@@ -1,0 +1,279 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172"
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172"
+# Ruby module CapabilityPlan
+STRUCT CapabilityRequest {
+  source: Capability,
+  capability: String@symbol,
+  var_node: Locatable,
+  alias_name: ?String,
+  alias_explicit: Bool,
+  alias_mutable: Bool,
+  guard_expr: ?Locatable,
+  view_length: ?Locatable
+}
+
+FN capabilityRequest__from_ast(source: Capability) RETURNS CapabilityRequest ->
+  MUTABLE alias_name: ?String = CAST(source.alias_value AS ?String);
+  RETURN CapabilityRequest{ source: COPY source, capability: COPY CAST((source.capability OR_ELSE :infer) AS String@symbol), var_node: COPY CAST(source.var_node AS Locatable), alias_name: COPY alias_name, alias_explicit: !((alias_name == NIL)), alias_mutable: (source.alias_mutable == TRUE), guard_expr: COPY CAST(source.guard_expr AS ?Locatable), view_length: COPY CAST(source.view_length AS ?Locatable) };
+END
+FN capabilityRequest__inferred?(self: CapabilityRequest) RETURNS Bool ->
+  RETURN (self.capability == :infer);
+END
+FN capabilityRequest__effective_alias_name(self: CapabilityRequest) RETURNS String ->
+  IF self.alias_name != NIL THEN
+  RETURN COPY (self.alias_name)?;
+  ELSE
+  RETURN capabilityPlan__var_name_for(self.var_node);
+  END
+END
+STRUCT CapabilityTargetFact {
+  var_node: Locatable,
+  var_name: String,
+  target_label: String,
+  field_target: Bool,
+  index_target: Bool,
+  resolved_type: Type,
+  old_scope: ?Scope@multiowned,
+  source_entry: ?SymbolEntry@multiowned,
+  source_type: Type,
+  sync: ?String@symbol,
+  storage: ?String@symbol,
+  layout: ?String@symbol,
+  live_symbol_refreshed: Bool
+}
+
+FN capabilityTargetFact__lock_identity(self: CapabilityTargetFact) RETURNS !?String@symbol ->
+  RETURN type__base_type(self.resolved_type);
+END
+FN capabilityTargetFact__with_source_entry(self: CapabilityTargetFact, source_entry: ?SymbolEntry) RETURNS !CapabilityTargetFact ->
+  IF source_entry EXISTS AS source_entry_value THEN
+    RETURN CapabilityTargetFact{ var_node: COPY self.var_node, var_name: COPY self.var_name, target_label: COPY self.target_label, field_target: self.field_target, index_target: self.index_target, resolved_type: COPY self.resolved_type, old_scope: KEEP self.old_scope, source_entry: source_entry_value, source_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY symbolEntry__type(source_entry_value) })), sync: ( { MUTABLE rtoc_optional_or_source_1: ?String@symbol = symbolEntry__sync(source_entry_value); MUTABLE rtoc_optional_or_result_2: ?String@symbol = NIL; IF rtoc_optional_or_source_1 != NIL THEN rtoc_optional_or_result_2 = COPY rtoc_optional_or_source_1; ELSE rtoc_optional_or_result_2 = type__sync(self.resolved_type); END rtoc_optional_or_result_2 } ), storage: COPY symbolEntry__storage(source_entry_value), layout: ( { MUTABLE rtoc_optional_or_source_3: ?String@symbol = symbolEntry__layout(source_entry_value); MUTABLE rtoc_optional_or_result_4: ?String@symbol = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = type__layout(self.resolved_type); END rtoc_optional_or_result_4 } ), live_symbol_refreshed: TRUE };
+  ELSE
+    RETURN COPY self;
+  END
+END
+PUB STRUCT CapabilityTransition {
+  request: CapabilityRequest,
+  target: CapabilityTargetFact,
+  source: Capability,
+  capability: String@symbol,
+  var_node: Locatable,
+  var_name: String,
+  target_label: String,
+  alias_name: String,
+  alias_explicit: Bool,
+  alias_mutable: Bool,
+  guard_expr: ?Locatable,
+  view_length: ?Locatable,
+  resolved_type: Type,
+  old_scope: ?Scope@multiowned,
+  source_entry: ?SymbolEntry@multiowned,
+  field_target: Bool,
+  sync: ?String@symbol,
+  storage: ?String@symbol,
+  layout: ?String@symbol,
+  source_type: Type,
+  lock_identity_value: ?String@symbol,
+  borrowed_qualifier: ?String
+}
+
+FN capabilityTransition__lock_capability?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN ([symbol("EXCLUSIVE"), :write_locked_read] |> DISTINCT _).contains?(self.capability);
+END
+FN capabilityTransition__restrict?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN (self.capability == symbol("RESTRICT"));
+END
+FN capabilityTransition__borrowed?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN (self.capability == symbol("BORROWED"));
+END
+FN capabilityTransition__snapshot?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN (self.capability == symbol("SNAPSHOT"));
+END
+FN capabilityTransition__view?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN ([symbol("VIEW"), :MATERIALIZED_VIEW, :UNSAFE_VIEW] |> DISTINCT _).contains?(self.capability);
+END
+FN capabilityTransition__deferred_lock_param?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN (((capabilityTransition__deferred_sync_param?(self) AND capabilityTransition__lock_capability?(self))) == TRUE);
+END
+FN capabilityTransition__deferred_sync_param?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN ((((capabilityTransition__parameter_target?(self) AND (self.sync == NIL)) AND !(capabilityTransition__declared_sync_contract?(self)))) == TRUE);
+END
+FN capabilityTransition__parameter_target?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN ((KEEP self.source_entry != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ((KEEP self.source_entry)?);
+  symbolEntry__is_param(rtoc_local_receiver_5) } == TRUE));
+END
+FN capabilityTransition__declared_sync_contract?(self: CapabilityTransition) RETURNS Bool EFFECTS REENTRANT ->
+  MUTABLE entry: ?SymbolEntry@multiowned = COPY KEEP self.source_entry;
+  IF entry EXISTS AS entry_value THEN
+    RETURN symbolEntry__declared_sync_contract?(entry_value);
+  ELSE
+    RETURN FALSE;
+  END
+END
+FN capabilityTransition__exclusive_sync?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN symbolEntry__locked_family_sync?(self.sync);
+END
+FN capabilityTransition__write_locked_sync?(self: CapabilityTransition) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN symbolEntry__write_locked_sync?(self.sync);
+END
+FN capabilityTransition__exclusive_validation_action(self: CapabilityTransition) RETURNS String@symbol ->
+  IF capabilityTransition__exclusive_sync?(self) THEN
+    RETURN :valid;
+  END
+  IF (capabilityTransition__parameter_target?(self) AND capabilityTransition__declared_sync_contract?(self)) THEN
+    RETURN :declared_contract;
+  END
+  IF capabilityTransition__deferred_sync_param?(self) THEN
+    RETURN :defer;
+  END
+  RETURN :mismatch;
+END
+FN capabilityTransition__unwraps_sync_alias?(self: CapabilityTransition) RETURNS Bool ->
+  IF self.field_target THEN
+    RETURN !((self.sync == NIL));
+  END
+  RETURN (!((self.sync == NIL)) OR capabilityTransition__deferred_lock_param?(self));
+END
+FN capabilityTransition__declares_plain_restrict_alias?(self: CapabilityTransition) RETURNS Bool ->
+  RETURN ((capabilityTransition__restrict?(self) AND self.alias_explicit) AND (self.sync == NIL));
+END
+FN capabilityTransition__declared_source_type(self: CapabilityTransition) RETURNS Type ->
+  RETURN COPY self.source_type;
+END
+FN capabilityTransition__borrowed_rejection_qualifier(self: CapabilityTransition) RETURNS ?String ->
+  RETURN COPY self.borrowed_qualifier;
+END
+FN capabilityTransition__lock_identity(self: CapabilityTransition) RETURNS ?String@symbol ->
+  RETURN self.lock_identity_value;
+END
+FN capabilityTransition__sync_constrained?(self: CapabilityTransition) RETURNS Bool ->
+  IF (self.capability == symbol("EXCLUSIVE")) OR (self.capability == :write_locked_read) OR (self.capability == symbol("SNAPSHOT")) OR (self.capability == :ATOMIC) THEN
+    RETURN TRUE;
+  ELSE_IF (self.capability == :infer) THEN
+    MUTABLE entry: ?SymbolEntry@multiowned = COPY KEEP self.source_entry;
+    IF entry EXISTS AS entry_value THEN
+      MUTABLE families: ?[Set]String@symbol = COPY entry_value.sync_families;
+      RETURN (!((symbolEntry__sync(entry_value) == NIL)) OR (IF families != NIL THEN
+        !(families.empty?())
+      ELSE
+        FALSE
+      END));
+    ELSE
+      RETURN FALSE;
+    END
+  ELSE
+    RETURN FALSE;
+  END
+END
+FN capabilityTransition__admits_atomic?(self: CapabilityTransition) RETURNS Bool ->
+  MUTABLE sym: ?SymbolEntry@multiowned = COPY KEEP self.source_entry;
+  IF sym EXISTS AS sym_value THEN
+    IF symbolEntry__atomic?(sym_value) THEN
+      RETURN TRUE;
+    END
+    MUTABLE fams: ?[Set]String@symbol = COPY sym_value.sync_families;
+    IF fams EXISTS AS fams_value THEN
+      MUTABLE expanded: [Set]String@symbol = Set[];
+      FOR _ IN fams_value DO
+      IF (_ == :SNAPSHOTTED) THEN
+        &expanded.insert(:VERSIONED);
+        &expanded.insert(:ATOMIC);
+      ELSE
+        &expanded.insert(COPY _);
+      END
+      END
+      RETURN expanded.contains?(:ATOMIC);
+    ELSE
+      RETURN FALSE;
+    END
+  ELSE
+    RETURN FALSE;
+  END
+END
+FN capabilityTransition__with_source_entry(self: CapabilityTransition, source_entry: ?SymbolEntry) RETURNS !CapabilityTransition EFFECTS REENTRANT ->
+  MUTABLE refreshed_target = TRY (capabilityTargetFact__with_source_entry(self.target, source_entry));
+  RETURN TRY (capabilityPlan__transition_from(self.request, refreshed_target, self.borrowed_qualifier));
+END
+STRUCT WithCapabilityPlan {
+  all: []CapabilityTransition
+}
+
+FN withCapabilityPlan__add(MUTABLE self: WithCapabilityPlan, fact: CapabilityTransition) RETURNS Void ->
+  &self.all.append(COPY fact);
+END
+FN withCapabilityPlan__locks(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
+  RETURN self.all |> WHERE ([symbol("EXCLUSIVE"), :write_locked_read] |> DISTINCT _).contains?(_.capability);
+END
+FN withCapabilityPlan__guarded(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
+  RETURN self.all |> WHERE !((_.guard_expr == NIL));
+END
+FN withCapabilityPlan__sync_constrained(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
+  RETURN self.all |> WHERE capabilityTransition__sync_constrained?(_);
+END
+FN withCapabilityPlan__snapshot_transitions(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
+  RETURN self.all |> WHERE capabilityTransition__snapshot?(_);
+END
+FN withCapabilityPlan__mutable_snapshot?(self: WithCapabilityPlan) RETURNS !Bool ->
+  RETURN (TRY (withCapabilityPlan__snapshot_transitions(self))) |> ANY _.alias_mutable;
+END
+FN withCapabilityPlan__first_transition(self: WithCapabilityPlan) RETURNS CapabilityTransition ->
+  RETURN COPY UNWRAP (self.all.first());
+END
+FN withCapabilityPlan__refresh_live_symbols(self: WithCapabilityPlan, live_symbols: {String}SymbolEntry) RETURNS !WithCapabilityPlan ->
+  MUTABLE refreshed = WithCapabilityPlan{ all: List[] };
+  FOR _ IN self.all DO
+  withCapabilityPlan__add(&refreshed, TRY (capabilityTransition__with_source_entry(_, live_symbols[_.var_name])));
+  END
+  RETURN refreshed;
+END
+FN capabilityPlan__var_name_for(var_node: Locatable) RETURNS String ->
+  MUTABLE root: ?Identifier = aST__root_identifier(var_node);
+  IF root EXISTS AS root_value THEN
+    RETURN COPY root_value.name;
+  END
+  IF var_node IS_A GetField AS get_field THEN
+    RETURN COPY CAST(get_field.field AS String);
+  END
+  RETURN "__unknown";
+END
+FN capabilityPlan__transition_from(request: CapabilityRequest, target: CapabilityTargetFact, borrowed_qualifier: ?String) RETURNS !CapabilityTransition ->
+  MUTABLE capability = (request.source.capability OR_ELSE request.capability);
+  RETURN CapabilityTransition{ request: COPY request, target: COPY target, source: COPY request.source, capability: COPY capability, var_node: COPY request.var_node, var_name: COPY target.var_name, target_label: COPY target.target_label, alias_name: COPY (request.alias_name OR_ELSE target.var_name), alias_explicit: request.alias_explicit, alias_mutable: request.alias_mutable, guard_expr: COPY request.guard_expr, view_length: COPY request.view_length, resolved_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY target.resolved_type })), old_scope: KEEP target.old_scope, source_entry: KEEP target.source_entry, field_target: target.field_target, sync: COPY target.sync, storage: COPY target.storage, layout: COPY target.layout, source_type: COPY target.source_type, lock_identity_value: COPY TRY (capabilityTargetFact__lock_identity(target)), borrowed_qualifier: COPY borrowed_qualifier };
+END
+FN capabilityPlan__refresh_function_plans_mut(fn_value: FunctionDef, with_blocks: []WithBlock) RETURNS !Void ->
+  MUTABLE live_symbols = TRY (scope__live_param_syms(fn_value));
+  IF (live_symbols.count() == 0) THEN
+    RETURN;
+  END
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < with_blocks.length() DO
+    MUTABLE plan: ?WithCapabilityPlan = COPY with_blocks[rtoc_idx]?.capability_plan;
+    IF !(plan) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE concrete_plan: WithCapabilityPlan = COPY CAST(plan AS WithCapabilityPlan);
+    MUTABLE rtoc_writer_receiver_6: WithBlock = with_blocks[rtoc_idx]?;
+    rtoc_writer_receiver_6.capability_plan = withCapabilityPlan__refresh_live_symbols(concrete_plan, live_symbols);
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+FN capabilityPlan__require_for(node: WithBlock) RETURNS !WithCapabilityPlan ->
+  MUTABLE plan: ?WithCapabilityPlan = COPY node.capability_plan;
+  IF plan EXISTS AS plan_value THEN
+    RETURN COPY CAST(plan_value AS WithCapabilityPlan);
+  ELSE
+    panic("Internal: WITH block reached consumer without a CapabilityPlan");
+  END
+END
+# End Ruby module CapabilityPlan
+# Ruby module AST
+FN withBlock__set_capability_plan(MUTABLE self: WithBlock, plan: WithCapabilityPlan) RETURNS Void ->
+  self.capability_plan = COPY plan;
+END
+FN withBlock__capability_plan(self: WithBlock) RETURNS ?WithCapabilityPlan ->
+  RETURN COPY CAST(self.capability_plan AS ?WithCapabilityPlan);
+END
+# End Ruby module AST

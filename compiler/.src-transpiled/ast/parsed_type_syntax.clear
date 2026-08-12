@@ -1,0 +1,15 @@
+REQUIRE "type.clear"
+STRUCT ParsedTypeSyntax {
+  expression: TypeExpression,
+  start_token: Token,
+  end_token: Token,
+  auto_token: ?Token,
+  auto: Bool
+}
+FN typeSyntaxLowering__lower(syntax: ParsedTypeSyntax) RETURNS !Type ->
+  MUTABLE lowered = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY syntax.expression }, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, syntax.auto));
+  IF syntax.auto_token EXISTS AS auto_token_value THEN
+    lowered.auto_token = auto_token_value;
+  END
+  RETURN lowered;
+END

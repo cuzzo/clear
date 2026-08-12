@@ -6,7 +6,7 @@ This spec lists the ruby-to-clear gem work that is now practical because CLEAR
 can parse and lower source value blocks:
 
 ```clear
-items |> SELECT { tmp = _ + 1_i64; tmp * 2_i64 }
+items |> SELECT { tmp = _ + 1; tmp * 2 }
 ```
 
 and because ruby-to-clear can emit package requirements plus fallible calls:

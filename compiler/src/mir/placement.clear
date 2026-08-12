@@ -1,0 +1,70 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+# Ruby module MIR
+# Ruby module MIR::Placement
+STRUCT BindingFact {
+  name: String,
+  type_info: Type,
+  storage: String@symbol,
+  alloc: String@symbol,
+  scope: String@symbol,
+  heap_return: Bool,
+  escape_reason: ?String@symbol
+}
+
+FN bindingFact__heap?(self: BindingFact) RETURNS Bool ->
+  RETURN (self.alloc == :heap);
+END
+FN bindingFact__frame?(self: BindingFact) RETURNS Bool ->
+  RETURN (self.alloc == :frame);
+END
+FN placement__alloc(value: ?String@symbol, default_value: String@symbol = :heap) RETURNS String@symbol ->
+  IF (value == :heap) THEN
+    RETURN :heap;
+  END
+  IF (value == :frame) THEN
+    RETURN :frame;
+  END
+  RETURN default_value;
+END
+PUB FN placement__heap?(value: ?String@symbol) RETURNS Bool ->
+  RETURN (placement__alloc(value, :heap) == :heap);
+END
+FN placement__frame?(value: ?String@symbol) RETURNS Bool ->
+  RETURN (placement__alloc(value, :heap) == :frame);
+END
+FN placement__explicit_heap?(value: ?String@symbol) RETURNS Bool ->
+  RETURN (value == :heap);
+END
+FN placement__explicit_frame?(value: ?String@symbol) RETURNS Bool ->
+  RETURN (value == :frame);
+END
+FN placement__alloc_scope(value: ?String@symbol) RETURNS String@symbol ->
+  IF placement__heap?(value) THEN
+    RETURN :heap;
+  ELSE
+    RETURN :iteration;
+  END
+END
+FN placement__cleanup_scope(value: ?String@symbol) RETURNS String@symbol ->
+  IF placement__heap?(value) THEN
+    RETURN :heap;
+  ELSE
+    RETURN :iteration;
+  END
+END
+FN placement__binding_alloc(storage: ?String@symbol, cleanup_alloc: ?String@symbol, default_value: String@symbol = :frame) RETURNS String@symbol ->
+  IF (storage == :heap) THEN
+    RETURN :heap;
+  END
+  RETURN placement__alloc(cleanup_alloc, default_value);
+END
+FN placement__zig_allocator(value: ?String@symbol, rt_name: ?String) RETURNS String ->
+  MUTABLE rt = (rt_name OR_ELSE "rt");
+  IF (placement__alloc(value, :heap) == :heap) THEN
+    RETURN "${rt}.heapAlloc()";
+  ELSE
+    RETURN "${rt}.frameAlloc()";
+  END
+END
+# End Ruby module MIR::Placement
+# End Ruby module MIR

@@ -5,10 +5,15 @@
   "corpus": {
     "source_root": "compiler/ruby",
     "glob": "**/*.rb",
-    "generated_root": "compiler/src"
+    "generated_root": "compiler/src",
+    "exclude": [
+      "tools/**/*.rb",
+      "lsp/**/*.rb"
+    ]
   },
   "helper_config": "gems/ruby-to-clear/config/compiler_regex_helpers.json",
   "packages": {
+    "fs": "stdlib/fs/src/lib.clear",
     "path": "stdlib/path/src/lib.clear"
   },
   "native_modules": {

@@ -1,0 +1,41 @@
+REQUIRE "type.clear"
+REQUIRE "../backends/type_zig_renderer.clear"
+REQUIRE "type_expression.clear"
+STRUCT AsyncResultShape {
+  kind: String@symbol,
+  payload_type: Type
+}
+
+FN asyncResultShape__promise(payload_type: Type, shared_value: Bool = FALSE) RETURNS !AsyncResultShape ->
+  RETURN AsyncResultShape{ kind: IF shared_value THEN
+    :shared_promise
+  ELSE
+    :promise
+  END, payload_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY payload_type })) };
+END
+FN asyncResultShape__promise_list_item(promise_list_type: Type) RETURNS !AsyncResultShape ->
+  MUTABLE payload = TRY (type__tense_type(promise_list_type));
+  MUTABLE item_expression = UNWRAP (typeExpressionTree__linear_item_envelope(payload.shape.expression));
+  RETURN TRY (asyncResultShape__promise(TRY (type__from_child_expression(item_expression))));
+END
+FN asyncResultShape__promise?(self: AsyncResultShape) RETURNS Bool ->
+  RETURN ((self.kind == :promise) OR asyncResultShape__shared_promise?(self));
+END
+FN asyncResultShape__shared_promise?(self: AsyncResultShape) RETURNS Bool ->
+  RETURN (self.kind == :shared_promise);
+END
+FN asyncResultShape__boxes_fallible_payload?(self: AsyncResultShape) RETURNS Bool ->
+  RETURN type__error_union?(self.payload_type);
+END
+FN asyncResultShape__payload_zig_type(self: AsyncResultShape) RETURNS !String ->
+  RETURN TRY (typeZigRenderer__render_async_payload(self.payload_type));
+END
+FN asyncResultShape__handle_zig_type(self: AsyncResultShape) RETURNS !String ->
+  MUTABLE wrapper: String = "";
+  IF asyncResultShape__shared_promise?(self) THEN
+    wrapper = "CheatLib.SharedPromise";
+  ELSE
+    wrapper = "CheatLib.Promise";
+  END
+  RETURN "${wrapper}(${TRY (asyncResultShape__payload_zig_type(self))})";
+END

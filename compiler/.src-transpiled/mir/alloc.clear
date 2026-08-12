@@ -1,0 +1,5 @@
+REQUIRE "../ast/type.clear"
+REQUIRE "../ast/ast.clear"
+# Ruby module AllocHelper
+UNION AllocDeclarationNode { VarDecl: VarDecl, BindExpr: BindExpr }
+# End Ruby module AllocHelper

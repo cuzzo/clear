@@ -1,0 +1,21 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6261636b656e64732f7a69675f747970652e636c656172"
+PUB FN typeZigRenderer__render_async_payload(type: Type, is_param: Bool = FALSE, is_field: Bool = FALSE) RETURNS !String EFFECTS REENTRANT ->
+  IF !(type__error_union?(type)) THEN
+    RETURN TRY (typeZigRenderer__render(type, is_param, is_field, TRUE));
+  END
+  MUTABLE payload = TRY (type__error_union_payload_with_outer_capabilities(type));
+  MUTABLE rendered_payload = TRY (typeZigRenderer__render(payload, is_param, is_field, TRUE));
+  RETURN "CheatLib.AsyncFallible(${rendered_payload})";
+END
+PUB FN typeZigRenderer__render(type: Type, is_param: Bool = FALSE, is_field: Bool = FALSE, nested: Bool = FALSE) RETURNS !String EFFECTS REENTRANT ->
+  IF (type__error_union?(type) AND type__optional?((TRY (type__success_type(type))))) THEN
+    MUTABLE payload = TRY (type__error_union_payload_with_outer_capabilities(type));
+    RETURN "anyerror!${TRY (typeZigRenderer__render(payload, is_param, is_field, TRUE))}";
+  END
+  IF ((((nested OR is_param) OR is_field)) AND type__error_union?(type)) THEN
+    MUTABLE payload = TRY (type__error_union_payload_with_outer_capabilities(type));
+    RETURN "anyerror!${TRY (typeZigRenderer__render(payload, is_param, is_field, TRUE))}";
+  END
+  RETURN TRY (type__render_zig_type(type, is_param, is_field));
+END

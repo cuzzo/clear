@@ -1,0 +1,495 @@
+REQUIRE "type.clear"
+REQUIRE "ast.clear"
+REQUIRE "param.clear"
+REQUIRE "struct_field.clear"
+REQUIRE "lexer.clear"
+REQUIRE "parser_rules.clear"
+REQUIRE "error_registry.clear"
+REQUIRE "source_error.clear"
+REQUIRE "fixable_error.clear"
+REQUIRE "frontend_resource_budget.clear"
+REQUIRE "fixable_suggestion_helper.clear"
+REQUIRE "parsed_type_syntax.clear"
+REQUIRE "parser/state.clear"
+REQUIRE "parser/statements_and_control_flow.clear"
+REQUIRE "parser/declarations_and_definitions.clear"
+REQUIRE "parser/types.clear"
+REQUIRE "parser/expressions_and_postfix.clear"
+REQUIRE "parser/predicates_and_refinements.clear"
+REQUIRE "parser/collections_capabilities_and_tenses.clear"
+REQUIRE "diagnostic_registry.clear"
+UNION CodeOrMessage { StringValue: String, SymbolValue: String@symbol }
+UNION ParsedExternEffectsReturnValueValue { SymbolValue: String@symbol, BoolValue: Bool }
+STRUCT ClearParser {
+  budget: FrontendResourceBudget@multiowned,
+  delimiter_closings: []?Int64,
+  gradual: Bool,
+  pos: Int64,
+  source_code: String,
+  tokens: []Token
+}
+
+PUB FN ruby_constant_open_delimiters() RETURNS String ->
+  RETURN CAST("([{" AS String);
+END
+PUB FN ruby_constant_close_delimiters() RETURNS String ->
+  RETURN CAST(")]}" AS String);
+END
+STRUCT CapabilityParseResult {
+  ownership: ?String@symbol,
+  sync: ?String@symbol,
+  collection: ?String@symbol,
+  is_soa: Bool,
+  is_indirect: Bool,
+  shard_count: ?Int64,
+  observable: Bool,
+  observable_token: ?Token
+}
+STRUCT TaskPrefix {
+  pinned: Bool,
+  parallel: Bool,
+  stack_size: ?String@symbol,
+  arena: Bool,
+  can_smash: Bool,
+  stack_size_token: ?Token,
+  can_smash_token: ?Token
+}
+STRUCT ParsedStructField {
+  name: String,
+  value: Locatable,
+  name_token: Token
+}
+STRUCT SigilAttrs {
+  dim: ?String@symbol,
+  val: ?String@symbol,
+  stack_size: ?String@symbol,
+  pinned: Bool,
+  parallel: Bool,
+  arena: Bool,
+  can_smash: Bool
+}
+STRUCT CapJoin {
+  ownership: ?String@symbol,
+  sync: ?String@symbol,
+  layout: ?String@symbol,
+  lock_rank: ?Int64
+}
+STRUCT ElementCapability {
+  ownership: ?String@symbol,
+  sync: ?String@symbol,
+  layout: ?String@symbol
+}
+STRUCT ParsedEffectsDecl {
+  kind: ?String@symbol,
+  span: ?EffectSpan,
+  max_depth: ?Int64,
+  tight: Bool
+}
+STRUCT ParsedExternEffects {
+  alloc: ?String@symbol,
+  safe: Bool
+}
+
+FN parsedExternEffects__to_h(self: ParsedExternEffects) RETURNS !{String@symbol}ParsedExternEffectsReturnValueValue ->
+  MUTABLE alloc_kind: ?String@symbol = COPY self.alloc;
+  IF ((alloc_kind != NIL) AND self.safe) THEN
+    RETURN CAST({:alloc: ParsedExternEffectsReturnValueValue{ SymbolValue: COPY alloc_kind }, :safe: ParsedExternEffectsReturnValueValue{ BoolValue: TRUE }} AS {String@symbol}ParsedExternEffectsReturnValueValue);
+  END
+  IF alloc_kind EXISTS AS alloc_kind_value THEN
+    RETURN CAST({:alloc: ParsedExternEffectsReturnValueValue{ SymbolValue: COPY alloc_kind_value }} AS {String@symbol}ParsedExternEffectsReturnValueValue);
+  END
+  IF self.safe THEN
+    RETURN CAST({:safe: ParsedExternEffectsReturnValueValue{ BoolValue: TRUE }} AS {String@symbol}ParsedExternEffectsReturnValueValue);
+  END
+  RETURN {};
+END
+STRUCT ParsedVarForm {
+  node: Locatable,
+  assignment: Bool
+}
+STRUCT RequiresKind {
+  family: ?String@symbol,
+  reentrance: ?String@symbol
+}
+STRUCT ParsedRequiresClause {
+  capabilities: {String}[Set]String@symbol,
+  reentrance: {String}String@symbol
+}
+STRUCT ParsedMatchStart {
+  token: Token,
+  subject: Locatable,
+  takes: Bool
+}
+STRUCT ParsedMatchArm {
+  kind: String@symbol,
+  value: Locatable,
+  extra_values: []Locatable,
+  binding: ?String,
+  destructure: ?StructPattern
+}
+UNION ClearParserArgumentType { SymbolValue: String@symbol, TypeMultiowned: Type@multiowned, Type: Type }
+UNION ClearParserReturnLifetime { SymbolValue: String@symbol, ArrayValue: []Locatable }
+UNION ClearParserWindowPipelineOp { WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp }
+UNION ClearParserConcurrentPipelineOp { SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, EachOp: EachOp, SumOpMultiowned: SumOp@multiowned, CountOpMultiowned: CountOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, SelectOp: SelectOp, WhereOp: WhereOp, SumOp: SumOp, CountOp: CountOp, MinOp: MinOp, MaxOp: MaxOp, AverageOp: AverageOp }
+MUTABLE gradual_mode_value: ?Bool = FALSE;
+MUTABLE ownership_mode_value: ?String@symbol = :default;
+stmt_rules: [41]ParserRule = [rule(:KEYWORD, "REQUIRE", :parse_require), rule(:KEYWORD, "EXTERN", :parse_extern_decl), rule(:KEYWORD, "MUTABLE", :parse_mutable_var_decl), rule(:KEYWORD, "CONST", :parse_const_decl), rule(:KEYWORD, "FN", :parse_function_def), rule(:KEYWORD, "METHOD", :parse_method_function_def), rule(:KEYWORD, "PUB", :parse_pub_visibility), rule(:KEYWORD, "PRIVATE", :parse_private_visibility), rule(:KEYWORD, "IF", :parse_if_statement), rule(:KEYWORD, "COMPTIME", :parse_comptime_statement), rule(:KEYWORD, "STRUCT", :parse_struct_def), rule(:KEYWORD, "PROTOCOL", :parse_protocol_def), rule(:KEYWORD, "IMPLEMENTATION", :parse_implementation_def), rule(:KEYWORD, "ENUM", :parse_enum_def), rule(:KEYWORD, "UNION", :parse_union_def), rule(:KEYWORD, "WHILE", :parse_while_loop), rule(:KEYWORD, "FOR", :parse_for_range), rule(:KEYWORD, "TIGHT", :parse_tight_stmt), rule(:KEYWORD, "RETURN", :parse_return), rule(:KEYWORD, "ASSERT", :parse_assert), rule(:KEYWORD, "DEFER", :parse_defer), rule(:KEYWORD, "ASSERT_RAISES", :parse_assert_raises), rule(:KEYWORD, "TEST", :parse_test_block), rule(:KEYWORD, "STUB", :parse_stub), rule(:KEYWORD, "BENCHMARK", :parse_benchmark_stmt), rule(:KEYWORD, "SMASH", :parse_smash_stmt), rule(:KEYWORD, "PROFILE", :parse_profile_stmt), rule(:KEYWORD, "RAISE", :parse_raise_stmt), rule(:KEYWORD, "EXIT", :parse_exit), rule(:KEYWORD, "DIE", :parse_die), rule(:KEYWORD, "BREAK", :parse_break), rule(:KEYWORD, "CONTINUE", :parse_continue), rule(:KEYWORD, "WITH", :parse_with_capability), rule(:KEYWORD, "SYNC", :parse_sync_policy_block), rule(:KEYWORD, "DO", :parse_do_block), rule(:KEYWORD, "BG", :parse_bg_block), rule(:KEYWORD, "YIELD", :parse_yield_expr), rule(:KEYWORD, "CLOSE", :parse_close_stream), rule(:KEYWORD, "MATCH", :parse_match_statement), rule(:KEYWORD, "PARTIAL", :parse_partial_match_statement), rule(:KEYWORD, "PASS", :parse_pass_statement)];
+MUTABLE stmt_rule_index: {String}ParserRule = TRY (index_rules(stmt_rules));
+primary_rules: [64]ParserRule = [rule(:KEYWORD, "IF", :parse_if_expr), rule(:KEYWORD, "MATCH", :parse_match_expr), rule(:KEYWORD, "PARTIAL", :parse_partial_match_expr), rule(:NUMBER, NIL, :parse_stack_literal), rule(:INT64, NIL, :parse_stack_literal), rule(:STRING, NIL, :parse_stack_literal), rule(:CHAR, ":", :parse_symbol_literal), rule(:BYTE, NIL, :parse_stack_literal), rule(:PREFIXED_INT, NIL, :parse_stack_literal), rule(:INT8, NIL, :parse_stack_literal), rule(:INT16, NIL, :parse_stack_literal), rule(:INT32, NIL, :parse_stack_literal), rule(:UINT16, NIL, :parse_stack_literal), rule(:UINT32, NIL, :parse_stack_literal), rule(:UINT64, NIL, :parse_stack_literal), rule(:FLOAT32, NIL, :parse_stack_literal), rule(:VAR_ID, NIL, :parse_var_id), rule(:KEYWORD, "TRUE", :parse_true_literal), rule(:KEYWORD, "FALSE", :parse_false_literal), rule(:KEYWORD, "NIL", :parse_nil_literal), rule(:KEYWORD, "DEFAULT", :parse_default_literal), rule(:KEYWORD, "CAST", :parse_cast), rule(:KEYWORD, "MOVE", :parse_move_node), rule(:KEYWORD, "GIVE", :parse_move_node), rule(:KEYWORD, "COPY", :parse_copy_node), rule(:KEYWORD, "OWN", :parse_own_node), rule(:KEYWORD, "KEEP", :parse_keep_node), rule(:KEYWORD, "SHARE", :parse_share_node), rule(:KEYWORD, "LINK", :parse_link_node), rule(:KEYWORD, "RESOLVE", :parse_resolve_node), rule(:KEYWORD, "FREEZE", :parse_freeze_node), rule(:KEYWORD, "BG", :parse_bg_block), rule(:KEYWORD, "NEXT", :parse_next_expr), rule(:PERCENT, "%", :parse_sigil_construct), rule(:KEYWORD, "REQUIRE", :parse_require_expression), rule(:KEYWORD, "SELECT", :parse_select_op), rule(:KEYWORD, "WHERE", :parse_where_op), rule(:KEYWORD, "INDEX", :parse_index_op), rule(:KEYWORD, "REDUCE", :parse_reduce_op), rule(:KEYWORD, "ORDER_BY", :parse_order_by_op), rule(:KEYWORD, "LIMIT", :parse_limit_op), rule(:KEYWORD, "SKIP", :parse_skip_op), rule(:KEYWORD, "UNNEST", :parse_unnest_op), rule(:KEYWORD, "DISTINCT", :parse_distinct_op), rule(:KEYWORD, "EACH", :parse_each_op), rule(:KEYWORD, "TAP", :parse_tap_op), rule(:KEYWORD, "FIND", :parse_find_op), rule(:KEYWORD, "ANY", :parse_any_op), rule(:KEYWORD, "ALL", :parse_all_op), rule(:KEYWORD, "COUNT", :parse_count_op), rule(:KEYWORD, "SUM", :parse_sum_op), rule(:KEYWORD, "AVERAGE", :parse_average_op), rule(:KEYWORD, "MIN", :parse_min_op), rule(:KEYWORD, "MAX", :parse_max_op), rule(:KEYWORD, "TAKE_WHILE", :parse_take_while_op), rule(:KEYWORD, "RECOVER", :parse_recover_op), rule(:KEYWORD, "COLLECT", :parse_collect_op), rule(:KEYWORD, "WINDOW", :parse_window_op), rule(:KEYWORD, "JOIN", :parse_join_op), rule(:KEYWORD, "SHARD", :parse_shard_op), rule(:KEYWORD, "CONCURRENT", :parse_concurrent_op), rule(:KEYWORD, "TRY", :parse_try_expression), rule(:KEYWORD, "UNWRAP", :parse_unwrap_expression), rule(:CHAR, "(", :parse_group_expression)];
+MUTABLE primary_rule_index: {String}ParserRule = TRY (index_rules(primary_rules));
+suffix_rules: [22]ParserRule = [rule(:CHAR, "[", :parse_index_suffix), rule(:DOUBLE_COLON, "::", :parse_static_call_suffix), rule(:CHAR, ".", :parse_dot_suffix), rule(:CHAR, "(", :parse_func_call_suffix), rule(:CHAR, "?", :parse_optional_unwrap_suffix), rule(:CHAR, "!", :parse_tense_navigation_suffix), rule(:CHAR, "~", :parse_tense_navigation_suffix), rule(:KEYWORD, "EXISTS", :parse_exists_suffix), rule(:KEYWORD, "IS_OK", :parse_is_ok_suffix), rule(:KEYWORD, "IS_READY", :parse_is_ready_suffix), rule(:VAR_ID, "@multiowned", :parse_capability_wrap_suffix), rule(:VAR_ID, "@shared", :parse_capability_wrap_suffix), rule(:VAR_ID, "@node", :parse_capability_wrap_suffix), rule(:VAR_ID, "@locked", :parse_capability_wrap_suffix), rule(:VAR_ID, "@writeLocked", :parse_capability_wrap_suffix), rule(:VAR_ID, "@local", :parse_capability_wrap_suffix), rule(:VAR_ID, "@alwaysMutable", :parse_capability_wrap_suffix), rule(:VAR_ID, "@versioned", :parse_capability_wrap_suffix), rule(:VAR_ID, "@atomic", :parse_capability_wrap_suffix), rule(:VAR_ID, "@boxed", :parse_capability_wrap_suffix), rule(:VAR_ID, "@indirect", :parse_capability_wrap_suffix), rule(:CHAR, "{", :parse_inline_union_variant_suffix)];
+MUTABLE suffix_rule_index: {String}ParserRule = TRY (index_rules(suffix_rules));
+element_capability_tokens = ["@shared", "@multiowned", "@node", "@locked", "@writeLocked", "@alwaysMutable", "@link", "@boxed", "@indirect"];
+element_sync_tokens = ["@locked", "@writeLocked", "@alwaysMutable", "locked", "writeLocked", "alwaysMutable"];
+capability_tokens = ["@multiowned", "@shared", "@node", "@split", "@locked", "@writeLocked", "@alwaysMutable", "@local", "@versioned", "@atomic", "@boxed", "@indirect", "@link", "@raw", "@symbol", "@c", "@size", "@list", "@pool", "@set", "@soa", "@sharded", "@observable"];
+FN clearParser__sigil_attrs(dim: ?String@symbol = NIL, val: ?String@symbol = NIL, stack_size: ?String@symbol = NIL, pinned: Bool = FALSE, parallel: Bool = FALSE, arena: Bool = FALSE, can_smash: Bool = FALSE) RETURNS SigilAttrs ->
+  RETURN SigilAttrs{ dim: COPY dim, val: COPY val, stack_size: COPY stack_size, pinned: COPY pinned, parallel: COPY parallel, arena: COPY arena, can_smash: COPY can_smash };
+END
+FN clearParser__initialize(MUTABLE self: ClearParser, tokens: []Token, source_code: String = "", gradual: ?Bool = NIL, budget: ?FrontendResourceBudget = NIL) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.tokens = COPY tokens;
+    rtoc_self_view.pos = 0;
+    rtoc_self_view.source_code = COPY source_code;
+    rtoc_self_view.budget = (budget OR_ELSE frontendResourceBudget__new());
+    rtoc_self_view.delimiter_closings = TRY (clearParser__index_delimiter_closings(rtoc_self_view, tokens));
+    rtoc_self_view.gradual = IF (gradual == NIL) THEN
+      clearParser__gradual_mode()
+    ELSE
+      gradual
+    END;
+}
+END
+FN clearParser__gradual_mode() RETURNS Bool ->
+  RETURN COPY gradual_mode_value;
+END
+FN clearParser__set_gradual_mode(value: Bool) RETURNS Bool ->
+  gradual_mode_value = COPY value;
+  RETURN COPY UNWRAP (value);
+END
+FN clearParser__ownership_mode() RETURNS String@symbol ->
+  RETURN (ownership_mode_value OR :default);
+END
+FN clearParser__set_ownership_mode(value: String@symbol) RETURNS String@symbol ->
+  ownership_mode_value = COPY value;
+  RETURN symbol(UNWRAP (value));
+END
+FN clearParser__parse_type_syntax(source: String, file: ?String = NIL) RETURNS !ParsedTypeSyntax ->
+  MUTABLE budget = frontendResourceBudget__new();
+  MUTABLE tokens = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_1 = (TRY (lexer__new(source, 0, file, 1, 1, 0, budget)));
+  TRY (lexer__tokenize(&rtoc_mutable_receiver_1)) };
+  MUTABLE parser = TRY (clearParser__new(tokens, source, NIL, budget));
+  RETURN TRY (clearParser__parse_type_syntax_document(parser));
+END
+FN clearParser__parse_type_syntax_document(self: ClearParser) RETURNS !ParsedTypeSyntax
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE syntax = TRY (clearParser__parse_type_annotation_syntax(&rtoc_self_view));
+    MUTABLE current_token = clearParser__current(rtoc_self_view);
+    IF !((current_token.type == :EOF)) THEN
+      clearParser__error_mut(rtoc_self_view, current_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "end of type", :got: current_token.value, :type: current_token.type, :line: current_token.line});
+    END
+    RETURN syntax;
+}
+END
+FN clearParser__parse(self: ClearParser) RETURNS !Program
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (clearParser__parse_with_budget(rtoc_self_view));
+}
+CATCH SystemStackError
+  RAISE Input, ParserError, "Frontend nesting resource limit exceeded";
+END
+FN clearParser__parse_with_budget(self: ClearParser) RETURNS !Program
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE source_violation: ?Exceeded = frontendResourceBudget__source_violation(rtoc_self_view.budget, rtoc_self_view.source_code);
+    IF source_violation EXISTS AS source_violation_value THEN
+      RAISE Input, ParserError, "Frontend {} resource limit exceeded (limit {})";
+    END
+    MUTABLE token_violation: ?Exceeded = frontendResourceBudget__tokens_violation(rtoc_self_view.budget, rtoc_self_view.tokens.length());
+    IF token_violation EXISTS AS token_violation_value THEN
+      RAISE Input, ParserError, "Frontend {} resource limit exceeded (limit {})";
+    END
+    RETURN TRY (clearParser__parse_program(rtoc_self_view));
+}
+CATCH Exceeded
+  RAISE Input, ParserError, "Frontend nesting resource limit exceeded (limit {})";
+END
+FN clearParser__parse_program(self: ClearParser) RETURNS !Program
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE stmts = List[];
+    WHILE (clearParser__current(rtoc_self_view).type != :EOF) DO
+      &stmts.append(TRY (clearParser__parse_statement(&rtoc_self_view)));
+    END
+    MUTABLE program = Program{ token: CAST(COPY clearParser__current(rtoc_self_view) AS Token), statements: COPY stmts, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, sync_policy: NIL, mir_pass_state: NIL, language_mode: NIL };
+    MUTABLE first = (rtoc_self_view.tokens.first() OR_ELSE clearParser__current(rtoc_self_view));
+    clearParser__stamp_source_range_mut(rtoc_self_view, Locatable{ Program: COPY program }, first, CAST(clearParser__current(rtoc_self_view) AS Token));
+    program.language_mode = IF rtoc_self_view.gradual THEN
+      :easy
+    ELSE
+      clearParser__ownership_mode()
+    END;
+    RETURN program;
+}
+END
+PRIVATE FN clearParser__source_code(self: ClearParser) RETURNS ?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+
+}
+END
+PRIVATE FN clearParser__error_mut(self: ClearParser, node_or_token: Auto, code_or_message: CodeOrMessage, args: []?Auto = [], kwargs: {String@symbol}Auto = {}) RETURNS Auto
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token: ?Any@multiowned = clearParser__diagnostic_token(rtoc_self_view, node_or_token);
+    MUTABLE message: String = "";
+    IF code_or_message IS_A String@symbol AS string_symbol THEN
+      message = UNWRAP (TRY (diagnosticRegistry__format_from_hash(string_symbol, args, kwargs)));
+    ELSE
+      message = castCodeOrMessageToString(COPY code_or_message);
+    END
+    MUTABLE source_token: ?Token@multiowned = clearParser__source_error_token(rtoc_self_view, token);
+    MUTABLE diagnostic_code: ?String@symbol = NIL;
+    IF code_or_message IS_A String@symbol AS string_symbol THEN
+      diagnostic_code = COPY (CAST(string_symbol AS String@symbol));
+    END
+    RETURN clearParser__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), message, diagnostic_code);
+}
+END
+PRIVATE FN clearParser__format_diagnostic_template(self: ClearParser, template: String, args: []?Auto, kwargs: {String@symbol}?Auto) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN diagnosticRegistry__format_template(template, args, kwargs);
+}
+END
+PRIVATE FN clearParser__diagnostic_message(self: ClearParser, code: String@symbol, args: []?Auto = [], kwargs: {String@symbol}Auto = {}) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE message: ?String = TRY (diagnosticRegistry__format_from_hash(code, args, kwargs));
+    IF message EXISTS AS message_value THEN
+      RETURN message_value;
+    ELSE
+      panic("Internal Compiler Error: Unknown error code :{}");
+    END
+}
+END
+PRIVATE FN clearParser__fix_description(self: ClearParser, code: String@symbol, kwargs: {String@symbol}?Auto = {}) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+}
+END
+PRIVATE FN clearParser__fix_description_from_hash(self: ClearParser, code: String@symbol, kwargs: {String@symbol}?Auto) RETURNS !String
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+}
+END
+PRIVATE FN clearParser__note_mut(self: ClearParser, node_or_token: Locatable, message: String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token: ?Token@multiowned = clearParser__source_error_token(rtoc_self_view, clearParser__diagnostic_token(rtoc_self_view, node_or_token));
+    MUTABLE loc: String = "";
+    IF token EXISTS AS token_value THEN
+      loc = " (line ${token_value.line})";
+    ELSE
+      loc = "";
+    END
+    clearParser__diagnostic_output(rtoc_self_view, "\x1B[36m[Note]\x1B[0m ${message}${loc}");
+    NIL;
+}
+END
+PRIVATE FN clearParser__warning_mut(self: ClearParser, node_or_token: Locatable, message: String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token: ?Token@multiowned = clearParser__source_error_token(rtoc_self_view, clearParser__diagnostic_token(rtoc_self_view, node_or_token));
+    MUTABLE loc: String = "";
+    IF token EXISTS AS token_value THEN
+      loc = " (line ${token_value.line})";
+    ELSE
+      loc = "";
+    END
+    clearParser__diagnostic_output(rtoc_self_view, "\x1B[33m[Warning]\x1B[0m ${message}${loc}");
+    NIL;
+}
+END
+PRIVATE FN clearParser__fixable_mut(self: ClearParser, node_or_token: Auto, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}Auto = {}) RETURNS Auto
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE rendered_message = (message OR_ELSE clearParser__diagnostic_message(rtoc_self_view, code?, [], kwargs));
+    MUTABLE token: ?Any@multiowned = clearParser__diagnostic_token(rtoc_self_view, node_or_token);
+    MUTABLE source_token: ?Token@multiowned = clearParser__source_error_token(rtoc_self_view, token);
+    MUTABLE finding = TRY (fixableFinding__new(level, rendered_message, token, category, fixes));
+    IF fixCollector__enabled?() THEN
+      TRY (fixCollector__push(finding, (level == :error)));
+      IF !(raise_in_collector) THEN
+        RETURN;
+      END
+      clearParser__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message);
+    END
+    IF (level == :hint) OR (level == :info) OR (level == :warning) THEN
+      MUTABLE loc: String = "";
+      IF source_token EXISTS AS source_token_value THEN
+        loc = " (line ${source_token_value.line})";
+      ELSE
+        loc = "";
+      END
+      MUTABLE tag: String = "";
+      IF (level == :warning) THEN
+        tag = "\x1B[33m[Warning]\x1B[0m";
+      ELSE
+        tag = "\x1B[36m[${(CAST(level AS String)).capitalize()}]\x1B[0m";
+      END
+      RETURN clearParser__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
+    ELSE_IF (level == :error) THEN
+      RETURN clearParser__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message);
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN clearParser__diagnostic_source_code(self: ClearParser) RETURNS ?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.source_code;
+}
+END
+PRIVATE FN clearParser__raise_source_error_mut(self: ClearParser, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS Auto
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF clearParser__parser_error_host?(rtoc_self_view) THEN
+      RAISE Input, ParserError, message;
+    END
+    RAISE Input, CompilerError, message;
+}
+END
+PRIVATE FN clearParser__diagnostic_token(self: ClearParser, node_or_token: Auto) RETURNS ?Any@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token = IF respondsTo?(node_or_token, "token") THEN
+      node_or_token.token()
+    ELSE
+      node_or_token
+    END;
+    RETURN CAST(token AS ?Any@multiowned);
+}
+END
+PRIVATE FN clearParser__source_error_token(self: ClearParser, token: ?Any@multiowned) RETURNS ?Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF ((token != NIL) AND (token IS_A Token)) THEN
+      RETURN COPY token;
+    END
+    IF !((((token != NIL) AND respondsTo?(token, "line")) AND respondsTo?(token, "column"))) THEN
+      RETURN NIL;
+    END
+    RETURN Token{ type: :ANCHOR, value: NIL, line: token.line(), column: token.column(), file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
+}
+END
+PRIVATE FN clearParser__diagnostic_output(self: ClearParser, message: String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    Kernel.warn(message);
+    NIL;
+}
+END
+PRIVATE FN clearParser__closest_name(self: ClearParser, input: NameCandidate, candidates: []NameCandidate, max_distance: Int64 = 3) RETURNS ?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE best: ?NameCandidate = NIL;
+    MUTABLE best_distance: Int64 = (max_distance + 1);
+    FOR _ IN candidates DO
+    MUTABLE distance = clearParser__suggestion_levenshtein(rtoc_self_view, CAST(input AS String), CAST(_ AS String));
+    IF (distance < best_distance) THEN
+        best = COPY _;
+        best_distance = distance;
+    END
+    END
+    IF (best_distance <= max_distance) THEN
+      RETURN COPY CAST(best AS String);
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN clearParser__emit_typo_suggestion_mut(self: ClearParser, token: ?TypoToken, name: String, candidates: []String, message: String, fix_label: String, category: String@symbol = :registry, cascade: Bool = TRUE) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token_line: Int64 = CAST(token.line() AS Int64);
+    MUTABLE token_column: Int64 = CAST(token.column() AS Int64);
+    MUTABLE best: ?String = clearParser__closest_name(rtoc_self_view, NameCandidate{ StringValue: COPY name }, candidates);
+    MUTABLE fixes: []Fix = ( { MUTABLE rtoc_empty_list_2: []Fix = List[]; rtoc_empty_list_2 } );
+    IF best EXISTS AS best_value THEN
+      &fixes.append(TRY (fix__new(TRY (diagnosticRegistry__fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: name, :best: best_value, :label: fix_label})), [edit__new(span__new(NIL, token_line, token_column, name.codepointCount()), best_value)], :auto)));
+    END
+    IF (fixes.length() == 0) THEN
+      RETURN clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], {:detail: message});
+    END
+    clearParser__fixable_mut(rtoc_self_view, token, category, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: message});
+}
+END
+PRIVATE FN clearParser__suggestion_levenshtein(self: ClearParser, left: String, right: String) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (left.length() == 0) THEN
+      RETURN right.codepointCount();
+    END
+    IF (right.length() == 0) THEN
+      RETURN left.codepointCount();
+    END
+    MUTABLE previous = (0 ..= right.codepointCount()).to_a();
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < left.length() DO
+      MUTABLE current = [(rtoc_idx + 1)];
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < right.length() DO
+          MUTABLE cost = IF (left.substr(rtoc_idx, 1) == right.substr(rtoc_idx, 1)) THEN
+              0
+            ELSE
+              1
+            END;
+          &current.append(([(UNWRAP (current[rtoc_idx]) + 1), (previous[(rtoc_idx + 1)] + 1), (previous[rtoc_idx] + cost)]).min());
+        rtoc_idx = rtoc_idx + 1;
+      END
+      previous = current;
+    rtoc_idx = rtoc_idx + 1;
+    END
+    RETURN previous.last();
+}
+END
+FN clearParser__new(tokens: []Token, source_code: String = "", gradual: ?Bool = NIL, budget: ?FrontendResourceBudget = NIL) RETURNS !ClearParser@multiowned ->
+  MUTABLE self = ClearParser{ budget: (budget OR_ELSE frontendResourceBudget__new()), delimiter_closings: List[], gradual: FALSE, pos: 0, source_code: COPY source_code, tokens: COPY tokens };
+  TRY (clearParser__initialize(&self, tokens, source_code, gradual, budget));
+  RETURN self @multiowned;
+END
+FN castCodeOrMessageToString(value: CodeOrMessage) RETURNS String ->
+  IF value IS_A String AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN "";
+END

@@ -1,0 +1,145 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+REQUIRE "../../mir/thunk_transform/recursive_splitter.clear"
+REQUIRE "pkg:rtoc_6173742f66697861626c655f6572726f722e636c656172"
+REQUIRE "pkg:rtoc_6173742f66756e6374696f6e5f7369676e61747572655f666f72776172642e636c656172"
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172"
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f636f6e746578742e636c656172"
+REQUIRE "../../semantic/tense_operation_plan.clear"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f6172675f737065632e636c656172"
+# Ruby module FunctionAnalysis
+UNION RoutineNode { FunctionDefMultiowned: FunctionDef@multiowned, LambdaLit: LambdaLit, FunctionDef: FunctionDef }
+UNION RoutineBody { ArrayValue: []Node, MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+UNION FunctionCallNode { FuncCall: FuncCall, MethodCall: MethodCall }
+STRUCT CallSignatureSite {
+  node: FunctionCallNode,
+  name: String,
+  args: []Locatable
+}
+
+FN callSignatureSite__assign_signature_mut(MUTABLE self: CallSignatureSite, signature: FunctionSignature) RETURNS Void ->
+  MATCH self.node START
+    FunctionCallNode.FuncCall AS item ->
+      MUTABLE item_mutable = COPY item;
+      item_mutable.matched_signature = COPY signature;
+      self.node = FunctionCallNode{ FuncCall: item_mutable };,
+    FunctionCallNode.MethodCall AS item ->
+      MUTABLE item_mutable = COPY item;
+      item_mutable.matched_signature = COPY signature;
+      self.node = FunctionCallNode{ MethodCall: item_mutable };,
+  END
+  self.node = COPY self.node;
+END
+FN callSignatureSite__append_arg_mut(MUTABLE self: CallSignatureSite, arg: Locatable) RETURNS Void ->
+  &self.args.append(COPY arg);
+END
+FN callSignatureSite__replace_arg_mut(MUTABLE self: CallSignatureSite, index_value: Int64, arg: Locatable) RETURNS Void ->
+  self.args[index_value] = COPY arg;
+END
+FN callSignatureSite__explicit_mutable_argument?(self: CallSignatureSite, index_value: Int64) RETURNS Bool EFFECTS REENTRANT ->
+  MUTABLE method_node: ?MethodCall = NIL;
+  IF self.node IS_A MethodCall THEN
+    method_node = COPY castFunctionCallNodeToOptionalMethodCall(self.node);
+  END
+  IF ((method_node != NIL) AND (self.args.length() == (method_node.args.length() + 1))) THEN
+    MUTABLE concrete_method = method_node;
+    IF (index_value == 0) THEN
+      RETURN methodCall__explicit_mutable_receiver?(&concrete_method);
+    END
+    RETURN methodCall__explicit_mutable_argument?(concrete_method, (index_value - 1));
+  END
+  IF self.node IS_A FuncCall THEN
+    MUTABLE func_node: FuncCall = COPY castFunctionCallNodeToFuncCall(self.node);
+    RETURN funcCall__explicit_mutable_argument?(func_node, index_value);
+  END
+  MUTABLE method_call: MethodCall = COPY castFunctionCallNodeToMethodCall(self.node);
+  RETURN methodCall__explicit_mutable_argument?(method_call, index_value);
+END
+FN callSignatureSite__explicit_mutable_argument_token(self: CallSignatureSite, index_value: Int64) RETURNS ?Token EFFECTS REENTRANT ->
+  MUTABLE method_node: ?MethodCall = NIL;
+  IF self.node IS_A MethodCall THEN
+    method_node = COPY castFunctionCallNodeToOptionalMethodCall(self.node);
+  END
+  IF ((method_node != NIL) AND (self.args.length() == (method_node.args.length() + 1))) THEN
+    MUTABLE concrete_method = method_node;
+    IF (index_value == 0) THEN
+      RETURN methodCall__explicit_mutable_receiver_token_value(&concrete_method);
+    END
+    RETURN CAST(methodCall__explicit_mutable_argument_token(concrete_method, (index_value - 1)) AS ?Token);
+  END
+  IF self.node IS_A FuncCall THEN
+    MUTABLE func_node: FuncCall = COPY castFunctionCallNodeToFuncCall(self.node);
+    RETURN CAST(funcCall__explicit_mutable_argument_token(func_node, index_value) AS ?Token);
+  END
+  MUTABLE method_call: MethodCall = COPY castFunctionCallNodeToMethodCall(self.node);
+  RETURN CAST(methodCall__explicit_mutable_argument_token(method_call, index_value) AS ?Token);
+END
+STRUCT CallArityPlan {
+  site: CallSignatureSite,
+  params: []Param,
+  min_args: Int64,
+  max_args: Int64,
+  given_args: Int64
+}
+
+FN callArityPlan__mismatch?(self: CallArityPlan) RETURNS Bool ->
+  RETURN ((self.given_args < self.min_args) OR (self.given_args > self.max_args));
+END
+FN callArityPlan__exact?(self: CallArityPlan) RETURNS Bool ->
+  RETURN (self.min_args == self.max_args);
+END
+FN callArityPlan__injectable_defaults(self: CallArityPlan) RETURNS ![]Param ->
+  IF !((self.given_args < self.max_args)) THEN
+    RETURN CAST(( { MUTABLE rtoc_empty_list_1: []Param = List[]; rtoc_empty_list_1 } ) AS []Param);
+  END
+  MUTABLE defaults: []Param = ( { MUTABLE rtoc_empty_list_2: []Param = List[]; rtoc_empty_list_2 } );
+  MUTABLE index = self.given_args;
+  WHILE (index < self.max_args) DO
+    MUTABLE param = COPY UNWRAP (self.params[index]);
+    IF !(param.required) THEN
+      &defaults.append(COPY param);
+    END
+    index = (index + 1);
+  END
+  RETURN defaults;
+END
+PUB STRUCT CallArgumentFacts {
+  site: CallSignatureSite,
+  index: Int64,
+  param: Param,
+  arg_node: Locatable,
+  is_give: Bool,
+  inner_node: Locatable,
+  arg_type: Type,
+  expected_type: Type,
+  actual_type: Type,
+  actual: ?String@symbol,
+  path: []String@symbol,
+  explicit_mutable: Bool,
+  mutable_marker_token: ?Token
+}
+STRUCT EncounteredCallArgument {
+  path: []String@symbol,
+  mutable: Bool,
+  name: String
+}
+# End Ruby module FunctionAnalysis
+FN castFunctionCallNodeToFuncCall(value: FunctionCallNode) RETURNS FuncCall ->
+  IF value IS_A FuncCall AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to FuncCall");
+END
+FN castFunctionCallNodeToMethodCall(value: FunctionCallNode) RETURNS MethodCall ->
+  IF value IS_A MethodCall AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to MethodCall");
+END
+FN castFunctionCallNodeToOptionalMethodCall(value: FunctionCallNode) RETURNS ?MethodCall ->
+  IF value IS_A MethodCall AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN NIL;
+END

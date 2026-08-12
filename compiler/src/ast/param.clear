@@ -1,0 +1,54 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+PUB STRUCT KeptIdentityContract {
+  family: String@symbol,
+  sink: String
+}
+
+FN keptIdentityContract__rc?(self: KeptIdentityContract) RETURNS Bool ->
+  RETURN (self.family == :multiowned);
+END
+PUB STRUCT CallEdgeOwnershipPlan {
+  op: String@symbol,
+  family: String@symbol
+}
+# Ruby module AST
+PUB STRUCT Param {
+  name: String,
+  type: Type,
+  default: ?Locatable,
+  mutable: ?Bool,
+  takes: ?Bool,
+  comptime: ?Bool,
+  name_token: ?Token,
+  required: ?Bool,
+  sync: ?String@symbol,
+  symbol: ?String@symbol,
+  carrier_contract: String@symbol
+}
+
+FN param__initialize(MUTABLE self: Param) RETURNS !Void ->
+  MUTABLE t: ?TypeTypeInput = TypeTypeInput{ Type: COPY self.type };
+  self.type = TRY (type__new(castTypeTypeInputToTypeConstructionInput((t OR_ELSE type__type_input_symbol_or_any(NIL)))));
+  MUTABLE contract: ?String@symbol = COPY self.carrier_contract;
+  self.carrier_contract = (contract OR_ELSE :polymorphic);
+END
+FN param__atomic?(self: Param) RETURNS Bool ->
+  RETURN (self.sync == :atomic);
+END
+PUB FN param__type(self: Param) RETURNS Type ->
+  RETURN COPY self.type;
+END
+PUB FN param__set_type(MUTABLE self: Param, val: ?TypeTypeInput) RETURNS !Void ->
+  self.type = TRY (type__new(castTypeTypeInputToTypeConstructionInput((val OR_ELSE type__type_input_symbol_or_any(NIL)))));
+END
+# End Ruby module AST
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
+    TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
+    TypeTypeInput.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
+    TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
+  END
+  panic("Invalid cast to TypeConstructionInput");
+END

@@ -33,4 +33,30 @@ RSpec.describe RubyToClear::MethodRegistry do
 
     expect(RubyToClear.transpile('File.read("path.txt")').strip).to eq('ClearFS.read("path.txt");')
   end
+
+  describe ".parenthesize_bare_expression_if" do
+    it "wraps a bare expression-IF in parens" do
+      code = "IF x > 5 THEN\n  1\nELSE\n  2\nEND"
+      expect(described_class.send(:parenthesize_bare_expression_if, code)).to eq("(#{code})")
+    end
+
+    it "wraps a bare COMPTIME IF in parens" do
+      code = "COMPTIME IF T IS_A Int64 THEN\n  1\nELSE\n  2\nEND"
+      expect(described_class.send(:parenthesize_bare_expression_if, code)).to eq("(#{code})")
+    end
+
+    it "leaves non-IF code unchanged" do
+      expect(described_class.send(:parenthesize_bare_expression_if, "x + 1")).to eq("x + 1")
+      expect(described_class.send(:parenthesize_bare_expression_if, "foo(bar)")).to eq("foo(bar)")
+      expect(described_class.send(:parenthesize_bare_expression_if, "{ MUTABLE x = 1; x }")).to eq("{ MUTABLE x = 1; x }")
+    end
+
+    it "leaves an already-parenthesized IF unchanged in shape (double-wraps, harmlessly)" do
+      code = "(IF x > 5 THEN\n  1\nELSE\n  2\nEND)"
+      # Does not start with "IF "/"COMPTIME IF " (starts with "("), so the
+      # guard correctly declines - no double-parenthesization in practice,
+      # since callers only ever pass the raw if_expression_code output.
+      expect(described_class.send(:parenthesize_bare_expression_if, code)).to eq(code)
+    end
+  end
 end

@@ -1,0 +1,17 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# A deliberately parser-only gate for freshly generated CLEAR.  The full
+# compiler command also performs name resolution, type/effect/ownership
+# analysis, MIR lowering, and Zig emission, so its exit status cannot tell G2
+# (syntax) apart from G3 (frontend semantics).
+
+root = File.expand_path("../../../..", __dir__)
+$LOAD_PATH.unshift(File.join(root, "compiler", "ruby"))
+
+require "ast/lexer"
+require "ast/parser"
+
+path = ARGV.fetch(0)
+source = File.read(path)
+ClearParser.new(Lexer.new(source).tokenize, source).parse

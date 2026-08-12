@@ -1,0 +1,1053 @@
+REQUIRE "pkg:rtoc_6173742f747970655f6361706162696c69746965732e636c656172"
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexFirstMatch(subject: String, regex: CompilerRegex) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
+FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
+  RETURN COPY compilerRegexFirstMatch(subject, compilerRegexCompile(pattern));
+END
+EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS ?CompilerRegexScanner EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
+FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
+  RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
+END
+
+PUB UNION Raw { SymbolValue: String@symbol, StringValue: String }
+PUB UNION TypeExpressionKind { NamedTypeExpression: NamedTypeExpression, TypeProjectionExpression: TypeProjectionExpression, FunctionTypeExpression: FunctionTypeExpression, TupleTypeExpression: TupleTypeExpression, OptionalTypeExpression: OptionalTypeExpression, FallibleTypeExpression: FallibleTypeExpression, FutureTypeExpression: FutureTypeExpression, LinearTypeExpression: LinearTypeExpression, MapTypeExpression: MapTypeExpression, StreamTypeExpression: StreamTypeExpression }
+# Ruby module TypeExpressionKind
+PUB STRUCT TypeExpression {
+  # Ruby's object graph is by reference; CLEAR structs are by value, so the
+  # TypeExpression -> TypeExpressionKind -> <variant> -> TypeExpression cycle
+  # needs one indirection. Boxing the kind breaks every such cycle at a single
+  # edge.
+  kind: TypeExpressionKind@boxed,
+  capabilities: TypeCapabilities
+}
+
+PUB UNION TypeExpressionSemanticPayload { Unset: Bool }
+PUB UNION TypeExpressionDimension { Int64Value: Int64, SymbolValue: String@symbol }
+valid_tense_orders: [12]String = ["", "!", "?", "!?", "~", "~!", "~?", "~!?", "!~", "!~!", "!~?", "!~!?"];
+PUB FN typeExpression__valid_tense_order?(order: String) RETURNS Bool ->
+  RETURN valid_tense_orders.contains?(order);
+END
+PUB FN typeExpression__of(kind: TypeExpressionKind, capabilities: TypeCapabilities = typeCapabilities__new(:affine)) RETURNS TypeExpression ->
+  RETURN TypeExpression{ kind: COPY kind, capabilities: COPY capabilities };
+END
+FN typeExpression__with_capabilities(self: TypeExpression, capabilities: TypeCapabilities) RETURNS TypeExpression ->
+  RETURN TypeExpression{ kind: COPY self.kind, capabilities: COPY capabilities };
+END
+PUB STRUCT NamedTypeExpression {
+  name: String@symbol,
+  arguments: []TypeExpression
+}
+PUB STRUCT TypeProjectionExpression {
+  owner: String@symbol,
+  member: String@symbol,
+  protocol: ?String@symbol
+}
+PUB STRUCT FunctionParamExpression {
+  expression: TypeExpression
+}
+PUB STRUCT FunctionSignatureExpression {
+  params: []FunctionParamExpression,
+  # Breaks the TypeExpression -> FunctionSignatureExpression -> TypeExpression
+  # cycle: Ruby's object graph is by reference, CLEAR structs are by value, so
+  # one edge in a recursive cycle needs indirection.
+  return_expression: TypeExpression@boxed,
+  reentrant: Bool,
+  abi: String@symbol,
+  semantic_payload: ?TypeExpressionSemanticPayload
+}
+PUB STRUCT FunctionTypeExpression {
+  signature: FunctionSignatureExpression
+}
+PUB STRUCT TupleTypeExpression {
+  items: []TypeExpression
+}
+PUB STRUCT OptionalTypeExpression {
+  inner: TypeExpression@boxed
+}
+PUB STRUCT FallibleTypeExpression {
+  inner: TypeExpression,
+  error_set: ?TypeExpression
+}
+PUB STRUCT FutureTypeExpression {
+  inner: TypeExpression@boxed
+}
+PUB STRUCT LinearTypeExpression {
+  kind: String@symbol,
+  dimensions: []TypeExpressionDimension,
+  item: TypeExpression,
+  allocation_hint: ?Int64
+}
+
+PUB FN linearTypeExpression__list?(self: LinearTypeExpression) RETURNS Bool ->
+  RETURN (self.kind == :list);
+END
+PUB FN linearTypeExpression__set?(self: LinearTypeExpression) RETURNS Bool ->
+  RETURN (self.kind == :set);
+END
+FN linearTypeExpression__pool?(self: LinearTypeExpression) RETURNS Bool ->
+  RETURN (self.kind == :pool);
+END
+PUB STRUCT MapTypeExpression {
+  key: TypeExpression,
+  value: TypeExpression,
+  key_implicit: Bool,
+  legacy_separator: String
+}
+PUB STRUCT StreamTypeExpression {
+  cardinality: TypeExpressionDimension,
+  item: TypeExpression@boxed
+}
+PUB FN typeExpressionTree__root_capabilities(expression: TypeExpression) RETURNS TypeCapabilities ->
+  MUTABLE kind = COPY expression.kind;
+  IF kind IS_A NamedTypeExpression AS named_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A TypeProjectionExpression AS type_projection_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A FunctionTypeExpression AS function_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A MapTypeExpression AS map_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
+    RETURN COPY expression.capabilities;
+  END
+  RETURN typeCapabilities__new(:affine);
+END
+PUB FN typeExpressionTree__with_root_capabilities(expression: TypeExpression, capabilities: TypeCapabilities) RETURNS TypeExpression ->
+  RETURN typeExpression__with_capabilities(expression, capabilities);
+END
+# A @boxed field reads as the pointer; passing it to a by-value parameter is
+# how the payload comes back out.
+# Reading a @boxed field yields the pointer; a by-value parameter is how the
+# payload comes back out.
+PUB FN typeExpressionDimensions__has_symbol(dimensions: []TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
+  FOR dimension IN dimensions DO
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(dimension, expected) THEN
+      RETURN TRUE;
+    END
+  END
+  RETURN FALSE;
+END
+# Narrowing accessors: a CAST cannot reinterpret a union as one variant.
+PUB FN typeExpressionKind__optional(kind: TypeExpressionKind) RETURNS ?OptionalTypeExpression ->
+  IF kind IS_A OptionalTypeExpression AS narrowed THEN
+    RETURN COPY narrowed;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionKind__stream(kind: TypeExpressionKind) RETURNS ?StreamTypeExpression ->
+  IF kind IS_A StreamTypeExpression AS narrowed THEN
+    RETURN COPY narrowed;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionKind__named(kind: TypeExpressionKind) RETURNS ?NamedTypeExpression ->
+  IF kind IS_A NamedTypeExpression AS narrowed THEN
+    RETURN COPY narrowed;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionKind__map(kind: TypeExpressionKind) RETURNS ?MapTypeExpression ->
+  IF kind IS_A MapTypeExpression AS narrowed THEN
+    RETURN COPY narrowed;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionKind__projection(kind: TypeExpressionKind) RETURNS ?TypeProjectionExpression ->
+  IF kind IS_A TypeProjectionExpression AS narrowed THEN
+    RETURN COPY narrowed;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionKind__tuple(kind: TypeExpressionKind) RETURNS ?TupleTypeExpression ->
+  IF kind IS_A TupleTypeExpression AS narrowed THEN
+    RETURN COPY narrowed;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionKind__future(kind: TypeExpressionKind) RETURNS ?FutureTypeExpression ->
+  IF kind IS_A FutureTypeExpression AS narrowed THEN
+    RETURN COPY narrowed;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionKind__fallible(kind: TypeExpressionKind) RETURNS ?FallibleTypeExpression ->
+  IF kind IS_A FallibleTypeExpression AS narrowed THEN
+    RETURN COPY narrowed;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionKind__linear(kind: TypeExpressionKind) RETURNS ?LinearTypeExpression ->
+  IF kind IS_A LinearTypeExpression AS linear THEN
+    RETURN COPY linear;
+  END
+  RETURN NIL;
+END
+PUB FN typeExpressionTree__kind_of(node: TypeExpression) RETURNS TypeExpressionKind ->
+  RETURN COPY node.kind;
+END
+PUB FN typeExpressionTree__unbox(inner: TypeExpression) RETURNS TypeExpression ->
+  RETURN COPY inner;
+END
+PUB FN typeExpressionTree__linear_item_capabilities(expression: TypeExpression) RETURNS ?TypeCapabilities ->
+  MUTABLE node: TypeExpression = COPY expression;
+  WHILE TRUE DO
+    MUTABLE kind = COPY node.kind;
+    IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+      node = typeExpressionTree__unbox(fallible_type_expression.inner);
+    ELSE_IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+      node = typeExpressionTree__unbox(future_type_expression.inner);
+    ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+      node = typeExpressionTree__unbox(optional_type_expression.inner);
+    ELSE
+      BREAK;
+    END
+  END
+  MUTABLE linear = COPY node.kind;
+  IF linear IS_A LinearTypeExpression AS linear_type_expression THEN
+    RETURN typeExpressionTree__root_capabilities(linear_type_expression.item);
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN typeExpressionTree__with_linear_item_capabilities(expression: TypeExpression, capabilities: TypeCapabilities) RETURNS TypeExpression EFFECTS REENTRANT ->
+  MUTABLE kind = COPY expression.kind;
+  MUTABLE cap = COPY expression.capabilities;
+  IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ FallibleTypeExpression: COPY FallibleTypeExpression{ inner: COPY typeExpressionTree__with_linear_item_capabilities(fallible_type_expression.inner, capabilities), error_set: COPY fallible_type_expression.error_set } }, capabilities: COPY cap };
+  END
+  IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY typeExpressionTree__with_linear_item_capabilities(future_type_expression.inner, capabilities) } }, capabilities: COPY cap };
+  END
+  IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeExpressionTree__with_linear_item_capabilities(optional_type_expression.inner, capabilities) } }, capabilities: COPY cap };
+  END
+  IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ kind: COPY linear_type_expression.kind, dimensions: COPY linear_type_expression.dimensions, item: COPY typeExpressionTree__with_root_capabilities(linear_type_expression.item, capabilities), allocation_hint: linear_type_expression.allocation_hint } }, capabilities: COPY cap };
+  ELSE
+    RETURN COPY expression;
+  END
+END
+PUB FN typeExpressionTree__linear_item_envelope(expression: TypeExpression) RETURNS ?TypeExpression EFFECTS REENTRANT ->
+  MUTABLE kind = COPY expression.kind;
+  MUTABLE cap = COPY expression.capabilities;
+  IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+    MUTABLE inner: ?TypeExpression = typeExpressionTree__linear_item_envelope(fallible_type_expression.inner);
+    IF inner EXISTS AS inner_value THEN
+      RETURN TypeExpression{ kind: TypeExpressionKind{ FallibleTypeExpression: COPY FallibleTypeExpression{ inner: COPY inner_value, error_set: COPY fallible_type_expression.error_set } }, capabilities: COPY cap };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE_IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+    MUTABLE inner: ?TypeExpression = typeExpressionTree__linear_item_envelope(future_type_expression.inner);
+    IF inner EXISTS AS inner_value THEN
+      RETURN TypeExpression{ kind: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY inner_value } }, capabilities: COPY cap };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+    MUTABLE inner: ?TypeExpression = typeExpressionTree__linear_item_envelope(optional_type_expression.inner);
+    IF inner EXISTS AS inner_value THEN
+      RETURN TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY inner_value } }, capabilities: COPY cap };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE_IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
+    RETURN COPY linear_type_expression.item;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN typeExpressionTree__with_nominal_arguments(expression: TypeExpression, name: String@symbol, arguments: []TypeExpression) RETURNS TypeExpression EFFECTS REENTRANT ->
+  MUTABLE kind = COPY expression.kind;
+  MUTABLE cap = COPY expression.capabilities;
+  IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeExpressionTree__with_nominal_arguments(optional_type_expression.inner, name, arguments) } }, capabilities: COPY cap };
+  ELSE_IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ FallibleTypeExpression: COPY FallibleTypeExpression{ inner: COPY typeExpressionTree__with_nominal_arguments(fallible_type_expression.inner, name, arguments), error_set: COPY fallible_type_expression.error_set } }, capabilities: COPY cap };
+  ELSE_IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY typeExpressionTree__with_nominal_arguments(future_type_expression.inner, name, arguments) } }, capabilities: COPY cap };
+  ELSE_IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ kind: COPY linear_type_expression.kind, dimensions: COPY linear_type_expression.dimensions, item: COPY typeExpressionTree__with_nominal_arguments(linear_type_expression.item, name, arguments), allocation_hint: linear_type_expression.allocation_hint } }, capabilities: COPY cap };
+  ELSE_IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
+    RETURN TypeExpression{ kind: TypeExpressionKind{ StreamTypeExpression: COPY StreamTypeExpression{ cardinality: COPY stream_type_expression.cardinality, item: COPY typeExpressionTree__with_nominal_arguments(stream_type_expression.item, name, arguments) } }, capabilities: COPY cap };
+  ELSE_IF kind IS_A FunctionTypeExpression AS function_type_expression THEN
+    RETURN COPY expression;
+  ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
+    IF !((name == :Tuple)) THEN
+      RETURN COPY expression;
+    END
+    RETURN TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY arguments } }, capabilities: COPY cap };
+  ELSE_IF kind IS_A NamedTypeExpression AS named_type_expression THEN
+    IF !((named_type_expression.name == name)) THEN
+      RETURN COPY expression;
+    END
+    RETURN TypeExpression{ kind: TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY name, arguments: COPY arguments } }, capabilities: COPY cap };
+  ELSE_IF kind IS_A MapTypeExpression AS map_type_expression THEN
+    IF !((name == :HashMap)) THEN
+      RETURN COPY expression;
+    END
+    MUTABLE key_branch_value: ?TypeExpression = NIL;
+    IF (arguments.length() == 1) THEN
+      key_branch_value = map_type_expression.key;
+    ELSE
+      key_branch_value = COPY UNWRAP (arguments[0]);
+    END
+    MUTABLE key: TypeExpression = key_branch_value?;
+    MUTABLE value_branch_value: ?TypeExpression = NIL;
+    IF (arguments.length() == 1) THEN
+      value_branch_value = COPY UNWRAP (arguments[0]);
+    ELSE
+      value_branch_value = COPY UNWRAP (arguments[1]);
+    END
+    MUTABLE value: TypeExpression = value_branch_value?;
+    RETURN TypeExpression{ kind: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY key, value: COPY value, key_implicit: (arguments.length() == 1), legacy_separator: COPY map_type_expression.legacy_separator } }, capabilities: COPY cap };
+  ELSE
+    RETURN COPY expression;
+  END
+END
+FN typeExpressionTree__transform(expression: TypeExpression, visitor: FN(TypeExpression) -> TypeExpression) RETURNS TypeExpression EFFECTS REENTRANT ->
+  MUTABLE kind = COPY expression.kind;
+  MUTABLE cap = COPY expression.capabilities;
+  MUTABLE rebuilt_branch_value: ?TypeExpression = NIL;
+  PARTIAL MATCH kind START
+    TypeExpressionKind.NamedTypeExpression AS named_type_expression ->
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY named_type_expression.name, arguments: COPY named_type_expression.arguments |> SELECT typeExpressionTree__transform(_, visitor) } }, capabilities: COPY cap };,
+    TypeExpressionKind.TypeProjectionExpression AS type_projection_expression ->
+    rebuilt_branch_value = COPY expression;,
+    TypeExpressionKind.FunctionTypeExpression AS function_type_expression ->
+    MUTABLE signature = function_type_expression.signature;
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ FunctionTypeExpression: COPY FunctionTypeExpression{ signature: COPY FunctionSignatureExpression{ params: COPY signature.params |> SELECT FunctionParamExpression{ expression: COPY typeExpressionTree__transform(_.expression, visitor) }, return_expression: COPY typeExpressionTree__transform(signature.return_expression, visitor), reentrant: signature.reentrant, abi: COPY signature.abi, semantic_payload: NIL } } }, capabilities: COPY cap };,
+    TypeExpressionKind.TupleTypeExpression AS tuple_type_expression ->
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY tuple_type_expression.items |> SELECT typeExpressionTree__transform(_, visitor) } }, capabilities: COPY cap };,
+    TypeExpressionKind.OptionalTypeExpression AS optional_type_expression ->
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeExpressionTree__transform(optional_type_expression.inner, visitor) } }, capabilities: COPY cap };,
+    TypeExpressionKind.FallibleTypeExpression AS fallible_type_expression ->
+    MUTABLE error_set: ?TypeExpression = fallible_type_expression.error_set;
+    MUTABLE transformed_error_set_branch_value: ?TypeExpression = NIL;
+    IF error_set EXISTS AS error_set_value THEN
+      transformed_error_set_branch_value = typeExpressionTree__transform(error_set_value, visitor);
+    ELSE
+      transformed_error_set_branch_value = NIL;
+    END
+    MUTABLE transformed_error_set: TypeExpression = transformed_error_set_branch_value?;
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ FallibleTypeExpression: COPY FallibleTypeExpression{ inner: COPY typeExpressionTree__transform(fallible_type_expression.inner, visitor), error_set: COPY transformed_error_set } }, capabilities: COPY cap };,
+    TypeExpressionKind.FutureTypeExpression AS future_type_expression ->
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY typeExpressionTree__transform(future_type_expression.inner, visitor) } }, capabilities: COPY cap };,
+    TypeExpressionKind.LinearTypeExpression AS linear_type_expression ->
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ kind: COPY linear_type_expression.kind, dimensions: COPY linear_type_expression.dimensions, item: COPY typeExpressionTree__transform(linear_type_expression.item, visitor), allocation_hint: linear_type_expression.allocation_hint } }, capabilities: COPY cap };,
+    TypeExpressionKind.MapTypeExpression AS map_type_expression ->
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY typeExpressionTree__transform(map_type_expression.key, visitor), value: COPY typeExpressionTree__transform(map_type_expression.value, visitor), key_implicit: map_type_expression.key_implicit, legacy_separator: COPY map_type_expression.legacy_separator } }, capabilities: COPY cap };,
+    TypeExpressionKind.StreamTypeExpression AS stream_type_expression ->
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ StreamTypeExpression: COPY StreamTypeExpression{ cardinality: COPY stream_type_expression.cardinality, item: COPY typeExpressionTree__transform(stream_type_expression.item, visitor) } }, capabilities: COPY cap };,
+    DEFAULT ->
+    rebuilt_branch_value = COPY expression;
+  END
+  MUTABLE rebuilt: TypeExpression = rebuilt_branch_value?;
+  RETURN visitor(rebuilt);
+END
+PUB FN typeExpressionTree__node_count(expression: TypeExpression) RETURNS !Int64 ->
+  RETURN (TRY (typeExpressionTree__each_node(expression))).length();
+END
+PUB FN typeExpressionTree__capability_site_count(expression: TypeExpression) RETURNS !Int64 EFFECTS REENTRANT ->
+  MUTABLE own_site = IF typeCapabilities__explicit_layer_capability?(expression.capabilities) THEN
+    1
+  ELSE
+    0
+  END;
+  MUTABLE child_depth: Int64 = 0;
+  FOR _ IN (TRY (typeExpressionTree__children(expression))) DO
+  MUTABLE depth = TRY (typeExpressionTree__capability_site_count(_));
+  IF (depth > child_depth) THEN
+      child_depth = COPY depth;
+  END
+  END
+  RETURN (own_site + child_depth);
+END
+FN typeExpressionTree__nested_capabilities?(expression: TypeExpression) RETURNS !Bool ->
+  RETURN ((TRY (typeExpressionTree__each_node(expression))) |> SKIP 1) |> ANY typeCapabilities__explicit_layer_capability?(typeExpressionTree__root_capabilities(_));
+END
+PUB FN typeExpressionTree__tense_wrapper?(expression: TypeExpression) RETURNS Bool ->
+  RETURN PARTIAL MATCH expression.kind START
+    TypeExpressionKind.OptionalTypeExpression -> TRUE,
+    TypeExpressionKind.FallibleTypeExpression -> TRUE,
+    TypeExpressionKind.FutureTypeExpression -> TRUE,
+    DEFAULT -> FALSE
+  END;
+END
+PUB FN typeExpressionTree__each_node(expression: TypeExpression) RETURNS ![]TypeExpression ->
+  MUTABLE found: []TypeExpression = ( { MUTABLE rtoc_empty_list_1: []TypeExpression = List[]; rtoc_empty_list_1 } );
+  MUTABLE pending: []TypeExpression = [expression];
+  WHILE !((pending.length() == 0)) DO
+    MUTABLE node = UNWRAP (&pending.pop());
+    MUTABLE node_children = TRY (typeExpressionTree__children(node));
+    &found.append(node);
+    pending = ruby_array_concat_TypeExpression(pending, node_children);
+  END
+  RETURN found;
+END
+PUB FN typeExpressionTree__direct_children(expression: TypeExpression) RETURNS ![]TypeExpression ->
+  RETURN TRY (typeExpressionTree__children(expression));
+END
+PRIVATE FN typeExpressionTree__children(expression: TypeExpression) RETURNS ![]TypeExpression ->
+  MUTABLE kind = COPY expression.kind;
+  IF kind IS_A NamedTypeExpression AS named_type_expression THEN
+    RETURN COPY named_type_expression.arguments;
+  ELSE_IF kind IS_A TypeProjectionExpression AS type_projection_expression THEN
+    MUTABLE no_children: []TypeExpression = List[];
+    RETURN no_children;
+  ELSE_IF kind IS_A FunctionTypeExpression AS function_type_expression THEN
+    MUTABLE children: []TypeExpression = List[];
+    FOR param IN function_type_expression.signature.params DO
+      &children.append(typeExpressionTree__unbox(param.expression));
+    END
+    &children.append(typeExpressionTree__unbox(function_type_expression.signature.return_expression));
+    RETURN children;
+  ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
+    RETURN COPY tuple_type_expression.items;
+  ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+    MUTABLE children_of: []TypeExpression = List[];
+    &children_of.append(typeExpressionTree__unbox(optional_type_expression.inner));
+    RETURN children_of;
+  ELSE_IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+    MUTABLE children_of: []TypeExpression = List[];
+    &children_of.append(typeExpressionTree__unbox(future_type_expression.inner));
+    RETURN children_of;
+  ELSE_IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+    IF (fallible_type_expression.error_set == NIL) THEN
+      MUTABLE children_of: []TypeExpression = List[];
+      &children_of.append(typeExpressionTree__unbox(fallible_type_expression.inner));
+      RETURN children_of;
+    ELSE
+      MUTABLE children_of: []TypeExpression = List[];
+      &children_of.append(typeExpressionTree__unbox(fallible_type_expression.inner));
+      &children_of.append(typeExpressionTree__unbox(UNWRAP (fallible_type_expression.error_set)));
+      RETURN children_of;
+    END
+  ELSE_IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
+    MUTABLE children_of: []TypeExpression = List[];
+    &children_of.append(typeExpressionTree__unbox(linear_type_expression.item));
+    RETURN children_of;
+  ELSE_IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
+    MUTABLE children_of: []TypeExpression = List[];
+    &children_of.append(typeExpressionTree__unbox(stream_type_expression.item));
+    RETURN children_of;
+  ELSE_IF kind IS_A MapTypeExpression AS map_type_expression THEN
+    MUTABLE children_of: []TypeExpression = List[];
+    &children_of.append(typeExpressionTree__unbox(map_type_expression.key));
+    &children_of.append(typeExpressionTree__unbox(map_type_expression.value));
+    RETURN children_of;
+  ELSE
+    MUTABLE no_children_of: []TypeExpression = List[];
+    RETURN no_children_of;
+  END
+END
+STRUCT GenericParts {
+  base: String,
+  arguments: []String
+}
+PUB FN typeExpressionParser__parse(raw: Raw) RETURNS !TypeExpression EFFECTS REENTRANT ->
+  MUTABLE source: String = "";
+  IF raw IS_A String@symbol AS raw_symbol THEN
+    source = "${raw_symbol}";
+  ELSE_IF raw IS_A String AS raw_text THEN
+    source = COPY raw_text;
+  END
+  IF source.startsWith?("[~") THEN
+    MUTABLE closing: ?Int64 = source.indexOf("]");
+    IF !((closing == NIL)) THEN
+      MUTABLE marker = COPY (source.substr(2, (closing - 2)));
+      MUTABLE cardinality_branch_value: ?TypeExpressionDimension = NIL;
+      IF (marker.length() == 0) THEN
+        cardinality_branch_value = TypeExpressionDimension{ SymbolValue: :FINITE };
+      ELSE_IF (marker == "INF") THEN
+        cardinality_branch_value = TypeExpressionDimension{ SymbolValue: :INF };
+      ELSE_IF regexMatch?(marker, "\\A\\d+\\z") THEN
+        cardinality_branch_value = TypeExpressionDimension{ Int64Value: TRY (marker.toInt()) };
+      ELSE
+        cardinality_branch_value = NIL;
+      END
+      MUTABLE cardinality: ?TypeExpressionDimension = cardinality_branch_value;
+      IF !((cardinality == NIL)) THEN
+        MUTABLE item_source = COPY (source.substr(((closing + 1)), (source.length() - ((closing + 1)))));
+        IF !((item_source.length() == 0)) THEN
+          RETURN typeExpression__of(TypeExpressionKind{ StreamTypeExpression: COPY StreamTypeExpression{ cardinality: COPY cardinality, item: COPY TRY (typeExpressionParser__parse(Raw{ StringValue: COPY item_source })) } });
+        END
+      END
+    END
+  END
+  RETURN TRY (typeExpressionParser__parse_source(source));
+END
+PRIVATE FN typeExpressionParser__parse_source(source: String) RETURNS !TypeExpression EFFECTS REENTRANT ->
+  MUTABLE normalized = source.trim();
+  IF (normalized.length() == 0) THEN
+    panic("empty type expression");
+  END
+  MUTABLE prefixed: ?TypeExpression = TRY (typeExpressionParser__parse_prefixed_source(normalized));
+  IF !((prefixed == NIL)) THEN
+    RETURN prefixed;
+  END
+  RETURN TRY (typeExpressionParser__parse_primary_source(normalized));
+END
+PRIVATE FN typeExpressionParser__parse_prefixed_source(source: String) RETURNS !?TypeExpression EFFECTS REENTRANT ->
+  MUTABLE prefix = source.substr(0, 1);
+  IF !((["~", "!", "?"]).contains?(prefix)) THEN
+    RETURN NIL;
+  END
+  MUTABLE order = COPY (regexFirstMatch(source, "\\A[~!?]+") OR_ELSE "");
+  IF !(typeExpression__valid_tense_order?(order)) THEN
+    IF order.contains?("~~") THEN
+      panic("double future type is not allowed");
+    END
+    IF order.contains?("!!") THEN
+      panic("double fallible type is not allowed");
+    END
+    IF order.contains?("??") THEN
+      panic("double optional type is not allowed");
+    END
+    panic("unsupported tense order {}");
+  END
+  MUTABLE inner_source = COPY (source.substr(1, (source.length() - 1)));
+  IF (prefix == "~") THEN
+    IF inner_source.startsWith?("~") THEN
+      panic("double future type is not allowed");
+    END
+    RETURN typeExpression__of(TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY TRY (typeExpressionParser__parse_source(inner_source)) } });
+  ELSE_IF (prefix == "!") THEN
+    RETURN typeExpression__of(TypeExpressionKind{ FallibleTypeExpression: COPY FallibleTypeExpression{ inner: COPY TRY (typeExpressionParser__parse_source(inner_source)), error_set: NIL } });
+  ELSE_IF (prefix == "?") THEN
+    RETURN TRY (typeExpressionParser__parse_optional_source(inner_source));
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN typeExpressionParser__parse_optional_source(inner_source: String) RETURNS !TypeExpression EFFECTS REENTRANT ->
+  IF inner_source.startsWith?("?") THEN
+    panic("double optional type is not allowed");
+  END
+  IF typeExpressionParser__grouped_type?(inner_source) THEN
+    RETURN typeExpression__of(TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY TRY (typeExpressionParser__parse_source((inner_source.substr(1, (((inner_source.length() - 2) - 1) + 1))))) } });
+  END
+  MUTABLE optional_array_parts: ?Tuple<String, ?TypeExpressionDimension> = typeExpressionParser__split_array_suffix(inner_source);
+  IF optional_array_parts EXISTS AS optional_array_pair THEN
+    MUTABLE item_source: String = COPY optional_array_pair._0;
+    MUTABLE dimension: ?TypeExpressionDimension = COPY optional_array_pair._1;
+    RETURN typeExpression__of(TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ kind: IF (dimension == NIL) THEN
+      :list
+    ELSE
+      :array
+    END, dimensions: [(dimension OR_ELSE TypeExpressionDimension{ SymbolValue: :LIST })], item: COPY typeExpression__of(TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY TRY (typeExpressionParser__parse_source(item_source)) } }), allocation_hint: NIL } });
+  END
+  RETURN typeExpression__of(TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY TRY (typeExpressionParser__parse_source(inner_source)) } });
+END
+PRIVATE FN typeExpressionParser__parse_primary_source(source: String) RETURNS !TypeExpression EFFECTS REENTRANT ->
+  MUTABLE array: ?TypeExpression = TRY (typeExpressionParser__parse_array_source(source));
+  IF !((array == NIL)) THEN
+    RETURN array;
+  END
+  RETURN TRY (typeExpressionParser__parse_generic_or_named_source(source));
+END
+PRIVATE FN typeExpressionParser__parse_array_source(source: String) RETURNS !?TypeExpression EFFECTS REENTRANT ->
+  MUTABLE array_parts: ?Tuple<String, ?TypeExpressionDimension> = typeExpressionParser__split_array_suffix(source);
+  IF array_parts EXISTS AS array_parts_value THEN
+    MUTABLE item_source: String = COPY array_parts_value._0;
+    MUTABLE dimension: ?TypeExpressionDimension = COPY array_parts_value._1;
+    RETURN typeExpression__of(TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ kind: IF (dimension == NIL) THEN
+      :list
+    ELSE
+      :array
+    END, dimensions: [(dimension OR_ELSE TypeExpressionDimension{ SymbolValue: :LIST })], item: COPY TRY (typeExpressionParser__parse_source(item_source)), allocation_hint: NIL } });
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN typeExpressionParser__parse_generic_or_named_source(source: String) RETURNS !TypeExpression EFFECTS REENTRANT ->
+  MUTABLE projection: ?CompilerRegexScanner = compilerRegexMatchData(source, compilerRegexCompile("\\A([A-Z]\\w*)::([A-Z]\\w*)\\z"));
+  IF projection EXISTS AS projection_md THEN
+    RETURN typeExpression__of(TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: symbol(COPY compilerRegexCapture(projection_md, 1)), member: symbol(COPY compilerRegexCapture(projection_md, 2)), protocol: NIL } });
+  END
+  MUTABLE generic: ?GenericParts = TRY (typeExpressionParser__split_generic(source));
+  IF !((generic == NIL)) THEN
+    MUTABLE arguments = generic.arguments |> SELECT TRY (typeExpressionParser__parse_source(_));
+    IF (generic.base == "HashMap") THEN
+      IF (arguments.length() == 1) THEN
+        RETURN typeExpression__of(TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY typeExpression__of(TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: :String, arguments: List[] } }), value: COPY UNWRAP (arguments.first()), key_implicit: TRUE, legacy_separator: "," } });
+      END
+      IF (arguments.length() == 2) THEN
+        MUTABLE key = COPY UNWRAP (arguments.first());
+        MUTABLE value = COPY UNWRAP (arguments.last());
+        RETURN typeExpression__of(TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY key, value: COPY value, legacy_separator: COPY typeExpressionParser__top_level_argument_separator(source), key_implicit: FALSE } });
+      END
+      panic("HashMap expects one or two type arguments");
+    ELSE_IF (generic.base == "Tuple") THEN
+      RETURN typeExpression__of(TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY arguments } });
+    END
+    RETURN typeExpression__of(TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY symbol(generic.base), arguments: COPY arguments } });
+  END
+  MUTABLE base, capabilities = typeExpressionParser__split_legacy_capability_suffix(source);
+  RETURN TypeExpression{ kind: TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY symbol(base), arguments: List[] } }, capabilities: COPY capabilities };
+END
+PRIVATE FN typeExpressionParser__split_legacy_capability_suffix(source: String) RETURNS Tuple<String, TypeCapabilities> ->
+  MUTABLE marker: ?Int64 = source.indexOf("@");
+  IF marker EXISTS AS marker_value THEN
+    IF marker_value.zero?() THEN
+      RETURN Tuple{source, typeCapabilities__new(:affine)};
+    ELSE
+      MUTABLE base = COPY (source.substr(0, (marker_value - 0)));
+      MUTABLE ownership: ?String@symbol = :affine;
+      MUTABLE sync: ?String@symbol = NIL;
+      MUTABLE layout: ?String@symbol = NIL;
+      FOR _ IN (source.substr(marker_value, (source.length() - marker_value))).split("@") |> WHERE !(_.empty?()) |> UNNEST _.split(":") DO
+      IF (_ == "shared") THEN
+        ownership = :shared;
+      ELSE_IF (_ == "multiowned") OR (_ == "multiOwned") THEN
+        ownership = :multiowned;
+      ELSE_IF (_ == "link") THEN
+        ownership = :link;
+      ELSE_IF (_ == "split") THEN
+        ownership = :split;
+      ELSE_IF (_ == "locked") THEN
+        sync = :locked;
+      ELSE_IF (_ == "writeLocked") THEN
+        sync = :write_locked;
+      ELSE_IF (_ == "versioned") THEN
+        sync = :versioned;
+      ELSE_IF (_ == "atomic") THEN
+        sync = :atomic;
+      ELSE_IF (_ == "local") THEN
+        sync = :local;
+      ELSE_IF (_ == "raw") THEN
+        sync = :raw;
+      ELSE_IF (_ == "symbol") THEN
+        sync = :symbol;
+      ELSE_IF (_ == "boxed") OR (_ == "indirect") THEN
+        layout = :indirect;
+      END
+      END
+      RETURN Tuple{base, typeCapabilities__new(ownership, FALSE, sync, layout)};
+    END
+  ELSE
+    RETURN Tuple{source, typeCapabilities__new(:affine)};
+  END
+END
+PRIVATE FN typeExpressionParser__grouped_type?(source: String) RETURNS Bool ->
+  IF !((source.startsWith?("(") AND source.endsWith?(")"))) THEN
+    RETURN FALSE;
+  END
+  MUTABLE depth: Int64 = 0;
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < source.length() DO
+    IF (source.substr(rtoc_idx, 1) == "(") THEN
+        depth = (depth + 1);
+    END
+    IF (source.substr(rtoc_idx, 1) == ")") THEN
+        depth = (depth - 1);
+    END
+    IF (depth.zero?() AND (rtoc_idx < (source.codepointCount() - 1))) THEN
+        RETURN FALSE;
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN depth.zero?();
+END
+PRIVATE FN typeExpressionParser__split_array_suffix(source: String) RETURNS !?Tuple<String, ?TypeExpressionDimension> ->
+  IF !(source.endsWith?("]")) THEN
+    RETURN NIL;
+  END
+  MUTABLE depth: Int64 = 0;
+  MUTABLE index: Int64 = (source.codepointCount() - 1);
+  WHILE (index >= 0) DO
+    MUTABLE character = source.substr(index, 1);
+    IF (character == "]") THEN
+      depth = (depth + 1);
+    END
+    IF (character == "[") THEN
+      depth = (depth - 1);
+      IF depth.zero?() THEN
+        MUTABLE item_source = source.substr(0, (index - 0));
+        IF (FALSE OR (item_source.length() == 0)) THEN
+          RETURN NIL;
+        END
+        MUTABLE dimension_source = COPY (source.substr(((index + 1)), ((source.length() - 1) - ((index + 1)))));
+        MUTABLE dimension_branch_value: ?TypeExpressionDimension = NIL;
+        PARTIAL MATCH dimension_source START
+          "" ->
+          dimension_branch_value = NIL;,
+          "?" ->
+          dimension_branch_value = TypeExpressionDimension{ SymbolValue: :STREAM_OPEN };,
+          "INF" ->
+          dimension_branch_value = TypeExpressionDimension{ SymbolValue: :INF };,
+          "*" ->
+          dimension_branch_value = TypeExpressionDimension{ SymbolValue: :INFERRED };,
+          DEFAULT ->
+          IF !(regexMatch?(dimension_source, "\\A\\d+\\z")) THEN
+            RETURN NIL;
+          END
+          dimension_branch_value = TypeExpressionDimension{ Int64Value: TRY (dimension_source.toInt()) };
+        END
+        MUTABLE dimension: ?TypeExpressionDimension = dimension_branch_value;
+        RETURN Tuple{item_source, dimension};
+      END
+    END
+    index = (index - 1);
+  END
+  RETURN NIL;
+END
+PRIVATE FN typeExpressionParser__split_generic(source: String) RETURNS !?GenericParts ->
+  MUTABLE opening: ?Int64 = source.indexOf("<");
+  IF opening EXISTS AS opening_value THEN
+    IF !(source.endsWith?(">")) THEN
+      RETURN NIL;
+    ELSE
+      MUTABLE base = COPY (source.substr(0, (opening_value - 0)));
+      IF !(regexMatch?(base, "\\A[A-Z]\\w*\\z")) THEN
+        RETURN NIL;
+      END
+      MUTABLE inner = COPY (source.substr(((opening_value + 1)), ((source.length() - 1) - ((opening_value + 1)))));
+      RETURN GenericParts{ base: COPY base, arguments: COPY TRY (typeExpressionParser__split_arguments(inner)) };
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN typeExpressionParser__split_arguments(source: String) RETURNS ![]String ->
+  MUTABLE arguments: []String = ( { MUTABLE rtoc_empty_list_4: []String = List[]; rtoc_empty_list_4 } );
+  MUTABLE start: Int64 = 0;
+  MUTABLE depth: Int64 = 0;
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < source.length() DO
+  IF (source.substr(rtoc_idx, 1) == "<") OR (source.substr(rtoc_idx, 1) == "(") OR (source.substr(rtoc_idx, 1) == "[") OR (source.substr(rtoc_idx, 1) == "{") THEN
+      depth = (depth + 1);
+  ELSE_IF (source.substr(rtoc_idx, 1) == ">") OR (source.substr(rtoc_idx, 1) == ")") OR (source.substr(rtoc_idx, 1) == "]") OR (source.substr(rtoc_idx, 1) == "}") THEN
+      depth = (depth - 1);
+  ELSE_IF (source.substr(rtoc_idx, 1) == ",") THEN
+      IF !(depth.zero?()) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+      END
+      &arguments.append((source.substr(start, (rtoc_idx - start))).trim());
+      start = (rtoc_idx + 1);
+  END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  &arguments.append((source.substr(start, (source.length() - start))).trim());
+  RETURN arguments;
+END
+PRIVATE FN typeExpressionParser__top_level_argument_separator(source: String) RETURNS String ->
+  MUTABLE opening = UNWRAP (source.indexOf("<"));
+  MUTABLE depth: Int64 = 0;
+  MUTABLE index: Int64 = (opening + 1);
+  WHILE (index < (source.codepointCount() - 1)) DO
+    MUTABLE character = source.substr(index, 1);
+    IF (character == "<") OR (character == "(") OR (character == "[") OR (character == "{") THEN
+      depth = (depth + 1);
+    ELSE_IF (character == ">") OR (character == ")") OR (character == "]") OR (character == "}") THEN
+      depth = (depth - 1);
+    ELSE_IF (character == ",") THEN
+      IF depth.zero?() THEN
+        MUTABLE following = COPY (source.substr(((index + 1)), (source.length() - ((index + 1)))));
+        IF following.startsWith?(" ") THEN
+          RETURN ", ";
+        ELSE
+          RETURN ",";
+        END
+      END
+    END
+    index = (index + 1);
+  END
+  RETURN ",";
+END
+FN typeExpressionPrinter__dimension_suffix(dimension: TypeExpressionDimension) RETURNS String ->
+  IF dimension IS_A String@symbol AS string_symbol THEN
+    IF (string_symbol == :LIST) THEN
+      RETURN "[]";
+    ELSE_IF (string_symbol == :STREAM_OPEN) THEN
+      RETURN "[?]";
+    ELSE_IF (string_symbol == :INF) THEN
+      RETURN "[INF]";
+    ELSE_IF (string_symbol == :INFERRED) THEN
+      RETURN "[*]";
+    ELSE
+      RETURN "[${string_symbol}]";
+    END
+  END
+  RETURN "[${typeExpressionPrinter__dimension_text(dimension)}]";
+END
+PUB FN typeExpressionPrinter__dimension_text(dimension: TypeExpressionDimension) RETURNS String ->
+  IF dimension IS_A String@symbol AS string_symbol THEN
+    RETURN "${string_symbol}";
+  ELSE_IF dimension IS_A Int64 AS count THEN
+    RETURN count.toString();
+  END
+  RETURN "";
+END
+FN typeExpressionPrinter__dimension_marker(dimension: TypeExpressionDimension) RETURNS String ->
+  IF dimension IS_A String@symbol AS string_symbol THEN
+    IF (string_symbol == :LIST) THEN
+      RETURN "List";
+    ELSE_IF (string_symbol == :STREAM_OPEN) THEN
+      RETURN "~";
+    ELSE_IF (string_symbol == :INF) THEN
+      RETURN "~INF";
+    ELSE_IF (string_symbol == :INFERRED) THEN
+      RETURN "*";
+    ELSE
+      RETURN "${string_symbol}";
+    END
+  END
+  RETURN typeExpressionPrinter__dimension_text(dimension);
+END
+PUB FN typeExpressionPrinter__semantic(expression: TypeExpression) RETURNS !String EFFECTS REENTRANT ->
+  MUTABLE kind = COPY expression.kind;
+  IF kind IS_A NamedTypeExpression AS named_type_expression THEN
+    IF (named_type_expression.arguments.length() == 0) THEN
+      RETURN "${named_type_expression.name}";
+    END
+    RETURN "${named_type_expression.name}<${(named_type_expression.arguments |> SELECT TRY (typeExpressionPrinter__semantic(_))).join(",")}>";
+  ELSE_IF kind IS_A TypeProjectionExpression AS type_projection_expression THEN
+    RETURN "${type_projection_expression.owner}::${type_projection_expression.member}";
+  ELSE_IF kind IS_A FunctionTypeExpression AS function_type_expression THEN
+    MUTABLE params = (function_type_expression.signature.params |> SELECT TRY (typeExpressionPrinter__semantic(_.expression))).join(",");
+    RETURN "FN(${params}) -> ${TRY (typeExpressionPrinter__semantic(function_type_expression.signature.return_expression))}";
+  ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
+    RETURN "Tuple<${(tuple_type_expression.items |> SELECT TRY (typeExpressionPrinter__semantic(_))).join(",")}>";
+  ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+    MUTABLE inner = TRY (typeExpressionPrinter__semantic(optional_type_expression.inner));
+    MUTABLE inner_kind = optional_type_expression.inner.kind;
+    MUTABLE grouped = (inner_kind IS_A LinearTypeExpression OR inner_kind IS_A MapTypeExpression);
+    IF grouped THEN
+      RETURN "?(${inner})";
+    ELSE
+      RETURN "?${inner}";
+    END
+  ELSE_IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+    RETURN "!${TRY (typeExpressionPrinter__semantic(fallible_type_expression.inner))}";
+  ELSE_IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+    RETURN "~${TRY (typeExpressionPrinter__semantic(future_type_expression.inner))}";
+  ELSE_IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
+    RETURN linear_type_expression.dimensions |> REDUCE(TRY (typeExpressionPrinter__semantic(linear_type_expression.item))) "${acc}${typeExpressionPrinter__dimension_suffix(_)}";
+  ELSE_IF kind IS_A MapTypeExpression AS map_type_expression THEN
+    RETURN "HashMap<${TRY (typeExpressionPrinter__semantic(map_type_expression.key))},${TRY (typeExpressionPrinter__semantic(map_type_expression.value))}>";
+  ELSE_IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
+    MUTABLE suffix: String = "";
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(stream_type_expression.cardinality, :FINITE) THEN
+      suffix = "[]";
+    ELSE
+      suffix = "[${typeExpressionPrinter__dimension_text(stream_type_expression.cardinality)}]";
+    END
+    RETURN "~${TRY (typeExpressionPrinter__semantic(stream_type_expression.item))}${suffix}";
+  ELSE
+    panic("unknown type expression {}");
+  END
+END
+PUB FN typeExpressionPrinter__legacy(expression: TypeExpression) RETURNS !String EFFECTS REENTRANT ->
+  MUTABLE kind = COPY expression.kind;
+  MUTABLE cap = COPY expression.capabilities;
+  IF kind IS_A NamedTypeExpression AS named_type_expression THEN
+    MUTABLE base: String = "";
+    IF (named_type_expression.arguments.length() == 0) THEN
+      base = "${named_type_expression.name}";
+    ELSE
+      base = "${named_type_expression.name}<${(named_type_expression.arguments |> SELECT TRY (typeExpressionPrinter__legacy(_))).join(",")}>";
+    END
+    RETURN "${base}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A TypeProjectionExpression AS type_projection_expression THEN
+    RETURN "${type_projection_expression.owner}::${type_projection_expression.member}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A FunctionTypeExpression AS function_type_expression THEN
+    RETURN "FN(${(function_type_expression.signature.params |> SELECT TRY (typeExpressionPrinter__legacy(_.expression))).join(",")}) -> ${TRY (typeExpressionPrinter__legacy(function_type_expression.signature.return_expression))}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
+    RETURN "Tuple<${(tuple_type_expression.items |> SELECT TRY (typeExpressionPrinter__legacy(_))).join(",")}>${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+    MUTABLE inner = TRY (typeExpressionPrinter__legacy(optional_type_expression.inner));
+    MUTABLE inner_kind = optional_type_expression.inner.kind;
+    MUTABLE base: String = "";
+    IF (inner_kind IS_A LinearTypeExpression OR inner_kind IS_A MapTypeExpression) THEN
+      base = "?(${inner})";
+    ELSE
+      base = "?${inner}";
+    END
+    RETURN "${base}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+    RETURN "!${TRY (typeExpressionPrinter__legacy(fallible_type_expression.inner))}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+    RETURN "~${TRY (typeExpressionPrinter__legacy(future_type_expression.inner))}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
+    MUTABLE surface = linear_type_expression.dimensions |> REDUCE(TRY (typeExpressionPrinter__legacy(linear_type_expression.item))) "${acc}${typeExpressionPrinter__dimension_suffix(_)}";
+    RETURN "${surface}${typeExpressionPrinter__capability_suffix(cap, FALSE)}";
+  ELSE_IF kind IS_A MapTypeExpression AS map_type_expression THEN
+    MUTABLE key = TRY (typeExpressionPrinter__legacy(map_type_expression.key));
+    MUTABLE value = TRY (typeExpressionPrinter__legacy(map_type_expression.value));
+    MUTABLE base: String = "";
+    IF map_type_expression.key_implicit THEN
+      base = "HashMap<${value}>";
+    ELSE
+      base = "HashMap<${key}${map_type_expression.legacy_separator}${value}>";
+    END
+    RETURN "${base}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
+    MUTABLE cardinality = stream_type_expression.cardinality;
+    MUTABLE marker: String = "";
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(cardinality, :FINITE) THEN
+      marker = "";
+    ELSE
+      marker = COPY typeExpressionPrinter__dimension_text(cardinality);
+    END
+    RETURN "[~${marker}]${TRY (typeExpressionPrinter__legacy(stream_type_expression.item))}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE
+    panic("unknown type expression {}");
+  END
+END
+PUB FN typeExpressionPrinter__inline(expression: TypeExpression) RETURNS !String EFFECTS REENTRANT ->
+  MUTABLE kind = COPY expression.kind;
+  MUTABLE cap = COPY expression.capabilities;
+  IF kind IS_A NamedTypeExpression AS named_type_expression THEN
+    MUTABLE base: String = "";
+    IF (named_type_expression.arguments.length() == 0) THEN
+      base = "${named_type_expression.name}";
+    ELSE
+      base = "${named_type_expression.name}<${(named_type_expression.arguments |> SELECT TRY (typeExpressionPrinter__inline(_))).join(", ")}>";
+    END
+    RETURN "${base}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A TypeProjectionExpression AS type_projection_expression THEN
+    RETURN "${type_projection_expression.owner}::${type_projection_expression.member}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A FunctionTypeExpression AS function_type_expression THEN
+    RETURN "FN(${(function_type_expression.signature.params |> SELECT TRY (typeExpressionPrinter__inline(_.expression))).join(", ")}) -> ${TRY (typeExpressionPrinter__inline(function_type_expression.signature.return_expression))}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
+    RETURN "Tuple<${(tuple_type_expression.items |> SELECT TRY (typeExpressionPrinter__inline(_))).join(", ")}>${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
+    RETURN "?${TRY (typeExpressionPrinter__inline(optional_type_expression.inner))}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN
+    RETURN "!${TRY (typeExpressionPrinter__inline(fallible_type_expression.inner))}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A FutureTypeExpression AS future_type_expression THEN
+    RETURN "~${TRY (typeExpressionPrinter__inline(future_type_expression.inner))}${typeExpressionPrinter__capability_suffix(cap)}";
+  ELSE_IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
+    MUTABLE prefix = typeExpressionPrinter__inline_linear_prefix(linear_type_expression);
+    MUTABLE caps = typeExpressionPrinter__capability_suffix(cap, FALSE);
+    RETURN "${prefix}${IF (caps.length() == 0) THEN
+      ""
+    ELSE
+      "${caps} "
+    END}${TRY (typeExpressionPrinter__inline(linear_type_expression.item))}";
+  ELSE_IF kind IS_A MapTypeExpression AS map_type_expression THEN
+    MUTABLE caps = typeExpressionPrinter__capability_suffix(cap);
+    RETURN "{${TRY (typeExpressionPrinter__inline(map_type_expression.key))}}${IF (caps.length() == 0) THEN
+      ""
+    ELSE
+      "${caps} "
+    END}${TRY (typeExpressionPrinter__inline(map_type_expression.value))}";
+  ELSE_IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
+    MUTABLE cardinality = stream_type_expression.cardinality;
+    MUTABLE marker: String = "";
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(cardinality, :FINITE) THEN
+      marker = "";
+    ELSE
+      marker = COPY typeExpressionPrinter__dimension_text(cardinality);
+    END
+    MUTABLE caps = typeExpressionPrinter__capability_suffix(cap);
+    RETURN "[~${marker}]${IF (caps.length() == 0) THEN
+      ""
+    ELSE
+      "${caps} "
+    END}${TRY (typeExpressionPrinter__inline(stream_type_expression.item))}";
+  ELSE
+    panic("unknown type expression {}");
+  END
+END
+PRIVATE FN typeExpressionPrinter__inline_linear_prefix(expression: LinearTypeExpression) RETURNS String ->
+  MUTABLE hint: ?Int64 = expression.allocation_hint;
+  IF linearTypeExpression__list?(expression) THEN
+    IF (hint == NIL) THEN
+      RETURN "[]";
+    ELSE
+      RETURN "[List(${hint.toString()})]";
+    END
+  END
+  IF linearTypeExpression__set?(expression) THEN
+    IF (hint == NIL) THEN
+      RETURN "[Set]";
+    ELSE
+      RETURN "[Set(${hint.toString()})]";
+    END
+  END
+  IF linearTypeExpression__pool?(expression) THEN
+    MUTABLE pool_size: ?Int64 = hint;
+    IF (pool_size == NIL) THEN
+      MUTABLE candidate: ?TypeExpressionDimension = expression.dimensions |> FIND _ IS_A Int64;
+      IF candidate? IS_A Int64 AS int64 THEN
+        pool_size = COPY int64;
+      END
+    END
+    RETURN "[Pool(${(UNWRAP pool_size).toString()})]";
+  END
+  MUTABLE dimensions = expression.dimensions |> SELECT typeExpressionPrinter__dimension_marker(_);
+  RETURN "[${dimensions.join(", ")}]";
+END
+PRIVATE FN typeExpressionPrinter__capability_suffix(capabilities: TypeCapabilities, include_collection: Bool = TRUE) RETURNS String ->
+  MUTABLE parts: []String = ( { MUTABLE rtoc_empty_list_5: []String = List[]; rtoc_empty_list_5 } );
+  MUTABLE ownership: ?String@symbol = COPY capabilities.ownership;
+  IF ((ownership != NIL) AND (ownership != :affine)) THEN
+    &parts.append(UNWRAP (typeCapabilities__ownership_surface_name_for(ownership)));
+  END
+  IF (capabilities.layout == :indirect) THEN
+    &parts.append("@boxed");
+  END
+  IF capabilities.soa THEN
+    &parts.append("@soa");
+  END
+  IF !((capabilities.shard_count == NIL)) THEN
+    &parts.append("@sharded(${(UNWRAP capabilities.shard_count).toString()})");
+  END
+  MUTABLE sync: ?String@symbol = COPY capabilities.sync;
+  IF !((sync == NIL)) THEN
+    &parts.append(UNWRAP (typeCapabilities__sync_surface_name_for(sync)));
+  END
+  IF capabilities.observable THEN
+    &parts.append("@observable");
+  END
+  IF (include_collection AND !((capabilities.collection == NIL))) THEN
+    &parts.append("@${UNWRAP capabilities.collection}");
+  END
+  IF (parts.length() == 0) THEN
+    RETURN "";
+  END
+  RETURN ((parts.first() OR_ELSE "") $+ (((parts |> SKIP 1) |> SELECT ":${rtoc_delete_prefix(_, "@")}").join("")));
+END
+FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
+  IF s.startsWith?(affix) THEN
+    RETURN s.substr(affix.length(), (s.length() - affix.length()));
+  END
+  RETURN COPY s;
+END
+FN ruby_array_concat_TypeExpression(left: []TypeExpression, right: []TypeExpression) RETURNS []TypeExpression ->
+  MUTABLE result: []TypeExpression = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END
+FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
+  IF value IS_A String@symbol AS equality_payload THEN
+    RETURN equality_payload == expected;
+  END
+  RETURN FALSE;
+END

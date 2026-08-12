@@ -5,6 +5,29 @@ module RubyToClear
     module LocalAnalyzer
     private
 
+    MUTATING_RUBY_RECEIVER_METHODS = Set.new(%w[
+      << []= append push pop shift unshift insert delete delete_at delete_if
+      keep_if clear replace concat collect! compact! fill flatten! map! reject!
+      reverse! rotate! select! shuffle! slice! sort! sort_by! uniq! add merge!
+      update transform_keys! transform_values!
+    ]).freeze
+
+    def ruby_mutating_receiver_call?(node, receiver_types = nil)
+      return false unless node.is_a?(Prism::CallNode) && node.receiver
+
+      name = node.name.to_s
+      if name == "<<"
+        receiver_type = if receiver_types && node.receiver.is_a?(Prism::LocalVariableReadNode)
+          receiver_types[node.receiver.name.to_s]
+        end
+        receiver_type ||= clear_type_for_receiver_node(node.receiver)
+        base_type = receiver_type.to_s.delete_prefix("?").split("@").first.to_s
+        return false if base_type.match?(/\A(?:U?Int|Byte)\d*\z/)
+      end
+      node.equal_loc || name.end_with?("!") || ruby_setter_method_name?(name) ||
+        MUTATING_RUBY_RECEIVER_METHODS.include?(name)
+    end
+
     def collect_written_variables(node, parameter_names = Set.new, exclude_defs: false)
       written = Set.new
       walk = ->(n) do
@@ -67,20 +90,104 @@ module RubyToClear
       names
     end
 
-    def collect_mutated_parameter_receivers(node)
+    def collect_mutated_parameter_receivers(node, receiver_types = nil)
       names = Set.new
-      walk = lambda do |current|
+      # An `each`/`map` block lowers to an inline loop, so `seen << name`
+      # inside one mutates the ENCLOSING frame's parameter - skipping blocks
+      # hid that and left the parameter declared immutable. Only the block's
+      # own parameters are a different binding, so shadow those by name.
+      walk = lambda do |current, shadowed|
         return unless current
-        return if current.is_a?(Prism::DefNode) || current.is_a?(Prism::BlockNode)
+        return if current.is_a?(Prism::DefNode)
 
-        if current.is_a?(Prism::CallNode) && current.equal_loc &&
-           current.receiver.is_a?(Prism::LocalVariableReadNode)
-          names << current.receiver.name.to_s
+        if current.is_a?(Prism::BlockNode)
+          shadowed = shadowed | block_parameter_names(current)
         end
-        current.child_nodes.each { |child| walk.call(child) if child }
+
+        if ruby_mutating_receiver_call?(current, receiver_types)
+          if current.receiver.is_a?(Prism::LocalVariableReadNode)
+            receiver_name = current.receiver.name.to_s
+            names << receiver_name unless shadowed.include?(receiver_name)
+          elsif (root = mutated_map_slot_parameter_root(current))
+            names << root unless shadowed.include?(root)
+          end
+        end
+        mutable_call_argument_local_names(current).each do |name|
+          names << name unless shadowed.include?(name)
+        end
+        current.child_nodes.each { |child| walk.call(child, shadowed) if child }
       end
-      walk.call(node)
+      walk.call(node, Set.new)
       names
+    end
+
+    # Locals passed to parameters inferred as MUTABLE are mutated by the
+    # callee even when the call itself has no syntactically mutating receiver.
+    # This is especially important while classifying closure captures:
+    #
+    #   issues = []
+    #   transform { |item| resolve(item, issues) } # resolve mutates issues
+    #
+    # The method-parameter registry is populated before body lowering, so it
+    # is the authoritative source for this transitive mutation edge.
+    def mutable_call_argument_local_names(node)
+      return Set.new unless node.is_a?(Prism::CallNode)
+
+      arguments = node.arguments&.arguments || []
+      return Set.new unless arguments.any? { |argument| argument.is_a?(Prism::LocalVariableReadNode) }
+
+      owner = if node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+        @current_class
+      elsif node.receiver.is_a?(Prism::ConstantReadNode) || node.receiver.is_a?(Prism::ConstantPathNode)
+        constant_receiver_name(node.receiver) || node.receiver.location.slice.strip
+      else
+        receiver_type = clear_type_for_receiver_node(node.receiver)
+        instance_method_owner_type(receiver_type, clear_function_name(node.name.to_s)) if receiver_type
+      end
+      params = method_params_for(node.name.to_s, owner)
+      return Set.new unless params
+
+      arguments.each_with_index.each_with_object(Set.new) do |(argument, index), names|
+        next unless params[index]&.fetch(:mutable, false)
+        next unless argument.is_a?(Prism::LocalVariableReadNode)
+
+        names << argument.name.to_s
+      end
+    end
+
+    def block_parameter_names(block_node)
+      parameters = block_node.parameters
+      parameters = parameters.parameters if parameters.respond_to?(:parameters)
+      return Set.new unless parameters
+
+      names = Set.new
+      collect = lambda do |current|
+        return unless current
+
+        names << current.name.to_s if current.respond_to?(:name) && current.name
+        current.child_nodes.each { |child| collect.call(child) if child }
+      end
+      collect.call(parameters)
+      names
+    end
+
+    # `T.must(slots[key]).sources << v` mutates `slots` through the map
+    # slot (lowered to an IF-EXISTS pointer bind), so the root local is a
+    # mutated receiver even though it is not the direct receiver.
+    def mutated_map_slot_parameter_root(call_node)
+      node = call_node.receiver
+      node = node.receiver while node.is_a?(Prism::CallNode) && node.receiver && !node.block &&
+                                 (node.arguments.nil? || node.arguments.arguments.empty?)
+      return nil unless node.is_a?(Prism::CallNode) && sorbet_call?(node, "must")
+
+      args = node.arguments ? node.arguments.arguments : []
+      return nil unless args.length == 1
+
+      index_read = args.first
+      return nil unless index_read.is_a?(Prism::CallNode) && index_read.name.to_s == "[]" &&
+                        index_read.receiver.is_a?(Prism::LocalVariableReadNode)
+
+      index_read.receiver.name.to_s
     end
 
     def collect_emitted_function_names(node)
@@ -204,6 +311,17 @@ module RubyToClear
       types = {}
       old_local_types = @local_types
       @local_types = {}
+      set_locals = Set.new
+      collect_set_locals = ->(n) do
+        return unless n
+        return if n.is_a?(Prism::DefNode) || n.is_a?(Prism::BlockNode)
+
+        if n.is_a?(Prism::LocalVariableWriteNode) && set_constructor_expression?(n.value)
+          set_locals << n.name.to_s
+        end
+        n.child_nodes.each { |child| collect_set_locals.call(child) if child }
+      end
+      collect_set_locals.call(node)
       walk = ->(n) do
         return unless n
         return if n.is_a?(Prism::DefNode) || n.is_a?(Prism::BlockNode)
@@ -227,6 +345,31 @@ module RubyToClear
           record_collected_local_type(types, n.name.to_s, type)
         end
 
+        if n.is_a?(Prism::CallNode) && %w[<< add insert].include?(n.name.to_s) &&
+           n.receiver.is_a?(Prism::LocalVariableReadNode) && set_locals.include?(n.receiver.name.to_s)
+          argument = n.arguments&.arguments&.first
+          element_type = inferred_clear_type(argument)
+          if element_type && !["Auto", "Any", "Void"].include?(element_type.to_s)
+            record_collected_local_type(
+              types,
+              n.receiver.name.to_s,
+              "#{collection_element_type(element_type)}[]@set"
+            )
+          end
+        end
+
+
+        if n.is_a?(Prism::InstanceVariableWriteNode) && (typed_value = sorbet_typed_value(n.value))
+          value_node, type = typed_value
+          value_node = value_node.receiver if value_node.is_a?(Prism::CallNode) &&
+            value_node.name.to_s == "freeze" && value_node.receiver
+          if value_node.is_a?(Prism::LocalVariableReadNode)
+            name = value_node.name.to_s
+            types[name] = type
+            @local_types[name] = type
+          end
+        end
+
         n.child_nodes.each { |child| walk.call(child) if child }
       end
       walk.call(node)
@@ -235,14 +378,52 @@ module RubyToClear
       @local_types = old_local_types
     end
 
+    def set_constructor_expression?(node)
+      return false unless node
+
+      if node.is_a?(Prism::CallNode)
+        receiver_name = registry_receiver_name(node.receiver)
+        return true if receiver_name == "Set" && %w[[] new].include?(node.name.to_s)
+        return true if node.receiver && node.name.to_s == "to_set"
+      end
+
+      if node.is_a?(Prism::ParenthesesNode)
+        return set_constructor_expression?(node.body&.body&.last)
+      end
+
+      false
+    end
+
     def record_collected_local_type(types, name, type)
       return unless concrete_predeclared_type?(type)
 
       if types.key?(name) && types[name] != type
         existing = types[name].to_s
         incoming = type.to_s
-        if existing.delete_prefix("?") == incoming.delete_prefix("?")
-          merged = existing.start_with?("?") ? existing : incoming
+        existing_container = existing.delete_prefix("?")
+        incoming_container = incoming.delete_prefix("?")
+        existing_base = strip_top_level_capability_unconditional(existing).delete_prefix("?")
+        incoming_base = strip_top_level_capability_unconditional(incoming).delete_prefix("?")
+
+        if existing == "NIL" && incoming != "NIL"
+          merged = incoming.start_with?("?") ? incoming : "?#{incoming}"
+          types[name] = merged
+          @local_types[name] = merged
+        elsif incoming == "NIL" && existing != "NIL"
+          merged = existing.start_with?("?") ? existing : "?#{existing}"
+          types[name] = merged
+          @local_types[name] = merged
+        elsif existing_container.end_with?("[]@set") && incoming_container.end_with?("[]@set") &&
+              [existing_container.delete_suffix("[]@set"), incoming_container.delete_suffix("[]@set")].include?("Any")
+          concrete = existing_container == "Any[]@set" ? incoming_container : existing_container
+          merged = (existing.start_with?("?") || incoming.start_with?("?")) ? "?#{concrete}" : concrete
+          types[name] = merged
+          @local_types[name] = merged
+        elsif existing_base == incoming_base
+          is_optional = existing.start_with?("?") || incoming.start_with?("?")
+          base = existing.include?("@") ? existing : incoming
+          base_no_opt = base.delete_prefix("?")
+          merged = is_optional ? "?#{base_no_opt}" : base_no_opt
           types[name] = merged
           @local_types[name] = merged
         else
@@ -278,18 +459,24 @@ module RubyToClear
     def default_value_for_type(type)
       raw_text = type.to_s
       return "Set[]" if raw_text.end_with?("[]@set")
-      return "[]" if raw_text.end_with?("[]")
+      return "List[]" if raw_text.end_with?("[]")
       return "NIL" if raw_text.start_with?("?")
 
       text = expand_clear_type_alias(raw_text).to_s
       return "Set[]" if text.end_with?("[]@set")
-      return "[]" if text.end_with?("[]")
+      return "List[]" if text.end_with?("[]")
       return "NIL" if text.start_with?("?")
       return "NIL" if text == "Void"
       return function_default_value(text) if function_clear_type?(text)
       return "FALSE" if text == "Bool"
-      return "0.0" if %w[Float32 Float64].include?(text)
-      return "0" if text.match?(/\A(?:U?Int|Byte)\d*\z/)
+      return "0.0_f32" if text == "Float32"
+      return "0.0" if text == "Float64"
+      integer_suffix = {
+        "Byte" => "u8", "Int" => "i64", "Int8" => "i8", "Int16" => "i16",
+        "Int32" => "i32", "Int64" => "i64", "UInt" => "u64", "UInt8" => "u8",
+        "UInt16" => "u16", "UInt32" => "u32", "UInt64" => "u64",
+      }[text]
+      return "0_#{integer_suffix}" if integer_suffix
       return "\"\"" if text == "String"
       return "{}" if text.start_with?("HashMap<")
 
@@ -399,11 +586,33 @@ module RubyToClear
       directly_mutates_instance_state?(node)
     end
 
+    # `@field.declare(...)` mutates the receiver whenever `declare` is a
+    # mutating method of the field's own class - and so mutates self. The
+    # syntactic ruby_mutating_receiver_call? test (bang suffix, setter, a
+    # fixed method list) cannot see that; the mutating-method registry can.
+    def mutating_field_receiver_call?(node)
+      return false unless @current_class
+
+      field_name = node.receiver.name.to_s.delete_prefix("@")
+      field_type = @class_instance_field_types[@current_class][field_name]
+      return false unless field_type
+
+      owner = field_type.to_s.delete_prefix("?").split("@").first.to_s.delete_suffix("[]")
+      return false if owner.empty?
+
+      mutating_instance_method?(owner, node.name.to_s)
+    end
+
     def directly_mutates_instance_state?(node)
       found = false
       walk = ->(n) do
         return if found || n.nil?
-        return if n.is_a?(Prism::DefNode) || n.is_a?(Prism::LambdaNode)
+        return if n.is_a?(Prism::DefNode)
+
+        # A lambda closes over the same receiver. Mutating `self` inside that
+        # closure still requires the enclosing CLEAR method's receiver to be
+        # mutable (BodySlot writers are the common case), so inspect lambda
+        # bodies instead of treating them as an ownership boundary.
 
         case n
         when Prism::InstanceVariableWriteNode,
@@ -413,6 +622,17 @@ module RubyToClear
           found = true
           return
         when Prism::CallNode
+          if n.receiver.is_a?(Prism::InstanceVariableReadNode) &&
+             (ruby_mutating_receiver_call?(n) || mutating_field_receiver_call?(n))
+            found = true
+            return
+          end
+          if n.receiver.is_a?(Prism::CallNode) && n.receiver.receiver.nil? &&
+             struct_field_reader?(@current_class, n.receiver.name.to_s) &&
+             ruby_mutating_receiver_call?(n)
+            found = true
+            return
+          end
           if n.receiver.is_a?(Prism::SelfNode) && ruby_setter_method_name?(n.name.to_s)
             found = true
             return
@@ -462,6 +682,22 @@ module RubyToClear
       found
     end
 
+    # A frozen constant inlined at its use sites (e.g. TypeCapabilities::AFFINE)
+    # carries the type of its initializer; recover it so callers don't wrap the
+    # inlined value in a defensive (and fallibility-inducing) CAST.
+    def constant_inline_node_type(key)
+      inline_node = @constant_inline_nodes[key]
+      return nil unless inline_node
+
+      # Frozen constants are stored as `X.freeze`; the value's type is X's.
+      if inline_node.is_a?(Prism::CallNode) && inline_node.name.to_s == "freeze" && inline_node.receiver
+        inline_node = inline_node.receiver
+      end
+
+      type = inferred_clear_type(inline_node)
+      type unless type.to_s.empty? || %w[Any Auto].include?(type.to_s)
+    end
+
     def recursive_method_call?(node, method_name)
       found = false
       walk = ->(n) do
@@ -482,6 +718,39 @@ module RubyToClear
         walk.call(node)
       end
       found
+    end
+
+    def collect_reentrant_instance_method_names(class_node)
+      # Include both instance (`def foo`) and module/class (`def self.foo`)
+      # methods: module functions call each other by bare name and can form
+      # mutually recursive cycles too (e.g. parse -> parse_source -> parse_*).
+      definitions = (class_node.body&.body || []).select do |statement|
+        statement.is_a?(Prism::DefNode) &&
+          (statement.receiver.nil? || statement.receiver.is_a?(Prism::SelfNode))
+      end
+      names = definitions.to_h { |definition| [definition.name.to_s, definition] }
+      edges = names.to_h do |name, definition|
+        calls = Set.new
+        walk = lambda do |node|
+          return unless node.is_a?(Prism::Node)
+          return if node != definition && (node.is_a?(Prism::DefNode) || node.is_a?(Prism::LambdaNode))
+
+          calls << node.name.to_s if node.is_a?(Prism::CallNode) && names.key?(node.name.to_s)
+          node.child_nodes.each { |child| walk.call(child) if child }
+        end
+        walk.call(definition.body)
+        [name, calls]
+      end
+
+      names.keys.each_with_object(Set.new) do |start, cyclic|
+        visit = lambda do |name, seen|
+          return true if name == start && !seen.empty?
+          return false if seen.include?(name)
+
+          edges.fetch(name, []).any? { |target| visit.call(target, seen | [name]) }
+        end
+        cyclic << start if edges.fetch(start, []).any? { |target| visit.call(target, Set[start]) }
+      end
     end
 
     def extract_parameter_names(def_node)
@@ -555,10 +824,18 @@ module RubyToClear
       declared = declared_type.to_s.delete_prefix("?")
       expected = runtime_is_a_expected_type(declared, expected_type).to_s
       return false if declared.empty? || expected.empty?
+      # Testing a value against its already-known union type is statically
+      # true; it is not a request to select one of that union's variants.
+      return false if strip_top_level_capability_unconditional(declared) ==
+        strip_top_level_capability_unconditional(expected)
 
       members = @union_types[declared]
       if members
-        expected_names = runtime_union_target_names(expected)
+        expected_names = if @union_types.key?(expected)
+          @union_types[expected].flat_map { |m| runtime_union_target_names(m) }
+        else
+          runtime_union_target_names(expected)
+        end
         return members.any? do |member|
           member_names = runtime_union_target_names(member)
           !(member_names & expected_names).empty?
@@ -572,21 +849,38 @@ module RubyToClear
       expected.start_with?("#{namespace}.")
     end
 
+    def strip_top_level_capability_unconditional(text)
+      return text.to_s if text.to_s == "String@symbol"
+      depth = 0
+      text.to_s.each_char.with_index do |char, index|
+        depth += 1 if "<[(".include?(char)
+        depth -= 1 if ">])".include?(char)
+        return text[0...index] if char == "@" && depth.zero?
+      end
+      text.to_s
+    end
+
     def runtime_is_a_expected_type(receiver_type, expected_type)
       declared = receiver_type.to_s.delete_prefix("?")
       expected = clear_type_expr(expected_type).to_s
       members = @union_types[declared]
-      return expected unless members
-
-      if expected == "HashMap<Any>"
-        concrete = members.find { |member| member.to_s.start_with?("HashMap<") }
-        return concrete if concrete
-      elsif expected == "Any[]"
-        concrete = members.find { |member| member.to_s.end_with?("[]") }
-        return concrete if concrete
+      res = if members
+        stripped_expected = strip_top_level_capability_unconditional(expected)
+        if stripped_expected == "HashMap<Any>"
+          concrete = members.find { |member| member.to_s.start_with?("HashMap<") }
+          concrete || expected
+        elsif stripped_expected == "Any[]"
+          concrete = members.find { |member| member.to_s.match?(/\[\d*\]\z/) }
+          concrete || expected
+        else
+          expected
+        end
+      else
+        expected
       end
+      return res if res.to_s.match?(/\[\d*\]\z/)
 
-      expected
+      res.to_s.end_with?("[]@symbol") ? res.to_s : strip_top_level_capability_unconditional(res)
     end
 
     def runtime_union_target_names(type)
@@ -649,8 +943,38 @@ module RubyToClear
       inferred_clear_type(node)
     end
 
+    def closed_static_type_any_predicate(node)
+      receiver = node.receiver
+      return nil unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+
+      constant_name = receiver.location.slice.strip.split("::").last
+      expected_types = @static_type_arrays[constant_name]
+      return nil unless expected_types&.any?
+
+      block = node.block
+      return nil unless block.is_a?(Prism::BlockNode)
+      parameters = block.parameters&.parameters
+      requireds = parameters&.requireds || []
+      return nil unless requireds.length == 1
+
+      parameter_name = requireds.first.name.to_s
+      body = block.body
+      return nil unless body.is_a?(Prism::StatementsNode) && body.body.length == 1
+
+      predicate = body.body.first
+      return nil unless predicate.is_a?(Prism::CallNode) && predicate.name.to_s == "is_a?"
+      args = predicate.arguments&.arguments || []
+      return nil unless args.length == 1 && args.first.is_a?(Prism::LocalVariableReadNode)
+      return nil unless args.first.name.to_s == parameter_name
+
+      subject = visit(predicate.receiver)
+      tests = expected_types.map { |type| "#{subject} IS_A #{strip_top_level_capability_unconditional(clear_type_expr(type))}" }
+      "(#{tests.join(' OR ')})"
+    end
+
     public :current_type_param_for_receiver, :runtime_union_narrowing_candidate?,
-           :runtime_is_a_expected_type, :static_clear_type_for_receiver, :inferred_clear_type_for_node
+           :runtime_is_a_expected_type, :static_clear_type_for_receiver, :inferred_clear_type_for_node,
+           :closed_static_type_any_predicate
 
     private
 
@@ -687,9 +1011,12 @@ module RubyToClear
 
     def array_element_clear_type(type)
       text = expand_non_emitted_type_alias(type).to_s
-      return nil unless text.end_with?("[]")
+      return text.delete_prefix("[]") if text.start_with?("[]")
 
-      text.delete_suffix("[]")
+      suffix = text[/\[\d*\]\z/]
+      return nil unless suffix
+
+      text.delete_suffix(suffix)
     end
 
     def hash_map_type_parts(type)
@@ -737,6 +1064,7 @@ module RubyToClear
       return "hash" if text.start_with?("HashMap<")
       return "string" if text.start_with?("String")
       return "scanner" if text == "CompilerRegexScanner"
+      return "numeric" if text.match?(/\A(?:Byte|U?Int(?:8|16|32|64)?|Float(?:32|64)?)\z/)
 
       nil
     end
@@ -782,6 +1110,14 @@ module RubyToClear
       optional = text.start_with?("?")
       base = text.delete_prefix("?")
 
+      # ?T[] is an array of optional elements (only ?(T[]) makes the
+      # collection itself optional), so the ? travels with the element
+      # through alias expansion instead of being hoisted onto the array.
+      if optional && !base.start_with?("(") && base.match?(/\[\](?:@set)?\z/)
+        suffix = base.end_with?("[]@set") ? "[]@set" : "[]"
+        return "#{expand_non_emitted_type_alias("?#{base.delete_suffix(suffix)}", seen)}#{suffix}"
+      end
+
       normalized = if base.start_with?("HashMap<") && base.end_with?(">")
         inner = base.delete_prefix("HashMap<").delete_suffix(">")
         parts = split_top_level_clear_list(inner)
@@ -804,7 +1140,18 @@ module RubyToClear
     end
 
     def set_like_clear_type?(type)
-      type.to_s.delete_prefix("?").end_with?("@set")
+      text = type.to_s.delete_prefix("?")
+      text = text[1...-1].to_s if text.start_with?("(") && text.end_with?(")")
+      text.end_with?("@set") || text.start_with?("[Set]")
+    end
+
+    # Element type of a set (`T@set` / `[Set]T`) or array (`T[]`) container.
+    def container_element_clear_type(type)
+      text = expand_non_emitted_type_alias(type).to_s.delete_prefix("?")
+      text = text[1...-1].to_s if text.start_with?("(") && text.end_with?(")")
+      return text.delete_prefix("[Set]") if text.start_with?("[Set]")
+
+      array_element_clear_type(text.delete_suffix("@set"))
     end
 
     def set_receiver?(receiver)
@@ -817,10 +1164,13 @@ module RubyToClear
         @current_class
       when Prism::ConstantReadNode
         name = node.name.to_s
-        @constant_types[name] || @constant_types[@constant_names[name]]
+        @constant_types[name] || @constant_types[@constant_names[name]] ||
+          constant_inline_node_type(name)
       when Prism::ConstantPathNode
-        name = node.location.slice.strip.split("::").last
-        @constant_types[name] || @constant_types[@constant_names[name]]
+        path = node.location.slice.strip
+        name = path.split("::").last
+        @constant_types[name] || @constant_types[@constant_names[name]] ||
+          constant_inline_node_type(path) || constant_inline_node_type(name)
       when Prism::LocalVariableReadNode
         name = node.name.to_s
         renamed = @renames[name]
@@ -828,7 +1178,13 @@ module RubyToClear
       when Prism::InstanceVariableReadNode
         return nil unless @current_class
 
-        @class_instance_field_types[@current_class][node.name.to_s.delete_prefix("@")]
+        field = node.name.to_s.delete_prefix("@")
+        if @inside_class_method || @class_variables.include?(field)
+          @class_storage_types["#{@current_class}##{field}"] ||
+            @class_instance_field_types[@current_class][field]
+        else
+          @class_instance_field_types[@current_class][field]
+        end
       when Prism::ParenthesesNode
         inferred_clear_type(node)
       when Prism::CallNode
@@ -879,10 +1235,11 @@ module RubyToClear
         receiver_type = clear_type_for_receiver_node(node.receiver)
         if receiver_type
           field_type = class_instance_field_type(receiver_type, node.name.to_s)
-          return field_type if field_type
+          return field_type if field_type && !["Any", "Auto"].include?(field_type.to_s)
 
           return_type = method_return_type_for(node.name.to_s, receiver_type)
           return return_type if return_type
+          return field_type if field_type
         elsif node.receiver.nil? && (@inside_instance_method || @inside_class_method)
           return_type = method_return_type_for(node.name.to_s, @current_class)
           return return_type if return_type
@@ -891,7 +1248,7 @@ module RubyToClear
         nil
       end
     end
-    public :clear_type_for_receiver_node, :map_key_clear_type, :map_value_clear_type,
+    public :array_element_clear_type, :clear_type_for_receiver_node, :map_key_clear_type, :map_value_clear_type,
            :split_top_level_clear_list
 
     private
@@ -931,7 +1288,8 @@ module RubyToClear
         return subset_cast
       end
 
-      union_payload_cast_code(visit(value_node), source_type, target_type)
+      union_payload_cast_code(visit(value_node), source_type, target_type) ||
+        (!target_text.empty? ? "CAST(#{visit(value_node)} AS #{target_text})" : nil)
     end
 
     def union_subset_cast_code(source_code, source_type, target_type)
@@ -1059,7 +1417,9 @@ module RubyToClear
     def union_payload_cast_helper_definition(helper, source_type, union_type, target_type, target_payload, variant, fallback, optional_source)
       _ = union_type
       _ = variant
-      subject = optional_source ? "value?" : "value"
+      # Inside the nil guard, CLEAR's narrowing types `value` as the payload;
+      # a redundant `?` unwrap is rejected there.
+      subject = "value"
       lines = [
         "FN #{helper}(value: #{source_type}) RETURNS #{target_type} ->"
       ]
@@ -1094,7 +1454,9 @@ module RubyToClear
       args = node.arguments ? node.arguments.arguments : []
       return nil unless args.length >= 2
 
-      [args.first, expand_non_emitted_type_alias(convert_sorbet_type(args[1]))]
+      converted_type = convert_sorbet_type(args[1])
+      typed_type = expand_non_emitted_type_alias(converted_type)
+      [args.first, typed_type]
     end
 
     def inferred_shape(node)
@@ -1148,6 +1510,7 @@ module RubyToClear
       when "compilerRegexCapture", "regexCapture"
         return "string"
       when "[]"
+        return "set" if receiver_name == "Set"
         if node.receiver
           element_type = array_element_clear_type(clear_type_for_receiver_node(node.receiver))
           return clear_type_shape(element_type) if element_type
@@ -1158,15 +1521,21 @@ module RubyToClear
         return "array" if receiver_shape == "string"
       when "index"
         return "?Int64" if receiver_shape == "string"
-      when "strip", "trim"
+      when "strip", "trim", "tr"
         return "string" if receiver_shape == "string"
       when "to_s"
         return "string"
+      when "to_f"
+        return "numeric" if receiver_shape == "string" || receiver_shape == "numeric"
       when "match"
         args = node.arguments ? node.arguments.arguments : []
         return "scanner" if receiver_shape == "string" && args.length == 1 && regex_value_node?(args.first)
       when "keys", "values"
         return "array" if receiver_shape == "hash"
+      when "new"
+        return "set" if receiver_name == "Set"
+      when "to_set"
+        return "set" if receiver_shape == "array"
       when "select", "filter", "reject"
         return "hash" if receiver_shape == "hash"
         return "array" if receiver_shape == "array"
@@ -1183,8 +1552,10 @@ module RubyToClear
 
       body = node.block.body.body
       return nil unless body.length == 1
-      if alias_name.to_s == "Node" && body.first.is_a?(Prism::ConstantReadNode) && body.first.name.to_s == "Locatable"
-        return ensure_ast_node_union!(emit: false) || "Node"
+      if alias_name.to_s.split("::").last == "Node" &&
+         body.first.is_a?(Prism::ConstantReadNode) &&
+         body.first.name.to_s == "Locatable"
+        return "Locatable"
       end
 
       with_type_alias_context(alias_name) do
@@ -1229,10 +1600,13 @@ module RubyToClear
         (renamed && static_clear_type_for_receiver(renamed)) || static_clear_type_for_receiver(name)
       when Prism::ConstantReadNode
         name = node.name.to_s
-        @constant_types[name] || @constant_types[@constant_names[name]]
+        @constant_types[name] || @constant_types[@constant_names[name]] ||
+          constant_inline_node_type(name)
       when Prism::ConstantPathNode
-        name = node.location.slice.strip.split("::").last
-        @constant_types[name] || @constant_types[@constant_names[name]]
+        path = node.location.slice.strip
+        name = path.split("::").last
+        @constant_types[name] || @constant_types[@constant_names[name]] ||
+          constant_inline_node_type(path) || constant_inline_node_type(name)
       when Prism::InstanceVariableReadNode
         return nil unless @current_class
 
@@ -1240,12 +1614,21 @@ module RubyToClear
       when Prism::OrNode
         left_type = inferred_clear_type(node.left)
         left_text = left_type.to_s
+        if left_text.start_with?("?") &&
+           ((node.right.is_a?(Prism::ArrayNode) && node.right.elements.empty?) ||
+            (node.right.is_a?(Prism::HashNode) && node.right.elements.empty?))
+          return left_text.delete_prefix("?")
+        end
         if !left_text.empty? && left_text != "Any" && left_text != "Auto" &&
            left_text != "Bool" && !left_text.start_with?("?")
           return left_type
         end
 
         right_type = inferred_clear_type(node.right)
+        # `maybe_x || x` is total: the NIL arm is exactly what the right side
+        # supplies, so the result is the non-optional type, not nil-typed.
+        return right_type if left_text.start_with?("?") &&
+          !right_type.to_s.empty? && left_text.delete_prefix("?") == right_type.to_s
         if left_text.start_with?("?") && (members = @union_types[left_text.delete_prefix("?")])
           right_text = expand_non_emitted_type_alias(right_type).to_s.delete_prefix("?")
           member_match = members.any? do |member|
@@ -1254,35 +1637,81 @@ module RubyToClear
           return left_text.delete_prefix("?") if member_match
         end
         left_type == right_type ? left_type : nil
+      when Prism::ParenthesesNode
+        body = node.body
+        return nil unless body.is_a?(Prism::StatementsNode) && body.body.length == 1
+
+        inferred_clear_type(body.body.first)
       when Prism::CallNode
         block_node = node.block
+        receiver_name = registry_receiver_name(node.receiver)
+        if %w[+ - * / % ** & | ^ << >>].include?(node.name.to_s) && node.receiver
+          receiver_type = inferred_clear_type(node.receiver).to_s.delete_prefix("?")
+          if receiver_type.match?(/\A(?:U?Int|Byte|Float)\d*\z/)
+            return receiver_type
+          end
+          return "String" if node.name.to_s == "+" && receiver_type == "String"
+        end
+        if receiver_name == "Set" && %w[[] new].include?(node.name.to_s)
+          args = node.arguments ? node.arguments.arguments : []
+          source_type = inferred_clear_type(args.first)
+          element_type = array_element_clear_type(source_type)
+          return "#{element_type ? collection_element_type(element_type) : 'Any'}[]@set"
+        end
+        if node.receiver && node.name.to_s == "to_set"
+          element_type = array_element_clear_type(clear_type_for_receiver_node(node.receiver))
+          return "#{element_type || 'Any'}[]@set"
+        end
+        if node.receiver && %w[dup clone].include?(node.name.to_s)
+          receiver_type = clear_type_for_receiver_node(node.receiver)
+          return receiver_type if receiver_type
+        end
         if %w[map collect].include?(node.name.to_s) &&
            block_node.is_a?(Prism::BlockNode) && block_node.body.is_a?(Prism::StatementsNode)
-          block_expression = block_node.body.body.last
-          block_type = inferred_clear_type(block_expression)
+          block_type = map_block_result_type(node, block_node)
           if block_type && !["Auto", "Any"].include?(block_type.to_s)
             return "#{collection_element_type(block_type)}[]"
           end
         end
-        if node.receiver && %w[sort_by select filter reject].include?(node.name.to_s)
+        if node.receiver && %w[sort_by select filter reject reverse].include?(node.name.to_s)
           receiver_type = clear_type_for_receiver_node(node.receiver)
           return receiver_type if receiver_type
         end
         if node.name.to_s == "[]" && node.receiver
           args = node.arguments ? node.arguments.arguments : []
-          if (field_name = self_struct_field_index_name(node.receiver, args.first))
-            return @class_instance_field_types[@current_class][field_name] if @current_class
+          if (field_name = struct_field_index_name(node.receiver, args.first))
+            receiver_type = clear_type_for_receiver_node(node.receiver)
+            return class_instance_field_type(receiver_type, field_name)
           end
         end
-        return "Int64" if node.name.to_s == "to_i"
+        if node.name.to_s == "to_i"
+          # With a base argument and the u64 native configured, integer
+          # literal parsing lands in the full unsigned domain.
+          based = node.arguments&.arguments&.length.to_i == 1
+          return "UInt64" if based && @helper_config.helper?(:string_to_int_base)
+          return "Int64"
+        end
         return "String@symbol" if node.name.to_s == "to_sym"
         return "String" if node.name.to_s == "to_s"
-        return "String" if %w[compilerRegexCapture regexCapture].include?(node.name.to_s)
-        if node.receiver && %w[strip trim sub gsub].include?(node.name.to_s) && string_receiver?(node.receiver)
+        return "String" if %w[compilerRegexCapture regexCapture compilerRegexMatched regexMatched].include?(node.name.to_s)
+        return "?String" if %w[compilerRegexGetch regexGetch].include?(node.name.to_s)
+        if node.receiver && node.name.to_s == "matched" && registry_receiver_shape(node.receiver) == "scanner"
+          return "String"
+        end
+        if node.receiver && node.name.to_s == "getch" && registry_receiver_shape(node.receiver) == "scanner"
+          return "?String"
+        end
+        if node.receiver && %w[strip trim sub gsub tr].include?(node.name.to_s) && string_receiver?(node.receiver)
           return "String"
         end
         if node.receiver && %w[split lines].include?(node.name.to_s) && string_receiver?(node.receiver)
           return "String[]"
+        end
+        if node.receiver && node.name.to_s == "to_f"
+          receiver_type = clear_type_for_receiver_node(node.receiver).to_s.delete_prefix("?")
+          if string_receiver?(node.receiver) || receiver_type.match?(/\A(?:U?Int\d*|Byte\d*|Float\d*)\z/)
+            return "Float64"
+          end
         end
         if node.receiver && node.name.to_s == "index" && string_receiver?(node.receiver)
           return "?Int64"
@@ -1295,6 +1724,19 @@ module RubyToClear
           end
         end
 
+        if node.name.to_s == "[]" && node.receiver &&
+           clear_type_for_receiver_node(node.receiver).to_s.delete_prefix("?") == "CompilerRegexScanner"
+          # Ruby `matchdata[n]` is capture group n.
+          return "String"
+        end
+
+        if node.name.to_s == "[]" && node.receiver &&
+           (index_args = node.arguments&.arguments) && (1..2).cover?(index_args.length) &&
+           regex_pattern_expression?(index_args.first)
+          # Ruby `str[/re/]` / `str[/re/, n]` returns the match or nil.
+          return "?String"
+        end
+
         if node.name.to_s == "[]" && node.receiver && string_receiver?(node.receiver)
           return "String"
         end
@@ -1302,7 +1744,14 @@ module RubyToClear
         if node.name.to_s == "[]" && node.receiver
           receiver_type = clear_type_for_receiver_node(node.receiver)
           element_type = array_element_clear_type(receiver_type)
-          return element_type if element_type
+          if element_type
+            # Dynamic-array indexing is bounds-optional. Fixed-array indexing
+            # is total in CLEAR, so it preserves the element type verbatim.
+            # Treating `[N]T[index]` as `?T` made member lowering insert an
+            # invalid `?` even inside the generated `index < length` each loop.
+            fixed_array = receiver_type.to_s.delete_prefix("?").match?(/\A\[\d+\].+\z/)
+            return fixed_array ? element_type : optional_clear_type(element_type)
+          end
 
           value_type = map_value_clear_type(receiver_type)
           return optional_clear_type(value_type) if value_type
@@ -1327,9 +1776,23 @@ module RubyToClear
           return "#{value_type}[]" if value_type
         end
 
-        if node.name.to_s == "match" && node.receiver && string_receiver?(node.receiver)
+        if node.receiver && %w[first last pop shift].include?(node.name.to_s)
+          element_type = array_element_clear_type(clear_type_for_receiver_node(node.receiver))
+          return optional_clear_type(element_type) if element_type
+        end
+
+        if node.receiver && %w[find detect].include?(node.name.to_s) && node.block
+          # Array#find / #detect returns the first matching element, or nil.
+          element_type = array_element_clear_type(clear_type_for_receiver_node(node.receiver))
+          return optional_clear_type(element_type) if element_type
+        end
+
+        if node.name.to_s == "match" && node.receiver
           args = node.arguments ? node.arguments.arguments : []
-          return "?CompilerRegexScanner" if args.length == 1 && regex_value_node?(args.first) && @helper_config.helper?(:regex_match_data)
+          match_form = args.length == 1 && @helper_config.helper?(:regex_match_data) &&
+            ((string_receiver?(node.receiver) && regex_value_node?(args.first)) ||
+             regex_pattern_expression?(node.receiver))
+          return "?CompilerRegexScanner" if match_form
         end
 
         if (!node.arguments || node.arguments.arguments.empty?) &&
@@ -1348,17 +1811,27 @@ module RubyToClear
         if receiver
           receiver_type = clear_type_for_receiver_node(receiver)
           if receiver_type
+            # An explicit method contract describes the value exposed to the
+            # caller; the backing Struct/T::Struct field describes storage.
+            # Prefer the contract so a deliberately widened getter (for
+            # example StateField stored as FsmOps::Expr) remains widened at
+            # call sites instead of being wrapped as a union payload twice.
+            return_type = method_return_type_for(node.name.to_s, receiver_type)
+            return return_type if return_type
+
             field_type = class_instance_field_type(receiver_type, node.name.to_s)
-            return field_type if field_type
+            return field_type if field_type && !["Any", "Auto"].include?(field_type.to_s)
 
             union_field_type = shared_union_field_type(receiver_type, node.name.to_s)
-            return union_field_type if union_field_type
+            return union_field_type if union_field_type && !["Any", "Auto"].include?(union_field_type.to_s)
+            return union_field_type || field_type if union_field_type || field_type
           end
-
-          return method_return_type_for(node.name.to_s, receiver_type) if receiver_type
 
           if (receiver_class = constant_receiver_name(receiver))
             return method_return_type_for(node.name.to_s, receiver_class)
+          end
+          if (receiver_module = module_function_receiver_name(receiver))
+            return method_return_type_for(node.name.to_s, receiver_module)
           end
         elsif receiver.nil? || @inside_instance_method || @inside_class_method
           method_return_type_for(node.name.to_s, @current_class)
@@ -1384,6 +1857,42 @@ module RubyToClear
         "Bool"
       when Prism::NilNode
         "Void"
+      end
+    end
+    public :inferred_clear_type
+
+    # A map block's result type is the type of its final expression - but that
+    # expression is routinely a local assigned earlier in the same block
+    # (`m = lookup(c); ...; m`), and the block parameter itself is only typed
+    # by the receiver's element type. Inferring the final expression against
+    # an empty scope therefore yields nothing, which silently loses the whole
+    # map's element type for every downstream consumer (real corpus:
+    # mir/fsm_transform/emit.rb's `prior_meta = prior.map { ... }` then
+    # `prior_meta.each_with_index`, which failed with "each_with_index
+    # requires a statically typed collection"). Bind the parameter and each
+    # preceding assignment before inferring.
+    def map_block_result_type(node, block_node)
+      statements = block_node.body.body
+      return nil unless statements&.any?
+
+      scope = {}
+      param = block_node.parameters&.parameters&.requireds&.first
+      param_name = param.respond_to?(:name) ? param.name.to_s : nil
+      if param_name && node.receiver
+        element_type = array_element_clear_type(clear_type_for_receiver_node(node.receiver))
+        scope[param_name] = element_type if element_type
+      end
+
+      with_local_types(scope) do
+        statements[0...-1].each do |statement|
+          next unless statement.is_a?(Prism::LocalVariableWriteNode)
+
+          assigned = inferred_clear_type(statement.value).to_s
+          next if assigned.empty? || assigned == "Auto"
+
+          note_local_type(statement.name.to_s, assigned)
+        end
+        inferred_clear_type(statements.last)
       end
     end
 

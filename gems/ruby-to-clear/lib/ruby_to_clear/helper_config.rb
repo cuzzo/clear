@@ -4,7 +4,8 @@ require "json"
 
 module RubyToClear
   class HelperConfig
-    attr_reader :requires, :struct_fields, :union_variants, :unions, :untyped_type
+    attr_reader :requires, :struct_fields, :union_variants, :unions, :untyped_type,
+                :modular_dependency_root
 
     def self.load(value)
       case value
@@ -31,6 +32,10 @@ module RubyToClear
       @unions = data["unions"] || data[:unions] || {}
       @union_variants = data["union_variants"] || data[:union_variants] || {}
       @untyped_type = (data["untyped_type"] || data[:untyped_type] || "Auto").to_s
+      @export_declarations = !!(data["export_declarations"] || data[:export_declarations])
+      @modular_dependency_root = (
+        data["modular_dependency_root"] || data[:modular_dependency_root]
+      )&.to_s
       @scanner_receivers = Array(
         data["scanner_receivers"] ||
         data[:scanner_receivers] ||
@@ -63,20 +68,24 @@ module RubyToClear
         out[name] = true if body.match?(Regexp.new("\\b#{Regexp.escape(name)}\\b"))
       end
 
+      # A kept EXTERN FN may reference an EXTERN STRUCT type in its
+      # signature; keep declarations referenced by kept declarations until
+      # the set stops growing.
       loop do
-        added = false
+        grew = false
         declarations.each do |name, line|
           next unless needed[name]
 
-          line.scan(/\b[A-Z][A-Za-z0-9_]*\b/).each do |type_name|
-            next unless declarations.any? { |candidate, _| candidate == type_name }
-            next if needed[type_name]
+          declarations.each do |other_name, _other_line|
+            next if other_name == name || needed[other_name]
 
-            needed[type_name] = true
-            added = true
+            if line.match?(Regexp.new("\\b#{Regexp.escape(other_name)}\\b"))
+              needed[other_name] = true
+              grew = true
+            end
           end
         end
-        break unless added
+        break unless grew
       end
 
       declarations.filter_map { |name, line| line if needed[name] }
@@ -113,6 +122,42 @@ module RubyToClear
 
     def clear_type(ruby_type)
       @types[ruby_type.to_s] || @types[ruby_type.to_sym]
+    end
+
+    def export_declarations?
+      @export_declarations
+    end
+
+    def modular_dependencies?
+      !@modular_dependency_root.to_s.empty?
+    end
+
+    # Package identities are derived from corpus-relative generated paths, not
+    # checkout-absolute paths, so emitted CLEAR stays deterministic across
+    # machines. Hex is deliberately reversible: the verifier can register the
+    # independently generated provider without maintaining a second name map.
+    def self.dependency_package_name(generated_relative)
+      "rtoc_#{generated_relative.to_s.unpack1('H*')}"
+    end
+
+    def dependency_package_for(source_path)
+      return nil unless modular_dependencies?
+
+      normalized = File.expand_path(source_path).tr("\\", "/")
+      marker = modular_dependency_root.tr("\\", "/").sub(%r{\A/+}, "").sub(%r{/+\z}, "")
+      prefix = "/#{marker}/"
+      offset = normalized.index(prefix)
+      return nil unless offset
+
+      relative = normalized[(offset + prefix.length)..]
+      generated_relative = relative.sub(/\.rb\z/, ".clear")
+      self.class.dependency_package_name(generated_relative)
+    end
+
+    def ruby_types_for(clear_type)
+      @types.filter_map do |ruby_type, emitted_type|
+        ruby_type.to_s if emitted_type.to_s == clear_type.to_s
+      end
     end
 
     private

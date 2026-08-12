@@ -1,0 +1,14 @@
+# Ruby module AST
+PUB STRUCT StructField {
+  type: Any@multiowned,
+  default: Any@multiowned,
+  borrowed: Bool
+}
+
+FN structField__default(self: StructField) RETURNS Auto ->
+  RETURN COPY self.default;
+END
+FN structField__borrowed(self: StructField) RETURNS Bool ->
+  RETURN !(!(self.borrowed));
+END
+# End Ruby module AST

@@ -1,0 +1,622 @@
+REQUIRE "frontend_resource_budget.clear"
+UNION TokenValue { StringValue: String, Int64Value: Int64, Float64Value: Float64 }
+STRUCT Lexer {
+  base_offset: Int64,
+  budget: FrontendResourceBudget@multiowned,
+  column: Int64,
+  file: ?String,
+  interpolation_depth: Int64,
+  line: Int64,
+  s: Scanner,
+  tokens: []Token
+}
+
+STRUCT Token {
+  type: String@symbol,
+  value: ?TokenValue,
+  line: Int64,
+  column: Int64,
+  file: Any@multiowned,
+  start_offset: Int64,
+  end_offset: Int64,
+  end_line: Int64,
+  end_column: Int64
+}
+text_types: [16]String@symbol = [:ARROW, :CHAR, :COMPOUND_ASSIGN, :DOUBLE_COLON, :ELLIPSIS, :KEYWORD, :LEGACY_LOGICAL, symbol("OR_ELSE"), :PERCENT, :RANGE, :RANGE_EXCL, :RANGE_INCL, :SMOOTH, :STRING, :TYPE_ID, :VAR_ID];
+integer_types: [9]String@symbol = [:BYTE, :INT8, :INT16, :INT32, :INT64, :PREFIXED_INT, :UINT16, :UINT32, :UINT64];
+float_types: [2]String@symbol = [:FLOAT32, :NUMBER];
+FN token__text_mut(self: Token) RETURNS !String ->
+  MUTABLE payload: ?TokenValue = COPY self.value;
+  IF text_types.contains?(self.type) THEN
+  IF payload? IS_A String AS string THEN
+    RETURN string;
+  END
+  END
+  RAISE Input, TokenPayloadError, token__payload_error(self, "text", "String");
+END
+FN token__integer_mut(self: Token) RETURNS !Int64 ->
+  MUTABLE payload: ?TokenValue = COPY self.value;
+  IF integer_types.contains?(self.type) THEN
+  IF payload? IS_A Int64 AS int64 THEN
+    RETURN int64;
+  END
+  END
+  RAISE Input, TokenPayloadError, token__payload_error(self, "integer", "Integer");
+END
+FN token__float_mut(self: Token) RETURNS !Float64 ->
+  MUTABLE payload: ?TokenValue = COPY self.value;
+  IF float_types.contains?(self.type) THEN
+  IF payload? IS_A Float64 AS float64 THEN
+    RETURN float64;
+  END
+  END
+  RAISE Input, TokenPayloadError, token__payload_error(self, "float", "Float");
+END
+FN token__display_value(self: Token) RETURNS String ->
+  MUTABLE payload: ?TokenValue = COPY self.value;
+  IF payload? IS_A String AS string THEN
+    RETURN string;
+  END
+  IF payload? IS_A Int64 AS int64 THEN
+    RETURN COPY int64.toString();
+  END
+  IF payload? IS_A Float64 AS float64 THEN
+    RETURN COPY float64.toString();
+  END
+  RETURN "";
+END
+FN token__start_line(self: Token) RETURNS Int64 ->
+  RETURN self.line;
+END
+FN token__start_column(self: Token) RETURNS Int64 ->
+  RETURN self.column;
+END
+FN token__byte_length(self: Token) RETURNS Int64 ->
+  IF (self.start_offset AND self.end_offset) THEN
+    RETURN (self.end_offset - self.start_offset);
+  END
+  MUTABLE payload: ?TokenValue = COPY self.value;
+  IF payload? IS_A String AS string THEN
+    RETURN string.bytes();
+  END
+  IF payload? IS_A Int64 AS int64 THEN
+    RETURN int64.toString().bytes();
+  END
+  IF payload? IS_A Float64 AS float64 THEN
+    RETURN float64.toString().bytes();
+  END
+  RETURN 0;
+END
+PRIVATE FN token__payload_error(self: Token, accessor: String, expected_class: String) RETURNS String ->
+  MUTABLE payload: ?TokenValue = COPY self.value;
+  MUTABLE actual_class: String = "";
+  IF payload? IS_A String AS string THEN
+    actual_class = "String";
+  ELSE
+    IF payload? IS_A Int64 AS int64 THEN
+      actual_class = "Integer";
+    ELSE
+      IF payload? IS_A Float64 AS float64 THEN
+        actual_class = "Float";
+      ELSE
+        actual_class = "NilClass";
+      END
+    END
+  END
+  RETURN ":${self.type} token at ${self.line.toString()}:${self.column.toString()} has no ${accessor} payload (expected ${expected_class}, got ${actual_class})";
+END
+FN lexer__initialize(MUTABLE self: Lexer, source_input: String, interpolation_depth: Int64 = 0, file: ?String = NIL, start_line: Int64 = 1, start_column: Int64 = 1, start_offset: Int64 = 0, budget: ?FrontendResourceBudget = NIL) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE source = COPY source_input;
+    source = (COPY source);
+    IF !(source.validUtf8?()) THEN
+      RAISE Input, Error, "Lexer Error: source is not valid UTF-8";
+    END
+    rtoc_self_view.s = Scanner{ source: source, pos: 0 };
+    rtoc_self_view.line = COPY start_line;
+    rtoc_self_view.column = COPY start_column;
+    rtoc_self_view.base_offset = COPY start_offset;
+    rtoc_self_view.file = COPY file;
+    rtoc_self_view.budget = (budget OR_ELSE frontendResourceBudget__new());
+    MUTABLE e: ?Exceeded = frontendResourceBudget__source_violation(rtoc_self_view.budget, source);
+    IF e EXISTS AS e_value THEN
+      RAISE Input, Error, "Lexer Error: frontend {} resource limit exceeded (limit {})";
+    END
+    rtoc_self_view.tokens = List[];
+    rtoc_self_view.interpolation_depth = COPY interpolation_depth;
+}
+END
+FN lexer__tokenize(MUTABLE self: Lexer) RETURNS ![]Token
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    WHILE !(rtoc_self_view.s.eos?()) DO
+      MUTABLE start_line = rtoc_self_view.line;
+      MUTABLE start_col = rtoc_self_view.column;
+      MUTABLE start_offset = lexer__current_offset(rtoc_self_view);
+      IF rtoc_self_view.s.scan("\\s+|#.*$") THEN
+        MUTABLE rtoc_mutable_alias_arg_1 = COPY rtoc_self_view.s.matched();
+        lexer__advance_pos(&rtoc_self_view, rtoc_mutable_alias_arg_1);
+      ELSE_IF rtoc_self_view.s.scan("\\.\\.\\.") THEN
+        lexer__add(&rtoc_self_view, :ELLIPSIS, TokenValue{ StringValue: COPY "..." }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\.\\.<=") THEN
+        lexer__add(&rtoc_self_view, :RANGE_INCL, TokenValue{ StringValue: COPY "..<=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\.\\.=") THEN
+        lexer__add(&rtoc_self_view, :RANGE_INCL, TokenValue{ StringValue: COPY "..=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\.\\.<") THEN
+        lexer__add(&rtoc_self_view, :RANGE_EXCL, TokenValue{ StringValue: COPY "..<" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\.\\.") THEN
+        lexer__add(&rtoc_self_view, :RANGE, TokenValue{ StringValue: COPY ".." }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("->") THEN
+        lexer__add(&rtoc_self_view, :ARROW, TokenValue{ StringValue: COPY "->" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\|>") THEN
+        lexer__add(&rtoc_self_view, :SMOOTH, TokenValue{ StringValue: COPY "|>" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("OR_ELSE\\b") THEN
+        lexer__add(&rtoc_self_view, symbol("OR_ELSE"), TokenValue{ StringValue: COPY "OR_ELSE" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("==") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "==" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan(">>") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY ">>" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("<<") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "<<" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan(">=") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY ">=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("<=") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "<=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("!=") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "!=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("&&") THEN
+        lexer__add(&rtoc_self_view, :LEGACY_LOGICAL, TokenValue{ StringValue: COPY "&&" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\*\\*") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "**" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\|\\|") THEN
+        lexer__add(&rtoc_self_view, :LEGACY_LOGICAL, TokenValue{ StringValue: COPY "||" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\$\\+") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "$+" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("%\\*") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "%*" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("%\\+") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "%+" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("%-") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "%-" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("!\\*") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "!*" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("!\\+") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "!+" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("!-") THEN
+        lexer__add(&rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "!-" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\+=") THEN
+        lexer__add(&rtoc_self_view, :COMPOUND_ASSIGN, TokenValue{ StringValue: COPY "+=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("-=") THEN
+        lexer__add(&rtoc_self_view, :COMPOUND_ASSIGN, TokenValue{ StringValue: COPY "-=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\*=") THEN
+        lexer__add(&rtoc_self_view, :COMPOUND_ASSIGN, TokenValue{ StringValue: COPY "*=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("/=") THEN
+        lexer__add(&rtoc_self_view, :COMPOUND_ASSIGN, TokenValue{ StringValue: COPY "/=" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("_") THEN
+        lexer__add(&rtoc_self_view, :VAR_ID, TokenValue{ StringValue: COPY "_" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\"\"\"((?:.|\\n)*?)\"\"\"") THEN
+        MUTABLE content = rtoc_self_view.s.matched().substr(3, (((rtoc_self_view.s.matched().length() - 4) - 3) + 1));
+        lexer__add(&rtoc_self_view, :STRING, content, start_col);
+      ELSE_IF rtoc_self_view.s.scan("::") THEN
+        lexer__add(&rtoc_self_view, :DOUBLE_COLON, TokenValue{ StringValue: COPY "::" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("[=+\\-*/<>&|!.,;(){}\\[\\]:?~]") THEN
+        MUTABLE rtoc_mutable_alias_arg_2 = COPY rtoc_self_view.s.matched();
+        lexer__add(&rtoc_self_view, :CHAR, rtoc_mutable_alias_arg_2, start_col);
+      ELSE_IF rtoc_self_view.s.scan("%") THEN
+        lexer__add(&rtoc_self_view, :PERCENT, TokenValue{ StringValue: COPY "%" }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("[a-zA-Z_@$]\\w*(\\?(?=\\())?") THEN
+        MUTABLE word = rtoc_self_view.s.matched();
+        IF (word == "MUTABLE") OR (word == "FN") OR (word == "METHOD") OR (word == "RETURN") OR (word == "RETURNS") OR (word == "USE") OR (word == "CONST") OR (word == "IF") OR (word == "THEN") OR (word == "ELSE") OR (word == "ELSE_IF") OR (word == "END") OR (word == "COMPTIME") OR (word == "IS_A") OR (word == "EXISTS") OR (word == "IS_OK") OR (word == "IS_READY") OR (word == "WHILE") OR (word == "DO") OR (word == "FOR") OR (word == "IN") OR (word == "BG") OR (word == "NEXT") OR (word == "BREAK") OR (word == "CONTINUE") OR (word == "CAST") OR (word == "AS") OR (word == "TRY") OR (word == "UNWRAP") OR (word == "STRUCT") OR (word == "ENUM") OR (word == "UNION") OR (word == "PROTOCOL") OR (word == "IMPLEMENTATION") OR (word == "TRUE") OR (word == "FALSE") OR (word == "NIL") OR (word == "Auto") OR (word == "ASSERT") OR (word == "RAISE") OR (word == "CATCH") OR (word == "EXIT") OR (word == "DIE") OR (word == "PASS") OR (word == "PRUNE") OR (word == "DEFER") OR (word == "MOD") OR (word == "AND") OR (word == "OR") OR (word == "OR_ELSE") OR (word == "XOR") OR (word == "BIT_AND") OR (word == "BIT_OR") OR (word == "REQUIRE") OR (word == "SELECT") OR (word == "WHERE") OR (word == "INDEX") OR (word == "REDUCE") OR (word == "ORDER_BY") OR (word == "LIMIT") OR (word == "SKIP") OR (word == "UNNEST") OR (word == "DISTINCT") OR (word == "EACH") OR (word == "TAP") OR (word == "FIND") OR (word == "ANY") OR (word == "ALL") OR (word == "COUNT") OR (word == "SUM") OR (word == "AVERAGE") OR (word == "MIN") OR (word == "MAX") OR (word == "CONCURRENT") OR (word == "SHARD") OR (word == "TAKE_WHILE") OR (word == "WINDOW") OR (word == "JOIN") OR (word == "RECOVER") OR (word == "COLLECT") OR (word == "GIVE") OR (word == "TAKES") OR (word == "COPY") OR (word == "KEEP") OR (word == "MOVE") OR (word == "SHARE") OR (word == "LINK") OR (word == "RESOLVE") OR (word == "FREEZE") OR (word == "UNIQUE") OR (word == "MONOMORPHIC") OR (word == "OWN") OR (word == "WITH") OR (word == "EXCLUSIVE") OR (word == "RESTRICT") OR (word == "BORROWED") OR (word == "ON") OR (word == "RETRY") OR (word == "POSSIBLE_DEADLOCK") OR (word == "POSSIBLE_LOCK_CYCLE") OR (word == "VIEW") OR (word == "MATERIALIZED") OR (word == "UNSAFE") OR (word == "LENGTH") OR (word == "SNAPSHOT") OR (word == "GUARD") OR (word == "PRE") OR (word == "DEBUG_POST") OR (word == "POLYMORPHIC") OR (word == "SHARED") OR (word == "SYNC") OR (word == "POLICY") OR (word == "REQUIRES") OR (word == "MATCH") OR (word == "PARTIAL") OR (word == "START") OR (word == "DEFAULT") OR (word == "WHEN") OR (word == "PUB") OR (word == "PRIVATE") OR (word == "EXTERN") OR (word == "FROM") OR (word == "EFFECTS") OR (word == "CLOSE") OR (word == "ABI") OR (word == "CALLCONV") OR (word == "HEADER") OR (word == "STREAM") OR (word == "YIELD") OR (word == "YIELDS") OR (word == "TIGHT") OR (word == "TEST") OR (word == "THAT") OR (word == "STUB") OR (word == "BENCHMARK") OR (word == "SMASH") OR (word == "PROFILE") OR (word == "ASSERT_RAISES") OR (word == "CAPTURES") OR (word == "SEQUENCE") OR (word == "PENDING") OR (word == "BEFORE") OR (word == "AFTER") OR (word == "LET") OR (word == "TAGS") THEN
+          lexer__add(&rtoc_self_view, :KEYWORD, word, start_col);
+        ELSE_IF regexMatch?(word, "^[A-Z]") THEN
+          lexer__add(&rtoc_self_view, :TYPE_ID, word, start_col);
+        ELSE
+          lexer__add(&rtoc_self_view, :VAR_ID, word, start_col);
+        END
+      ELSE_IF rtoc_self_view.s.scan("0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*_(${"i8|i16|i32|i64|u8|u16|u32|u64|f32|f64"})\\b") THEN
+        MUTABLE hex_value = TRY ((lexer__strip_digit_separators(rtoc_self_view, rtoc_self_view.s.matched(), rtoc_self_view.s[1])).deletePrefix("0x").toInt(16));
+        MUTABLE rtoc_mutable_alias_arg_3 = COPY rtoc_self_view.s[1];
+        TRY (lexer__add_prefixed_int(&rtoc_self_view, hex_value, rtoc_mutable_alias_arg_3, start_col));
+      ELSE_IF rtoc_self_view.s.scan("0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*") THEN
+        MUTABLE rtoc_mutable_alias_arg_4 = COPY TRY (lexer__check_based_literal(rtoc_self_view, TRY ((rtoc_delete_prefix(rtoc_self_view.s.matched().tr("_", ""), "0x")).toInt(16))));
+        lexer__add(&rtoc_self_view, :PREFIXED_INT, rtoc_mutable_alias_arg_4, start_col);
+      ELSE_IF rtoc_self_view.s.scan("0o[0-7]+(?:_[0-7]+)*_(${"i8|i16|i32|i64|u8|u16|u32|u64|f32|f64"})\\b") THEN
+        MUTABLE octal_value = TRY ((lexer__strip_digit_separators(rtoc_self_view, rtoc_self_view.s.matched(), rtoc_self_view.s[1])).deletePrefix("0o").toInt(8));
+        MUTABLE rtoc_mutable_alias_arg_5 = COPY rtoc_self_view.s[1];
+        TRY (lexer__add_prefixed_int(&rtoc_self_view, octal_value, rtoc_mutable_alias_arg_5, start_col));
+      ELSE_IF rtoc_self_view.s.scan("0o[0-7]+(?:_[0-7]+)*") THEN
+        MUTABLE rtoc_mutable_alias_arg_6 = COPY TRY (lexer__check_based_literal(rtoc_self_view, TRY ((rtoc_delete_prefix(rtoc_self_view.s.matched().tr("_", ""), "0o")).toInt(8))));
+        lexer__add(&rtoc_self_view, :PREFIXED_INT, rtoc_mutable_alias_arg_6, start_col);
+      ELSE_IF rtoc_self_view.s.scan("0b[0-1]+(?:_[0-1]+)*_(${"i8|i16|i32|i64|u8|u16|u32|u64|f32|f64"})\\b") THEN
+        MUTABLE binary_value = TRY ((lexer__strip_digit_separators(rtoc_self_view, rtoc_self_view.s.matched(), rtoc_self_view.s[1])).deletePrefix("0b").toInt(2));
+        MUTABLE rtoc_mutable_alias_arg_7 = COPY rtoc_self_view.s[1];
+        TRY (lexer__add_prefixed_int(&rtoc_self_view, binary_value, rtoc_mutable_alias_arg_7, start_col));
+      ELSE_IF rtoc_self_view.s.scan("0b[0-1]+(?:_[0-1]+)*") THEN
+        MUTABLE rtoc_mutable_alias_arg_8 = COPY TRY (lexer__check_based_literal(rtoc_self_view, TRY ((rtoc_delete_prefix(rtoc_self_view.s.matched().tr("_", ""), "0b")).toInt(2))));
+        lexer__add(&rtoc_self_view, :PREFIXED_INT, rtoc_mutable_alias_arg_8, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\d+(?:_\\d+)*\\.\\d+(?:_\\d+)*_(${"i8|i16|i32|i64|u8|u16|u32|u64|f32|f64"})\\b") THEN
+        MUTABLE float_value = ((lexer__strip_digit_separators(rtoc_self_view, rtoc_self_view.s.matched(), rtoc_self_view.s[1])).toFloat() OR_ELSE 0.0);
+        MUTABLE suffix = rtoc_self_view.s[1];
+        IF (suffix == "f32") THEN
+          lexer__add(&rtoc_self_view, :FLOAT32, TokenValue{ Float64Value: float_value }, start_col);
+        ELSE_IF (suffix == "f64") THEN
+          lexer__add(&rtoc_self_view, :NUMBER, TokenValue{ Float64Value: float_value }, start_col);
+        ELSE
+          RAISE Input, Error, "Lexer Error: Unknown float suffix '_{}' at line {}:{}";
+        END
+      ELSE_IF rtoc_self_view.s.scan("\\d+(?:_\\d+)*\\.\\d+(?:_\\d+)*") THEN
+        MUTABLE rtoc_mutable_alias_arg_9 = COPY rtoc_self_view.s.matched().tr("_", "").to_f();
+        lexer__add(&rtoc_self_view, :NUMBER, rtoc_mutable_alias_arg_9, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\\d+(?:_\\d+)*_(${"i8|i16|i32|i64|u8|u16|u32|u64|f32|f64"})\\b") THEN
+        MUTABLE body = lexer__strip_digit_separators(rtoc_self_view, rtoc_self_view.s.matched(), rtoc_self_view.s[1]);
+        MUTABLE rtoc_mutable_alias_arg_10 = COPY rtoc_self_view.s[1];
+        TRY (lexer__add_prefixed_int(&rtoc_self_view, TRY (body.toInt(10)), rtoc_mutable_alias_arg_10, start_col));
+      ELSE_IF rtoc_self_view.s.scan("\\d+(?:_\\d+)*") THEN
+        MUTABLE decimal_value = TRY (rtoc_self_view.s.matched().tr("_", "").toInt());
+        IF (decimal_value > 9223372036854775807) THEN
+          RAISE Input, Error, "Lexer Error: Literal {} overflows i64 (range {})";
+        END
+        lexer__add(&rtoc_self_view, :INT64, TokenValue{ Int64Value: decimal_value }, start_col);
+      ELSE_IF rtoc_self_view.s.scan("\"") THEN
+        MUTABLE rtoc_mutable_alias_arg_11 = COPY rtoc_self_view.s.matched();
+        lexer__advance_pos(&rtoc_self_view, rtoc_mutable_alias_arg_11);
+        TRY (lexer__read_interpolated_string(&rtoc_self_view, start_line, start_col, start_offset));
+      ELSE
+        RAISE Input, Error, "Lexer Error: Unexpected char: {} on line {}:{}";
+      END
+    END
+    &rtoc_self_view.tokens.append(COPY lexer__source_token(rtoc_self_view, :EOF, NIL, rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view), rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view)));
+    RETURN COPY rtoc_self_view.tokens;
+}
+END
+PRIVATE FN lexer__read_interpolated_string(MUTABLE self: Lexer, start_line: Int64, start_col: Int64, start_offset: Int64) RETURNS !Void
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE buffer = "";
+    MUTABLE chunk_start_line: Int64 = start_line;
+    MUTABLE chunk_start_col: Int64 = start_col;
+    MUTABLE chunk_start_offset: Int64 = start_offset;
+    WHILE TRUE DO
+      MUTABLE text = rtoc_self_view.s.scan("[^\"\\\\$]+");
+      IF text THEN
+        buffer = (buffer $+ COPY text);
+        lexer__advance_pos(&rtoc_self_view, text);
+      END
+      IF (rtoc_self_view.s.peek(1) == "\\") THEN
+        rtoc_self_view.s.getch();
+        lexer__advance_pos(&rtoc_self_view, "\\");
+        MUTABLE ch = rtoc_self_view.s.getch();
+        IF ch THEN
+          lexer__advance_pos(&rtoc_self_view, ch);
+        END
+        IF (ch == "n") THEN
+          buffer = (buffer $+ "\n");
+        ELSE_IF (ch == "t") THEN
+          buffer = (buffer $+ "\t");
+        ELSE_IF (ch == "\"") THEN
+          buffer = (buffer $+ "\"");
+        ELSE_IF (ch == "\\") THEN
+          buffer = (buffer $+ "\\");
+        ELSE_IF (ch == "r") THEN
+          buffer = (buffer $+ "\r");
+        ELSE_IF (ch == "0") THEN
+          buffer = (buffer $+ "\x00");
+        ELSE_IF (ch == "x") THEN
+          MUTABLE hex = rtoc_self_view.s.scan("[0-9a-fA-F]{2}");
+          IF !(hex) THEN
+            RAISE Input, Error, "Lexer Error: \\\\x requires exactly 2 hex digits at line {}:{}";
+          END
+          lexer__advance_pos(&rtoc_self_view, hex);
+          buffer = (buffer $+ COPY codepointToString((TRY (hex.toInt(16)))));
+        ELSE_IF (ch == "u") THEN
+          IF !((rtoc_self_view.s.peek(1) == "{")) THEN
+            RAISE Input, Error, "Lexer Error: \\\\u requires {hex} at line {}:{}";
+          END
+          rtoc_self_view.s.getch();
+          lexer__advance_pos(&rtoc_self_view, "{");
+          MUTABLE hex = rtoc_self_view.s.scan("[0-9a-fA-F]{1,6}");
+          IF !(hex) THEN
+            RAISE Input, Error, "Lexer Error: invalid \\\\u{} escape at line {}:{}";
+          END
+          lexer__advance_pos(&rtoc_self_view, hex);
+          IF !((rtoc_self_view.s.peek(1) == "}")) THEN
+            RAISE Input, Error, "Lexer Error: unclosed \\\\u{} at line {}:{}";
+          END
+          rtoc_self_view.s.getch();
+          lexer__advance_pos(&rtoc_self_view, "}");
+          buffer = (buffer $+ COPY codepointToString((TRY (hex.toInt(16)))));
+        ELSE
+          buffer = (buffer $+ "\\");
+          buffer = (buffer $+ ((ch OR "")));
+        END
+        CONTINUE;
+      END
+      IF (rtoc_self_view.s.peek(1) == "\"") THEN
+        rtoc_self_view.s.getch();
+        lexer__advance_pos(&rtoc_self_view, "\"");
+        &rtoc_self_view.tokens.append(COPY lexer__source_token(rtoc_self_view, :STRING, TokenValue{ StringValue: COPY buffer }, chunk_start_line, chunk_start_col, chunk_start_offset, rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view)));
+        BREAK;
+      ELSE_IF (rtoc_self_view.s.peek(2) == ("$" $+ "{")) THEN
+        IF (rtoc_self_view.interpolation_depth >= 64) THEN
+          RAISE Input, Error, "Lexer Error: string interpolation nesting exceeds {} levels";
+        END
+        MUTABLE interpolation_line = rtoc_self_view.line;
+        MUTABLE interpolation_col = rtoc_self_view.column;
+        MUTABLE interpolation_offset = lexer__current_offset(rtoc_self_view);
+        &rtoc_self_view.tokens.append(COPY lexer__source_token(rtoc_self_view, :STRING, TokenValue{ StringValue: COPY buffer }, chunk_start_line, chunk_start_col, chunk_start_offset, rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view)));
+        buffer = "";
+        rtoc_self_view.s.getch();
+        rtoc_self_view.s.getch();
+        lexer__advance_pos(&rtoc_self_view, ("$" $+ "{"));
+        &rtoc_self_view.tokens.append(COPY lexer__source_token(rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "$+" }, interpolation_line, interpolation_col, interpolation_offset, interpolation_line, interpolation_col, interpolation_offset));
+        &rtoc_self_view.tokens.append(COPY lexer__source_token(rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "(" }, interpolation_line, interpolation_col, interpolation_offset, interpolation_line, interpolation_col, interpolation_offset));
+        MUTABLE expr_line = rtoc_self_view.line;
+        MUTABLE expr_column = rtoc_self_view.column;
+        MUTABLE expr_offset = lexer__current_offset(rtoc_self_view);
+        MUTABLE expr_source = TRY (lexer__extract_balanced_brace_content(&rtoc_self_view));
+        MUTABLE sub_lexer = TRY (lexer__new(expr_source, (rtoc_self_view.interpolation_depth + 1), rtoc_self_view.file, expr_line, expr_column, expr_offset, rtoc_self_view.budget));
+        TRY (frontendResourceBudget__enter_mut(&rtoc_self_view.budget));
+        MUTABLE sub_tokens: []Token = TRY (lexer__tokenize(&sub_lexer));
+        frontendResourceBudget__leave_mut(&rtoc_self_view.budget);
+        &sub_tokens.pop();
+        rtoc_self_view.tokens = ruby_array_concat_Token(rtoc_self_view.tokens, sub_tokens);
+        &rtoc_self_view.tokens.append(COPY lexer__source_token(rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY ")" }, rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view), rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view)));
+        &rtoc_self_view.tokens.append(COPY lexer__source_token(rtoc_self_view, :CHAR, TokenValue{ StringValue: COPY "$+" }, rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view), rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view)));
+        chunk_start_line = rtoc_self_view.line;
+        chunk_start_col = rtoc_self_view.column;
+        chunk_start_offset = lexer__current_offset(rtoc_self_view);
+      ELSE_IF (rtoc_self_view.s.peek(1) == "$") THEN
+        buffer = (buffer $+ COPY rtoc_self_view.s.getch());
+        lexer__advance_pos(&rtoc_self_view, "$");
+      ELSE
+        IF rtoc_self_view.s.eos?() THEN
+          RAISE Input, Error, "Lexer Error: Unclosed string starting at line {}:{}";
+        END
+      END
+    END
+}
+END
+PRIVATE FN lexer__extract_balanced_brace_content(MUTABLE self: Lexer) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE content = "";
+    MUTABLE depth = 1;
+    MUTABLE state: String@symbol = :code;
+    MUTABLE escaped: Bool = FALSE;
+    WHILE !(rtoc_self_view.s.eos?()) DO
+      IF ((state == :code) AND (rtoc_self_view.s.peek(3) == "\"\"\"")) THEN
+        MUTABLE raw = rtoc_self_view.s.scan("\"\"\"");
+        content = (content $+ COPY raw);
+        lexer__advance_pos(&rtoc_self_view, raw);
+        state = :triple_string;
+        CONTINUE;
+      END
+      MUTABLE ch = rtoc_self_view.s.getch();
+      IF !(ch) THEN
+        BREAK;
+      END
+      IF (state == :comment) THEN
+        content = (content $+ COPY ch);
+        lexer__advance_pos(&rtoc_self_view, ch);
+        IF (ch == "\n") THEN
+          state = :code;
+        END
+        CONTINUE;
+      END
+      IF (state == :string) THEN
+        content = (content $+ COPY ch);
+        lexer__advance_pos(&rtoc_self_view, ch);
+        IF escaped THEN
+          escaped = FALSE;
+        ELSE_IF (ch == "\\") THEN
+          escaped = TRUE;
+        ELSE_IF (ch == "\"") THEN
+          state = :code;
+        END
+        CONTINUE;
+      END
+      IF (state == :triple_string) THEN
+        content = (content $+ COPY ch);
+        lexer__advance_pos(&rtoc_self_view, ch);
+        IF ((ch == "\"") AND (rtoc_self_view.s.peek(2) == "\"\"")) THEN
+          MUTABLE tail = rtoc_self_view.s.scan("\"\"");
+          content = (content $+ COPY tail);
+          lexer__advance_pos(&rtoc_self_view, tail);
+          state = :code;
+        END
+        CONTINUE;
+      END
+      IF (ch == "#") THEN
+        state = :comment;
+      ELSE_IF (ch == "\"") THEN
+        state = :string;
+      ELSE_IF (ch == "{") THEN
+        depth = (depth + 1);
+      ELSE_IF (ch == "}") THEN
+        depth = (depth - 1);
+        IF (depth == 0) THEN
+          lexer__advance_pos(&rtoc_self_view, ch);
+          RETURN content;
+        END
+      END
+      content = (content $+ COPY ch);
+      lexer__advance_pos(&rtoc_self_view, ch);
+    END
+    RAISE Input, Error, "Lexer Error: Unclosed interpolation %{...}";
+}
+END
+PRIVATE FN lexer__add(MUTABLE self: Lexer, type: String@symbol, val: TokenValue, col: Int64) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE start_line = rtoc_self_view.line;
+    MUTABLE start_offset = (lexer__current_offset(rtoc_self_view) - rtoc_self_view.s.matched().bytesize());
+    MUTABLE rtoc_mutable_alias_arg_12 = COPY rtoc_self_view.s.matched();
+    lexer__advance_pos(&rtoc_self_view, rtoc_mutable_alias_arg_12);
+    &rtoc_self_view.tokens.append(COPY lexer__source_token(rtoc_self_view, type, val, start_line, col, start_offset, rtoc_self_view.line, rtoc_self_view.column, lexer__current_offset(rtoc_self_view)));
+    RETURN lexer__current_offset(rtoc_self_view);
+}
+END
+PRIVATE FN lexer__current_offset(self: Lexer) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view.base_offset + rtoc_self_view.s.pos());
+}
+END
+PRIVATE FN lexer__source_token(self: Lexer, type: String@symbol, value: ?TokenValue, line: Int64, column: Int64, start_offset: Int64, end_line: Int64, end_column: Int64, end_offset: Int64) RETURNS Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN Token{ type: COPY type, value: COPY value, line: COPY line, column: COPY column, file: COPY rtoc_self_view.file, start_offset: COPY start_offset, end_offset: COPY end_offset, end_line: COPY end_line, end_column: COPY end_column };
+}
+END
+PRIVATE FN lexer__advance_pos(MUTABLE self: Lexer, str: String) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE newlines = str.count("\n");
+    IF (newlines > 0) THEN
+      rtoc_self_view.line = (rtoc_self_view.line + newlines);
+      MUTABLE last_newline_index = str.rindex("\n");
+      rtoc_self_view.column = ((str.codepointCount() - last_newline_index));
+      RETURN ((str.codepointCount() - last_newline_index));
+    ELSE
+      rtoc_self_view.column = (rtoc_self_view.column + str.codepointCount());
+      RETURN rtoc_self_view.column;
+    END
+}
+END
+PRIVATE FN lexer__strip_digit_separators(self: Lexer, matched: String, suffix: String) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE body = regexReplaceFirst(matched, "_${escapeRegex(suffix)}\\z", "");
+    RETURN body.replace("_", "");
+}
+END
+PRIVATE FN lexer__add_prefixed_int(MUTABLE self: Lexer, val: Int64, suffix: String, start_col: Int64) RETURNS !?Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF !(lexer__numeric_suffix?(rtoc_self_view, suffix)) THEN
+      RAISE Input, Error, "Lexer Error: Unknown numeric suffix '_{}' at line {}:{}";
+    END
+    IF (lexer__integer_suffix?(rtoc_self_view, suffix) AND !(lexer__integer_suffix_contains?(rtoc_self_view, suffix, val))) THEN
+      RAISE Input, Error, "Lexer Error: Literal {} overflows {} (range {})";
+    END
+    IF (suffix == "i64") THEN
+      RETURN lexer__add(&rtoc_self_view, :INT64, TokenValue{ Int64Value: val }, start_col);
+    ELSE_IF (suffix == "u8") THEN
+      RETURN lexer__add(&rtoc_self_view, :BYTE, TokenValue{ Int64Value: val }, start_col);
+    ELSE_IF (suffix == "i8") THEN
+      RETURN lexer__add(&rtoc_self_view, :INT8, TokenValue{ Int64Value: val }, start_col);
+    ELSE_IF (suffix == "i16") THEN
+      RETURN lexer__add(&rtoc_self_view, :INT16, TokenValue{ Int64Value: val }, start_col);
+    ELSE_IF (suffix == "i32") THEN
+      RETURN lexer__add(&rtoc_self_view, :INT32, TokenValue{ Int64Value: val }, start_col);
+    ELSE_IF (suffix == "u16") THEN
+      RETURN lexer__add(&rtoc_self_view, :UINT16, TokenValue{ Int64Value: val }, start_col);
+    ELSE_IF (suffix == "u32") THEN
+      RETURN lexer__add(&rtoc_self_view, :UINT32, TokenValue{ Int64Value: val }, start_col);
+    ELSE_IF (suffix == "u64") THEN
+      RETURN lexer__add(&rtoc_self_view, :UINT64, TokenValue{ Int64Value: val }, start_col);
+    ELSE_IF (suffix == "f32") THEN
+      RETURN lexer__add(&rtoc_self_view, :FLOAT32, TokenValue{ Float64Value: val.toFloat() }, start_col);
+    ELSE_IF (suffix == "f64") THEN
+      RETURN lexer__add(&rtoc_self_view, :NUMBER, TokenValue{ Float64Value: val.toFloat() }, start_col);
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN lexer__numeric_suffix?(self: Lexer, suffix: String) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN ((lexer__integer_suffix?(rtoc_self_view, suffix) OR (suffix == "f32")) OR (suffix == "f64"));
+}
+END
+PRIVATE FN lexer__integer_suffix?(self: Lexer, suffix: String) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (["u8", "i8", "i16", "u16", "i32", "u32", "i64", "u64"]).contains?(suffix);
+}
+END
+PRIVATE FN lexer__integer_suffix_contains?(self: Lexer, suffix: String, value: Int64) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN PARTIAL MATCH suffix START
+      "u8" -> (value <= 255),
+      "i8" -> (value <= 127),
+      "i16" -> (value <= 32767),
+      "u16" -> (value <= 65535),
+      "i32" -> (value <= 2147483647),
+      "u32" -> (value <= 4294967295),
+      "i64" -> (value <= 9223372036854775807),
+      "u64" -> (((((value >> 63)) >> 1)) == 0),
+      DEFAULT -> FALSE
+    END;
+}
+END
+PRIVATE FN lexer__check_based_literal(self: Lexer, value: Int64) RETURNS !Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (((((value >> 63)) >> 1)) != 0) THEN
+      RAISE Input, Error, "Lexer Error: Literal {} overflows u64 (range {})";
+    END
+    RETURN COPY value;
+}
+END
+PRIVATE FN lexer__integer_suffix_range_text(self: Lexer, suffix: String) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (suffix == "u8") THEN
+      RETURN "0..255";
+    ELSE_IF (suffix == "i8") THEN
+      RETURN "-128..127";
+    ELSE_IF (suffix == "i16") THEN
+      RETURN "-32768..32767";
+    ELSE_IF (suffix == "u16") THEN
+      RETURN "0..65535";
+    ELSE_IF (suffix == "i32") THEN
+      RETURN "-2147483648..2147483647";
+    ELSE_IF (suffix == "u32") THEN
+      RETURN "0..4294967295";
+    ELSE_IF (suffix == "i64") THEN
+      RETURN "-9223372036854775808..9223372036854775807";
+    ELSE_IF (suffix == "u64") THEN
+      RETURN "0..18446744073709551615";
+    ELSE
+      RETURN "";
+    END
+}
+END
+FN lexer__new(source: String, interpolation_depth: Int64 = 0, file: ?String = NIL, start_line: Int64 = 1, start_column: Int64 = 1, start_offset: Int64 = 0, budget: ?FrontendResourceBudget = NIL) RETURNS !Lexer@multiowned ->
+  MUTABLE self = Lexer{ base_offset: start_offset, budget: (budget OR_ELSE frontendResourceBudget__new()), column: start_column, file: COPY file, interpolation_depth: interpolation_depth, line: start_line, s: Scanner{ source: COPY source, pos: 0 }, tokens: List[] };
+  TRY (lexer__initialize(&self, source, interpolation_depth, file, start_line, start_column, start_offset, budget));
+  RETURN self @multiowned;
+END
+FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
+  IF s.startsWith?(affix) THEN
+    RETURN s.substr(affix.length(), (s.length() - affix.length()));
+  END
+  RETURN COPY s;
+END
+FN ruby_array_concat_Token(left: []Token, right: []Token) RETURNS []Token ->
+  MUTABLE result: []Token = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END

@@ -9,35 +9,30 @@ module RubyToClear
 
       def aggregate(units)
         total_loc = units.sum { |unit| unit.fetch("source_loc") }
-        gates = GATES.to_h do |gate|
-          passed = units.select { |unit| unit.dig("gates", gate) == "pass" }
-          unknown = units.count { |unit| unit.dig("gates", gate) == "unknown" }
-          passed_loc = passed.sum { |unit| unit.fetch("source_loc") }
-          [gate, {
-            "passed_files" => passed.length,
-            "total_files" => units.length,
-            "file_percent" => percent(passed.length, units.length),
-            "passed_source_loc" => passed_loc,
-            "total_source_loc" => total_loc,
-            "source_loc_percent" => percent(passed_loc, total_loc),
-            "unknown_files" => unknown
-          }]
+        gates = gate_metrics(units, total_loc) { |unit, gate| unit.dig("gates", gate) }
+        assisted_gates = gate_metrics(units, total_loc) do |unit, gate|
+          unit.dig("gates", gate) == "pass" || unit.dig("autofix", gate) == "pass" ? "pass" : unit.dig("autofix", gate)
         end
 
-        failures = units.filter_map { |unit| unit["failure"]&.fetch("code", nil) }.tally.sort.to_h
+        primary_units = units.reject { |unit| unit.dig("failure", "secondary") == true }
+        failures = primary_units.filter_map { |unit| unit["failure"]&.fetch("code", nil) }.tally.sort.to_h
         fingerprints = units.filter_map do |unit|
           failure = unit["failure"]
-          [failure["code"], failure["fingerprint"]] if failure
+          [failure["code"], failure["fingerprint"]] if failure && failure["secondary"] != true
         end.tally.sort_by { |(_key, count)| -count }.to_h
 
         {
           "files" => units.length,
           "source_loc" => total_loc,
           "gates" => gates,
+          "autofix_assisted_gates" => assisted_gates,
           "failure_codes" => failures,
+          "blocked_files" => units.count { |unit| unit.dig("failure", "secondary") == true },
           "failure_fingerprints" => fingerprints.map do |(code, fingerprint), count|
             { "code" => code, "fingerprint" => fingerprint, "count" => count }
           end,
+          "diagnostic_inventory" => DiagnosticInventory.aggregate(units),
+          "autofix_diagnostic_inventory" => DiagnosticInventory.aggregate(units, variant: "autofix"),
           "autofix_assisted_files" => units.count { |unit| unit.dig("autofix", "g4") == "pass" },
           "autofix" => {
             "attempted_files" => units.count { |unit| unit.dig("autofix", "fix") },
@@ -94,6 +89,17 @@ module RubyToClear
         out << ""
         out << "Clean transpilation means raw G1-G4 success. Autofix-assisted results are separate."
         out << ""
+        if aggregate.dig("autofix", "attempted_files").positive?
+          out << "## Autofix-Assisted Gates"
+          out << ""
+          out << "| Gate | Files | File % | Source LoC | LoC % |"
+          out << "| --- | ---: | ---: | ---: | ---: |"
+          Reporter::GATES.each do |gate|
+            row = aggregate.dig("autofix_assisted_gates", gate)
+            out << "| #{gate.upcase} | #{row["passed_files"]}/#{row["total_files"]} | #{format("%.2f", row["file_percent"])}% | #{row["passed_source_loc"]}/#{row["total_source_loc"]} | #{format("%.2f", row["source_loc_percent"])}% |"
+          end
+          out << ""
+        end
         out << "- raw build-clean files: #{aggregate.dig("gates", "g4", "passed_files")}"
         out << "- autofix-assisted build-clean files: #{aggregate.fetch("autofix_assisted_files")}"
         out << "- autofix completed files: #{aggregate.dig("autofix", "completed_files")}/#{aggregate.dig("autofix", "attempted_files")} (#{aggregate.dig("autofix", "failed_files")} fixer crashes)"
@@ -107,6 +113,7 @@ module RubyToClear
         else
           aggregate.fetch("failure_codes").each { |code, count| out << "- `#{code}`: #{count}" }
         end
+        out << "- blocked by a failed generated dependency: #{aggregate.fetch("blocked_files")}"
         out << ""
         out << "## Top Failure Fingerprints"
         out << ""
@@ -114,6 +121,10 @@ module RubyToClear
           out << "- #{item["count"]} x `#{item["code"]}`: #{item["fingerprint"]}"
         end
         out << ""
+        append_diagnostic_inventory(out, "Observed Diagnostic Inventory", aggregate.fetch("diagnostic_inventory"))
+        if aggregate.dig("autofix", "attempted_files").positive?
+          append_diagnostic_inventory(out, "Post-Autofix Diagnostic Inventory", aggregate.fetch("autofix_diagnostic_inventory"))
+        end
         out << "## Units"
         out << ""
         out << "| Unit | LoC | G1 | G2 | G3 | G4 | Failure | Autofix G4 |"
@@ -128,6 +139,46 @@ module RubyToClear
         return 0.0 if denominator.zero?
 
         (100.0 * numerator / denominator).round(4)
+      end
+
+      def gate_metrics(units, total_loc)
+        GATES.to_h do |gate|
+          passed = units.select { |unit| yield(unit, gate) == "pass" }
+          unknown = units.count { |unit| yield(unit, gate) == "unknown" }
+          passed_loc = passed.sum { |unit| unit.fetch("source_loc") }
+          [gate, {
+            "passed_files" => passed.length,
+            "total_files" => units.length,
+            "file_percent" => percent(passed.length, units.length),
+            "passed_source_loc" => passed_loc,
+            "total_source_loc" => total_loc,
+            "source_loc_percent" => percent(passed_loc, total_loc),
+            "unknown_files" => unknown
+          }]
+        end
+      end
+
+      def append_diagnostic_inventory(out, heading, inventory)
+        out << "## #{heading}"
+        out << ""
+        out << "- observed instances: #{inventory.fetch("observed_instances")}"
+        out << "- unique clusters: #{inventory.fetch("unique_clusters")}"
+        out << "- affected roots: #{inventory.fetch("affected_roots")}"
+        out << "- limitation: #{inventory.fetch("limitations")}"
+        out << ""
+        out << "| Category | Instances | Unique clusters | Affected roots |"
+        out << "| --- | ---: | ---: | ---: |"
+        inventory.fetch("categories").each do |item|
+          out << "| #{item["category"]} | #{item["instances"]} | #{item["unique_clusters"]} | #{item["affected_roots"]} |"
+        end
+        out << ""
+        out << "### Highest-Impact Clusters"
+        out << ""
+        inventory.fetch("clusters").first(30).each do |item|
+          provider = item["provider"] ? " at `#{item["provider"]}:#{item["line"]}`" : ""
+          out << "- #{item["affected_roots"]} roots / #{item["instances"]} instances, `#{item["category"]}`#{provider}: #{item["fingerprint"]}"
+        end
+        out << ""
       end
     end
   end

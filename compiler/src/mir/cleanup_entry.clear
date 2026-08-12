@@ -1,0 +1,255 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6966656379636c655f706c616e2e636c656172"
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172"
+PUB STRUCT CleanupEntry {
+
+}
+
+FN cleanupEntry__build(kind: String@symbol, alloc: String@symbol = :heap, has_moved_guard: Bool = TRUE, extra: {String@symbol}Any = {}) RETURNS CleanupEntry@multiowned ->
+  MUTABLE e = new();
+  e[:needs_cleanup] = TRUE;
+  e[:alloc] = COPY alloc;
+  e[:scope] = cleanupEntry__cleanup_scope_for_alloc(alloc, :function);
+  e[:kind] = COPY kind;
+  e[:has_moved_guard] = COPY has_moved_guard;
+  extra.keys() |> EACH {
+  MUTABLE v: Any = (extra[_] OR_ELSE panic("missing hash key"));
+  e[_] = v;
+  };
+  RETURN e;
+END
+FN cleanupEntry__no_cleanup(alloc: String@symbol, scope: String@symbol) RETURNS CleanupEntry@multiowned ->
+  MUTABLE e = new();
+  e[:needs_cleanup] = FALSE;
+  e[:alloc] = COPY alloc;
+  e[:scope] = COPY scope;
+  e[:kind] = :none;
+  e[:has_moved_guard] = FALSE;
+  RETURN e;
+END
+FN cleanupEntry__from(h: Any) RETURNS CleanupEntry@multiowned ->
+  MUTABLE e = new();
+  h.keys() |> EACH {
+  MUTABLE v: Any = (h[_] OR_ELSE panic("missing hash key"));
+  e[_] = v;
+  };
+  RETURN e;
+END
+FN cleanupEntry__cleanup_scope_for_alloc(alloc: String@symbol, frame_scope: String@symbol) RETURNS String@symbol ->
+  IF placement__heap?(alloc) THEN
+    RETURN :heap;
+  ELSE
+    RETURN frame_scope;
+  END
+END
+FN cleanupEntry__kind(self: CleanupEntry) RETURNS String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN CAST(rtoc_self_view[:kind] AS String@symbol);
+}
+END
+FN cleanupEntry__alloc(self: CleanupEntry) RETURNS String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN CAST(rtoc_self_view[:alloc] AS String@symbol);
+}
+END
+FN cleanupEntry__scope(self: CleanupEntry) RETURNS String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN CAST(rtoc_self_view[:scope] AS String@symbol);
+}
+END
+FN cleanupEntry__none?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN equal?(new());
+}
+END
+FN cleanupEntry__present?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN !(equal?(new()));
+}
+END
+FN cleanupEntry__needs_cleanup?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view[:needs_cleanup] == TRUE);
+}
+END
+FN cleanupEntry__has_moved_guard?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view[:has_moved_guard] == TRUE);
+}
+END
+FN cleanupEntry__heap?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view[:alloc] == :heap);
+}
+END
+FN cleanupEntry__frame?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view[:alloc] == :frame);
+}
+END
+FN cleanupEntry__match_as?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view[:match_as] == TRUE);
+}
+END
+FN cleanupEntry__via_pointer?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view[:via_pointer] == TRUE);
+}
+END
+PRIVATE FN cleanupEntry__needs_release_fields?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view[:needs_release_fields] == TRUE);
+}
+END
+FN cleanupEntry__rc_release_fields_cleanup?(self: CleanupEntry) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN ((cleanupEntry__kind(rtoc_self_view) == :rc) AND cleanupEntry__needs_release_fields?(rtoc_self_view));
+}
+END
+FN cleanupEntry__mark_moved_guard_mut(MUTABLE self: CleanupEntry) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view[:has_moved_guard] = TRUE;
+    MUTABLE rtoc_owned_return_1: CleanupEntry@multiowned = rtoc_self_view;
+    RETURN rtoc_owned_return_1;
+}
+END
+FN cleanupEntry__clear_moved_guard_mut(MUTABLE self: CleanupEntry) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view[:has_moved_guard] = FALSE;
+    MUTABLE rtoc_owned_return_2: CleanupEntry@multiowned = rtoc_self_view;
+    RETURN rtoc_owned_return_2;
+}
+END
+FN cleanupEntry__suppress_cleanup_mut(MUTABLE self: CleanupEntry) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view[:needs_cleanup] = FALSE;
+    RETURN cleanupEntry__clear_moved_guard_mut(&rtoc_self_view);
+}
+END
+FN cleanupEntry__set_cleanup_scope_mut(MUTABLE self: CleanupEntry, scope: String@symbol) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view[:scope] = COPY scope;
+    MUTABLE rtoc_owned_return_3: CleanupEntry@multiowned = rtoc_self_view;
+    RETURN rtoc_owned_return_3;
+}
+END
+FN cleanupEntry__set_alloc_mut(MUTABLE self: CleanupEntry, alloc: String@symbol) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view[:alloc] = COPY alloc;
+    rtoc_self_view[:scope] = cleanupEntry__cleanup_scope_for_alloc(alloc, {:frame_scope: cleanupEntry__scope(rtoc_self_view)});
+    MUTABLE rtoc_owned_return_4: CleanupEntry@multiowned = rtoc_self_view;
+    RETURN rtoc_owned_return_4;
+}
+END
+FN cleanupEntry__promote_to_cleanup_mut(MUTABLE self: CleanupEntry, kind: String@symbol, alloc: String@symbol, has_moved_guard: Bool) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view[:needs_cleanup] = TRUE;
+    rtoc_self_view[:kind] = COPY kind;
+    rtoc_self_view[:alloc] = COPY alloc;
+    rtoc_self_view[:scope] = cleanupEntry__cleanup_scope_for_alloc(alloc, {:frame_scope: :function});
+    rtoc_self_view[:has_moved_guard] = COPY has_moved_guard;
+    MUTABLE rtoc_owned_return_5: CleanupEntry@multiowned = rtoc_self_view;
+    RETURN rtoc_owned_return_5;
+}
+END
+FN cleanupEntry__with_alloc(self: CleanupEntry, alloc: String@symbol) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE updated = dup();
+    cleanupEntry__set_alloc_mut(&updated, alloc);
+    RETURN updated;
+}
+END
+FN cleanupEntry__with_moved_guard(self: CleanupEntry) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE updated = dup();
+    cleanupEntry__mark_moved_guard_mut(&updated);
+    RETURN updated;
+}
+END
+FN cleanupEntry__rc_alloc(self: CleanupEntry) RETURNS ?String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view[:rc_alloc];
+}
+END
+FN cleanupEntry__base_zig(self: CleanupEntry) RETURNS ?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view[:base_zig];
+}
+END
+FN cleanupEntry__resource_close_plan(self: CleanupEntry) RETURNS ?ResourceClosePlan
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view[:resource_close_plan];
+}
+END
+FN cleanupEntry__lifecycle_plan(self: CleanupEntry) RETURNS ?LifecyclePlan
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY CAST(rtoc_self_view[:lifecycle_plan] AS ?LifecyclePlan);
+}
+END
+FN cleanupEntry__set_lifecycle_plan_mut(MUTABLE self: CleanupEntry, plan: LifecyclePlan) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view[:lifecycle_plan] = COPY plan;
+    MUTABLE rtoc_owned_return_6: CleanupEntry@multiowned = rtoc_self_view;
+    RETURN rtoc_owned_return_6;
+}
+END
+FN cleanupEntry__tuple_cleanup_fields(self: CleanupEntry) RETURNS ![]Any@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN CAST((rtoc_self_view[:tuple_cleanup_fields] OR List[]) AS []Any@multiowned);
+}
+END

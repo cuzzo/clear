@@ -1,0 +1,69 @@
+REQUIRE "../ast/type.clear"
+REQUIRE "../ast/symbol_entry.clear"
+UNION Path { StringValue: String, SymbolValue: String@symbol, PlaceId: PlaceId }
+# Ruby module OwnershipIdentity
+STRUCT BindingId {
+  name: String,
+  binding_id: Int64
+}
+
+FN bindingId__from_symbol(name: String, symbol: SymbolEntry) RETURNS BindingId ->
+  RETURN BindingId{ name: COPY name, binding_id: symbol.binding_id };
+END
+FN bindingId__to_s(self: BindingId) RETURNS String ->
+  RETURN "${self.name}#${self.binding_id.toString()}";
+END
+STRUCT PlaceId {
+  path: String,
+  binding_name: ?String,
+  binding_id: ?Int64
+}
+
+FN placeId__from_path(path: Path) RETURNS PlaceId ->
+  IF path IS_A PlaceId AS place_id THEN
+    RETURN COPY place_id;
+  END
+  RETURN PlaceId{ path: COPY CAST(path AS String), binding_name: NIL, binding_id: NIL };
+END
+FN placeId__from_symbol(path: Path, symbol: ?SymbolEntry) RETURNS PlaceId ->
+  IF symbol EXISTS AS symbol_value THEN
+    MUTABLE name = COPY CAST(path AS String);
+    RETURN PlaceId{ path: COPY name, binding_name: COPY name, binding_id: symbol_value.binding_id };
+  ELSE
+    RETURN placeId__from_path(path);
+  END
+END
+FN placeId__binding_identity(self: PlaceId) RETURNS ?BindingId ->
+  MUTABLE name: ?String = COPY self.binding_name;
+  MUTABLE id: ?Int64 = self.binding_id;
+  IF name EXISTS AS name_value THEN
+    IF id THEN
+      RETURN BindingId{ name: COPY name_value, binding_id: UNWRAP (id) };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN placeId__child?(self: PlaceId) RETURNS Bool ->
+  RETURN self.path.contains?(".");
+END
+FN placeId__parent(self: PlaceId) RETURNS ?PlaceId ->
+  IF !(placeId__child?(self)) THEN
+    RETURN NIL;
+  END
+  MUTABLE parts = self.path.split(".");
+  &parts.pop();
+  MUTABLE parent_path: String = "";
+  MUTABLE index: Int64 = 0;
+  WHILE (index < parts.length()) DO
+    IF !((parent_path.length() == 0)) THEN
+      parent_path = "${parent_path}.";
+    END
+    parent_path = "${parent_path}${UNWRAP (parts[index])}";
+    index = (index + 1);
+  END
+  RETURN placeId__from_path(Path{ StringValue: COPY parent_path });
+END
+# End Ruby module OwnershipIdentity

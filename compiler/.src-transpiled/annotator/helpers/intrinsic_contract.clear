@@ -1,0 +1,141 @@
+REQUIRE "../../ast/type.clear"
+REQUIRE "../../ast/param.clear"
+REQUIRE "intrinsic_emit.clear"
+REQUIRE "../../ast/ast.clear"
+PUB ENUM IntrinsicTemplateKind { Zig, NumericZig, ShardedZig, ShardDirectZig }
+PUB ENUM IntrinsicAllocationKind { Alloc, ReturnAlloc, ValAlloc, KeyAlloc, ShardAlloc, ShardedAlloc }
+STRUCT IntrinsicTemplateContract {
+  zig: ?IntrinsicEmitStrOrSym,
+  numeric_zig: ?IntrinsicEmitStrOrSym,
+  sharded_zig: ?IntrinsicEmitStrOrSym,
+  shard_direct_zig: ?IntrinsicEmitStrOrSym,
+  bc: Bool,
+  bc_op: ?String@symbol
+}
+
+FN intrinsicTemplateContract__pattern_for(self: IntrinsicTemplateContract, kind: IntrinsicTemplateKind) RETURNS ?IntrinsicEmitStrOrSym ->
+  IF (kind == IntrinsicTemplateKind.Zig) THEN
+    RETURN intrinsicTemplateContract__copy_template_value(self, self.zig);
+  END
+  IF (kind == IntrinsicTemplateKind.NumericZig) THEN
+    RETURN intrinsicTemplateContract__copy_template_value(self, self.numeric_zig);
+  END
+  IF (kind == IntrinsicTemplateKind.ShardedZig) THEN
+    RETURN intrinsicTemplateContract__copy_template_value(self, self.sharded_zig);
+  END
+  IF (kind == IntrinsicTemplateKind.ShardDirectZig) THEN
+    RETURN intrinsicTemplateContract__copy_template_value(self, self.shard_direct_zig);
+  END
+  RETURN NIL;
+END
+FN intrinsicTemplateContract__copy_template_value(self: IntrinsicTemplateContract, value: ?IntrinsicEmitStrOrSym) RETURNS ?IntrinsicEmitStrOrSym ->
+  IF value EXISTS AS value_value THEN
+    MUTABLE concrete = COPY value_value;
+    IF concrete IS_A String@symbol AS string_symbol THEN
+      RETURN IntrinsicEmitStrOrSym{ SymbolValue: COPY string_symbol };
+    END
+    RETURN COPY concrete;
+  ELSE
+    RETURN NIL;
+  END
+END
+FN intrinsicTemplateContract__bc_op_or(self: IntrinsicTemplateContract, default_name: String@symbol) RETURNS String@symbol ->
+  IF self.bc_op != NIL THEN
+  RETURN (self.bc_op)?;
+  ELSE
+  RETURN default_name;
+  END
+END
+STRUCT IntrinsicAllocationContract {
+  allocates: Bool,
+  alloc: ?String@symbol,
+  return_alloc: ?String@symbol,
+  val_alloc: ?String@symbol,
+  key_alloc: ?String@symbol,
+  shard_alloc: ?String@symbol,
+  sharded_alloc: ?String@symbol
+}
+
+FN intrinsicAllocationContract__placeholder(self: IntrinsicAllocationContract, kind: IntrinsicAllocationKind) RETURNS ?String@symbol ->
+  IF (kind == IntrinsicAllocationKind.Alloc) THEN
+    RETURN self.alloc;
+  END
+  IF (kind == IntrinsicAllocationKind.ReturnAlloc) THEN
+    RETURN self.return_alloc;
+  END
+  IF (kind == IntrinsicAllocationKind.ValAlloc) THEN
+    RETURN self.val_alloc;
+  END
+  IF (kind == IntrinsicAllocationKind.KeyAlloc) THEN
+    RETURN self.key_alloc;
+  END
+  IF (kind == IntrinsicAllocationKind.ShardAlloc) THEN
+    RETURN self.shard_alloc;
+  END
+  IF (kind == IntrinsicAllocationKind.ShardedAlloc) THEN
+    RETURN self.sharded_alloc;
+  END
+  RETURN NIL;
+END
+STRUCT IntrinsicOwnershipContract {
+  mutates_receiver: Bool,
+  takes_value: Bool,
+  takes_indices: [Set]Int64,
+  argument_takes_indices: [Set]Int64,
+  container_borrow: Bool
+}
+
+FN intrinsicOwnershipContract__takes_any?(self: IntrinsicOwnershipContract) RETURNS Bool ->
+  RETURN (self.takes_value OR !(self.takes_indices.empty?()));
+END
+STRUCT IntrinsicBehaviorContract {
+  is_method: Bool,
+  suspends: Bool,
+  fsm_setup_present: Bool,
+  narrows_collection: Bool,
+  narrows_receiver_collection: Bool,
+  reject_when: ?String@symbol,
+  reject_error: ?String,
+  error_kind: ?String@symbol,
+  error_type: ?String@symbol,
+  lifetime: []String
+}
+
+FN intrinsicBehaviorContract__narrows_collection_type?(self: IntrinsicBehaviorContract) RETURNS Bool ->
+  RETURN (self.narrows_collection OR self.narrows_receiver_collection);
+END
+STRUCT IntrinsicContract {
+  template: IntrinsicTemplateContract,
+  allocation: IntrinsicAllocationContract,
+  ownership: IntrinsicOwnershipContract,
+  behavior: IntrinsicBehaviorContract
+}
+
+MUTABLE empty_value: IntrinsicContract = IntrinsicContract{ template: COPY IntrinsicTemplateContract{ zig: NIL, numeric_zig: NIL, sharded_zig: NIL, shard_direct_zig: NIL, bc: FALSE, bc_op: NIL }, allocation: COPY IntrinsicAllocationContract{ allocates: FALSE, alloc: NIL, return_alloc: NIL, val_alloc: NIL, key_alloc: NIL, shard_alloc: NIL, sharded_alloc: NIL }, ownership: COPY IntrinsicOwnershipContract{ mutates_receiver: FALSE, takes_value: FALSE, takes_indices: Set[], argument_takes_indices: Set[], container_borrow: FALSE }, behavior: COPY IntrinsicBehaviorContract{ is_method: FALSE, suspends: FALSE, fsm_setup_present: FALSE, narrows_collection: FALSE, narrows_receiver_collection: FALSE, reject_when: NIL, reject_error: NIL, error_kind: NIL, error_type: NIL, lifetime: List[] } };
+FN intrinsicContract__empty() RETURNS IntrinsicContract ->
+  RETURN empty_value;
+END
+FN intrinsicContract__from_emit(emit: IntrinsicEmit, params: []Param) RETURNS !IntrinsicContract ->
+  RETURN IntrinsicContract{ template: COPY IntrinsicTemplateContract{ zig: COPY emit.zig, numeric_zig: COPY emit.numeric_zig, sharded_zig: COPY emit.sharded_zig, shard_direct_zig: COPY emit.shard_direct_zig, bc: emit.bc, bc_op: COPY emit.bc_op }, allocation: COPY IntrinsicAllocationContract{ allocates: emit.allocates, alloc: COPY emit.alloc, return_alloc: COPY emit.return_alloc, val_alloc: COPY emit.val_alloc, key_alloc: COPY emit.key_alloc, shard_alloc: COPY emit.shard_alloc, sharded_alloc: COPY emit.sharded_alloc }, ownership: COPY IntrinsicOwnershipContract{ mutates_receiver: emit.mutates_receiver, takes_value: emit.takes_value, takes_indices: COPY TRY (intrinsicContract__normalized_takes_indices(emit, params)), argument_takes_indices: COPY TRY (intrinsicContract__normalized_argument_takes_indices(emit)), container_borrow: emit.container_borrow }, behavior: COPY IntrinsicBehaviorContract{ is_method: emit.is_method, suspends: emit.suspends, fsm_setup_present: emit.fsm_setup_present, narrows_collection: emit.narrows_collection, narrows_receiver_collection: emit.narrows_receiver_collection, reject_when: COPY emit.reject_when, reject_error: COPY emit.reject_error, error_kind: COPY emit.error_kind, error_type: COPY emit.error_type, lifetime: COPY emit.lifetime } };
+END
+FN intrinsicContract__normalized_takes_indices(emit: IntrinsicEmit, params: []Param) RETURNS ![Set]Int64 ->
+  MUTABLE indices: [Set]Int64 = Set[];
+  FOR _ IN emit.takes_args DO
+  &indices.insert(_);
+  END
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < params.length() DO
+  IF params[rtoc_idx]?.takes EXISTS AS takes_value THEN
+      &indices.insert(COPY rtoc_idx);
+  END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN indices;
+END
+FN intrinsicContract__normalized_argument_takes_indices(emit: IntrinsicEmit) RETURNS ![Set]Int64 ->
+  MUTABLE indices: [Set]Int64 = Set[];
+  FOR _ IN emit.takes_args DO
+  &indices.insert(_);
+  END
+  RETURN indices;
+END

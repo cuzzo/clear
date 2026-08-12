@@ -16,6 +16,7 @@ module RubyToClear
       "TrueClass" => "Bool",
       "FalseClass" => "Bool",
       "BasicObject" => "Any",
+      "Proc" => "Any",
       "T" => "Auto",
     }.freeze
 
@@ -85,19 +86,30 @@ module RubyToClear
       keyword_hash = call_node.arguments&.arguments&.first
       return {} unless keyword_hash.is_a?(Prism::KeywordHashNode)
 
-      keyword_hash.elements.each_with_object({}) do |assoc, types|
-        next unless assoc.is_a?(Prism::AssocNode)
+      old_in_sig = @in_function_signature
+      @in_function_signature = true
+      begin
+        keyword_hash.elements.each_with_object({}) do |assoc, types|
+          next unless assoc.is_a?(Prism::AssocNode)
 
-        param_name = assoc.key.value.to_s
-        types[param_name] = convert_sorbet_type(
-          assoc.value,
-          union_name: camel_type_name(param_name),
-          emit_union: true
-        )
+          param_name = assoc.key.value.to_s
+          types[param_name] = convert_sorbet_type(
+            assoc.value,
+            union_name: camel_type_name(param_name),
+            emit_union: true
+          )
+        end
+      ensure
+        @in_function_signature = old_in_sig
       end
     end
 
     def convert_sorbet_type(node, union_name: nil, emit_union: false, map_key: false)
+      res = convert_sorbet_type_raw(node, union_name: union_name, emit_union: emit_union, map_key: map_key)
+      resolve_type_with_aliasable(res)
+    end
+
+    def convert_sorbet_type_raw(node, union_name: nil, emit_union: false, map_key: false)
       return untyped_type unless node
 
       case node
@@ -119,26 +131,36 @@ module RubyToClear
 
     def convert_sorbet_constant_read_type(node)
       name = node.name.to_s
+      # An explicit helper-config type mapping overrides alias expansion:
+      # a project may alias Integer as a domain type (e.g. TokenInt) whose
+      # translated representation is intentionally different (UInt64).
+      if (configured = @helper_config.clear_type(name))
+        return configured
+      end
       if (type_alias = type_alias_for_name(name))
         return expand_non_emitted_type_alias(type_alias)
       end
 
-      @helper_config.clear_type(name) || SORBET_CONSTANT_TYPES.fetch(name, name)
+      SORBET_CONSTANT_TYPES.fetch(name) { clear_constant_type_name(name) }
     end
 
     def convert_sorbet_constant_path_type(node, emit_union:)
       path = node.location.slice.strip
       if path == "AST::Node"
+        if (type_alias = type_alias_for_path(path))
+          return expand_non_emitted_type_alias(type_alias)
+        end
         ensure_ast_node_union!(emit: emit_union)
         return "Node"
       end
+      return @helper_config.clear_type(path) if @helper_config.clear_type(path)
       if (type_alias = type_alias_for_path(path))
         return expand_non_emitted_type_alias(type_alias)
       end
 
       return untyped_type if path == "T.untyped"
 
-      SORBET_PATH_TYPES.fetch(path) { path.split("::").last }
+      SORBET_PATH_TYPES.fetch(path) { clear_constant_type_name(path) }
     end
 
     def convert_sorbet_call_type(node, union_name:, emit_union:, map_key:)
@@ -176,8 +198,6 @@ module RubyToClear
         emit_union: emit_union,
         map_key: map_key
       )
-      return untyped_type if inner == untyped_type
-
       optional_clear_type(inner)
     end
 
@@ -186,14 +206,17 @@ module RubyToClear
       non_nil_args = args.reject { |arg| arg.location.slice.strip == "NilClass" }
       has_nil = non_nil_args.length != args.length
 
+      # Hash keys must stay scalar: CLEAR map keys cannot be unions, so the
+      # String|Symbol pair keeps its historical String@symbol collapse there.
       type = if map_key && sorbet_string_symbol_union_args?(non_nil_args)
-        "String"
+        "String@symbol"
       elsif non_nil_args.any? { |arg| sorbet_broad_any_type_node?(arg) }
         "Any"
       elsif non_nil_args.length == 1
         convert_sorbet_type(non_nil_args.first, union_name: union_name, emit_union: emit_union, map_key: map_key)
       else
-        sorbet_union_from_any_args(non_nil_args, union_name: union_name, emit_union: emit_union) || untyped_type
+        sorbet_union_from_any_args(non_nil_args, union_name: union_name, emit_union: emit_union) ||
+          (sorbet_string_symbol_union_args?(non_nil_args) ? "String@symbol" : untyped_type)
       end
 
       has_nil && type != untyped_type ? optional_clear_type(type) : type
@@ -224,6 +247,14 @@ module RubyToClear
     def convert_array_type_call(node, union_name:, emit_union:)
       inner = convert_collection_item_type(node, union_name: union_name, emit_union: emit_union)
       return "Any[]" if inner == "Auto"
+
+      # Function parameters are borrowed at the top level, but elements of a
+      # Ruby Array still retain Ruby object identity. Keep reference-backed
+      # element types reference-backed even while parsing a signature; using a
+      # value element here makes parameter and return types disagree after
+      # operations such as `uniq`/DISTINCT.
+      base = inner.to_s.delete_prefix("?").split("@").first.to_s.delete_suffix("[]")
+      inner = apply_multiowned_sigil(inner) if @aliasable_classes.include?(base)
 
       "#{collection_element_type(inner)}[]"
     end
@@ -305,6 +336,7 @@ module RubyToClear
 
       return nil unless found_proc
 
+      return_type = fallible_return_type(return_type) if allocating_collection_return_type?(return_type)
       "FN(#{params.join(', ')}) -> #{return_type}"
     end
 
@@ -359,8 +391,13 @@ module RubyToClear
       return direct if direct
 
       suffix = "::#{name}"
-      suffix_matches = @type_aliases.keys.select { |key| key.end_with?(suffix) }
-      return @type_aliases[suffix_matches.first] if suffix_matches.length == 1
+      is_known_class = @class_instance_field_types.key?(name.to_s) ||
+                        @constructor_params.key?(name.to_s) ||
+                        @aliasable_classes.include?(name.to_s)
+      unless is_known_class
+        suffix_matches = @type_aliases.keys.select { |key| key.end_with?(suffix) }
+        return @type_aliases[suffix_matches.first] if suffix_matches.length == 1
+      end
 
       nil
     end
@@ -370,6 +407,7 @@ module RubyToClear
       segments = normalized.split("::")
       candidates = [path.to_s, normalized]
       candidates << type_alias_key(segments.last) if @current_class && segments.any?
+      candidates << type_alias_key(normalized) if @current_class
 
       if segments.length > 1
         1.upto(segments.length - 1) do |index|
@@ -389,7 +427,13 @@ module RubyToClear
     end
 
     def type_alias_clear_name(name, current_class = @current_class)
-      current_class ? camel_type_name("#{current_class}::#{name}") : name.to_s
+      return name.to_s unless current_class
+      # Ruby modules are pure namespaces that CLEAR flattens away, so aliases
+      # declared directly in a module keep their unqualified reference name.
+      # Aliases owned by a class stay prefixed to avoid cross-class collisions.
+      return camel_type_name(name) if @type_alias_module_namespaces.include?(current_class)
+
+      camel_type_name("#{current_class}::#{name}")
     end
 
     def with_current_class(class_name)
@@ -404,10 +448,80 @@ module RubyToClear
       class_name ? "#{class_name}##{method_name}" : method_name.to_s
     end
 
+    def transitive_includes(name, seen = Set.new)
+      return [] if seen.include?(name)
+      seen = seen | [name]
+
+      direct = (@class_includes[name] || []) + (@mixin_includes[name] || [])
+      direct.flat_map do |included|
+        resolved = resolved_mixin_metadata_name(included, name)
+        [included, resolved, *transitive_includes(resolved, seen)].uniq
+      end.uniq
+    end
+
+    def resolve_qualified_class_name(class_name)
+      return nil unless class_name
+      class_name_str = class_name.to_s.delete_prefix("?").split("@").first.to_s.delete_suffix("[]")
+      cache_key = [@current_class.to_s, class_name_str]
+      if @metadata_finalized && @qualified_class_resolution_cache.key?(cache_key)
+        return @qualified_class_resolution_cache[cache_key]
+      end
+
+      declared_names = (
+        @class_instance_method_names.select { |_name, methods| methods.any? }.keys +
+        @class_class_method_names.select { |_name, methods| methods.any? }.keys +
+        @class_instance_field_types.select { |_name, fields| fields.any? }.keys +
+        @struct_fields.select { |_name, fields| fields.any? }.keys
+      ).uniq
+      lexical = nil
+      unless class_name_str.include?("::") || @current_class.to_s.empty?
+        scope = @current_class.to_s.split("::")
+        scope.pop
+        scope.length.downto(1) do |length|
+          candidate = (scope.first(length) + [class_name_str]).join("::")
+          if declared_names.include?(candidate)
+            lexical = candidate
+            break
+          end
+        end
+      end
+
+      exact = lexical || (@constant_names.key?(class_name_str) ? class_name_str : nil) ||
+        @type_aliases.keys.find { |k| k == class_name_str || k.end_with?("::#{class_name_str}") } ||
+        @imported_class_names.find { |name| name.end_with?("::#{class_name_str}") }
+      resolved = if exact
+        exact
+      else
+        # Hashes with default procs acquire empty basename entries during
+        # speculative lookups. Those are not declarations and must not make a
+        # unique qualified symbol appear ambiguous (for example the nested
+        # FunctionSignature::AnalysisFacts type versus an empty AnalysisFacts
+        # lookup bucket).
+        matches = declared_names.select do |name|
+          name == class_name_str || name.end_with?("::#{class_name_str}") || name.end_with?(".#{class_name_str}")
+        end
+        matches.one? ? matches.first : class_name_str
+      end
+      @qualified_class_resolution_cache[cache_key] = resolved if @metadata_finalized
+      resolved
+    end
+
     def method_param_types_for(method_name, class_name = nil)
       if class_name
-        scoped = scoped_method_key(class_name, method_name)
-        return @method_param_types[scoped] if @method_param_types.key?(scoped)
+        class_name = resolve_qualified_class_name(class_name)
+        [class_name, class_name.to_s.split("::").last].uniq.each do |c_name|
+          scoped = scoped_method_key(c_name, method_name)
+          return @method_param_types[scoped] if @method_param_types.key?(scoped)
+        end
+
+        if (includes = transitive_includes(class_name))
+          includes.each do |inc|
+            [inc, inc.to_s.split("::").last].uniq.each do |c_name|
+              scoped_inc = scoped_method_key(c_name, method_name)
+              return @method_param_types[scoped_inc] if @method_param_types.key?(scoped_inc)
+            end
+          end
+        end
       end
 
       @method_param_types[method_name.to_s] || {}
@@ -415,20 +529,106 @@ module RubyToClear
 
     def method_params_for(method_name, class_name = nil)
       if class_name
+        class_name = resolve_qualified_class_name(class_name)
         scoped = scoped_method_key(class_name, method_name)
-        return @method_params[scoped] if @method_params.key?(scoped)
+        if @method_params.key?(scoped)
+          return qualify_method_param_aliases(@method_params[scoped], class_name)
+        end
+
+        if (includes = transitive_includes(class_name))
+          includes.each do |inc|
+            scoped_inc = scoped_method_key(inc, method_name)
+            if @method_params.key?(scoped_inc)
+              return qualify_method_param_aliases(@method_params[scoped_inc], class_name)
+            end
+          end
+        end
+
+        # Expanded mixin methods are emitted on the concrete receiver, while
+        # their declaration signature remains owned by the source mixin. Use a
+        # signature only when all matching declarations agree; ambiguity stays
+        # unresolved instead of being guessed by the emitter.
+        matching = @method_params.filter_map do |key, params|
+          params if key.to_s.end_with?("##{method_name}")
+        end
+        canonical = matching.uniq do |params|
+          params.map { |param| [param[:name], param[:kind], param[:type].to_s, param[:mutable], param[:default]&.location&.slice] }
+        end
+        return qualify_method_param_aliases(canonical.first, class_name) if canonical.one?
       end
 
       @method_params[method_name.to_s]
     end
 
+    def qualify_method_param_aliases(params, class_name)
+      params.map do |param|
+        type = param[:type].to_s
+        owners = [class_name.to_s, class_name.to_s.split("::").last].uniq
+        qualified = owners.filter_map do |owner|
+          candidate = "#{owner}::#{type}"
+          candidate if @type_aliases.key?(candidate)
+        end.first
+        unless qualified
+          local_aliases = owners.flat_map do |owner|
+            @type_aliases.keys.grep(/\A#{Regexp.escape(owner)}::/)
+          end.uniq
+          suffix_matches = local_aliases.select do |candidate|
+            type.delete_prefix("?").end_with?(candidate.split("::").last)
+          end
+          qualified = suffix_matches.first if suffix_matches.one?
+        end
+        next param unless !type.empty? && !type.include?("::") && qualified
+
+        param.merge(type: qualified)
+      end
+    end
+
     def method_return_type_for(method_name, class_name = nil)
       if class_name
-        scoped = scoped_method_key(class_name, method_name)
-        return @method_return_types[scoped] if @method_return_types.key?(scoped)
+        class_name = resolve_qualified_class_name(class_name)
+        [class_name, class_name.to_s.split("::").last].uniq.each do |c_name|
+          scoped = scoped_method_key(c_name, method_name)
+          return @method_return_types[scoped] if @method_return_types.key?(scoped)
+        end
+
+        if (includes = transitive_includes(class_name))
+          includes.each do |inc|
+            [inc, inc.to_s.split("::").last].uniq.each do |c_name|
+              scoped_inc = scoped_method_key(c_name, method_name)
+              return @method_return_types[scoped_inc] if @method_return_types.key?(scoped_inc)
+            end
+          end
+        end
+
+        owner = class_name
+        %w[BindingLifecycleFacts BindingFlowFacts].each do |facts_class|
+          ["#{owner}::#{facts_class}", facts_class].each do |facts_owner|
+            field_type = @class_instance_field_types[facts_owner][method_name.to_s]
+            return field_type if field_type
+          end
+        end
       end
 
       @method_return_types[method_name.to_s]
+    end
+    public :method_return_type_for
+
+    def method_return_type_identity_for(method_name, class_name = nil)
+      if class_name
+        class_name = resolve_qualified_class_name(class_name)
+        [class_name, class_name.to_s.split("::").last].uniq.each do |candidate|
+          key = scoped_method_key(candidate, method_name)
+          return @method_return_type_identities[key] if @method_return_type_identities.key?(key)
+        end
+        transitive_includes(class_name).each do |included|
+          [included, included.to_s.split("::").last].uniq.each do |candidate|
+            key = scoped_method_key(candidate, method_name)
+            return @method_return_type_identities[key] if @method_return_type_identities.key?(key)
+          end
+        end
+      end
+
+      @method_return_type_identities[method_name.to_s]
     end
 
     def sorbet_union_from_any_args(args, union_name:, emit_union:)
@@ -449,6 +649,13 @@ module RubyToClear
       return [text] if text.start_with?("?")
 
       expanded = expand_non_emitted_type_alias(text).to_s
+      # Locatable is the canonical representation of AST::Node, but a wider
+      # union containing AST::Node must contain its concrete variants. CLEAR
+      # unions are nominal and do not provide transitive IS_A through a nested
+      # union payload.
+      return @union_types[expanded] if expanded == "Locatable" && @union_types[expanded]
+      return [expanded] if @closed_interface_unions.include?(expanded)
+
       @union_types[expanded] || [expanded]
     end
 
@@ -508,7 +715,11 @@ module RubyToClear
     def optional_clear_type(type)
       text = type.to_s
       return text if text.start_with?("?")
-      return untyped_type if text == untyped_type
+
+      # CLEAR intentionally parses ?T[] as an array of optional elements.
+      # Sorbet's T.nilable(T::Array[T]) and T.nilable(T::Set[T]) describe an
+      # optional collection instead, which requires an explicit grouping.
+      return "?(#{text})" if text.match?(/\[\](?:@\w+)*\z/)
 
       "?#{text}"
     end
@@ -546,6 +757,7 @@ module RubyToClear
       names << type_alias if @union_types.key?(type_alias)
       names.sort_by { |name| [name == type_alias ? 1 : 0, name] }.filter_map do |name|
         next if @body_union_defs.include?(name)
+        next if @imported_union_names.include?(name)
 
         @body_union_defs << name
         union_definition(name, @union_types[name], visibility: visibility)

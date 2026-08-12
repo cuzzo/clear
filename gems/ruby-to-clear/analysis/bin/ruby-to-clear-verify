@@ -12,7 +12,9 @@ options = {
   artifacts_dir: "tmp/ruby-to-clear-verify",
   report_dir: File.join(analysis_root, "results"),
   jobs: 2,
-  autofix: false
+  autofix: false,
+  allow_toolchain_change: false,
+  g4: true
 }
 
 parser = OptionParser.new do |opts|
@@ -23,9 +25,36 @@ parser = OptionParser.new do |opts|
   opts.on("--jobs N", Integer, "Concurrent compiler processes, default 2") { |value| options[:jobs] = value }
   opts.on("--timeout SECONDS", Integer, "Per-process timeout") { |value| options[:timeout_seconds] = value }
   opts.on("--autofix", "Evaluate clear fix output separately") { options[:autofix] = true }
+  opts.on("--g3-only", "Stop after G3; do not run clear test/Zig G4") { options[:g4] = false }
   opts.on("--only REGEXP", "Only units whose source path matches") { |value| options[:only] = value }
+  opts.on("--g3-from-report PATH", "Regenerate the full corpus, then run only prior G3 failures") do |value|
+    options[:g3_from_report] = value
+  end
+  opts.on("--changed PATHS", "Comma-separated changed corpus paths; reuse unchanged G0-G2 artifacts") do |value|
+    options[:changed] = value
+  end
+  opts.on("--reuse-report PATH", "Completed full-run report whose immutable artifacts seed --changed") do |value|
+    options[:reuse_report] = value
+  end
+  opts.on("--allow-toolchain-change",
+          "Focused --changed validation after transpiler edits; unchanged generated units come from the reuse report") do
+    options[:allow_toolchain_change] = true
+  end
 end
 parser.parse!
+
+if options[:autofix] && (options[:g3_from_report] || !options[:g4])
+  abort "--autofix requires G4; remove --g3-from-report or --g3-only"
+end
+if options[:changed] && !options[:reuse_report]
+  abort "--changed requires --reuse-report from a completed verifier run"
+end
+if options[:changed] && options[:g3_from_report]
+  abort "--changed cannot be combined with --g3-from-report"
+end
+if options[:allow_toolchain_change] && !options[:changed]
+  abort "--allow-toolchain-change requires --changed"
+end
 
 report = RubyToClear::Analysis::Verifier.new(**options).run
 aggregate = report.fetch("aggregate")

@@ -3,7 +3,7 @@
 
 require_relative "../lib/ruby_to_clear"
 
-usage = "Usage: ruby-to-clear [--strict] [--helper-config path.json] <file.rb>"
+usage = "Usage: ruby-to-clear [--strict] [--helper-config path.json] [--cfg-facts path.json] [--typed-ir-report path.json] <file.rb>"
 
 if ARGV.empty? || ARGV.include?("--help") || ARGV.include?("-h")
   puts usage
@@ -12,10 +12,30 @@ end
 
 strict = ARGV.delete("--strict")
 helper_config = nil
+cfg_facts_path = nil
+typed_ir_report_path = nil
 if (idx = ARGV.index("--helper-config"))
   helper_config = ARGV[idx + 1]
   unless helper_config
     warn "--helper-config requires a path"
+    exit 1
+  end
+  ARGV.delete_at(idx + 1)
+  ARGV.delete_at(idx)
+end
+if (idx = ARGV.index("--typed-ir-report"))
+  typed_ir_report_path = ARGV[idx + 1]
+  unless typed_ir_report_path
+    warn "--typed-ir-report requires a path"
+    exit 1
+  end
+  ARGV.delete_at(idx + 1)
+  ARGV.delete_at(idx)
+end
+if (idx = ARGV.index("--cfg-facts"))
+  cfg_facts_path = ARGV[idx + 1]
+  unless cfg_facts_path
+    warn "--cfg-facts requires a path"
     exit 1
   end
   ARGV.delete_at(idx + 1)
@@ -28,7 +48,10 @@ unless File.exist?(path)
 end
 
 begin
-  puts RubyToClear.transpile_file(path, raise_on_error: strict, helper_config: helper_config)
+  puts RubyToClear.transpile_file(
+    path, raise_on_error: strict, helper_config: helper_config, cfg_facts_path: cfg_facts_path,
+    typed_ir_report_path: typed_ir_report_path
+  )
 rescue StandardError => e
   warn "Error: #{e.message}"
   exit 1

@@ -1,0 +1,114 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+# Ruby module AST
+# Ruby stores each error type as a 4-key Hash. A record is the honest CLEAR
+# spelling and removes every `CAST(entry AS {String@symbol}Any)` the readers
+# needed.
+PUB STRUCT ErrorTypeEntry {
+  kind: String@symbol,
+  zig_name: String,
+  id: Int64,
+  first_site: ?Token
+}
+UNION ErrorTypeConflictValue { SymbolValue: String@symbol, TokenMultiowned: Token@multiowned, BoolValue: Bool, Token: Token }
+PUB FN ruby_constant_error_kinds() RETURNS [6]String@symbol ->
+  RETURN CAST([:Transient, :Input, :System, :NotFound, :Permission, :Canceled] AS [6]String@symbol);
+END
+MUTABLE next_user_id: Int64 = 11;
+MUTABLE error_types_value: ?{String@symbol}ErrorTypeEntry = NIL;
+FN aST__error_types() RETURNS !{String@symbol}ErrorTypeEntry ->
+  IF !((error_types_value == NIL)) THEN
+    RETURN COPY error_types_value;
+  END
+  error_types_value = COPY (CAST({:LockTimeout: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "LockTimeout", id: 1, first_site: NIL }, :LockCycle: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "LockCycle", id: 2, first_site: NIL }, :Deadlock: ErrorTypeEntry{ kind: :System, zig_name: COPY "Deadlock", id: 3, first_site: NIL }, :UnexpectedRecursion: ErrorTypeEntry{ kind: :System, zig_name: COPY "UnexpectedRecursion", id: 4, first_site: NIL }, :MaxDepthExceeded: ErrorTypeEntry{ kind: :System, zig_name: COPY "MaxDepthExceeded", id: 5, first_site: NIL }, :MvccConflict: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "MvccConflict", id: 6, first_site: NIL }, :AtomicConflict: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "AtomicConflict", id: 7, first_site: NIL }, :GuardFail: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "GuardFail", id: 8, first_site: NIL }, :PreconditionFail: ErrorTypeEntry{ kind: :Input, zig_name: COPY "PreconditionFail", id: 9, first_site: NIL }, :OutOfMemory: ErrorTypeEntry{ kind: :System, zig_name: COPY "OutOfMemory", id: 10, first_site: NIL }} AS {String@symbol}ErrorTypeEntry));
+  RETURN COPY error_types_value;
+END
+FN aST__error_type_names() RETURNS ![]String@symbol ->
+  RETURN (TRY (aST__error_types())).keys();
+END
+FN aST__error_kind?(sym: ?String@symbol) RETURNS Bool ->
+  RETURN ruby_constant_error_kinds().contains?(sym);
+END
+FN aST__error_type?(sym: ?String@symbol) RETURNS !Bool ->
+  IF sym EXISTS AS sym_value THEN
+    RETURN (TRY (aST__error_types())).contains?(sym_value);
+  ELSE
+    RETURN FALSE;
+  END
+END
+FN aST__kind_of_type(sym: String@symbol) RETURNS !?String@symbol ->
+  entry: ?ErrorTypeEntry = (TRY (aST__error_types()))[sym];
+  IF entry EXISTS AS entry_value THEN
+    RETURN COPY entry_value.kind;
+  END
+  RETURN NIL;
+END
+FN aST__zig_name_of_type(sym: String@symbol) RETURNS !?String ->
+  entry: ?ErrorTypeEntry = (TRY (aST__error_types()))[sym];
+  IF entry EXISTS AS entry_value THEN
+    RETURN COPY entry_value.zig_name;
+  END
+  RETURN NIL;
+END
+FN aST__id_of_type(sym: String@symbol) RETURNS !?Int64 ->
+  entry: ?ErrorTypeEntry = (TRY (aST__error_types()))[sym];
+  IF entry EXISTS AS entry_value THEN
+    RETURN entry_value.id;
+  END
+  RETURN NIL;
+END
+FN aST__register_type_mut(type_sym: String@symbol, kind_sym: String@symbol, site_token: ?Token = NIL) RETURNS !Tuple<Bool, ?{String@symbol}?ErrorTypeConflictValue> ->
+  MUTABLE registry = TRY (aST__error_types());
+  MUTABLE entry: ?ErrorTypeEntry = COPY registry[type_sym];
+  IF entry EXISTS AS entry_value THEN
+    IF (entry_value.kind == kind_sym) THEN
+      RETURN CAST(Tuple{TRUE, NIL} AS Tuple<Bool, ?{String@symbol}?ErrorTypeConflictValue>);
+    END
+    MUTABLE conflict: {String@symbol}?ErrorTypeConflictValue = {};
+    conflict[:existing_kind] = ErrorTypeConflictValue{ SymbolValue: COPY entry_value.kind };
+    conflict[:given_kind] = ErrorTypeConflictValue{ SymbolValue: COPY kind_sym };
+    IF entry_value.first_site EXISTS AS first_site_value THEN
+      conflict[:first_site] = ErrorTypeConflictValue{ Token: COPY first_site_value };
+    END
+    conflict[:is_stdlib] = ErrorTypeConflictValue{ BoolValue: (CAST({:LockTimeout: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "LockTimeout", id: 1, first_site: NIL }, :LockCycle: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "LockCycle", id: 2, first_site: NIL }, :Deadlock: ErrorTypeEntry{ kind: :System, zig_name: COPY "Deadlock", id: 3, first_site: NIL }, :UnexpectedRecursion: ErrorTypeEntry{ kind: :System, zig_name: COPY "UnexpectedRecursion", id: 4, first_site: NIL }, :MaxDepthExceeded: ErrorTypeEntry{ kind: :System, zig_name: COPY "MaxDepthExceeded", id: 5, first_site: NIL }, :MvccConflict: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "MvccConflict", id: 6, first_site: NIL }, :AtomicConflict: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "AtomicConflict", id: 7, first_site: NIL }, :GuardFail: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "GuardFail", id: 8, first_site: NIL }, :PreconditionFail: ErrorTypeEntry{ kind: :Input, zig_name: COPY "PreconditionFail", id: 9, first_site: NIL }, :OutOfMemory: ErrorTypeEntry{ kind: :System, zig_name: COPY "OutOfMemory", id: 10, first_site: NIL }} AS {String@symbol}ErrorTypeEntry)).contains?(type_sym) };
+    RETURN Tuple{TRUE, conflict};
+  ELSE
+    MUTABLE id = COPY next_user_id;
+    next_user_id = (next_user_id + 1);
+    registry[type_sym] = ErrorTypeEntry{ kind: COPY kind_sym, zig_name: CAST(type_sym AS String), id: id, first_site: COPY site_token };
+    RETURN CAST(Tuple{FALSE, NIL} AS Tuple<Bool, ?{String@symbol}?ErrorTypeConflictValue>);
+  END
+END
+FN aST__reset_user_types_mut() RETURNS Int64 ->
+  error_types_value = COPY (CAST({:LockTimeout: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "LockTimeout", id: 1, first_site: NIL }, :LockCycle: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "LockCycle", id: 2, first_site: NIL }, :Deadlock: ErrorTypeEntry{ kind: :System, zig_name: COPY "Deadlock", id: 3, first_site: NIL }, :UnexpectedRecursion: ErrorTypeEntry{ kind: :System, zig_name: COPY "UnexpectedRecursion", id: 4, first_site: NIL }, :MaxDepthExceeded: ErrorTypeEntry{ kind: :System, zig_name: COPY "MaxDepthExceeded", id: 5, first_site: NIL }, :MvccConflict: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "MvccConflict", id: 6, first_site: NIL }, :AtomicConflict: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "AtomicConflict", id: 7, first_site: NIL }, :GuardFail: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "GuardFail", id: 8, first_site: NIL }, :PreconditionFail: ErrorTypeEntry{ kind: :Input, zig_name: COPY "PreconditionFail", id: 9, first_site: NIL }, :OutOfMemory: ErrorTypeEntry{ kind: :System, zig_name: COPY "OutOfMemory", id: 10, first_site: NIL }} AS {String@symbol}ErrorTypeEntry));
+  next_user_id = 11;
+  RETURN 11;
+END
+FN aST__sort_enum_entries(entries: []Tuple<String@symbol, Int64>) RETURNS []Tuple<String@symbol, Int64> ->
+  RETURN entries |> ORDER_BY _._1;
+END
+FN aST__enum_entries() RETURNS ![]Tuple<String@symbol, Int64> ->
+  # The entry map is typed; walking it needs no Any hop and no casts.
+  MUTABLE entries: []Tuple<String@symbol, Int64> = List[];
+  FOR error_name IN (TRY (aST__error_types())).keys() DO
+    &entries.append(Tuple{COPY error_name, (UNWRAP ((TRY (aST__error_types()))[error_name])).id});
+  END
+  MUTABLE ordered: []Tuple<String@symbol, Int64> = List[];
+  &ordered.append(Tuple{:None, 0});
+  FOR item IN aST__sort_enum_entries(entries) DO
+    &ordered.append(COPY item);
+  END
+  RETURN ordered;
+END
+FN aST__types_for_kind(kind: String@symbol) RETURNS ![]String@symbol ->
+  MUTABLE types: []String@symbol = ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } );
+  (TRY (aST__error_types())).keys() |> EACH {
+  MUTABLE meta: ErrorTypeEntry = ((TRY (aST__error_types()))[_] OR_ELSE CAST(panic("missing hash key") AS ErrorTypeEntry));
+  IF (meta.kind == kind) THEN
+    &types.append(_);
+  END
+  };
+  RETURN types;
+END
+# End Ruby module AST

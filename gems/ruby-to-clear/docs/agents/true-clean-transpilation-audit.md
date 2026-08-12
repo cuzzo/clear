@@ -144,8 +144,10 @@ Every failed unit gets one primary stage and all available diagnostics.
 | C0 | CLEAR syntax/parse failure |
 | C1 | CLEAR name or declaration failure |
 | C2 | CLEAR type or union failure |
-| C3 | CLEAR effect, mutability, ownership, or lifetime failure |
+| C3 | CLEAR ownership, borrow, or lifetime failure |
 | C4 | CLEAR backend/Zig-emission failure |
+| C5 | CLEAR mutability or exclusive-aliasing failure |
+| C6 | CLEAR effect or capability-contract failure |
 | Z0 | Zig compile or link failure |
 | B0 | Runtime crash or nonzero exit |
 | B1 | Differential output mismatch |

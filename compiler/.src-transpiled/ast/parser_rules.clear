@@ -1,0 +1,30 @@
+REQUIRE "lexer.clear"
+STRUCT ParserRule {
+  type: String@symbol,
+  value: ?String,
+  action: String@symbol
+}
+FN clearParser__rule(type: String@symbol, value: ?String = NIL, action: String@symbol) RETURNS ParserRule ->
+  RETURN ParserRule{ type: COPY type, value: COPY value, action: COPY action };
+END
+FN clearParser__rule_key(type: String@symbol, value: ?String) RETURNS String ->
+  RETURN ((CAST(type AS String) $+ "\x00") $+ ((value OR_ELSE "\x01")));
+END
+FN clearParser__token_rule_key(token: Token) RETURNS String ->
+  MUTABLE value = token.value;
+  IF value IS_A String THEN
+    RETURN clearParser__rule_key(token.type, value);
+  END
+  RETURN clearParser__rule_key(token.type, NIL);
+END
+FN clearParser__index_rules(rules: []ParserRule) RETURNS !{String}ParserRule ->
+  MUTABLE index: {String}ParserRule = {};
+  FOR _ IN rules DO
+  MUTABLE key = clearParser__rule_key(_.type, _.value);
+  IF index.contains?(key) THEN
+      panic("Duplicate parser rule for {}");
+  END
+  index[key] = COPY _;
+  END
+  RETURN index;
+END

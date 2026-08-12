@@ -1,0 +1,15 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f736f757263655f6572726f722e636c656172"
+REQUIRE "pkg:rtoc_6173742f646961676e6f737469635f72656769737472792e636c656172"
+REQUIRE "pkg:rtoc_6173742f66697861626c655f6572726f722e636c656172"
+# Ruby module FixableSuggestionHelper
+PUB UNION NameCandidate { StringValue: String, SymbolValue: String@symbol }
+PUB FN nameCandidate__text(value: NameCandidate) RETURNS String ->
+  IF value IS_A String@symbol AS string_symbol THEN
+    RETURN "${string_symbol}";
+  ELSE_IF value IS_A String AS text THEN
+    RETURN COPY text;
+  END
+  RETURN "";
+END
+# End Ruby module FixableSuggestionHelper

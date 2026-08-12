@@ -1,0 +1,235 @@
+REQUIRE "diagnostic_registry.clear"
+REQUIRE "lexer.clear"
+STRUCT AnchorToken {
+  line: Int64,
+  column: Int64
+}
+
+FN anchorToken__type(self: AnchorToken) RETURNS String@symbol ->
+  RETURN :ANCHOR;
+END
+FN anchorToken__value(self: AnchorToken) RETURNS Void ->
+  NIL;
+END
+UNION TypoToken { TokenMultiowned: Token@multiowned, AnchorToken: AnchorToken, Token: Token }
+PUB STRUCT Span {
+  col: Int64,
+  file: ?String,
+  length: Int64,
+  line: Int64
+}
+
+PUB FN span__initialize(MUTABLE self: Span, file: ?String, line: Int64, col: Int64, length: Int64) RETURNS Void ->
+  self.file = COPY file;
+  self.line = COPY line;
+  self.col = COPY col;
+  self.length = COPY length;
+END
+PUB FN span__end_line(self: Span) RETURNS Int64 ->
+  RETURN self.line;
+END
+PUB FN span__end_col(self: Span) RETURNS Int64 ->
+  RETURN (self.col + self.length);
+END
+PUB FN span__to_h(self: Span) RETURNS Any@multiowned ->
+  RETURN {:file: self.file, :line: self.line, :col: self.col, :length: self.length, :end_line: span__end_line(self), :end_col: span__end_col(self)};
+END
+PUB FN span__new(file: ?String, line: Int64, col: Int64, length: Int64) RETURNS Span ->
+  MUTABLE self = Span{ col: col, file: COPY file, length: length, line: line };
+  span__initialize(&self, file, line, col, length);
+  RETURN self;
+END
+PUB STRUCT Edit {
+  replacement: String,
+  span: Span
+}
+
+PUB FN edit__initialize(MUTABLE self: Edit, span: Span, replacement: String) RETURNS Void ->
+  self.span = COPY span;
+  self.replacement = COPY replacement;
+END
+PUB FN edit__new(span: Span, replacement: String) RETURNS Edit ->
+  MUTABLE self = Edit{ replacement: COPY replacement, span: COPY span };
+  edit__initialize(&self, span, replacement);
+  RETURN self;
+END
+PUB STRUCT Fix {
+  confidence: String@symbol,
+  description: String,
+  edits: []Edit
+}
+
+confidences = [:auto, :interactive];
+PUB FN fix__initialize(MUTABLE self: Fix, description: String, edits: []Edit, confidence: String@symbol = :interactive) RETURNS !Void ->
+  IF !(confidences.contains?(confidence)) THEN
+    panic("Fix.confidence must be one of {}, got {}");
+  END
+  self.description = COPY description;
+  self.confidence = COPY confidence;
+  self.edits = edits;
+  IF (self.edits.length() == 0) THEN
+    panic("Fix needs at least one edit");
+  END
+END
+PUB FN fix__new(description: String, edits: []Edit, confidence: String@symbol = :interactive) RETURNS !Fix ->
+  MUTABLE self = Fix{ confidence: COPY confidence, description: COPY description, edits: List[] };
+  TRY (fix__initialize(&self, description, edits, confidence));
+  RETURN self;
+END
+PUB STRUCT FixableFinding {
+  category: String@symbol,
+  fixes: []Fix,
+  level: String@symbol,
+  message: String,
+  token: DiagnosticToken
+}
+
+levels = [:hint, :info, :warning, :error];
+PUB FN fixableFinding__initialize(MUTABLE self: FixableFinding, level: String@symbol, message: String, token: DiagnosticToken, category: String@symbol, fixes: []Fix) RETURNS !Void ->
+  IF !(levels.contains?(level)) THEN
+    panic("bad level {}");
+  END
+  IF !((TRY (diagnosticRegistry__categories())).contains?(category)) THEN
+    panic("bad category {}");
+  END
+  self.level = COPY level;
+  self.message = COPY message;
+  self.token = COPY token;
+  self.category = COPY category;
+  self.fixes = fixes;
+END
+PUB FN fixableFinding__fatal?(self: FixableFinding) RETURNS Bool ->
+  RETURN (self.level == :error);
+END
+PUB FN fixableFinding__new(level: String@symbol, message: String, token: DiagnosticToken, category: String@symbol, fixes: []Fix) RETURNS !FixableFinding ->
+  MUTABLE self = FixableFinding{ category: COPY category, fixes: List[], level: COPY level, message: COPY message, token: COPY token };
+  TRY (fixableFinding__initialize(&self, level, message, token, category, fixes));
+  RETURN self;
+END
+# Ruby module FixCollector
+MUTABLE findings_value: ?[]FixableFinding = NIL;
+MUTABLE fatal_count_value: Int64 = 0;
+MUTABLE enabled: Bool = FALSE;
+MUTABLE type_migrations_enabled: Bool = FALSE;
+MUTABLE fallibility_propagation_enabled: Bool = FALSE;
+FN fixCollector__enable_mut() RETURNS ![]FixableFinding ->
+  fixCollector__ensure_findings_mut();
+  MUTABLE buffer: ?[]FixableFinding = COPY findings_value;
+  IF buffer EXISTS AS buffer_value THEN
+    MUTABLE buffer_value_mutable = COPY buffer_value;
+    &buffer_value_mutable.clear();
+    findings_value = buffer_value_mutable;
+    fatal_count_value = 0;
+    enabled = TRUE;
+    type_migrations_enabled = FALSE;
+    fallibility_propagation_enabled = FALSE;
+    RETURN TRY (fixCollector__findings());
+  ELSE
+    panic("BUG: fix collector storage was not initialized");
+  END
+END
+FN fixCollector__enable_type_migrations_mut() RETURNS Void ->
+  IF enabled THEN
+    type_migrations_enabled = TRUE;
+  END
+END
+FN fixCollector__type_migrations_enabled?() RETURNS Bool ->
+  RETURN (enabled AND type_migrations_enabled);
+END
+FN fixCollector__enable_fallibility_propagation_mut() RETURNS Void ->
+  IF enabled THEN
+    fallibility_propagation_enabled = TRUE;
+  END
+END
+FN fixCollector__fallibility_propagation_enabled?() RETURNS Bool ->
+  RETURN (enabled AND fallibility_propagation_enabled);
+END
+FN fixCollector__disable_mut() RETURNS !Void ->
+  fixCollector__ensure_findings_mut();
+  MUTABLE buffer: ?[]FixableFinding = COPY findings_value;
+  IF buffer EXISTS AS buffer_value THEN
+    MUTABLE buffer_value_mutable = COPY buffer_value;
+    &buffer_value_mutable.clear();
+    findings_value = buffer_value_mutable;
+    fatal_count_value = 0;
+    enabled = FALSE;
+    type_migrations_enabled = FALSE;
+    fallibility_propagation_enabled = FALSE;
+  ELSE
+    panic("BUG: fix collector storage was not initialized");
+  END
+END
+FN fixCollector__enabled?() RETURNS Bool ->
+  RETURN COPY enabled;
+END
+FN fixCollector__push(finding: FixableFinding, fatal: Bool = FALSE) RETURNS ![]FixableFinding ->
+  fixCollector__ensure_findings_mut();
+  MUTABLE buffer: ?[]FixableFinding = COPY findings_value;
+  IF buffer EXISTS AS buffer_value THEN
+    MUTABLE buffer_value_mutable = COPY buffer_value;
+    IF enabled THEN
+      &buffer_value_mutable.append(COPY finding);
+      IF fatal THEN
+        fatal_count_value = (fatal_count_value + 1);
+      END
+    END
+    findings_value = buffer_value_mutable;
+    RETURN TRY (fixCollector__findings());
+  ELSE
+    panic("BUG: fix collector storage was not initialized");
+  END
+END
+FN fixCollector__drain() RETURNS ![]FixableFinding ->
+  fixCollector__ensure_findings_mut();
+  MUTABLE buffer: ?[]FixableFinding = COPY findings_value;
+  IF buffer EXISTS AS buffer_value THEN
+    MUTABLE buffer_value_mutable = COPY buffer_value;
+    MUTABLE out = COPY buffer_value_mutable;
+    IF enabled THEN
+      &buffer_value_mutable.clear();
+    END
+    findings_value = buffer_value_mutable;
+    RETURN out;
+  ELSE
+    panic("BUG: fix collector storage was not initialized");
+  END
+END
+FN fixCollector__has_fatal?() RETURNS !Bool ->
+  fixCollector__ensure_findings_mut();
+  MUTABLE buffer: ?[]FixableFinding = COPY findings_value;
+  IF buffer EXISTS AS buffer_value THEN
+    RETURN (enabled AND fatal_count_value.positive?());
+  ELSE
+    panic("BUG: fix collector storage was not initialized");
+  END
+END
+FN fixCollector__fatal_count() RETURNS !Int64 ->
+  fixCollector__ensure_findings_mut();
+  MUTABLE buffer: ?[]FixableFinding = COPY findings_value;
+  IF buffer EXISTS AS buffer_value THEN
+    IF enabled THEN
+      RETURN COPY fatal_count_value;
+    ELSE
+      RETURN 0;
+    END
+  ELSE
+    panic("BUG: fix collector storage was not initialized");
+  END
+END
+FN fixCollector__ensure_findings_mut() RETURNS Void ->
+  IF !((findings_value == NIL)) THEN
+    RETURN;
+  END
+  findings_value = List[];
+END
+FN fixCollector__findings() RETURNS ![]FixableFinding ->
+  fixCollector__ensure_findings_mut();
+  MUTABLE buffer: ?[]FixableFinding = COPY findings_value;
+  IF buffer EXISTS AS buffer_value THEN
+    MUTABLE out = COPY buffer_value;
+    RETURN out;
+  ELSE
+    panic("BUG: fix collector storage was not initialized");
+  END
+END
+# End Ruby module FixCollector

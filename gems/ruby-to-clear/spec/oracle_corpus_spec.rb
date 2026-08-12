@@ -19,8 +19,8 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
       RUBY
       clear: <<~CLEAR,
         REQUIRE "pkg:fs"
-        FN read_names(path: String) RETURNS !String[] ->
-          (readLines(path) OR RAISE) |> SELECT _.trim();
+        FN read_names(path: String) RETURNS ![]String ->
+          RETURN (TRY (readLines(path))) |> SELECT _.trim();
         END
       CLEAR
     },
@@ -37,12 +37,12 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
       clear: <<~CLEAR,
         REQUIRE "pkg:fs"
         FN count_names(path: String) RETURNS !Int64 ->
-          MUTABLE lines = readLines(path) OR RAISE;
+          MUTABLE lines = TRY (readLines(path));
           MUTABLE names = lines |> SELECT {
           MUTABLE name = _.trim();
           name
           };
-          names.length();
+          RETURN names.length();
         END
       CLEAR
     },
@@ -53,7 +53,7 @@ RSpec.describe "Ruby-to-CLEAR oracle corpus" do
         Set.new(values)
       RUBY
       clear: <<~CLEAR,
-        MUTABLE values: String[]@set = [:a, :b];
+        MUTABLE values: [Set]String@symbol = [:a, :b];
         values |> DISTINCT _;
       CLEAR
     },

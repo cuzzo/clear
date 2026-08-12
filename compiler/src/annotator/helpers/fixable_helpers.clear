@@ -1,0 +1,1358 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+REQUIRE "pkg:rtoc_6173742f646961676e6f737469635f72656769737472792e636c656172"
+REQUIRE "pkg:rtoc_6173742f66697861626c655f6572726f722e636c656172"
+REQUIRE "pkg:rtoc_6173742f66697861626c655f73756767657374696f6e5f68656c7065722e636c656172"
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172"
+REQUIRE "pkg:rtoc_73656d616e7469632f6f776e6572736869705f67726170682e636c656172"
+REQUIRE "capabilities.clear"
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f616e616c797369732e636c656172"
+REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172"
+REQUIRE "effects.clear"
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f6175746f5f696e666572656e63652e636c656172"
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172"
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexFirstMatch(subject: String, regex: CompilerRegex) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
+FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
+  RETURN COPY compilerRegexFirstMatch(subject, compilerRegexCompile(pattern));
+END
+FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
+  RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
+END
+FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
+  RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
+END
+FN escapeRegex(value: String) RETURNS String ->
+  RETURN compilerRegexEscape(value);
+END
+
+UNION Reg { VarDecl: VarDecl, DestructureTarget: DestructureTarget }
+# Ruby module FixableHelper
+signed_order = [:Int8, :Int16, :Int32, :Int64];
+unsigned_order = [:Byte, :UInt16, :UInt32, :UInt64];
+FN source_code() RETURNS ?String ->
+
+END
+PUB FN fix_description(code: String@symbol, kwargs: {String@symbol}String = {}) RETURNS !String ->
+  RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+END
+FN emit_optional_field_safe_nav_finding_mut(node: GetField, target_type: Type) RETURNS !Void ->
+  MUTABLE token = COPY node.token;
+  MUTABLE fix = TRY (fix__new(fix_description(:INSERT_SAFE_NAVIGATION), [edit__new(span__new(NIL, token.line, (token.column - 1), 0), "?")], :auto));
+  fixable_mut(node, {:code: :OPTIONAL_FIELD_REQUIRES_SAFE_NAV, :field: node.field, :type: TRY (type__surface_name(castTypeToTypeTypeInput(target_type))), :target: node.target.name(), :category: :type, :level: :error, :fixes: [fix]});
+END
+STRUCT CapabilityFixCandidate {
+  sigil: String,
+  description_code: String@symbol,
+  description_params: {String@symbol}String
+}
+STRUCT AutoCandidate {
+  type_sym: String@symbol,
+  note: ?String
+}
+FN emit_mutable_unused_finding_mut(reg: ?Reg, name: String) RETURNS !Void ->
+  IF reg EXISTS AS reg_value THEN
+    MUTABLE tok_branch_value: ?Token = NIL;
+    IF reg_value IS_A VarDecl AS var_decl THEN
+      tok_branch_value = varDecl__token(var_decl);
+    ELSE
+      tok_branch_value = (MATCH reg_value START Reg.VarDecl AS item -> item.token, Reg.DestructureTarget AS item -> item.token END);
+    END
+    MUTABLE tok: Token = tok_branch_value?;
+    MUTABLE fixes = List[];
+    IF (tok.value == "MUTABLE") THEN
+      &fixes.append(TRY (fix__new(fix_description(:REMOVE_MUTABLE_UNUSED), [edit__new(span__new(NIL, tok.line, tok.column, "MUTABLE ".codepointCount()), "")], :auto)));
+    END
+    fixable_mut(reg_value, {:code: :MUTABLE_UNUSED, :name: name, :category: :lint, :level: :warning, :fixes: fixes});
+  ELSE
+    RETURN;
+  END
+END
+FN closest_name(input: NameCandidate, candidates: []NameCandidate, max_distance: Int64 = 3) RETURNS ?String ->
+  MUTABLE best: ?NameCandidate = NIL;
+  MUTABLE best_d: Int64 = (max_distance + 1);
+  FOR _ IN candidates DO
+  MUTABLE d = levenshtein(nameCandidate__text(input), nameCandidate__text(_));
+  IF (d < best_d) THEN
+      best = COPY _;
+      best_d = d;
+  END
+  END
+  IF (best_d <= max_distance) THEN
+    RETURN nameCandidate__text(UNWRAP (best));
+  ELSE
+    RETURN NIL;
+  END
+END
+FN levenshtein(a: String, b: String) RETURNS !Int64 ->
+  IF (a.length() == 0) THEN
+    RETURN b.codepointCount();
+  END
+  IF (b.length() == 0) THEN
+    RETURN a.codepointCount();
+  END
+  MUTABLE prev = TRY (effectSet__to_a((0 ..= b.codepointCount())));
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < a.length() DO
+    MUTABLE curr = [(rtoc_idx + 1)];
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < b.length() DO
+        MUTABLE cost = IF (a.substr(rtoc_idx, 1) == b.substr(rtoc_idx, 1)) THEN
+            0
+          ELSE
+            1
+          END;
+        &curr.append(([(UNWRAP (curr[rtoc_idx]) + 1), (prev[(rtoc_idx + 1)] + 1), (prev[rtoc_idx] + cost)]).min());
+      rtoc_idx = rtoc_idx + 1;
+    END
+    prev = curr;
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN prev.last();
+END
+FN emit_registry_mismatch_mut(token: Token, name: NameCandidate, candidates: []NameCandidate, message: String, fix_label: String) RETURNS !Void ->
+  MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch?((CAST(name AS String)), "\\A[A-Z]")) THEN
+    NIL
+  ELSE
+    closest_name(name, candidates)
+  END;
+  MUTABLE fixes = List[];
+  IF best THEN
+    &fixes.append(TRY (fix__new(fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: name, :best: best, :label: fix_label}), [edit__new(span__new(NIL, token.line, token.column, (CAST(name AS String)).codepointCount()), CAST(best AS String))], :auto)));
+  END
+  IF (fixes.length() == 0) THEN
+    RETURN error_mut(token, :REGISTRY_MISMATCH_REJECTED, {:detail: message});
+  END
+  fixable_mut(token, {:code: :REGISTRY_MISMATCH_REJECTED, :detail: message, :category: :registry, :level: :error, :fixes: fixes});
+END
+PUB FN emit_typo_suggestion_mut(token: ?TypoToken, name: String, candidates: []String, message: String, fix_label: String, category: String@symbol = :registry, cascade: Bool = TRUE) RETURNS !Void ->
+  MUTABLE token_line: Int64 = CAST(token.line() AS Int64);
+  MUTABLE token_column: Int64 = CAST(token.column() AS Int64);
+  MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch?(name, "\\A[A-Z]")) THEN
+    NIL
+  ELSE
+    closest_name(name, candidates)
+  END;
+  MUTABLE fixes = List[];
+  IF best THEN
+    &fixes.append(TRY (fix__new(fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: name, :best: best, :label: fix_label}), [edit__new(span__new(NIL, token_line, token_column, name.codepointCount()), CAST(best AS String))], :auto)));
+  END
+  IF (fixes.length() == 0) THEN
+    RETURN error_mut(token, :TYPO_SUGGESTION_REJECTED, {:detail: message});
+  END
+  fixable_mut(token, {:code: :TYPO_SUGGESTION_REJECTED, :detail: message, :category: category, :level: :error, :fixes: fixes, :raise_in_collector: cascade});
+END
+FN anchor_at(line: Int64, col: Int64) RETURNS AnchorToken ->
+  RETURN AnchorToken{ line: COPY line, column: COPY col };
+END
+FN variant_anchor_from_getfield(getfield_node: GetField) RETURNS ?AnchorToken ->
+  MUTABLE tgt = COPY getfield_node.target;
+  IF !(tgt.token()) THEN
+    RETURN NIL;
+  END
+  RETURN anchor_at(tgt.token().line(), ((tgt.token().column() + (CAST(tgt.name() AS String)).codepointCount()) + 1));
+END
+FN variant_anchor_from_unionlit(node: Node, variant_name: String) RETURNS ?AnchorToken ->
+  IF !(node.token()) THEN
+    RETURN NIL;
+  END
+  RETURN anchor_at(node.token().line(), (node.token().column() - variant_name.codepointCount()));
+END
+FN emit_variant_typo_mut(anchor: AnchorToken, name: String, candidates: []NameCandidate, message: String, fix_label: String, cascade: Bool = FALSE) RETURNS !Void ->
+  MUTABLE best = closest_name(name, candidates);
+  MUTABLE fixes = List[];
+  IF best THEN
+    &fixes.append(TRY (fix__new(fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: name, :best: best, :label: fix_label}), [edit__new(span__new(NIL, anchor.line, anchor.column, name.codepointCount()), CAST(best AS String))], :auto)));
+  END
+  IF (fixes.length() == 0) THEN
+    RETURN error_mut(anchor, :TYPO_SUGGESTION_REJECTED, {:detail: message});
+  END
+  fixable_mut(anchor, {:code: :TYPO_SUGGESTION_REJECTED, :detail: message, :category: :type, :level: :error, :fixes: fixes, :raise_in_collector: cascade});
+END
+FN emit_use_of_moved_error_mut(use_node: Identifier, og_node: OwnershipNode) RETURNS !Void ->
+  MUTABLE src = source_code();
+  MUTABLE name = COPY use_node.name;
+  MUTABLE move_line: ?Int64 = og_node.move_line;
+  MUTABLE move_col: ?Int64 = og_node.move_col;
+  IF move_line EXISTS AS move_line_value THEN
+    IF move_col THEN
+      MUTABLE fanout_entry = (IF lookup_scope_for(name) != NIL THEN
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = ((lookup_scope_for(name))?);
+      scope__resolve_entry(rtoc_local_receiver_1, name) }
+      ELSE
+        NIL
+      END);
+      IF ((fanout_entry IS_A SymbolEntry@multiowned AND symbolEntry__is_param(fanout_entry)) AND (symbolEntry__carrier_contract(fanout_entry) == :polymorphic)) THEN
+        RETURN emit_carrier_fanout_error_mut(use_node, og_node, name, move_line_value, move_col);
+      END
+      MUTABLE type = ownershipNode__full_type(og_node);
+      MUTABLE is_shared = type__shared?(type);
+      MUTABLE is_multi = type__multiowned?(type);
+      MUTABLE is_split = type__split?(type);
+      MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
+      MUTABLE consumer_keyword: String = "";
+      IF use_clone THEN
+        consumer_keyword = "KEEP";
+      ELSE
+        consumer_keyword = "COPY";
+      END
+      MUTABLE consumer_description_code = IF use_clone THEN
+        :WRAP_CONSUMER_WITH_KEEP
+      ELSE
+        :WRAP_CONSUMER_WITH_COPY
+      END;
+      MUTABLE replacement_col: ?Int64 = move_col;
+      MUTABLE replacement_length = name.codepointCount();
+      IF src THEN
+        MUTABLE move_text = COPY CAST(src.split("\n")[(move_line_value - 1)] AS String);
+        MUTABLE prefix = COPY (move_text.substr(0, (move_col - 1)));
+        MUTABLE give_prefix = prefix.match("GIVE\\s+\\z");
+        IF give_prefix THEN
+          replacement_col = (give_prefix.begin(0) + 1);
+          replacement_length = (replacement_length + give_prefix[0].codepointCount());
+        END
+      END
+      MUTABLE fixes = List[];
+      &fixes.append(TRY (fix__new(fix_description(consumer_description_code, {:line: og_node.move_line}), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
+      MUTABLE candidate_caps = List[];
+      IF !((is_multi OR is_split)) THEN
+        &candidate_caps.append("@multiowned");
+      END
+      IF !((is_shared OR is_split)) THEN
+        &candidate_caps.append("@shared");
+      END
+      MUTABLE consumed_by_call = ((og_node.move_action == :takes) OR (og_node.move_action == :give));
+      IF (TRUE AND consumed_by_call) THEN
+        MUTABLE pt: ?TypeTypeInput = COPY og_node.move_consumer_param_type;
+        IF ((pt != NIL) AND !(pt IS_A Type)) THEN
+          pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(pt))));
+        END
+        MUTABLE param_admits_shared = ((pt != NIL) AND (IF respondsTo?(pt, "shared?") THEN
+          type__shared?(pt)
+        ELSE
+          FALSE
+        END));
+        MUTABLE param_admits_multi = ((pt != NIL) AND (IF respondsTo?(pt, "multiowned?") THEN
+          pt.multiowned?()
+        ELSE
+          FALSE
+        END));
+        IF (((pt != NIL) AND !(param_admits_shared)) AND !(param_admits_multi)) THEN
+          &candidate_caps.delete("@shared");
+          &candidate_caps.delete("@multiowned");
+        END
+      END
+      MUTABLE scope = lookup_scope_for(name);
+      MUTABLE decl = COPY (IF scope != NIL THEN
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (scope?);
+      scope__resolve_entry(rtoc_local_receiver_2, name) }
+      ELSE
+        NIL
+      END)?.reg;
+      src = source_code();
+      IF ((decl AND decl.token()) AND src) THEN
+        MUTABLE dline = decl.token().line();
+        MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");
+        MUTABLE semi_idx = line_text.indexOf(";", (decl.token().column() - 1));
+        IF semi_idx THEN
+          MUTABLE insert_col = (semi_idx + 1);
+          FOR _ IN candidate_caps DO
+  MUTABLE reason = "atomic Arc; safe across fibers";
+  IF (_ == "@multiowned") THEN
+              reason = "single-scheduler Rc; automatic clone on move";
+  END
+  &fixes.append(TRY (fix__new(fix_description(:CHANGE_BINDING_CAPABILITY_FOR_MOVE, {:name: name, :cap: _, :reason: reason}), [edit__new(span__new(NIL, dline, insert_col, 0), " ${_}")], :interactive)));
+          END
+        END
+      END
+      MUTABLE consumer = consumer_source_text(move_line_value);
+      MUTABLE phrase = ownership_active_phrase((og_node.move_action OR_ELSE :move));
+      IF consumer THEN
+        msg = "USE AFTER MOVE: You can't use `${name}`. `${consumer}` ${phrase} (line ${move_line_value.toString()}).";
+      ELSE
+        msg = "USE AFTER MOVE: You can't use `${name}` \u{2014} it ${phrase} (line ${move_line_value.toString()}).";
+      END
+      fixable_mut(use_node, {:code: :USE_OF_MOVED_VALUE, :detail: msg, :category: :ownership, :level: :error, :fixes: fixes, :raise_in_collector: TRUE});
+    ELSE
+      MUTABLE msg = "USE AFTER MOVE: You can't use `${name}`.";
+      RETURN error_mut(use_node, :USE_OF_MOVED_VALUE, {:detail: msg});
+    END
+  ELSE
+    msg = "USE AFTER MOVE: You can't use `${name}`.";
+    RETURN error_mut(use_node, :USE_OF_MOVED_VALUE, {:detail: msg});
+  END
+END
+FN emit_carrier_fanout_error_mut(use_node: Identifier, og_node: OwnershipNode, name: String, move_line: Int64, move_col: Int64) RETURNS !Void ->
+  MUTABLE consumer = consumer_source_text(move_line);
+  MUTABLE consumer_clause: String = "";
+  IF consumer THEN
+    consumer_clause = "`${consumer}` consumes it (line ${move_line.toString()})";
+  ELSE
+    consumer_clause = "it is consumed (line ${move_line.toString()})";
+  END
+  MUTABLE msg = "`${name}` is used again after ${consumer_clause}. `${name}` is a carrier-polymorphic parameter; choose how the additional owner is created: wrap the first consuming use as KEEP to preserve the caller's ownership model. If both consumers require independent identity, constrain the parameter as UNIQUE and use COPY.";
+  MUTABLE fixes = [TRY (fix__new(fix_description(:WRAP_CONSUMER_WITH_KEEP, {:line: move_line}), [edit__new(span__new(NIL, move_line, move_col, name.codepointCount()), "(KEEP ${name})")], :interactive))];
+  fixable_mut(use_node, {:code: :CARRIER_POLYMORPHIC_FANOUT, :detail: msg, :category: :ownership, :level: :error, :fixes: fixes, :raise_in_collector: TRUE});
+END
+FN emit_use_of_moved_in_loop_error_mut(node: Node, name: String, og_node: ?OwnershipNode = NIL, code: String@symbol = :USE_OF_MOVED_IN_LOOP) RETURNS Void ->
+  MUTABLE loop_move_line: ?Int64 = og_node?.move_line;
+  MUTABLE consumer = IF loop_move_line != NIL THEN
+    consumer_source_text(loop_move_line)
+  ELSE
+    NIL
+  END;
+  MUTABLE consumer_clause: String = "";
+  IF consumer THEN
+    consumer_clause = "`${consumer}` already TOOK it. ";
+  ELSE
+    consumer_clause = "";
+  END
+  MUTABLE msg = "USE AFTER MOVE: You can't use `${name}` here \u{2014} ${consumer_clause}Values can only be TAKEN once; subsequent iterations have nothing left to GIVE.";
+  error_mut(node, code, {:detail: msg});
+END
+FN emit_use_of_moved_path_error_mut(node: GetField, path: []NameCandidate, og_node: ?OwnershipNode = NIL) RETURNS Void ->
+  MUTABLE path_str = (path |> SELECT _.toString()).join(".");
+  MUTABLE root = COPY CAST(path.first() AS String);
+  MUTABLE msg: String = "";
+  IF ((og_node != NIL) AND (og_node.move_line != NIL)) THEN
+    MUTABLE phrase = ownership_passive_phrase((og_node.move_action OR_ELSE :move));
+    msg = "USE AFTER MOVE: You can't use `${path_str}`. Its owner `${root}` ${phrase} on line ${og_node.move_line.toString()}.";
+  ELSE
+    msg = "USE AFTER MOVE: You can't use `${path_str}`. Its owner `${root}` was already consumed elsewhere.";
+  END
+  error_mut(node, :USE_OF_MOVED_PATH, {:detail: msg});
+END
+FN ownership_active_phrase(action: String@symbol) RETURNS String ->
+  IF (CAST({:give: "already GAVE it away", :takes: "already TOOK it away", :return: "already RETURNED it", :next: "already consumed it via NEXT", :share: "already SHARED it", :collect: "already COLLECTED it", :capture: "already captured it", :move: "already MOVED it"} AS {String@symbol}String))[action] != NIL THEN
+  RETURN COPY ((CAST({:give: "already GAVE it away", :takes: "already TOOK it away", :return: "already RETURNED it", :next: "already consumed it via NEXT", :share: "already SHARED it", :collect: "already COLLECTED it", :capture: "already captured it", :move: "already MOVED it"} AS {String@symbol}String))[action])?;
+  ELSE
+  RETURN "already consumed it";
+  END
+END
+FN ownership_passive_phrase(action: String@symbol) RETURNS String ->
+  IF (CAST({:give: "was already GIVEN away", :takes: "was already TAKEN away", :return: "was already RETURNED", :next: "was already consumed via NEXT", :share: "was already SHARED", :collect: "was already COLLECTED", :capture: "was already captured", :move: "was already MOVED"} AS {String@symbol}String))[action] != NIL THEN
+  RETURN COPY ((CAST({:give: "was already GIVEN away", :takes: "was already TAKEN away", :return: "was already RETURNED", :next: "was already consumed via NEXT", :share: "was already SHARED", :collect: "was already COLLECTED", :capture: "was already captured", :move: "was already MOVED"} AS {String@symbol}String))[action])?;
+  ELSE
+  RETURN "was already consumed";
+  END
+END
+FN consumer_source_text(line_num: Int64) RETURNS ?String ->
+  MUTABLE src = source_code();
+  IF !((src AND TRUE)) THEN
+    RETURN NIL;
+  END
+  MUTABLE line = src.split("\n")[(line_num - 1)];
+  IF !(line) THEN
+    RETURN NIL;
+  END
+  MUTABLE text = line.trim();
+  text = text.chomp(";").trim();
+  IF text.empty?() THEN
+    RETURN NIL;
+  ELSE
+    RETURN text;
+  END
+END
+FN smallest_fitting_int_type(val: Int64) RETURNS ?String@symbol ->
+  MUTABLE order = IF (val >= 0) THEN
+    unsigned_order
+  ELSE
+    signed_order
+  END;
+  MUTABLE selected: ?String@symbol = NIL;
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < order.length() DO
+    IF selected THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE max: ?Int64 = (CAST({:Byte: 255, :UInt8: 255, :UInt16: 65535, :UInt32: 4294967295, :UInt64: (((2 ** 64)) - 1), :Int8: 127, :Int16: 32767, :Int32: 2147483647, :Int64: 9223372036854775807} AS {String@symbol}Int64))[order[rtoc_idx]];
+    IF (max == NIL) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE min = ((CAST({:Byte: 0, :UInt8: 0, :UInt16: 0, :UInt32: 0, :UInt64: 0, :Int8: -128, :Int16: -32768, :Int32: -2147483648, :Int64: (-9223372036854775807 - 1)} AS {String@symbol}Int64))[order[rtoc_idx]] OR_ELSE 0);
+    IF ((val >= min) AND (val <= max)) THEN
+        selected = order[rtoc_idx];
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN selected;
+END
+FN annotation_type_column(prefix: String, target_name: String) RETURNS ?Int64 ->
+  MUTABLE idx = 0;
+  MUTABLE found: ?Int64 = NIL;
+  WHILE (idx < prefix.codepointCount()) DO
+    MUTABLE colon: ?Int64 = prefix.indexOf(":", idx);
+    IF colon EXISTS AS colon_value THEN
+      MUTABLE type_start = (colon_value + 1);
+      WHILE ((type_start < prefix.codepointCount()) AND whitespace_char?(prefix.substr(type_start, 1))) DO
+        type_start = (type_start + 1);
+      END
+      MUTABLE type_end = (type_start + target_name.codepointCount());
+      IF ((prefix.substr(type_start, target_name.codepointCount()) == target_name) AND !(identifier_char_at?(prefix, type_end))) THEN
+        found = (type_start + 1);
+      END
+      idx = (colon_value + 1);
+    ELSE
+      idx = prefix.codepointCount();
+    END
+  END
+  RETURN found;
+END
+FN whitespace_char?(ch: ?String) RETURNS Bool ->
+  RETURN ((ch == " ") OR (ch == "\t"));
+END
+FN identifier_char_at?(text: String, idx: Int64) RETURNS Bool ->
+  IF (idx >= text.codepointCount()) THEN
+    RETURN FALSE;
+  END
+  MUTABLE ch = text.substr(idx, 1);
+  RETURN ((((((ch >= "A") AND (ch <= "Z"))) OR (((ch >= "a") AND (ch <= "z")))) OR (((ch >= "0") AND (ch <= "9")))) OR (ch == "_"));
+END
+FN emit_int_overflow_error_mut(node: Literal, val: Int64, target_type: String@symbol, min_value: Int64, max_value: Int64) RETURNS !Void ->
+  MUTABLE src = source_code();
+  MUTABLE tok = COPY node.token;
+  IF !((TRUE AND src)) THEN
+    RETURN error_mut(node, :INT_LITERAL_OVERFLOW, {:val: val, :type: target_type, :min: min_value, :max: max_value});
+  END
+  MUTABLE best = smallest_fitting_int_type(val);
+  IF !(best) THEN
+    RETURN error_mut(node, :INT_LITERAL_OVERFLOW, {:val: val, :type: target_type, :min: min_value, :max: max_value});
+  END
+  MUTABLE line_text = (src.split("\n")[(tok.line - 1)] OR "");
+  MUTABLE snippet = (line_text.substr(((tok.column - 1)), (line_text.length() - ((tok.column - 1)))) OR "");
+  MUTABLE m = snippet.match("\\A(\\d[\\d_]*)_([a-z]\\d+)");
+  IF m THEN
+    MUTABLE old_suffix = m[2];
+    MUTABLE new_suffix: ?String = COPY (CAST({:Int8: "i8", :Byte: "u8", :Int16: "i16", :UInt16: "u16", :Int32: "i32", :UInt32: "u32", :Int64: "i64", :UInt64: "u64"} AS {String@symbol}String))[best];
+    IF ((new_suffix != NIL) AND (new_suffix != old_suffix)) THEN
+      MUTABLE suffix_col = ((tok.column + scopeBindings__length(m[1])) + 1);
+      RETURN emit_overflow_suffix_fix_mut(node, target_type, min_value, max_value, tok, suffix_col, old_suffix, new_suffix, val);
+    END
+  END
+  MUTABLE target_name = COPY CAST(target_type AS String);
+  MUTABLE prefix = (line_text.substr(0, (((tok.column - 1)) - 0)) OR "");
+  MUTABLE ann_col = annotation_type_column(prefix, target_name);
+  IF ann_col THEN
+    MUTABLE new_type = COPY CAST(best AS String);
+    IF (new_type != target_name) THEN
+      MUTABLE fix = TRY (fix__new(fix_description(:WIDEN_INT_ANNOTATION, {:old_type: target_name, :new_type: new_type, :value: val}), [edit__new(span__new(NIL, tok.line, ann_col, target_name.codepointCount()), new_type)], :auto));
+      RETURN fixable_mut(node, {:code: :INT_LITERAL_OVERFLOW, :val: val, :type: target_type, :min: min_value, :max: max_value, :category: :type, :level: :error, :fixes: [fix], :raise_in_collector: TRUE});
+    END
+  END
+  error_mut(node, :INT_LITERAL_OVERFLOW, {:val: val, :type: target_type, :min: min_value, :max: max_value});
+END
+FN emit_overflow_suffix_fix_mut(node: Locatable, target_type: String@symbol, min_value: Int64, max_value: Int64, tok: Token, suffix_col: Int64, old_suffix: String, new_suffix: String, val: Int64) RETURNS !Void ->
+  MUTABLE fix = TRY (fix__new(fix_description(:WIDEN_INT_SUFFIX, {:old_suffix: old_suffix, :new_suffix: new_suffix, :value: val}), [edit__new(span__new(NIL, tok.line, suffix_col, old_suffix.codepointCount()), new_suffix)], :auto));
+  fixable_mut(node, {:code: :INT_LITERAL_OVERFLOW, :val: val, :type: target_type, :min: min_value, :max: max_value, :category: :type, :level: :error, :fixes: [fix], :raise_in_collector: TRUE});
+END
+FN emit_local_never_shared_finding_mut(info: BindingAuditRecord) RETURNS !Void ->
+  MUTABLE name = COPY info.var;
+  MUTABLE line: ?Int64 = info.line;
+  MUTABLE fixes = List[];
+  MUTABLE source = source_code();
+  IF (source AND (line != NIL)) THEN
+    MUTABLE src_line = (source.split("\n")[(line - 1)] OR "");
+    MUTABLE idx = src_line.indexOf("@local", (((info.column OR_ELSE 1)) - 1));
+    IF idx THEN
+      MUTABLE trail = IF ((src_line[(idx + 6)] == " ")) THEN
+        1
+      ELSE
+        0
+      END;
+      MUTABLE lead = IF (((idx > 0) AND (src_line[(idx - 1)] == " "))) THEN
+        1
+      ELSE
+        0
+      END;
+      MUTABLE start_col = ((idx + 1) - lead);
+      MUTABLE length = ((6 + lead) + trail);
+      &fixes.append(TRY (fix__new(fix_description(:REMOVE_LOCAL_CAPABILITY, {:name: name}), [edit__new(span__new(NIL, line, start_col, length), "")], :auto)));
+    END
+  END
+  MUTABLE anchor = IF line != NIL THEN
+    anchor_at(line, (info.column OR_ELSE 1))
+  ELSE
+    NIL
+  END;
+  fixable_mut(anchor, {:code: :LOCAL_NEVER_SHARED, :name: name, :category: :lint, :level: :info, :fixes: fixes});
+END
+FN emit_immutable_assignment_error_mut(node: BindExpr, scope: Scope) RETURNS Void ->
+  MUTABLE fix = build_declare_mutable_fix(node.name, scope);
+  IF !(fix) THEN
+    RETURN error_mut(node, :IMMUTABLE_ASSIGNMENT, {:name: node.name});
+  END
+  fixable_mut(node, {:code: :IMMUTABLE_ASSIGNMENT, :name: node.name, :category: :ownership, :level: :error, :fixes: [fix]});
+END
+FN emit_immutable_arg_error_mut(arg_node: Identifier, scope: Scope, arg_idx: Int64, param_name: String) RETURNS Void ->
+  MUTABLE fix = build_declare_mutable_fix(arg_node.name, scope);
+  MUTABLE kw = {:index: arg_idx, :param: param_name, :actual: arg_node.name};
+  IF !(fix) THEN
+    RETURN error_mut(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, kw);
+  END
+  fixable_mut(arg_node, mergeKwargs(mergeKwargs({:code: :IMMUTABLE_ARG_PASSED_AS_MUTABLE}, kw), {:category: :ownership, :level: :error, :fixes: [fix], :raise_in_collector: TRUE}));
+END
+FN emit_missing_mutable_marker_error_mut(facts: CallArgumentFacts, scope: Scope) RETURNS !Void ->
+  MUTABLE arg = COPY facts.arg_node;
+  MUTABLE root: ?Identifier = aST__root_identifier(arg);
+  IF root EXISTS AS root_value THEN
+    MUTABLE edits: []Edit = [edit__new(span__new(NIL, root_value.token.line, root_value.token.column, 0), "&")];
+    MUTABLE mutable_fix = build_declare_mutable_fix(root_value.name, scope);
+    IF (scope__is_immutable?(scope, root_value.name) AND mutable_fix) THEN
+      edits = ruby_array_concat_Edit(edits, CAST(mutable_fix.edits() AS []Edit));
+    END
+    MUTABLE fix = TRY (fix__new(fix_description(:INSERT_MUTABLE_ARGUMENT_MARKER, {:name: root_value.name, :param: facts.param.name}), edits, :auto));
+    fixable_mut(root_value, {:code: :MUTABLE_ARGUMENT_REQUIRES_MARKER, :index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name, :category: :mutability, :level: :error, :fixes: [fix]});
+  ELSE
+    RETURN;
+  END
+END
+FN emit_unexpected_mutable_argument_error_mut(facts: CallArgumentFacts) RETURNS !Void ->
+  MUTABLE token: ?Token = COPY facts.mutable_marker_token;
+  IF token EXISTS AS token_value THEN
+    MUTABLE fix = TRY (fix__new(fix_description(:REMOVE_MUTABLE_ARGUMENT_MARKER, {:param: facts.param.name}), [edit__new(span__new(NIL, token_value.line, token_value.column, 1), "")], :auto));
+    fixable_mut(token_value, {:code: :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :index: (facts.index + 1), :param: facts.param.name, :category: :mutability, :level: :error, :fixes: [fix]});
+  ELSE
+    RETURN error_mut(facts.arg_node, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, {:index: (facts.index + 1), :param: facts.param.name});
+  END
+END
+FN emit_immutable_index_assignment_error_mut(assignment_node: Assignment, scope: Scope, var_name: String) RETURNS Void ->
+  MUTABLE fix = build_declare_mutable_fix(var_name, scope);
+  IF !(fix) THEN
+    RETURN error_mut(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, {:name: var_name});
+  END
+  fixable_mut(assignment_node, {:code: :ASSIGN_INDEX_IMMUTABLE_LIST, :name: var_name, :category: :ownership, :level: :error, :fixes: [fix]});
+END
+FN emit_immutable_field_assignment_error_mut(assignment_node: Assignment, scope: Scope, var_name: String, field_name: String) RETURNS Void ->
+  MUTABLE fix = build_declare_mutable_fix(var_name, scope);
+  MUTABLE kw = {:name: var_name, :field: field_name};
+  IF !(fix) THEN
+    RETURN error_mut(assignment_node, :IMMUTABLE_FIELD_ASSIGNMENT, kw);
+  END
+  fixable_mut(assignment_node, mergeKwargs(mergeKwargs({:code: :IMMUTABLE_FIELD_ASSIGNMENT}, kw), {:category: :ownership, :level: :error, :fixes: [fix]}));
+END
+FN emit_reentrant_error_mut(fn_node: FunctionDef, code: String@symbol) RETURNS !Void ->
+  MUTABLE arrow = COPY fn_node.arrow_token;
+  MUTABLE fix = NIL;
+  IF arrow THEN
+    fix = TRY (fix__new(fix_description(:ADD_EFFECTS_REENTRANT), [edit__new(span__new(NIL, arrow.line, arrow.column, 0), "EFFECTS REENTRANT ")], :auto));
+  END
+  IF !(fix) THEN
+    RETURN error_mut(fn_node, code, {:name: fn_node.name});
+  END
+  fixable_mut(fn_node, {:code: code, :name: fn_node.name, :category: :reentrance, :level: :error, :fixes: [fix]});
+END
+FN emit_capture_immutable_as_mutable_error_mut(node: FunctionDef, cap_name: String, owner_scope: Scope) RETURNS Void ->
+  MUTABLE fix = build_declare_mutable_fix(cap_name, owner_scope);
+  IF !(fix) THEN
+    RETURN error_mut(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, {:name: cap_name});
+  END
+  fixable_mut(node, {:code: :CAPTURE_IMMUTABLE_AS_MUTABLE, :name: cap_name, :category: :ownership, :level: :error, :fixes: [fix]});
+END
+FN emit_ambiguous_return_error_mut(fn_node: FunctionDef, found_returns: []ReturnFact) RETURNS !Void ->
+  MUTABLE return_types = ( { MUTABLE rtoc_map_results = CAST([] AS []Type); found_returns |> EACH { &rtoc_map_results.append(COPY _.type); }; rtoc_map_results } );
+  MUTABLE arrow = COPY fn_node.arrow_token;
+  MUTABLE fix = NIL;
+  IF arrow THEN
+    fix = TRY (fix__new(fix_description(:INSERT_RETURNS_ANY), [edit__new(span__new(NIL, arrow.line, arrow.column, 0), "RETURNS :Any ")], :auto));
+  END
+  IF !(fix) THEN
+    RETURN error_mut(fn_node, :AMBIGUOUS_RETURN, {:types: return_types});
+  END
+  fixable_mut(fn_node, {:code: :AMBIGUOUS_RETURN, :types: return_types, :category: :type, :level: :error, :fixes: [fix]});
+END
+FN emit_match_partial_fix_mut(match_node: MatchStatement, code: String@symbol, kwargs: {String@symbol}String = {}) RETURNS !Void ->
+  MUTABLE tok = COPY match_node.token;
+  MUTABLE fix = NIL;
+  IF tok THEN
+    fix = TRY (fix__new(fix_description(:REPLACE_MATCH_WITH_PARTIAL), [edit__new(span__new(NIL, tok.line, tok.column, 0), "PARTIAL ")], :auto));
+  END
+  IF !(fix) THEN
+    RETURN error_mut(match_node, code, kwargs);
+  END
+  IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
+    fixable_mut(match_node, {:code: code, :type: kwargs[:type], :category: :type, :level: :error, :fixes: [fix]});
+  ELSE_IF (code == :MATCH_NON_EXHAUSTIVE) THEN
+    fixable_mut(match_node, {:code: code, :kind: kwargs[:kind], :name: kwargs[:name], :missing: kwargs[:missing], :category: :type, :level: :error, :fixes: [fix]});
+  ELSE
+    panic("unsupported MATCH partial fix diagnostic: {}");
+  END
+END
+FN emit_return_borrowed_no_copy_error_mut(MUTABLE node: Locatable) RETURNS !Void ->
+  MUTABLE fix = NIL;
+  IF node.token() THEN
+    MUTABLE tok = node.token();
+    fix = TRY (fix__new(fix_description(:WRAP_RETURN_WITH_COPY), [edit__new(span__new(NIL, tok.line(), tok.column(), 0), "COPY ")], :auto));
+  END
+  MUTABLE kw = {:type: &node.full_type_mut("borrowed return diagnostic")};
+  IF !(fix) THEN
+    RETURN error_mut(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, kw);
+  END
+  fixable_mut(node, mergeKwargs(mergeKwargs({:code: :RETURN_BORROWED_NO_COPY_OR_LIFETIME}, kw), {:category: :lifetime, :level: :error, :fixes: [fix]}));
+END
+FN emit_cap_field_needs_with_mut(node: GetField, code: String@symbol, name: NameCandidate, field: String, cap: String, perm: String) RETURNS !Void ->
+  MUTABLE src = source_code();
+  MUTABLE kw = {:name: name, :field: field, :cap: cap};
+  MUTABLE fixes = List[];
+  IF ((src AND TRUE) AND node.token) THEN
+    MUTABLE line_num = node.token.line;
+    MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
+    MUTABLE body = line_text.chomp();
+    MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
+    MUTABLE inner = body.lstrip();
+    IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
+      MUTABLE alias_name = "${castNameCandidateToString(name)}_v";
+      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex(CAST(name AS String))}\\.(?=\\w)", "${alias_name}.");
+      MUTABLE new_line = "${indent}WITH ${perm} ${castNameCandidateToString(name)} AS ${alias_name} { ${rewritten} }";
+      &fixes.append(TRY (fix__new(fix_description(:WRAP_CAPABILITY_ACCESS, {:permission: perm, :name: name, :alias_name: alias_name, :capability: cap}), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), new_line)], :interactive)));
+    END
+  END
+  IF (fixes.length() == 0) THEN
+    RETURN error_mut(node, code, kw);
+  END
+  fixable_mut(node, mergeKwargs(mergeKwargs({:code: code}, kw), {:category: :capability, :level: :error, :fixes: fixes, :raise_in_collector: TRUE}));
+END
+FN emit_foreign_with_view_needs_unsafe_mut(node: WithBlock, fact: CapabilityTransition) RETURNS !Void ->
+  MUTABLE name = COPY fact.target_label;
+  MUTABLE view_token = fact.source.view_token;
+  MUTABLE as_token = fact.source.as_token;
+  IF !((view_token AND as_token)) THEN
+    RETURN error_mut(node, :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, {:name: name});
+  END
+  MUTABLE fix = TRY (fix__new(fix_description(:CONVERT_FOREIGN_VIEW_TO_UNSAFE, {:name: name}), [edit__new(span__new(NIL, view_token.line(), view_token.column(), "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token.line(), as_token.column(), 0), "LENGTH 0 ")], :interactive));
+  fixable_mut(node, {:code: :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, :name: name, :category: :capability, :level: :error, :fixes: [fix], :raise_in_collector: TRUE});
+END
+FN emit_foreign_index_needs_unsafe_view_mut(node: GetIndex, name: String) RETURNS !Void ->
+  MUTABLE src = source_code();
+  MUTABLE fixes = List[];
+  IF src THEN
+    MUTABLE line_num = node.source_range.start_line;
+    MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
+    MUTABLE body = line_text.chomp();
+    MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
+    MUTABLE inner = body.lstrip();
+    MUTABLE index = node.index;
+    MUTABLE length: String = "";
+    IF ((index IS_A Literal AND index.value() IS_A Int64) AND (index.value() >= 0)) THEN
+      length = COPY CAST(((index.value() + 1)) AS String);
+    ELSE
+      length = "0";
+    END
+    IF !(inner.empty?()) THEN
+      MUTABLE alias_name = "${name}_view";
+      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex(name)}\\s*(?=\\[)", alias_name);
+      MUTABLE replacement = "${indent}WITH UNSAFE VIEW ${name} LENGTH ${length} AS ${alias_name} { ${rewritten} }";
+      &fixes.append(TRY (fix__new(fix_description(:WRAP_FOREIGN_INDEX_UNSAFE_VIEW, {:name: name, :length: length, :alias_name: alias_name}), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), replacement)], :interactive)));
+    END
+  END
+  IF (fixes.length() == 0) THEN
+    RETURN error_mut(node, :FOREIGN_POINTER_DIRECT_INDEX, {:name: name});
+  END
+  fixable_mut(node, {:code: :FOREIGN_POINTER_DIRECT_INDEX, :name: name, :category: :capability, :level: :error, :fixes: fixes, :raise_in_collector: TRUE});
+END
+FN emit_direct_view_access_finding_mut(node: Locatable, name: String, permission: String) RETURNS !Void ->
+  MUTABLE src = source_code();
+  MUTABLE fixes = List[];
+  IF src THEN
+    MUTABLE line_num = token__start_line(node.source_range());
+    MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
+    MUTABLE body = line_text.chomp();
+    MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
+    MUTABLE inner = body.lstrip();
+    IF !(inner.empty?()) THEN
+      MUTABLE alias_name = "${name}_view";
+      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex(name)}\\b", alias_name);
+      MUTABLE replacement = "${indent}WITH ${permission} ${name} AS ${alias_name} { ${rewritten} }";
+      &fixes.append(TRY (fix__new(fix_description(:WRAP_DIRECT_VIEW_ACCESS, {:permission: permission, :name: name, :alias_name: alias_name}), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), replacement)], :interactive)));
+    END
+  END
+  IF (fixes.length() == 0) THEN
+    RETURN error_mut(node, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, {:name: name, :permission: permission});
+  END
+  fixable_mut(node, {:code: :DIRECT_VIEW_ACCESS_REQUIRES_WITH, :name: name, :permission: permission, :category: :capability, :level: :error, :fixes: fixes, :raise_in_collector: TRUE});
+END
+FN emit_with_guard_all_bindings_need_as_mut(node: WithBlock, missing_caps: []CapabilityTransition) RETURNS !Void ->
+  MUTABLE edits = List[];
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < missing_caps.length() DO
+    MUTABLE vn = COPY missing_caps[rtoc_idx]?.var_node;
+    IF !(((IF vn IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) AND vn.token())) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE tok = vn.token();
+    MUTABLE name = COPY CAST(vn.name() AS String);
+    &edits.append(edit__new(span__new(NIL, tok.line(), (tok.column() + name.codepointCount()), 0), " AS ${name}_v"));
+  rtoc_idx = rtoc_idx + 1;
+  END
+  IF (edits.length() == 0) THEN
+    RETURN error_mut(node, :WITH_GUARD_ALL_BINDINGS_NEED_AS);
+  END
+  MUTABLE fix = TRY (fix__new(fix_description(:ADD_WITH_GUARD_ALIASES), edits, :auto));
+  fixable_mut(node, {:code: :WITH_GUARD_ALL_BINDINGS_NEED_AS, :category: :capability, :level: :error, :fixes: [fix], :raise_in_collector: TRUE});
+END
+FN emit_with_guard_mutable_mutated_mut(node: WithBlock, names_input: []String, verb: String) RETURNS !Void ->
+  MUTABLE names = COPY names_input;
+  MUTABLE src = source_code();
+  names = names.to_a();
+  MUTABLE edits = List[];
+  IF ((src AND TRUE) AND node.token) THEN
+    MUTABLE with_line = node.token.line;
+    MUTABLE window_lines = (src.split("\n").substr(((with_line - 1)), ((((with_line + 8)) - ((with_line - 1))) + 1)) OR List[]);
+    FOR _ IN names DO
+  MUTABLE pat = "\\bMUTABLE\\s+${escapeRegex(_)}\\b";
+  MUTABLE off = 0;
+  MUTABLE found: Bool = FALSE;
+  WHILE ((off < scopeBindings__length(window_lines)) AND !(found)) DO
+        MUTABLE line = window_lines[off];
+        MUTABLE idx = regexMatch?(line, pat);
+        IF idx THEN
+          MUTABLE line_no = (with_line + off);
+          MUTABLE mut_col = (idx + 1);
+          &edits.append(edit__new(span__new(NIL, line_no, mut_col, "MUTABLE ".codepointCount()), ""));
+          found = TRUE;
+        END
+        off = (off + 1);
+  END
+    END
+  END
+  MUTABLE names_str = (names |> SELECT "'${_}'").join(", ");
+  MUTABLE kw = {:names: names_str, :verb: verb};
+  IF (edits.length() == 0) THEN
+    RETURN error_mut(node, :WITH_GUARD_MUTABLE_MUTATED, kw);
+  END
+  MUTABLE target: String = "";
+  IF (names.length() == 1) THEN
+    target = "the alias";
+  ELSE
+    target = "each guarded alias";
+  END
+  MUTABLE fix = TRY (fix__new(fix_description(:DROP_WITH_GUARD_MUTABLE, {:target: target}), edits, :interactive));
+  fixable_mut(node, mergeKwargs(mergeKwargs({:code: :WITH_GUARD_MUTABLE_MUTATED}, kw), {:category: :capability, :level: :error, :fixes: [fix], :raise_in_collector: TRUE}));
+END
+FN emit_with_read_needs_write_lock_mut(node: WithBlock, name: String, var_node: Locatable) RETURNS Void ->
+  MUTABLE syn = cap_var_sync(var_node);
+  MUTABLE fix =   IF (syn == :locked) THEN
+    build_decl_cap_replace_fix(name, "@locked", "@writeLocked", {:description_code: :REPLACE_LOCKED_WITH_WRITE_LOCKED, :confidence: :auto})
+  ELSE
+    build_decl_cap_insert_fix(name, "@writeLocked", {:description_code: :WITH_ADD_WRITE_LOCKED, :description_params: {:reader: "via `WITH READ`"}, :confidence: :auto})
+  END;
+  IF !(fix) THEN
+    RETURN error_mut(node, :WITH_READ_NEEDS_WRITE_LOCK, {:name: name});
+  END
+  fixable_mut(node, {:code: :WITH_READ_NEEDS_WRITE_LOCK, :name: name, :category: :capability, :level: :error, :fixes: [fix], :raise_in_collector: TRUE});
+END
+FN emit_with_cannot_infer_cap_mut(node: WithBlock, name: String) RETURNS Void ->
+  MUTABLE candidates = [{:sigil: "@multiowned", :description_code: :WITH_ADD_MULTIOWNED, :description_params: {:suffix: ""}}, {:sigil: "@shared", :description_code: :WITH_ADD_SHARED, :description_params: {:suffix: "across fibers"}}, {:sigil: "@locked", :description_code: :WITH_ADD_LOCKED, :description_params: {}}, {:sigil: "@writeLocked", :description_code: :WITH_ADD_WRITE_LOCKED, :description_params: {:reader: "via WITH READ"}}];
+  MUTABLE fixes = candidates |> SELECT:? build_decl_cap_insert_fix(name, _[:sigil], {:description_code: _[:description_code], :description_params: _[:description_params], :confidence: :interactive}) |> WHERE _ != NIL;
+  IF (fixes.length() == 0) THEN
+    RETURN error_mut(node, :WITH_CANNOT_INFER_CAP, {:name: name});
+  END
+  fixable_mut(node, {:code: :WITH_CANNOT_INFER_CAP, :name: name, :category: :capability, :level: :error, :fixes: fixes, :raise_in_collector: TRUE});
+END
+FN emit_with_materialized_needs_tense_mut(node: WithBlock, name: String, got: TypeTypeInput) RETURNS !Void ->
+  MUTABLE src = source_code();
+  MUTABLE scope = lookup_scope_for(name);
+  MUTABLE decl = COPY (IF scope != NIL THEN
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = (scope?);
+  scope__resolve_entry(rtoc_local_receiver_3, name) }
+  ELSE
+    NIL
+  END)?.reg;
+  MUTABLE fix = NIL;
+  IF (decl AND src) THEN
+    MUTABLE token = IF respondsTo?(decl, "token") THEN
+      decl.token()
+    ELSE
+      NIL
+    END;
+    IF token THEN
+      MUTABLE dline = token.line();
+      MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");
+      MUTABLE search_offset = (token.column() - 1);
+      MUTABLE ann_match = (IF line_text.substr(search_offset, (line_text.length() - search_offset)) != NIL THEN
+        ((line_text.substr(search_offset, (line_text.length() - search_offset)))?).match(":\\s*([A-Za-z_][\\w]*)")
+      ELSE
+        NIL
+      END);
+      IF (ann_match AND !(line_text.contains?("~"))) THEN
+        MUTABLE type_col = ((search_offset + ann_match.begin(1)) + 1);
+        fix = TRY (fix__new(fix_description(:PREFIX_TENSE_TYPE, {:name: name}), [edit__new(span__new(NIL, dline, type_col, 0), "~")], :interactive));
+      END
+    END
+  END
+  MUTABLE kw = {:name: name, :got: got};
+  IF !(fix) THEN
+    RETURN error_mut(node, :WITH_MATERIALIZED_NEEDS_TENSE, kw);
+  END
+  fixable_mut(node, mergeKwargs(mergeKwargs({:code: :WITH_MATERIALIZED_NEEDS_TENSE}, kw), {:category: :capability, :level: :error, :fixes: [fix], :raise_in_collector: TRUE}));
+END
+FN emit_with_restrict_immutable_error_mut(node: WithBlock, var_node: Identifier) RETURNS Void ->
+  MUTABLE name = COPY var_node.name;
+  MUTABLE scope = ((var_node.symbol?.scope) OR_ELSE current_scope());
+  MUTABLE fix = build_declare_mutable_fix(name, scope);
+  IF !(fix) THEN
+    RETURN error_mut(node, :WITH_RESTRICT_NEEDS_MUTABLE, {:name: name});
+  END
+  fixable_mut(node, {:code: :WITH_RESTRICT_NEEDS_MUTABLE, :name: name, :category: :capability, :level: :error, :fixes: [fix]});
+END
+FN emit_can_smash_unsupported_error_mut(node: AsyncValidationNode) RETURNS !Void ->
+  MUTABLE fix = NIL;
+  MUTABLE tok = IF respondsTo?(node, "can_smash_token") THEN
+    node.can_smash_token()
+  ELSE
+    NIL
+  END;
+  IF tok THEN
+    fix = TRY (fix__new(fix_description(:REPLACE_CAN_SMASH_WITH_SERVICE), [edit__new(span__new(NIL, tok.line(), tok.column(), (CAST(tok.value() AS String)).codepointCount()), "@service")], :auto));
+  END
+  IF !(fix) THEN
+    RETURN error_mut(node, :CAN_SMASH_NOT_SUPPORTED);
+  END
+  fixable_mut(node, {:code: :CAN_SMASH_NOT_SUPPORTED, :category: :reentrance, :level: :error, :fixes: [fix]});
+END
+FN emit_type_mismatch_assign_error_mut(node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS Void ->
+  MUTABLE kw = {:got: value_type, :expected: target_type};
+  MUTABLE value = node.value();
+  MUTABLE fix = build_cast_wrap_fix(value, target_type);
+  IF !(fix) THEN
+    RETURN error_mut(node, :TYPE_MISMATCH_ASSIGN, kw);
+  END
+  fixable_mut(node, mergeKwargs(mergeKwargs({:code: :TYPE_MISMATCH_ASSIGN}, kw), {:category: :type, :level: :error, :fixes: [fix]}));
+END
+FN literal_source_length(tok: Token) RETURNS Int64 ->
+  MUTABLE src = source_code();
+  IF !(src) THEN
+    RETURN (token__display_value(tok)).codepointCount();
+  END
+  MUTABLE line = src.split("\n")[(tok.line - 1)];
+  IF !(line) THEN
+    RETURN (token__display_value(tok)).codepointCount();
+  END
+  MUTABLE rest = line.substr(((tok.column - 1)), (line.length() - ((tok.column - 1))));
+  IF ((rest == NIL) OR rest.empty?()) THEN
+    RETURN (token__display_value(tok)).codepointCount();
+  END
+  IF rest.startsWith?("\"\"\"") THEN
+    MUTABLE idx = rest.indexOf("\"\"\"", 3);
+    IF idx THEN
+      RETURN (idx + 3);
+    ELSE
+      RETURN (token__display_value(tok)).codepointCount();
+    END
+  END
+  IF rest.startsWith?("\"") THEN
+    MUTABLE i = 1;
+    WHILE (i < scopeBindings__length(rest)) DO
+      MUTABLE ch = rest[i];
+      IF (ch == "\"") THEN
+        BREAK;
+      END
+      IF ((ch == "\\") AND ((i + 1) < scopeBindings__length(rest))) THEN
+        i = (i + 1);
+      END
+      i = (i + 1);
+    END
+    RETURN (i + 1);
+  END
+  MUTABLE m = rest.match("\\A[\\d_a-zA-Z.]+");
+  IF m THEN
+    RETURN scopeBindings__length(m[0]);
+  ELSE
+    RETURN (token__display_value(tok)).codepointCount();
+  END
+END
+FN build_cast_wrap_fix(value: ?Locatable, target_type: TypeTypeInput) RETURNS !?Fix ->
+  IF value EXISTS AS value_value THEN
+    IF !(value_value.token()) THEN
+      RETURN NIL;
+    END
+    MUTABLE tok = value_value.token();
+    MUTABLE target_name_branch_value: ?TypeTypeInput = NIL;
+    IF target_type IS_A Type AS type THEN
+      target_name_branch_value = TypeTypeInput{ SymbolValue: COPY type__resolved(type) };
+    ELSE
+      target_name_branch_value = COPY target_type;
+    END
+    MUTABLE target_name: TypeTypeInput = target_name_branch_value?;
+    MUTABLE text_length = PARTIAL MATCH value_value START
+      Locatable.Literal AS literal -> literal_source_length(tok),
+      Locatable.Identifier AS identifier -> identifier__name(identifier).codepointCount(),
+      DEFAULT -> NIL
+    END;
+    IF !(text_length) THEN
+      RETURN NIL;
+    END
+    RETURN TRY (fix__new(fix_description(:WRAP_VALUE_WITH_CAST, {:type: target_name}), [edit__new(span__new(NIL, tok.line(), tok.column(), 0), "CAST("), edit__new(span__new(NIL, tok.line(), (tok.column() + text_length), 0), " AS ${castTypeTypeInputToString(target_name)})")], :interactive));
+  ELSE
+    RETURN NIL;
+  END
+END
+FN build_decl_cap_insert_fix(name: String, sigil: String, description_code: String@symbol = :ADD_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}String, confidence: String@symbol = :auto) RETURNS !?Fix ->
+  MUTABLE src = source_code();
+  MUTABLE scope = lookup_scope_for(name);
+  MUTABLE decl = COPY (IF scope != NIL THEN
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_4 = (scope?);
+  scope__resolve_entry(rtoc_local_receiver_4, name) }
+  ELSE
+    NIL
+  END)?.reg;
+  IF !(((decl AND respondsTo?(decl, "token")) AND decl.token())) THEN
+    RETURN NIL;
+  END
+  IF !(src) THEN
+    RETURN NIL;
+  END
+  MUTABLE dline = decl.token().line();
+  MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");
+  MUTABLE semi_idx = line_text.indexOf(";", (decl.token().column() - 1));
+  IF !(semi_idx) THEN
+    RETURN NIL;
+  END
+  IF line_text.contains?(sigil) THEN
+    RETURN NIL;
+  END
+  MUTABLE insert_col = (semi_idx + 1);
+  MUTABLE fix_params = {:sigil: sigil, :name: name, :line: dline}.keys() |> REDUCE(COPY description_params) { acc[_] = COPY ({:sigil: sigil, :name: name, :line: dline}[_] OR_ELSE panic("missing hash key")); acc };
+  RETURN TRY (fix__new(fix_description_from_hash(description_code, fix_params), [edit__new(span__new(NIL, dline, insert_col, 0), " ${sigil}")], confidence));
+END
+FN build_decl_cap_replace_fix(name: String, old_sigil: String, new_sigil: String, description_code: String@symbol = :CHANGE_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}String, confidence: String@symbol = :auto) RETURNS !?Fix ->
+  MUTABLE src = source_code();
+  MUTABLE scope = lookup_scope_for(name);
+  MUTABLE decl = COPY (IF scope != NIL THEN
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = (scope?);
+  scope__resolve_entry(rtoc_local_receiver_5, name) }
+  ELSE
+    NIL
+  END)?.reg;
+  IF !(((decl AND respondsTo?(decl, "token")) AND decl.token())) THEN
+    RETURN NIL;
+  END
+  IF !(src) THEN
+    RETURN NIL;
+  END
+  MUTABLE dline = decl.token().line();
+  MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");
+  MUTABLE idx = line_text.indexOf(old_sigil);
+  IF !(idx) THEN
+    RETURN NIL;
+  END
+  MUTABLE fix_params = {:old_sigil: old_sigil, :new_sigil: new_sigil, :name: name, :line: dline}.keys() |> REDUCE(COPY description_params) { acc[_] = COPY ({:old_sigil: old_sigil, :new_sigil: new_sigil, :name: name, :line: dline}[_] OR_ELSE panic("missing hash key")); acc };
+  RETURN TRY (fix__new(fix_description_from_hash(description_code, fix_params), [edit__new(span__new(NIL, dline, (idx + 1), old_sigil.codepointCount()), new_sigil)], confidence));
+END
+FN emit_with_cap_mismatch_mut(node: WithBlock, name: String, code: String@symbol, candidates: []CapabilityFixCandidate, confidence: String@symbol = :auto, kw: {String@symbol}String = {}) RETURNS !Void ->
+  MUTABLE fixes = candidates |> SELECT:? build_decl_cap_insert_fix(name, _.sigil, {:description_code: _.description_code, :description_params: _.description_params, :confidence: confidence}) |> WHERE _ != NIL;
+  IF (fixes.length() == 0) THEN
+    RETURN error_mut(node, code, kw);
+  END
+  IF (code == :WITH_EXCLUSIVE_NEEDS_LOCK) THEN
+    fixable_mut(node, {:code: code, :got: kw[:got], :category: :capability, :level: :error, :fixes: fixes, :raise_in_collector: TRUE});
+  ELSE_IF (code == :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC) OR (code == :WITH_ATOMIC_NEEDS_SHARED_ATOMIC) THEN
+    fixable_mut(node, {:code: code, :name: kw[:name], :actual: kw[:actual], :category: :capability, :level: :error, :fixes: fixes, :raise_in_collector: TRUE});
+  ELSE_IF (code == :WITH_NEEDS_MULTIOWNED) OR (code == :WITH_NEEDS_SHARED) THEN
+    fixable_mut(node, {:code: code, :name: kw[:name], :category: :capability, :level: :error, :fixes: fixes, :raise_in_collector: TRUE});
+  ELSE
+    panic("unsupported WITH capability mismatch diagnostic: {}");
+  END
+END
+FN build_declare_mutable_fix(name: String, scope: Scope) RETURNS !?Fix ->
+  MUTABLE info: ?SymbolEntry@multiowned = scope__resolve_entry(scope, name);
+  IF info EXISTS AS info_value THEN
+    MUTABLE tok = NIL;
+    MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
+    IF ((decl != NIL) AND decl.token()) THEN
+      tok = decl.token();
+    ELSE_IF (symbolEntry__is_param(info_value) AND (info_value.param_decl_token != NIL)) THEN
+      tok = COPY info_value.param_decl_token;
+    END
+    IF !(tok) THEN
+      RETURN NIL;
+    END
+    IF (tok.value() == "MUTABLE") THEN
+      RETURN NIL;
+    END
+    RETURN TRY (fix__new(fix_description(:DECLARE_MUTABLE_BINDING, {:name: name, :line: tok.line()}), [edit__new(span__new(NIL, tok.line(), tok.column(), 0), "MUTABLE ")], :auto));
+  ELSE
+    RETURN NIL;
+  END
+END
+FN build_atomic_escape_migration_fix(source_sym: SymbolEntry, source_name: String) RETURNS !?Fix ->
+  MUTABLE src = source_code();
+  IF !(((TRUE AND TRUE) AND symbolEntry__atomic?(source_sym))) THEN
+    RETURN NIL;
+  END
+  IF !(src) THEN
+    RETURN NIL;
+  END
+  MUTABLE reg_branch_value: ?SymbolEntryRegInput = NIL;
+  IF TRUE THEN
+    reg_branch_value = COPY source_sym.reg;
+  ELSE
+    reg_branch_value = NIL;
+  END
+  MUTABLE reg: ?SymbolEntryRegInput = reg_branch_value;
+  IF reg EXISTS AS reg_value THEN
+    IF reg_value.token() THEN
+      MUTABLE line_num = reg_value.token().line();
+      IF !(line_num) THEN
+        RETURN NIL;
+      END
+      MUTABLE src_line = (src.split("\n")[(line_num - 1)] OR "");
+      MUTABLE search_offset = (reg_value.token().column() - 1);
+      MUTABLE match = (IF src_line.substr(search_offset, (src_line.length() - search_offset)) != NIL THEN
+        ((src_line.substr(search_offset, (src_line.length() - search_offset)))?).match("@(?:shared:atomic|atomic:shared)")
+      ELSE
+        NIL
+      END);
+      IF !(match) THEN
+        RETURN NIL;
+      END
+      MUTABLE start_col = ((search_offset + match.begin(0)) + 1);
+      RETURN TRY (fix__new(fix_description(:MIGRATE_ATOMIC_ESCAPE, {:name: source_name}), [edit__new(span__new(NIL, line_num, start_col, scopeBindings__length(match[0])), "@shared:locked")], :interactive));
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+FN auto_rank_candidates(ops: [Set]String@symbol) RETURNS !Any[]Candidate ->
+  IF (FALSE OR ops.empty?()) THEN
+    RETURN CAST(( { MUTABLE rtoc_empty_list_6: Auto[]Candidate = List[]; rtoc_empty_list_6 } ) AS Auto[]Candidate);
+  END
+  MUTABLE agg = {};
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < ops.length() DO
+    MUTABLE entry: ?{String@symbol}Any@multiowned = COPY (CAST({:ADD: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :CONCAT: CAST({:default: :String, :alts: List[]} AS {String@symbol}Any@multiowned), :SUB: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :MUL: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :DIV: CAST({:default: :Float64, :alts: [:Int64], :notes: {:Int64: "integer division \u{2014} TRUNCATES toward zero"}} AS {String@symbol}Any@multiowned), symbol("MOD"): CAST({:default: :Int64, :alts: List[]} AS {String@symbol}Any@multiowned), :EQ: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :NEQ: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :LT: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :GT: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :LTE: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :GTE: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), symbol("AND"): CAST({:default: :Bool, :alts: List[]} AS {String@symbol}Any@multiowned), symbol("OR"): CAST({:default: :Bool, :alts: List[]} AS {String@symbol}Any@multiowned)} AS {String@symbol}{String@symbol}Any@multiowned))[ops[rtoc_idx]];
+    IF !(entry) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE default: String@symbol = COPY CAST(entry[:default] AS String@symbol);
+    MUTABLE alts: []String@symbol = CAST((entry[:alts] OR_ELSE List[]) AS []String@symbol);
+    MUTABLE notes: {String@symbol}String = CAST((entry[:notes] OR_ELSE {}) AS {String@symbol}String);
+    MUTABLE ranked = ([default] + alts);
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < ranked.length() DO
+        MUTABLE stat: ?Any = COPY agg[ranked[rtoc_idx]];
+        IF !(stat) THEN
+            stat = {:count: 0, :rank_sum: 0, :notes: List[]};
+            agg[ranked[rtoc_idx]] = UNWRAP (stat);
+        END
+        stat[:count] = (CAST(stat[:count] AS Int64) + 1);
+        stat[:rank_sum] = (CAST(stat[:rank_sum] AS Int64) + rtoc_idx);
+        IF notes[ranked[rtoc_idx]] THEN
+            (CAST(stat[:notes] AS []String)).append(UNWRAP (notes[ranked[rtoc_idx]]));
+        END
+      rtoc_idx = rtoc_idx + 1;
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  MUTABLE n_ops = ops.size();
+  MUTABLE intersection = agg |> WHERE (_._1[:count] == n_ops);
+  RETURN (intersection |> ORDER_BY _._1[:rank_sum]).keys() |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY (CAST(((CAST(((intersection |> ORDER_BY _._1[:rank_sum])[_] OR_ELSE panic("missing hash key"))[:notes] AS []String)) |> DISTINCT _) AS []String)).first() };
+END
+FN build_auto_candidate_fix(slot: Slot, type_sym: String@symbol, note: ?String, position: Int64) RETURNS !?Fix ->
+  MUTABLE auto_tok = auto_token_for(slot);
+  IF !(auto_tok) THEN
+    RETURN NIL;
+  END
+  MUTABLE type_str = COPY CAST(type_sym AS String);
+  RETURN TRY (fix__new(fix_description(:PIN_AUTO_SLOT, {:position: position, :label: auto_slot_label(slot), :type: type_str, :note: IF note != NIL THEN
+    " ${note}"
+  ELSE
+    ""
+  END}), [edit__new(span__new(NIL, auto_tok.line(), auto_tok.column(), "Auto".codepointCount()), type_str)], :interactive));
+END
+FN build_auto_op_evidence_block(ops: [Set]String@symbol, candidates: Any[]Candidate) RETURNS String ->
+  IF (candidates.length() == 0) THEN
+    RETURN "";
+  END
+  MUTABLE op_list = ((ops |> SELECT COPY _) |> ORDER_BY _).join(", ");
+  MUTABLE msg = "\n  In the body, the binding is used in operator(s): ${op_list}.\n";
+  msg = (msg $+ "  Suggested fixes:\n");
+  MUTABLE idx = 0;
+  WHILE (idx < candidates.length()) DO
+    MUTABLE candidate: ?AnyCandidate = COPY candidates[idx];
+    MUTABLE type_sym = candidate.type_sym;
+    MUTABLE note: ?String = candidate.note;
+    MUTABLE label = "";
+    IF (idx == 0) THEN
+      label = "(recommended)";
+    END
+    MUTABLE line = "    ${(idx + 1).toString()}. ${label.ljust(15)} ${type_sym}";
+    IF note EXISTS AS note_value THEN
+      line = (line $+ "  -- ${note_value}");
+    END
+    msg = (msg $+ line);
+    msg = (msg $+ "\n");
+    idx = (idx + 1);
+  END
+  RETURN msg;
+END
+FN emit_auto_resolved_finding_mut(resolution: Resolution) RETURNS Void ->
+  MUTABLE slot = COPY resolution.slot;
+  IF (TRUE AND (slot.shape != NIL)) THEN
+    RETURN;
+  END
+  MUTABLE type_str = auto_type_source_form(resolution.type);
+  MUTABLE label = auto_slot_label(slot);
+  MUTABLE auto_tok = auto_token_for(slot);
+  fixable_mut((auto_tok OR slot.decl_node), {:code: :AUTO_INFERRED_TYPE, :label: label, :type: type_str, :category: :type, :level: :info, :fixes: build_auto_replace_fixes(auto_tok, type_str)});
+END
+FN emit_auto_shape_resolved_finding_mut(decl: AutoConstraintCollectorSlotDeclNode, slot: Slot) RETURNS Void ->
+  IF !((decl IS_A VarDecl OR decl IS_A BindExpr)) THEN
+    RETURN;
+  END
+  IF !(decl.type()) THEN
+    RETURN;
+  END
+  IF type__auto?(decl.type()) THEN
+    RETURN;
+  END
+  MUTABLE type_str = auto_type_source_form(decl.type());
+  MUTABLE name: String = "";
+  IF TRUE THEN
+    name = (MATCH decl START AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> item.name, AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> item.name, AutoConstraintCollectorSlotDeclNode.BindExpr AS item -> item.name END);
+  ELSE
+    name = "<binding>";
+  END
+  MUTABLE auto_tok = auto_token_for(slot);
+  fixable_mut((auto_tok OR decl), {:code: :AUTO_INFERRED_BINDING_TYPE, :name: name, :type: type_str, :category: :type, :level: :info, :fixes: build_auto_replace_fixes(auto_tok, type_str)});
+END
+FN build_auto_replace_fixes(auto_tok: ?Token, type_str: String) RETURNS ![]Fix ->
+  IF auto_tok EXISTS AS auto_tok_value THEN
+    RETURN CAST([TRY (fix__new(fix_description(:REPLACE_AUTO_WITH_INFERRED, {:type: type_str}), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :auto))] AS []Fix);
+  ELSE
+    RETURN CAST(( { MUTABLE rtoc_empty_list_7: []Fix = List[]; rtoc_empty_list_7 } ) AS []Fix);
+  END
+END
+FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS Void ->
+  MUTABLE slot = COPY ambiguity.slot;
+  MUTABLE label = auto_slot_label(slot);
+  MUTABLE observed = COPY ambiguity.observed_types;
+  MUTABLE observed_strs = observed |> SELECT auto_type_source_form(_);
+  MUTABLE message = build_auto_ambiguity_message(label, observed_strs, slot);
+  MUTABLE slot_id = slot_id_for(slot);
+  MUTABLE ops: [Set]Any = Set[];
+  IF slot_id THEN
+    ops = ((op_evidence[slot_id] OR_ELSE Set[]));
+  ELSE
+    ops = Set[];
+  END
+  MUTABLE candidates = auto_rank_candidates(ops);
+  IF !(candidates.empty?()) THEN
+    message = (message + build_auto_op_evidence_block(ops, candidates));
+  END
+  MUTABLE fixes = List[];
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < candidates.length() DO
+    MUTABLE fix = build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym(), candidates[rtoc_idx].note(), (rtoc_idx + 1));
+    IF fix THEN
+        &fixes.append(fix);
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  MUTABLE auto_tok = auto_token_for(slot);
+  fixable_mut((auto_tok OR slot.decl_node), {:code: :AUTO_AMBIGUOUS_TYPE, :detail: message, :category: :type, :level: :error, :fixes: fixes});
+END
+FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS Void ->
+  MUTABLE label = auto_slot_label(slot);
+  MUTABLE base_msg = "Cannot infer type for ${label} \u{2014} no observed uses to drive inference.";
+  MUTABLE slot_id = slot_id_for(slot);
+  MUTABLE ops: [Set]Any = Set[];
+  IF slot_id THEN
+    ops = ((op_evidence[slot_id] OR_ELSE Set[]));
+  ELSE
+    ops = Set[];
+  END
+  MUTABLE candidates = auto_rank_candidates(ops);
+  MUTABLE message = COPY base_msg;
+  IF candidates.empty?() THEN
+    message = (message $+ " Replace `Auto` with a concrete type, or remove the unused declaration.");
+  ELSE
+    message = (message $+ COPY build_auto_op_evidence_block(ops, candidates));
+  END
+  MUTABLE fixes = List[];
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < candidates.length() DO
+    MUTABLE fix = build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym(), candidates[rtoc_idx].note(), (rtoc_idx + 1));
+    IF fix THEN
+        &fixes.append(fix);
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  MUTABLE auto_tok = auto_token_for(slot);
+  fixable_mut((auto_tok OR slot.decl_node), {:code: :AUTO_UNRESOLVED_TYPE, :detail: message, :category: :type, :level: :error, :fixes: fixes});
+END
+FN slot_id_for(slot: Slot) RETURNS ?AnySlotId@multiowned ->
+  MUTABLE kind = COPY slot.kind;
+  IF ((kind == :param) AND !((((slot.fn_name != NIL) AND (slot.index != NIL))))) THEN
+    RETURN NIL;
+  END
+  IF ((kind == :return) AND !(slot.fn_name)) THEN
+    RETURN NIL;
+  END
+  IF (kind == :param) THEN
+    RETURN autoSlotId__param(UNWRAP (slot.fn_name), UNWRAP (slot.index));
+  ELSE_IF (kind == :return) THEN
+    RETURN autoSlotId__return(UNWRAP (slot.fn_name));
+  ELSE_IF (kind == :local) THEN
+    RETURN autoSlotId__local(castAutoConstraintCollectorDeclarationNodeToLocatable(castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node)));
+  ELSE
+    RETURN NIL;
+  END
+END
+FN auto_type_source_form(type: AutoConstraintCollectorObservedType) RETURNS String ->
+  IF type IS_A Type AS type_as_type THEN
+    MUTABLE sym = type__resolved(type_as_type);
+    RETURN COPY CAST(sym AS String);
+  ELSE
+    RETURN COPY CAST(type AS String);
+  END
+END
+FN auto_slot_label(slot: Slot) RETURNS !?String ->
+  IF (TRUE AND (slot.shape != NIL)) THEN
+    RETURN auto_shape_slot_label(slot);
+  END
+  IF (slot.kind == :param) THEN
+    RETURN auto_param_slot_label(slot);
+  ELSE_IF (slot.kind == :return) THEN
+    RETURN "return type of `${slot.fn_name}`";
+  ELSE_IF (slot.kind == :local) THEN
+    RETURN auto_local_slot_label(slot);
+  ELSE
+    panic("auto_slot_label: unrecognized slot kind {}");
+  END
+END
+FN auto_shape_slot_label(slot: Slot) RETURNS ?String ->
+  MUTABLE name: Any = NIL;
+  MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node) START
+    AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
+      name = COPY item.name;,
+    AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
+      name = COPY item.name;,
+  END
+  IF (slot.shape == :list_element) THEN
+    RETURN "element type of list `${name}`";
+  ELSE_IF (slot.shape == :map_key) THEN
+    RETURN "key type of map `${name}`";
+  ELSE_IF (slot.shape == :map_value) THEN
+    RETURN "value type of map `${name}`";
+  ELSE
+    RETURN NIL;
+  END
+END
+FN auto_param_slot_label(slot: Slot) RETURNS String ->
+  MUTABLE fn: FunctionDef = COPY CAST(slot.decl_node AS FunctionDef);
+  MUTABLE param = COPY UNWRAP (fn.params[UNWRAP (slot.index)]);
+  RETURN "parameter '${param.name}' of `${slot.fn_name}`";
+END
+FN auto_local_slot_label(slot: Slot) RETURNS String ->
+  MUTABLE name: Any = NIL;
+  MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node) START
+    AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
+      name = COPY item.name;,
+    AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
+      name = COPY item.name;,
+  END
+  RETURN "local '${name}'";
+END
+FN auto_token_for(slot: Slot) RETURNS ?Token ->
+  RETURN COPY slot.auto_token;
+END
+FN build_auto_ambiguity_message(label: String, observed_strs: []String, slot: Slot) RETURNS String ->
+  MUTABLE types_list = observed_strs.join(", ");
+  MUTABLE msg = "Ambiguous Auto for ${label}: observed as ${types_list}.\n";
+  msg = (msg $+ "  Option 1 (recommended): pin one concrete type at the\n");
+  msg = (msg $+ "    declaration and convert at the divergent sites. The\n");
+  msg = (msg $+ "    candidate types observed are: ${types_list}.\n");
+  msg = (msg $+ "    Pick the one whose semantics match your intent and\n");
+  msg = (msg $+ "    convert the others (e.g. `Int64.toString(x)`,\n");
+  msg = (msg $+ "    `Int.fromString(s) OR_ELSE RAISE`).\n");
+  msg = (msg $+ "  Option 2: if these types do not have an obvious\n");
+  msg = (msg $+ "    conversion path, restructure the call sites so a\n");
+  msg = (msg $+ "    single concrete type flows through.\n");
+  IF ((slot.kind == :param) OR (slot.kind == :return)) THEN
+    MUTABLE union_name: String = "";
+    IF (slot.kind == :param) THEN
+      MUTABLE fn: FunctionDef = COPY CAST(slot.decl_node AS FunctionDef);
+      union_name = ((UNWRAP (fn.params[UNWRAP (slot.index)])).name).capitalize();
+    ELSE
+      union_name = "Result";
+    END
+    MUTABLE variant_parts: []String = ( { MUTABLE rtoc_empty_list_8: []String = List[]; rtoc_empty_list_8 } );
+    MUTABLE i: Int64 = 0;
+    WHILE (i < observed_strs.length()) DO
+      &variant_parts.append("Variant${i.toString()}: ${UNWRAP (observed_strs[i])}");
+      i = (i + 1);
+    END
+    MUTABLE variants = variant_parts.join(", ");
+    msg = (msg $+ "  Option 3 (last resort): if you genuinely need to accept\n");
+    msg = (msg $+ "    multiple types, define a union explicitly:\n");
+    msg = (msg $+ "      UNION ${union_name} { ${variants} }\n");
+    msg = (msg $+ "    Auto does NOT auto-create unions.\n");
+  END
+  RETURN msg;
+END
+# End Ruby module FixableHelper
+FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    AutoConstraintCollectorDeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    AutoConstraintCollectorDeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
+  PARTIAL MATCH value START
+    AutoConstraintCollectorSlotDeclNode.VarDecl AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ VarDecl: COPY cast_payload };,
+    AutoConstraintCollectorSlotDeclNode.BindExpr AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ BindExpr: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to AutoConstraintCollectorDeclarationNode");
+  END
+  panic("Invalid cast to AutoConstraintCollectorDeclarationNode");
+END
+FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
+  IF value IS_A String AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN "";
+END
+FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+  PARTIAL MATCH value START
+    Type.StringValue AS cast_payload -> RETURN TypeTypeInput{ StringValue: COPY cast_payload };,
+    Type.SymbolValue AS cast_payload -> RETURN TypeTypeInput{ SymbolValue: COPY cast_payload };,
+    Type.Type AS cast_payload -> RETURN TypeTypeInput{ Type: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeTypeInput");
+  END
+  panic("Invalid cast to TypeTypeInput");
+END
+FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
+  IF value IS_A String AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN "";
+END
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
+    TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
+    TypeTypeInput.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
+    TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
+  END
+  panic("Invalid cast to TypeConstructionInput");
+END
+FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
+  MUTABLE result: []Edit = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END

@@ -1,0 +1,1388 @@
+REQUIRE "../type.clear"
+REQUIRE "../ast.clear"
+REQUIRE "../lexer.clear"
+REQUIRE "../frontend_resource_budget.clear"
+REQUIRE "state.clear"
+REQUIRE "expressions_and_postfix.clear"
+UNION ClearParserReturnValue { ForRange: ForRange, ForEach: ForEach, Token: Token, BoolValue: Bool, VarDecl: VarDecl, DestructuringAssignment: DestructuringAssignment, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, Program: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, StructDef: StructDef, Assignment: Assignment, DestructureTarget: DestructureTarget, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, UnaryOp: UnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MethodCall: MethodCall, GetField: GetField, GetIndex: GetIndex, Cast: Cast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, DeferStmt: DeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, OptionalUnwrap: OptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, BlockExpr: BlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, RangeLit: RangeLit, EnumDef: EnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, DoBlock: DoBlock, BgBlock: BgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Type: Type }
+MUTABLE value_block_statement_keywords: [Set]String = ["ASSERT", "ASSERT_RAISES", "BENCHMARK", "BREAK", "CONTINUE", "DEFER", "DIE", "DO", "ENUM", "EXIT", "EXTERN", "FN", "FOR", "METHOD", "MUTABLE", "IF", "MATCH", "PARTIAL", "PASS", "PRIVATE", "PROFILE", "PUB", "RAISE", "RETURN", "SMASH", "STRUCT", "STUB", "SYNC", "TEST", "TIGHT", "UNION", "WHILE", "WITH", "YIELD"] |> DISTINCT _;
+PRIVATE FN clearParser__dispatch_stmt_rule(MUTABLE self: ClearParser, rule: ParserRule) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE result = PARTIAL MATCH rule.action() START
+      :parse_require -> parse_require(),
+      :parse_extern_decl -> parse_extern_decl(),
+      :parse_mutable_var_decl -> parse_mutable_var_decl(),
+      :parse_const_decl -> parse_const_decl(),
+      :parse_function_def -> parse_function_def(),
+      :parse_method_function_def -> parse_function_def(:package, {:is_method: TRUE}),
+      :parse_pub_visibility -> parse_visibility_decl(:pub),
+      :parse_private_visibility -> parse_visibility_decl(:private),
+      :parse_if_statement -> parse_if_statement(),
+      :parse_comptime_statement -> parse_comptime_statement(),
+      :parse_struct_def -> parse_struct_def(),
+      :parse_protocol_def -> parse_protocol_def(),
+      :parse_implementation_def -> parse_implementation_def(),
+      :parse_enum_def -> parse_enum_def(),
+      :parse_union_def -> parse_union_def(),
+      :parse_while_loop -> parse_while_loop(),
+      :parse_for_range -> TRY (clearParser__parse_for_range(&rtoc_self_view)),
+      :parse_tight_stmt -> TRY (clearParser__parse_tight_stmt(&rtoc_self_view)),
+      :parse_return -> clearParser__parse_return(rtoc_self_view),
+      :parse_assert -> clearParser__parse_assert(rtoc_self_view),
+      :parse_defer -> TRY (clearParser__parse_defer(&rtoc_self_view)),
+      :parse_assert_raises -> parse_assert_raises(),
+      :parse_test_block -> parse_test_block(),
+      :parse_stub -> parse_stub(),
+      :parse_benchmark_stmt -> parse_benchmark_stmt(),
+      :parse_smash_stmt -> parse_smash_stmt(),
+      :parse_profile_stmt -> parse_profile_stmt(),
+      :parse_raise_stmt -> clearParser__parse_raise_stmt(rtoc_self_view),
+      :parse_exit -> clearParser__parse_exit(rtoc_self_view),
+      :parse_die -> clearParser__parse_die(rtoc_self_view),
+      :parse_break -> clearParser__parse_break(rtoc_self_view),
+      :parse_continue -> clearParser__parse_continue(rtoc_self_view),
+      :parse_with_capability -> parse_with_capability(),
+      :parse_sync_policy_block -> parse_sync_policy_block(),
+      :parse_do_block -> parse_do_block(),
+      :parse_bg_block -> parse_bg_block(),
+      :parse_yield_expr -> parse_yield_expr(),
+      :parse_close_stream -> parse_close_stream(),
+      :parse_match_statement -> TRY (clearParser__parse_match_statement(&rtoc_self_view)),
+      :parse_partial_match_statement -> TRY (clearParser__parse_partial_match_statement(&rtoc_self_view)),
+      :parse_pass_statement -> clearParser__parse_pass_statement(rtoc_self_view),
+      DEFAULT -> panic("Unknown statement parser action {}")
+    END;
+    RETURN result;
+}
+END
+PRIVATE FN clearParser__parse_assert(self: ClearParser) RETURNS !Assert
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token = consume(:KEYWORD, "ASSERT");
+    MUTABLE condition = parse_expression();
+    MUTABLE message: String@symbol = :Any;
+    IF match_mut(:CHAR, ",") THEN
+      message = TRY (token__text_mut(consume(:STRING)));
+    END
+    consume(:CHAR, ";");
+    RETURN Assert{ token: COPY token, condition: condition, message: message, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_defer(MUTABLE self: ClearParser) RETURNS !DeferStmt
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE token = consume(:KEYWORD, "DEFER");
+    MUTABLE body: []Locatable = List[];
+    IF match?(:CHAR, "{") THEN
+      consume(:CHAR, "{");
+      MUTABLE stmts: []Locatable = ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } );
+      WHILE !(match?(:CHAR, "}")) DO
+        &stmts.append(TRY (clearParser__parse_statement(&rtoc_self_view)));
+      END
+      consume(:CHAR, "}");
+      body = stmts;
+    ELSE
+      body = [TRY (clearParser__parse_statement(&rtoc_self_view))];
+    END
+    clearParser__reject_defer_control_flow_mut(rtoc_self_view, token, body);
+    RETURN DeferStmt{ token: COPY token, body: body, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__reject_defer_control_flow_mut(self: ClearParser, token: Token, body: []Locatable) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE stack: []Locatable = COPY body;
+    WHILE !((stack.length() == 0)) DO
+      MUTABLE node: ?Locatable = &stack.pop();
+      IF !((node != NIL)) THEN
+        CONTINUE;
+      END
+      IF (((((node != NIL) AND (node IS_A ReturnNode)) OR ((node != NIL) AND (node IS_A BreakNode))) OR ((node != NIL) AND (node IS_A ContinueNode))) OR ((node != NIL) AND (node IS_A YieldExpr))) THEN
+        MUTABLE kind: ?String = COPY (CAST(node.class().name() AS String)).split("::").last();
+        error_mut(token, :DEFER_NO_CONTROL_FLOW, {:kind: kind});
+      END
+      IF (((node != NIL) AND (node IS_A FunctionDef)) OR ((node != NIL) AND (node IS_A LambdaLit))) THEN
+        CONTINUE;
+      END
+      FOR _ IN node.class().members() DO
+      MUTABLE value = COPY node.substr(_, 1);
+      END
+    END
+}
+END
+PRIVATE FN clearParser__parse_break(self: ClearParser) RETURNS BreakNode
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token = consume(:KEYWORD, "BREAK");
+    consume(:CHAR, ";");
+    RETURN BreakNode{ token: COPY token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_continue(self: ClearParser) RETURNS ContinueNode
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token = consume(:KEYWORD, "CONTINUE");
+    consume(:CHAR, ";");
+    RETURN ContinueNode{ token: COPY token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_partial_match_statement(MUTABLE self: ClearParser) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    consume(:KEYWORD, "PARTIAL");
+    RETURN Locatable{ MatchStatement: COPY TRY (clearParser__parse_match_statement(&rtoc_self_view, TRUE)) };
+}
+END
+PRIVATE FN clearParser__parse_pass_statement(self: ClearParser) RETURNS PassStmt
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE tok = consume(:KEYWORD, "PASS");
+    match_mut(:CHAR, ";");
+    RETURN PassStmt{ token: COPY tok, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_statement(MUTABLE self: ClearParser) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE rtoc_mutable_receiver_2 = CAST(rtoc_self_view.budget AS FrontendResourceBudget);
+    TRY (frontendResourceBudget__enter_mut(&rtoc_mutable_receiver_2));
+    MUTABLE statement = TRY (clearParser__parse_statement_body(&rtoc_self_view));
+    MUTABLE rtoc_mutable_receiver_3 = CAST(rtoc_self_view.budget AS FrontendResourceBudget);
+    frontendResourceBudget__leave_mut(&rtoc_mutable_receiver_3);
+    RETURN statement;
+}
+END
+PRIVATE FN clearParser__parse_statement_body(MUTABLE self: ClearParser) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE start_token = current();
+    MUTABLE node: ?Locatable = NIL;
+    IF (current().type() == :VAR_ID) THEN
+      IF clearParser__destructuring_assignment?(rtoc_self_view) THEN
+        node = Locatable{ DestructuringAssignment: COPY clearParser__parse_destructuring_assign(rtoc_self_view) };
+      ELSE
+        MUTABLE parsed = TRY (clearParser__parse_var_form(rtoc_self_view));
+        consume(:CHAR, ";");
+        node = parsed.node();
+      END
+    ELSE
+      MUTABLE rule = STMT_RULE_INDEX[ClearParser.token_rule_key(current())];
+      IF rule THEN
+        node = TRY (clearParser__dispatch_stmt_rule(&rtoc_self_view, rule));
+      ELSE
+        node = parse_expression();
+        consume(:CHAR, ";");
+      END
+    END
+    RETURN stamp_source_range_mut(node, start_token, previous());
+}
+END
+PRIVATE FN clearParser__destructuring_assignment?(self: ClearParser) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF match_at?(1, :CHAR, ",") THEN
+      RETURN TRUE;
+    END
+    IF !(match_at?(1, :CHAR, ":")) THEN
+      RETURN FALSE;
+    END
+    MUTABLE offset = 2;
+    MUTABLE delimiters: []String = ( { MUTABLE rtoc_empty_list_4: []String = List[]; rtoc_empty_list_4 } );
+    WHILE TRUE DO
+      MUTABLE token = peek_at(offset);
+      IF !(token) THEN
+        RETURN FALSE;
+      END
+      IF (token.type() == :EOF) THEN
+        RETURN FALSE;
+      END
+      IF (token.type() == :CHAR) THEN
+        MUTABLE value = TRY (token__text_mut(token));
+        IF (value == "(") OR (value == "[") OR (value == "{") OR (value == "<") THEN
+          &delimiters.append(value);
+        ELSE_IF (value == ")") OR (value == "]") OR (value == "}") OR (value == ">") THEN
+          IF !((delimiters.length() == 0)) THEN
+            &delimiters.pop();
+          END
+        ELSE_IF (value == ",") THEN
+          IF (delimiters.length() == 0) THEN
+            RETURN TRUE;
+          END
+        ELSE_IF (value == "=") OR (value == ";") THEN
+          IF (delimiters.length() == 0) THEN
+            RETURN FALSE;
+          END
+        END
+      END
+      offset = (offset + 1);
+    END
+    RETURN NIL;
+}
+END
+PRIVATE FN clearParser__parse_destructuring_assign(self: ClearParser, default_mutable: Bool = FALSE) RETURNS DestructuringAssignment
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE start_token = current();
+    MUTABLE targets = [clearParser__parse_destructure_target(rtoc_self_view, default_mutable)];
+    WHILE match_mut(:CHAR, ",") DO
+      &targets.append(clearParser__parse_destructure_target(rtoc_self_view, default_mutable));
+    END
+    consume(:CHAR, "=");
+    MUTABLE value = parse_expression();
+    consume(:CHAR, ";");
+    RETURN DestructuringAssignment{ token: COPY start_token, targets: COPY targets, value: value, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_destructure_target(self: ClearParser, default_mutable: Bool = FALSE) RETURNS !DestructureTarget
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE mutable = default_mutable;
+    IF match_mut(:KEYWORD, "MUTABLE") THEN
+      mutable = TRUE;
+    END
+    MUTABLE name_tok = consume(:VAR_ID);
+    MUTABLE type_annotation = NIL;
+    IF match_mut(:CHAR, ":") THEN
+      type_annotation = parse_type_annotation();
+    END
+    RETURN DestructureTarget{ token: COPY name_tok, name: TRY (token__text_mut(name_tok)), type: COPY type_annotation, mutable: mutable, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL };
+}
+END
+PRIVATE FN clearParser__parse_var_form(self: ClearParser) RETURNS !ParsedVarForm
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE target_token = current();
+    MUTABLE target = parse_expression();
+    MUTABLE opt_type = NIL;
+    IF (IF target IS_A Identifier AS identifier THEN match?(:CHAR, ":") ELSE FALSE END) THEN
+      consume(:CHAR, ":");
+      opt_type = (TRY (clearParser__parse_inferred_wrapper_annotation(rtoc_self_view)) OR_ELSE parse_type_annotation());
+    END
+    IF match?(:COMPOUND_ASSIGN) THEN
+      IF !(((target IS_A Identifier OR target IS_A GetField) OR target IS_A GetIndex)) THEN
+        error_mut(target_token, CodeOrMessage{ SymbolValue: :INVALID_ASSIGNMENT });
+      END
+      MUTABLE op_token = consume(:COMPOUND_ASSIGN);
+      MUTABLE op_char = TRY (token__text_mut(op_token)).substr(0, 1);
+      MUTABLE op_sym = (ruby_constant_op_to_op_code()[op_char] OR_ELSE symbol(op_char));
+      MUTABLE rhs = parse_expression();
+      MUTABLE desugared_value = BinaryOp{ token: COPY op_token, left: deep_clone_node(target), op: COPY op_sym, right: rhs, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
+      IF target IS_A Identifier AS identifier THEN
+        MUTABLE bind = BindExpr{ token: COPY target_token, name: identifier__name(identifier), type: NIL, value: desugared_value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL };
+        bind.compound_op = op_sym;
+        RETURN ParsedVarForm{ node: Locatable{ BindExpr: COPY bind }, assignment: TRUE };
+      ELSE
+        MUTABLE asgn = Assignment{ token: COPY target_token, name: castLocatableToAssignmentName(COPY target), value: Locatable{ BinaryOp: COPY desugared_value }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
+        asgn.compound_op = op_sym;
+        RETURN ParsedVarForm{ node: Locatable{ Assignment: COPY asgn }, assignment: TRUE };
+      END
+    END
+    IF !(clearParser__match?(rtoc_self_view, :CHAR, "=")) THEN
+      IF opt_type THEN
+        clearParser__consume(&rtoc_self_view, :CHAR, "=");
+      END
+      RETURN ParsedVarForm{ node: COPY target, assignment: FALSE };
+    END
+    IF !(((target IS_A Identifier OR target IS_A GetField) OR target IS_A GetIndex)) THEN
+      error_mut(target_token, CodeOrMessage{ SymbolValue: :INVALID_ASSIGNMENT });
+    END
+    clearParser__consume(&rtoc_self_view, :CHAR, "=");
+    MUTABLE value = clearParser__parse_expression(&rtoc_self_view);
+    MUTABLE node =   IF target IS_A Identifier THEN
+      BindExpr{ token: COPY target_token, name: target.name(), type: COPY opt_type, value: value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL }
+    ELSE
+      Assignment{ token: COPY target_token, name: castLocatableToAssignmentName(COPY target), value: COPY value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL }
+    END;
+    RETURN ParsedVarForm{ node: COPY node, assignment: TRUE };
+}
+END
+PRIVATE FN clearParser__parse_inferred_wrapper_annotation(self: ClearParser) RETURNS !?Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF !(((clearParser__match?(rtoc_self_view, :CHAR, "!") OR clearParser__match?(rtoc_self_view, :CHAR, "?")) OR clearParser__match?(rtoc_self_view, :CHAR, "~"))) THEN
+      RETURN NIL;
+    END
+    MUTABLE start = clearParser__current(rtoc_self_view).value;
+    MUTABLE next_token: ?Token = clearParser__peek_at(rtoc_self_view, 1);
+    MUTABLE suffix =   IF (((start == "!") AND ((next_token != NIL) AND (next_token.type == :CHAR))) AND ((UNWRAP (next_token)).value == "?")) THEN
+      "!?"
+    ELSE
+      start
+    END;
+    MUTABLE required_count = suffix.length();
+    MUTABLE terminal: ?Token = clearParser__peek_at(rtoc_self_view, required_count);
+    IF !((((terminal != NIL) AND (terminal.type == :CHAR)) AND ((UNWRAP (terminal)).value == "="))) THEN
+      RETURN NIL;
+    END
+    required_count.times(%() USE(MUTABLE rtoc_self_view) -> {
+    clearParser__consume(&rtoc_self_view, :CHAR);
+    rubyToClearVoid()
+    });
+    RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY "${suffix}Auto" }));
+}
+END
+PRIVATE FN clearParser__parse_tight_stmt(MUTABLE self: ClearParser) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE body: []Node = List[];
+    MUTABLE tight_token = clearParser__consume(&rtoc_self_view, :KEYWORD, "TIGHT");
+    IF clearParser__match?(rtoc_self_view, :KEYWORD, "FOR") THEN
+      MUTABLE for_node = TRY (clearParser__parse_for_range(&rtoc_self_view));
+      for_node.tight = TRUE;
+      RETURN castClearParserReturnValueToLocatable(for_node);
+    END
+    IF !(clearParser__match?(rtoc_self_view, :KEYWORD, "WHILE")) THEN
+      panic("Expected WHILE or FOR after TIGHT (got {})");
+    END
+    clearParser__consume(&rtoc_self_view, :KEYWORD, "WHILE");
+    MUTABLE cond = clearParser__parse_expression(&rtoc_self_view);
+    IF clearParser__match?(rtoc_self_view, :ARROW, "->") THEN
+      clearParser__consume(&rtoc_self_view, :ARROW, "->");
+      MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
+      body = ([stmt]);
+    ELSE
+      body = TRY (clearParser__parse_keyword_block(&rtoc_self_view, "DO"));
+    END
+    MUTABLE while_node = WhileLoop{ token: COPY tight_token, condition: COPY cond, do_branch: COPY body, deferred_drops: NIL, tight: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL };
+    while_node.tight = TRUE;
+    RETURN Locatable{ WhileLoop: COPY while_node };
+}
+END
+PRIVATE FN clearParser__parse_return(self: ClearParser) RETURNS ReturnNode
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE ret_token = clearParser__consume(&rtoc_self_view, :KEYWORD, "RETURN");
+    MUTABLE value = NIL;
+    IF !(clearParser__match?(rtoc_self_view, :CHAR, ";")) THEN
+      value = clearParser__parse_expression(&rtoc_self_view);
+    END
+    clearParser__consume(&rtoc_self_view, :CHAR, ";");
+    RETURN ReturnNode{ token: COPY ret_token, value: value, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_exit(self: ClearParser) RETURNS ThrowNode
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE exit_token = clearParser__consume(&rtoc_self_view, :KEYWORD);
+    MUTABLE context_expr = NIL;
+    IF ((!(clearParser__match?(rtoc_self_view, :CHAR, ";")) AND !(clearParser__match?(rtoc_self_view, :CHAR, ")"))) AND !(clearParser__match?(rtoc_self_view, :KEYWORD, "END"))) THEN
+      context_expr = clearParser__parse_primary(&rtoc_self_view);
+    END
+    clearParser__match_mut(&rtoc_self_view, :CHAR, ";");
+    RETURN ThrowNode{ token: COPY exit_token, value: context_expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_die(self: ClearParser) RETURNS DieNode
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE status = NIL;
+    MUTABLE die_token = clearParser__consume(&rtoc_self_view, :KEYWORD);
+    MUTABLE context_expr = NIL;
+    IF castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :CHAR, ";")) THEN
+      status = Literal{ token: COPY clearParser__previous(rtoc_self_view), type: :NUMBER, value: 1, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    ELSE
+      status = clearParser__parse_expression(&rtoc_self_view);
+      clearParser__consume(&rtoc_self_view, :CHAR, ";");
+    END
+    RETURN DieNode{ token: COPY die_token, status: status, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_block_body(MUTABLE self: ClearParser, stop_words: []String) RETURNS ![]Node
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE stmts: []Node = ( { MUTABLE rtoc_empty_list_5: []Node = List[]; rtoc_empty_list_5 } );
+    WHILE !(((stop_words |> ANY clearParser__match?(rtoc_self_view, clearParser__literal_token_type(rtoc_self_view, _), _)) OR clearParser__match?(rtoc_self_view, :EOF))) DO
+      MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
+      IF stmt THEN
+        &stmts.append(castLocatableToNode(stmt));
+      END
+    END
+    RETURN stmts;
+}
+END
+PRIVATE FN clearParser__parse_statement_block(MUTABLE self: ClearParser, type: String@symbol, open: String, close_value: String) RETURNS ![]Node
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    clearParser__consume(&rtoc_self_view, type, open);
+    MUTABLE body = TRY (clearParser__parse_block_body(&rtoc_self_view, [close_value]));
+    clearParser__consume(&rtoc_self_view, clearParser__literal_token_type(rtoc_self_view, close_value), close_value);
+    RETURN body;
+}
+END
+PRIVATE FN clearParser__parse_keyword_block(MUTABLE self: ClearParser, open: String, terminator: String = "END") RETURNS ![]Node
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN TRY (clearParser__parse_statement_block(&rtoc_self_view, :KEYWORD, open, terminator));
+}
+END
+PRIVATE FN clearParser__parse_brace_block(MUTABLE self: ClearParser) RETURNS ![]Node
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN TRY (clearParser__parse_statement_block(&rtoc_self_view, :CHAR, "{", "}"));
+}
+END
+PRIVATE FN clearParser__parse_value_block_expr(MUTABLE self: ClearParser) RETURNS !BlockExpr
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE block_token = clearParser__consume(&rtoc_self_view, :CHAR, "{");
+    MUTABLE body: []Node = ( { MUTABLE rtoc_empty_list_6: []Node = List[]; rtoc_empty_list_6 } );
+    MUTABLE result: ?Locatable = NIL;
+    WHILE !((clearParser__match?(rtoc_self_view, :CHAR, "}") OR clearParser__match?(rtoc_self_view, :EOF))) DO
+      IF ((clearParser__current(rtoc_self_view).type == :VAR_ID) AND clearParser__destructuring_assignment?(rtoc_self_view)) THEN
+        &body.append(Node{ DestructuringAssignment: COPY clearParser__parse_destructuring_assign(rtoc_self_view) });
+        CONTINUE;
+      END
+      IF (clearParser__current(rtoc_self_view).type == :VAR_ID) THEN
+        MUTABLE parsed = TRY (clearParser__parse_var_form(rtoc_self_view));
+        IF (parsed.assignment OR clearParser__match_mut(&rtoc_self_view, :CHAR, ";")) THEN
+          IF parsed.assignment THEN
+            clearParser__consume(&rtoc_self_view, :CHAR, ";");
+          END
+          &body.append(parsed.node);
+          CONTINUE;
+        END
+        result = parsed.node;
+        BREAK;
+      END
+      MUTABLE stmt: ?Locatable = TRY (clearParser__parse_value_block_keyword_statement(&rtoc_self_view));
+      IF stmt EXISTS AS stmt_value THEN
+        &body.append(castLocatableToNode(stmt_value));
+        CONTINUE;
+      END
+      MUTABLE expr = clearParser__parse_expression(&rtoc_self_view);
+      IF castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :CHAR, ";")) THEN
+        &body.append(castLocatableToNode(expr));
+        CONTINUE;
+      ELSE
+        result = expr;
+        BREAK;
+      END
+    END
+    IF !(result) THEN
+      error_mut(clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :UNEXPECTED_TOKEN_LINE }, [], {:value: clearParser__current(rtoc_self_view).value, :type: clearParser__current(rtoc_self_view).type, :line: clearParser__current(rtoc_self_view).line});
+    END
+    clearParser__consume(&rtoc_self_view, :CHAR, "}");
+    RETURN BlockExpr{ token: COPY block_token, body: COPY body, result: COPY result, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_value_block_keyword_statement(MUTABLE self: ClearParser) RETURNS !?Locatable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF !((clearParser__current(rtoc_self_view).type == :KEYWORD)) THEN
+      RETURN NIL;
+    END
+    IF !(value_block_statement_keywords.contains?(clearParser__current(rtoc_self_view).value)) THEN
+      RETURN NIL;
+    END
+    RETURN TRY (clearParser__parse_statement(&rtoc_self_view));
+}
+END
+PRIVATE FN clearParser__brace_literal_is_hash?(self: ClearParser) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF !(clearParser__match?(rtoc_self_view, :CHAR, "{")) THEN
+      RETURN FALSE;
+    END
+    IF clearParser__match_at?(rtoc_self_view, 1, :CHAR, "}") THEN
+      RETURN TRUE;
+    END
+    MUTABLE first: ?Token = clearParser__peek_at(rtoc_self_view, 1);
+    IF (((first != NIL) AND (first.type == :KEYWORD)) AND value_block_statement_keywords.contains?((UNWRAP (first)).value)) THEN
+      RETURN FALSE;
+    END
+    MUTABLE depth = 0;
+    MUTABLE offset = 0;
+    WHILE TRUE DO
+      MUTABLE token: ?Token = clearParser__peek_at(rtoc_self_view, offset);
+      IF token EXISTS AS token_value THEN
+        MUTABLE token_value_mutable = COPY token_value;
+        IF (token_value_mutable.type == :CHAR) THEN
+          MUTABLE token_value = TRY (token__text_mut(token_value_mutable));
+          IF (token_value == "{") OR (token_value == "(") OR (token_value == "[") THEN
+            MUTABLE closing_index: ?Int64 = rtoc_self_view.delimiter_closings[(rtoc_self_view.pos + offset)];
+            IF ((depth > 0) AND (closing_index)) THEN
+              offset = ((closing_index - rtoc_self_view.pos) + 1);
+              CONTINUE;
+            END
+            depth = (depth + 1);
+          ELSE_IF (token_value == "}") OR (token_value == ")") OR (token_value == "]") THEN
+            depth = (depth - 1);
+            IF (depth <= 0) THEN
+              RETURN FALSE;
+            END
+          ELSE_IF (token_value == ";") THEN
+            IF (depth == 1) THEN
+              RETURN FALSE;
+            END
+          ELSE_IF (token_value == ":") THEN
+            IF (depth == 1) THEN
+              RETURN !(clearParser__top_level_assignment_before_brace_delimiter?(rtoc_self_view, (offset + 1)));
+            END
+          END
+        END
+        offset = (offset + 1);
+      ELSE
+        RETURN FALSE;
+      END
+    END
+    RETURN NIL;
+}
+END
+PRIVATE FN clearParser__top_level_assignment_before_brace_delimiter?(self: ClearParser, start_offset: Int64) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE depth = 1;
+    MUTABLE offset = start_offset;
+    WHILE TRUE DO
+      MUTABLE token: ?Token = clearParser__peek_at(rtoc_self_view, offset);
+      IF token EXISTS AS token_value THEN
+        MUTABLE token_value_mutable = COPY token_value;
+        IF ((token_value_mutable.type == :COMPOUND_ASSIGN) AND (depth == 1)) THEN
+          RETURN TRUE;
+        ELSE_IF (token_value_mutable.type == :CHAR) THEN
+          MUTABLE token_value = TRY (token__text_mut(token_value_mutable));
+          IF (token_value == "{") OR (token_value == "(") OR (token_value == "[") THEN
+            MUTABLE closing_index: ?Int64 = rtoc_self_view.delimiter_closings[(rtoc_self_view.pos + offset)];
+            IF closing_index EXISTS AS closing_index_value THEN
+              offset = ((closing_index_value - rtoc_self_view.pos) + 1);
+              CONTINUE;
+            END
+            depth = (depth + 1);
+          ELSE_IF (token_value == "}") OR (token_value == ")") OR (token_value == "]") THEN
+            depth = (depth - 1);
+            IF (depth <= 0) THEN
+              RETURN FALSE;
+            END
+          ELSE_IF (token_value == ",") OR (token_value == ";") THEN
+            IF (depth == 1) THEN
+              RETURN FALSE;
+            END
+          ELSE_IF (token_value == "=") THEN
+            IF (depth == 1) THEN
+              RETURN TRUE;
+            END
+          END
+        END
+        offset = (offset + 1);
+      ELSE
+        RETURN FALSE;
+      END
+    END
+    RETURN NIL;
+}
+END
+PRIVATE FN clearParser__parse_match_expr(self: ClearParser, MUTABLE partial_value: Bool = FALSE) RETURNS MatchStatement
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE start = clearParser__parse_match_start(rtoc_self_view);
+    MUTABLE cases = List[];
+    MUTABLE default_case: ?[]Node = NIL;
+    WHILE !((clearParser__match?(rtoc_self_view, :KEYWORD, "END") OR clearParser__match?(rtoc_self_view, :EOF))) DO
+      IF clearParser__match?(rtoc_self_view, :KEYWORD, "DEFAULT") THEN
+        clearParser__consume(&rtoc_self_view, :KEYWORD, "DEFAULT");
+        clearParser__consume(&rtoc_self_view, :ARROW);
+        default_case = [clearParser__parse_expression(&rtoc_self_view)];
+        clearParser__match_mut(&rtoc_self_view, :CHAR, ",");
+        BREAK;
+      END
+      MUTABLE arm = clearParser__parse_match_arm(rtoc_self_view);
+      &cases.append(clearParser__build_match_case(rtoc_self_view, arm, [castLocatableToNode(clearParser__parse_expression(&rtoc_self_view))]));
+      clearParser__match_mut(&rtoc_self_view, :CHAR, ",");
+    END
+    clearParser__consume(&rtoc_self_view, :KEYWORD, "END");
+    RETURN MatchStatement{ token: COPY start.token, expr: COPY start.subject, cases: COPY cases, default_case: COPY default_case, case_drops: List[], default_drops: NIL, exhaustive: !(partial_value), takes: start.takes, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_match: NIL, expr_mode: NIL, case_result_types: NIL, default_result_type: NIL };
+}
+END
+PRIVATE FN clearParser__parse_for_range(MUTABLE self: ClearParser) RETURNS !ClearParserReturnValue
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE body: []Node = List[];
+    MUTABLE tok = clearParser__consume(&rtoc_self_view, :KEYWORD, "FOR");
+    MUTABLE var_name = TRY (token__text_mut(clearParser__consume(&rtoc_self_view, :VAR_ID)));
+    clearParser__consume(&rtoc_self_view, :KEYWORD, "IN");
+    MUTABLE expr = clearParser__parse_expression(&rtoc_self_view);
+    IF clearParser__match?(rtoc_self_view, :ARROW, "->") THEN
+      clearParser__consume(&rtoc_self_view, :ARROW, "->");
+      MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
+      body = ([stmt]);
+    ELSE
+      body = TRY (clearParser__parse_keyword_block(&rtoc_self_view, "DO"));
+    END
+    IF expr IS_A RangeLit AS range_lit THEN
+      RETURN ClearParserReturnValue{ ForRange: COPY ForRange{ token: COPY tok, var_name: var_name, start_expr: range_lit.start, end_expr: range_lit.finish, inclusive: range_lit.inclusive, body: body, deferred_drops: NIL, mark_per_iter: NIL, tight: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
+    ELSE
+      RETURN ClearParserReturnValue{ ForEach: COPY ForEach{ token: COPY tok, var_name: var_name, collection: expr, body: body, deferred_drops: NIL, is_mutable: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
+    END
+}
+END
+PRIVATE FN clearParser__parse_match_statement(MUTABLE self: ClearParser, MUTABLE partial_value: Bool = FALSE) RETURNS !MatchStatement
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE start = clearParser__parse_match_start(rtoc_self_view);
+    MUTABLE cases = List[];
+    MUTABLE default_case: ?[]Node = NIL;
+    WHILE !((clearParser__match?(rtoc_self_view, :KEYWORD, "END") OR clearParser__match?(rtoc_self_view, :EOF))) DO
+      IF clearParser__match?(rtoc_self_view, :KEYWORD, "DEFAULT") THEN
+        clearParser__consume(&rtoc_self_view, :KEYWORD, "DEFAULT");
+        clearParser__consume(&rtoc_self_view, :ARROW);
+        default_case = TRY (clearParser__parse_block_body(&rtoc_self_view, ["END"]));
+        BREAK;
+      END
+      MUTABLE arm = clearParser__parse_match_arm(rtoc_self_view);
+      MUTABLE body = TRY (clearParser__parse_block_body(&rtoc_self_view, [",", "DEFAULT", "WHEN", "END"]));
+      &cases.append(clearParser__build_match_case(rtoc_self_view, arm, body));
+      clearParser__match_mut(&rtoc_self_view, :CHAR, ",");
+    END
+    clearParser__consume(&rtoc_self_view, :KEYWORD, "END");
+    RETURN MatchStatement{ token: COPY start.token, expr: COPY start.subject, cases: COPY cases, default_case: COPY default_case, case_drops: List[], default_drops: NIL, exhaustive: !(partial_value), takes: start.takes, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_match: NIL, expr_mode: NIL, case_result_types: NIL, default_result_type: NIL };
+}
+END
+PRIVATE FN clearParser__parse_match_start(self: ClearParser) RETURNS ParsedMatchStart
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token = clearParser__consume(&rtoc_self_view, :KEYWORD, "MATCH");
+    MUTABLE takes = !(!(clearParser__match_mut(&rtoc_self_view, :KEYWORD, "TAKES")));
+    MUTABLE subject = clearParser__parse_expression(&rtoc_self_view);
+    clearParser__consume(&rtoc_self_view, :KEYWORD, "START");
+    RETURN ParsedMatchStart{ token: COPY token, subject: COPY subject, takes: takes };
+}
+END
+PRIVATE FN clearParser__parse_match_arm(self: ClearParser) RETURNS !ParsedMatchArm
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :KEYWORD, "WHEN")) THEN
+      MUTABLE condition = clearParser__parse_expression(&rtoc_self_view);
+      clearParser__consume(&rtoc_self_view, :ARROW);
+      RETURN ParsedMatchArm{ kind: :when, value: COPY condition, extra_values: ( { MUTABLE rtoc_empty_list_7: []Locatable = List[]; rtoc_empty_list_7 } ), binding: NIL, destructure: NIL };
+    END
+    IF clearParser__match?(rtoc_self_view, :CHAR, "{") THEN
+      MUTABLE pattern = clearParser__parse_struct_pattern(rtoc_self_view);
+      clearParser__consume(&rtoc_self_view, :ARROW);
+      RETURN ParsedMatchArm{ kind: :struct_pattern, value: Locatable{ StructPattern: COPY pattern }, extra_values: ( { MUTABLE rtoc_empty_list_8: []Locatable = List[]; rtoc_empty_list_8 } ), binding: NIL, destructure: NIL };
+    END
+    MUTABLE first_pattern = clearParser__parse_expression(&rtoc_self_view);
+    MUTABLE extra_patterns: []Locatable = ( { MUTABLE rtoc_empty_list_9: []Locatable = List[]; rtoc_empty_list_9 } );
+    WHILE (clearParser__match?(rtoc_self_view, :CHAR, ",") AND clearParser__multi_pattern_continues?(rtoc_self_view)) DO
+      clearParser__consume(&rtoc_self_view, :CHAR, ",");
+      &extra_patterns.append(clearParser__parse_expression(&rtoc_self_view));
+    END
+    MUTABLE binding: ?String = NIL;
+    MUTABLE destructure: ?StructPattern = NIL;
+    IF castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :KEYWORD, "AS")) THEN
+      binding = TRY (token__text_mut(clearParser__consume(&rtoc_self_view, :VAR_ID)));
+    ELSE_IF clearParser__match?(rtoc_self_view, :CHAR, "{") THEN
+      destructure = clearParser__parse_struct_pattern(rtoc_self_view);
+    END
+    clearParser__consume(&rtoc_self_view, :ARROW);
+    RETURN ParsedMatchArm{ kind: :eq, value: COPY first_pattern, extra_values: COPY extra_patterns, binding: COPY binding, destructure: COPY destructure };
+}
+END
+PRIVATE FN clearParser__build_match_case(self: ClearParser, arm: ParsedMatchArm, body: []Node) RETURNS MatchCase
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN MatchCase{ kind: COPY arm.kind, value: COPY arm.value, body: COPY body, binding: COPY arm.binding, destructure: COPY arm.destructure, extra_values: COPY arm.extra_values, indirect_payload_as: FALSE };
+}
+END
+PRIVATE FN clearParser__parse_struct_pattern(self: ClearParser) RETURNS !StructPattern
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE tok = clearParser__consume(&rtoc_self_view, :CHAR, "{");
+    MUTABLE fields = List[];
+    MUTABLE partial: Bool = FALSE;
+    WHILE !((clearParser__match?(rtoc_self_view, :CHAR, "}") OR clearParser__match?(rtoc_self_view, :EOF))) DO
+      IF clearParser__match?(rtoc_self_view, :ELLIPSIS, "...") THEN
+        clearParser__consume(&rtoc_self_view, :ELLIPSIS, "...");
+        partial = TRUE;
+        BREAK;
+      END
+      MUTABLE name_tok = clearParser__consume(&rtoc_self_view, :VAR_ID);
+      MUTABLE name = TRY (token__text_mut(name_tok));
+      IF clearParser__match?(rtoc_self_view, :CHAR, ":") THEN
+        clearParser__consume(&rtoc_self_view, :CHAR, ":");
+        IF ((clearParser__current(rtoc_self_view).type == :VAR_ID) AND (clearParser__current(rtoc_self_view).value == "_")) THEN
+          clearParser__consume(&rtoc_self_view, :VAR_ID);
+          &fields.append(PatternField{ name: COPY name, value: PatternFieldValue{ SymbolValue: :wildcard }, name_token: name_tok });
+        ELSE
+          &fields.append(PatternField{ name: COPY name, value: castLocatableToPatternFieldValue(COPY clearParser__parse_expression(&rtoc_self_view)), name_token: name_tok });
+        END
+      ELSE
+        &fields.append(PatternField{ name: COPY name, value: PatternFieldValue{ SymbolValue: :bind }, name_token: name_tok });
+      END
+      clearParser__match_mut(&rtoc_self_view, :CHAR, ",");
+    END
+    clearParser__consume(&rtoc_self_view, :CHAR, "}");
+    RETURN StructPattern{ token: COPY tok, fields: COPY fields, partial: partial, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+PRIVATE FN clearParser__parse_catch_item(self: ClearParser) RETURNS !CatchItem
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE tok = clearParser__consume(&rtoc_self_view, :TYPE_ID);
+    MUTABLE form = IF (ruby_constant_error_kinds() |> SELECT _.toString()) |> SELECT _.toString().contains?(TRY (token__text_mut(tok))) THEN
+      :kind
+    ELSE
+      :type
+    END;
+    RETURN CatchItem{ form: COPY form, name: COPY TRY (token__text_mut(tok)), token: tok };
+}
+END
+PRIVATE FN clearParser__parse_catch_filter(self: ClearParser) RETURNS !?CatchFilter
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF clearParser__match?(rtoc_self_view, :TYPE_ID) THEN
+      MUTABLE tok = clearParser__consume(&rtoc_self_view, :TYPE_ID);
+      RETURN CatchFilter{ form: :type, value: ReturnValue{ StringValue: COPY TRY (token__text_mut(tok)) }, token: tok };
+    ELSE_IF clearParser__match?(rtoc_self_view, :STRING) THEN
+      tok = clearParser__current(rtoc_self_view);
+      MUTABLE str_expr = clearParser__parse_expression(&rtoc_self_view);
+      RETURN CatchFilter{ form: :message, value: castLocatableToReturnValue(COPY str_expr), token: tok };
+    ELSE
+      RETURN error_mut(clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :CATCH_WITH_BAD_INNER });
+    END
+}
+END
+PRIVATE FN clearParser__parse_raise_stmt(self: ClearParser) RETURNS !Raise
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE tok = clearParser__consume(&rtoc_self_view, :KEYWORD, "RAISE");
+    IF clearParser__match?(rtoc_self_view, :STRING) THEN
+      MUTABLE msg = clearParser__parse_expression(&rtoc_self_view);
+      clearParser__consume(&rtoc_self_view, :CHAR, ";");
+      RETURN Raise{ token: COPY tok, kind: :System, error_name: NIL, message_expr: msg, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    END
+    IF clearParser__match?(rtoc_self_view, :CHAR, ";") THEN
+      clearParser__consume(&rtoc_self_view, :CHAR, ";");
+      RETURN Raise{ token: COPY tok, kind: :System, error_name: NIL, message_expr: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    END
+    MUTABLE first_tok = clearParser__consume(&rtoc_self_view, :TYPE_ID);
+    MUTABLE first_is_kind = (ruby_constant_error_kinds() |> SELECT _.toString()) |> SELECT _.toString().contains?(TRY (token__text_mut(first_tok)));
+    MUTABLE kind: ?String@symbol = IF first_is_kind THEN
+      symbol((TRY (token__text_mut(first_tok))))
+    ELSE
+      NIL
+    END;
+    MUTABLE error_name: ?String = IF first_is_kind THEN
+      NIL
+    ELSE
+      TRY (token__text_mut(first_tok))
+    END;
+    MUTABLE message = NIL;
+    IF clearParser__match?(rtoc_self_view, :CHAR, ",") THEN
+      clearParser__consume(&rtoc_self_view, :CHAR, ",");
+      IF (first_is_kind AND clearParser__match?(rtoc_self_view, :TYPE_ID)) THEN
+        error_name = TRY (token__text_mut(clearParser__consume(&rtoc_self_view, :TYPE_ID)));
+        IF clearParser__match?(rtoc_self_view, :CHAR, ",") THEN
+          clearParser__consume(&rtoc_self_view, :CHAR, ",");
+          message = clearParser__parse_expression(&rtoc_self_view);
+        END
+      ELSE
+        message = clearParser__parse_expression(&rtoc_self_view);
+      END
+    END
+    clearParser__consume(&rtoc_self_view, :CHAR, ";");
+    RETURN Raise{ token: COPY tok, kind: symbol(UNWRAP (COPY kind)), error_name: error_name, message_expr: message, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+}
+END
+FN castClearParserReturnValueToBool(value: ClearParserReturnValue) RETURNS Bool ->
+  IF value IS_A Bool AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN TRUE;
+END
+FN castClearParserReturnValueToLocatable(value: ClearParserReturnValue) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    ClearParserReturnValue.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    ClearParserReturnValue.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    ClearParserReturnValue.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    ClearParserReturnValue.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    ClearParserReturnValue.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    ClearParserReturnValue.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    ClearParserReturnValue.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    ClearParserReturnValue.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    ClearParserReturnValue.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
+    ClearParserReturnValue.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    ClearParserReturnValue.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    ClearParserReturnValue.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    ClearParserReturnValue.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    ClearParserReturnValue.StructDef AS cast_payload -> RETURN Locatable{ StructDef: COPY cast_payload };,
+    ClearParserReturnValue.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    ClearParserReturnValue.DestructureTarget AS cast_payload -> RETURN Locatable{ DestructureTarget: COPY cast_payload };,
+    ClearParserReturnValue.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    ClearParserReturnValue.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    ClearParserReturnValue.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    ClearParserReturnValue.UnaryOp AS cast_payload -> RETURN Locatable{ UnaryOp: COPY cast_payload };,
+    ClearParserReturnValue.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    ClearParserReturnValue.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    ClearParserReturnValue.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    ClearParserReturnValue.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    ClearParserReturnValue.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    ClearParserReturnValue.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    ClearParserReturnValue.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    ClearParserReturnValue.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    ClearParserReturnValue.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    ClearParserReturnValue.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    ClearParserReturnValue.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    ClearParserReturnValue.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    ClearParserReturnValue.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    ClearParserReturnValue.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    ClearParserReturnValue.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    ClearParserReturnValue.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    ClearParserReturnValue.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    ClearParserReturnValue.MethodCall AS cast_payload -> RETURN Locatable{ MethodCall: COPY cast_payload };,
+    ClearParserReturnValue.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    ClearParserReturnValue.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    ClearParserReturnValue.Cast AS cast_payload -> RETURN Locatable{ Cast: COPY cast_payload };,
+    ClearParserReturnValue.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    ClearParserReturnValue.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    ClearParserReturnValue.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    ClearParserReturnValue.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    ClearParserReturnValue.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    ClearParserReturnValue.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    ClearParserReturnValue.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    ClearParserReturnValue.DeferStmt AS cast_payload -> RETURN Locatable{ DeferStmt: COPY cast_payload };,
+    ClearParserReturnValue.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    ClearParserReturnValue.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    ClearParserReturnValue.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    ClearParserReturnValue.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    ClearParserReturnValue.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    ClearParserReturnValue.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    ClearParserReturnValue.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    ClearParserReturnValue.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    ClearParserReturnValue.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    ClearParserReturnValue.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    ClearParserReturnValue.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    ClearParserReturnValue.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    ClearParserReturnValue.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    ClearParserReturnValue.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    ClearParserReturnValue.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    ClearParserReturnValue.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    ClearParserReturnValue.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    ClearParserReturnValue.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    ClearParserReturnValue.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    ClearParserReturnValue.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    ClearParserReturnValue.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    ClearParserReturnValue.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    ClearParserReturnValue.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    ClearParserReturnValue.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    ClearParserReturnValue.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    ClearParserReturnValue.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    ClearParserReturnValue.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    ClearParserReturnValue.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    ClearParserReturnValue.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    ClearParserReturnValue.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    ClearParserReturnValue.OptionalUnwrap AS cast_payload -> RETURN Locatable{ OptionalUnwrap: COPY cast_payload };,
+    ClearParserReturnValue.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    ClearParserReturnValue.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    ClearParserReturnValue.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    ClearParserReturnValue.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    ClearParserReturnValue.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    ClearParserReturnValue.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    ClearParserReturnValue.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    ClearParserReturnValue.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    ClearParserReturnValue.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    ClearParserReturnValue.BlockExpr AS cast_payload -> RETURN Locatable{ BlockExpr: COPY cast_payload };,
+    ClearParserReturnValue.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    ClearParserReturnValue.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    ClearParserReturnValue.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    ClearParserReturnValue.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    ClearParserReturnValue.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    ClearParserReturnValue.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    ClearParserReturnValue.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    ClearParserReturnValue.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    ClearParserReturnValue.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    ClearParserReturnValue.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    ClearParserReturnValue.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    ClearParserReturnValue.RangeLit AS cast_payload -> RETURN Locatable{ RangeLit: COPY cast_payload };,
+    ClearParserReturnValue.EnumDef AS cast_payload -> RETURN Locatable{ EnumDef: COPY cast_payload };,
+    ClearParserReturnValue.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    ClearParserReturnValue.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    ClearParserReturnValue.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    ClearParserReturnValue.DoBlock AS cast_payload -> RETURN Locatable{ DoBlock: COPY cast_payload };,
+    ClearParserReturnValue.BgBlock AS cast_payload -> RETURN Locatable{ BgBlock: COPY cast_payload };,
+    ClearParserReturnValue.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    ClearParserReturnValue.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    ClearParserReturnValue.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    ClearParserReturnValue.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    ClearParserReturnValue.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    ClearParserReturnValue.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    ClearParserReturnValue.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    ClearParserReturnValue.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    ClearParserReturnValue.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    ClearParserReturnValue.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    ClearParserReturnValue.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    ClearParserReturnValue.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    ClearParserReturnValue.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    ClearParserReturnValue.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    ClearParserReturnValue.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    ClearParserReturnValue.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    ClearParserReturnValue.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    ClearParserReturnValue.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    ClearParserReturnValue.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    ClearParserReturnValue.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
+  PARTIAL MATCH value START
+    Locatable.Identifier AS cast_payload -> RETURN AssignmentName{ Identifier: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN AssignmentName{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN AssignmentName{ GetIndex: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to AssignmentName");
+  END
+  panic("Invalid cast to AssignmentName");
+END
+FN castLocatableToNode(value: Locatable) RETURNS Node ->
+  PARTIAL MATCH value START
+    Locatable.Program AS cast_payload -> RETURN Node{ Program: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN Node{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN Node{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN Node{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN Node{ ConformanceDef: COPY cast_payload };,
+    Locatable.StructDef AS cast_payload -> RETURN Node{ StructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN Node{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN Node{ Assignment: COPY cast_payload };,
+    Locatable.DestructureTarget AS cast_payload -> RETURN Node{ DestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN Node{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN Node{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN Node{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN Node{ IsA: COPY cast_payload };,
+    Locatable.UnaryOp AS cast_payload -> RETURN Node{ UnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN Node{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN Node{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN Node{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN Node{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN Node{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN Node{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN Node{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN Node{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN Node{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN Node{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN Node{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN Node{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN Node{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN Node{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN Node{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN Node{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN Node{ FuncCall: COPY cast_payload };,
+    Locatable.MethodCall AS cast_payload -> RETURN Node{ MethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN Node{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN Node{ GetIndex: COPY cast_payload };,
+    Locatable.Cast AS cast_payload -> RETURN Node{ Cast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN Node{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN Node{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN Node{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN Node{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN Node{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN Node{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN Node{ Require: COPY cast_payload };,
+    Locatable.DeferStmt AS cast_payload -> RETURN Node{ DeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN Node{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN Node{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN Node{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN Node{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN Node{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN Node{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN Node{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN Node{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN Node{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN Node{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN Node{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN Node{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN Node{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN Node{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN Node{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN Node{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN Node{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN Node{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN Node{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN Node{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN Node{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN Node{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN Node{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN Node{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN Node{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN Node{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN Node{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN Node{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN Node{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN Node{ Copy: COPY cast_payload };,
+    Locatable.OptionalUnwrap AS cast_payload -> RETURN Node{ OptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN Node{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN Node{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN Node{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN Node{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN Node{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN Node{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN Node{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN Node{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN Node{ RecoverOp: COPY cast_payload };,
+    Locatable.BlockExpr AS cast_payload -> RETURN Node{ BlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN Node{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN Node{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN Node{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN Node{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN Node{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN Node{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN Node{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN Node{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN Node{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN Node{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN Node{ StructPattern: COPY cast_payload };,
+    Locatable.RangeLit AS cast_payload -> RETURN Node{ RangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN Node{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN Node{ ExternStructDecl: COPY cast_payload };,
+    Locatable.EnumDef AS cast_payload -> RETURN Node{ EnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN Node{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN Node{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN Node{ StaticCall: COPY cast_payload };,
+    Locatable.DoBlock AS cast_payload -> RETURN Node{ DoBlock: COPY cast_payload };,
+    Locatable.BgBlock AS cast_payload -> RETURN Node{ BgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN Node{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN Node{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN Node{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN Node{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN Node{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN Node{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN Node{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN Node{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN Node{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN Node{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN Node{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN Node{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN Node{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN Node{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN Node{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN Node{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN Node{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN Node{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN Node{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN Node{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN Node{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN Node{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Node");
+  END
+  panic("Invalid cast to Node");
+END
+FN castLocatableToPatternFieldValue(value: Locatable) RETURNS PatternFieldValue ->
+  PARTIAL MATCH value START
+    Locatable.Program AS cast_payload -> RETURN PatternFieldValue{ Program: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN PatternFieldValue{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN PatternFieldValue{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN PatternFieldValue{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN PatternFieldValue{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN PatternFieldValue{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN PatternFieldValue{ ConformanceDef: COPY cast_payload };,
+    Locatable.StructDef AS cast_payload -> RETURN PatternFieldValue{ StructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN PatternFieldValue{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN PatternFieldValue{ Assignment: COPY cast_payload };,
+    Locatable.DestructureTarget AS cast_payload -> RETURN PatternFieldValue{ DestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN PatternFieldValue{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN PatternFieldValue{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN PatternFieldValue{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN PatternFieldValue{ IsA: COPY cast_payload };,
+    Locatable.UnaryOp AS cast_payload -> RETURN PatternFieldValue{ UnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN PatternFieldValue{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN PatternFieldValue{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN PatternFieldValue{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN PatternFieldValue{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN PatternFieldValue{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN PatternFieldValue{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN PatternFieldValue{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN PatternFieldValue{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN PatternFieldValue{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN PatternFieldValue{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN PatternFieldValue{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN PatternFieldValue{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN PatternFieldValue{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN PatternFieldValue{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN PatternFieldValue{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN PatternFieldValue{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN PatternFieldValue{ FuncCall: COPY cast_payload };,
+    Locatable.MethodCall AS cast_payload -> RETURN PatternFieldValue{ MethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN PatternFieldValue{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN PatternFieldValue{ GetIndex: COPY cast_payload };,
+    Locatable.Cast AS cast_payload -> RETURN PatternFieldValue{ Cast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN PatternFieldValue{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN PatternFieldValue{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN PatternFieldValue{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN PatternFieldValue{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN PatternFieldValue{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN PatternFieldValue{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN PatternFieldValue{ Require: COPY cast_payload };,
+    Locatable.DeferStmt AS cast_payload -> RETURN PatternFieldValue{ DeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN PatternFieldValue{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN PatternFieldValue{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN PatternFieldValue{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN PatternFieldValue{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN PatternFieldValue{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN PatternFieldValue{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN PatternFieldValue{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN PatternFieldValue{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN PatternFieldValue{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN PatternFieldValue{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN PatternFieldValue{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN PatternFieldValue{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN PatternFieldValue{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN PatternFieldValue{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN PatternFieldValue{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN PatternFieldValue{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN PatternFieldValue{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN PatternFieldValue{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN PatternFieldValue{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN PatternFieldValue{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN PatternFieldValue{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN PatternFieldValue{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN PatternFieldValue{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN PatternFieldValue{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN PatternFieldValue{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN PatternFieldValue{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN PatternFieldValue{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN PatternFieldValue{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN PatternFieldValue{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN PatternFieldValue{ Copy: COPY cast_payload };,
+    Locatable.OptionalUnwrap AS cast_payload -> RETURN PatternFieldValue{ OptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN PatternFieldValue{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN PatternFieldValue{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN PatternFieldValue{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN PatternFieldValue{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN PatternFieldValue{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN PatternFieldValue{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN PatternFieldValue{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN PatternFieldValue{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN PatternFieldValue{ RecoverOp: COPY cast_payload };,
+    Locatable.BlockExpr AS cast_payload -> RETURN PatternFieldValue{ BlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN PatternFieldValue{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN PatternFieldValue{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN PatternFieldValue{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN PatternFieldValue{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN PatternFieldValue{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN PatternFieldValue{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN PatternFieldValue{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN PatternFieldValue{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN PatternFieldValue{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN PatternFieldValue{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN PatternFieldValue{ StructPattern: COPY cast_payload };,
+    Locatable.RangeLit AS cast_payload -> RETURN PatternFieldValue{ RangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN PatternFieldValue{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN PatternFieldValue{ ExternStructDecl: COPY cast_payload };,
+    Locatable.EnumDef AS cast_payload -> RETURN PatternFieldValue{ EnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN PatternFieldValue{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN PatternFieldValue{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN PatternFieldValue{ StaticCall: COPY cast_payload };,
+    Locatable.DoBlock AS cast_payload -> RETURN PatternFieldValue{ DoBlock: COPY cast_payload };,
+    Locatable.BgBlock AS cast_payload -> RETURN PatternFieldValue{ BgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN PatternFieldValue{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN PatternFieldValue{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN PatternFieldValue{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN PatternFieldValue{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN PatternFieldValue{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN PatternFieldValue{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN PatternFieldValue{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN PatternFieldValue{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN PatternFieldValue{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN PatternFieldValue{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN PatternFieldValue{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN PatternFieldValue{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN PatternFieldValue{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN PatternFieldValue{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN PatternFieldValue{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN PatternFieldValue{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN PatternFieldValue{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN PatternFieldValue{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN PatternFieldValue{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN PatternFieldValue{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN PatternFieldValue{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN PatternFieldValue{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to PatternFieldValue");
+  END
+  panic("Invalid cast to PatternFieldValue");
+END
+FN castLocatableToReturnValue(value: Locatable) RETURNS ReturnValue ->
+  PARTIAL MATCH value START
+    Locatable.Program AS cast_payload -> RETURN ReturnValue{ Program: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN ReturnValue{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN ReturnValue{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN ReturnValue{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN ReturnValue{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN ReturnValue{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN ReturnValue{ ConformanceDef: COPY cast_payload };,
+    Locatable.StructDef AS cast_payload -> RETURN ReturnValue{ StructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN ReturnValue{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN ReturnValue{ Assignment: COPY cast_payload };,
+    Locatable.DestructureTarget AS cast_payload -> RETURN ReturnValue{ DestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN ReturnValue{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN ReturnValue{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN ReturnValue{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN ReturnValue{ IsA: COPY cast_payload };,
+    Locatable.UnaryOp AS cast_payload -> RETURN ReturnValue{ UnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN ReturnValue{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN ReturnValue{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN ReturnValue{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN ReturnValue{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN ReturnValue{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN ReturnValue{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN ReturnValue{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN ReturnValue{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN ReturnValue{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN ReturnValue{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN ReturnValue{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN ReturnValue{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN ReturnValue{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN ReturnValue{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN ReturnValue{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN ReturnValue{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN ReturnValue{ FuncCall: COPY cast_payload };,
+    Locatable.MethodCall AS cast_payload -> RETURN ReturnValue{ MethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN ReturnValue{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN ReturnValue{ GetIndex: COPY cast_payload };,
+    Locatable.Cast AS cast_payload -> RETURN ReturnValue{ Cast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN ReturnValue{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN ReturnValue{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN ReturnValue{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN ReturnValue{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN ReturnValue{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN ReturnValue{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN ReturnValue{ Require: COPY cast_payload };,
+    Locatable.DeferStmt AS cast_payload -> RETURN ReturnValue{ DeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN ReturnValue{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN ReturnValue{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN ReturnValue{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN ReturnValue{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN ReturnValue{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN ReturnValue{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN ReturnValue{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN ReturnValue{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN ReturnValue{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN ReturnValue{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN ReturnValue{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN ReturnValue{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN ReturnValue{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN ReturnValue{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN ReturnValue{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN ReturnValue{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN ReturnValue{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN ReturnValue{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN ReturnValue{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN ReturnValue{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN ReturnValue{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN ReturnValue{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN ReturnValue{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN ReturnValue{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN ReturnValue{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN ReturnValue{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN ReturnValue{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN ReturnValue{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN ReturnValue{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN ReturnValue{ Copy: COPY cast_payload };,
+    Locatable.OptionalUnwrap AS cast_payload -> RETURN ReturnValue{ OptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN ReturnValue{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN ReturnValue{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN ReturnValue{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN ReturnValue{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN ReturnValue{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN ReturnValue{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN ReturnValue{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN ReturnValue{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN ReturnValue{ RecoverOp: COPY cast_payload };,
+    Locatable.BlockExpr AS cast_payload -> RETURN ReturnValue{ BlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN ReturnValue{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN ReturnValue{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN ReturnValue{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN ReturnValue{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN ReturnValue{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN ReturnValue{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN ReturnValue{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN ReturnValue{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN ReturnValue{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN ReturnValue{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN ReturnValue{ StructPattern: COPY cast_payload };,
+    Locatable.RangeLit AS cast_payload -> RETURN ReturnValue{ RangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN ReturnValue{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN ReturnValue{ ExternStructDecl: COPY cast_payload };,
+    Locatable.EnumDef AS cast_payload -> RETURN ReturnValue{ EnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN ReturnValue{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN ReturnValue{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN ReturnValue{ StaticCall: COPY cast_payload };,
+    Locatable.DoBlock AS cast_payload -> RETURN ReturnValue{ DoBlock: COPY cast_payload };,
+    Locatable.BgBlock AS cast_payload -> RETURN ReturnValue{ BgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN ReturnValue{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN ReturnValue{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN ReturnValue{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN ReturnValue{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN ReturnValue{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN ReturnValue{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN ReturnValue{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN ReturnValue{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN ReturnValue{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN ReturnValue{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN ReturnValue{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN ReturnValue{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN ReturnValue{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN ReturnValue{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN ReturnValue{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN ReturnValue{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN ReturnValue{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN ReturnValue{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN ReturnValue{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN ReturnValue{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN ReturnValue{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN ReturnValue{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ReturnValue");
+  END
+  panic("Invalid cast to ReturnValue");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

@@ -1,0 +1,138 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+STRUCT FunctionContext {
+  alloc_count: Int64,
+  conditional_depth: Int64,
+  frame_count: Int64,
+  generic_params: []GenericParamDecl,
+  heap_count: Int64,
+  lifetime: []FunctionContextLifetimeSource,
+  loop_depth: Int64,
+  name: String,
+  return_type: Type,
+  returns: []ReturnFact,
+  stack_vars_bytes: Int64,
+  type_params: []String@symbol,
+  uses_rt: Bool
+}
+
+UNION FunctionContextLifetimeSource { StringValue: String, SymbolValue: String@symbol }
+FN functionContext__set_return_type(MUTABLE self: FunctionContext, val: ?TypeTypeInput) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.return_type = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_1: ?Type = NIL;
+    IF (val == NIL) THEN
+      rtoc_ternary_value_1 = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
+    ELSE
+      rtoc_ternary_value_1 = TRY (type__new(castTypeTypeInputToTypeConstructionInput(val)));
+    END
+    rtoc_ternary_value_1? };
+}
+END
+FN functionContext__record_frame_use_mut(MUTABLE self: FunctionContext) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.frame_count = (rtoc_self_view.frame_count + 1);
+}
+END
+FN functionContext__record_heap_use_mut(MUTABLE self: FunctionContext) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.heap_count = (rtoc_self_view.heap_count + 1);
+}
+END
+FN functionContext__record_alloc_use_mut(MUTABLE self: FunctionContext) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.alloc_count = (rtoc_self_view.alloc_count + 1);
+}
+END
+FN functionContext__record_stack_bytes_mut(MUTABLE self: FunctionContext, bytes: Int64) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.stack_vars_bytes = (rtoc_self_view.stack_vars_bytes + bytes);
+}
+END
+FN functionContext__mark_runtime_used_mut(MUTABLE self: FunctionContext) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.uses_rt = TRUE;
+}
+END
+FN functionContext__enter_loop_mut(MUTABLE self: FunctionContext) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.loop_depth = (rtoc_self_view.loop_depth + 1);
+}
+END
+FN functionContext__exit_loop_mut(MUTABLE self: FunctionContext) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.loop_depth = (rtoc_self_view.loop_depth - 1);
+}
+END
+FN functionContext__enter_conditional_mut(MUTABLE self: FunctionContext) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.conditional_depth = (rtoc_self_view.conditional_depth + 1);
+}
+END
+FN functionContext__exit_conditional_mut(MUTABLE self: FunctionContext) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.conditional_depth = (rtoc_self_view.conditional_depth - 1);
+}
+END
+FN functionContext__initialize(MUTABLE self: FunctionContext, name: String, return_type: ?TypeTypeInput = NIL, lifetime: []FunctionContextLifetimeSource, type_params: []String@symbol, generic_params: []GenericParamDecl) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.name = COPY name;
+    rtoc_self_view.return_type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
+    rtoc_self_view.return_type = COPY castOptionalTypeTypeInputToType(return_type);
+    rtoc_self_view.lifetime = COPY lifetime;
+    rtoc_self_view.type_params = COPY type_params;
+    rtoc_self_view.generic_params = COPY generic_params;
+    rtoc_self_view.frame_count = 0;
+    rtoc_self_view.heap_count = 0;
+    rtoc_self_view.alloc_count = 0;
+    rtoc_self_view.uses_rt = FALSE;
+    rtoc_self_view.loop_depth = 0;
+    rtoc_self_view.conditional_depth = 0;
+    rtoc_self_view.returns = List[];
+    rtoc_self_view.stack_vars_bytes = 0;
+}
+END
+FN functionContext__new(name: String, return_type: ?TypeTypeInput = NIL, lifetime: []FunctionContextLifetimeSource, type_params: []String@symbol, generic_params: []GenericParamDecl) RETURNS !FunctionContext@multiowned ->
+  MUTABLE self = FunctionContext{ alloc_count: 0, conditional_depth: 0, frame_count: 0, generic_params: COPY generic_params, heap_count: 0, lifetime: COPY lifetime, loop_depth: 0, name: COPY name, return_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), returns: List[], stack_vars_bytes: 0, type_params: COPY type_params, uses_rt: FALSE };
+  TRY (functionContext__initialize(&self, name, return_type, lifetime, type_params, generic_params));
+  RETURN self @multiowned;
+END
+FN castOptionalTypeTypeInputToType(value: ?TypeTypeInput) RETURNS Type ->
+  IF value != NIL THEN
+    IF value IS_A Type AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN panic("Invalid cast to Type");
+END
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
+    TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
+    TypeTypeInput.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
+    TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
+  END
+  panic("Invalid cast to TypeConstructionInput");
+END

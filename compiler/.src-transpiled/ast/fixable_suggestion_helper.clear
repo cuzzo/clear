@@ -1,0 +1,7 @@
+REQUIRE "type.clear"
+REQUIRE "source_error.clear"
+REQUIRE "diagnostic_registry.clear"
+REQUIRE "fixable_error.clear"
+# Ruby module FixableSuggestionHelper
+UNION NameCandidate { StringValue: String, SymbolValue: String@symbol }
+# End Ruby module FixableSuggestionHelper

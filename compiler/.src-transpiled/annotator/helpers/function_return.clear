@@ -1,0 +1,725 @@
+REQUIRE "../../ast/type.clear"
+REQUIRE "../../ast/ast.clear"
+STRUCT FunctionReturn {
+  fixed: ?Type,
+  infer: ?String@symbol,
+  kind: Kind
+}
+
+PUB ENUM Kind { Fixed, ElementOf, OptionalOfElement, IdOfElement, OptionalOfValue, ValueList, KeyList, Infer }
+FN functionReturn__initialize(MUTABLE self: FunctionReturn, kind: Kind, fixed: ?Type = NIL, infer: ?String@symbol = NIL) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.kind = COPY kind;
+    rtoc_self_view.fixed = COPY fixed;
+    rtoc_self_view.infer = COPY infer;
+}
+END
+FN functionReturn__fixed(t: Type) RETURNS FunctionReturn@multiowned ->
+  RETURN functionReturn__new(Kind.Fixed, t);
+END
+FN functionReturn__infer(m: String@symbol) RETURNS FunctionReturn@multiowned ->
+  RETURN functionReturn__new(Kind.Infer, NIL, m);
+END
+FN functionReturn__fixed?(self: FunctionReturn) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view.kind == Kind.Fixed);
+}
+END
+FN functionReturn__variant(kind_name: String@symbol) RETURNS !FunctionReturn@multiowned ->
+  RETURN functionReturn__new(TRY (functionReturn__variant_kind(kind_name)));
+END
+FN functionReturn__variant_kind(kind_name: String@symbol) RETURNS !Kind ->
+  IF (kind_name == :Fixed) THEN
+    RETURN Kind.Fixed;
+  ELSE_IF (kind_name == :ElementOf) THEN
+    RETURN Kind.ElementOf;
+  ELSE_IF (kind_name == :OptionalOfElement) THEN
+    RETURN Kind.OptionalOfElement;
+  ELSE_IF (kind_name == :IdOfElement) THEN
+    RETURN Kind.IdOfElement;
+  ELSE_IF (kind_name == :OptionalOfValue) THEN
+    RETURN Kind.OptionalOfValue;
+  ELSE_IF (kind_name == :ValueList) THEN
+    RETURN Kind.ValueList;
+  ELSE_IF (kind_name == :KeyList) THEN
+    RETURN Kind.KeyList;
+  ELSE_IF (kind_name == :Infer) THEN
+    RETURN Kind.Infer;
+  ELSE
+    panic("unknown FunctionReturn variant: {}");
+  END
+END
+FN functionReturn__copy(self: FunctionReturn) RETURNS !FunctionReturn@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (rtoc_self_view.kind == Kind.Fixed) THEN
+      RETURN functionReturn__fixed(TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (rtoc_self_view.fixed) })));
+    END
+    IF (rtoc_self_view.kind == Kind.Infer) THEN
+      RETURN functionReturn__infer(symbol(UNWRAP (rtoc_self_view.infer)));
+    END
+    RETURN functionReturn__new(rtoc_self_view.kind);
+}
+END
+FN functionReturn__resolve(self: FunctionReturn, receiver: ?Type, args: []Locatable) RETURNS !Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (rtoc_self_view.kind == Kind.Fixed) THEN
+      RETURN COPY UNWRAP (rtoc_self_view.fixed);
+    ELSE_IF (rtoc_self_view.kind == Kind.ElementOf) THEN
+      IF receiver EXISTS AS receiver_value THEN
+        MUTABLE el: ?Type = TRY (type__element_type(receiver_value));
+        IF el != NIL THEN
+    RETURN el;
+        ELSE
+    RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+        END
+      ELSE
+        RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+      END
+    ELSE_IF (rtoc_self_view.kind == Kind.OptionalOfElement) THEN
+      RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY UNWRAP (TRY (type__element_type(UNWRAP (receiver)))) }));
+    ELSE_IF (rtoc_self_view.kind == Kind.IdOfElement) THEN
+      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("Id<${type__resolved(UNWRAP (TRY (type__element_type(UNWRAP (receiver)))))}>") }));
+    ELSE_IF (rtoc_self_view.kind == Kind.OptionalOfValue) THEN
+      RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY TRY (type__value_type(UNWRAP (receiver))) }));
+    ELSE_IF (rtoc_self_view.kind == Kind.ValueList) THEN
+      MUTABLE value = TRY (type__value_type(UNWRAP (receiver)));
+      RETURN CAST(TRY (functionReturn__element_list(rtoc_self_view, value)) AS Type);
+    ELSE_IF (rtoc_self_view.kind == Kind.KeyList) THEN
+      MUTABLE key = TRY (type__key_type(UNWRAP (receiver)));
+      RETURN CAST(TRY (functionReturn__element_list(rtoc_self_view, key)) AS Type);
+    ELSE_IF (rtoc_self_view.kind == Kind.Infer) THEN
+      RETURN CAST(TRY (functionReturn__resolve_infer(rtoc_self_view, args)) AS Type);
+    ELSE
+      panic("unknown FunctionReturn kind: {}");
+    END
+}
+END
+FN functionReturn__element_list(self: FunctionReturn, element: Type) RETURNS !Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE list = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(element)}[]") }, NIL, NIL, NIL, NIL, :list));
+    IF !(((type__ownership(element) == NIL) OR ((type__ownership(element))? == :affine))) THEN
+      TRY (type__set_elem_ownership(&list, type__ownership(element)));
+    END
+    IF !((type__sync(element) == NIL)) THEN
+      TRY (type__set_elem_sync(&list, type__sync(element)));
+    END
+    RETURN list;
+}
+END
+FN functionReturn__resolve_infer(self: FunctionReturn, args: []Locatable) RETURNS !Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE r_branch_value: ?Type@multiowned = NIL;
+    PARTIAL MATCH symbol(UNWRAP (rtoc_self_view.infer)) START
+      :infer_element_type ->
+      r_branch_value = TRY (functionReturn__infer_element_type(rtoc_self_view, args));,
+      :infer_optional_element_type ->
+      r_branch_value = TRY (functionReturn__infer_optional_element_type(rtoc_self_view, args));,
+      :infer_to_list ->
+      r_branch_value = TRY (functionReturn__infer_to_list(rtoc_self_view, args));,
+      DEFAULT ->
+      panic("unknown FunctionReturn infer method: {}");
+    END
+    MUTABLE r: Type@multiowned = r_branch_value?;
+    IF TRUE THEN
+      RETURN CAST(r AS Type);
+    ELSE
+      RETURN TRY (type__new(TypeConstructionInput{ Type: COPY r }));
+    END
+}
+END
+FN functionReturn__infer_element_type(self: FunctionReturn, args: []Locatable) RETURNS !Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE receiver: ?Locatable = COPY args.first();
+    IF receiver EXISTS AS receiver_value THEN
+      MUTABLE type: ?Type = NIL;
+      MATCH receiver_value START
+        Locatable.Program AS item ->
+          type = COPY item.type_object;,
+        Locatable.RequireNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.ProtocolRequirement AS item ->
+          type = COPY item.type_object;,
+        Locatable.ProtocolDef AS item ->
+          type = COPY item.type_object;,
+        Locatable.FunctionDef AS item ->
+          type = COPY item.type_object;,
+        Locatable.ImplementationDef AS item ->
+          type = COPY item.type_object;,
+        Locatable.ConformanceDef AS item ->
+          type = COPY item.type_object;,
+        Locatable.StructDef AS item ->
+          type = COPY item.type_object;,
+        Locatable.VarDecl AS item ->
+          type = COPY item.type_object;,
+        Locatable.Assignment AS item ->
+          type = COPY item.type_object;,
+        Locatable.DestructureTarget AS item ->
+          type = COPY item.type_object;,
+        Locatable.DestructuringAssignment AS item ->
+          type = COPY item.type_object;,
+        Locatable.BindExpr AS item ->
+          type = COPY item.type_object;,
+        Locatable.BinaryOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.IsA AS item ->
+          type = COPY item.type_object;,
+        Locatable.UnaryOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.CallSiteOverride AS item ->
+          type = COPY item.type_object;,
+        Locatable.Identifier AS item ->
+          type = COPY item.type_object;,
+        Locatable.Literal AS item ->
+          type = COPY item.type_object;,
+        Locatable.ListLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.TupleLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.DefaultArrayLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.HashLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.DefaultLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.StructLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.LambdaLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.IfStatement AS item ->
+          type = COPY item.type_object;,
+        Locatable.IfBind AS item ->
+          type = COPY item.type_object;,
+        Locatable.WhileLoop AS item ->
+          type = COPY item.type_object;,
+        Locatable.WhileBindLoop AS item ->
+          type = COPY item.type_object;,
+        Locatable.BreakNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.ContinueNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.FuncCall AS item ->
+          type = COPY item.type_object;,
+        Locatable.MethodCall AS item ->
+          type = COPY item.type_object;,
+        Locatable.GetField AS item ->
+          type = COPY item.type_object;,
+        Locatable.GetIndex AS item ->
+          type = COPY item.type_object;,
+        Locatable.Cast AS item ->
+          type = COPY item.type_object;,
+        Locatable.ReturnNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.Assert AS item ->
+          type = COPY item.type_object;,
+        Locatable.Raise AS item ->
+          type = COPY item.type_object;,
+        Locatable.ThrowNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.DieNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.Slice AS item ->
+          type = COPY item.type_object;,
+        Locatable.Require AS item ->
+          type = COPY item.type_object;,
+        Locatable.DeferStmt AS item ->
+          type = COPY item.type_object;,
+        Locatable.WithBlock AS item ->
+          type = COPY item.type_object;,
+        Locatable.SyncPolicyDecl AS item ->
+          type = COPY item.type_object;,
+        Locatable.SelectOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.WhereOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.IndexOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.ReduceOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.OrderByOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.LimitOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.UnnestOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.DistinctOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.EachOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.TapOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.SkipOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.CollectOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.TakeWhileOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.WindowOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.BatchWindowOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.JoinOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.FindOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.AnyOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.AllOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.CountOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.SumOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.AverageOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.MinOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.MaxOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.ShardOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.ConcurrentOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.Placeholder AS item ->
+          type = COPY item.type_object;,
+        Locatable.Copy AS item ->
+          type = COPY item.type_object;,
+        Locatable.OptionalUnwrap AS item ->
+          type = COPY item.type_object;,
+        Locatable.TenseNavigation AS item ->
+          type = COPY item.type_object;,
+        Locatable.MutableBorrow AS item ->
+          type = COPY item.type_object;,
+        Locatable.OrElseRaise AS item ->
+          type = COPY item.type_object;,
+        Locatable.OrElseExit AS item ->
+          type = COPY item.type_object;,
+        Locatable.OrElsePass AS item ->
+          type = COPY item.type_object;,
+        Locatable.OrElsePrune AS item ->
+          type = COPY item.type_object;,
+        Locatable.OrElseBreak AS item ->
+          type = COPY item.type_object;,
+        Locatable.CatchBlock AS item ->
+          type = COPY item.type_object;,
+        Locatable.RecoverOp AS item ->
+          type = COPY item.type_object;,
+        Locatable.BlockExpr AS item ->
+          type = COPY item.type_object;,
+        Locatable.StringConcat AS item ->
+          type = COPY item.type_object;,
+        Locatable.CapabilityWrap AS item ->
+          type = COPY item.type_object;,
+        Locatable.MoveNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.CopyNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.KeepNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.ShareNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.LinkNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.ResolveNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.FreezeNode AS item ->
+          type = COPY item.type_object;,
+        Locatable.PassStmt AS item ->
+          type = COPY item.type_object;,
+        Locatable.StructPattern AS item ->
+          type = COPY item.type_object;,
+        Locatable.RangeLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.ExternFnDecl AS item ->
+          type = COPY item.type_object;,
+        Locatable.ExternStructDecl AS item ->
+          type = COPY item.type_object;,
+        Locatable.EnumDef AS item ->
+          type = COPY item.type_object;,
+        Locatable.UnionDef AS item ->
+          type = COPY item.type_object;,
+        Locatable.UnionVariantLit AS item ->
+          type = COPY item.type_object;,
+        Locatable.StaticCall AS item ->
+          type = COPY item.type_object;,
+        Locatable.DoBlock AS item ->
+          type = COPY item.type_object;,
+        Locatable.BgBlock AS item ->
+          type = COPY item.type_object;,
+        Locatable.ThenChain AS item ->
+          type = COPY item.type_object;,
+        Locatable.BgStreamBlock AS item ->
+          type = COPY item.type_object;,
+        Locatable.YieldExpr AS item ->
+          type = COPY item.type_object;,
+        Locatable.CloseStream AS item ->
+          type = COPY item.type_object;,
+        Locatable.NextExpr AS item ->
+          type = COPY item.type_object;,
+        Locatable.MatchStatement AS item ->
+          type = COPY item.type_object;,
+        Locatable.ForRange AS item ->
+          type = COPY item.type_object;,
+        Locatable.ForEach AS item ->
+          type = COPY item.type_object;,
+        Locatable.TestBlock AS item ->
+          type = COPY item.type_object;,
+        Locatable.WhenBlock AS item ->
+          type = COPY item.type_object;,
+        Locatable.LetBinding AS item ->
+          type = COPY item.type_object;,
+        Locatable.TestThat AS item ->
+          type = COPY item.type_object;,
+        Locatable.AssertRaises AS item ->
+          type = COPY item.type_object;,
+        Locatable.BenchmarkStmt AS item ->
+          type = COPY item.type_object;,
+        Locatable.SmashStmt AS item ->
+          type = COPY item.type_object;,
+        Locatable.ProfileStmt AS item ->
+          type = COPY item.type_object;,
+        Locatable.StubDecl AS item ->
+          type = COPY item.type_object;,
+        Locatable.Drop AS item ->
+          type = COPY item.type_object;,
+        Locatable.SuppressCleanup AS item ->
+          type = COPY item.type_object;,
+        Locatable.Return AS item ->
+          type = COPY item.type_object;,
+        Locatable.ReassignCleanup AS item ->
+          type = COPY item.type_object;,
+        Locatable.FieldCleanup AS item ->
+          type = COPY item.type_object;,
+      END
+      IF type EXISTS AS type_value THEN
+        IF TRY (type__element_type(type_value)) != NIL THEN
+    RETURN (TRY (type__element_type(type_value)))?;
+        ELSE
+    RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+        END
+      ELSE
+        RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+      END
+    ELSE
+      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+    END
+}
+END
+FN functionReturn__infer_optional_element_type(self: FunctionReturn, args: []Locatable) RETURNS !Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY TRY (functionReturn__infer_element_type(rtoc_self_view, args)) }));
+}
+END
+FN functionReturn__infer_to_list(self: FunctionReturn, args: []Locatable) RETURNS !Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE receiver = COPY UNWRAP (args.first());
+    MUTABLE receiver_type: ?Type = NIL;
+    MATCH receiver START
+      Locatable.Program AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.RequireNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ProtocolRequirement AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ProtocolDef AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.FunctionDef AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ImplementationDef AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ConformanceDef AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.StructDef AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.VarDecl AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Assignment AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.DestructureTarget AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.DestructuringAssignment AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.BindExpr AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.BinaryOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.IsA AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.UnaryOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.CallSiteOverride AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Identifier AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Literal AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ListLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.TupleLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.DefaultArrayLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.HashLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.DefaultLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.StructLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.LambdaLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.IfStatement AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.IfBind AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.WhileLoop AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.WhileBindLoop AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.BreakNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ContinueNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.FuncCall AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.MethodCall AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.GetField AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.GetIndex AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Cast AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ReturnNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Assert AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Raise AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ThrowNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.DieNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Slice AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Require AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.DeferStmt AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.WithBlock AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.SyncPolicyDecl AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.SelectOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.WhereOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.IndexOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ReduceOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.OrderByOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.LimitOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.UnnestOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.DistinctOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.EachOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.TapOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.SkipOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.CollectOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.TakeWhileOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.WindowOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.BatchWindowOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.JoinOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.FindOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.AnyOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.AllOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.CountOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.SumOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.AverageOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.MinOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.MaxOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ShardOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ConcurrentOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Placeholder AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Copy AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.OptionalUnwrap AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.TenseNavigation AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.MutableBorrow AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.OrElseRaise AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.OrElseExit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.OrElsePass AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.OrElsePrune AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.OrElseBreak AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.CatchBlock AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.RecoverOp AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.BlockExpr AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.StringConcat AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.CapabilityWrap AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.MoveNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.CopyNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.KeepNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ShareNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.LinkNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ResolveNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.FreezeNode AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.PassStmt AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.StructPattern AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.RangeLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ExternFnDecl AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ExternStructDecl AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.EnumDef AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.UnionDef AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.UnionVariantLit AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.StaticCall AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.DoBlock AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.BgBlock AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ThenChain AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.BgStreamBlock AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.YieldExpr AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.CloseStream AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.NextExpr AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.MatchStatement AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ForRange AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ForEach AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.TestBlock AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.WhenBlock AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.LetBinding AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.TestThat AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.AssertRaises AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.BenchmarkStmt AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.SmashStmt AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ProfileStmt AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.StubDecl AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Drop AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.SuppressCleanup AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.Return AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.ReassignCleanup AS item ->
+        receiver_type = COPY item.type_object;,
+      Locatable.FieldCleanup AS item ->
+        receiver_type = COPY item.type_object;,
+    END
+    IF receiver_type EXISTS AS receiver_type_value THEN
+      MUTABLE receiver_type_value_mutable = COPY receiver_type_value;
+      MUTABLE receiver_type_value_mutable = receiver_type_value_mutable;
+      IF type__untyped?(receiver_type_value_mutable) THEN
+        panic("toList receiver: unresolved type info");
+      END
+      MUTABLE element_type_branch_value: ?Type = NIL;
+      IF (TRY (type__dynamic_stream?(receiver_type_value_mutable)) OR type__promise_list?(receiver_type_value_mutable)) THEN
+        element_type_branch_value = TRY (type__element_type((TRY (type__tense_type(receiver_type_value_mutable)))));
+      ELSE_IF TRY (type__bounded_stream?(receiver_type_value_mutable)) THEN
+        element_type_branch_value = TRY (type__stream_element_type(receiver_type_value_mutable));
+      ELSE_IF TRY (type__inf_stream?(receiver_type_value_mutable)) THEN
+        element_type_branch_value = TRY (type__inf_stream_element_type(receiver_type_value_mutable));
+      ELSE_IF TRY (type__open_stream?(receiver_type_value_mutable)) THEN
+        element_type_branch_value = TRY (type__open_stream_element_type(receiver_type_value_mutable));
+      ELSE
+        element_type_branch_value = TRY (type__element_type(receiver_type_value_mutable));
+      END
+      MUTABLE element_type: ?Type = element_type_branch_value;
+      MUTABLE element = element_type?;
+      MUTABLE list = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(element)}[]") }, NIL, NIL, NIL, :heap, :list));
+      TRY (type__set_elem_ownership(&list, type__ownership(element)));
+      TRY (type__set_elem_sync(&list, type__sync(element)));
+      RETURN list;
+    ELSE
+      panic("toList receiver: unresolved type info");
+    END
+}
+END
+FN functionReturn__new(kind: Kind, fixed: ?Type = NIL, infer: ?String@symbol = NIL) RETURNS FunctionReturn@multiowned ->
+  MUTABLE self = FunctionReturn{ fixed: COPY fixed, infer: COPY infer, kind: COPY kind };
+  functionReturn__initialize(&self, kind, fixed, infer);
+  RETURN self @multiowned;
+END

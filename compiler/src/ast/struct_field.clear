@@ -1,0 +1,22 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+# Ruby module AST
+PUB STRUCT StructField {
+  type: Type,
+  default: ?SchemasResourceSchemaFieldMetadataValue@boxed,
+  borrowed: Bool
+}
+
+# Wraps a parsed default expression as the metadata value the slot holds.
+PUB FN structField__node_default(node: ?Locatable) RETURNS ?SchemasResourceSchemaFieldMetadataValue ->
+  IF node EXISTS AS present THEN
+    RETURN SchemasResourceSchemaFieldMetadataValue{ Locatable: COPY present };
+  END
+  RETURN NIL;
+END
+PUB FN structField__default(self: StructField) RETURNS ?SchemasResourceSchemaFieldMetadataValue ->
+  RETURN COPY self.default;
+END
+PUB FN structField__borrowed(self: StructField) RETURNS Bool ->
+  RETURN !(!(self.borrowed));
+END
+# End Ruby module AST

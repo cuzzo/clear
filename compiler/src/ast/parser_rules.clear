@@ -1,0 +1,33 @@
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172"
+PUB STRUCT ParserRule {
+  type: String@symbol,
+  value: ?String,
+  action: String@symbol
+}
+PUB FN clearParser__rule(type: String@symbol, value: ?String = NIL, action: String@symbol) RETURNS ParserRule ->
+  RETURN ParserRule{ type: COPY type, value: COPY value, action: COPY action };
+END
+PUB FN clearParser__rule_key(type: String@symbol, value: ?String) RETURNS String ->
+  RETURN ((CAST(type AS String) $+ "\x00") $+ ((value OR_ELSE "\x01")));
+END
+PUB FN clearParser__token_rule_key(token: Token) RETURNS String ->
+  # Ruby reaches `nil.is_a?(String)` and simply falls through; `value?` on an
+  # absent payload panics, so narrow before testing the variant.
+  IF (COPY token.value) EXISTS AS value THEN
+    IF value IS_A String AS value_string THEN
+      RETURN clearParser__rule_key(token.type, COPY value_string);
+    END
+  END
+  RETURN clearParser__rule_key(token.type, NIL);
+END
+PUB FN clearParser__index_rules(rules: []ParserRule) RETURNS {String}ParserRule ->
+  MUTABLE index: {String}ParserRule = {};
+  FOR _ IN rules DO
+  MUTABLE key = clearParser__rule_key(_.type, _.value);
+  IF index.contains?(key) THEN
+      panic("Duplicate parser rule for ${key}");
+  END
+  index[key] = COPY _;
+  END
+  RETURN index;
+END

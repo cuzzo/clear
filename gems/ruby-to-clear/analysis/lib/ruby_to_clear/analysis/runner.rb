@@ -18,7 +18,9 @@ module RubyToClear
 
         File.open(stdout_path, "wb") do |stdout|
           File.open(stderr_path, "wb") do |stderr|
-            pid = Process.spawn(env, *argv, out: stdout, err: stderr, chdir: chdir, pgroup: true)
+            spawn_options = { out: stdout, err: stderr, pgroup: true }
+            spawn_options[:chdir] = chdir if chdir
+            pid = Process.spawn(env, *argv, **spawn_options)
             begin
               Timeout.timeout(timeout_seconds) { _waited_pid, status = Process.wait2(pid) }
             rescue Timeout::Error
@@ -53,6 +55,12 @@ module RubyToClear
           "stderr_path" => stderr_path,
           "harness_error" => "#{e.class}: #{e.message}"
         }
+      ensure
+        # An interrupted verifier (Ctrl-C, CI cancellation, or a caller
+        # stopping a scoped run) must not strand the compiler it spawned in a
+        # separate process group. Timeout already handles this path; ensure
+        # covers every non-timeout escape from Process.wait2.
+        terminate_group(pid) if pid && status.nil?
       end
 
       def diagnostic_text(result)

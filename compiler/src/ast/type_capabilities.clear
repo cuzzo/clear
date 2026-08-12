@@ -1,0 +1,263 @@
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172"
+PUB STRUCT TypeCapabilitySuffix {
+  base: String,
+  ownership: ?String@symbol,
+  sync: ?String@symbol
+}
+PUB STRUCT TypeCapabilityUnset {
+
+}
+PUB STRUCT TypeCapabilities {
+  collection: ?String@symbol,
+  elem_layout: ?String@symbol,
+  elem_ownership: ?String@symbol,
+  elem_sync: ?String@symbol,
+  layout: ?String@symbol,
+  link_source: ?String@symbol,
+  lock_rank: ?Int64,
+  observable: Bool,
+  observable_terminal: ?String@symbol,
+  observable_token: ?Token,
+  ownership: ?String@symbol,
+  ownership_set: Bool,
+  polymorphic_shared: Bool,
+  shard_count: ?Int64,
+  soa: Bool,
+  sync: ?String@symbol
+}
+
+PUB UNION TypeCapabilitiesMaybeSymbol { TypeCapabilityUnset: TypeCapabilityUnset, SymbolValue: String@symbol }
+PUB UNION TypeCapabilitiesMaybeInteger { TypeCapabilityUnset: TypeCapabilityUnset, Int64Value: Int64 }
+PUB UNION TypeCapabilitiesMaybeBoolean { TypeCapabilityUnset: TypeCapabilityUnset, BoolValue: Bool }
+PUB UNION TypeCapabilitiesMaybeToken { TypeCapabilityUnset: TypeCapabilityUnset, TokenMultiowned: Token }
+FN typeCapabilities__initialize(MUTABLE self: TypeCapabilities, ownership: ?String@symbol = NIL, ownership_set: Bool = FALSE, sync_value: ?String@symbol = NIL, layout: ?String@symbol = NIL, lock_rank: ?Int64 = NIL, collection: ?String@symbol = NIL, shard_count: ?Int64 = NIL, soa: Bool = FALSE, elem_ownership: ?String@symbol = NIL, elem_sync: ?String@symbol = NIL, elem_layout: ?String@symbol = NIL, link_source: ?String@symbol = NIL, observable: Bool = FALSE, observable_terminal: ?String@symbol = NIL, observable_token: ?Token = NIL, polymorphic_shared: Bool = FALSE) RETURNS Void ->
+  self.ownership = COPY ownership;
+  self.ownership_set = COPY ownership_set;
+  self.sync = COPY sync_value;
+  self.layout = COPY layout;
+  self.lock_rank = COPY lock_rank;
+  self.collection = COPY collection;
+  self.shard_count = COPY shard_count;
+  self.soa = COPY soa;
+  self.elem_ownership = COPY elem_ownership;
+  self.elem_sync = COPY elem_sync;
+  self.elem_layout = COPY elem_layout;
+  self.link_source = COPY link_source;
+  self.observable = COPY observable;
+  self.observable_terminal = COPY observable_terminal;
+  self.observable_token = COPY observable_token;
+  self.polymorphic_shared = COPY polymorphic_shared;
+END
+PUB FN typeCapabilities__copy(self: TypeCapabilities) RETURNS TypeCapabilities ->
+  RETURN COPY self;
+END
+PUB FN typeCapabilities__with(self: TypeCapabilities, ownership: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, ownership_set: TypeCapabilitiesMaybeBoolean = TypeCapabilitiesMaybeBoolean{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, sync_value: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, layout: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, lock_rank: ?TypeCapabilitiesMaybeInteger = TypeCapabilitiesMaybeInteger{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, collection: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, shard_count: ?TypeCapabilitiesMaybeInteger = TypeCapabilitiesMaybeInteger{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, soa: TypeCapabilitiesMaybeBoolean = TypeCapabilitiesMaybeBoolean{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, elem_ownership: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, elem_sync: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, elem_layout: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, link_source: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, observable: TypeCapabilitiesMaybeBoolean = TypeCapabilitiesMaybeBoolean{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, observable_terminal: ?TypeCapabilitiesMaybeSymbol = TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, observable_token: ?TypeCapabilitiesMaybeToken = TypeCapabilitiesMaybeToken{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, polymorphic_shared: TypeCapabilitiesMaybeBoolean = TypeCapabilitiesMaybeBoolean{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }) RETURNS TypeCapabilities ->
+  MUTABLE next_ownership: ?String@symbol = NIL;
+  IF ((ownership != NIL) AND (ownership IS_A TypeCapabilityUnset)) THEN
+    next_ownership = COPY self.ownership;
+  ELSE
+    next_ownership = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(ownership);
+  END
+  MUTABLE next_ownership_set: Bool = FALSE;
+  IF ownership_set IS_A TypeCapabilityUnset THEN
+    next_ownership_set = ((!(((ownership != NIL) AND (ownership IS_A TypeCapabilityUnset))) OR self.ownership_set));
+  ELSE
+    next_ownership_set = COPY castTypeCapabilitiesMaybeBooleanToBool(ownership_set);
+  END
+  MUTABLE next_sync: ?String@symbol = NIL;
+  IF ((sync_value != NIL) AND (sync_value IS_A TypeCapabilityUnset)) THEN
+    next_sync = COPY self.sync;
+  ELSE
+    next_sync = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(sync_value);
+  END
+  MUTABLE next_layout: ?String@symbol = NIL;
+  IF ((layout != NIL) AND (layout IS_A TypeCapabilityUnset)) THEN
+    next_layout = COPY self.layout;
+  ELSE
+    next_layout = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(layout);
+  END
+  MUTABLE next_lock_rank: ?Int64 = NIL;
+  IF ((lock_rank != NIL) AND (lock_rank IS_A TypeCapabilityUnset)) THEN
+    next_lock_rank = self.lock_rank;
+  ELSE
+    next_lock_rank = COPY castOptionalTypeCapabilitiesMaybeIntegerToOptionalInt64(lock_rank);
+  END
+  MUTABLE next_collection: ?String@symbol = NIL;
+  IF ((collection != NIL) AND (collection IS_A TypeCapabilityUnset)) THEN
+    next_collection = COPY self.collection;
+  ELSE
+    next_collection = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(collection);
+  END
+  MUTABLE next_shard_count: ?Int64 = NIL;
+  IF ((shard_count != NIL) AND (shard_count IS_A TypeCapabilityUnset)) THEN
+    next_shard_count = self.shard_count;
+  ELSE
+    next_shard_count = COPY castOptionalTypeCapabilitiesMaybeIntegerToOptionalInt64(shard_count);
+  END
+  MUTABLE next_soa: Bool = FALSE;
+  IF soa IS_A TypeCapabilityUnset THEN
+    next_soa = self.soa;
+  ELSE
+    next_soa = COPY castTypeCapabilitiesMaybeBooleanToBool(soa);
+  END
+  MUTABLE next_elem_ownership: ?String@symbol = NIL;
+  IF ((elem_ownership != NIL) AND (elem_ownership IS_A TypeCapabilityUnset)) THEN
+    next_elem_ownership = COPY self.elem_ownership;
+  ELSE
+    next_elem_ownership = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(elem_ownership);
+  END
+  MUTABLE next_elem_sync: ?String@symbol = NIL;
+  IF ((elem_sync != NIL) AND (elem_sync IS_A TypeCapabilityUnset)) THEN
+    next_elem_sync = COPY self.elem_sync;
+  ELSE
+    next_elem_sync = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(elem_sync);
+  END
+  MUTABLE next_elem_layout: ?String@symbol = NIL;
+  IF ((elem_layout != NIL) AND (elem_layout IS_A TypeCapabilityUnset)) THEN
+    next_elem_layout = COPY self.elem_layout;
+  ELSE
+    next_elem_layout = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(elem_layout);
+  END
+  MUTABLE next_link_source: ?String@symbol = NIL;
+  IF ((link_source != NIL) AND (link_source IS_A TypeCapabilityUnset)) THEN
+    next_link_source = COPY self.link_source;
+  ELSE
+    next_link_source = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(link_source);
+  END
+  MUTABLE next_observable: Bool = FALSE;
+  IF observable IS_A TypeCapabilityUnset THEN
+    next_observable = self.observable;
+  ELSE
+    next_observable = COPY castTypeCapabilitiesMaybeBooleanToBool(observable);
+  END
+  MUTABLE next_observable_terminal: ?String@symbol = NIL;
+  IF ((observable_terminal != NIL) AND (observable_terminal IS_A TypeCapabilityUnset)) THEN
+    next_observable_terminal = COPY self.observable_terminal;
+  ELSE
+    next_observable_terminal = COPY castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(observable_terminal);
+  END
+  MUTABLE next_observable_token_branch_value: ?Token = NIL;
+  IF ((observable_token != NIL) AND (observable_token IS_A TypeCapabilityUnset)) THEN
+    next_observable_token_branch_value = COPY self.observable_token;
+  ELSE
+    next_observable_token_branch_value = COPY castOptionalTypeCapabilitiesMaybeTokenToOptionalToken(observable_token);
+  END
+  MUTABLE next_observable_token: ?Token = next_observable_token_branch_value;
+  MUTABLE next_polymorphic_shared: Bool = FALSE;
+  IF polymorphic_shared IS_A TypeCapabilityUnset THEN
+    next_polymorphic_shared = self.polymorphic_shared;
+  ELSE
+    next_polymorphic_shared = COPY castTypeCapabilitiesMaybeBooleanToBool(polymorphic_shared);
+  END
+  RETURN typeCapabilities__new(next_ownership, next_ownership_set, next_sync, next_layout, next_lock_rank, next_collection, next_shard_count, next_soa, next_elem_ownership, next_elem_sync, next_elem_layout, next_link_source, next_observable, next_observable_terminal, next_observable_token, next_polymorphic_shared);
+END
+PUB FN typeCapabilities__without_runtime_wrappers(self: TypeCapabilities) RETURNS TypeCapabilities ->
+  RETURN typeCapabilities__with(self, TypeCapabilitiesMaybeSymbol{ SymbolValue: :affine }, TypeCapabilitiesMaybeBoolean{ BoolValue: FALSE }, NIL, NIL, TypeCapabilitiesMaybeInteger{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, TypeCapabilitiesMaybeInteger{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, TypeCapabilitiesMaybeBoolean{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, NIL, NIL, NIL);
+END
+PUB FN typeCapabilities__inline_migration_safe?(self: TypeCapabilities) RETURNS Bool ->
+  IF !(((((((self.lock_rank == NIL) AND (self.elem_ownership == NIL)) AND (self.elem_sync == NIL)) AND (self.elem_layout == NIL)) AND (self.link_source == NIL)) AND (self.observable_terminal == NIL))) THEN
+    RETURN FALSE;
+  END
+  IF self.polymorphic_shared THEN
+    RETURN FALSE;
+  END
+  RETURN ((((self.collection == NIL) OR ((self.collection)? == :list)) OR (self.collection == :set)) OR (self.collection == :pool));
+END
+PUB FN typeCapabilities__explicit_layer_capability?(self: TypeCapabilities) RETURNS Bool ->
+  RETURN ((((((((((((((!((self.ownership == NIL)) AND (self.ownership != :affine))) OR !((self.sync == NIL))) OR !((self.layout == NIL))) OR !((self.lock_rank == NIL))) OR !((self.shard_count == NIL))) OR self.soa) OR !((self.elem_ownership == NIL))) OR !((self.elem_sync == NIL))) OR !((self.elem_layout == NIL))) OR !((self.link_source == NIL))) OR self.observable) OR !((self.observable_terminal == NIL))) OR self.polymorphic_shared);
+END
+PUB FN typeCapabilities__element_update_requested?(self: TypeCapabilities, ownership: ?TypeCapabilitiesMaybeSymbol, sync_value: ?TypeCapabilitiesMaybeSymbol, layout: ?TypeCapabilitiesMaybeSymbol) RETURNS Bool ->
+  RETURN (((((!(((ownership != NIL) AND (ownership IS_A TypeCapabilityUnset))) OR !(((sync_value != NIL) AND (sync_value IS_A TypeCapabilityUnset)))) OR !(((layout != NIL) AND (layout IS_A TypeCapabilityUnset)))) OR !((self.elem_ownership == NIL))) OR !((self.elem_sync == NIL))) OR !((self.elem_layout == NIL)));
+END
+PUB FN typeCapabilities__ownership_surface_name_for(value: String@symbol) RETURNS ?String ->
+  IF (value == :multiowned) THEN
+    RETURN "@multiowned";
+  END
+  IF (value == :shared) THEN
+    RETURN "@shared";
+  END
+  IF (value == :node) THEN
+    RETURN "@node";
+  END
+  IF (value == :shared_node) THEN
+    RETURN "@shared:node";
+  END
+  IF (value == :split) THEN
+    RETURN "@split";
+  END
+  IF (value == :link) THEN
+    RETURN "@link";
+  END
+  IF (value == :frozen) THEN
+    RETURN "@frozen";
+  END
+  RETURN NIL;
+END
+PUB FN typeCapabilities__sync_surface_name_for(value: String@symbol) RETURNS ?String ->
+  IF (value == :locked) THEN
+    RETURN "@locked";
+  END
+  IF (value == :write_locked) THEN
+    RETURN "@writeLocked";
+  END
+  IF (value == :versioned) THEN
+    RETURN "@versioned";
+  END
+  IF (value == :atomic) THEN
+    RETURN "@atomic";
+  END
+  IF (value == :always_mutable) THEN
+    RETURN "@alwaysMutable";
+  END
+  IF (value == :local) THEN
+    RETURN "@local";
+  END
+  IF (value == :raw) THEN
+    RETURN "@raw";
+  END
+  IF (value == :symbol) THEN
+    RETURN "@symbol";
+  END
+  IF (value == :c) THEN
+    RETURN "@c";
+  END
+  IF (value == :size) THEN
+    RETURN "@size";
+  END
+  RETURN NIL;
+END
+PUB FN typeCapabilities__new(ownership: ?String@symbol = NIL, ownership_set: Bool = FALSE, sync: ?String@symbol = NIL, layout: ?String@symbol = NIL, lock_rank: ?Int64 = NIL, collection: ?String@symbol = NIL, shard_count: ?Int64 = NIL, soa: Bool = FALSE, elem_ownership: ?String@symbol = NIL, elem_sync: ?String@symbol = NIL, elem_layout: ?String@symbol = NIL, link_source: ?String@symbol = NIL, observable: Bool = FALSE, observable_terminal: ?String@symbol = NIL, observable_token: ?Token = NIL, polymorphic_shared: Bool = FALSE) RETURNS TypeCapabilities ->
+  MUTABLE self = TypeCapabilities{ collection: COPY collection, elem_layout: COPY elem_layout, elem_ownership: COPY elem_ownership, elem_sync: COPY elem_sync, layout: COPY layout, link_source: COPY link_source, lock_rank: lock_rank, observable: observable, observable_terminal: COPY observable_terminal, observable_token: COPY observable_token, ownership: COPY ownership, ownership_set: ownership_set, polymorphic_shared: polymorphic_shared, shard_count: shard_count, soa: soa, sync: COPY sync };
+  typeCapabilities__initialize(&self, ownership, ownership_set, sync, layout, lock_rank, collection, shard_count, soa, elem_ownership, elem_sync, elem_layout, link_source, observable, observable_terminal, observable_token, polymorphic_shared);
+  RETURN self;
+END
+FN castOptionalTypeCapabilitiesMaybeIntegerToOptionalInt64(value: ?TypeCapabilitiesMaybeInteger) RETURNS ?Int64 ->
+  IF value != NIL THEN
+    IF value IS_A Int64 AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN NIL;
+END
+FN castOptionalTypeCapabilitiesMaybeSymbolToOptionalStringSymbol(value: ?TypeCapabilitiesMaybeSymbol) RETURNS ?String@symbol ->
+  IF value != NIL THEN
+    IF value IS_A String@symbol AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN NIL;
+END
+FN castOptionalTypeCapabilitiesMaybeTokenToOptionalToken(value: ?TypeCapabilitiesMaybeToken) RETURNS ?Token ->
+  IF value != NIL THEN
+    IF value IS_A Token AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN NIL;
+END
+FN castTypeCapabilitiesMaybeBooleanToBool(value: TypeCapabilitiesMaybeBoolean) RETURNS Bool ->
+  IF value IS_A Bool AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN TRUE;
+END

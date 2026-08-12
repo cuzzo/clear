@@ -1,0 +1,441 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172"
+UNION OpsOrExprItem { AssignField: AssignField, LetConst: LetConst, ErrDeferCall: ErrDeferCall, ErrDeferFreeField: ErrDeferFreeField, DeferFreeField: DeferFreeField, StmtCall: StmtCall, IoSubmit: IoSubmit, IfFieldSubLtZeroReturnCall: IfFieldSubLtZeroReturnCall, ArgRef: ArgRef, StateField: StateField, SubField: SubField, LocalRef: LocalRef, AddrOf: AddrOf, IntCast: IntCast, CallExpr: CallExpr, AllocExpr: AllocExpr, SliceUntilIntCast: SliceUntilIntCast, FsmOpsBinOp: FsmOpsBinOp, Emittable: Emittable }
+PUB UNION Waiter { StringValue: String, StateField: StateField }
+# Ruby module FsmOps
+PUB STRUCT AssignField {
+  field: String,
+  value: Expr
+}
+PUB STRUCT LetConst {
+  name: String,
+  zig_type: String,
+  value: IntCast
+}
+PUB STRUCT ErrDeferCall {
+  fn: FunctionPath,
+  args: []StateField
+}
+PUB STRUCT ErrDeferFreeField {
+  field: String
+}
+STRUCT DeferFreeField {
+  field: String
+}
+PUB STRUCT StmtCall {
+  fn: FunctionPath,
+  args: []Expr,
+  is_try: Bool
+}
+PUB STRUCT IoSubmit {
+  verb: String@symbol,
+  waiter: Any@multiowned,
+  extra_args: []Expr
+}
+PUB STRUCT IfFieldSubLtZeroReturnCall {
+  field: String,
+  sub: String,
+  return_fn: FunctionPath,
+  return_args: []SubField
+}
+PUB STRUCT ArgRef {
+  idx: Int64
+}
+PUB STRUCT StateField {
+  name: Any@multiowned
+}
+STRUCT SubField {
+  base: StateField,
+  name: String
+}
+STRUCT LocalRef {
+  name: String
+}
+STRUCT AddrOf {
+  expr: StateField
+}
+STRUCT IntCast {
+  zig_type: String,
+  expr: Expr
+}
+PUB STRUCT CallExpr {
+  fn: FunctionPath,
+  args: []Expr,
+  is_try: Bool
+}
+STRUCT FunctionPath {
+  root: String@symbol,
+  parts: []String
+}
+
+FN functionPath__static(name: String) RETURNS FunctionPath ->
+  RETURN FunctionPath{ root: :static, parts: [name] };
+END
+FN functionPath__context(parts: []String) RETURNS FunctionPath ->
+  RETURN FunctionPath{ root: :ctx, parts: COPY parts };
+END
+FN functionPath__render(self: FunctionPath, ctx_name: String) RETURNS !String ->
+  IF (self.root == :static) THEN
+    RETURN self.parts.join(".");
+  ELSE_IF (self.root == :ctx) THEN
+    RETURN (([ctx_name] + self.parts)).join(".");
+  ELSE
+    panic("unknown FSM function path root {}");
+  END
+END
+PUB STRUCT AllocExpr {
+  elem_type: String,
+  count: LocalRef
+}
+STRUCT SliceUntilIntCast {
+  base: StateField,
+  end_expr: SubField
+}
+PUB STRUCT FsmOpsBinOp {
+  op: String,
+  left: CallExpr,
+  right: IntCast
+}
+
+PUB FN fsmOpsBinOp__op(self: FsmOpsBinOp) RETURNS String ->
+  self.op;
+END
+PUB FN fsmOpsBinOp__left(self: FsmOpsBinOp) RETURNS CallExpr ->
+  self.left;
+END
+PUB FN fsmOpsBinOp__right(self: FsmOpsBinOp) RETURNS IntCast ->
+  self.right;
+END
+PUB UNION Expr { ArgRef: ArgRef, StateField: StateField, SubField: SubField, LocalRef: LocalRef, AddrOf: AddrOf, IntCast: IntCast, CallExpr: CallExpr, AllocExpr: AllocExpr, SliceUntilIntCast: SliceUntilIntCast, FsmOpsBinOp: FsmOpsBinOp, Emittable: Emittable }
+PUB UNION Stmt { AssignField: AssignField, LetConst: LetConst, ErrDeferCall: ErrDeferCall, ErrDeferFreeField: ErrDeferFreeField, DeferFreeField: DeferFreeField, StmtCall: StmtCall, IoSubmit: IoSubmit, IfFieldSubLtZeroReturnCall: IfFieldSubLtZeroReturnCall }
+UNION WalkValue { AssignField: AssignField, LetConst: LetConst, ErrDeferCall: ErrDeferCall, ErrDeferFreeField: ErrDeferFreeField, DeferFreeField: DeferFreeField, StmtCall: StmtCall, IoSubmit: IoSubmit, IfFieldSubLtZeroReturnCall: IfFieldSubLtZeroReturnCall, ArgRef: ArgRef, StateField: StateField, SubField: SubField, LocalRef: LocalRef, AddrOf: AddrOf, IntCast: IntCast, CallExpr: CallExpr, AllocExpr: AllocExpr, SliceUntilIntCast: SliceUntilIntCast, FsmOpsBinOp: FsmOpsBinOp, Emittable: Emittable, FunctionPath: FunctionPath, ArrayValue: []Any@multiowned, StringValue: String, SymbolValue: String@symbol, Int64Value: Int64, BoolValue: Bool }
+FN addrOf__expr(self: AddrOf) RETURNS Expr ->
+  RETURN COPY Expr{ StateField: COPY self.expr };
+END
+FN intCast__expr(self: IntCast) RETURNS Expr ->
+  RETURN COPY self.expr;
+END
+# Ruby module FsmOps::DSL
+PUB FN dSL__assign_field(field: String, value: Expr) RETURNS AssignField ->
+  RETURN AssignField{ field: COPY field, value: COPY value };
+END
+PUB FN dSL__let_const(name: String, zig_type: String, value: IntCast) RETURNS LetConst ->
+  RETURN LetConst{ name: COPY name, zig_type: COPY zig_type, value: COPY value };
+END
+PUB FN dSL__err_defer_call(fn_value: FunctionPath, args: []StateField) RETURNS ErrDeferCall ->
+  RETURN ErrDeferCall{ fn: COPY fn_value, args: COPY args };
+END
+PUB FN dSL__err_defer_free_field(field: String) RETURNS ErrDeferFreeField ->
+  RETURN ErrDeferFreeField{ field: COPY field };
+END
+PUB FN dSL__defer_free_field(field: String) RETURNS DeferFreeField ->
+  RETURN DeferFreeField{ field: COPY field };
+END
+PUB FN dSL__stmt_call(fn_value: FunctionPath, args: []Expr, is_try: Bool = FALSE) RETURNS StmtCall ->
+  RETURN StmtCall{ fn: COPY fn_value, args: COPY args, is_try: COPY is_try };
+END
+PUB FN dSL__io_submit(verb: String@symbol, waiter: Waiter, extra_args: []Expr) RETURNS IoSubmit ->
+  MUTABLE waiter_op_branch_value: ?StateField = NIL;
+  IF waiter IS_A String AS string THEN
+    waiter_op_branch_value = StateField{ name: COPY string };
+  ELSE
+    waiter_op_branch_value = castWaiterToStateField(waiter);
+  END
+  MUTABLE waiter_op: StateField = waiter_op_branch_value?;
+  RETURN IoSubmit{ verb: COPY verb, waiter: waiter_op, extra_args: COPY extra_args };
+END
+PUB FN dSL__if_neg_return_call(field: String, sub: String, return_fn: FunctionPath, return_args: []SubField) RETURNS IfFieldSubLtZeroReturnCall ->
+  RETURN IfFieldSubLtZeroReturnCall{ field: COPY field, sub: COPY sub, return_fn: COPY return_fn, return_args: COPY return_args };
+END
+PUB FN dSL__fn(name: String) RETURNS FunctionPath ->
+  RETURN functionPath__static(name);
+END
+PUB FN dSL__ctx_fn(parts: []String) RETURNS FunctionPath ->
+  RETURN functionPath__context(parts);
+END
+PUB FN dSL__arg(idx: Int64) RETURNS ArgRef ->
+  RETURN ArgRef{ idx: COPY idx };
+END
+PUB FN dSL__state(name: String) RETURNS StateField ->
+  RETURN StateField{ name: COPY name };
+END
+PUB FN dSL__subf(base: StateField, name: String) RETURNS SubField ->
+  RETURN SubField{ base: COPY base, name: COPY name };
+END
+PUB FN dSL__local(name: String) RETURNS LocalRef ->
+  RETURN LocalRef{ name: COPY name };
+END
+FN dSL__addr(expr: StateField) RETURNS AddrOf ->
+  RETURN AddrOf{ expr: COPY expr };
+END
+PUB FN dSL__intcast(zig_type: String, expr: Expr) RETURNS IntCast ->
+  RETURN IntCast{ zig_type: COPY zig_type, expr: COPY expr };
+END
+PUB FN dSL__call(fn_value: FunctionPath, args: []Expr, is_try: Bool = FALSE) RETURNS CallExpr ->
+  RETURN CallExpr{ fn: COPY fn_value, args: COPY args, is_try: COPY is_try };
+END
+PUB FN dSL__alloc_expr(elem_type: String, count_value: LocalRef) RETURNS AllocExpr ->
+  RETURN AllocExpr{ elem_type: COPY elem_type, count: COPY count_value };
+END
+PUB FN dSL__slice_intcast(base: StateField, end_expr: SubField) RETURNS SliceUntilIntCast ->
+  RETURN SliceUntilIntCast{ base: COPY base, end_expr: COPY end_expr };
+END
+PUB FN dSL__binop(op: String, left: CallExpr, right: IntCast) RETURNS FsmOpsBinOp ->
+  RETURN FsmOpsBinOp{ op: COPY op, left: COPY left, right: COPY right };
+END
+# End Ruby module FsmOps::DSL
+PUB STRUCT StateFieldDecl {
+  name: String,
+  zig_type: String,
+  default_value: Emittable
+}
+STRUCT Lowerer {
+  arg_mirs: []Emittable,
+  ctx_id: Int64
+}
+
+FN lowerer__initialize(MUTABLE self: Lowerer, ctx_id: Int64, arg_mirs: []Emittable) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.ctx_id = COPY ctx_id;
+    rtoc_self_view.arg_mirs = COPY arg_mirs;
+}
+END
+FN lowerer__lower_stmts(self: Lowerer, ops: []Stmt) RETURNS ![]Emittable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN ops |> SELECT TRY (lowerer__lower_stmt(rtoc_self_view, _));
+}
+END
+FN lowerer__lower_stmt(self: Lowerer, op: Stmt) RETURNS !Emittable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF op IS_A AssignField AS assign_field THEN
+      RETURN Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY lowerer__state_ref(rtoc_self_view, assign_field.field) }, value: COPY TRY (lowerer__lower_expr(rtoc_self_view, assign_field.value)), needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+    ELSE_IF op IS_A LetConst AS let_const THEN
+      RETURN Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY let_const.name }, init: COPY TRY (lowerer__lower_expr(rtoc_self_view, Expr{ IntCast: COPY let_const.value })), mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY let_const.zig_type })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } };
+    ELSE_IF op IS_A ErrDeferCall AS err_defer_call THEN
+      RETURN Emittable{ ErrDeferStmt: COPY ErrDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY Call{ callee: COPY lowerer__resolve_fn(rtoc_self_view, err_defer_call.fn), args: COPY err_defer_call.args |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, Expr{ StateField: COPY _ })), try_wrap: FALSE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+    ELSE_IF op IS_A ErrDeferFreeField AS err_defer_free_field THEN
+      RETURN Emittable{ ErrDeferStmt: COPY ErrDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY lowerer__free_call(rtoc_self_view, err_defer_free_field.field) AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+    ELSE_IF op IS_A DeferFreeField AS defer_free_field THEN
+      RETURN Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY lowerer__free_call(rtoc_self_view, defer_free_field.field) AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+    ELSE_IF op IS_A StmtCall AS stmt_call THEN
+      RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY Call{ callee: COPY lowerer__resolve_fn(rtoc_self_view, stmt_call.fn), args: COPY stmt_call.args |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, _)), try_wrap: stmt_call.is_try, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+    ELSE_IF op IS_A IoSubmit AS io_submit THEN
+      MUTABLE verb_fn: ?String = COPY (CAST({:read: "submitReadForFsm", :write: "submitWriteForFsm", :recv: "submitRecvForFsm", :send: "submitSendForFsm"} AS {String@symbol}String))[io_submit.verb] OR CAST(panic("FsmOps::IoSubmit unknown verb {}") AS String);
+      MUTABLE all_args = ([MIRUnaryOp{ op: "&", operand: COPY TRY (lowerer__lower_expr(rtoc_self_view, io_submit.waiter)), lowered_node_id: NIL, ownership_consumption: NIL }] + ((io_submit.extra_args) |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, _))));
+      MUTABLE receiver = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY lowerer__ctx_ident(rtoc_self_view) }, field: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "getSched", args: ( { MUTABLE rtoc_empty_list_1: []Any = List[]; rtoc_empty_list_1 } ), try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+      RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ MIRMethodCall: COPY receiver }, method: UNWRAP (COPY verb_fn), args: COPY all_args, try_wrap: TRUE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+    ELSE_IF op IS_A IfFieldSubLtZeroReturnCall AS if_field_sub_lt_zero_return_call THEN
+      MUTABLE cond = MIRBinOp{ op: "<", left: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY lowerer__state_ref(rtoc_self_view, if_field_sub_lt_zero_return_call.field) }, field: COPY if_field_sub_lt_zero_return_call.sub, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE ret = ReturnStmt{ value: Emittable{ Call: COPY Call{ callee: COPY lowerer__resolve_fn(rtoc_self_view, if_field_sub_lt_zero_return_call.return_fn), args: COPY if_field_sub_lt_zero_return_call.return_args |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, Expr{ SubField: COPY _ })), try_wrap: FALSE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      RETURN Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY cond }, then_body: [ret], else_body: List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } };
+    ELSE
+      panic("FsmOps::Lowerer unknown statement op {}");
+    END
+}
+END
+FN lowerer__lower_expr(self: Lowerer, expr: Expr) RETURNS !Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF expr IS_A ArgRef AS arg_ref THEN
+      MUTABLE idx = arg_ref.idx;
+      IF !(((idx >= 0) AND (idx < rtoc_self_view.arg_mirs.length()))) THEN
+        panic("FsmOps arg index {} out of range ({} args)");
+      END
+      RETURN COPY UNWRAP (rtoc_self_view.arg_mirs[idx]);
+    ELSE_IF expr IS_A Emittable AS emittable THEN
+      RETURN COPY emittable;
+    ELSE_IF expr IS_A StateField AS state_field THEN
+      RETURN Emittable{ FieldGet: COPY lowerer__state_ref(rtoc_self_view, state_field.name) };
+    ELSE_IF expr IS_A SubField AS sub_field THEN
+      RETURN Emittable{ FieldGet: COPY FieldGet{ object: COPY TRY (lowerer__lower_expr(rtoc_self_view, Expr{ StateField: COPY sub_field.base })), field: COPY sub_field.name, lowered_node_id: NIL, ownership_consumption: NIL } };
+    ELSE_IF expr IS_A LocalRef AS local_ref THEN
+      RETURN Emittable{ Ident: COPY Ident{ name: COPY local_ref.name, lowered_node_id: NIL, ownership_consumption: NIL } };
+    ELSE_IF expr IS_A AddrOf AS addr_of THEN
+      RETURN Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "&", operand: COPY TRY (lowerer__lower_expr(rtoc_self_view, addrOf__expr(addr_of))), lowered_node_id: NIL, ownership_consumption: NIL } };
+    ELSE_IF expr IS_A IntCast AS int_cast THEN
+      RETURN Emittable{ Call: COPY Call{ callee: "@as", args: [Emittable{ Ident: COPY Ident{ name: COPY int_cast.zig_type, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Call: COPY Call{ callee: "@intCast", args: [TRY (lowerer__lower_expr(rtoc_self_view, intCast__expr(int_cast)))], try_wrap: FALSE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
+    ELSE_IF expr IS_A CallExpr AS call_expr THEN
+      RETURN Emittable{ Call: COPY Call{ callee: COPY lowerer__resolve_fn(rtoc_self_view, call_expr.fn), args: COPY call_expr.args |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, _)), try_wrap: call_expr.is_try, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
+    ELSE_IF expr IS_A AllocExpr AS alloc_expr THEN
+      RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY lowerer__ctx_ident(rtoc_self_view) }, field: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "alloc", args: [CAST(Ident{ name: COPY alloc_expr.elem_type, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(TRY (lowerer__lower_expr(rtoc_self_view, Expr{ LocalRef: COPY alloc_expr.count })) AS Any)], try_wrap: TRUE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
+    ELSE_IF expr IS_A SliceUntilIntCast AS slice_until_int_cast THEN
+      RETURN Emittable{ SliceExpr: COPY SliceExpr{ target: COPY TRY (lowerer__lower_expr(rtoc_self_view, Expr{ StateField: COPY slice_until_int_cast.base })), start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_expr: COPY TRY (lowerer__lower_expr(rtoc_self_view, Expr{ IntCast: COPY IntCast{ zig_type: "usize", expr: Expr{ SubField: COPY slice_until_int_cast.end_expr } } })), elem_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
+    ELSE_IF expr IS_A FsmOpsBinOp AS fsm_ops_bin_op THEN
+      RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: COPY fsm_ops_bin_op.op, left: COPY TRY (lowerer__lower_expr(rtoc_self_view, Expr{ CallExpr: COPY fsm_ops_bin_op.left })), right: COPY TRY (lowerer__lower_expr(rtoc_self_view, Expr{ IntCast: COPY fsm_ops_bin_op.right })), lowered_node_id: NIL, ownership_consumption: NIL } };
+    ELSE
+      panic("FsmOps::Lowerer unknown expression op {}");
+    END
+}
+END
+PRIVATE FN lowerer__state_ref(self: Lowerer, name: String) RETURNS FieldGet
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN FieldGet{ object: Emittable{ Ident: COPY lowerer__ctx_ident(rtoc_self_view) }, field: COPY name, lowered_node_id: NIL, ownership_consumption: NIL };
+}
+END
+PRIVATE FN lowerer__ctx_ident(self: Lowerer) RETURNS Ident
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN Ident{ name: "__ctx_${rtoc_self_view.ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
+}
+END
+PRIVATE FN lowerer__free_call(self: Lowerer, field: String) RETURNS MIRMethodCall
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY lowerer__ctx_ident(rtoc_self_view) }, field: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "free", args: [CAST(lowerer__state_ref(rtoc_self_view, field) AS Any)], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+}
+END
+PRIVATE FN lowerer__resolve_fn(self: Lowerer, fn_path: FunctionPath) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (functionPath__render(fn_path, "__ctx_${rtoc_self_view.ctx_id.toString()}"));
+}
+END
+FN lowerer__new(ctx_id: Int64, arg_mirs: []Emittable) RETURNS Lowerer@multiowned ->
+  MUTABLE self = Lowerer{ arg_mirs: COPY arg_mirs, ctx_id: ctx_id };
+  lowerer__initialize(&self, ctx_id, arg_mirs);
+  RETURN self @multiowned;
+END
+FN fsmOps__referenced_state_fields(ops_or_expr: []OpsOrExprItem) RETURNS ![]String ->
+  MUTABLE out = List[];
+  fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(ops_or_expr AS []Any@multiowned) }, %(node: ?WalkValue) USE(MUTABLE out) -> {
+  IF node? IS_A StateField AS state_field THEN
+      &out.append(state_field.name);
+  END
+  rubyToClearVoid()
+  });
+  RETURN CAST((out |> DISTINCT _) AS []Any);
+END
+FN fsmOps__alloc_state_fields(ops: []Stmt) RETURNS ![]String ->
+  MUTABLE out = List[];
+  FOR _ IN ops DO
+  IF _ IS_A AssignField AS assign_field THEN
+  IF assign_field.value IS_A AllocExpr THEN
+    &out.append(assign_field.field);
+  END
+  END
+  END
+  RETURN CAST((out |> DISTINCT _) AS []Any);
+END
+FN fsmOps__free_state_fields(ops: []Stmt) RETURNS ![]String ->
+  MUTABLE out = List[];
+  FOR _ IN ops DO
+  IF _ IS_A ErrDeferFreeField AS err_defer_free_field THEN
+    &out.append(err_defer_free_field.field);
+  ELSE_IF _ IS_A DeferFreeField AS defer_free_field THEN
+    &out.append(defer_free_field.field);
+  END
+  END
+  RETURN CAST((out |> DISTINCT _) AS []Any);
+END
+FN fsmOps__finish_value_aliases_finalized_state?(expr: ?Expr, finalize_ops: []Stmt) RETURNS !Bool ->
+  IF expr EXISTS AS expr_value THEN
+    MUTABLE finalized = TRY (fsmOps__free_state_fields(finalize_ops));
+    IF (finalized.length() == 0) THEN
+      RETURN FALSE;
+    END
+    MUTABLE refs = TRY (fsmOps__referenced_state_fields([castExprToOpsOrExprItem(expr_value)]));
+    RETURN refs |> ANY finalized.contains?(_);
+  ELSE
+    RETURN FALSE;
+  END
+END
+FN fsmOps__walk(node: ?WalkValue, block: FN(?WalkValue) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF node EXISTS AS node_value THEN
+    IF node_value IS_A []Any@multiowned AS array THEN
+      FOR _ IN array DO
+      fsmOps__walk(CAST(_ AS ?WalkValue), block);
+      END
+      RETURN;
+    END
+    block(node_value);
+    IF node_value IS_A AssignField AS assign_field THEN
+      fsmOps__walk(castExprToOptionalWalkValue(assign_field.value), block);
+    ELSE_IF node_value IS_A LetConst AS let_const THEN
+      fsmOps__walk(WalkValue{ IntCast: COPY let_const.value }, block);
+    ELSE_IF node_value IS_A ErrDeferCall AS err_defer_call THEN
+      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(err_defer_call.args AS []Any@multiowned) }, block);
+    ELSE_IF node_value IS_A StmtCall AS stmt_call THEN
+      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(stmt_call.args AS []Any@multiowned) }, block);
+    ELSE_IF node_value IS_A CallExpr AS call_expr THEN
+      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(call_expr.args AS []Any@multiowned) }, block);
+    ELSE_IF node_value IS_A IoSubmit AS io_submit THEN
+      fsmOps__walk(WalkValue{ ArrayValue: COPY io_submit.waiter }, block);
+      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(io_submit.extra_args AS []Any@multiowned) }, block);
+    ELSE_IF node_value IS_A IfFieldSubLtZeroReturnCall AS if_field_sub_lt_zero_return_call THEN
+      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(if_field_sub_lt_zero_return_call.return_args AS []Any@multiowned) }, block);
+    ELSE_IF node_value IS_A SubField AS sub_field THEN
+      fsmOps__walk(WalkValue{ StateField: COPY sub_field.base }, block);
+    ELSE_IF node_value IS_A AddrOf AS addr_of THEN
+      fsmOps__walk(WalkValue{ StateField: COPY addrOf__expr(addr_of) }, block);
+    ELSE_IF node_value IS_A IntCast AS int_cast THEN
+      fsmOps__walk(castExprToOptionalWalkValue(intCast__expr(int_cast)), block);
+    ELSE_IF node_value IS_A AllocExpr AS alloc_expr THEN
+      fsmOps__walk(WalkValue{ LocalRef: COPY alloc_expr.count }, block);
+    ELSE_IF node_value IS_A SliceUntilIntCast AS slice_until_int_cast THEN
+      fsmOps__walk(WalkValue{ StateField: COPY slice_until_int_cast.base }, block);
+      fsmOps__walk(WalkValue{ SubField: COPY slice_until_int_cast.end_expr }, block);
+    ELSE_IF node_value IS_A FsmOpsBinOp AS fsm_ops_bin_op THEN
+      fsmOps__walk(WalkValue{ CallExpr: COPY fsm_ops_bin_op.left }, block);
+      fsmOps__walk(WalkValue{ IntCast: COPY fsm_ops_bin_op.right }, block);
+    END
+  ELSE
+    RETURN;
+  END
+END
+# End Ruby module FsmOps
+FN castExprToOpsOrExprItem(value: Expr) RETURNS OpsOrExprItem ->
+  PARTIAL MATCH value START
+    Expr.ArgRef AS cast_payload -> RETURN OpsOrExprItem{ ArgRef: COPY cast_payload };,
+    Expr.StateField AS cast_payload -> RETURN OpsOrExprItem{ StateField: COPY cast_payload };,
+    Expr.SubField AS cast_payload -> RETURN OpsOrExprItem{ SubField: COPY cast_payload };,
+    Expr.LocalRef AS cast_payload -> RETURN OpsOrExprItem{ LocalRef: COPY cast_payload };,
+    Expr.AddrOf AS cast_payload -> RETURN OpsOrExprItem{ AddrOf: COPY cast_payload };,
+    Expr.IntCast AS cast_payload -> RETURN OpsOrExprItem{ IntCast: COPY cast_payload };,
+    Expr.CallExpr AS cast_payload -> RETURN OpsOrExprItem{ CallExpr: COPY cast_payload };,
+    Expr.AllocExpr AS cast_payload -> RETURN OpsOrExprItem{ AllocExpr: COPY cast_payload };,
+    Expr.SliceUntilIntCast AS cast_payload -> RETURN OpsOrExprItem{ SliceUntilIntCast: COPY cast_payload };,
+    Expr.FsmOpsBinOp AS cast_payload -> RETURN OpsOrExprItem{ FsmOpsBinOp: COPY cast_payload };,
+    Expr.Emittable AS cast_payload -> RETURN OpsOrExprItem{ Emittable: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to OpsOrExprItem");
+  END
+  panic("Invalid cast to OpsOrExprItem");
+END
+FN castExprToOptionalWalkValue(value: Expr) RETURNS ?WalkValue ->
+  PARTIAL MATCH value START
+    Expr.ArgRef AS cast_payload -> RETURN WalkValue{ ArgRef: COPY cast_payload };,
+    Expr.StateField AS cast_payload -> RETURN WalkValue{ StateField: COPY cast_payload };,
+    Expr.SubField AS cast_payload -> RETURN WalkValue{ SubField: COPY cast_payload };,
+    Expr.LocalRef AS cast_payload -> RETURN WalkValue{ LocalRef: COPY cast_payload };,
+    Expr.AddrOf AS cast_payload -> RETURN WalkValue{ AddrOf: COPY cast_payload };,
+    Expr.IntCast AS cast_payload -> RETURN WalkValue{ IntCast: COPY cast_payload };,
+    Expr.CallExpr AS cast_payload -> RETURN WalkValue{ CallExpr: COPY cast_payload };,
+    Expr.AllocExpr AS cast_payload -> RETURN WalkValue{ AllocExpr: COPY cast_payload };,
+    Expr.SliceUntilIntCast AS cast_payload -> RETURN WalkValue{ SliceUntilIntCast: COPY cast_payload };,
+    Expr.FsmOpsBinOp AS cast_payload -> RETURN WalkValue{ FsmOpsBinOp: COPY cast_payload };,
+    Expr.Emittable AS cast_payload -> RETURN WalkValue{ Emittable: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?WalkValue");
+  END
+  panic("Invalid cast to ?WalkValue");
+END
+FN castWaiterToStateField(value: Waiter) RETURNS StateField ->
+  IF value IS_A StateField AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to StateField");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

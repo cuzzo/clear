@@ -1,0 +1,86 @@
+REQUIRE "type.clear"
+REQUIRE "lexer.clear"
+REQUIRE "ast.clear"
+# Ruby module AST
+UNION ErrorTypeConflictValue { SymbolValue: String@symbol, TokenMultiowned: Token@multiowned, BoolValue: Bool, Token: Token }
+PUB FN ruby_constant_error_kinds() RETURNS [6]String@symbol ->
+  RETURN CAST([:Transient, :Input, :System, :NotFound, :Permission, :Canceled] AS [6]String@symbol);
+END
+MUTABLE next_user_id: Int64 = 11;
+MUTABLE error_types_value: ?{String@symbol}Any@multiowned = NIL;
+FN aST__error_types() RETURNS !{String@symbol}Any@multiowned ->
+  IF !((error_types_value == NIL)) THEN
+    RETURN COPY error_types_value;
+  END
+  error_types_value = COPY (CAST({:LockTimeout: {:kind: :Transient, :zig_name: "LockTimeout", :id: 1, :first_site: NIL}, :LockCycle: {:kind: :Transient, :zig_name: "LockCycle", :id: 2, :first_site: NIL}, :Deadlock: {:kind: :System, :zig_name: "Deadlock", :id: 3, :first_site: NIL}, :UnexpectedRecursion: {:kind: :System, :zig_name: "UnexpectedRecursion", :id: 4, :first_site: NIL}, :MaxDepthExceeded: {:kind: :System, :zig_name: "MaxDepthExceeded", :id: 5, :first_site: NIL}, :MvccConflict: {:kind: :Transient, :zig_name: "MvccConflict", :id: 6, :first_site: NIL}, :AtomicConflict: {:kind: :Transient, :zig_name: "AtomicConflict", :id: 7, :first_site: NIL}, :GuardFail: {:kind: :Transient, :zig_name: "GuardFail", :id: 8, :first_site: NIL}, :PreconditionFail: {:kind: :Input, :zig_name: "PreconditionFail", :id: 9, :first_site: NIL}, :OutOfMemory: {:kind: :System, :zig_name: "OutOfMemory", :id: 10, :first_site: NIL}} AS {String@symbol}Any@multiowned));
+  RETURN COPY error_types_value;
+END
+FN aST__error_type_names() RETURNS ![]String@symbol ->
+  RETURN (TRY (aST__error_types())).keys();
+END
+FN aST__error_kind?(sym: ?String@symbol) RETURNS Bool ->
+  RETURN ruby_constant_error_kinds().contains?(sym);
+END
+FN aST__error_type?(sym: ?String@symbol) RETURNS !Bool ->
+  IF sym EXISTS AS sym_value THEN
+    RETURN (TRY (aST__error_types())).contains?(sym_value);
+  ELSE
+    RETURN FALSE;
+  END
+END
+FN aST__kind_of_type(sym: String@symbol) RETURNS !?String@symbol ->
+  RETURN CAST((IF (TRY (aST__error_types()))[sym] != NIL THEN
+  (((TRY (aST__error_types()))[sym])?)[:kind]
+  ELSE
+  NIL
+  END) AS ?String@symbol);
+END
+FN aST__zig_name_of_type(sym: String@symbol) RETURNS !?String ->
+  RETURN CAST((IF (TRY (aST__error_types()))[sym] != NIL THEN
+  (((TRY (aST__error_types()))[sym])?)[:zig_name]
+  ELSE
+  NIL
+  END) AS ?String);
+END
+FN aST__id_of_type(sym: String@symbol) RETURNS !?Int64 ->
+  RETURN CAST((IF (TRY (aST__error_types()))[sym] != NIL THEN
+  (((TRY (aST__error_types()))[sym])?)[:id]
+  ELSE
+  NIL
+  END) AS ?Int64);
+END
+FN aST__register_type_mut(type_sym: String@symbol, kind_sym: String@symbol, site_token: ?Token = NIL) RETURNS !Tuple<Bool, ?{String@symbol}?ErrorTypeConflictValue> ->
+  MUTABLE registry = TRY (aST__error_types());
+  MUTABLE entry: ?Any@multiowned = COPY registry[type_sym];
+  IF entry EXISTS AS entry_value THEN
+    IF (entry_value[:kind] == kind_sym) THEN
+      RETURN CAST(Tuple{TRUE, NIL} AS Tuple<Bool, ?{String@symbol}?ErrorTypeConflictValue>);
+    END
+    RETURN CAST(Tuple{TRUE, {:existing_kind: entry_value[:kind], :given_kind: kind_sym, :first_site: entry_value[:first_site], :is_stdlib: (CAST({:LockTimeout: {:kind: :Transient, :zig_name: "LockTimeout", :id: 1, :first_site: NIL}, :LockCycle: {:kind: :Transient, :zig_name: "LockCycle", :id: 2, :first_site: NIL}, :Deadlock: {:kind: :System, :zig_name: "Deadlock", :id: 3, :first_site: NIL}, :UnexpectedRecursion: {:kind: :System, :zig_name: "UnexpectedRecursion", :id: 4, :first_site: NIL}, :MaxDepthExceeded: {:kind: :System, :zig_name: "MaxDepthExceeded", :id: 5, :first_site: NIL}, :MvccConflict: {:kind: :Transient, :zig_name: "MvccConflict", :id: 6, :first_site: NIL}, :AtomicConflict: {:kind: :Transient, :zig_name: "AtomicConflict", :id: 7, :first_site: NIL}, :GuardFail: {:kind: :Transient, :zig_name: "GuardFail", :id: 8, :first_site: NIL}, :PreconditionFail: {:kind: :Input, :zig_name: "PreconditionFail", :id: 9, :first_site: NIL}, :OutOfMemory: {:kind: :System, :zig_name: "OutOfMemory", :id: 10, :first_site: NIL}} AS {String@symbol}Any@multiowned)).contains?(type_sym)}} AS Tuple<Bool, ?{String@symbol}?ErrorTypeConflictValue>);
+  ELSE
+    MUTABLE id = COPY next_user_id;
+    next_user_id = (next_user_id + 1);
+    registry[type_sym] = {:kind: kind_sym, :zig_name: CAST(type_sym AS String), :id: id, :first_site: site_token};
+    RETURN CAST(Tuple{FALSE, NIL} AS Tuple<Bool, ?{String@symbol}?ErrorTypeConflictValue>);
+  END
+END
+FN aST__reset_user_types_mut() RETURNS Int64 ->
+  error_types_value = COPY (CAST({:LockTimeout: {:kind: :Transient, :zig_name: "LockTimeout", :id: 1, :first_site: NIL}, :LockCycle: {:kind: :Transient, :zig_name: "LockCycle", :id: 2, :first_site: NIL}, :Deadlock: {:kind: :System, :zig_name: "Deadlock", :id: 3, :first_site: NIL}, :UnexpectedRecursion: {:kind: :System, :zig_name: "UnexpectedRecursion", :id: 4, :first_site: NIL}, :MaxDepthExceeded: {:kind: :System, :zig_name: "MaxDepthExceeded", :id: 5, :first_site: NIL}, :MvccConflict: {:kind: :Transient, :zig_name: "MvccConflict", :id: 6, :first_site: NIL}, :AtomicConflict: {:kind: :Transient, :zig_name: "AtomicConflict", :id: 7, :first_site: NIL}, :GuardFail: {:kind: :Transient, :zig_name: "GuardFail", :id: 8, :first_site: NIL}, :PreconditionFail: {:kind: :Input, :zig_name: "PreconditionFail", :id: 9, :first_site: NIL}, :OutOfMemory: {:kind: :System, :zig_name: "OutOfMemory", :id: 10, :first_site: NIL}} AS {String@symbol}Any@multiowned));
+  next_user_id = 11;
+  RETURN 11;
+END
+FN aST__enum_entries() RETURNS ![]Tuple<String@symbol, Int64> ->
+  MUTABLE entries = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String@symbol, Int64>); (TRY (aST__error_types())).keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{_, CAST(((TRY (aST__error_types()))[_] OR_ELSE CAST(panic("missing hash key") AS Any@multiowned))[:id] AS Int64)} AS Tuple<String@symbol, Int64>)); }; rtoc_tuple_results } );
+  RETURN ([CAST(Tuple{:None, 0} AS Tuple<String@symbol, Int64>)] + (entries |> ORDER_BY _._1));
+END
+FN aST__types_for_kind(kind: String@symbol) RETURNS ![]String@symbol ->
+  MUTABLE types: []String@symbol = ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } );
+  (TRY (aST__error_types())).keys() |> EACH {
+  MUTABLE meta: Any@multiowned = ((TRY (aST__error_types()))[_] OR_ELSE CAST(panic("missing hash key") AS Any@multiowned));
+  IF (meta[:kind] == kind) THEN
+    &types.append(_);
+  END
+  };
+  RETURN types;
+END
+# End Ruby module AST

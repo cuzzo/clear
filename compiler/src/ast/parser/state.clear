@@ -1,0 +1,1261 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f736f757263655f6572726f722e636c656172"
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+REQUIRE "pkg:rtoc_6173742f66697861626c655f6572726f722e636c656172"
+REQUIRE "pkg:rtoc_6173742f646961676e6f737469635f72656769737472792e636c656172"
+REQUIRE "pkg:rtoc_6173742f66726f6e74656e645f7265736f757263655f6275646765742e636c656172"
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+PUB FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
+  RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
+END
+
+PUB UNION ClearParserReturnValue { VarDecl: VarDecl, DestructuringAssignment: DestructuringAssignment, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, Token: Token, BoolValue: Bool, ForRange: ForRange, ForEach: ForEach, Program: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, StructDef: StructDef, Assignment: Assignment, DestructureTarget: DestructureTarget, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, UnaryOp: UnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MethodCall: MethodCall, GetField: GetField, GetIndex: GetIndex, Cast: Cast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, DeferStmt: DeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, OptionalUnwrap: OptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, BlockExpr: BlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, RangeLit: RangeLit, EnumDef: EnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, DoBlock: DoBlock, BgBlock: BgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Type: Type, FunctionDefMultiowned: FunctionDef@multiowned, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, TypeMultiowned: Type@multiowned, TokenMultiowned: Token@multiowned }
+PUB UNION CodeOrMessage { StringValue: String, SymbolValue: String@symbol }
+PUB STRUCT ClearParser {
+  budget: FrontendResourceBudget@multiowned,
+  wrapper_operand_precedence: ?Int64,
+  delimiter_closings: []?Int64,
+  gradual: Bool,
+  pos: Int64,
+  source_code: String,
+  tokens: []Token
+}
+
+syntax_tokens_at_statement_end: [4]String = [";", "THEN", "DO", "->"];
+PUB FN clearParser__parser_error_host?(self: ClearParser) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRUE;
+}
+END
+PUB FN clearParser__index_delimiter_closings(self: ClearParser, tokens: []Token) RETURNS ![]?Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE opening_chars: []String = List[];
+    MUTABLE opening_indices: []Int64 = List[];
+    MUTABLE closings: []?Int64 = List[];
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < tokens.length() DO
+      &closings.append(NIL);
+      IF !((tokens[rtoc_idx]?.type == :CHAR)) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE value = TRY (token__text_mut(tokens[rtoc_idx]?));
+      IF "([{".contains?(value) THEN
+          &opening_chars.append(value);
+          &opening_indices.append(COPY rtoc_idx);
+      ELSE_IF !((opening_chars.length() == 0)) THEN
+          MUTABLE opening = COPY UNWRAP (opening_chars.last());
+          MUTABLE closing = ")]}".substr(UNWRAP ("([{".indexOf(opening)), 1);
+          IF !((closing == value)) THEN
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+          END
+          &opening_chars.pop();
+          MUTABLE opening_index: ?Int64 = &opening_indices.pop();
+          closings[opening_index?] = rtoc_idx;
+      END
+    rtoc_idx = rtoc_idx + 1;
+    END
+    RETURN closings;
+}
+END
+PUB FN clearParser__peek(self: ClearParser) RETURNS Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token: ?Token = COPY rtoc_self_view.tokens[(rtoc_self_view.pos + 1)];
+    IF token EXISTS AS token_value THEN
+      RETURN COPY token_value;
+    END
+    RETURN Token{ type: :EOF, value: TokenValue{ StringValue: COPY "" }, line: clearParser__current(rtoc_self_view).line, column: clearParser__current(rtoc_self_view).column, file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
+}
+END
+PUB FN clearParser__peek_at(self: ClearParser, n: Int64) RETURNS ?Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.tokens[(rtoc_self_view.pos + n)];
+}
+END
+PUB FN clearParser__current(self: ClearParser) RETURNS Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY UNWRAP (rtoc_self_view.tokens[rtoc_self_view.pos]);
+}
+END
+PUB FN clearParser__previous(self: ClearParser) RETURNS Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY UNWRAP (rtoc_self_view.tokens[(rtoc_self_view.pos - 1)]);
+}
+END
+PUB FN clearParser__consume_number(MUTABLE self: ClearParser) RETURNS !Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_cur_0 = clearParser__current(rtoc_self_view);
+    IF ((rtoc_cur_0.type == :NUMBER) OR (rtoc_cur_0.type == :INT64)) THEN
+      MUTABLE tok = clearParser__current(rtoc_self_view);
+      rtoc_self_view.pos = (rtoc_self_view.pos + 1);
+      RETURN tok;
+    ELSE
+      TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :EXPECTED_NUMBER }, [], {:value: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}"}));
+      RETURN clearParser__current(rtoc_self_view);
+    END
+}
+END
+PUB FN clearParser__consume(MUTABLE self: ClearParser, type: String@symbol, value: ?String = NIL) RETURNS !Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE token = clearParser__current(rtoc_self_view);
+    MUTABLE matches_value: Bool = FALSE;
+    IF value EXISTS AS value_value THEN
+      MUTABLE expected_value = COPY value_value;
+      # Ruby guards on `token.value.is_a?(String)`; without it, text_mut raises
+      # TokenPayloadError for every token whose payload is not a String.
+      IF (COPY token.value) EXISTS AS payload THEN
+        IF payload IS_A String THEN
+          matches_value = (TRY (token__text_mut(token)) == expected_value);
+        END
+      END
+    END
+    IF (((token.type == type)) OR matches_value) THEN
+      IF ((value != NIL) AND !(matches_value)) THEN
+        TRY (clearParser__emit_consume_error_with_fix(rtoc_self_view, token, type, value));
+      END
+      rtoc_self_view.pos = (rtoc_self_view.pos + 1);
+      RETURN token;
+    ELSE
+      TRY (clearParser__emit_consume_error_with_fix(rtoc_self_view, token, type, value));
+      RETURN token;
+    END
+}
+END
+PRIVATE FN clearParser__emit_consume_error_with_fix(self: ClearParser, token: Token, expected_type: String@symbol, expected_value: ?String) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE prev_tok: ?Token = NIL;
+    IF (rtoc_self_view.pos > 0) THEN
+      prev_tok = COPY rtoc_self_view.tokens[(rtoc_self_view.pos - 1)];
+    END
+    IF expected_value EXISTS AS expected_text THEN
+     IF prev_tok EXISTS AS prev_tok_value THEN
+      IF syntax_tokens_at_statement_end.contains?(expected_text) THEN
+       IF (prev_tok_value.line < token.line) THEN
+        RETURN TRY (clearParser__emit_syntax_insert_end_of_line_mut(rtoc_self_view, prev_tok_value, token, expected_text));
+       END
+       IF ((["THEN", "DO", "->"]).contains?(expected_text) AND (prev_tok_value.line == token.line)) THEN
+        RETURN TRY (clearParser__emit_syntax_insert_before_token_mut(rtoc_self_view, token, expected_text));
+       END
+      END
+     END
+    END
+    IF prev_tok EXISTS AS prev_suffix_tok THEN
+     IF ((((token.type == :CHAR) AND (TRY (token__text_mut(token)) == "!")) AND ([:VAR_ID, :TYPE_ID]).contains?(prev_suffix_tok.type)) AND (prev_suffix_tok.end_offset == token.start_offset)) THEN
+      clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :LEGACY_MUTATION_NAME_SUFFIX });
+     END
+    END
+    TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "${(expected_value OR_ELSE expected_type)}", :got: "${token__display_value(token)}", :type: "${token.type}", :line: token.line.toString()}));
+}
+END
+PRIVATE FN clearParser__emit_syntax_insert_end_of_line_mut(self: ClearParser, prev_tok: Token, next_tok: Token, expected_value: String) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    # split() builds a temporary list; the element is a borrow INTO it, so the
+    # binding needs its own copy or both free the same bytes.
+    MUTABLE line_text = COPY (rtoc_self_view.source_code.split("\n")[(prev_tok.line - 1)] OR_ELSE "");
+    MUTABLE insert_col = (regexReplaceAll(line_text, "\\s+\\z", "").length() + 1);
+    MUTABLE leader: String = "";
+    IF ((expected_value == ";")) THEN
+      leader = "";
+    ELSE
+      leader = " ";
+    END
+    MUTABLE fix = TRY (fix__new(clearParser__fix_description(rtoc_self_view, :INSERT_EXPECTED_AT_END_OF_LINE, {:expected: "${expected_value}", :line: prev_tok.line.toString()}), [edit__new(span__new(NIL, prev_tok.line, insert_col, 0), "${leader}${expected_value}")], :auto));
+    RETURN clearParser__fixable_mut(rtoc_self_view, next_tok, :type, [fix], NIL, :PARSER_EXPECTED_AT_END_OF_LINE, :error, TRUE, {:expected: "${expected_value}", :expected_line: prev_tok.line.toString(), :got: "${token__display_value(next_tok)}", :got_line: next_tok.line.toString()});
+}
+END
+PRIVATE FN clearParser__emit_syntax_insert_before_token_mut(self: ClearParser, token: Token, expected_value: String) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE fix = TRY (fix__new(clearParser__fix_description(rtoc_self_view, :INSERT_EXPECTED_BEFORE_TOKEN, {:expected: "${expected_value}", :got: "${token__display_value(token)}", :line: token.line.toString()}), [edit__new(span__new(NIL, token.line, token.column, 0), "${expected_value} ")], :auto));
+    RETURN clearParser__fixable_mut(rtoc_self_view, token, :type, [fix], NIL, :PARSER_EXPECTED_BEFORE_TOKEN, :error, TRUE, {:expected: "${expected_value}", :got: "${token__display_value(token)}", :line: token.line.toString()});
+}
+END
+PUB FN clearParser__match?(self: ClearParser, type: String@symbol, val: ?String = NIL) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token = clearParser__current(rtoc_self_view);
+    IF !((token.type == type)) THEN
+      RETURN FALSE;
+    END
+    IF val EXISTS AS val_value THEN
+      MUTABLE expected_value = COPY val_value;
+      RETURN (TRY (token__text_mut(token)) == expected_value);
+    ELSE
+      RETURN TRUE;
+    END
+}
+END
+PUB FN clearParser__generic_close?(self: ClearParser) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (TRY (clearParser__match?(rtoc_self_view, :CHAR, ">")) OR TRY (clearParser__match?(rtoc_self_view, :CHAR, ">>")));
+}
+END
+PUB FN clearParser__consume_generic_close(MUTABLE self: ClearParser) RETURNS !Token
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF !(clearParser__match?(rtoc_self_view, :CHAR, ">>")) THEN
+      RETURN TRY (clearParser__consume(&rtoc_self_view, :CHAR, ">"));
+    END
+    MUTABLE combined = clearParser__current(rtoc_self_view);
+    MUTABLE first: Token = OWN COPY combined;
+    MUTABLE second: Token = OWN COPY combined;
+    first.value = TokenValue{ StringValue: COPY ">" };
+    IF combined.start_offset EXISTS AS combined_start THEN
+      first.end_offset = (combined_start + 1);
+    END
+    first.end_column = (combined.column + 1);
+    second.value = TokenValue{ StringValue: COPY ">" };
+    second.column = (combined.column + 1);
+    IF combined.start_offset EXISTS AS combined_start_second THEN
+      second.start_offset = (combined_start_second + 1);
+    END
+    rtoc_self_view.tokens[rtoc_self_view.pos] = COPY second;
+    RETURN first;
+}
+END
+PUB FN clearParser__match_at?(self: ClearParser, n: Int64, type: String@symbol, val: ?String = NIL) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE tok: ?Token = clearParser__peek_at(rtoc_self_view, n);
+    IF tok EXISTS AS tok_value THEN
+      MUTABLE tok_value_mutable = COPY tok_value;
+      IF !((tok_value_mutable.type == type)) THEN
+        RETURN FALSE;
+      END
+      IF val EXISTS AS val_value THEN
+        MUTABLE expected_value = COPY val_value;
+        RETURN (TRY (token__text_mut(tok_value_mutable)) == expected_value);
+      ELSE
+        RETURN TRUE;
+      END
+    ELSE
+      RETURN FALSE;
+    END
+}
+END
+PUB FN clearParser__multi_pattern_continues?(self: ClearParser) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE nxt: ?Token = clearParser__peek_at(rtoc_self_view, 1);
+    IF nxt EXISTS AS nxt_value THEN
+      MUTABLE nxt_value_mutable = COPY nxt_value;
+      IF ((nxt_value_mutable.type == :ARROW) OR (nxt_value_mutable.type == :EOF)) THEN
+        RETURN FALSE;
+      END
+      IF ((nxt_value_mutable.type == :KEYWORD) AND (["AS", "WHEN", "DEFAULT", "END"]).contains?(TRY (token__text_mut(nxt_value_mutable)))) THEN
+        RETURN FALSE;
+      END
+      IF ((nxt_value_mutable.type == :CHAR) AND (TRY (token__text_mut(nxt_value_mutable)) == "{")) THEN
+        RETURN FALSE;
+      END
+      RETURN TRUE;
+    ELSE
+      RETURN FALSE;
+    END
+}
+END
+PUB FN clearParser__match_mut(MUTABLE self: ClearParser, type: String@symbol, value: ?String = NIL) RETURNS !ClearParserReturnValue
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF clearParser__match?(rtoc_self_view, type, value) THEN
+      MUTABLE matched: Token@multiowned = COPY TRY (clearParser__consume(&rtoc_self_view, type));
+      RETURN ClearParserReturnValue{ TokenMultiowned: matched };
+    ELSE
+      RETURN ClearParserReturnValue{ BoolValue: FALSE };
+    END
+}
+END
+PUB FN clearParser__stamp_source_range_mut(self: ClearParser, MUTABLE node: Locatable, first: Token, last: Token) RETURNS Locatable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE start_offset = (first.start_offset OR_ELSE 0);
+    MUTABLE end_offset = (last.end_offset OR_ELSE ((start_offset + token__display_value(last).bytes())));
+    MATCH node START
+      Locatable.Program AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Program: item_mutable };,
+      Locatable.RequireNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ RequireNode: item_mutable };,
+      Locatable.ProtocolRequirement AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ProtocolRequirement: item_mutable };,
+      Locatable.ProtocolDef AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ProtocolDef: item_mutable };,
+      Locatable.FunctionDef AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ FunctionDef: item_mutable };,
+      Locatable.ImplementationDef AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ImplementationDef: item_mutable };,
+      Locatable.ConformanceDef AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ConformanceDef: item_mutable };,
+      Locatable.StructDef AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ StructDef: item_mutable };,
+      Locatable.VarDecl AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ VarDecl: item_mutable };,
+      Locatable.Assignment AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Assignment: item_mutable };,
+      Locatable.DestructureTarget AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ DestructureTarget: item_mutable };,
+      Locatable.DestructuringAssignment AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ DestructuringAssignment: item_mutable };,
+      Locatable.BindExpr AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ BindExpr: item_mutable };,
+      Locatable.BinaryOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ BinaryOp: item_mutable };,
+      Locatable.IsA AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ IsA: item_mutable };,
+      Locatable.UnaryOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ UnaryOp: item_mutable };,
+      Locatable.CallSiteOverride AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ CallSiteOverride: item_mutable };,
+      Locatable.Identifier AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Identifier: item_mutable };,
+      Locatable.Literal AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Literal: item_mutable };,
+      Locatable.ListLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ListLit: item_mutable };,
+      Locatable.TupleLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ TupleLit: item_mutable };,
+      Locatable.DefaultArrayLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ DefaultArrayLit: item_mutable };,
+      Locatable.HashLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ HashLit: item_mutable };,
+      Locatable.DefaultLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ DefaultLit: item_mutable };,
+      Locatable.StructLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ StructLit: item_mutable };,
+      Locatable.LambdaLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ LambdaLit: item_mutable };,
+      Locatable.IfStatement AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ IfStatement: item_mutable };,
+      Locatable.IfBind AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ IfBind: item_mutable };,
+      Locatable.WhileLoop AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ WhileLoop: item_mutable };,
+      Locatable.WhileBindLoop AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ WhileBindLoop: item_mutable };,
+      Locatable.BreakNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ BreakNode: item_mutable };,
+      Locatable.ContinueNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ContinueNode: item_mutable };,
+      Locatable.FuncCall AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ FuncCall: item_mutable };,
+      Locatable.MethodCall AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ MethodCall: item_mutable };,
+      Locatable.GetField AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ GetField: item_mutable };,
+      Locatable.GetIndex AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ GetIndex: item_mutable };,
+      Locatable.Cast AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Cast: item_mutable };,
+      Locatable.ReturnNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ReturnNode: item_mutable };,
+      Locatable.Assert AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Assert: item_mutable };,
+      Locatable.Raise AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Raise: item_mutable };,
+      Locatable.ThrowNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ThrowNode: item_mutable };,
+      Locatable.DieNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ DieNode: item_mutable };,
+      Locatable.Slice AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Slice: item_mutable };,
+      Locatable.Require AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Require: item_mutable };,
+      Locatable.DeferStmt AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ DeferStmt: item_mutable };,
+      Locatable.WithBlock AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ WithBlock: item_mutable };,
+      Locatable.SyncPolicyDecl AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ SyncPolicyDecl: item_mutable };,
+      Locatable.SelectOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ SelectOp: item_mutable };,
+      Locatable.WhereOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ WhereOp: item_mutable };,
+      Locatable.IndexOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ IndexOp: item_mutable };,
+      Locatable.ReduceOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ReduceOp: item_mutable };,
+      Locatable.OrderByOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ OrderByOp: item_mutable };,
+      Locatable.LimitOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ LimitOp: item_mutable };,
+      Locatable.UnnestOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ UnnestOp: item_mutable };,
+      Locatable.DistinctOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ DistinctOp: item_mutable };,
+      Locatable.EachOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ EachOp: item_mutable };,
+      Locatable.TapOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ TapOp: item_mutable };,
+      Locatable.SkipOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ SkipOp: item_mutable };,
+      Locatable.CollectOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ CollectOp: item_mutable };,
+      Locatable.TakeWhileOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ TakeWhileOp: item_mutable };,
+      Locatable.WindowOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ WindowOp: item_mutable };,
+      Locatable.BatchWindowOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ BatchWindowOp: item_mutable };,
+      Locatable.JoinOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ JoinOp: item_mutable };,
+      Locatable.FindOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ FindOp: item_mutable };,
+      Locatable.AnyOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ AnyOp: item_mutable };,
+      Locatable.AllOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ AllOp: item_mutable };,
+      Locatable.CountOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ CountOp: item_mutable };,
+      Locatable.SumOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ SumOp: item_mutable };,
+      Locatable.AverageOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ AverageOp: item_mutable };,
+      Locatable.MinOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ MinOp: item_mutable };,
+      Locatable.MaxOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ MaxOp: item_mutable };,
+      Locatable.ShardOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ShardOp: item_mutable };,
+      Locatable.ConcurrentOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ConcurrentOp: item_mutable };,
+      Locatable.Placeholder AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Placeholder: item_mutable };,
+      Locatable.Copy AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Copy: item_mutable };,
+      Locatable.OptionalUnwrap AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ OptionalUnwrap: item_mutable };,
+      Locatable.TenseNavigation AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ TenseNavigation: item_mutable };,
+      Locatable.MutableBorrow AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ MutableBorrow: item_mutable };,
+      Locatable.OrElseRaise AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ OrElseRaise: item_mutable };,
+      Locatable.OrElseExit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ OrElseExit: item_mutable };,
+      Locatable.OrElsePass AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ OrElsePass: item_mutable };,
+      Locatable.OrElsePrune AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ OrElsePrune: item_mutable };,
+      Locatable.OrElseBreak AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ OrElseBreak: item_mutable };,
+      Locatable.CatchBlock AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ CatchBlock: item_mutable };,
+      Locatable.RecoverOp AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ RecoverOp: item_mutable };,
+      Locatable.BlockExpr AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ BlockExpr: item_mutable };,
+      Locatable.StringConcat AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ StringConcat: item_mutable };,
+      Locatable.CapabilityWrap AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ CapabilityWrap: item_mutable };,
+      Locatable.MoveNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ MoveNode: item_mutable };,
+      Locatable.CopyNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ CopyNode: item_mutable };,
+      Locatable.KeepNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ KeepNode: item_mutable };,
+      Locatable.ShareNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ShareNode: item_mutable };,
+      Locatable.LinkNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ LinkNode: item_mutable };,
+      Locatable.ResolveNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ResolveNode: item_mutable };,
+      Locatable.FreezeNode AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ FreezeNode: item_mutable };,
+      Locatable.PassStmt AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ PassStmt: item_mutable };,
+      Locatable.StructPattern AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ StructPattern: item_mutable };,
+      Locatable.RangeLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ RangeLit: item_mutable };,
+      Locatable.ExternFnDecl AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ExternFnDecl: item_mutable };,
+      Locatable.ExternStructDecl AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ExternStructDecl: item_mutable };,
+      Locatable.EnumDef AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ EnumDef: item_mutable };,
+      Locatable.UnionDef AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ UnionDef: item_mutable };,
+      Locatable.UnionVariantLit AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ UnionVariantLit: item_mutable };,
+      Locatable.StaticCall AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ StaticCall: item_mutable };,
+      Locatable.DoBlock AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ DoBlock: item_mutable };,
+      Locatable.BgBlock AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ BgBlock: item_mutable };,
+      Locatable.ThenChain AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ThenChain: item_mutable };,
+      Locatable.BgStreamBlock AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ BgStreamBlock: item_mutable };,
+      Locatable.YieldExpr AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ YieldExpr: item_mutable };,
+      Locatable.CloseStream AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ CloseStream: item_mutable };,
+      Locatable.NextExpr AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ NextExpr: item_mutable };,
+      Locatable.MatchStatement AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ MatchStatement: item_mutable };,
+      Locatable.ForRange AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ForRange: item_mutable };,
+      Locatable.ForEach AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ForEach: item_mutable };,
+      Locatable.TestBlock AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ TestBlock: item_mutable };,
+      Locatable.WhenBlock AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ WhenBlock: item_mutable };,
+      Locatable.LetBinding AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ LetBinding: item_mutable };,
+      Locatable.TestThat AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ TestThat: item_mutable };,
+      Locatable.AssertRaises AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ AssertRaises: item_mutable };,
+      Locatable.BenchmarkStmt AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ BenchmarkStmt: item_mutable };,
+      Locatable.SmashStmt AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ SmashStmt: item_mutable };,
+      Locatable.ProfileStmt AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ProfileStmt: item_mutable };,
+      Locatable.StubDecl AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ StubDecl: item_mutable };,
+      Locatable.Drop AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Drop: item_mutable };,
+      Locatable.SuppressCleanup AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ SuppressCleanup: item_mutable };,
+      Locatable.Return AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ Return: item_mutable };,
+      Locatable.ReassignCleanup AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ ReassignCleanup: item_mutable };,
+      Locatable.FieldCleanup AS item ->
+        MUTABLE item_mutable = COPY item;
+        item_mutable.source_range = SourceRange{ file: ( { MUTABLE rtoc_optional_or_source_3: ?String = first.file; MUTABLE rtoc_optional_or_result_4: ?String = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = last.file; END rtoc_optional_or_result_4 } ), start_offset: start_offset, end_offset: end_offset, start_line: first.line, start_column: first.column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+        node = Locatable{ FieldCleanup: item_mutable };,
+    END
+    RETURN COPY node;
+}
+END
+PUB FN clearParser__source_range_from_node(self: ClearParser, first: Locatable, last: Token) RETURNS !SourceRange
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE source_range: ?SourceRange = NIL;
+    MATCH first START
+      Locatable.Program AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.RequireNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ProtocolRequirement AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ProtocolDef AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.FunctionDef AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ImplementationDef AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ConformanceDef AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.StructDef AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.VarDecl AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Assignment AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.DestructureTarget AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.DestructuringAssignment AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.BindExpr AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.BinaryOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.IsA AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.UnaryOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.CallSiteOverride AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Identifier AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Literal AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ListLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.TupleLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.DefaultArrayLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.HashLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.DefaultLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.StructLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.LambdaLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.IfStatement AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.IfBind AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.WhileLoop AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.WhileBindLoop AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.BreakNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ContinueNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.FuncCall AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.MethodCall AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.GetField AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.GetIndex AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Cast AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ReturnNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Assert AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Raise AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ThrowNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.DieNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Slice AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Require AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.DeferStmt AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.WithBlock AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.SyncPolicyDecl AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.SelectOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.WhereOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.IndexOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ReduceOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.OrderByOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.LimitOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.UnnestOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.DistinctOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.EachOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.TapOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.SkipOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.CollectOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.TakeWhileOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.WindowOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.BatchWindowOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.JoinOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.FindOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.AnyOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.AllOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.CountOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.SumOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.AverageOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.MinOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.MaxOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ShardOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ConcurrentOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Placeholder AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Copy AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.OptionalUnwrap AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.TenseNavigation AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.MutableBorrow AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.OrElseRaise AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.OrElseExit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.OrElsePass AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.OrElsePrune AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.OrElseBreak AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.CatchBlock AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.RecoverOp AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.BlockExpr AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.StringConcat AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.CapabilityWrap AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.MoveNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.CopyNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.KeepNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ShareNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.LinkNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ResolveNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.FreezeNode AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.PassStmt AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.StructPattern AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.RangeLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ExternFnDecl AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ExternStructDecl AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.EnumDef AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.UnionDef AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.UnionVariantLit AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.StaticCall AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.DoBlock AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.BgBlock AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ThenChain AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.BgStreamBlock AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.YieldExpr AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.CloseStream AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.NextExpr AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.MatchStatement AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ForRange AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ForEach AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.TestBlock AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.WhenBlock AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.LetBinding AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.TestThat AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.AssertRaises AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.BenchmarkStmt AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.SmashStmt AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ProfileStmt AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.StubDecl AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Drop AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.SuppressCleanup AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.Return AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.ReassignCleanup AS item ->
+        source_range = COPY item.source_range;,
+      Locatable.FieldCleanup AS item ->
+        source_range = COPY item.source_range;,
+    END
+    IF source_range EXISTS AS source_range_value THEN
+      MUTABLE range: SourceRange = COPY source_range_value;
+      MUTABLE end_offset = (last.end_offset OR_ELSE ((((last.start_offset OR_ELSE range.end_offset)) + (token__display_value(last)).bytes())));
+      MUTABLE range_file: ?String = COPY range.file;
+      IF (range_file == NIL) THEN
+        range_file = COPY last.file;
+      END
+      RETURN SourceRange{ file: range_file, start_offset: range.start_offset, end_offset: end_offset, start_line: range.start_line, start_column: range.start_column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+    END
+    panic("Internal: source range missing from postfix receiver");
+}
+END
+FN clearParser__source_code(self: ClearParser) RETURNS ?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+
+}
+END
+PUB FN clearParser__error_mut(self: ClearParser, node_or_token: ?Token, code_or_message: CodeOrMessage, args: Any[] = [], kwargs: {String@symbol}String = {}) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token: ?Token = clearParser__diagnostic_token(rtoc_self_view, node_or_token);
+    MUTABLE message: String = "";
+    IF code_or_message IS_A String@symbol AS string_symbol THEN
+      message = UNWRAP (TRY (diagnosticRegistry__format_from_hash(string_symbol, args, kwargs)));
+    ELSE
+      message = castCodeOrMessageToString(COPY code_or_message);
+    END
+    MUTABLE source_token: ?Token = clearParser__source_error_token(rtoc_self_view, token);
+    MUTABLE diagnostic_code: ?String@symbol = NIL;
+    IF code_or_message IS_A String@symbol AS string_symbol THEN
+      diagnostic_code = COPY (string_symbol);
+    END
+    RETURN clearParser__raise_source_error_mut(rtoc_self_view, source_token, message, diagnostic_code);
+}
+END
+FN clearParser__format_diagnostic_template(self: ClearParser, template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN diagnosticRegistry__format_template(template, args, kwargs);
+}
+END
+PUB FN clearParser__diagnostic_message(self: ClearParser, code: String@symbol, args: Any[] = [], kwargs: {String@symbol}String = {}) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE message: ?String = TRY (diagnosticRegistry__format_from_hash(code, args, kwargs));
+    IF message EXISTS AS message_value THEN
+      RETURN COPY message_value;
+    ELSE
+      panic("Internal Compiler Error: Unknown error code :{}");
+    END
+}
+END
+PUB FN clearParser__fix_description(self: ClearParser, code: String@symbol, kwargs: {String@symbol}String = {}) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+}
+END
+PUB FN clearParser__fix_description_from_hash(self: ClearParser, code: String@symbol, kwargs: {String@symbol}String) RETURNS !String
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+}
+END
+PUB FN clearParser__note_mut(self: ClearParser, node_or_token: ?Token, message: String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token: ?Token = clearParser__source_error_token(rtoc_self_view, clearParser__diagnostic_token(rtoc_self_view, node_or_token));
+    MUTABLE loc: String = "";
+    IF token EXISTS AS token_value THEN
+      loc = " (line ${token_value.line.toString()})";
+    ELSE
+      loc = "";
+    END
+    clearParser__diagnostic_output(rtoc_self_view, "\x1B[36m[Note]\x1B[0m ${message}${loc}");
+    NIL;
+}
+END
+PUB FN clearParser__warning_mut(self: ClearParser, node_or_token: ?Token, message: String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE token: ?Token = clearParser__source_error_token(rtoc_self_view, clearParser__diagnostic_token(rtoc_self_view, node_or_token));
+    MUTABLE loc: String = "";
+    IF token EXISTS AS token_value THEN
+      loc = " (line ${token_value.line.toString()})";
+    ELSE
+      loc = "";
+    END
+    clearParser__diagnostic_output(rtoc_self_view, "\x1B[33m[Warning]\x1B[0m ${message}${loc}");
+    NIL;
+}
+END
+PUB FN clearParser__fixable_mut(self: ClearParser, node_or_token: ?Token, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}String = {}) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE rendered_message = (message OR_ELSE clearParser__diagnostic_message(rtoc_self_view, code?, [], kwargs));
+    MUTABLE token: ?Token = clearParser__diagnostic_token(rtoc_self_view, node_or_token);
+    MUTABLE source_token: ?Token = clearParser__source_error_token(rtoc_self_view, token);
+    MUTABLE finding = TRY (fixableFinding__new(level, rendered_message, token, category, fixes));
+    IF fixCollector__enabled?() THEN
+      TRY (fixCollector__push(finding, (level == :error)));
+      IF !(raise_in_collector) THEN
+        RETURN;
+      END
+      clearParser__raise_source_error_mut(rtoc_self_view, source_token, rendered_message);
+    END
+    IF (level == :hint) OR (level == :info) OR (level == :warning) THEN
+      MUTABLE loc: String = "";
+      IF source_token EXISTS AS source_token_value THEN
+        loc = " (line ${source_token_value.line.toString()})";
+      ELSE
+        loc = "";
+      END
+      MUTABLE tag: String = "";
+      IF (level == :warning) THEN
+        tag = "\x1B[33m[Warning]\x1B[0m";
+      ELSE
+        tag = "\x1B[36m[${level.capitalize()}]\x1B[0m";
+      END
+      RETURN clearParser__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
+    ELSE_IF (level == :error) THEN
+      RETURN clearParser__raise_source_error_mut(rtoc_self_view, source_token, rendered_message);
+    ELSE
+      RETURN;
+    END
+}
+END
+FN clearParser__diagnostic_source_code(self: ClearParser) RETURNS ?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.source_code;
+}
+END
+PUB FN clearParser__raise_source_error_mut(self: ClearParser, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF clearParser__parser_error_host?(rtoc_self_view) THEN
+      RAISE Input, ParserError, message;
+    END
+    RAISE Input, CompilerError, message;
+}
+END
+PUB FN clearParser__diagnostic_token(self: ClearParser, node_or_token: ?Token) RETURNS ?Token
+  REQUIRES self: LOCAL
+->
+  RETURN COPY node_or_token;
+END
+PUB FN clearParser__source_error_token(self: ClearParser, token: ?Token) RETURNS ?Token
+  REQUIRES self: LOCAL
+->
+  RETURN COPY token;
+END
+PUB FN clearParser__diagnostic_output(self: ClearParser, message: String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+  print(message);
+END
+PUB FN castCodeOrMessageToString(value: CodeOrMessage) RETURNS String ->
+  IF value IS_A String AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN "";
+END

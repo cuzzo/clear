@@ -1,0 +1,104 @@
+PUB UNION Value { StringValue: String, SymbolValue: String@symbol }
+PUB STRUCT IntrinsicArgSpec {
+  name: ?String,
+  type: String@symbol,
+  sync: ?String@symbol,
+  ownership: ?String@symbol,
+  mutable: Bool,
+  takes: Bool
+}
+
+UNION IntrinsicArgSpecRawArgSpecEntry { SymbolValue: String@symbol, StringValue: String, AnyMultiowned: Any@multiowned }
+PUB UNION IntrinsicArgSpecRawArgSpec { SymbolValue: String@symbol, StringValue: String, AnyMultiowned: Any@multiowned, ArrayValue: []IntrinsicArgSpecRawArgSpecEntry }
+PRIVATE FN intrinsicArgSpec__string_value_of(raw: ?Any) RETURNS ?Value ->
+  IF raw EXISTS AS raw_value THEN
+    RETURN Value{ StringValue: COPY CAST(raw_value AS String) };
+  END
+  RETURN NIL;
+END
+
+PRIVATE FN intrinsicArgSpec__symbol_value_of(raw: ?Any) RETURNS ?Value ->
+  IF raw EXISTS AS raw_value THEN
+    RETURN Value{ SymbolValue: COPY CAST(raw_value AS String@symbol) };
+  END
+  RETURN NIL;
+END
+
+FN intrinsicArgSpec__from_registry(raw: IntrinsicArgSpecRawArgSpecEntry) RETURNS IntrinsicArgSpec ->
+  IF raw IS_A Any@multiowned AS raw_map THEN
+    raw_fields = CAST(raw_map AS {String@symbol}Any);
+    RETURN IntrinsicArgSpec{ name: COPY intrinsicArgSpec__normalize_name(intrinsicArgSpec__string_value_of(raw_fields[:name])), type: COPY intrinsicArgSpec__normalize_type(intrinsicArgSpec__symbol_value_of(raw_fields[:type])), sync: COPY intrinsicArgSpec__normalize_symbol(intrinsicArgSpec__symbol_value_of(raw_fields[:sync])), ownership: COPY intrinsicArgSpec__normalize_symbol(intrinsicArgSpec__symbol_value_of(raw_fields[:ownership])), mutable: (raw_fields[:mutable] == TRUE), takes: (raw_fields[:takes] == TRUE) };
+  END
+  IF raw IS_A String@symbol AS string_symbol THEN
+    RETURN IntrinsicArgSpec{ type: COPY intrinsicArgSpec__normalize_type(Value{ SymbolValue: COPY string_symbol }), name: NIL, sync: NIL, ownership: NIL, mutable: FALSE, takes: FALSE };
+  END
+  RETURN IntrinsicArgSpec{ type: :Any, name: NIL, sync: NIL, ownership: NIL, mutable: FALSE, takes: FALSE };
+END
+PUB FN intrinsicArgSpec__list_from_registry(raw: ?IntrinsicArgSpecRawArgSpec) RETURNS ![]IntrinsicArgSpec ->
+  IF raw? IS_A []IntrinsicArgSpecRawArgSpecEntry AS array THEN
+    RETURN array |> SELECT intrinsicArgSpec__from_registry(_);
+  END
+  RETURN CAST(( { MUTABLE rtoc_empty_list_1: []IntrinsicArgSpec = List[]; rtoc_empty_list_1 } ) AS []IntrinsicArgSpec);
+END
+PUB FN intrinsicArgSpec__fixed_list_from_registry?(raw: ?IntrinsicArgSpecRawArgSpec) RETURNS Bool ->
+  IF raw EXISTS AS raw_value THEN
+    RETURN raw_value IS_A []IntrinsicArgSpecRawArgSpecEntry;
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN intrinsicArgSpec__varargs_from_registry?(raw: ?IntrinsicArgSpecRawArgSpec) RETURNS Bool ->
+  IF raw EXISTS AS raw_value THEN
+    IF raw_value IS_A String@symbol AS string_symbol THEN
+      RETURN (string_symbol == :Varargs);
+    END
+    RETURN FALSE;
+  ELSE
+    RETURN FALSE;
+  END
+END
+FN intrinsicArgSpec__unconstrained_any?(self: IntrinsicArgSpec) RETURNS Bool ->
+  RETURN (((self.type == :Any) AND (self.sync == NIL)) AND (self.ownership == NIL));
+END
+FN intrinsicArgSpec__capability_constrained?(self: IntrinsicArgSpec) RETURNS Bool ->
+  RETURN (!((self.sync == NIL)) OR !((self.ownership == NIL)));
+END
+PUB FN intrinsicArgSpec__display_type(self: IntrinsicArgSpec) RETURNS String ->
+  RETURN COPY CAST(self.type AS String);
+END
+PRIVATE FN intrinsicArgSpec__normalize_name(value: ?Value) RETURNS ?String ->
+  IF value EXISTS AS value_value THEN
+    IF value_value IS_A String AS string THEN
+      RETURN COPY string;
+    END
+    RETURN COPY CAST(value_value AS String);
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN intrinsicArgSpec__normalize_type(value: ?Value) RETURNS String@symbol ->
+  IF value EXISTS AS value_value THEN
+    IF value_value IS_A String@symbol AS string_symbol THEN
+      RETURN COPY string_symbol;
+    END
+    IF value_value IS_A String AS string THEN
+      RETURN symbol(string);
+    END
+    RETURN :Any;
+  ELSE
+    RETURN :Any;
+  END
+END
+PRIVATE FN intrinsicArgSpec__normalize_symbol(value: ?Value) RETURNS ?String@symbol ->
+  IF value EXISTS AS value_value THEN
+    IF value_value IS_A String@symbol AS string_symbol THEN
+      RETURN COPY string_symbol;
+    END
+    IF value_value IS_A String AS string THEN
+      RETURN symbol(string);
+    END
+    RETURN NIL;
+  ELSE
+    RETURN NIL;
+  END
+END

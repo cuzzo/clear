@@ -1,0 +1,780 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f6172675f737065632e636c656172"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f656d69742e636c656172"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f636f6e74726163742e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f72657475726e2e636c656172"
+PUB UNION Borrows { SymbolValue: String@symbol, ArrayValue: []String@symbol }
+PUB UNION FunctionSignatureReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION X { Type: Type, FunctionSignatureMultiowned: FunctionSignature@multiowned, ArrayValue: []FunctionSignature@multiowned, FunctionSignature: FunctionSignature }
+PUB STRUCT FunctionSignature {
+  contract: Contract@multiowned,
+  facts: AnalysisFacts,
+  generic_bounds: {String@symbol}[]Type@multiowned,
+  intrinsic_contract: ?IntrinsicContract
+}
+
+PUB UNION FunctionSignatureLifetimeSource { StringValue: String, SymbolValue: String@symbol }
+PUB UNION FunctionSignatureLifetimeInput { StringValue: String, SymbolValue: String@symbol, ArrayValue: []FunctionSignatureLifetimeSource }
+UNION FunctionSignatureSyncSource { FunctionDefMultiowned: FunctionDef@multiowned, FunctionDef: FunctionDef }
+STRUCT Contract {
+  extern: Bool,
+  extern_effects: {String@symbol}ExternEffectValue,
+  extern_source: ?ExternSource,
+  fn_type_params: []String@symbol,
+  intrinsic: Bool,
+  module_alias: ?String,
+  owner_type: ?String,
+  owner_type_params: []String@symbol,
+  params: []Param,
+  reentrant: Bool,
+  return_lifetime: []FunctionSignatureLifetimeSource,
+  return_type: Type,
+  type_params: []String@symbol,
+  visibility: ?String@symbol
+}
+
+FN contract__initialize(MUTABLE self: Contract, params: []Param, visibility: ?String@symbol = NIL, type_params: []String@symbol, reentrant: Bool = FALSE, extern_value: Bool = FALSE, module_alias: ?String = NIL, extern_effects: {String@symbol}ExternEffectValue, extern_source: ?ExternSource = NIL, fn_type_params: []String@symbol, owner_type: ?String = NIL, owner_type_params: []String@symbol, intrinsic: Bool = FALSE) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.params = COPY params;
+    rtoc_self_view.return_type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
+    rtoc_self_view.return_lifetime = List[];
+    rtoc_self_view.visibility = COPY visibility;
+    rtoc_self_view.type_params = COPY type_params;
+    rtoc_self_view.reentrant = COPY reentrant;
+    rtoc_self_view.extern = COPY extern_value;
+    rtoc_self_view.module_alias = COPY module_alias;
+    rtoc_self_view.extern_effects = COPY extern_effects;
+    rtoc_self_view.extern_source = COPY extern_source;
+    rtoc_self_view.fn_type_params = COPY fn_type_params;
+    rtoc_self_view.owner_type = COPY owner_type;
+    rtoc_self_view.owner_type_params = COPY owner_type_params;
+    rtoc_self_view.intrinsic = COPY intrinsic;
+}
+END
+FN contract__new(params: []Param, visibility: ?String@symbol = NIL, type_params: []String@symbol, reentrant: Bool = FALSE, extern: Bool = FALSE, module_alias: ?String = NIL, extern_effects: {String@symbol}ExternEffectValue, extern_source: ?ExternSource = NIL, fn_type_params: []String@symbol, owner_type: ?String = NIL, owner_type_params: []String@symbol, intrinsic: Bool = FALSE) RETURNS !Contract@multiowned ->
+  MUTABLE self = Contract{ extern: extern, extern_effects: COPY extern_effects, extern_source: COPY extern_source, fn_type_params: COPY fn_type_params, intrinsic: intrinsic, module_alias: COPY module_alias, owner_type: COPY owner_type, owner_type_params: COPY owner_type_params, params: COPY params, reentrant: reentrant, return_lifetime: List[], return_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), type_params: COPY type_params, visibility: COPY visibility };
+  TRY (contract__initialize(&self, params, visibility, type_params, reentrant, extern, module_alias, extern_effects, extern_source, fn_type_params, owner_type, owner_type_params, intrinsic));
+  RETURN self @multiowned;
+END
+STRUCT AnalysisFacts {
+  needs_rt: ?Bool,
+  can_fail: ?Bool,
+  alloc_fault: ?Bool,
+  error_fallible: ?Bool,
+  effects: ?[Set]String@symbol,
+  return_strategy: ?String@symbol,
+  stack_tier: ?String@symbol,
+  requires: {String}[Set]String@symbol,
+  heap_carry_return: ?Bool,
+  heap_carry_return_vars: ?[Set]String,
+  arg_validator: ?String@symbol,
+  intrinsic_arg_specs: []IntrinsicArgSpec,
+  intrinsic_fixed_arg_list: Bool,
+  intrinsic_varargs: Bool,
+  arity: ?Int64,
+  emit: ?IntrinsicEmit,
+  return_def: ?FunctionReturn@multiowned
+}
+
+FN analysisFacts__copy(self: AnalysisFacts) RETURNS !AnalysisFacts ->
+  RETURN AnalysisFacts{ needs_rt: self.needs_rt, can_fail: self.can_fail, alloc_fault: self.alloc_fault, error_fallible: self.error_fallible, effects: COPY self.effects, return_strategy: COPY self.return_strategy, stack_tier: COPY self.stack_tier, requires: COPY TRY (functionSignature__copy_requires_for_import(self.requires)), heap_carry_return: self.heap_carry_return, heap_carry_return_vars: COPY self.heap_carry_return_vars, arg_validator: KEEP self.arg_validator, intrinsic_arg_specs: COPY self.intrinsic_arg_specs, intrinsic_fixed_arg_list: self.intrinsic_fixed_arg_list, intrinsic_varargs: self.intrinsic_varargs, arity: self.arity, emit: COPY self.emit, return_def: KEEP self.return_def };
+END
+PUB FN functionSignature__visibility(self: FunctionSignature) RETURNS ?String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.contract.visibility;
+}
+END
+PUB FN functionSignature__type_params(self: FunctionSignature) RETURNS ![]String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.type_params;
+}
+END
+PUB FN functionSignature__reentrant(self: FunctionSignature) RETURNS Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.contract.reentrant;
+}
+END
+PUB FN functionSignature__return_strategy(self: FunctionSignature) RETURNS ?String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.return_strategy;
+}
+END
+PUB FN functionSignature__return_lifetime(self: FunctionSignature) RETURNS ![]FunctionSignatureLifetimeSource
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.return_lifetime;
+}
+END
+PUB FN functionSignature__params(self: FunctionSignature) RETURNS ![]Param
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.params;
+}
+END
+PUB FN functionSignature__return_type(self: FunctionSignature) RETURNS Type
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.return_type;
+}
+END
+PUB FN functionSignature__extern(self: FunctionSignature) RETURNS Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.contract.extern;
+}
+END
+PUB FN functionSignature__module_alias(self: FunctionSignature) RETURNS ?String
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.module_alias;
+}
+END
+PUB FN functionSignature__extern_effects(self: FunctionSignature) RETURNS !{String@symbol}ExternEffectValue
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.extern_effects;
+}
+END
+PUB FN functionSignature__extern_source(self: FunctionSignature) RETURNS ?ExternSource
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.extern_source;
+}
+END
+PUB FN functionSignature__fn_type_params(self: FunctionSignature) RETURNS ![]String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.fn_type_params;
+}
+END
+PUB FN functionSignature__owner_type(self: FunctionSignature) RETURNS ?String
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.owner_type;
+}
+END
+PUB FN functionSignature__owner_type_params(self: FunctionSignature) RETURNS ![]String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.contract.owner_type_params;
+}
+END
+PUB FN functionSignature__intrinsic(self: FunctionSignature) RETURNS Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.contract.intrinsic;
+}
+END
+PUB FN functionSignature__needs_rt(self: FunctionSignature) RETURNS ?Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.needs_rt;
+}
+END
+PUB FN functionSignature__can_fail(self: FunctionSignature) RETURNS ?Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.can_fail;
+}
+END
+PUB FN functionSignature__alloc_fault(self: FunctionSignature) RETURNS ?Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.alloc_fault;
+}
+END
+PUB FN functionSignature__error_fallible(self: FunctionSignature) RETURNS ?Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.error_fallible;
+}
+END
+PUB FN functionSignature__effects(self: FunctionSignature) RETURNS !?[Set]String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.facts.effects;
+}
+END
+PUB FN functionSignature__stack_tier(self: FunctionSignature) RETURNS ?String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.stack_tier;
+}
+END
+PUB FN functionSignature__arg_validator(self: FunctionSignature) RETURNS ?String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.facts.arg_validator;
+}
+END
+PUB FN functionSignature__intrinsic_arg_specs(self: FunctionSignature) RETURNS ![]IntrinsicArgSpec
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.facts.intrinsic_arg_specs;
+}
+END
+PUB FN functionSignature__intrinsic_fixed_arg_list?(self: FunctionSignature) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.intrinsic_fixed_arg_list;
+}
+END
+PUB FN functionSignature__intrinsic_varargs?(self: FunctionSignature) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.intrinsic_varargs;
+}
+END
+PUB FN functionSignature__intrinsic_args_label(self: FunctionSignature) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF functionSignature__intrinsic_varargs?(rtoc_self_view) THEN
+      RETURN "(varargs)";
+    END
+    MUTABLE display_types = TRY (functionSignature__intrinsic_arg_specs(rtoc_self_view)) |> SELECT COPY intrinsicArgSpec__display_type(_);
+    RETURN "(${display_types.join(", ")})";
+}
+END
+PUB FN functionSignature__arity(self: FunctionSignature) RETURNS ?Int64
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.arity;
+}
+END
+PUB FN functionSignature__emit(self: FunctionSignature) RETURNS ?IntrinsicEmit
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.facts.emit;
+}
+END
+PUB FN functionSignature__intrinsic_contract(MUTABLE self: FunctionSignature) RETURNS !IntrinsicContract
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF rtoc_self_view.intrinsic_contract == NIL THEN
+        MUTABLE emit: ?IntrinsicEmit = COPY rtoc_self_view.facts.emit;
+      rtoc_self_view.intrinsic_contract = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_1: ?IntrinsicContract = NIL;
+        IF emit != NIL THEN
+          rtoc_ternary_value_1 = TRY (intrinsicContract__from_emit(emit, rtoc_self_view.contract.params));
+        ELSE
+          rtoc_ternary_value_1 = intrinsicContract__empty();
+        END
+        rtoc_ternary_value_1? };  END
+    RETURN UNWRAP (rtoc_self_view.intrinsic_contract);
+}
+END
+PUB FN functionSignature__requires(self: FunctionSignature) RETURNS !{String}[Set]String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.facts.requires;
+}
+END
+PUB FN functionSignature__heap_carry_return(self: FunctionSignature) RETURNS ?Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.facts.heap_carry_return;
+}
+END
+PUB FN functionSignature__heap_carry_return_vars(self: FunctionSignature) RETURNS !?[Set]String
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.facts.heap_carry_return_vars;
+}
+END
+PUB FN functionSignature__unwrap(x: ?X) RETURNS ?FunctionSignature@multiowned ->
+  IF x? IS_A FunctionSignature AS function_signature THEN
+    MUTABLE rtoc_owned_return_2: ?FunctionSignature@multiowned = function_signature;
+    RETURN rtoc_owned_return_2;
+  END
+  IF x? IS_A Type AS type THEN
+    MUTABLE type = COPY type;
+    MUTABLE function_type: ?FunctionType = type__function_type(type);
+    IF function_type EXISTS AS function_type_value THEN
+      # The slot records only whether type.clear memoized a signature; that
+      # module sits below FunctionSignature and cannot name it.
+      IF function_type_value.source_signature EXISTS AS source_signature_value THEN
+        RETURN NIL;
+      END
+    ELSE
+      RETURN NIL;
+    END
+  END
+  RETURN NIL;
+END
+PUB FN functionSignature__intrinsic_signature(return_type: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), allocates: Bool = FALSE, borrows: ?Borrows = NIL, can_fail: ?Bool = NIL, return_alloc: ?String@symbol = NIL) RETURNS !FunctionSignature@multiowned ->
+  RETURN TRY (functionSignature__new(( { MUTABLE rtoc_empty_list_3: []Param = List[]; rtoc_empty_list_3 } ), TypeTypeInput{ Type: COPY return_type }, NIL, NIL, ( { MUTABLE rtoc_empty_list_4: []String@symbol = List[]; rtoc_empty_list_4 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_5: []String@symbol = List[]; rtoc_empty_list_5 } ), NIL, ( { MUTABLE rtoc_empty_list_6: []String@symbol = List[]; rtoc_empty_list_6 } ), TRUE, NIL, can_fail, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, IntrinsicEmit{ allocates: COPY allocates, borrows: borrows, return_alloc: COPY return_alloc, zig: NIL, numeric_zig: NIL, sharded_zig: NIL, shard_direct_zig: NIL, fsm_setup: List[], fsm_state_decls: List[], fsm_finish_block: List[], fsm_state_finalize: List[], fsm_setup_present: FALSE, fsm_state_decls_present: FALSE, fsm_finish_block_present: FALSE, fsm_state_finalize_present: FALSE, fsm_finish_value: NIL, bc: FALSE, is_method: FALSE, suspends: FALSE, narrows_collection: FALSE, narrows_receiver_collection: FALSE, mutates_receiver: FALSE, takes_value: FALSE, container_borrow: FALSE, tag: NIL, builtin: NIL, alloc: NIL, val_alloc: NIL, key_alloc: NIL, shard_alloc: NIL, sharded_alloc: NIL, reject_when: NIL, bc_op: NIL, error_kind: NIL, error_type: NIL, registry: NIL, elem: NIL, fallible_clauses: NIL, lifetime: List[], reject_error: NIL, arity: NIL, takes_args: List[], label: NIL, eql: NIL, strcmp: NIL, cleanup: NIL, assert: NIL, array: NIL, list: NIL, pool: NIL, set: NIL, get: NIL, string_raw: NIL, string_symbol: NIL, string_map: NIL, numeric_map: NIL, set_collection: NIL }));
+END
+PUB FN functionSignature__allocating_intrinsic() RETURNS !FunctionSignature@multiowned ->
+  RETURN TRY (functionSignature__intrinsic_signature(TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), TRUE));
+END
+PUB FN functionSignature__borrowing_intrinsic() RETURNS !FunctionSignature@multiowned ->
+  RETURN TRY (functionSignature__intrinsic_signature(TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), FALSE, Borrows{ SymbolValue: :all }));
+END
+PUB FN functionSignature__initialize(MUTABLE self: FunctionSignature, params: []Param, return_type: ?TypeTypeInput = NIL, return_lifetime: ?FunctionSignatureLifetimeInput = NIL, visibility: ?String@symbol = NIL, type_params: []String@symbol, generic_bounds: {String@symbol}[]Type, reentrant: Bool = FALSE, extern_value: Bool = FALSE, module_alias: ?String = NIL, extern_effects: ?{String@symbol}ExternEffectValue = NIL, extern_source: ?ExternSource = NIL, fn_type_params: []String@symbol, owner_type: ?String = NIL, owner_type_params: []String@symbol, intrinsic: Bool = FALSE, needs_rt: ?Bool = NIL, can_fail: ?Bool = NIL, alloc_fault: ?Bool = NIL, error_fallible: ?Bool = NIL, effects_value: ?[Set]String@symbol = NIL, return_strategy: ?String@symbol = NIL, stack_tier: ?String@symbol = NIL, requires_value: ?{String}[Set]String@symbol = NIL, heap_carry_return: ?Bool = NIL, heap_carry_return_vars: ?[Set]String = NIL, arg_validator: ?String@symbol = NIL, arg_spec: ?IntrinsicArgSpecRawArgSpec = NIL, arity: ?Int64 = NIL, emit: ?IntrinsicEmit = NIL, return_def: ?FunctionReturn = NIL) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.contract = TRY (contract__new(params, visibility, type_params, reentrant, extern_value, module_alias, (extern_effects OR_ELSE {}), extern_source, fn_type_params, owner_type, owner_type_params, intrinsic));
+    rtoc_self_view.generic_bounds = ( { MUTABLE rtoc_transform_values_result_7: {String@symbol}[]Type = {}; FOR rtoc_key IN generic_bounds.keys() DO rtoc_transform_values_result_7[rtoc_key] = { MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE bounds: []Type = (generic_bounds[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS []Type));
+    bounds |> SELECT TRY (type__new(TypeConstructionInput{ Type: COPY _ }))
+    }; END rtoc_transform_values_result_7 } );
+    rtoc_self_view.facts = AnalysisFacts{ needs_rt: COPY needs_rt, can_fail: COPY can_fail, alloc_fault: COPY alloc_fault, error_fallible: COPY error_fallible, effects: COPY effects_value, return_strategy: COPY return_strategy, stack_tier: COPY stack_tier, requires: COPY TRY (functionSignature__copy_requires_for_import((requires_value OR_ELSE {}))), heap_carry_return: COPY heap_carry_return, heap_carry_return_vars: COPY heap_carry_return_vars, arg_validator: COPY arg_validator, intrinsic_arg_specs: COPY TRY (intrinsicArgSpec__list_from_registry(arg_spec)), intrinsic_fixed_arg_list: intrinsicArgSpec__fixed_list_from_registry?(arg_spec), intrinsic_varargs: intrinsicArgSpec__varargs_from_registry?(arg_spec), arity: COPY arity, emit: COPY emit, return_def: return_def };
+    rtoc_self_view.contract.return_type = CAST(TRY (functionSignature__coerce_return_type(rtoc_self_view, return_type)) AS Type);
+    rtoc_self_view.contract.return_lifetime = TRY (functionSignature__normalize_lifetime(rtoc_self_view, return_lifetime));
+    rtoc_self_view.intrinsic_contract = NIL;
+}
+END
+PUB FN functionSignature__replace_return_type_mut(MUTABLE self: FunctionSignature, return_type: ?TypeTypeInput) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.contract.return_type = CAST(TRY (functionSignature__coerce_return_type(rtoc_self_view, return_type)) AS Type);
+    rtoc_self_view;
+}
+END
+PUB FN functionSignature__replace_return_strategy_mut(MUTABLE self: FunctionSignature, return_strategy: ?String@symbol) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.facts.return_strategy = COPY return_strategy;
+    rtoc_self_view;
+}
+END
+PUB FN functionSignature__replace_intrinsic_emit_mut(MUTABLE self: FunctionSignature, emit: ?IntrinsicEmit) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF emit EXISTS AS emit_value THEN
+      rtoc_self_view.facts.emit = COPY emit_value;
+    ELSE
+      rtoc_self_view.facts.emit = NIL;
+    END
+    rtoc_self_view.intrinsic_contract = NIL;
+    rtoc_self_view;
+}
+END
+PUB FN functionSignature__mark_runtime_required_mut(MUTABLE self: FunctionSignature) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.facts.needs_rt = TRUE;
+    rtoc_self_view;
+}
+END
+PUB FN functionSignature__mark_faulting_allocation_mut(MUTABLE self: FunctionSignature) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.facts.can_fail = TRUE;
+    rtoc_self_view.facts.alloc_fault = TRUE;
+    rtoc_self_view;
+}
+END
+PUB FN functionSignature__emits_allocating?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).allocation).allocates;
+}
+END
+PUB FN functionSignature__recoverable_result?(self: FunctionSignature) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF rtoc_self_view.facts.error_fallible EXISTS AS optional_value_value THEN
+      RETURN (optional_value_value == TRUE);
+    ELSE
+      RETURN (functionSignature__can_fail(rtoc_self_view) == TRUE);
+    END
+}
+END
+PUB FN functionSignature__mutates_receiver?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership).mutates_receiver;
+}
+END
+PUB FN functionSignature__takes_ownership?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN intrinsicOwnershipContract__takes_any?(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership));
+}
+END
+PUB FN functionSignature__return_alloc(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).allocation).return_alloc;
+}
+END
+PUB FN functionSignature__intrinsic_takes_value?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership).takes_value;
+}
+END
+PUB FN functionSignature__intrinsic_argument_takes_indices(MUTABLE self: FunctionSignature) RETURNS ![Set]Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN COPY ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership).argument_takes_indices;
+}
+END
+PUB FN functionSignature__intrinsic_pattern(MUTABLE self: FunctionSignature) RETURNS !?FunctionSignatureReturnValue
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN COPY castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).template).zig);
+}
+END
+PUB FN functionSignature__intrinsic_template(MUTABLE self: FunctionSignature, kind: IntrinsicTemplateKind) RETURNS !?FunctionSignatureReturnValue
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(intrinsicTemplateContract__pattern_for(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).template), kind));
+}
+END
+PUB FN functionSignature__required_intrinsic_template(MUTABLE self: FunctionSignature, kind: IntrinsicTemplateKind) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE pattern: ?FunctionSignatureReturnValue = TRY (functionSignature__intrinsic_template(&rtoc_self_view, kind));
+    IF pattern EXISTS AS pattern_value THEN
+      RETURN COPY (CAST(pattern_value AS String));
+    ELSE
+      panic("registry template missing :{}");
+    END
+}
+END
+PUB FN functionSignature__template_kind_label(kind: IntrinsicTemplateKind) RETURNS String ->
+  IF (kind == IntrinsicTemplateKind.Zig) THEN
+    RETURN "zig";
+  END
+  IF (kind == IntrinsicTemplateKind.NumericZig) THEN
+    RETURN "numeric_zig";
+  END
+  IF (kind == IntrinsicTemplateKind.ShardedZig) THEN
+    RETURN "sharded_zig";
+  END
+  IF (kind == IntrinsicTemplateKind.ShardDirectZig) THEN
+    RETURN "shard_direct_zig";
+  END
+  RETURN "unknown";
+END
+PUB FN functionSignature__intrinsic_bc_op_or(MUTABLE self: FunctionSignature, default_name: String@symbol) RETURNS !String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN intrinsicTemplateContract__bc_op_or(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).template), default_name);
+}
+END
+PUB FN functionSignature__intrinsic_bc?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).template).bc;
+}
+END
+PUB FN functionSignature__intrinsic_alloc(MUTABLE self: FunctionSignature, kind: IntrinsicAllocationKind) RETURNS !?String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN intrinsicAllocationContract__placeholder(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).allocation), kind);
+}
+END
+PUB FN functionSignature__intrinsic_suspends?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).suspends;
+}
+END
+PUB FN functionSignature__intrinsic_container_borrow?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership).container_borrow;
+}
+END
+PUB FN functionSignature__intrinsic_collection_narrowing?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN intrinsicBehaviorContract__narrows_collection_type?(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior));
+}
+END
+PUB FN functionSignature__intrinsic_receiver_collection_narrowing?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).narrows_receiver_collection;
+}
+END
+PUB FN functionSignature__intrinsic_reject_when(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).reject_when;
+}
+END
+PUB FN functionSignature__intrinsic_reject_error(MUTABLE self: FunctionSignature) RETURNS !?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN COPY ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).reject_error;
+}
+END
+PUB FN functionSignature__intrinsic_error_kind(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).error_kind;
+}
+END
+PUB FN functionSignature__intrinsic_error_type(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).error_type;
+}
+END
+PUB FN functionSignature__intrinsic_lifetime(MUTABLE self: FunctionSignature) RETURNS ![]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN COPY ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).lifetime;
+}
+END
+PUB FN functionSignature__with_intrinsic_override(self: FunctionSignature, pattern: IntrinsicEmitStrOrSym, alloc: ?String@symbol = NIL) RETURNS !FunctionSignature@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE copy: FunctionSignature@multiowned = TRY (functionSignature__dup(rtoc_self_view));
+    MUTABLE emit_copy: IntrinsicEmit = IntrinsicEmit{ zig: NIL, numeric_zig: NIL, sharded_zig: NIL, shard_direct_zig: NIL, fsm_setup: List[], fsm_state_decls: List[], fsm_finish_block: List[], fsm_state_finalize: List[], fsm_setup_present: FALSE, fsm_state_decls_present: FALSE, fsm_finish_block_present: FALSE, fsm_state_finalize_present: FALSE, fsm_finish_value: NIL, bc: FALSE, is_method: FALSE, suspends: FALSE, narrows_collection: FALSE, narrows_receiver_collection: FALSE, mutates_receiver: FALSE, allocates: FALSE, takes_value: FALSE, container_borrow: FALSE, tag: NIL, builtin: NIL, alloc: NIL, return_alloc: NIL, val_alloc: NIL, key_alloc: NIL, shard_alloc: NIL, sharded_alloc: NIL, borrows: NIL, reject_when: NIL, bc_op: NIL, error_kind: NIL, error_type: NIL, registry: NIL, elem: NIL, fallible_clauses: NIL, lifetime: List[], reject_error: NIL, arity: NIL, takes_args: List[], label: NIL, eql: NIL, strcmp: NIL, cleanup: NIL, assert: NIL, array: NIL, list: NIL, pool: NIL, set: NIL, get: NIL, string_raw: NIL, string_symbol: NIL, string_map: NIL, numeric_map: NIL, set_collection: NIL };
+    IF functionSignature__emit(copy) THEN
+      emit_copy = COPY UNWRAP (functionSignature__emit(copy));
+    END
+    IF pattern IS_A String@symbol AS string_symbol THEN
+      emit_copy.zig = COPY IntrinsicEmitStrOrSym{ SymbolValue: COPY string_symbol };
+    ELSE_IF pattern IS_A String AS string THEN
+      emit_copy.zig = COPY IntrinsicEmitStrOrSym{ StringValue: COPY string };
+    END
+    IF alloc EXISTS AS alloc_value THEN
+      emit_copy.alloc = COPY alloc_value;
+    END
+    functionSignature__replace_intrinsic_emit_mut(&copy, emit_copy);
+    RETURN copy;
+}
+END
+PUB FN functionSignature__heap_return_alloc?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN (TRY (functionSignature__return_alloc(&rtoc_self_view)) == :heap);
+}
+END
+PUB FN functionSignature__frame_return_alloc?(MUTABLE self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN (TRY (functionSignature__return_alloc(&rtoc_self_view)) == :frame);
+}
+END
+PUB FN functionSignature__dup(self: FunctionSignature) RETURNS !FunctionSignature@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE copy = TRY (functionSignature__new(rtoc_self_view.contract.params, TypeTypeInput{ Type: COPY rtoc_self_view.contract.return_type }, FunctionSignatureLifetimeInput{ ArrayValue: COPY rtoc_self_view.contract.return_lifetime }, rtoc_self_view.contract.visibility, rtoc_self_view.contract.type_params, rtoc_self_view.generic_bounds, rtoc_self_view.contract.reentrant, rtoc_self_view.contract.extern, rtoc_self_view.contract.module_alias, rtoc_self_view.contract.extern_effects, rtoc_self_view.contract.extern_source, rtoc_self_view.contract.fn_type_params, rtoc_self_view.contract.owner_type, rtoc_self_view.contract.owner_type_params, rtoc_self_view.contract.intrinsic));
+    functionSignature__replace_analysis_storage_mut(&copy, TRY (analysisFacts__copy(rtoc_self_view.facts)));
+    RETURN copy;
+}
+END
+PUB FN functionSignature__copy_params_for_import(params: []Param) RETURNS ![]Param ->
+  RETURN params |> SELECT Param{ name: _.name, type: COPY TRY (type__copy_type(_.type)), default: _.default, mutable: _.mutable, takes: _.takes, comptime: _.comptime, name_token: _.name_token, required: _.required, sync: _.sync, symbol: NIL, carrier_contract: :polymorphic };
+END
+PUB FN functionSignature__copy_requires_for_import(requires_value: {String}[Set]String@symbol) RETURNS !{String}[Set]String@symbol ->
+  MUTABLE copied: {String}[Set]String@symbol = {};
+  requires_value.keys() |> EACH {
+  MUTABLE families: [Set]String@symbol = (requires_value[_] OR_ELSE CAST(panic("missing hash key") AS [Set]String@symbol));
+  copied[_] = COPY families;
+  };
+  RETURN copied;
+END
+PRIVATE FN functionSignature__coerce_return_type(self: FunctionSignature, val: ?TypeTypeInput) RETURNS !Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF val EXISTS AS val_value THEN
+      RETURN TRY (type__new(castTypeTypeInputToTypeConstructionInput(val_value)));
+    ELSE
+      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
+    END
+}
+END
+PUB FN functionSignature__adopt_param_symbols_mut(self: FunctionSignature, fn_value: FunctionDef) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < rtoc_self_view.contract.params.length() DO
+      MUTABLE src: ?Param = COPY fn_value.params[rtoc_idx];
+      IF rtoc_self_view.contract.params[rtoc_idx] != NIL THEN
+          MUTABLE rtoc_field_slot_8 = COPY UNWRAP (rtoc_self_view.contract.params[rtoc_idx]);
+          rtoc_field_slot_8.symbol = (rtoc_field_slot_8.symbol OR_ELSE src?.symbol);
+          rtoc_self_view.contract.params[rtoc_idx] = rtoc_field_slot_8;
+        END
+    rtoc_idx = rtoc_idx + 1;
+    END
+}
+END
+PRIVATE FN functionSignature__replace_requires_storage_mut(MUTABLE self: FunctionSignature, requires_value: ?{String}[Set]String@symbol) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE copied_requires = TRY (functionSignature__copy_requires_for_import((requires_value OR_ELSE {})));
+    rtoc_self_view.facts.requires = copied_requires;
+}
+END
+PRIVATE FN functionSignature__replace_analysis_storage_mut(MUTABLE self: FunctionSignature, facts: AnalysisFacts) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.facts = COPY facts;
+}
+END
+PRIVATE FN functionSignature__normalize_lifetime(self: FunctionSignature, val: ?FunctionSignatureLifetimeInput) RETURNS ![]FunctionSignatureLifetimeSource
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF val EXISTS AS val_value THEN
+      MUTABLE raw: []FunctionSignatureLifetimeSource = ( { MUTABLE rtoc_empty_list_9: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_9 } );
+      IF val_value IS_A []FunctionSignatureLifetimeSource AS array THEN
+      FOR rtoc_array_item_10 IN array DO
+          &raw.append(COPY rtoc_array_item_10);
+        END
+      ELSE
+      &raw.append(COPY castFunctionSignatureLifetimeInputToFunctionSignatureLifetimeSource(val_value));
+      END
+      MUTABLE out: []FunctionSignatureLifetimeSource = ( { MUTABLE rtoc_empty_list_11: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_11 } );
+      MUTABLE i: Int64 = 0;
+      WHILE (i < raw.length()) DO
+        MUTABLE item = COPY UNWRAP (raw[i]);
+        IF item IS_A String@symbol AS string_symbol THEN
+          &out.append(FunctionSignatureLifetimeSource{ StringValue: COPY CAST(string_symbol AS String) });
+        ELSE
+          &out.append(COPY item);
+        END
+        i = (i + 1);
+      END
+      RETURN out;
+    ELSE
+      RETURN CAST(( { MUTABLE rtoc_empty_list_12: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_12 } ) AS []FunctionSignatureLifetimeSource);
+    END
+}
+END
+PUB FN functionSignature__new(params: []Param, return_type: ?TypeTypeInput = NIL, return_lifetime: ?FunctionSignatureLifetimeInput = NIL, visibility: ?String@symbol = NIL, type_params: []String@symbol, generic_bounds: {String@symbol}[]Type, reentrant: Bool = FALSE, extern: Bool = FALSE, module_alias: ?String = NIL, extern_effects: ?{String@symbol}ExternEffectValue = NIL, extern_source: ?ExternSource = NIL, fn_type_params: []String@symbol, owner_type: ?String = NIL, owner_type_params: []String@symbol, intrinsic: Bool = FALSE, needs_rt: ?Bool = NIL, can_fail: ?Bool = NIL, alloc_fault: ?Bool = NIL, error_fallible: ?Bool = NIL, effects: ?[Set]String@symbol = NIL, return_strategy: ?String@symbol = NIL, stack_tier: ?String@symbol = NIL, requires: ?{String}[Set]String@symbol = NIL, heap_carry_return: ?Bool = NIL, heap_carry_return_vars: ?[Set]String = NIL, arg_validator: ?String@symbol = NIL, arg_spec: ?IntrinsicArgSpecRawArgSpec = NIL, arity: ?Int64 = NIL, emit: ?IntrinsicEmit = NIL, return_def: ?FunctionReturn = NIL) RETURNS !FunctionSignature@multiowned ->
+  MUTABLE self = FunctionSignature{ contract: TRY (contract__new(COPY params, COPY visibility, COPY type_params, COPY reentrant, COPY extern, COPY module_alias, (COPY extern_effects OR_ELSE {}), COPY extern_source, COPY fn_type_params, COPY owner_type, COPY owner_type_params, COPY intrinsic)), facts: AnalysisFacts{ needs_rt: COPY needs_rt, can_fail: COPY can_fail, alloc_fault: COPY alloc_fault, error_fallible: COPY error_fallible, effects: COPY effects, return_strategy: COPY return_strategy, stack_tier: COPY stack_tier, requires: COPY TRY (functionSignature__copy_requires_for_import((COPY requires OR_ELSE {}))), heap_carry_return: COPY heap_carry_return, heap_carry_return_vars: COPY heap_carry_return_vars, arg_validator: COPY arg_validator, intrinsic_arg_specs: COPY TRY (intrinsicArgSpec__list_from_registry(COPY arg_spec)), intrinsic_fixed_arg_list: intrinsicArgSpec__fixed_list_from_registry?(COPY arg_spec), intrinsic_varargs: intrinsicArgSpec__varargs_from_registry?(COPY arg_spec), arity: COPY arity, emit: COPY emit, return_def: return_def }, generic_bounds: {}, intrinsic_contract: NIL };
+  TRY (functionSignature__initialize(&self, params, return_type, return_lifetime, visibility, type_params, generic_bounds, reentrant, extern, module_alias, extern_effects, extern_source, fn_type_params, owner_type, owner_type_params, intrinsic, needs_rt, can_fail, alloc_fault, error_fallible, effects, return_strategy, stack_tier, requires, heap_carry_return, heap_carry_return_vars, arg_validator, arg_spec, arity, emit, return_def));
+  RETURN self @multiowned;
+END
+FN castFunctionSignatureLifetimeInputToFunctionSignatureLifetimeSource(value: FunctionSignatureLifetimeInput) RETURNS FunctionSignatureLifetimeSource ->
+  PARTIAL MATCH value START
+    FunctionSignatureLifetimeInput.StringValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ StringValue: COPY cast_payload };,
+    FunctionSignatureLifetimeInput.SymbolValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to FunctionSignatureLifetimeSource");
+  END
+  panic("Invalid cast to FunctionSignatureLifetimeSource");
+END
+FN castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(value: ?IntrinsicEmitStrOrSym) RETURNS ?FunctionSignatureReturnValue ->
+  IF value == NIL THEN
+    panic("Invalid cast to ?FunctionSignatureReturnValue");
+  END
+  PARTIAL MATCH value? START
+    IntrinsicEmitStrOrSym.StringValue AS cast_payload -> RETURN FunctionSignatureReturnValue{ StringValue: COPY cast_payload };,
+    IntrinsicEmitStrOrSym.SymbolValue AS cast_payload -> RETURN FunctionSignatureReturnValue{ SymbolValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?FunctionSignatureReturnValue");
+  END
+  panic("Invalid cast to ?FunctionSignatureReturnValue");
+END
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
+    TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
+    TypeTypeInput.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
+    TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
+  END
+  panic("Invalid cast to TypeConstructionInput");
+END

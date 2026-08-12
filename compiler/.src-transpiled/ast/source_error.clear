@@ -1,0 +1,104 @@
+REQUIRE "type.clear"
+REQUIRE "diagnostic_registry.clear"
+REQUIRE "lexer.clear"
+REQUIRE "fixable_error.clear"
+REQUIRE "ast.clear"
+# Ruby module ErrorHelper
+STRUCT SourceError {
+  code: ?String@symbol,
+  original_message: String,
+  source_code: ?String,
+  token: ?Token
+}
+
+FN sourceError__initialize(MUTABLE self: SourceError, token: ?Token, message: String, source_code: ?String, code: ?String@symbol = NIL) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.token = COPY token;
+    rtoc_self_view.original_message = COPY message;
+    rtoc_self_view.source_code = COPY source_code;
+    rtoc_self_view.code = COPY code;
+}
+END
+FN sourceError__error_type(self: SourceError) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN "Error";
+}
+END
+PRIVATE FN sourceError__build_message(self: SourceError) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF rtoc_self_view.token EXISTS AS token_value THEN
+      IF (token_value.type == :EOF) THEN
+        RETURN "\n\x1B[31m[${sourceError__error_type(rtoc_self_view)}]\x1B[0m${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (at End of File)\n";
+      ELSE
+        MUTABLE line_num = token_value.line;
+        MUTABLE col_num = token_value.column;
+        IF rtoc_self_view.source_code EXISTS AS source_code_value THEN
+          IF (source_code_value.length() == 0) THEN
+            RETURN "[${sourceError__error_type(rtoc_self_view)}]${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (Line ${line_num})";
+          ELSE
+            MUTABLE lines = source_code_value.split("\n");
+            MUTABLE raw_line = (lines[(line_num - 1)] OR_ELSE "");
+            MUTABLE out = "\n\x1B[31m[${sourceError__error_type(rtoc_self_view)}]\x1B[0m${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message}\n";
+            out = (out $+ "\x1B[90mLocation:\x1B[0m Line ${line_num}, Column ${col_num}\n\n");
+            MUTABLE gutter_width = (CAST(line_num AS String)).codepointCount();
+            out = (out $+ "  ${compilerRepeatString(" ", gutter_width)} | \n");
+            out = (out $+ "  ${line_num} | ${raw_line}\n");
+            MUTABLE prefix = raw_line.substr(0, ((col_num - 1) - 0));
+            MUTABLE visual_offset = prefix.replace("\t", "  ").codepointCount();
+            out = (out $+ "  ${compilerRepeatString(" ", gutter_width)} | \x1B[31m${compilerRepeatString(" ", visual_offset)}^\x1B[0m\n");
+            out = (out $+ "  ${compilerRepeatString(" ", gutter_width)} | \n");
+            RETURN out;
+          END
+        ELSE
+          RETURN "[${sourceError__error_type(rtoc_self_view)}]${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (Line ${line_num})";
+        END
+      END
+    ELSE
+      RETURN "\n\x1B[31m[${sourceError__error_type(rtoc_self_view)}]\x1B[0m${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (at End of File)\n";
+    END
+}
+END
+PRIVATE FN sourceError__code_suffix(self: SourceError) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF rtoc_self_view.code EXISTS AS code_value THEN
+      RETURN " [${code_value}]";
+    ELSE
+      RETURN "";
+    END
+}
+END
+FN sourceError__new(token: ?Token, message: String, source_code: ?String, code: ?String@symbol = NIL) RETURNS SourceError@multiowned ->
+  MUTABLE self = SourceError{ code: COPY code, original_message: COPY message, source_code: COPY source_code, token: COPY token };
+  sourceError__initialize(&self, token, message, source_code, code);
+  RETURN self @multiowned;
+END
+STRUCT ParserError {
+
+}
+
+FN parserError__error_type(self: ParserError) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN "Parser Error";
+}
+END
+STRUCT CompilerError {
+
+}
+
+FN compilerError__error_type(self: CompilerError) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN "Compiler Error";
+}
+END

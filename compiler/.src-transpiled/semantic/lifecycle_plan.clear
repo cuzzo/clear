@@ -1,0 +1,645 @@
+REQUIRE "../ast/type.clear"
+REQUIRE "../ast/ast.clear"
+REQUIRE "../ast/symbol_entry.clear"
+REQUIRE "../ast/type_expression.clear"
+REQUIRE "../ast/struct_field.clear"
+REQUIRE "../annotator/helpers/function_signature.clear"
+REQUIRE "../ast/param.clear"
+# Ruby module Semantic
+STRUCT LinearResourceFacts {
+  known: {String}Bool,
+  linear: {String}Bool
+}
+
+FN linearResourceFacts__initialize(MUTABLE self: LinearResourceFacts, known: {String}Bool, linear: {String}Bool) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.known = COPY known;
+    rtoc_self_view.linear = COPY linear;
+}
+END
+FN linearResourceFacts__empty() RETURNS LinearResourceFacts@multiowned ->
+  RETURN linearResourceFacts__new({}, {});
+END
+FN linearResourceFacts__build(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !LinearResourceFacts@multiowned ->
+  MUTABLE inventory = TRY (lifecycleRegistry__type_inventory(program, schema_lookup));
+  RETURN linearResourceFacts__build_types(inventory.values(), schema_lookup);
+END
+FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS LinearResourceFacts@multiowned ->
+  MUTABLE key: String = "";
+  MUTABLE known: {String}Bool = {};
+  MUTABLE seeds: {String}Bool = {};
+  MUTABLE edges: {String}[]String = {};
+  MUTABLE pending: []Type = COPY roots;
+  MUTABLE index: Int64 = 0;
+  WHILE (index < pending.length()) DO
+    MUTABLE type_info = COPY UNWRAP (pending[index]);
+    index = (index + 1);
+    key = linearResourceFacts__fact_key(type_info);
+    IF known.contains?(key) THEN
+      CONTINUE;
+    END
+    known[key] = TRUE;
+    MUTABLE seed, dependencies = linearResourceFacts__resource_seed_and_dependencies(type_info, schema_lookup);
+    IF seed THEN
+      seeds[key] = TRUE;
+    END
+    MUTABLE dependency_keys: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
+    FOR _ IN dependencies DO
+  MUTABLE dependency_key = linearResourceFacts__fact_key(CAST(COPY _ AS Type));
+  &dependency_keys.append(dependency_key);
+  IF !(known.contains?(dependency_key)) THEN
+        &pending.append(CAST(COPY _ AS Type));
+  END
+    END
+    edges[key] = dependency_keys;
+  END
+  MUTABLE reverse_edges: {String}[]String = {};
+  edges.keys() |> EACH {
+  MUTABLE dependencies: []String = (edges[_] OR_ELSE CAST(panic("missing hash key") AS []String));
+  FOR _ IN dependencies DO
+  reverse_edges[_] = (reverse_edges[_] OR_ELSE List[]);
+  IF reverse_edges[_] EXISTS AS rtoc_map_slot_2 THEN
+      &rtoc_map_slot_2.append(COPY _);
+    ELSE
+      panic("T.must: map slot is NIL");
+    END
+  END
+  };
+  MUTABLE linear: {String}Bool = {};
+  MUTABLE queue: []String = seeds.keys();
+  MUTABLE cursor: Int64 = 0;
+  WHILE (cursor < queue.length()) DO
+    key = COPY UNWRAP (queue[cursor]);
+    cursor = (cursor + 1);
+    IF linear.contains?(key) THEN
+      CONTINUE;
+    END
+    linear[key] = TRUE;
+    FOR _ IN ((reverse_edges[key] OR_ELSE List[])) DO
+    IF !(linear.contains?(_)) THEN
+      &queue.append(COPY _);
+    END
+    END
+  END
+  RETURN linearResourceFacts__new(known, linear);
+END
+FN linearResourceFacts__contains?(self: LinearResourceFacts, type_info: Type) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE key = linearResourceFacts__fact_key(type_info);
+    IF !(rtoc_self_view.known.contains?(key)) THEN
+      panic("missing linear-resource fact for {} (type absent from post-annotation inventory)");
+    END
+    RETURN rtoc_self_view.linear.contains?(key);
+}
+END
+FN linearResourceFacts__fact_key(type_info: Type) RETURNS String ->
+  RETURN regexReplaceFirst(type__semantic_type_key(type_info), "\\|loc=[^|]+", "|loc=any");
+END
+PRIVATE FN linearResourceFacts__resource_seed_and_dependencies(type_info: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Tuple<Bool, []Type> ->
+  IF type__resource?(type_info) THEN
+    RETURN CAST(Tuple{TRUE, List[]} AS Tuple<Bool, []Type>);
+  END
+  IF type__optional?(type_info) THEN
+    MUTABLE wrapped: ?Type = TRY (type__wrapped_type(type_info));
+    IF wrapped EXISTS AS wrapped_value THEN
+      RETURN CAST(Tuple{FALSE, [wrapped_value]} AS Tuple<Bool, []Type>);
+    ELSE
+      RETURN CAST(Tuple{FALSE, List[]} AS Tuple<Bool, []Type>);
+    END
+  END
+  IF type__error_union?(type_info) THEN
+    RETURN CAST(Tuple{FALSE, [TRY (type__success_type(type_info))]} AS Tuple<Bool, []Type>);
+  END
+  IF type__tuple?(type_info) THEN
+    RETURN CAST(Tuple{FALSE, TRY (type__generic_args(type_info))} AS Tuple<Bool, []Type>);
+  END
+  IF type__map?(type_info) THEN
+    RETURN CAST(Tuple{FALSE, CAST(Tuple{TRY (type__key_type(type_info)), TRY (type__value_type(type_info))} AS Tuple<Bool, []Type>)} AS Tuple<Bool, []Type>);
+  END
+  IF (type__array?(type_info) OR type__collection?(type_info)) THEN
+    MUTABLE element: ?Type = TRY (type__element_type(type_info));
+    IF element EXISTS AS element_value THEN
+      RETURN CAST(Tuple{FALSE, [element_value]} AS Tuple<Bool, []Type>);
+    ELSE
+      RETURN CAST(Tuple{FALSE, List[]} AS Tuple<Bool, []Type>);
+    END
+  END
+  MUTABLE schema: ?TypeSchemaLookupResult = schema_lookup(type__resolved(type_info));
+  IF ((schema == NIL) AND type__generic_instance?(type_info)) THEN
+    schema = schema_lookup(type__generic_base(type_info));
+  END
+  IF schema? IS_A ResourceSchema AS resource_schema THEN
+    RETURN CAST(Tuple{TRUE, List[]} AS Tuple<Bool, []Type>);
+  END
+  MUTABLE dependencies: []Type = ( { MUTABLE rtoc_empty_list_3: []Type = List[]; rtoc_empty_list_3 } );
+  IF schema? IS_A StructSchema AS struct_schema THEN
+    struct_schema.fields.keys() |> EACH {
+  MUTABLE field: StructField = (struct_schema.fields[_] OR_ELSE CAST(panic("missing hash key") AS StructField));
+    IF !(structField__borrowed(field)) THEN
+      &dependencies.append(CAST(TRY (lifecycleRegistry__concrete_schema_type(type_info, TypeTypeInput{ Type: COPY structField__type(field) }, struct_schema.type_params)) AS Type));
+    END
+    };
+  ELSE_IF schema? IS_A UnionSchema AS union_schema THEN
+    FOR _ IN union_schema.variants.values() DO
+    IF _ IS_A InlineStructVariant@multiowned THEN
+      FOR _ IN _.fields().values() DO
+      &dependencies.append(CAST(TRY (lifecycleRegistry__concrete_schema_type(type_info, _, union_schema.type_params)) AS Type));
+      END
+    ELSE_IF _ THEN
+      &dependencies.append(CAST(TRY (lifecycleRegistry__concrete_schema_type(type_info, _, union_schema.type_params)) AS Type));
+    END
+    END
+  END
+  RETURN CAST(Tuple{FALSE, dependencies} AS Tuple<Bool, []Type>);
+END
+FN linearResourceFacts__new(known: {String}Bool, linear: {String}Bool) RETURNS LinearResourceFacts@multiowned ->
+  MUTABLE self = LinearResourceFacts{ known: {}, linear: {} };
+  linearResourceFacts__initialize(&self, known, linear);
+  RETURN self @multiowned;
+END
+STRUCT LifecyclePlan {
+  type_key: String,
+  drop_strategy: String@symbol,
+  copy_strategy: String@symbol,
+  resource_close_plan: ?ResourceClosePlan
+}
+
+FN lifecyclePlan__needs_drop?(self: LifecyclePlan) RETURNS Bool ->
+  RETURN (self.drop_strategy != :none);
+END
+FN lifecyclePlan__copyable?(self: LifecyclePlan) RETURNS Bool ->
+  RETURN (self.copy_strategy != :forbidden);
+END
+FN lifecyclePlanner__plan(type_info: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, linear_resource_facts: ?LinearResourceFacts = NIL) RETURNS !LifecyclePlan ->
+  MUTABLE resource_facts = (linear_resource_facts OR_ELSE linearResourceFacts__build_types([type_info], schema_lookup));
+  MUTABLE type_key = type__lifecycle_type_key(type_info);
+  IF ((type__symbol?(type_info) OR type__id_handle?(type_info)) OR TRY (type__c_array_view?(type_info))) THEN
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL };
+  END
+  IF (type__borrowed_reference?(type_info) OR type__rodata?(type_info)) THEN
+    MUTABLE copy =     IF TRY (linearResourceFacts__contains?(resource_facts, type_info)) THEN
+      :forbidden
+    ELSE_IF TRY (type__any_rc?(type_info)) THEN
+      :retain
+    ELSE_IF (TRY (type__string?(type_info)) OR TRY (type__recursive_cleanup_shape?(type_info, schema_lookup))) THEN
+      :deep_clone
+    ELSE
+      :bit_copy
+    END;
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :none, copy_strategy: COPY copy, resource_close_plan: NIL };
+  END
+  IF TRY (type__any_rc?(type_info)) THEN
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :release, copy_strategy: :retain, resource_close_plan: NIL };
+  END
+  IF TRY (type__split_open_stream?(type_info)) THEN
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :semantic, copy_strategy: :retain, resource_close_plan: NIL };
+  END
+  MUTABLE close = TRY (type__resolve_resource_close(type_info, schema_lookup));
+  IF close.is_resource THEN
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :resource_close, copy_strategy: :forbidden, resource_close_plan: COPY CAST(KEEP close.close_plan AS ?ResourceClosePlan) };
+  END
+  IF TRY (linearResourceFacts__contains?(resource_facts, type_info)) THEN
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :semantic, copy_strategy: :forbidden, resource_close_plan: NIL };
+  END
+  IF ((type__any_sync?(type_info) OR type__frozen?(type_info)) OR type__link?(type_info)) THEN
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :semantic, copy_strategy: :deep_clone, resource_close_plan: NIL };
+  END
+  IF lifecyclePlanner__generic_parameter?(type_info, schema_lookup) THEN
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :generic, copy_strategy: :generic, resource_close_plan: NIL };
+  END
+  IF (TRY (type__string?(type_info)) OR TRY (type__recursive_cleanup_shape?(type_info, schema_lookup))) THEN
+    RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :semantic, copy_strategy: :deep_clone, resource_close_plan: NIL };
+  END
+  RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL };
+END
+FN lifecyclePlanner__monomorphic_carrier_key(type_info: Type) RETURNS String ->
+  RETURN "MONOMORPHIC ${type__resolved(type_info)}";
+END
+FN lifecyclePlanner__monomorphic_carrier_plan(type_info: Type) RETURNS LifecyclePlan ->
+  RETURN LifecyclePlan{ type_key: COPY lifecyclePlanner__monomorphic_carrier_key(type_info), drop_strategy: :release, copy_strategy: :retain, resource_close_plan: NIL };
+END
+FN lifecyclePlanner__plan_binding(type_info: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, linear_resource_facts: ?LinearResourceFacts = NIL) RETURNS !LifecyclePlan ->
+  MUTABLE base = TRY (lifecyclePlanner__plan(type_info, schema_lookup, linear_resource_facts));
+  IF !(lifecyclePlanner__mutable_owned_string_binding?(type_info, node)) THEN
+    RETURN base;
+  END
+  RETURN LifecyclePlan{ type_key: "${type__lifecycle_type_key(type_info)}|binding=mutable-owned", drop_strategy: :semantic, copy_strategy: :deep_clone, resource_close_plan: NIL };
+END
+PRIVATE FN lifecyclePlanner__generic_parameter?(type_info: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool EFFECTS REENTRANT ->
+  IF type__projection?(type_info) THEN
+    RETURN TRUE;
+  END
+  IF type__generic_instance?(type_info) THEN
+    RETURN (TRY (type__generic_args(type_info))) |> ANY lifecyclePlanner__generic_parameter?(_, schema_lookup);
+  END
+  MUTABLE wrapped: ?Type = TRY (type__wrapped_type(type_info));
+  IF wrapped EXISTS AS wrapped_value THEN
+    RETURN lifecyclePlanner__generic_parameter?(wrapped_value, schema_lookup);
+  END
+  MUTABLE name = COPY CAST(type__resolved(type_info) AS String);
+  RETURN (regexMatch?(name, "\\A[A-Z]\\z") AND ((schema_lookup(type__resolved(type_info))) == NIL));
+END
+PRIVATE FN lifecyclePlanner__mutable_owned_string_binding?(type_info: Type, node: Locatable) RETURNS !Bool ->
+  IF !(TRY (type__string?(type_info))) THEN
+    RETURN FALSE;
+  END
+  IF !(((MATCH node START Locatable.Program AS item -> item.var_mutated, Locatable.RequireNode AS item -> item.var_mutated, Locatable.ProtocolRequirement AS item -> item.var_mutated, Locatable.ProtocolDef AS item -> item.var_mutated, Locatable.FunctionDef AS item -> item.var_mutated, Locatable.ImplementationDef AS item -> item.var_mutated, Locatable.ConformanceDef AS item -> item.var_mutated, Locatable.StructDef AS item -> item.var_mutated, Locatable.VarDecl AS item -> item.var_mutated, Locatable.Assignment AS item -> item.var_mutated, Locatable.DestructureTarget AS item -> item.var_mutated, Locatable.DestructuringAssignment AS item -> item.var_mutated, Locatable.BindExpr AS item -> item.var_mutated, Locatable.BinaryOp AS item -> item.var_mutated, Locatable.IsA AS item -> item.var_mutated, Locatable.UnaryOp AS item -> item.var_mutated, Locatable.CallSiteOverride AS item -> item.var_mutated, Locatable.Identifier AS item -> item.var_mutated, Locatable.Literal AS item -> item.var_mutated, Locatable.ListLit AS item -> item.var_mutated, Locatable.TupleLit AS item -> item.var_mutated, Locatable.DefaultArrayLit AS item -> item.var_mutated, Locatable.HashLit AS item -> item.var_mutated, Locatable.DefaultLit AS item -> item.var_mutated, Locatable.StructLit AS item -> item.var_mutated, Locatable.LambdaLit AS item -> item.var_mutated, Locatable.IfStatement AS item -> item.var_mutated, Locatable.IfBind AS item -> item.var_mutated, Locatable.WhileLoop AS item -> item.var_mutated, Locatable.WhileBindLoop AS item -> item.var_mutated, Locatable.BreakNode AS item -> item.var_mutated, Locatable.ContinueNode AS item -> item.var_mutated, Locatable.FuncCall AS item -> item.var_mutated, Locatable.MethodCall AS item -> item.var_mutated, Locatable.GetField AS item -> item.var_mutated, Locatable.GetIndex AS item -> item.var_mutated, Locatable.Cast AS item -> item.var_mutated, Locatable.ReturnNode AS item -> item.var_mutated, Locatable.Assert AS item -> item.var_mutated, Locatable.Raise AS item -> item.var_mutated, Locatable.ThrowNode AS item -> item.var_mutated, Locatable.DieNode AS item -> item.var_mutated, Locatable.Slice AS item -> item.var_mutated, Locatable.Require AS item -> item.var_mutated, Locatable.DeferStmt AS item -> item.var_mutated, Locatable.WithBlock AS item -> item.var_mutated, Locatable.SyncPolicyDecl AS item -> item.var_mutated, Locatable.SelectOp AS item -> item.var_mutated, Locatable.WhereOp AS item -> item.var_mutated, Locatable.IndexOp AS item -> item.var_mutated, Locatable.ReduceOp AS item -> item.var_mutated, Locatable.OrderByOp AS item -> item.var_mutated, Locatable.LimitOp AS item -> item.var_mutated, Locatable.UnnestOp AS item -> item.var_mutated, Locatable.DistinctOp AS item -> item.var_mutated, Locatable.EachOp AS item -> item.var_mutated, Locatable.TapOp AS item -> item.var_mutated, Locatable.SkipOp AS item -> item.var_mutated, Locatable.CollectOp AS item -> item.var_mutated, Locatable.TakeWhileOp AS item -> item.var_mutated, Locatable.WindowOp AS item -> item.var_mutated, Locatable.BatchWindowOp AS item -> item.var_mutated, Locatable.JoinOp AS item -> item.var_mutated, Locatable.FindOp AS item -> item.var_mutated, Locatable.AnyOp AS item -> item.var_mutated, Locatable.AllOp AS item -> item.var_mutated, Locatable.CountOp AS item -> item.var_mutated, Locatable.SumOp AS item -> item.var_mutated, Locatable.AverageOp AS item -> item.var_mutated, Locatable.MinOp AS item -> item.var_mutated, Locatable.MaxOp AS item -> item.var_mutated, Locatable.ShardOp AS item -> item.var_mutated, Locatable.ConcurrentOp AS item -> item.var_mutated, Locatable.Placeholder AS item -> item.var_mutated, Locatable.Copy AS item -> item.var_mutated, Locatable.OptionalUnwrap AS item -> item.var_mutated, Locatable.TenseNavigation AS item -> item.var_mutated, Locatable.MutableBorrow AS item -> item.var_mutated, Locatable.OrElseRaise AS item -> item.var_mutated, Locatable.OrElseExit AS item -> item.var_mutated, Locatable.OrElsePass AS item -> item.var_mutated, Locatable.OrElsePrune AS item -> item.var_mutated, Locatable.OrElseBreak AS item -> item.var_mutated, Locatable.CatchBlock AS item -> item.var_mutated, Locatable.RecoverOp AS item -> item.var_mutated, Locatable.BlockExpr AS item -> item.var_mutated, Locatable.StringConcat AS item -> item.var_mutated, Locatable.CapabilityWrap AS item -> item.var_mutated, Locatable.MoveNode AS item -> item.var_mutated, Locatable.CopyNode AS item -> item.var_mutated, Locatable.KeepNode AS item -> item.var_mutated, Locatable.ShareNode AS item -> item.var_mutated, Locatable.LinkNode AS item -> item.var_mutated, Locatable.ResolveNode AS item -> item.var_mutated, Locatable.FreezeNode AS item -> item.var_mutated, Locatable.PassStmt AS item -> item.var_mutated, Locatable.StructPattern AS item -> item.var_mutated, Locatable.RangeLit AS item -> item.var_mutated, Locatable.ExternFnDecl AS item -> item.var_mutated, Locatable.ExternStructDecl AS item -> item.var_mutated, Locatable.EnumDef AS item -> item.var_mutated, Locatable.UnionDef AS item -> item.var_mutated, Locatable.UnionVariantLit AS item -> item.var_mutated, Locatable.StaticCall AS item -> item.var_mutated, Locatable.DoBlock AS item -> item.var_mutated, Locatable.BgBlock AS item -> item.var_mutated, Locatable.ThenChain AS item -> item.var_mutated, Locatable.BgStreamBlock AS item -> item.var_mutated, Locatable.YieldExpr AS item -> item.var_mutated, Locatable.CloseStream AS item -> item.var_mutated, Locatable.NextExpr AS item -> item.var_mutated, Locatable.MatchStatement AS item -> item.var_mutated, Locatable.ForRange AS item -> item.var_mutated, Locatable.ForEach AS item -> item.var_mutated, Locatable.TestBlock AS item -> item.var_mutated, Locatable.WhenBlock AS item -> item.var_mutated, Locatable.LetBinding AS item -> item.var_mutated, Locatable.TestThat AS item -> item.var_mutated, Locatable.AssertRaises AS item -> item.var_mutated, Locatable.BenchmarkStmt AS item -> item.var_mutated, Locatable.SmashStmt AS item -> item.var_mutated, Locatable.ProfileStmt AS item -> item.var_mutated, Locatable.StubDecl AS item -> item.var_mutated, Locatable.Drop AS item -> item.var_mutated, Locatable.SuppressCleanup AS item -> item.var_mutated, Locatable.Return AS item -> item.var_mutated, Locatable.ReassignCleanup AS item -> item.var_mutated, Locatable.FieldCleanup AS item -> item.var_mutated END) == TRUE)) THEN
+    RETURN FALSE;
+  END
+  IF aST__container_borrow?(node) THEN
+    RETURN FALSE;
+  END
+  MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
+  IF TRUE THEN
+    symbol_branch_value = (MATCH node START Locatable.Program AS item -> item.symbol, Locatable.RequireNode AS item -> item.symbol, Locatable.ProtocolRequirement AS item -> item.symbol, Locatable.ProtocolDef AS item -> item.symbol, Locatable.FunctionDef AS item -> item.symbol, Locatable.ImplementationDef AS item -> item.symbol, Locatable.ConformanceDef AS item -> item.symbol, Locatable.StructDef AS item -> item.symbol, Locatable.VarDecl AS item -> item.symbol, Locatable.Assignment AS item -> item.symbol, Locatable.DestructureTarget AS item -> item.symbol, Locatable.DestructuringAssignment AS item -> item.symbol, Locatable.BindExpr AS item -> item.symbol, Locatable.BinaryOp AS item -> item.symbol, Locatable.IsA AS item -> item.symbol, Locatable.UnaryOp AS item -> item.symbol, Locatable.CallSiteOverride AS item -> item.symbol, Locatable.Identifier AS item -> item.symbol, Locatable.Literal AS item -> item.symbol, Locatable.ListLit AS item -> item.symbol, Locatable.TupleLit AS item -> item.symbol, Locatable.DefaultArrayLit AS item -> item.symbol, Locatable.HashLit AS item -> item.symbol, Locatable.DefaultLit AS item -> item.symbol, Locatable.StructLit AS item -> item.symbol, Locatable.LambdaLit AS item -> item.symbol, Locatable.IfStatement AS item -> item.symbol, Locatable.IfBind AS item -> item.symbol, Locatable.WhileLoop AS item -> item.symbol, Locatable.WhileBindLoop AS item -> item.symbol, Locatable.BreakNode AS item -> item.symbol, Locatable.ContinueNode AS item -> item.symbol, Locatable.FuncCall AS item -> item.symbol, Locatable.MethodCall AS item -> item.symbol, Locatable.GetField AS item -> item.symbol, Locatable.GetIndex AS item -> item.symbol, Locatable.Cast AS item -> item.symbol, Locatable.ReturnNode AS item -> item.symbol, Locatable.Assert AS item -> item.symbol, Locatable.Raise AS item -> item.symbol, Locatable.ThrowNode AS item -> item.symbol, Locatable.DieNode AS item -> item.symbol, Locatable.Slice AS item -> item.symbol, Locatable.Require AS item -> item.symbol, Locatable.DeferStmt AS item -> item.symbol, Locatable.WithBlock AS item -> item.symbol, Locatable.SyncPolicyDecl AS item -> item.symbol, Locatable.SelectOp AS item -> item.symbol, Locatable.WhereOp AS item -> item.symbol, Locatable.IndexOp AS item -> item.symbol, Locatable.ReduceOp AS item -> item.symbol, Locatable.OrderByOp AS item -> item.symbol, Locatable.LimitOp AS item -> item.symbol, Locatable.UnnestOp AS item -> item.symbol, Locatable.DistinctOp AS item -> item.symbol, Locatable.EachOp AS item -> item.symbol, Locatable.TapOp AS item -> item.symbol, Locatable.SkipOp AS item -> item.symbol, Locatable.CollectOp AS item -> item.symbol, Locatable.TakeWhileOp AS item -> item.symbol, Locatable.WindowOp AS item -> item.symbol, Locatable.BatchWindowOp AS item -> item.symbol, Locatable.JoinOp AS item -> item.symbol, Locatable.FindOp AS item -> item.symbol, Locatable.AnyOp AS item -> item.symbol, Locatable.AllOp AS item -> item.symbol, Locatable.CountOp AS item -> item.symbol, Locatable.SumOp AS item -> item.symbol, Locatable.AverageOp AS item -> item.symbol, Locatable.MinOp AS item -> item.symbol, Locatable.MaxOp AS item -> item.symbol, Locatable.ShardOp AS item -> item.symbol, Locatable.ConcurrentOp AS item -> item.symbol, Locatable.Placeholder AS item -> item.symbol, Locatable.Copy AS item -> item.symbol, Locatable.OptionalUnwrap AS item -> item.symbol, Locatable.TenseNavigation AS item -> item.symbol, Locatable.MutableBorrow AS item -> item.symbol, Locatable.OrElseRaise AS item -> item.symbol, Locatable.OrElseExit AS item -> item.symbol, Locatable.OrElsePass AS item -> item.symbol, Locatable.OrElsePrune AS item -> item.symbol, Locatable.OrElseBreak AS item -> item.symbol, Locatable.CatchBlock AS item -> item.symbol, Locatable.RecoverOp AS item -> item.symbol, Locatable.BlockExpr AS item -> item.symbol, Locatable.StringConcat AS item -> item.symbol, Locatable.CapabilityWrap AS item -> item.symbol, Locatable.MoveNode AS item -> item.symbol, Locatable.CopyNode AS item -> item.symbol, Locatable.KeepNode AS item -> item.symbol, Locatable.ShareNode AS item -> item.symbol, Locatable.LinkNode AS item -> item.symbol, Locatable.ResolveNode AS item -> item.symbol, Locatable.FreezeNode AS item -> item.symbol, Locatable.PassStmt AS item -> item.symbol, Locatable.StructPattern AS item -> item.symbol, Locatable.RangeLit AS item -> item.symbol, Locatable.ExternFnDecl AS item -> item.symbol, Locatable.ExternStructDecl AS item -> item.symbol, Locatable.EnumDef AS item -> item.symbol, Locatable.UnionDef AS item -> item.symbol, Locatable.UnionVariantLit AS item -> item.symbol, Locatable.StaticCall AS item -> item.symbol, Locatable.DoBlock AS item -> item.symbol, Locatable.BgBlock AS item -> item.symbol, Locatable.ThenChain AS item -> item.symbol, Locatable.BgStreamBlock AS item -> item.symbol, Locatable.YieldExpr AS item -> item.symbol, Locatable.CloseStream AS item -> item.symbol, Locatable.NextExpr AS item -> item.symbol, Locatable.MatchStatement AS item -> item.symbol, Locatable.ForRange AS item -> item.symbol, Locatable.ForEach AS item -> item.symbol, Locatable.TestBlock AS item -> item.symbol, Locatable.WhenBlock AS item -> item.symbol, Locatable.LetBinding AS item -> item.symbol, Locatable.TestThat AS item -> item.symbol, Locatable.AssertRaises AS item -> item.symbol, Locatable.BenchmarkStmt AS item -> item.symbol, Locatable.SmashStmt AS item -> item.symbol, Locatable.ProfileStmt AS item -> item.symbol, Locatable.StubDecl AS item -> item.symbol, Locatable.Drop AS item -> item.symbol, Locatable.SuppressCleanup AS item -> item.symbol, Locatable.Return AS item -> item.symbol, Locatable.ReassignCleanup AS item -> item.symbol, Locatable.FieldCleanup AS item -> item.symbol END);
+  ELSE
+    symbol_branch_value = NIL;
+  END
+  MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
+  RETURN !((IF symbol != NIL THEN
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_4 = (symbol?);
+  symbolEntry__borrow_provenance?(rtoc_local_receiver_4) }
+  ELSE
+    NIL
+  END));
+END
+STRUCT LifecycleRegistry {
+  binding_plans: {Int64}LifecyclePlan,
+  plans: {String}LifecyclePlan
+}
+
+UNION SemanticLifecycleRegistryBindingNode { VarDecl: VarDecl, BindExpr: BindExpr, DestructureTarget: DestructureTarget }
+FN lifecycleRegistry__empty() RETURNS LifecycleRegistry@multiowned ->
+  RETURN lifecycleRegistry__new({}, {});
+END
+FN lifecycleRegistry__concrete_schema_type(owner: Type, raw_type: TypeTypeInput, type_params: []String@symbol) RETURNS !Type ->
+  MUTABLE subst: {String@symbol}Type = {};
+  (type_params.zip(TRY (type__generic_args(owner)))).keys() |> EACH {
+  MUTABLE argument: Any = ((type_params.zip(TRY (type__generic_args(owner))))[_] OR_ELSE panic("missing hash key"));
+  IF (_ AND argument) THEN
+    subst[type__to_sym(_)] = TRY (type__new(argument));
+  END
+  };
+  RETURN CAST(TRY (lifecycleRegistry__substitute_schema_type(raw_type, subst)) AS Type);
+END
+FN lifecycleRegistry__type_inventory(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !{String}Type ->
+  MUTABLE types: {String}Type = {};
+  aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE types) -> {
+  IF node.typed?() THEN
+      TRY (lifecycleRegistry__add_type_mut(&types, &node.full_type_mut("lifecycle inventory")));
+  END
+  rubyToClearVoid()
+  });
+  TRY (lifecycleRegistry__add_declaration_types_mut(types, program));
+  TRY (lifecycleRegistry__add_instantiated_schema_types_mut(types, schema_lookup));
+  RETURN types;
+END
+FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, binding_nodes: []SemanticLifecycleRegistryBindingNode, linear_resource_facts: ?LinearResourceFacts = NIL, inventory: ?{String}Type = NIL) RETURNS !LifecycleRegistry@multiowned ->
+  MUTABLE types = (inventory OR_ELSE TRY (lifecycleRegistry__type_inventory(program, schema_lookup)));
+  MUTABLE resource_facts = (linear_resource_facts OR_ELSE linearResourceFacts__build_types(types.values(), schema_lookup));
+  MUTABLE plans: {String}LifecyclePlan = {};
+  types.keys() |> EACH {
+  MUTABLE type_info: Any = (types[_] OR_ELSE panic("missing hash key"));
+  plans[_] = TRY (lifecyclePlanner__plan(type_info, schema_lookup, resource_facts));
+  };
+  lifecycleRegistry__add_monomorphic_carrier_plans_mut(&plans, program);
+  MUTABLE binding_plans: {Int64}LifecyclePlan = {};
+  MUTABLE inventoried_bindings: []SemanticLifecycleRegistryBindingNode = COPY binding_nodes;
+  aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE inventoried_bindings) -> {
+  IF !(((node IS_A VarDecl OR node IS_A BindExpr) OR node IS_A DestructureTarget)) THEN
+      RETURN;
+  END
+  IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
+      RETURN;
+  END
+  IF !(node.typed?()) THEN
+      RETURN;
+  END
+  &inventoried_bindings.append(castLocatableToSemanticLifecycleRegistryBindingNode(COPY node));
+  rubyToClearVoid()
+  });
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < inventoried_bindings.length() DO
+    MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
+      IF TRUE THEN
+        symbol_branch_value = (MATCH inventoried_bindings[rtoc_idx]? START SemanticLifecycleRegistryBindingNode.VarDecl AS item -> item.symbol, SemanticLifecycleRegistryBindingNode.BindExpr AS item -> item.symbol, SemanticLifecycleRegistryBindingNode.DestructureTarget AS item -> item.symbol END);
+      ELSE
+        symbol_branch_value = NIL;
+      END
+    MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
+    MUTABLE declaration_branch_value: ?SymbolEntryRegInput = NIL;
+      IF (symbol != NIL) THEN
+        declaration_branch_value = symbol.reg;
+      ELSE
+        declaration_branch_value = NIL;
+      END
+    MUTABLE declaration: ?SymbolEntryRegInput = declaration_branch_value;
+    IF ((((declaration != NIL) AND (declaration IS_A VarDecl)) OR ((declaration != NIL) AND (declaration IS_A BindExpr))) OR ((declaration != NIL) AND (declaration IS_A DestructureTarget))) THEN
+        MUTABLE node: ?SymbolEntryRegInput = declaration;
+    END
+    IF (IF inventoried_bindings[rtoc_idx]? IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF !(inventoried_bindings[rtoc_idx]?.typed?()) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE place_id: ?Int64 = lifecycleRegistry__class_binding_place_id(castSemanticLifecycleRegistryBindingNodeToLocatable(inventoried_bindings[rtoc_idx]?));
+    IF !(place_id) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE plan = TRY (lifecyclePlanner__plan_binding(inventoried_bindings[rtoc_idx]?.full_type_mut("binding lifecycle inventory"), castSemanticLifecycleRegistryBindingNodeToLocatable(inventoried_bindings[rtoc_idx]?), schema_lookup, resource_facts));
+    MUTABLE existing: ?LifecyclePlan = COPY binding_plans[UNWRAP (place_id)];
+    MUTABLE existing_close: ?[List, List]Any = NIL;
+    IF (IF existing != NIL THEN
+        ((existing?).resource_close_plan).actions
+      ELSE
+        NIL
+      END) != NIL THEN
+        existing_close = COPY (((IF existing != NIL THEN
+        ((existing?).resource_close_plan).actions
+      ELSE
+        NIL
+      END))?) |> SELECT [_.call_kind().serialize(), _.name(), _.field_path(), _.runtime_heap_alloc_args()];
+      END
+    MUTABLE planned_close: ?[List, List]Any = NIL;
+    IF plan.resource_close_plan?.actions != NIL THEN
+        planned_close = COPY ((plan.resource_close_plan?.actions)?) |> SELECT [_.call_kind.serialize(), _.name, _.field_path, _.runtime_heap_alloc_args];
+      END
+    MUTABLE same_contract = (((((existing != NIL) AND (existing.type_key == plan.type_key)) AND (existing.drop_strategy == plan.drop_strategy)) AND (existing.copy_strategy == plan.copy_strategy)) AND (existing_close == planned_close));
+    IF ((existing != NIL) AND !(same_contract)) THEN
+        panic("{}{}{}");
+    END
+    binding_plans[place_id] = plan;
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN lifecycleRegistry__new(plans, binding_plans);
+END
+FN lifecycleRegistry__add_monomorphic_carrier_plans_mut(MUTABLE plans: {String}LifecyclePlan, program: Program) RETURNS !Void ->
+  aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE plans) -> {
+  IF !(node IS_A FunctionDef) THEN
+      RETURN;
+  END
+  MUTABLE rtoc_each_items_5 = (TRY (functionSignature__params(node)));
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < rtoc_each_items_5.length() DO
+      IF !((rtoc_each_items_5[rtoc_idx].takes AND (rtoc_each_items_5[rtoc_idx].carrier_contract == :monomorphic))) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE plan = lifecyclePlanner__monomorphic_carrier_plan(rtoc_each_items_5[rtoc_idx].type);
+      plans[plan.type_key] = plan;
+    rtoc_idx = rtoc_idx + 1;
+  END
+  rubyToClearVoid()
+  });
+END
+FN lifecycleRegistry__initialize(MUTABLE self: LifecycleRegistry, plans: {String}LifecyclePlan, binding_plans: {Int64}LifecyclePlan) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.plans = COPY plans;
+    rtoc_self_view.binding_plans = COPY binding_plans;
+}
+END
+FN lifecycleRegistry__fetch(self: LifecycleRegistry, type_info: Type) RETURNS !LifecyclePlan
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE key = type__lifecycle_type_key(type_info);
+    RETURN COPY (rtoc_self_view.plans[key] OR_ELSE {
+    IF !(type__primitive?(type_info)) THEN
+        panic("missing annotation lifecycle plan for {} (non-primitive type absent from inventory; refusing to default to no-drop)");
+    END
+    LifecyclePlan{ type_key: COPY key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL }
+    });
+}
+END
+FN lifecycleRegistry__fetch_monomorphic(self: LifecycleRegistry, type_info: Type) RETURNS LifecyclePlan
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY (rtoc_self_view.plans[lifecyclePlanner__monomorphic_carrier_key(type_info)] OR_ELSE lifecyclePlanner__monomorphic_carrier_plan(type_info));
+}
+END
+FN lifecycleRegistry__fetch_binding(self: LifecycleRegistry, node: Locatable, type_info: Type) RETURNS !LifecyclePlan
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE place_id: ?Int64 = lifecycleRegistry__binding_place_id(rtoc_self_view, node);
+    IF place_id EXISTS AS place_id_value THEN
+      RETURN COPY (rtoc_self_view.binding_plans[place_id_value] OR_ELSE panic("missing annotation binding lifecycle plan for place {}"));
+    ELSE
+      RETURN UNWRAP ([type_info]);
+    END
+}
+END
+PRIVATE FN lifecycleRegistry__binding_place_id(self: LifecycleRegistry, node: Locatable) RETURNS ?Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
+    IF TRUE THEN
+      symbol_branch_value = (MATCH node START Locatable.Program AS item -> item.symbol, Locatable.RequireNode AS item -> item.symbol, Locatable.ProtocolRequirement AS item -> item.symbol, Locatable.ProtocolDef AS item -> item.symbol, Locatable.FunctionDef AS item -> item.symbol, Locatable.ImplementationDef AS item -> item.symbol, Locatable.ConformanceDef AS item -> item.symbol, Locatable.StructDef AS item -> item.symbol, Locatable.VarDecl AS item -> item.symbol, Locatable.Assignment AS item -> item.symbol, Locatable.DestructureTarget AS item -> item.symbol, Locatable.DestructuringAssignment AS item -> item.symbol, Locatable.BindExpr AS item -> item.symbol, Locatable.BinaryOp AS item -> item.symbol, Locatable.IsA AS item -> item.symbol, Locatable.UnaryOp AS item -> item.symbol, Locatable.CallSiteOverride AS item -> item.symbol, Locatable.Identifier AS item -> item.symbol, Locatable.Literal AS item -> item.symbol, Locatable.ListLit AS item -> item.symbol, Locatable.TupleLit AS item -> item.symbol, Locatable.DefaultArrayLit AS item -> item.symbol, Locatable.HashLit AS item -> item.symbol, Locatable.DefaultLit AS item -> item.symbol, Locatable.StructLit AS item -> item.symbol, Locatable.LambdaLit AS item -> item.symbol, Locatable.IfStatement AS item -> item.symbol, Locatable.IfBind AS item -> item.symbol, Locatable.WhileLoop AS item -> item.symbol, Locatable.WhileBindLoop AS item -> item.symbol, Locatable.BreakNode AS item -> item.symbol, Locatable.ContinueNode AS item -> item.symbol, Locatable.FuncCall AS item -> item.symbol, Locatable.MethodCall AS item -> item.symbol, Locatable.GetField AS item -> item.symbol, Locatable.GetIndex AS item -> item.symbol, Locatable.Cast AS item -> item.symbol, Locatable.ReturnNode AS item -> item.symbol, Locatable.Assert AS item -> item.symbol, Locatable.Raise AS item -> item.symbol, Locatable.ThrowNode AS item -> item.symbol, Locatable.DieNode AS item -> item.symbol, Locatable.Slice AS item -> item.symbol, Locatable.Require AS item -> item.symbol, Locatable.DeferStmt AS item -> item.symbol, Locatable.WithBlock AS item -> item.symbol, Locatable.SyncPolicyDecl AS item -> item.symbol, Locatable.SelectOp AS item -> item.symbol, Locatable.WhereOp AS item -> item.symbol, Locatable.IndexOp AS item -> item.symbol, Locatable.ReduceOp AS item -> item.symbol, Locatable.OrderByOp AS item -> item.symbol, Locatable.LimitOp AS item -> item.symbol, Locatable.UnnestOp AS item -> item.symbol, Locatable.DistinctOp AS item -> item.symbol, Locatable.EachOp AS item -> item.symbol, Locatable.TapOp AS item -> item.symbol, Locatable.SkipOp AS item -> item.symbol, Locatable.CollectOp AS item -> item.symbol, Locatable.TakeWhileOp AS item -> item.symbol, Locatable.WindowOp AS item -> item.symbol, Locatable.BatchWindowOp AS item -> item.symbol, Locatable.JoinOp AS item -> item.symbol, Locatable.FindOp AS item -> item.symbol, Locatable.AnyOp AS item -> item.symbol, Locatable.AllOp AS item -> item.symbol, Locatable.CountOp AS item -> item.symbol, Locatable.SumOp AS item -> item.symbol, Locatable.AverageOp AS item -> item.symbol, Locatable.MinOp AS item -> item.symbol, Locatable.MaxOp AS item -> item.symbol, Locatable.ShardOp AS item -> item.symbol, Locatable.ConcurrentOp AS item -> item.symbol, Locatable.Placeholder AS item -> item.symbol, Locatable.Copy AS item -> item.symbol, Locatable.OptionalUnwrap AS item -> item.symbol, Locatable.TenseNavigation AS item -> item.symbol, Locatable.MutableBorrow AS item -> item.symbol, Locatable.OrElseRaise AS item -> item.symbol, Locatable.OrElseExit AS item -> item.symbol, Locatable.OrElsePass AS item -> item.symbol, Locatable.OrElsePrune AS item -> item.symbol, Locatable.OrElseBreak AS item -> item.symbol, Locatable.CatchBlock AS item -> item.symbol, Locatable.RecoverOp AS item -> item.symbol, Locatable.BlockExpr AS item -> item.symbol, Locatable.StringConcat AS item -> item.symbol, Locatable.CapabilityWrap AS item -> item.symbol, Locatable.MoveNode AS item -> item.symbol, Locatable.CopyNode AS item -> item.symbol, Locatable.KeepNode AS item -> item.symbol, Locatable.ShareNode AS item -> item.symbol, Locatable.LinkNode AS item -> item.symbol, Locatable.ResolveNode AS item -> item.symbol, Locatable.FreezeNode AS item -> item.symbol, Locatable.PassStmt AS item -> item.symbol, Locatable.StructPattern AS item -> item.symbol, Locatable.RangeLit AS item -> item.symbol, Locatable.ExternFnDecl AS item -> item.symbol, Locatable.ExternStructDecl AS item -> item.symbol, Locatable.EnumDef AS item -> item.symbol, Locatable.UnionDef AS item -> item.symbol, Locatable.UnionVariantLit AS item -> item.symbol, Locatable.StaticCall AS item -> item.symbol, Locatable.DoBlock AS item -> item.symbol, Locatable.BgBlock AS item -> item.symbol, Locatable.ThenChain AS item -> item.symbol, Locatable.BgStreamBlock AS item -> item.symbol, Locatable.YieldExpr AS item -> item.symbol, Locatable.CloseStream AS item -> item.symbol, Locatable.NextExpr AS item -> item.symbol, Locatable.MatchStatement AS item -> item.symbol, Locatable.ForRange AS item -> item.symbol, Locatable.ForEach AS item -> item.symbol, Locatable.TestBlock AS item -> item.symbol, Locatable.WhenBlock AS item -> item.symbol, Locatable.LetBinding AS item -> item.symbol, Locatable.TestThat AS item -> item.symbol, Locatable.AssertRaises AS item -> item.symbol, Locatable.BenchmarkStmt AS item -> item.symbol, Locatable.SmashStmt AS item -> item.symbol, Locatable.ProfileStmt AS item -> item.symbol, Locatable.StubDecl AS item -> item.symbol, Locatable.Drop AS item -> item.symbol, Locatable.SuppressCleanup AS item -> item.symbol, Locatable.Return AS item -> item.symbol, Locatable.ReassignCleanup AS item -> item.symbol, Locatable.FieldCleanup AS item -> item.symbol END);
+    ELSE
+      symbol_branch_value = NIL;
+    END
+    MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
+    IF (symbol != NIL) THEN
+      RETURN symbolEntry__semantic_place_id(symbol);
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN lifecycleRegistry__add_type_mut(MUTABLE types: {String}Type, type_info: Type) RETURNS !Void EFFECTS REENTRANT ->
+  MUTABLE key = type__lifecycle_type_key(type_info);
+  IF types.contains?(key) THEN
+    RETURN;
+  END
+  types[key] = COPY type_info;
+  FOR _ IN (TRY (typeExpressionTree__direct_children(type_info.shape.expression))) DO
+  TRY (lifecycleRegistry__add_type_mut(&types, TRY (type__from_child_expression(_))));
+  END
+  FOR _ IN (TRY (type__generic_args(type_info))) DO
+  TRY (lifecycleRegistry__add_type_mut(&types, _));
+  END
+  MUTABLE wrapped: ?Type = TRY (type__wrapped_type(type_info));
+  IF wrapped EXISTS AS wrapped_value THEN
+    MUTABLE wrapped_value_mutable = COPY wrapped_value;
+    TRY (lifecycleRegistry__add_type_mut(&types, wrapped_value_mutable));
+  END
+  MUTABLE element: ?Type = TRY (type__element_type(type_info));
+  IF element EXISTS AS element_value THEN
+    MUTABLE element_value_mutable = COPY element_value;
+    TRY (lifecycleRegistry__add_type_mut(&types, element_value_mutable));
+  END
+  IF type__map?(type_info) THEN
+    TRY (lifecycleRegistry__add_type_mut(&types, TRY (type__key_type(type_info))));
+  END
+  IF type__map?(type_info) THEN
+    TRY (lifecycleRegistry__add_type_mut(&types, TRY (type__value_type(type_info))));
+  END
+END
+PRIVATE FN lifecycleRegistry__class_binding_place_id(node: Locatable) RETURNS ?Int64 ->
+  MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
+  IF TRUE THEN
+    symbol_branch_value = (MATCH node START Locatable.Program AS item -> item.symbol, Locatable.RequireNode AS item -> item.symbol, Locatable.ProtocolRequirement AS item -> item.symbol, Locatable.ProtocolDef AS item -> item.symbol, Locatable.FunctionDef AS item -> item.symbol, Locatable.ImplementationDef AS item -> item.symbol, Locatable.ConformanceDef AS item -> item.symbol, Locatable.StructDef AS item -> item.symbol, Locatable.VarDecl AS item -> item.symbol, Locatable.Assignment AS item -> item.symbol, Locatable.DestructureTarget AS item -> item.symbol, Locatable.DestructuringAssignment AS item -> item.symbol, Locatable.BindExpr AS item -> item.symbol, Locatable.BinaryOp AS item -> item.symbol, Locatable.IsA AS item -> item.symbol, Locatable.UnaryOp AS item -> item.symbol, Locatable.CallSiteOverride AS item -> item.symbol, Locatable.Identifier AS item -> item.symbol, Locatable.Literal AS item -> item.symbol, Locatable.ListLit AS item -> item.symbol, Locatable.TupleLit AS item -> item.symbol, Locatable.DefaultArrayLit AS item -> item.symbol, Locatable.HashLit AS item -> item.symbol, Locatable.DefaultLit AS item -> item.symbol, Locatable.StructLit AS item -> item.symbol, Locatable.LambdaLit AS item -> item.symbol, Locatable.IfStatement AS item -> item.symbol, Locatable.IfBind AS item -> item.symbol, Locatable.WhileLoop AS item -> item.symbol, Locatable.WhileBindLoop AS item -> item.symbol, Locatable.BreakNode AS item -> item.symbol, Locatable.ContinueNode AS item -> item.symbol, Locatable.FuncCall AS item -> item.symbol, Locatable.MethodCall AS item -> item.symbol, Locatable.GetField AS item -> item.symbol, Locatable.GetIndex AS item -> item.symbol, Locatable.Cast AS item -> item.symbol, Locatable.ReturnNode AS item -> item.symbol, Locatable.Assert AS item -> item.symbol, Locatable.Raise AS item -> item.symbol, Locatable.ThrowNode AS item -> item.symbol, Locatable.DieNode AS item -> item.symbol, Locatable.Slice AS item -> item.symbol, Locatable.Require AS item -> item.symbol, Locatable.DeferStmt AS item -> item.symbol, Locatable.WithBlock AS item -> item.symbol, Locatable.SyncPolicyDecl AS item -> item.symbol, Locatable.SelectOp AS item -> item.symbol, Locatable.WhereOp AS item -> item.symbol, Locatable.IndexOp AS item -> item.symbol, Locatable.ReduceOp AS item -> item.symbol, Locatable.OrderByOp AS item -> item.symbol, Locatable.LimitOp AS item -> item.symbol, Locatable.UnnestOp AS item -> item.symbol, Locatable.DistinctOp AS item -> item.symbol, Locatable.EachOp AS item -> item.symbol, Locatable.TapOp AS item -> item.symbol, Locatable.SkipOp AS item -> item.symbol, Locatable.CollectOp AS item -> item.symbol, Locatable.TakeWhileOp AS item -> item.symbol, Locatable.WindowOp AS item -> item.symbol, Locatable.BatchWindowOp AS item -> item.symbol, Locatable.JoinOp AS item -> item.symbol, Locatable.FindOp AS item -> item.symbol, Locatable.AnyOp AS item -> item.symbol, Locatable.AllOp AS item -> item.symbol, Locatable.CountOp AS item -> item.symbol, Locatable.SumOp AS item -> item.symbol, Locatable.AverageOp AS item -> item.symbol, Locatable.MinOp AS item -> item.symbol, Locatable.MaxOp AS item -> item.symbol, Locatable.ShardOp AS item -> item.symbol, Locatable.ConcurrentOp AS item -> item.symbol, Locatable.Placeholder AS item -> item.symbol, Locatable.Copy AS item -> item.symbol, Locatable.OptionalUnwrap AS item -> item.symbol, Locatable.TenseNavigation AS item -> item.symbol, Locatable.MutableBorrow AS item -> item.symbol, Locatable.OrElseRaise AS item -> item.symbol, Locatable.OrElseExit AS item -> item.symbol, Locatable.OrElsePass AS item -> item.symbol, Locatable.OrElsePrune AS item -> item.symbol, Locatable.OrElseBreak AS item -> item.symbol, Locatable.CatchBlock AS item -> item.symbol, Locatable.RecoverOp AS item -> item.symbol, Locatable.BlockExpr AS item -> item.symbol, Locatable.StringConcat AS item -> item.symbol, Locatable.CapabilityWrap AS item -> item.symbol, Locatable.MoveNode AS item -> item.symbol, Locatable.CopyNode AS item -> item.symbol, Locatable.KeepNode AS item -> item.symbol, Locatable.ShareNode AS item -> item.symbol, Locatable.LinkNode AS item -> item.symbol, Locatable.ResolveNode AS item -> item.symbol, Locatable.FreezeNode AS item -> item.symbol, Locatable.PassStmt AS item -> item.symbol, Locatable.StructPattern AS item -> item.symbol, Locatable.RangeLit AS item -> item.symbol, Locatable.ExternFnDecl AS item -> item.symbol, Locatable.ExternStructDecl AS item -> item.symbol, Locatable.EnumDef AS item -> item.symbol, Locatable.UnionDef AS item -> item.symbol, Locatable.UnionVariantLit AS item -> item.symbol, Locatable.StaticCall AS item -> item.symbol, Locatable.DoBlock AS item -> item.symbol, Locatable.BgBlock AS item -> item.symbol, Locatable.ThenChain AS item -> item.symbol, Locatable.BgStreamBlock AS item -> item.symbol, Locatable.YieldExpr AS item -> item.symbol, Locatable.CloseStream AS item -> item.symbol, Locatable.NextExpr AS item -> item.symbol, Locatable.MatchStatement AS item -> item.symbol, Locatable.ForRange AS item -> item.symbol, Locatable.ForEach AS item -> item.symbol, Locatable.TestBlock AS item -> item.symbol, Locatable.WhenBlock AS item -> item.symbol, Locatable.LetBinding AS item -> item.symbol, Locatable.TestThat AS item -> item.symbol, Locatable.AssertRaises AS item -> item.symbol, Locatable.BenchmarkStmt AS item -> item.symbol, Locatable.SmashStmt AS item -> item.symbol, Locatable.ProfileStmt AS item -> item.symbol, Locatable.StubDecl AS item -> item.symbol, Locatable.Drop AS item -> item.symbol, Locatable.SuppressCleanup AS item -> item.symbol, Locatable.Return AS item -> item.symbol, Locatable.ReassignCleanup AS item -> item.symbol, Locatable.FieldCleanup AS item -> item.symbol END);
+  ELSE
+    symbol_branch_value = NIL;
+  END
+  MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
+  IF (symbol != NIL) THEN
+    RETURN symbolEntry__semantic_place_id(symbol);
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN lifecycleRegistry__add_declaration_types_mut(MUTABLE types: {String}Type, program: Program) RETURNS !Void ->
+  aST__each_locatable(CAST(program AS Locatable), TRUE, %(statement: Locatable) USE(MUTABLE types) -> {
+  IF statement IS_A StructDef AS struct_def THEN
+      MUTABLE struct_def_mutable = COPY struct_def;
+      FOR _ IN structDef__field_decls(struct_def_mutable).values() DO
+      TRY (lifecycleRegistry__add_type_mut(&types, _.type()));
+      END
+  ELSE_IF statement IS_A ExternStructDecl AS extern_struct_decl THEN
+      MUTABLE extern_struct_decl_mutable = COPY extern_struct_decl;
+      FOR _ IN externStructDecl__field_decls(extern_struct_decl_mutable).values() DO
+      TRY (lifecycleRegistry__add_type_mut(&types, _.type()));
+      END
+  ELSE_IF statement IS_A UnionDef AS union_def THEN
+      MUTABLE union_def_mutable = COPY union_def;
+      FOR _ IN union_def_mutable.variants.values() DO
+      IF _ IS_A InlineStructVariant@multiowned THEN
+        FOR _ IN _.fields().values() DO
+        TRY (lifecycleRegistry__add_type_mut(&types, TRY (type__from_input(_))));
+        END
+      ELSE_IF _ THEN
+        TRY (lifecycleRegistry__add_type_mut(&types, TRY (type__from_variant_input(_))));
+      END
+      END
+  ELSE_IF statement IS_A FunctionDef AS function_def THEN
+      MUTABLE function_def_mutable = COPY function_def;
+      FOR _ IN (TRY (functionSignature__params(function_def_mutable))) DO
+      TRY (lifecycleRegistry__add_type_mut(&types, _.type));
+      END
+      IF functionSignature__return_type(function_def_mutable) THEN
+        TRY (lifecycleRegistry__add_type_mut(&types, TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (functionSignature__return_type(function_def_mutable)) }))));
+      END
+  END
+  rubyToClearVoid()
+  });
+END
+PRIVATE FN lifecycleRegistry__add_instantiated_schema_types_mut(MUTABLE types: {String}Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
+  MUTABLE pending: []Type = COPY types.values();
+  MUTABLE index: Int64 = 0;
+  WHILE (index < pending.length()) DO
+    MUTABLE type_info = COPY UNWRAP (pending[index]);
+    index = (index + 1);
+    IF !(type__generic_instance?(type_info)) THEN
+      CONTINUE;
+    END
+    MUTABLE schema: ?TypeSchemaLookupResult = schema_lookup(type__resolved(type_info));
+    IF (schema == NIL) THEN
+      schema = schema_lookup(type__generic_base(type_info));
+    END
+    IF !((((schema != NIL) AND (schema IS_A StructSchema)) OR ((schema != NIL) AND (schema IS_A ResourceSchema)))) THEN
+      CONTINUE;
+    END
+    MUTABLE fields = schema.fields().values() |> SELECT _.type();
+    FOR _ IN fields DO
+  MUTABLE concrete = TRY (lifecycleRegistry__concrete_schema_type(type_info, _, schema.type_params()));
+  MUTABLE before = types.count();
+  TRY (lifecycleRegistry__add_type_mut(&types, CAST(concrete AS Type)));
+  IF (types.count() > before) THEN
+        pending = ruby_array_concat_Type(pending, CAST(types.values() |> SKIP before AS []Type));
+  END
+    END
+  END
+  NIL;
+END
+PRIVATE FN lifecycleRegistry__substitute_schema_type(raw_type: TypeTypeInput, subst: {String@symbol}Type) RETURNS !Type EFFECTS REENTRANT ->
+  MUTABLE type_info = TRY (type__from_input(raw_type));
+  MUTABLE replacement_branch_value: ?Type = NIL;
+  IF type__projection?(type_info) THEN
+    MUTABLE owner = symbol(UNWRAP (type__projection_owner(type_info)));
+    MUTABLE concrete_input: ?Type = COPY subst[owner];
+    IF concrete_input EXISTS AS concrete_input_value THEN
+      MUTABLE concrete = TRY (type__new(TypeConstructionInput{ Type: COPY concrete_input_value }));
+      MUTABLE projected: ?Type = NIL;
+      MUTABLE member: ?String@symbol = type__projection_member(type_info);
+      IF type__map?(concrete) THEN
+        IF (member == :Key) THEN
+          projected = TRY (type__key_type(concrete));
+        ELSE_IF (member == :Value) THEN
+          projected = TRY (type__value_type(concrete));
+        END
+      END
+      replacement_branch_value = (projected OR_ELSE TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY symbol(UNWRAP (type__projection_member(type_info))), protocol: COPY type__projection_protocol(type_info) }) })));
+    ELSE
+      replacement_branch_value = type_info;
+    END
+  ELSE_IF type__optional?(type_info) THEN
+    replacement_branch_value = TRY (type__optional_of(TypeTypeInput{ Type: COPY TRY (lifecycleRegistry__substitute_schema_type(TypeTypeInput{ Type: COPY UNWRAP (TRY (type__wrapped_type(type_info))) }, subst)) }));
+  ELSE_IF type__error_union?(type_info) THEN
+    replacement_branch_value = TRY (type__error_union_of(TypeTypeInput{ Type: COPY TRY (lifecycleRegistry__substitute_schema_type(TypeTypeInput{ Type: COPY UNWRAP (TRY (type__payload_type(type_info))) }, subst)) }));
+  ELSE_IF type__array?(type_info) THEN
+    replacement_branch_value = TRY (type__array_of(TypeTypeInput{ Type: COPY TRY (lifecycleRegistry__substitute_schema_type(TypeTypeInput{ Type: COPY UNWRAP (TRY (type__element_type(type_info))) }, subst)) }, type__capacity(type_info)));
+  ELSE_IF type__map?(type_info) THEN
+    MUTABLE wrapper = COPY type_info.shape.expression;
+    MUTABLE expression: MapTypeExpression = COPY CAST(wrapper.kind AS MapTypeExpression);
+    MUTABLE key = TRY (lifecycleRegistry__substitute_schema_type(TypeTypeInput{ Type: COPY TRY (type__key_type(type_info)) }, subst));
+    MUTABLE value = TRY (lifecycleRegistry__substitute_schema_type(TypeTypeInput{ Type: COPY TRY (type__value_type(type_info)) }, subst));
+    replacement_branch_value = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TypeExpression{ kind: COPY MapTypeExpression{ key: COPY key.shape.expression, value: COPY value.shape.expression, key_implicit: expression.key_implicit, legacy_separator: COPY expression.legacy_separator }, capabilities: COPY wrapper.capabilities } }));
+  ELSE_IF type__generic_instance?(type_info) THEN
+    replacement_branch_value = TRY (type__generic_instance_of(type__generic_base(type_info), (TRY (type__generic_args(type_info))) |> SELECT TRY (lifecycleRegistry__substitute_schema_type(TypeTypeInput{ Type: COPY _ }, subst))));
+  ELSE_IF type__tense?(type_info) THEN
+    replacement_branch_value = TRY (type__tense_of(TypeTypeInput{ Type: COPY TRY (lifecycleRegistry__substitute_schema_type(TypeTypeInput{ Type: COPY TRY (type__tense_type(type_info)) }, subst)) }));
+  ELSE
+    replacement_branch_value = (subst[type__resolved(type_info)] OR_ELSE type_info);
+  END
+  MUTABLE replacement: Type = replacement_branch_value?;
+  TRY (type__merge_capabilities_from_mut(&replacement, type_info));
+  type__copy_placement_from_mut(&replacement, type_info);
+  RETURN replacement;
+END
+FN lifecycleRegistry__new(plans: {String}LifecyclePlan, binding_plans: {Int64}LifecyclePlan) RETURNS LifecycleRegistry@multiowned ->
+  MUTABLE self = LifecycleRegistry{ binding_plans: {}, plans: {} };
+  lifecycleRegistry__initialize(&self, plans, binding_plans);
+  RETURN self @multiowned;
+END
+# End Ruby module Semantic
+FN castLocatableToSemanticLifecycleRegistryBindingNode(value: Locatable) RETURNS SemanticLifecycleRegistryBindingNode ->
+  PARTIAL MATCH value START
+    Locatable.VarDecl AS cast_payload -> RETURN SemanticLifecycleRegistryBindingNode{ VarDecl: COPY cast_payload };,
+    Locatable.DestructureTarget AS cast_payload -> RETURN SemanticLifecycleRegistryBindingNode{ DestructureTarget: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN SemanticLifecycleRegistryBindingNode{ BindExpr: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to SemanticLifecycleRegistryBindingNode");
+  END
+  panic("Invalid cast to SemanticLifecycleRegistryBindingNode");
+END
+FN castSemanticLifecycleRegistryBindingNodeToLocatable(value: SemanticLifecycleRegistryBindingNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    SemanticLifecycleRegistryBindingNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    SemanticLifecycleRegistryBindingNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    SemanticLifecycleRegistryBindingNode.DestructureTarget AS cast_payload -> RETURN Locatable{ DestructureTarget: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END
+FN ruby_array_concat_Type(left: []Type, right: []Type) RETURNS []Type ->
+  MUTABLE result: []Type = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END

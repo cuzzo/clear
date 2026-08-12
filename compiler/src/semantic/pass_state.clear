@@ -1,0 +1,114 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172"
+UNION Program { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Emittable: Emittable }
+PUB STRUCT MIRPassState {
+  completed: [Set]String@symbol
+}
+
+STRUCT StageSpec {
+  name: String@symbol,
+  producer: String,
+  requires: ?String@symbol
+}
+stages: [12]StageSpec = [StageSpec{ name: :annotated, producer: "SemanticAnnotator", requires: NIL }, StageSpec{ name: :pipeline_rewritten, producer: "PipelineRewriter", requires: :annotated }, StageSpec{ name: :string_concat_rewritten, producer: "StringConcatRewriter", requires: :pipeline_rewritten }, StageSpec{ name: :hoisted, producer: "Hoist", requires: :string_concat_rewritten }, StageSpec{ name: :premir_type_checked, producer: "PreMirTypeCheck", requires: :hoisted }, StageSpec{ name: :escape_analyzed, producer: "MIRPass/EscapeAnalysis", requires: :premir_type_checked }, StageSpec{ name: :cleanup_classified, producer: "MIRPass/CleanupClassifier", requires: :escape_analyzed }, StageSpec{ name: :loop_frame_analyzed, producer: "MIRPass/LoopFrameAnalysis", requires: :cleanup_classified }, StageSpec{ name: :needs_rt_finalized, producer: "MIRPass#finalize_needs_rt!", requires: :loop_frame_analyzed }, StageSpec{ name: :mir_pass_complete, producer: "MIRPass", requires: :needs_rt_finalized }, StageSpec{ name: :mir_lowered, producer: "MIRLowering", requires: :mir_pass_complete }, StageSpec{ name: :mir_checked, producer: "MIRChecker", requires: :mir_lowered }];
+FN mIRPassState__initialize(MUTABLE self: MIRPassState) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.completed = Set[];
+}
+END
+FN mIRPassState__mark_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE spec = TRY (mIRPassState__stage_spec_mut(rtoc_self_view, stage));
+    IF rtoc_self_view.completed.contains?(stage) THEN
+      RAISE Input, MIRPassOrderError, "{} attempted to mark {} twice";
+    END
+    MUTABLE expected: ?String@symbol = mIRPassState__next_unmarked_stage(rtoc_self_view);
+    IF !((stage == expected)) THEN
+      RAISE Input, MIRPassOrderError, "{}{}";
+    END
+    &rtoc_self_view.completed.insert(COPY stage);
+}
+END
+FN mIRPassState__require_mut(self: MIRPassState, stage: String@symbol, consumer: String) RETURNS !Void
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    TRY (mIRPassState__stage_spec_mut(rtoc_self_view, stage));
+    IF rtoc_self_view.completed.contains?(stage) THEN
+      RETURN;
+    END
+    RAISE Input, MIRPassOrderError, "{} requires {}; completed stages: {}";
+}
+END
+PRIVATE FN mIRPassState__completed_stages(self: MIRPassState) RETURNS ![]String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (stages |> SELECT _.name) |> WHERE rtoc_self_view.completed.contains?(_);
+}
+END
+FN mIRPassState__copy(self: MIRPassState) RETURNS MIRPassState@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE state = mIRPassState__new();
+    FOR _ IN rtoc_self_view.completed DO
+    &state.completed.insert(_);
+    END
+    RETURN state;
+}
+END
+FN mIRPassState__for_mut(program: Program) RETURNS MIRPassState@multiowned ->
+  MUTABLE state = program.mir_pass_state;
+  IF !(state IS_A MIRPassState) THEN
+    state = mIRPassState__new();
+    program.mir_pass_state = state;
+  END
+  RETURN state;
+END
+FN mIRPassState__class_require_mut(program: Program, stage: String@symbol, consumer: String) RETURNS !Void EFFECTS REENTRANT ->
+  MUTABLE state = program.mir_pass_state;
+  IF !(state IS_A MIRPassState) THEN
+    RAISE Input, MIRPassOrderError, "{} requires pass state; program was not produced by the MIR pipeline";
+  END
+  &state.require_mut(stage, consumer);
+END
+FN mIRPassState__validate_stage_mut(self: MIRPassState, stage: String@symbol) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (stages.to_h(%(spec) -> [spec.name(), spec])).contains?(stage) THEN
+      RETURN;
+    END
+    RAISE Input, MIRPassOrderError, "unknown MIR pass stage {}";
+}
+END
+PRIVATE FN mIRPassState__stage_spec_mut(self: MIRPassState, stage: String@symbol) RETURNS !StageSpec
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE spec: ?StageSpec = COPY (stages.to_h(%(spec: ?StageSpec) -> CAST(Tuple{spec.name, spec} AS Tuple<String@symbol, ?StageSpec>)))[stage];
+    IF spec EXISTS AS spec_value THEN
+      RETURN COPY spec_value;
+    END
+    RAISE Input, MIRPassOrderError, "unknown MIR pass stage {}";
+}
+END
+PRIVATE FN mIRPassState__next_unmarked_stage(self: MIRPassState) RETURNS ?String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (stages |> SELECT _.name) |> FIND !(rtoc_self_view.completed.contains?(_));
+}
+END
+FN mIRPassState__new() RETURNS MIRPassState@multiowned ->
+  MUTABLE self = MIRPassState{ completed: Set[] };
+  mIRPassState__initialize(&self);
+  RETURN self @multiowned;
+END
