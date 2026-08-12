@@ -1203,23 +1203,6 @@ class MIRLowering
     true
   end
 
-  # Nodes that MATERIALIZE a new value. Everything else projects out of
-  # something that already exists -- a field, an element, an unwrap, a cast --
-  # and projections are views, not owners.
-  #
-  # This list is the closed one. "Reads" is not: enumerating them missed
-  # `MIR::IfOptional` (safe navigation `x?.field`), which freed a field its
-  # parent temp already owned. Constructions are a bounded set in MIR, so
-  # defaulting to "view" and naming the owners fails closed -- a construction
-  # missing here surfaces as ALLOC_WITHOUT_CLEANUP from the checker, not as a
-  # double free at runtime.
-  OWNED_CONSTRUCTIONS = T.let(
-    [MIR::StructInit, MIR::ArrayInit, MIR::TupleLiteral, MIR::MakeList, MIR::ContainerInit,
-     MIR::ConcatStr, MIR::DupeSlice, MIR::DeepCopy, MIR::CapWrap, MIR::HeapCreate,
-     MIR::AllocSlice, MIR::OwnedSlice].freeze,
-    T::Array[T.untyped],
-  )
-
   # Does the materialized source own what it yields, or is it a view of storage
   # that outlives it? This path is reached for anything that must be named
   # before it is copied, which `mir_allocates?` answers for the whole subtree --
@@ -1237,7 +1220,7 @@ class MIRLowering
     return true if result.is_a?(MIR::Ident)
     return true if MIR::OwnershipEffect.of(result).produces_owned
 
-    OWNED_CONSTRUCTIONS.any? { |kind| result.is_a?(kind) }
+    result.materializes_value?
   end
 
   sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }
