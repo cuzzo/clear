@@ -1158,40 +1158,52 @@ class MIRLowering
   # A value block that ends in `binding?` hands out the payload but keeps its
   # own guarded cleanup. Only a consumer that TAKES the result can know the
   # transfer is due, so claim it here rather than in the block.
-  sig { params(mir: MIR::Node).void }
+  # Returns whether the transfer was claimed. A claim MAKES the destination the
+  # owner, whatever the result expression looks like -- `slot?` reads as a view
+  # of the block's binding, but once the block hands its claim over, the value
+  # is the consumer's to drop.
+  sig { params(mir: MIR::Node).returns(T::Boolean) }
   def claim_block_result_ownership!(mir)
-    return unless mir.is_a?(MIR::BlockExpr)
-    return if mir.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) && stmt.target == :block_result }
+    return false unless mir.is_a?(MIR::BlockExpr)
+    return true if mir.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) && stmt.target == :block_result }
 
     break_index = mir.body.rindex { |stmt| stmt.is_a?(MIR::BreakStmt) }
-    return unless break_index
+    return false unless break_index
 
     owner = mir_ident_names(T.cast(mir.body[break_index], MIR::BreakStmt).value).first
-    return unless owner
+    return false unless owner
 
     cleanup = mir.body.find do |stmt|
       stmt.is_a?(MIR::Cleanup) && stmt.name.to_s == owner && stmt.cleanup_entry&.[](:has_moved_guard)
     end
-    return unless cleanup
+    return false unless cleanup
 
     mir.body.insert(break_index, *ownership_transfer_marks(owner, :block_result, move_guarded: true))
+    true
   end
 
-  # Reads that hand back a view of storage someone else owns. A method call is
-  # included because it carries `owned_result_alloc` exactly when its result is
-  # the caller's to drop, so the effect below still tells the two apart.
-  CONTAINER_READ_RESULTS = T.let(
-    [MIR::ShardedMapGet, MIR::ItemsAccess, MIR::FieldGet, MIR::MethodCall].freeze,
+  # Nodes that MATERIALIZE a new value. Everything else projects out of
+  # something that already exists -- a field, an element, an unwrap, a cast --
+  # and projections are views, not owners.
+  #
+  # This list is the closed one. "Reads" is not: enumerating them missed
+  # `MIR::IfOptional` (safe navigation `x?.field`), which freed a field its
+  # parent temp already owned. Constructions are a bounded set in MIR, so
+  # defaulting to "view" and naming the owners fails closed -- a construction
+  # missing here surfaces as ALLOC_WITHOUT_CLEANUP from the checker, not as a
+  # double free at runtime.
+  OWNED_CONSTRUCTIONS = T.let(
+    [MIR::StructInit, MIR::ArrayInit, MIR::TupleLiteral, MIR::MakeList, MIR::ContainerInit,
+     MIR::ConcatStr, MIR::DupeSlice, MIR::DeepCopy, MIR::CapWrap, MIR::HeapCreate,
+     MIR::AllocSlice, MIR::OwnedSlice].freeze,
     T::Array[T.untyped],
   )
 
   # Does the materialized source own what it yields, or is it a view of storage
   # that outlives it? This path is reached for anything that must be named
   # before it is copied, which `mir_allocates?` answers for the whole subtree --
-  # a container lookup keyed by an allocating call "allocates" while still
-  # handing back a BORROW, and cleaning that up frees storage the container
-  # still holds. Every other shape constructs a fresh value and keeps the
-  # ownership it always had.
+  # a lookup keyed by an allocating call "allocates" while still handing back a
+  # view, and cleaning that up frees storage the container still holds.
   sig { params(mir: MIR::Node).returns(T::Boolean) }
   def owned_branch_source_owns?(mir)
     result = mir
@@ -1199,9 +1211,12 @@ class MIRLowering
       result = T.cast(mir.body.reverse.find { |stmt| stmt.is_a?(MIR::BreakStmt) }, T.nilable(MIR::BreakStmt))&.value
       return true unless result
     end
-    return true unless CONTAINER_READ_RESULTS.any? { |kind| result.is_a?(kind) }
+    # An identifier's ownership is a fact about its BINDING, recorded when the
+    # binding was lowered; this predicate is not the authority on it.
+    return true if result.is_a?(MIR::Ident)
+    return true if MIR::OwnershipEffect.of(result).produces_owned
 
-    MIR::OwnershipEffect.of(result).produces_owned
+    OWNED_CONSTRUCTIONS.any? { |kind| result.is_a?(kind) }
   end
 
   sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }
@@ -1215,14 +1230,14 @@ class MIRLowering
     # frees it). A block that yields `binding?` never released its own claim,
     # so ask for the transfer here -- the block cannot know whether its
     # consumer takes or merely borrows.
-    claim_block_result_ownership!(mir)
+    claimed = claim_block_result_ownership!(mir)
     source_alloc = mir_owned_alloc(mir) || MIR::OwnershipEffect.alloc_of(mir) || dest_alloc
     # ... but only when the block's result is genuinely owned. A block whose
     # result is a BORROW -- a container lookup whose key needed a temp, so the
     # lookup got wrapped in a block -- owns nothing, and cleaning it up frees
     # storage still held by the container. The copy below is what the
     # destination keeps either way.
-    source_owned = owned_branch_source_owns?(mir)
+    source_owned = claimed || owned_branch_source_owns?(mir)
     source_cleanup = nil
     if source_owned
       source_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false,
