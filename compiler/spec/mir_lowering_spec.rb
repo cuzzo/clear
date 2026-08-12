@@ -706,7 +706,10 @@ RSpec.describe MIRLowering do
     it "lowers identifier with question mark" do
       node = make_id("empty?")
       result = lowering.lower(node)
-      expect(emit(result)).to eq("empty")
+      # Zig carries no `?`, but CLEAR distinguishes `empty` from `empty?`.
+      # Stripping the mark collapsed the pair onto one Zig name -- a duplicate
+      # declaration, or a silent call to the wrong one -- so it is encoded.
+      expect(emit(result)).to eq("empty_p")
     end
 
     it "renames main to clearMain" do

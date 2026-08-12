@@ -1357,9 +1357,12 @@ RSpec.describe "pipeline backend coverage" do
       expect(with_placeholder.capture).to eq("__each_item")
       expect(with_placeholder.iter.end_val).to eq(MIR::BinOp.new("+", MIR::Lit.new("2"), MIR::Lit.new("1")))
 
+      # The capture is always bound and vouched for with a Suppress, rather
+      # than predicting from the body whether it is read: Zig rejects an unused
+      # capture, and `list |> EACH { count = count + 1; }` is ordinary.
       each_host.use_placeholder = false
       without_placeholder = each_lowerer.lower(range, AST::EachOp.new(tok, []))
-      expect(without_placeholder.capture).to eq("_")
+      expect(without_placeholder.capture).to eq("__each_item")
     end
 
   end
