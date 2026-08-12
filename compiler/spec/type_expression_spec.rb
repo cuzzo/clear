@@ -3,6 +3,8 @@ require "rspec"
 require_relative "../ruby/ast/lexer" unless defined?(Lexer)
 require_relative "../ruby/ast/ast" unless defined?(AST::Node)
 require_relative "../ruby/ast/type" unless defined?(Type)
+require_relative "../ruby/ast/parser" unless defined?(ClearParser)
+require_relative "../ruby/semantic/tense_operation_plan" unless defined?(TenseOperationPlanner)
 
 RSpec.describe TypeExpressionParser do
   def expression(source)
@@ -451,4 +453,39 @@ RSpec.describe TypeShape do
         "TypeExpression wrapping #{kind.class} allocated its own default TypeCapabilities"
     end
   end
+end
+
+RSpec.describe "tense-prefixed inline type capabilities" do
+  def annotation(source)
+    ClearParser.new(Lexer.new(source).tokenize, source).send(:parse_type_annotation)
+  end
+
+  # `?[]T` must carry the same `collection: :list` capability as `[]T`; the
+  # inline prefix path used to drop it, so the lifecycle inventory keyed the
+  # declared field type differently from the sink type at construction sites.
+  it "keeps the wrapped type's collection capability across ?, ! and ~ prefixes" do
+    expect(annotation("[]Int64").collection).to eq(:list)
+
+    ["?", "!", "~"].each do |prefix|
+      expect(annotation("#{prefix}[]Int64").collection).to eq(:list),
+        "#{prefix}[]Int64 dropped the wrapped list capability"
+    end
+  end
+end
+
+RSpec.describe "OR_ELSE result capabilities" do
+  # OR_ELSE consumes tense layers, not capabilities. The payload expression
+  # does not carry the source type's sync/collection/ownership, so rebuilding
+  # the result from it alone silently turned `?String@symbol` into a plain
+  # String -- a mismatch that reported as "Cannot assign String to String".
+  it "keeps the source capabilities on the recovered payload type" do
+    source = ClearParser.new(Lexer.new("?String@symbol").tokenize, "?String@symbol")
+      .send(:parse_type_annotation)
+    expect(source.sync).to eq(:symbol)
+
+    plan = TenseOperationPlanner.or_else(source, Type.new(:String))
+    expect(plan.result_type.sync).to eq(:symbol),
+      "OR_ELSE dropped @symbol from the recovered payload"
+  end
+
 end

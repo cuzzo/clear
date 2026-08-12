@@ -1,0 +1,36 @@
+STRUCT Rule { labels: []String }
+
+FN make_rule(label: String) RETURNS Rule ->
+  MUTABLE names: []String = List[];
+  &names.append(COPY label);
+  RETURN Rule{ labels: names };
+END
+
+# `a OR_ELSE b` where b is ITSELF optional stays optional: typing the merge as
+# the payload made placement copy a null as though it were present.
+FN lookup(index: {String}Rule, first: String, second: String) RETURNS ?Rule ->
+  MUTABLE found: ?Rule = COPY index[first];
+  found = COPY (found OR_ELSE index[second]);
+  RETURN COPY found;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE index: {String}Rule = {};
+  index["a"] = make_rule("alpha");
+
+  IF lookup(index, "missing", "also_missing") EXISTS AS hit THEN
+    ASSERT FALSE, "neither lookup hits, so the merge stays absent";
+  END
+
+  IF lookup(index, "missing", "a") EXISTS AS second_hit THEN
+    ASSERT second_hit.labels.length() == 1, "an optional fallback that hits supplies the value";
+  ELSE
+    ASSERT FALSE, "the fallback lookup should have hit";
+  END
+
+  IF lookup(index, "a", "missing") EXISTS AS first_hit THEN
+    ASSERT first_hit.labels.length() == 1, "a present left side still wins";
+  ELSE
+    ASSERT FALSE, "the first lookup should have hit";
+  END
+END

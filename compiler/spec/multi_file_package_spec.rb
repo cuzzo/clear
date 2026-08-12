@@ -78,6 +78,92 @@ RSpec.describe "multi-file packages", :integration do
     end
   end
 
+  it "initializes a package CONST whose initializer is a runtime call" do
+    Dir.mktmpdir do |dir|
+      rules = write(dir, "rules.clear", <<~CLEAR)
+        PUB STRUCT Rule { name: String }
+
+        PUB FN build_index() RETURNS {String}Rule ->
+            MUTABLE index: {String}Rule = {};
+            index["a"] = Rule{ name: "alpha" };
+            RETURN index;
+        END
+
+        PUB CONST RULE_INDEX: {String}Rule = build_index();
+
+        PUB FN lookup(key: String) RETURNS Bool ->
+            RETURN RULE_INDEX.contains?(key);
+        END
+      CLEAR
+
+      main = write(dir, "main.clear", <<~CLEAR)
+        REQUIRE "pkg:rules" AS rules
+
+        FN main() RETURNS Void ->
+            ASSERT lookup("a"), "package CONST is populated";
+            ASSERT !lookup("zz"), "package CONST has only its own keys";
+            RETURN;
+        END
+      CLEAR
+
+      binary = File.join(dir, "main")
+      out = clear("build", main, "-o", binary, "--pkg", "rules=#{rules}")
+      expect(out).to include("Built:")
+      run_out, status = Open3.capture2e(binary)
+      expect(status.success?).to be(true), run_out
+    end
+  end
+
+  it "retains an @multiowned argument kept by an imported package function" do
+    Dir.mktmpdir do |dir|
+      lex = write(dir, "lex.clear", <<~CLEAR)
+        PUB STRUCT Budget { limit: Int64 }
+        PUB STRUCT Lexer { budget: Budget@multiowned, tag: Int64 }
+        PUB STRUCT Parser { budget: Budget@multiowned, tag: Int64 }
+
+        PUB FN make_budget() RETURNS Budget@multiowned ->
+            RETURN Budget{ limit: 10 } @multiowned;
+        END
+
+        PUB FN lexer_new(budget: ?Budget = NIL) RETURNS !Lexer@multiowned ->
+            MUTABLE self = Lexer{ budget: (budget OR_ELSE make_budget()), tag: 1 };
+            RETURN self @multiowned;
+        END
+
+        PUB FN parser_new(budget: ?Budget = NIL) RETURNS !Parser@multiowned ->
+            MUTABLE self = Parser{ budget: (budget OR_ELSE make_budget()), tag: 2 };
+            RETURN self @multiowned;
+        END
+      CLEAR
+
+      main = write(dir, "main.clear", <<~CLEAR)
+        REQUIRE "pkg:lex" AS lex
+
+        FN parse_source() RETURNS !Int64 ->
+            MUTABLE budget = make_budget();
+            MUTABLE lexer = TRY (lexer_new(budget));
+            MUTABLE parser = TRY (parser_new(budget));
+            RETURN (lexer.budget.limit + parser.budget.limit);
+        END
+
+        FN main() RETURNS !Void ->
+            total = TRY (parse_source());
+            ASSERT total == 20, "both keepers see the budget";
+            RETURN;
+        END
+      CLEAR
+
+      binary = File.join(dir, "main")
+      out = clear("build", main, "-o", binary, "--pkg", "lex=#{lex}")
+      expect(out).to include("Built:")
+      # Two keepers, one handle: without a retain on the first call the second
+      # cleanup underflows the refcount.
+      run_out, status = Open3.capture2e(binary)
+      expect(status.success?).to be(true), run_out
+      expect(run_out).not_to include("integer overflow")
+    end
+  end
+
   it "runs member TEST blocks via a pkg: root" do
     Dir.mktmpdir do |dir|
       shapes, points = fixture(dir)

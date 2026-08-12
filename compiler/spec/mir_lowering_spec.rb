@@ -692,6 +692,17 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("push")
     end
 
+    it "encodes a question mark rather than dropping it" do
+      # `empty` and `empty?` are different CLEAR names; stripping the mark
+      # collapsed the pair onto one Zig identifier.
+      expect(emit(lowering.lower(make_id("empty?")))).to eq("empty_p")
+      expect(emit(lowering.lower(make_id("empty")))).to eq("empty")
+    end
+
+    it "encodes a bang the same way" do
+      expect(emit(lowering.lower(make_id("check!")))).to eq("check_bang")
+    end
+
     it "lowers identifier with question mark" do
       node = make_id("empty?")
       result = lowering.lower(node)
@@ -5216,5 +5227,124 @@ RSpec.describe "MIRLowering allocation cleanup classification" do
     expect(entry.kind).to eq(:resource)
     expect(entry.resource_close_plan).to equal(close_plan)
     expect(entry.lifecycle_plan).to equal(lifecycle)
+  end
+end
+
+RSpec.describe "block expression result type" do
+  # `lower_block_expr` must stamp the block's result type from its already
+  # annotated tail expression. Without the stamp, hoisting fell back to
+  # re-deriving the type from the MIR body shape, which only recognised a
+  # handful of break-value shapes and blew up with "allocating MIR::BlockExpr
+  # has no result type" on a tuple tail with more than one AllocMark.
+  it "stamps the tail expression's type on a multi-allocation tuple block" do
+    src = <<~CLEAR
+      FN pair(a: String, b: String) RETURNS Tuple<String, String> ->
+        RETURN ( { MUTABLE x = COPY a; MUTABLE y = COPY b; Tuple{COPY x, COPY y} } );
+      END
+    CLEAR
+
+    importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+    result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+    fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "pair" }
+    low = MIRLowering.new(input: MIRLoweringInput.new(
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs,
+      lifecycle_registry: result.lifecycle_registry,
+      importer: importer,
+      source_dir: Dir.pwd,
+      target: :zig
+    ))
+
+    mir = low.lower_program(result.ast)
+    blocks = []
+    walk = lambda do |node|
+      blocks << node if node.is_a?(MIR::BlockExpr)
+      case node
+      when Array then node.each { |c| walk.call(c) }
+      when Struct then node.each_pair { |_, v| walk.call(v) }
+      end
+    end
+    walk.call(mir.items)
+
+    block = blocks.first
+    expect(block).not_to be_nil, "expected the tuple tail to lower to a MIR::BlockExpr"
+    expect(block.result_type).not_to be_nil,
+      "lower_block_expr left result_type unstamped, so hoisting must re-derive it"
+    expect(block.result_type.resolved.to_s).to include("Tuple")
+  end
+end
+
+RSpec.describe "sharded map hoisting" do
+  # `hoist_cleanup_entry` enumerates the allocating MIR nodes it knows how to
+  # clean up and raises on anything else. `MIR::ShardedMapGet` was never added
+  # alongside the RegistryCall/IndexedStore family it belongs to, so hoisting an
+  # owned sharded-map read died with "unhandled allocating MIR node".
+  it "derives a cleanup entry for an owned ShardedMapGet result" do
+    low = MIRLowering.new(input: MIRLoweringInput.new(target: :zig))
+    node = MIR::ShardedMapGet.new(
+      MIR::Ident.new("map"),
+      MIR::Ident.new("key"),
+      nil,
+      nil,
+      :string_map,
+      FunctionSignature.new(params: [], return_type: Type.new(:String), intrinsic: true),
+      Type.new(:String),
+      Type.new(:String),
+      MIR::InlineAllocMetadata.new,
+      IntrinsicTemplateKind::ShardDirectZig
+    )
+
+    expect { low.send(:hoist_cleanup_entry, node, nil) }.not_to raise_error
+  end
+end
+
+RSpec.describe "per-statement hoist scratch" do
+  # FunctionState is per-MIRLowering, not per-function, so pending_stmts (hoist
+  # scratch for the statement being lowered) used to survive into the NEXT
+  # top-level statement. Residue surfaced inside a later function's body,
+  # carrying AllocMark/ErrCleanup groups without the TransferMarks emitted with
+  # the body they belonged to -- ERRCLEANUP_WITHOUT_TRANSFER on a function that
+  # never allocated anything.
+  it "does not carry one statement's pending hoists into the next" do
+    src = <<~CLEAR
+      FN first(a: String) RETURNS String ->
+        RETURN COPY a;
+      END
+
+      FN second(b: String) RETURNS String ->
+        RETURN COPY b;
+      END
+    CLEAR
+
+    importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+    result = CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd)
+    low = MIRLowering.new(input: MIRLoweringInput.new(
+      struct_schemas: result.struct_schemas,
+      enum_schemas: result.enum_schemas,
+      union_schemas: result.union_schemas,
+      fn_sigs: result.fn_sigs,
+      lifecycle_registry: result.lifecycle_registry,
+      importer: importer,
+      source_dir: Dir.pwd,
+      target: :zig
+    ))
+
+    low.instance_variable_get(:@state).function_state.pending_stmts << MIR::Comment.new("leaked-scratch")
+    program = low.lower_program(result.ast)
+
+    seen = []
+    walk = lambda do |n|
+      case n
+      when Array then n.each { |c| walk.call(c) }
+      when MIR::Comment then seen << n.text
+      when Struct then n.each_pair { |_, v| walk.call(v) }
+      end
+    end
+    walk.call(program.items)
+
+    expect(seen).not_to include("leaked-scratch"),
+      "hoist scratch from a previous statement was emitted into a later function's body"
   end
 end

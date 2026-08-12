@@ -10,8 +10,18 @@ RSpec.describe "Move semantics for heap-owning types" do
     ZigTranspiler.new.transpile(src)
   end
 
+  # Emitted bodies now contain nested `{ ... }` scopes whose closing brace sits
+  # at column 0, so stopping at the FIRST line-start `}` truncates the body.
+  # Take everything up to the last one before the next top-level fn instead.
   def fn_body(zig, name)
-    zig[/fn #{Regexp.escape(name)}\b.*?\n(.*?)^}/m, 1]
+    start = zig.index(/^(?:pub )?fn #{Regexp.escape(name)}\b/)
+    return nil unless start
+
+    rest = zig[start..]
+    after = rest[(rest.index("\n") + 1)..]
+    nxt = after.index(/^(?:pub )?fn \w/)
+    segment = nxt ? after[0...nxt] : after
+    segment[/\A(.*)^}/m, 1] || segment
   end
 
   # =========================================================================
@@ -145,8 +155,39 @@ RSpec.describe "Move semantics for heap-owning types" do
       CLEAR
       body = fn_body(zig, "run")
       expect(body).to include("defer if (!__tmp_1_moved) CheatLib.cleanup(@TypeOf(__tmp_1), __clear_heap_alloc, &__tmp_1)")
-      expect(body).to match(/try __hm\.put[^\n]*__tmp_1[^\n]*\n__tmp_1_moved = true;/)
-      expect(body).to match(/try __hm\.put[^\n]*__tmp_2[^\n]*\n__tmp_2_moved = true;/)
+      expect(body).to match(/try __hm_\d+\.put[^\n]*__tmp_1[^\n]*\n__tmp_1_moved = true;/)
+      expect(body).to match(/try __hm_\d+\.put[^\n]*__tmp_2[^\n]*\n__tmp_2_moved = true;/)
+    end
+
+    it "confines each map-literal pair's cleanup guard to its own scope" do
+      # Zig re-emits every PENDING errdefer at each `try`, so a guard that
+      # stays live for the rest of the literal costs code at every later put --
+      # quadratic in the entry count. One 600-entry registry literal compiled
+      # to 353 MB of machine code this way. The guard count live at the last
+      # put must therefore be bounded, not proportional to the entry count.
+      live_at_last_put = lambda do |entries|
+        pairs = entries.times.map { |i| %("k#{i}": COPY "v#{i}") }.join(", ")
+        body = fn_body(transpile(<<~CLEAR), "reg")
+          FN reg() RETURNS !{String}String ->
+              RETURN {#{pairs}};
+          END
+          FN main() RETURNS Void ->
+              RETURN;
+          END
+        CLEAR
+        depth = 0
+        open_guards = Hash.new(0)
+        body.lines.each do |line|
+          break if line.include?("put(") && line.include?("k#{entries - 1}")
+
+          open_guards[depth] += 1 if line.start_with?("errdefer")
+          depth += line.count("{") - line.count("}")
+          open_guards.delete_if { |guard_depth, _| guard_depth > depth }
+        end
+        open_guards.values.sum
+      end
+
+      expect(live_at_last_put.call(8)).to eq(live_at_last_put.call(2))
     end
   end
 

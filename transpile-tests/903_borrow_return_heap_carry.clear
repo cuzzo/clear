@@ -1,0 +1,30 @@
+# A `RETURNS self:T` accessor whose element type carries heap storage (String)
+# still returns a BORROW: the caller's argument owns it. Escape analysis used to
+# mark the return heap-carried anyway, so the call was treated as owned and
+# every use of it outside a Let init failed with UNHOISTED_ALLOC.
+
+STRUCT Tok { text: String, kind: String@symbol }
+STRUCT Stream { toks: []Tok, pos: Int64 }
+
+PUB FN stream__current(self: Stream) RETURNS self: Tok
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS view {
+    RETURN UNWRAP (view.toks[view.pos]);
+}
+END
+
+PUB FN stream__at_end?(self: Stream) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS view {
+    RETURN (stream__current(view).kind == :eof);
+}
+END
+
+FN main() RETURNS Void ->
+  s = Stream{ toks: [Tok{ text: "a", kind: :word }, Tok{ text: "", kind: :eof }], pos: 1_i64 };
+  ASSERT stream__at_end?(s), "second token ends the stream";
+  ASSERT stream__current(s).text == "", "borrowed token reads through";
+  print("ok");
+END

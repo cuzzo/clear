@@ -1,0 +1,38 @@
+# A local that shadows a parameter, or an IS_A payload binding, is legal CLEAR
+# (and legal Ruby), but Zig rejects every shadowing. The disambiguating rename
+# already existed for two same-named locals; parameters and payload bindings
+# were not in the name table, so `MUTABLE type = COPY type` emitted a
+# redeclaration. The suffix also has to be built from the CLEAR name --
+# `@"type"_L2` splices the escape into a new identifier.
+
+STRUCT Ty { n: Int64 }
+
+PUB FN widen(type: Ty) RETURNS Int64 ->
+  MUTABLE type = COPY type;
+  type.n = (type.n + 1_i64);
+  RETURN type.n;
+END
+
+PUB FN pick(ft: Int64) RETURNS Int64 ->
+  MUTABLE ft = (ft * 2_i64);
+  RETURN ft;
+END
+
+STRUCT Num { v: Int64 }
+UNION Value { Ty: Ty, Num: Num }
+
+PUB FN widen_payload(x: Value) RETURNS Int64 ->
+  IF x IS_A Ty AS type THEN
+    MUTABLE type = COPY type;
+    type.n = (type.n + 1_i64);
+    RETURN type.n;
+  END
+  RETURN 0_i64;
+END
+
+FN main() RETURNS Void ->
+  ASSERT widen(Ty{ n: 1_i64 }) == 2_i64, "shadowed param";
+  ASSERT pick(3_i64) == 6_i64, "shadowed scalar param";
+  ASSERT widen_payload(Value{ Ty: Ty{ n: 4_i64 } }) == 5_i64, "shadowed payload binding";
+  print("ok");
+END

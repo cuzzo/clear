@@ -1,0 +1,33 @@
+# Two names that never reached their escaping/substitution pass:
+#   `IF x IS_A Ty AS type` bound the payload as a bare `type`, which Zig
+#   rejects as shadowing a primitive.
+#   `UNWRAP (map[_])` left the pipeline placeholder unsubstituted -- the
+#   rewriter had no case for AST::OptionalUnwrap.
+
+STRUCT Ty { n: Int64 }
+UNION Value { Type: Ty, Num: Int64 }
+STRUCT Bindings { entries: {String}Int64 }
+
+FN classify(x: Value) RETURNS Int64 ->
+  IF x IS_A Ty AS type THEN
+    RETURN type.n;
+  END
+  RETURN 0_i64;
+END
+
+FN bindings__sum(self: Bindings) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS view {
+  MUTABLE total = 0_i64;
+  view.entries.keys() |> EACH { total = (total + UNWRAP (view.entries[_])); };
+  RETURN total;
+}
+END
+
+FN main() RETURNS Void ->
+  ASSERT classify(Value{ Type: Ty{ n: 7_i64 } }) == 7_i64, "keyword-named binding";
+  b = Bindings{ entries: {"a": 1_i64, "b": 2_i64} };
+  ASSERT bindings__sum(b) == 3_i64, "placeholder under UNWRAP";
+  print("ok");
+END

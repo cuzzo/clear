@@ -192,8 +192,9 @@ RSpec.describe Type, "zig_type gap coverage" do
     expect(heap.placement.location).to eq(:heap)
     expect(heap.location).to eq(:heap)
     expect(fallback.apply_cleanup_placement!(value_type: nil, alloc: nil)).to equal(fallback.placement)
-    expect(Type.new(:"Int64[]").dynamic_field_array?).to be true
-    expect(Type.new(:"Int64[2]", collection: :list).dynamic_field_array?).to be true
+    # `Int64[]` in a field is a Zig slice; `[]Int64@list` is an ArrayList.
+    expect(Type.new(:"Int64[]").slice_shaped_field_array?).to be true
+    expect(Type.new(:"Int64[2]", collection: :list).slice_shaped_field_array?).to be false
   end
 
   it "applies element-level capabilities to array element types" do

@@ -1,0 +1,23 @@
+# A `[]T@list` field is an ArrayList and iterates its `.items` just like a
+# local. FOR picked its shape from the syntactic position instead, so a list
+# reached through a field emitted `for (&list)`.
+
+STRUCT Item { n: Int64 }
+STRUCT Sig { params: []Item }
+STRUCT Fn { signature: Sig }
+
+FN total(f: Fn) RETURNS Int64 ->
+  MUTABLE total_n: Int64 = 0;
+  FOR param IN f.signature.params DO
+    total_n = total_n + param.n;
+  END
+  RETURN total_n;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE items: []Item = List[];
+  &items.append(Item{ n: 2 });
+  &items.append(Item{ n: 5 });
+  ASSERT total(Fn{ signature: Sig{ params: items } }) == 7, "FOR walks a nested field list";
+  print("ok");
+END

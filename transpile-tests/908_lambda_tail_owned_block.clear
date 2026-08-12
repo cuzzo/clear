@@ -1,0 +1,29 @@
+# A lambda's tail expression is its return value, but the RETURN is synthesized
+# during MIR lowering. The return-value hoist ran before ownership
+# finalization, and finalization is what makes a value block read as owned --
+# so the hoist skipped it and the block reached the checker unhoisted
+# (UNHOISTED_ALLOC). The same expression in a plain FN was always fine.
+
+STRUCT Cap { name: String, tag: String }
+
+FN fallback() RETURNS !String ->
+  RETURN "anon";
+END
+
+FN apply<Elem>(p: ?String, blk: FN(?String) -> Elem) RETURNS !Elem ->
+  RETURN blk(p);
+END
+
+FN via_lambda(p: ?String) RETURNS !Cap ->
+  RETURN TRY (apply(p, %(v: ?String) -> {
+    Cap{ name: "n", tag: COPY (v OR_ELSE TRY (fallback())) }
+  }));
+END
+
+FN main() RETURNS !Void ->
+  a = TRY (via_lambda(NIL));
+  ASSERT a.tag == "anon", "fallback";
+  b = TRY (via_lambda("x"));
+  ASSERT b.tag == "x", "present";
+  print("ok");
+END

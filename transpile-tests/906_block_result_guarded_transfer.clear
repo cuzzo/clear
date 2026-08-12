@@ -1,0 +1,32 @@
+# A block expression that hands out a guarded-cleanup binding must set the
+# `_moved` flag as it breaks: the TransferMark carried no MoveMark, so the
+# value was transferred out AND cleaned up on the way (OWNERSHIP_IMPLICIT_MOVE).
+
+STRUCT Tok { file: ?String, line: Int64 }
+STRUCT Span { file: ?String, line: Int64 }
+STRUCT Alpha { source_range: ?Span, name: String }
+STRUCT Beta { source_range: ?Span, count: Int64 }
+UNION Item { Alpha: Alpha, Beta: Beta }
+
+FN stamp(MUTABLE node: Item, first: Tok, last: Tok) RETURNS Item ->
+  MATCH node START
+    Item.Alpha AS item ->
+      MUTABLE item_mutable = COPY item;
+      item_mutable.source_range = Span{ file: ( { MUTABLE src: ?String = first.file; MUTABLE res: ?String = NIL; IF src != NIL THEN res = COPY src; ELSE res = last.file; END res } ), line: first.line };
+      node = Item{ Alpha: item_mutable };,
+    Item.Beta AS item ->
+      MUTABLE item_mutable = COPY item;
+      item_mutable.source_range = Span{ file: ( { MUTABLE src: ?String = first.file; MUTABLE res: ?String = NIL; IF src != NIL THEN res = COPY src; ELSE res = last.file; END res } ), line: first.line };
+      node = Item{ Beta: item_mutable };
+  END
+  RETURN node;
+END
+
+FN main() RETURNS Void ->
+  out = stamp(Item{ Alpha: Alpha{ source_range: NIL, name: "a" } }, Tok{ file: "x", line: 1_i64 }, Tok{ file: "y", line: 2_i64 });
+  IF out IS_A Alpha AS a THEN
+    sr = UNWRAP (a.source_range);
+    ASSERT UNWRAP (sr.file) == "x", "stamped";
+  END
+  print("ok");
+END

@@ -10,8 +10,18 @@ RSpec.describe CleanupClassifier do
     ZigTranspiler.new.transpile(src)
   end
 
+  # Emitted bodies now contain nested `{ ... }` scopes whose closing brace sits
+  # at column 0, so stopping at the FIRST line-start `}` truncates the body.
+  # Take everything up to the last one before the next top-level fn instead.
   def fn_body(zig, name)
-    zig[/fn #{name}\b.*?\n(.*?)^}/m, 1]
+    start = zig.index(/^(?:pub )?fn #{Regexp.escape(name)}\b/)
+    return nil unless start
+
+    rest = zig[start..]
+    after = rest[(rest.index("\n") + 1)..]
+    nxt = after.index(/^(?:pub )?fn \w/)
+    segment = nxt ? after[0...nxt] : after
+    segment[/\A(.*)^}/m, 1] || segment
   end
 
   # =========================================================================

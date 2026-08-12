@@ -1,4 +1,4 @@
-# Test: replace, downcase, upcase string functions.
+# Test: replace, downcase, upcase, capitalize string functions.
 
 FN main() RETURNS Void ->
     # replace: all occurrences
@@ -19,9 +19,17 @@ FN main() RETURNS Void ->
     ASSERT "ALREADY".upcase() == "ALREADY";
     ASSERT "MiXeD123".upcase() == "MIXED123";
 
+    # capitalize
+    ASSERT "hello world".capitalize() == "Hello world";
+    ASSERT "hELLO WORLD".capitalize() == "Hello world";
+    ASSERT "Already".capitalize() == "Already";
+    ASSERT "".capitalize() == "";
+    ASSERT "9lives".capitalize() == "9lives";
+
     # chained
     result = replace("Hello WORLD".downcase(), "hello", "hi");
     ASSERT result == "hi world";
+    ASSERT "warning".capitalize().upcase() == "WARNING";
 
     print("PASS");
     RETURN;

@@ -1,0 +1,39 @@
+# A MoveMark has to precede the move it guards. When the consuming node is a
+# terminator -- `RETURN Wrapper{ field: owned_binding }` -- the mark was
+# appended AFTER the return: the `_moved` guard was written too late to
+# suppress the scope cleanup, and Zig rejected the statement as unreachable
+# code.
+
+STRUCT VarDecl { name: String, value: Locatable }
+STRUCT Lit { text: String }
+UNION Locatable { Lit: Lit }
+UNION Ret { VarDecl: VarDecl }
+STRUCT Parser { pos: Int64 }
+
+PUB FN make(text: String) RETURNS !Locatable ->
+  RETURN Locatable{ Lit: COPY Lit{ text: COPY text } };
+END
+
+PUB FN parser__decl(MUTABLE self: Parser, name: String, has_value: Bool) RETURNS !Ret
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+  view.pos = (view.pos + 1_i64);
+  IF has_value THEN
+    MUTABLE value = TRY make(name);
+    RETURN Ret{ VarDecl: COPY VarDecl{ name: COPY name, value: value } };
+  END
+  MUTABLE fallback = TRY make("default");
+  RETURN Ret{ VarDecl: COPY VarDecl{ name: COPY name, value: fallback } };
+}
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE p = Parser{ pos: 0_i64 };
+  r = TRY parser__decl(&p, "x", TRUE);
+  PARTIAL MATCH r START
+    Ret.VarDecl AS d -> ASSERT d.name == "x", "decl";,
+    DEFAULT -> ASSERT FALSE, "expected VarDecl";
+  END
+  print("ok");
+END

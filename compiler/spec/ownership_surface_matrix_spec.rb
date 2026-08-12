@@ -5,7 +5,8 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 #
 # Companion to pipeline_position_matrix_spec.rb for the NON-pipeline ownership
 # surface: every owned value KIND x every consuming OPERATION x binding
-# CONTEXT.
+# CONTEXT. Every cell asserts EXACT expected values (not just memory safety) —
+# a wrong-result bug fails the same as a leak.
 #
 #   KINDS: owned String (call result / concat), built list, struct with owned
 #          field, nested struct, union with a String variant, optional owned,
@@ -18,16 +19,12 @@ require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
 #          FOR body, WHILE body, early-RETURN from a loop with the value live,
 #          CONTINUE/BREAK paths with the value pending.
 #
-# Same discipline as the pipeline matrix, two lanes:
+# Same discipline as the pipeline matrix, three lanes:
 #   - compile lane: every cell transpiles clean OR is in KNOWN_FAILURES with
 #     its exact code (strict both directions);
+#   - runtime lane (:integration): every transpile-clean cell runs leak-checked
+#     against RUNTIME_KNOWN_FAILURES (strict both directions);
 #   - discovery: MATRIX_REPORT=1 prints the cell map.
-#
-# This is a transpile-only matrix. The runtime ownership surface — leaks,
-# invalid frees, wrong values — belongs to the fuzz harness, whose cells are
-# `FN main` programs that actually execute: `ownership_surface_smoke` and the
-# per-sink truthful owners in tools/fuzz/surface_registry.rb cover a strictly
-# wider shape x sink product than these cells do.
 
 module OwnershipSurfaceMatrix
   extend self
@@ -251,5 +248,65 @@ RSpec.describe "Ownership surface matrix" do
         end
       end
     end
+  end
+end
+
+# ---------------------------------------------------------------------------
+# RUNTIME lane (integration): every transpile-clean cell is RUN under the
+# testing allocator with its EXACT-VALUE assertions. Catches leaks, invalid
+# frees, crashes AND wrong results that compile-level checks cannot see.
+# Strict both directions against RUNTIME_KNOWN_FAILURES.
+# ---------------------------------------------------------------------------
+RSpec.describe "Ownership surface matrix (runtime)", :integration do
+  RUNTIME_KNOWN_FAILURES = {
+#__RUNTIME_REGISTER__
+  }.freeze
+
+  it "every transpile-clean cell matches the runtime register" do
+    require "open3"
+    require "tmpdir"
+    root = File.expand_path("../..", __dir__)
+    cells = OwnershipSurfaceMatrix.cells.reject { |c| OwnershipSurfaceMatrix.check(c) }
+    queue = Queue.new
+    cells.each { |c| queue << c }
+    results = Queue.new
+    8.times.map do
+      Thread.new do
+        while (cell = (queue.pop(true) rescue nil))
+          Dir.mktmpdir do |dir|
+            f = File.join(dir, "cell.clear")
+            File.write(f, cell.program)
+            out, _ = Open3.capture2e(File.join(root, "clear"), "test", f, chdir: root)
+            sig = if out =~ /All \d+ tests? passed/ && out !~ /leaked|Invalid free/
+              nil
+            else
+              (out[/ASSERT[^\n]*failed[^\n]*/i] ||
+               out[/leaked|Invalid free|Segmentation fault|panic[^\n]*/] ||
+               out[/error: [^\n]*/] || "?").to_s.strip[0, 55]
+            end
+            results << [cell.id, sig]
+          end
+        end
+      end
+    end.each(&:join)
+
+    seen = {}
+    until results.empty?
+      id, sig = results.pop
+      seen[id] = sig
+    end
+    diffs = []
+    cells.each do |cell|
+      sig = seen[cell.id]
+      expected = RUNTIME_KNOWN_FAILURES[cell.id]
+      if expected && sig.nil?
+        diffs << "#{cell.id}: now PASSES at runtime — remove it from RUNTIME_KNOWN_FAILURES"
+      elsif expected && sig != expected
+        diffs << "#{cell.id}: signature changed — expected #{expected.inspect}, got #{sig.inspect}"
+      elsif !expected && sig
+        diffs << "#{cell.id}: RUNTIME FAILURE — #{sig}"
+      end
+    end
+    expect(diffs).to be_empty, diffs.join("\n")
   end
 end

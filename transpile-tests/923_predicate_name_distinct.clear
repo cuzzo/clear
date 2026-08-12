@@ -1,0 +1,21 @@
+# CLEAR distinguishes `raw` from `raw?` the way Ruby does. The Zig name
+# mangling stripped the trailing mark, so the pair collapsed onto one
+# identifier -- a duplicate declaration when both exist (ast/type.clear has
+# type__raw and type__raw?), and a silent call to whichever won otherwise.
+
+STRUCT Shape { kind: String@symbol }
+
+PUB FN shape__raw(self: Shape) RETURNS String@symbol ->
+  RETURN self.kind;
+END
+
+PUB FN shape__raw?(self: Shape) RETURNS Bool ->
+  RETURN (self.kind == :raw);
+END
+
+FN main() RETURNS Void ->
+  s = Shape{ kind: :raw };
+  ASSERT shape__raw(s) == :raw, "value accessor";
+  ASSERT shape__raw?(s), "predicate";
+  print("ok");
+END

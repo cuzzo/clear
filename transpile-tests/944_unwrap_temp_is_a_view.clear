@@ -1,0 +1,18 @@
+STRUCT Inner { names: []String }
+
+FN maybe(flag: Bool) RETURNS ?Inner ->
+  IF flag THEN
+    MUTABLE ns: []String = List[];
+    &ns.append("x");
+    RETURN Inner{ names: ns };
+  END
+  RETURN NIL;
+END
+
+# `tmp.?` is a VIEW of a temp that already owns the value. Hoisting it into a
+# second owned binding gave the same heap parts two cleanups, which smashed the
+# allocator free list rather than failing anywhere near the unwrap.
+FN main() RETURNS Void ->
+  MUTABLE n = (UNWRAP (maybe(TRUE))).names.length();
+  ASSERT n == 1, "the unwrapped call result is intact";
+END

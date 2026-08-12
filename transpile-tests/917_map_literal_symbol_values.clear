@@ -1,0 +1,37 @@
+# A map literal whose values are all symbols inferred {String}String, dropping
+# @symbol. Its values then read as owned string slices: COPY deep-cloned them
+# into the enclosing frame, and returning that value failed the escape check
+# (FRAME_ALLOC_ESCAPES). List literals already preserve the element capability.
+
+STRUCT Fact { collection: String@symbol, soa: Bool }
+STRUCT ListLit { token: String, options: ?Fact }
+UNION Locatable { ListLit: ListLit }
+STRUCT Parser { pos: Int64 }
+
+PUB FN parser__lit(MUTABLE self: Parser, name: String) RETURNS !?Locatable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+  view.pos = (view.pos + 1_i64);
+  kinds = {"List": :list, "Pool": :pool};
+  collection = kinds[name]?;
+  MUTABLE node = ListLit{ token: COPY name, options: NIL };
+  node.options = Fact{ collection: COPY collection, soa: FALSE };
+  RETURN Locatable{ ListLit: COPY node };
+}
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE p = Parser{ pos: 0_i64 };
+  got: ?Locatable = TRY parser__lit(&p, "Pool");
+  PARTIAL MATCH UNWRAP got START
+    Locatable.ListLit AS lit -> ASSERT (UNWRAP lit.options).collection == :pool, "the symbol survives the escape";,
+    DEFAULT -> ASSERT FALSE, "expected a ListLit";
+  END
+
+  # An all-string map keeps the owned-value representation.
+  plain = {"a": "one", "b": "two"};
+  ASSERT UNWRAP (plain["b"]) == "two", "string-valued maps still own their values";
+
+  print("ok");
+END

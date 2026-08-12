@@ -1,0 +1,20 @@
+# A map literal owns its values, so a value has to live in the map's own
+# allocator. The list literal places its elements that way; the map literal
+# stored the @rodata pointer of a string literal directly, so the map's
+# cleanup freed read-only memory ("Invalid free" at runtime).
+
+FN note(fields: {String@symbol}String) RETURNS Int64 ->
+  RETURN fields.length();
+END
+
+FN main() RETURNS Void ->
+  item = "a";
+  # Map literal bound to a local: values must live in the map's allocator.
+  m: {String@symbol}String = {:name: "a"};
+  ASSERT note(m) == 1_i64, "one entry";
+
+  # ... and the same literal passed straight as an argument.
+  ASSERT note({:name: "a", :kind: "dup"}) == 2_i64, "two entries";
+  ASSERT note({:name: COPY item, :kind: "dup"}) == 2_i64, "mixed owned and literal";
+  print("ok");
+END

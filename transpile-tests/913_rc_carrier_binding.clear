@@ -1,0 +1,34 @@
+# Declaring an Rc/Arc binding from a plain value was broken four ways: the
+# value was cast to the carrier type before the wrap (@as(Rc(T), plain)), the
+# wrap was spelled against an optional payload (Rc(?T) instead of ?Rc(T)), a
+# borrowed payload was moved into the handle instead of copied, and the
+# handle got no release because the lifecycle plan read the payload's borrow
+# provenance (ALLOC_WITHOUT_CLEANUP).
+
+PUB STRUCT Sig { name: String }
+PUB UNION Holder { Sig: Sig, Count: Int64 }
+
+# The plain case: a declared carrier builds a handle around an owned value.
+FN wrap_plain() RETURNS Int64 ->
+  s = Sig{ name: "plain" };
+  MUTABLE out: Sig@multiowned = s;
+  RETURN out.name.length();
+END
+
+# The parser's shape: the payload is BORROWED out of a union, and the declared
+# carrier is optional -- `?Sig@multiowned` is `?Rc(Sig)`, not `Rc(?Sig)`.
+PUB FN unwrap(x: ?Holder) RETURNS ?Sig@multiowned ->
+  IF x? IS_A Sig AS sig THEN
+    MUTABLE out: ?Sig@multiowned = sig;
+    RETURN out;
+  END
+  RETURN NIL;
+END
+
+FN main() RETURNS Void ->
+  ASSERT wrap_plain() == 5_i64, "plain carrier";
+  h = Holder{ Sig: Sig{ name: "f" } };
+  got: ?Sig@multiowned = unwrap(h);
+  ASSERT got EXISTS, "unwrapped";
+  print("ok");
+END

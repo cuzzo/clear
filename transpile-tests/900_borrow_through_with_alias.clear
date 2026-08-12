@@ -1,0 +1,48 @@
+# RETURNS self:T lets an accessor hand back a borrow scoped to its receiver.
+# Reading through a WITH POLYMORPHIC alias must be accepted: the alias is
+# already a scoped borrow of its source. This failed with
+# MUTABLE_PARAM_NEEDS_RESTRICT on any call through the alias.
+
+STRUCT Cursor { items: []Int64, pos: Int64 }
+
+PUB FN cursor__at(self: Cursor) RETURNS self: Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS view {
+    RETURN UNWRAP (view.items[view.pos]);
+}
+END
+
+PUB FN is_zero(v: Int64) RETURNS Bool ->
+  RETURN (v == 0_i64);
+END
+
+PUB FN cursor__has_more(self: Cursor) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS view {
+    RETURN (view.pos < 3_i64);
+}
+END
+
+PUB FN cursor__advance(MUTABLE self: Cursor) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+    # first statement of the block, borrow nested in an argument inside AND
+    IF (cursor__has_more(view) AND is_zero(cursor__at(view))) THEN
+      view.pos = (view.pos + 1_i64);
+      RETURN 0_i64;
+    END
+    MUTABLE held = COPY cursor__at(view);
+    view.pos = (view.pos + 1_i64);
+    RETURN held;
+}
+END
+
+FN main() RETURNS Void ->
+  MUTABLE c = Cursor{ items: [0_i64, 5_i64, 0_i64], pos: 0_i64 };
+  ASSERT cursor__advance(&c) == 0_i64, "first is zero";
+  ASSERT cursor__advance(&c) == 5_i64, "second is five";
+  print("ok");
+END

@@ -1,0 +1,15 @@
+# `${n}` desugars to `$+`. A number has no bit-level coercion to a string, so
+# a stamped String coercion could only emit `@as([]const u8, n)`. The rendering
+# is explicit; interpolation of the rendered string is what works.
+
+STRUCT Tok { line: Int64 }
+
+FN main() RETURNS Void ->
+  t = Tok{ line: 42 };
+  loc = " (line ${t.line.toString()})";
+  ASSERT loc == " (line 42)", "the rendered number interpolates";
+  n: Int64 = 7;
+  label = "n=" $+ n.toString();
+  ASSERT label == "n=7", "explicit concat renders the same way";
+  print("ok");
+END

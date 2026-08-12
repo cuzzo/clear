@@ -1,0 +1,22 @@
+# COPY into a @boxed field duplicates the PAYLOAD: the box itself is made by
+# the placement step. Typing the copy `?*T` told dupeValue the value was
+# already a pointer.
+
+STRUCT Leaf { n: Int64 }
+STRUCT Wrap { value: ?Node@boxed }
+UNION Node { Leaf: Leaf, Wrap: Wrap }
+
+FN build(inner: Node) RETURNS Wrap ->
+  RETURN Wrap{ value: COPY inner };
+END
+
+FN build_empty() RETURNS Wrap ->
+  RETURN Wrap{ value: NIL };
+END
+
+FN main() RETURNS Void ->
+  w = build(Node{ Leaf: Leaf{ n: 7 } });
+  ASSERT w.value != NIL, "the copied payload is boxed into the field";
+  ASSERT build_empty().value == NIL, "an absent boxed optional stays absent";
+  print("ok");
+END

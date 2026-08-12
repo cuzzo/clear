@@ -459,7 +459,7 @@ RSpec.describe "String@symbol" do
       expect(zig.index("const __clear_symbol_0")).to be < zig.index("pub fn label")
     end
 
-    it "emits symbol == symbol comparison as pointer+length check" do
+    it "emits symbol == symbol comparison as an interning-agnostic equality" do
       zig = compile_symbol_src(<<~CLEAR)
         FN main() RETURNS Void ->
           a = :foo;
@@ -468,15 +468,15 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      # symbolEql expands to pointer+length comparison, not CheatLib.eql
-      expect(zig).to include(".ptr ==")
-      expect(zig).to include(".len ==")
+      # Pooled literals and runtime intern-table handles never share a pointer,
+      # so symbolEql keeps the pointer fast path inside CheatLib.eql rather
+      # than comparing identity alone.
+      expect(zig).to include("CheatLib.eql(a, b)")
       expect(zig).to include("const a: []const u8 = __clear_symbol_0;")
       expect(zig).to include("const b: []const u8 = __clear_symbol_0;")
-      expect(zig).not_to include("CheatLib.eql")
     end
 
-    it "emits != between symbols as negated pointer check" do
+    it "emits != between symbols as a negated equality" do
       zig = compile_symbol_src(<<~CLEAR)
         FN main() RETURNS Void ->
           a = :foo;
@@ -485,7 +485,7 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      expect(zig).to include(".ptr ==")
+      expect(zig).to include("!CheatLib.eql(a, b)")
     end
 
     it "emits ASSERT with symbol comparison" do

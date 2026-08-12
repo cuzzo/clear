@@ -13,4 +13,10 @@ FN main() RETURNS Void ->
 
   dist = distance_sq(3, 4);
   ASSERT dist == 25;
+
+  ASSERT tag_weight(1) == 2;
+
+  # The union crosses two package boundaries: declared in math, matched in
+  # geometry, constructed here.
+  ASSERT shape_size(circle(7)) == 7;
 END

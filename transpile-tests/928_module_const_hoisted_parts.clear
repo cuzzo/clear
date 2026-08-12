@@ -1,0 +1,39 @@
+# A module-level CONST table built from calls has each element hoisted to a
+# temp. Those temps have nowhere to live at container scope, so the emitted
+# Zig referenced undeclared names:
+#
+#   const RULES = [2]Rule{ __tmp_3, __tmp_5 };
+#
+# The initializer looks non-allocating by the time the CONST path sees it --
+# the allocation moved into the pending temps -- so it has to check for them
+# and take the runtime-init prologue.
+
+STRUCT Rule { name: String, kind: Int64 }
+
+PUB FN rule(name: String, kind: Int64) RETURNS Rule ->
+  RETURN Rule{ name: COPY name, kind: kind };
+END
+
+CONST RULES: [2]Rule = [rule("a", 1_i64), rule("b", 2_i64)];
+
+PUB FN first_name() RETURNS String ->
+  RETURN COPY RULES[0].name;
+END
+
+PUB FN second_kind() RETURNS Int64 ->
+  RETURN RULES[1].kind;
+END
+
+# A module-level MUTABLE global has the same container-scope problem.
+MUTABLE defaults: [2]Rule = [rule("x", 9_i64), rule("y", 8_i64)];
+
+PUB FN default_name() RETURNS String ->
+  RETURN COPY defaults[0].name;
+END
+
+FN main() RETURNS Void ->
+  ASSERT first_name() == "a", "the table initialized before first use";
+  ASSERT second_kind() == 2_i64, "and every element landed";
+  ASSERT default_name() == "x", "a mutable global table initializes too";
+  print("ok");
+END

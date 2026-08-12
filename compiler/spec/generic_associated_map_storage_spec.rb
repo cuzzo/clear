@@ -55,7 +55,10 @@ RSpec.describe "generic associated-key map storage" do
       END
     CLEAR
 
-    expect(zig).to include("ProjectionBox(Store(i64)){ .latest = @as(?i64, null) }")
+    expect(zig).to include("ProjectionBox(Store(i64)){ .latest = null }")
+    # The projection stays generic in the definition and resolves per
+    # specialization; the literal above names the specialization.
+    expect(zig).to include("latest: ?__clearProtocolFacts_Identity(S).Value,")
   end
 
   it "does not misreport mutable generic calls as unused synchronization" do

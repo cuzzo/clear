@@ -1,0 +1,15 @@
+# A binding initialized from a frame-placed element view (`list[i] OR_ELSE ""`)
+# inherits a cleanup recipe from the init expression. That recipe named the
+# heap allocator while the AllocMark named :frame, so the binding had two
+# allocators (ALLOC_CLEANUP_MISMATCH). One binding, one allocator.
+
+FN line_at(source: String, index: Int64) RETURNS Int64 ->
+  line_text = (source.split("\n")[index] OR_ELSE "");
+  RETURN line_text.length();
+END
+
+FN main() RETURNS Void ->
+  ASSERT line_at("ab\ncde", 1) == 3_i64, "second line";
+  ASSERT line_at("ab\ncde", 7) == 0_i64, "missing line";
+  print("ok");
+END

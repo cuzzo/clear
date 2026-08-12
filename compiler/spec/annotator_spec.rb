@@ -4090,7 +4090,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect(out).to include("__hm.put(__clear_heap_alloc, __clear_heap_alloc")
+        expect(out).to match(/__hm_\d+\.put\(__clear_heap_alloc, __clear_heap_alloc/)
         expect(out).to include('"a"')
         expect(out).to include('"b"')
       end

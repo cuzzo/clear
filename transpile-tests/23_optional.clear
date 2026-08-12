@@ -13,5 +13,25 @@ FN main() RETURNS Void ->
     END
 
     ASSERT result == 1, "Conditional on optional should work";
+
+    # Two optionals compare like Rust's Option, Swift's Optional and Kotlin's
+    # nullable: both absent is equal, one absent is not, both present compares
+    # the payloads.
+    other_num: ?Int64 = 42;
+    also_empty: ?Int64 = NIL;
+    ASSERT maybe_num == other_num, "present optionals with equal payloads are equal";
+    ASSERT maybe_num != empty, "a present optional never equals an absent one";
+    ASSERT empty == also_empty, "two absent optionals are equal";
+    ASSERT !(empty != also_empty), "two absent optionals are not unequal";
+
+    # Strings take the content-comparison path rather than Zig's ==.
+    word: ?String = "clear";
+    same_word: ?String = "clear";
+    other_word: ?String = "zig";
+    no_word: ?String = NIL;
+    ASSERT word == same_word, "present string optionals compare by content";
+    ASSERT word != other_word, "different string payloads are unequal";
+    ASSERT word != no_word, "a present string never equals an absent one";
+    ASSERT no_word == NIL, "an absent optional still compares against NIL";
     RETURN;
 END

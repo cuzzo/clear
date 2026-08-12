@@ -1,0 +1,25 @@
+# An EACH body that allocates frame transients each turn needs the loop's
+# per-iteration arena rewind -- the one a SELECT element already gets. The
+# EACH lowerer built its ForStmt without it, so the arena grew for the whole
+# loop and the checker rejected the body's iteration-scoped allocations
+# (FRAME_NO_REWIND).
+
+FN summarize(items: []String, MUTABLE out: {String}String) RETURNS Int64
+  REQUIRES out: LOCAL
+->
+WITH POLYMORPHIC out AS MUTABLE view {
+    items |> EACH {
+      parts: []String = List[COPY _];
+      first: String = COPY UNWRAP (parts[0_i64]);
+      view[COPY _] = first;
+    };
+    RETURN view.length();
+}
+END
+
+FN main() RETURNS Void ->
+  src: []String = List["a", "b"];
+  MUTABLE m: {String}String = {};
+  ASSERT summarize(src, &m) == 2_i64, "two";
+  print("ok");
+END

@@ -1,0 +1,27 @@
+STRUCT Field { names: []String }
+
+FN make_field(label: String) RETURNS Field ->
+  MUTABLE ns: []String = List[];
+  &ns.append(COPY label);
+  RETURN Field{ names: ns };
+END
+
+FN collect(count: Int64) RETURNS Tuple<Int64, []Field> ->
+  MUTABLE items: []Field = List[];
+  MUTABLE i = 0_i64;
+  WHILE (i < count) DO
+    &items.append(make_field("f"));
+    i = (i + 1);
+  END
+  RETURN Tuple{count, items};
+END
+
+# Destructuring into an ALREADY DECLARED binding: the target keeps the frame
+# allocation its empty-literal initialiser chose, and it brings its own
+# cleanup, so the temp the tuple arrived in must hand ownership over.
+FN main() RETURNS Void ->
+  MUTABLE fields: []Field = List[];
+  _, fields = collect(2);
+  ASSERT fields.length() == 2, "the destructured list survives its frame";
+  ASSERT (UNWRAP ((UNWRAP (fields[0])).names[0])) == "f", "its elements are intact";
+END

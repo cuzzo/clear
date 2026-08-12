@@ -1,0 +1,38 @@
+# A function returning a union whose variants NAME structs owning heap fields
+# returns an owned value. call_owned_return? asked variant_has_heap?, which
+# only sees a bare heap pointer in the variant slot, and returned false -- so
+# reassigning an optional from that call had no ownership operand at all
+# (OWNERSHIP_CONSUMPTION_OPERAND_MISSING on the ReassignWithCleanup).
+
+STRUCT Lit { text: String }
+STRUCT Other { n: Int64 }
+UNION Locatable { Lit: Lit, Other: Other }
+STRUCT Parser { pos: Int64 }
+
+PUB FN parser__expr(MUTABLE self: Parser) RETURNS !Locatable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+  view.pos = (view.pos + 1_i64);
+  RETURN Locatable{ Lit: COPY Lit{ text: COPY "e" } };
+}
+END
+
+PUB FN parser__cap(MUTABLE self: Parser, has_guard: Bool) RETURNS !?Locatable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+  MUTABLE guard_expr: ?Locatable = NIL;
+  IF has_guard THEN
+    guard_expr = TRY (parser__expr(&view));
+  END
+  RETURN guard_expr;
+}
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE p = Parser{ pos: 0_i64 };
+  g: ?Locatable = TRY parser__cap(&p, TRUE);
+  ASSERT g != NIL, "guard parsed";
+  print("ok");
+END

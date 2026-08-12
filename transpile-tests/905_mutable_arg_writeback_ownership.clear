@@ -1,0 +1,29 @@
+# COPY through a borrow must deep-copy what the pointee owns, and a MUTABLE
+# param whose argument is a temporary must write back into the binding that
+# owns it. Both were wrong here: `COPY item` on a MATCH payload bit-copied
+# (aliasing the String), and the temp was copied into a separate mutable slot
+# whose value nobody freed -- one leak plus a double free.
+
+STRUCT Alpha { file: ?String, name: String }
+STRUCT Beta { count: Int64 }
+UNION Item { Alpha: Alpha, Beta: Beta }
+
+FN stamp(MUTABLE node: Item, src: ?String) RETURNS Item ->
+  MATCH node START
+    Item.Alpha AS item ->
+      MUTABLE item_mutable = COPY item;
+      item_mutable.file = COPY src;
+      node = Item{ Alpha: item_mutable };,
+    Item.Beta AS item ->
+      PASS
+  END
+  RETURN node;
+END
+
+FN main() RETURNS Void ->
+  out = stamp(Item{ Alpha: Alpha{ file: NIL, name: "a" } }, "x");
+  IF out IS_A Alpha AS a THEN
+    ASSERT UNWRAP (a.file) == "x", "stamped";
+  END
+  print("ok");
+END
