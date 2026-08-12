@@ -719,6 +719,7 @@ pub fn build(b: *std.Build) void {
         "scheduler-benchmark-test.zig",
         "parking-lot-benchmark-test.zig",
         "versioned-benchmark-test.zig",
+        "symbol-intern-benchmark-test.zig",
         "experimental/freeze_bench.zig",
     };
 
