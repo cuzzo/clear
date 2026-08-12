@@ -74,6 +74,17 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
         fn retire(self: *Self, slice: []u8) void {
             if (!is_debug) return;
             if (self.retired_len == retired_capacity) {
+                // Say so once. A safety check that quietly stops checking is
+                // worse than one that was never there: the build still looks
+                // covered, and every foreign free after this point is accepted.
+                if (!self.retired_overflowed) {
+                    std.debug.print(
+                        "\n[CLEAR] frame free check disabled for this arena: " ++
+                            "retired-block history exceeded {d} entries.\n" ++
+                            "        Foreign frees are no longer detected here.\n",
+                        .{retired_capacity},
+                    );
+                }
                 self.retired_overflowed = true;
                 return;
             }
