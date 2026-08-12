@@ -1182,7 +1182,7 @@ module MIRLoweringFunctions
     # distinct handle type. TAKES receives an owned COPY instead -- the callee
     # frees its parameter, and interned bytes are nobody's to free. Skipped
     # for MONOMORPHIC params, which thread the caller's carrier unchanged.
-    if ti&.symbol? && callee_param_type.string? && !callee_param_type.symbol? &&
+    if ti&.symbol? && callee_param_type.byte_string? &&
        callee_param&.carrier_contract != :monomorphic
       widened = MIR::FieldGet.new(arg, "bytes")
       return callee_param&.takes ? MIR::DupeSlice.new(widened, :heap) : widened

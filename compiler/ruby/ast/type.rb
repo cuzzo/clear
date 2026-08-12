@@ -3014,6 +3014,15 @@ class Type
     sync == :raw
   end
 
+  # A String-typed slot that renders as bytes ([]const u8) rather than as the
+  # interned Symbol handle. This is the target every symbol-widening site
+  # tests for; naming it once keeps the three coercion boundaries (CAST,
+  # placement, call arguments) from each re-spelling the pair.
+  sig { returns(T::Boolean) }
+  def byte_string?
+    string? && !symbol?
+  end
+
   sig { returns(T::Boolean) }
   def symbol?
     sync == :symbol

@@ -653,7 +653,7 @@ class MIRLowering
     # decides HOW the value is stored; this decides WHAT is stored, and only
     # the source type can answer it.
     dst = dest_type.is_a?(Type) ? dest_type : (dest_type ? Type.new(dest_type) : nil)
-    return placed unless dst&.string? && !dst.symbol?
+    return placed unless dst&.byte_string?
 
     widen_symbol_to_bytes(placed, ast_node)
   end
@@ -4424,7 +4424,7 @@ class MIRLowering
     # not the rendered Zig string's: semantic decisions in lowering come from
     # Type stamps (INV-7 territory), and two types may render alike.
     cast_target = Type.new(node.target)
-    if cast_target.string? && !cast_target.symbol? && !cast_target.optional?
+    if cast_target.byte_string? && !cast_target.optional?
       widened = widen_symbol_to_bytes(inner, node.value)
       return widened unless widened.equal?(inner)
     end
