@@ -4045,19 +4045,30 @@ class MIRLowering
     end
 
     methods = T.let([], T::Array[MIR::FnDef])
-    if drop_statements.any?
-      drop_statements.unshift(MIR::Suppress.new("alloc"))
-      methods << MIR::FnDef.new(
-        "__clear_drop",
-        [MIR::Param.new("self", "*@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
-        "void",
-        drop_statements,
-        :pub,
-        false,
-        [],
-      )
-    end
-    if clone_fields.any? && !copy_forbidden
+    # Emitted even when no field owns anything. `__clear_drop` is the type's
+    # ownership contract, and cleanup consults it BEFORE falling back to
+    # representation-driven reflection -- which cannot tell an owned String from
+    # a `String@symbol`, a `@rodata` literal, or a borrow, since all four are
+    # []const u8, and frees the static behind the last three. A struct that owns
+    # nothing has to say so rather than say nothing.
+    drop_statements.unshift(MIR::Suppress.new("alloc"))
+    drop_statements.unshift(MIR::Suppress.new("self")) if drop_statements.length == 1
+    methods << MIR::FnDef.new(
+      "__clear_drop",
+      [MIR::Param.new("self", "*@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+      "void",
+      drop_statements,
+      :pub,
+      false,
+      [],
+    )
+    # Drop and clone are ONE contract: the runtime reads drop-without-clone as
+    # "linear" and rejects the copy, so a copyable struct carries both.
+    unless copy_forbidden
+      # A struct with nothing to clone never writes to `result`, and Zig rejects
+      # a `var` that is never mutated.
+      clone_statements[0] = MIR::Let.new("result", self_ref, clone_fields.any?, nil, nil, nil)
+      clone_statements.unshift(MIR::Suppress.new("alloc"))
       clone_statements << MIR::ReturnStmt.new(MIR::Ident.new("result"))
       methods << MIR::FnDef.new(
         "__clear_clone",
