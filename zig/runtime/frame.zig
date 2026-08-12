@@ -18,9 +18,6 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
         const MIN_PAGE_SIZE = 4 * 1024;
         const MAX_PAGE_SIZE = 256 * 1024;
 
-        const Range = struct { base: usize, len: usize };
-        const retired_capacity = 128;
-
         const LargeObject = struct {
             slice: []u8,
             alignment: std.mem.Alignment,
@@ -52,10 +49,16 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
         // detached fiber's) would leak a growable list, and blocks grow
         // geometrically so the count stays small. If it ever wraps we stop
         // answering, rather than answer wrongly.
-        retired: if (is_debug) [retired_capacity]Range else void =
-            if (is_debug) @splat(.{ .base = 0, .len = 0 }) else {},
-        retired_len: if (is_debug) usize else void = if (is_debug) 0 else {},
-        retired_overflowed: if (is_debug) bool else void = if (is_debug) false else {},
+        // An envelope, not exact ranges: the check exists to catch frees of
+        // .rodata, interned symbols, and container-owned storage, none of
+        // which lives anywhere near this arena's heap blocks, so a coarse
+        // [lo, hi) loses essentially no real detection. What it buys is
+        // decisive -- a fixed 16 bytes. Runtime embeds this arena by value and
+        // a fiber keeps its Runtime ON THE FIBER STACK; an exact-range table
+        // grew that by 2 KB and overflowed 16 KB fiber stacks straight into
+        // the neighboring stack slab.
+        retired_lo: if (is_debug) usize else void = if (is_debug) std.math.maxInt(usize) else {},
+        retired_hi: if (is_debug) usize else void = if (is_debug) 0 else {},
 
         pub fn init(child_allocator: std.mem.Allocator, static_block: []u8) Self {
             return .{
@@ -73,33 +76,15 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
         /// unrelated -- or never.
         fn retire(self: *Self, slice: []u8) void {
             if (!is_debug) return;
-            if (self.retired_len == retired_capacity) {
-                // Say so once. A safety check that quietly stops checking is
-                // worse than one that was never there: the build still looks
-                // covered, and every foreign free after this point is accepted.
-                if (!self.retired_overflowed) {
-                    std.debug.print(
-                        "\n[CLEAR] frame free check disabled for this arena: " ++
-                            "retired-block history exceeded {d} entries.\n" ++
-                            "        Foreign frees are no longer detected here.\n",
-                        .{retired_capacity},
-                    );
-                }
-                self.retired_overflowed = true;
-                return;
-            }
-            self.retired[self.retired_len] = .{ .base = @intFromPtr(slice.ptr), .len = slice.len };
-            self.retired_len += 1;
+            const base = @intFromPtr(slice.ptr);
+            self.retired_lo = @min(self.retired_lo, base);
+            self.retired_hi = @max(self.retired_hi, base + slice.len);
         }
 
         pub fn owns(self: *Self, ptr: [*]u8) bool {
             const addr = @intFromPtr(ptr);
             if (is_debug) {
-                // History is incomplete, so "not found" proves nothing.
-                if (self.retired_overflowed) return true;
-                for (self.retired[0..self.retired_len]) |r| {
-                    if (addr >= r.base and addr < r.base + r.len) return true;
-                }
+                if (addr >= self.retired_lo and addr < self.retired_hi) return true;
             }
             if (self.static_block.len > 0) {
                 const base = @intFromPtr(self.static_block.ptr);
