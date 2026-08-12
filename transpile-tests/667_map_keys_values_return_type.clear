@@ -5,7 +5,10 @@
 # comparison then rejected `RETURN k;` with a RETURN_MISMATCH whose two
 # sides printed identically.
 
-FN codes(diagnostics: {String@symbol}Int64) RETURNS []String@symbol ->
+# keys() returns the map's OWN keys -- duplicated on insert, freed at deinit --
+# so they are owned Strings even though lookups use interned symbol handles.
+# `String@symbol` is a distinct type now, and it would be a lie here.
+FN codes(diagnostics: {String@symbol}Int64) RETURNS []String ->
   k = diagnostics.keys();
   RETURN k;
 END

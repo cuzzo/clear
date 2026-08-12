@@ -2278,8 +2278,8 @@ pub const CheatLib = struct {
     // schedulers/threads.
 
     // String Equality (Content check)
-    pub fn strEql(s1: []const u8, s2: []const u8) bool {
-        return std.mem.eql(u8, s1, s2);
+    pub fn strEql(s1: anytype, s2: anytype) bool {
+        return std.mem.eql(u8, bytesOf(s1), bytesOf(s2));
     }
 
     // Lexicographic string comparison. Returns -1, 0, or 1.
@@ -2296,6 +2296,8 @@ pub const CheatLib = struct {
     pub fn eql(a: anytype, b: @TypeOf(a)) bool {
         const T = @TypeOf(a);
         const info = @typeInfo(T);
+
+        if (T == Symbol) return a.eqlSymbol(b);
 
         // For slices (like strings), use mem.eql
         if (info == .pointer and info.pointer.size == .slice) {
@@ -3767,6 +3769,53 @@ pub const CheatLib = struct {
             const result = @call(.auto, body, .{@constCast(inner)} ++ args);
             if (comptime @typeInfo(@TypeOf(result)) == .error_union) try result;
         }
+    }
+
+    /// An interned string: a `:literal` points at .rodata, `symbol(str)` points
+    /// into the Runtime's pool. Either way the bytes outlive every handle and
+    /// belong to nobody, so a Symbol is Copy and dropping one is a no-op.
+    ///
+    /// Keeping it distinct from []const u8 is the whole point. The two are
+    /// identical in representation, so while a symbol was spelled []const u8
+    /// nothing downstream could tell it from an owned String -- a collection of
+    /// symbols freed its elements and handed .rodata to the allocator. Only the
+    /// type can carry that fact.
+    pub const Symbol = struct {
+        bytes: []const u8,
+
+        pub fn __clear_drop(self: *@This(), alloc: std.mem.Allocator) void {
+            _ = self;
+            _ = alloc;
+        }
+
+        pub fn __clear_clone(self: @This(), alloc: std.mem.Allocator) !@This() {
+            _ = alloc;
+            return self;
+        }
+
+        /// Interning makes identity pointer identity, so that is the fast path.
+        /// It is not sufficient alone: `:alpha` in two modules is two rodata
+        /// constants, and a pooled symbol is a third address for the same name.
+        pub fn eqlSymbol(self: @This(), other: @This()) bool {
+            if (self.bytes.ptr == other.bytes.ptr) return true;
+            return std.mem.eql(u8, self.bytes, other.bytes);
+        }
+    };
+
+    /// The bytes behind a String or a Symbol. Widening a symbol to a string is
+    /// always safe -- it is a borrow of interned storage -- so the conversion
+    /// resolves at comptime instead of at every call site.
+    pub inline fn bytesOf(value: anytype) []const u8 {
+        const T = @TypeOf(value);
+        if (comptime T == Symbol) return value.bytes;
+        return value;
+    }
+
+    /// Wrap interned bytes as a Symbol. A helper rather than a struct literal
+    /// because the stdlib zig templates substitute `{0}`-style holes and do not
+    /// escape braces.
+    pub inline fn symbolOf(bytes: []const u8) Symbol {
+        return .{ .bytes = bytes };
     }
 
     /// Unified comptime cleanup for any CLEAR type.

@@ -2010,7 +2010,9 @@ class MIREmitter
     end
     lines << "// Static String@symbol literal pool." unless @symbol_literals.empty?
     @symbol_literals.each do |value, name|
-      lines << "const #{name}: []const u8 = #{zig_byte_string_literal(value)};"
+      # A symbol constant is a Symbol, not a slice: that is what keeps cleanup
+      # from mistaking the .rodata behind it for an owned String.
+      lines << "const #{name}: CheatLib.Symbol = .{ .bytes = #{zig_byte_string_literal(value)} };"
     end
     lines.join("\n")
   end

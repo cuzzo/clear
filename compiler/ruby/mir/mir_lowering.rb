@@ -648,7 +648,14 @@ class MIRLowering
   sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: T.nilable(Symbol), dest_type: T.nilable(Type::TypeInput)).returns(MIR::Node) }
   def place_value_for_destination(mir, ast_node, dest_alloc, dest_type = nil)
     plan = destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
-    plan.place(self, mir, ast_node)
+    placed = plan.place(self, mir, ast_node)
+    # A symbol reaching a String destination widens to its bytes. Placement
+    # decides HOW the value is stored; this decides WHAT is stored, and only
+    # the source type can answer it.
+    dst = dest_type.is_a?(Type) ? dest_type : (dest_type ? Type.new(dest_type) : nil)
+    return placed unless dst&.string? && !dst.symbol?
+
+    widen_symbol_to_bytes(placed, ast_node)
   end
 
   sig { params(value: MIR::Node, shape: AsyncResultShape).returns(MIR::Node) }
@@ -1117,6 +1124,20 @@ class MIRLowering
     else
       place_string_value_for_heap_destination(mir, ast_node)
     end
+  end
+
+  # Widen a `String@symbol` to the bytes behind it. A Symbol is an interned
+  # handle with its own Zig type, so copying one into an owned String has to
+  # read `.bytes` first -- this is the borrow that widening always was, made
+  # explicit now that the two types are distinct.
+  sig { params(mir: MIR::Node, source_node: T.nilable(AST::Node)).returns(MIR::Node) }
+  def widen_symbol_to_bytes(mir, source_node)
+    return mir unless source_node
+
+    ti = Type.from_node!(source_node, context: "symbol widening") rescue nil
+    return mir unless ti&.symbol?
+
+    MIR::FieldGet.new(mir, "bytes")
   end
 
   sig { params(mir: MIR::Node, dst_ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
@@ -4410,6 +4431,14 @@ class MIRLowering
     return inner if Hoist.noreturn_value?(node.value)
 
     target_type = transpile_type(node.target)
+
+    # `CAST(sym AS String)` IS the widening from an interned handle to the
+    # bytes behind it -- not a coercion Zig can do, now that Symbol is its own
+    # type. Read the field instead of casting.
+    if target_type == "[]const u8"
+      widened = widen_symbol_to_bytes(inner, node.value)
+      return widened unless widened.equal?(inner)
+    end
 
     # Int -> enum: emit `@enumFromInt(value)` instead of `@as(EnumT, value)`.
     # Modern Zig rejects `@as(EnumT, intExpr)` (type coercion is enum-from-

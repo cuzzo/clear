@@ -23,16 +23,11 @@
 # A cell that frees a static or a borrow shows up as an arena free check panic,
 # a double free, or a leak; one that drops a cleanup it owed shows up as a leak.
 
-# `symbol` is deliberately NOT an axis yet. Whether a `String@symbol` element
-# inside an owning container is the container's to free is undecided in the
-# language today, and the compiler currently answers three different ways:
-# placement keeps symbols un-duped (destination_placement_plan), a container's
-# cleanup frees its elements uniformly, and `keys()` dupes symbol keys. This
-# matrix drove a list of symbols into a free of .rodata; encoding either answer
-# here would freeze a semantic that has not been chosen. See the note in
-# docs/agents/ownership-cleanup-retrospective.md.
+# `symbol` is an axis again: a `String@symbol` is now CheatLib.Symbol, a
+# distinct type whose drop is a no-op, so "is this element the container's to
+# free" has one answer everywhere instead of three.
 PROVENANCE_ROUND_TRIP_CELLS = []
-%i[owned rodata].each do |provenance|
+%i[owned rodata symbol].each do |provenance|
   %i[map list struct_field optional].each do |container|
     %i[bind_drop return_it reread].each do |exit_shape|
       PROVENANCE_ROUND_TRIP_CELLS << {
@@ -54,6 +49,7 @@ FuzzGenerator.register(:provenance_round_trip_matrix, cells: PROVENANCE_ROUND_TR
   # COPY, so nothing was allocated and nothing may be freed. The provenance is
   # the value's history, not a spelling on the type.
   when :rodata then ["String", '"alpha"', '"alpha"']
+  when :symbol then ["String@symbol", ':alpha', ':alpha']
   end
 
   # Build the container and the expression that reads one value back out.

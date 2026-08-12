@@ -5558,11 +5558,10 @@ class Type
       return "CheatLib.NumericMapType(#{numeric_key_zig}, #{val_zig})"
     end
 
-    # Interned symbols are intern-table handles the map never owns; the
-    # owned-value StringMap would free them on overwrite and at deinit
-    # (misaligned free of intern-table storage).
-    return "CheatLib.InternedValueStringMap()" if value_type.symbol?
-
+    # A symbol value needs no special map: CheatLib.Symbol's drop is a no-op,
+    # so the ordinary owned-value StringMap leaves intern-table storage alone.
+    # The old InternedValueStringMap existed because a symbol was spelled
+    # []const u8 and the map could not tell it from an owned String.
     "CheatLib.StringMap(#{val_zig})"
   end
 
@@ -5677,6 +5676,11 @@ class Type
       return signed_integer? ? "isize" : "usize"
     end
     if resolved == :String || string?
+      # An interned symbol is represented exactly like a String and owned by
+      # nobody. Spelling both []const u8 left every downstream consumer --
+      # cleanup above all -- unable to tell them apart.
+      return "CheatLib.Symbol" if symbol?
+
       return "[]const u8"
     end
 
@@ -5709,10 +5713,8 @@ class Type
     # 3d. Handle @set collection
     if set_collection?
       elem = T.must(element_type)
-      # Interned symbols are rodata/intern-table handles the set never
-      # owns; the owned-string Set would free them on duplicate insert
-      # and at deinit (misaligned free of rodata).
-      return "CheatLib.InternedStringSet()" if elem.symbol?
+      # Same for a set of symbols: Symbol drops to nothing, so the ordinary
+      # Set is correct without a separate interned representation.
       base_zig = elem.nested_zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Set(#{base_zig})"
     end

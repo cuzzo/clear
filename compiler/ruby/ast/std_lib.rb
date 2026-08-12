@@ -24,7 +24,10 @@ STD_LIB = T.let({
   "symbol" => {
     args: [STRING_TYPE],
     return: {type: STRING_TYPE, sync: :symbol},
-    zig: "try {rt}.internSymbol({0})",
+    # Wrapped, because a Symbol is a distinct type from the []const u8 the
+    # intern table hands back -- that distinction is what stops cleanup from
+    # treating an intern-table handle as an owned String.
+    zig: "CheatLib.symbolOf(try {rt}.internSymbol({0}))",
     bc: false,
     allocates: true,
     needs_rt: true,

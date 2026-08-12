@@ -130,6 +130,11 @@ class FunctionReturn
       element_list(value)
     when Kind::KeyList
       key = T.must(receiver).key_type
+      # keys() hands back the map's OWN keys, which it duplicated on insert and
+      # frees at deinit -- owned Strings, even when lookups are spelled with
+      # interned `String@symbol` handles. A Symbol is a handle nobody owns, so
+      # claiming one here would label map-owned bytes as immortal.
+      key = Type.new(:String) if key.symbol?
       element_list(key)
     when Kind::Infer
       resolve_infer(args)
