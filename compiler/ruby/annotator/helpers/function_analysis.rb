@@ -42,7 +42,7 @@ module FunctionAnalysis
     def explicit_mutable_argument?(index)
       method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
       if method_node && args.length == method_node.args.length + 1
-        concrete_method = method_node
+        concrete_method = T.must(method_node)
         return concrete_method.explicit_mutable_receiver? if index == 0
         return concrete_method.explicit_mutable_argument?(index - 1)
       end
@@ -58,7 +58,7 @@ module FunctionAnalysis
     def explicit_mutable_argument_token(index)
       method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
       if method_node && args.length == method_node.args.length + 1
-        concrete_method = method_node
+        concrete_method = T.must(method_node)
         return concrete_method.explicit_mutable_receiver_token_value if index == 0
         return concrete_method.explicit_mutable_argument_token(index - 1)
       end
@@ -196,11 +196,30 @@ module FunctionAnalysis
     return_type
   end
 
+  # The root scope also holds imported names and function entries; a routine
+  # body must only inherit the module's own variable declarations.
+  sig { returns(Scope) }
+  def module_variable_scope
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    seeded = Scope.new
+    semantic_root_scope.binding_entries.each do |name, entry|
+      next unless entry.reg.is_a?(AST::VarDecl)
+
+      seeded.binding_entries[name] = entry
+    end
+    seeded
+  end
+
   sig { params(node: RoutineNode, blk: T.proc.void).void }
   def with_routine_analysis_scope(node, &blk)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
 
-    with_new_scope do
+    # A routine body sees the module's own declarations: a module-level
+    # `MUTABLE x = ...` is Ruby module state, and `x = value` inside a function
+    # must reassign it. Seeding from the root scope (rather than a fresh one)
+    # is what makes the assignment resolve instead of silently declaring a
+    # shadowing local.
+    with_new_scope(module_variable_scope) do
       og_push_scope
       begin
         blk.call
@@ -258,7 +277,7 @@ module FunctionAnalysis
         name: "arg#{i}",
         type: param.type,
         required: true,
-        mutable: false,
+        mutable: param.mutable,
         takes: false
       )
       i += 1
@@ -1287,7 +1306,8 @@ module FunctionAnalysis
     end
     return true unless base_paths.include?(:wildcard) || base_paths.include?(param.name)
 
-    error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT, name: param.name)
+    error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT,
+      name: param.name, arg: arg_node.name, callee: (signature.respond_to?(:fn_name) ? signature.fn_name : nil) || "the callee")
   end
 
   # `node.return_lifetime` shapes:
@@ -1558,7 +1578,15 @@ module FunctionAnalysis
         nil,
         cap.storage
       )
-      capture_entry.inherit_ownership_identity!(owner_entry) if owner_entry
+      next unless owner_entry
+
+      capture_entry.inherit_ownership_identity!(owner_entry)
+      # A capture is the same binding seen from inside the lambda, so it keeps
+      # the source's capabilities. Without this, capturing a WITH alias --
+      # `USE(MUTABLE view)` -- yields an entry with none, so
+      # Scope#is_restricted? is false for it and borrowing through the capture
+      # is refused.
+      capture_entry.capabilities.merge(owner_entry.capabilities)
     end
     nil
   end
@@ -1670,12 +1698,15 @@ module FunctionAnalysis
     end
     if node.is_a?(AST::Identifier)
       return false unless ownership_graph[node.name]&.kind == :borrowed
-      # Parameters (reg=nil) and MATCH bindings (reg=nil) are safe to return —
-      # the caller controls their lifetime. Only flag variables explicitly assigned
-      # from a collection index borrow (BindExpr with container_borrow=true).
+      # Parameters and MATCH/IS_A payload bindings are safe to return — the
+      # caller controls their lifetime. (A payload binding records its MATCH
+      # arm as `reg` so lowering can rename a nested rebind of the same name;
+      # that node carries no container_borrow.) Only flag variables explicitly
+      # assigned from a collection index borrow (BindExpr with
+      # container_borrow=true).
       scope = lookup_scope_for(node.name)
       reg = scope&.resolve_entry(node.name)&.reg
-      return reg&.container_borrow == true
+      return !!(reg.respond_to?(:container_borrow) && reg.container_borrow == true)
     end
     return true if node.is_a?(AST::GetIndex)
     return true if node.is_a?(AST::GetField)

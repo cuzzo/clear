@@ -962,6 +962,11 @@ class MIRChecker
 
   sig { params(expected: LinearOwnershipState, actual: LinearOwnershipState, label: String).void }
   def linear_require_same_state!(expected, actual, label)
+    # A `_moved`-guarded binding released on only one path through the body is
+    # exactly what the guard exists for -- the same normalization a branch join
+    # gets. Without it, a loop that reassigns a guarded handle and returns early
+    # on some iterations reads as an unprovable state change.
+    normalize_guarded_conditional_releases!([expected, actual])
     return if expected.same_state?(actual)
 
     @errors << error(:OWNERSHIP_UNVERIFIED_PATH, label,

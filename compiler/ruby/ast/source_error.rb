@@ -38,7 +38,7 @@ module ErrorHelper
     # 2. Determine Message
     message = T.let("", String)
     if code_or_message.is_a?(Symbol)
-      message = DiagnosticRegistry.format_from_hash(code_or_message, args, kwargs) || ""
+      message = DiagnosticRegistry.format_from_hash(code_or_message, args, kwargs)
       raise "Internal Compiler Error: Unknown error code :#{code_or_message}" unless message
     else
       # C. Legacy Support (Raw String)
@@ -48,7 +48,7 @@ module ErrorHelper
     source_token = source_error_token(token)
     diagnostic_code = T.let(nil, T.nilable(Symbol))
     if code_or_message.is_a?(Symbol)
-      diagnostic_code = code_or_message.dup
+      diagnostic_code = T.cast(code_or_message, Symbol).dup
     end
     raise_source_error!(
       source_token,
@@ -182,10 +182,10 @@ module ErrorHelper
   end
   def raise_source_error!(token, message, code: nil)
     if parser_error_host?
-      Kernel.raise ParserError.new(token, message, diagnostic_source_code, code: code)
+      raise ParserError.new(token, message, diagnostic_source_code, code: code)
     end
 
-    Kernel.raise CompilerError.new(token, message, diagnostic_source_code, code: code)
+    raise CompilerError.new(token, message, diagnostic_source_code, code: code)
   end
 
   sig { params(node_or_token: T.untyped).returns(DiagnosticToken) }

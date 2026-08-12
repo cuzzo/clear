@@ -13,7 +13,7 @@ module Annotator
       def self.function_signature(node, return_lifetime:)
         FunctionSignature.new(
           params: node.params.map { |param| function_param(param) },
-          return_type: node.annotation_return_type,
+          return_type: T.cast(node.annotation_return_type, T.nilable(Type::TypeInput)),
           return_lifetime: return_lifetime,
           visibility: node.visibility,
           fn_type_params: node.type_params.map(&:to_sym),
@@ -34,10 +34,10 @@ module Annotator
 
       sig { params(node: AST::ExternFnDecl).returns(FunctionSignature) }
       def self.extern_function_signature(node)
-        params = node.params.nil? ? [] : node.params
+        params = node.params.nil? ? [] : T.must(node.params)
         FunctionSignature.new(
           params: params.map { |param| extern_param(param) },
-          return_type: node.annotation_return_type,
+          return_type: T.cast(node.annotation_return_type, T.nilable(Type::TypeInput)),
           return_lifetime: extern_lifetime_paths(node),
           visibility: :pub,
           extern: true,
@@ -61,7 +61,7 @@ module Annotator
         T.cast(lifetime, T::Array[AST::Node]).each do |source|
           next unless source.is_a?(AST::Identifier)
 
-          identifier = source
+          identifier = T.cast(source, AST::Identifier)
           paths << identifier.name.to_s
         end
         paths

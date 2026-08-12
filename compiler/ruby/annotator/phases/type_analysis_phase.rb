@@ -53,7 +53,7 @@ module Annotator
         typed_node_count = 0
         violations = T.let([], T::Array[Violation])
 
-        AST.each_locatable(program, descend_functions: true) do |node|
+        AST.each_locatable(T.cast(program, AST::Locatable), descend_functions: true) do |node|
           next if ignored_node_ids.include?(node.object_id)
 
           node_type = node_type(node)

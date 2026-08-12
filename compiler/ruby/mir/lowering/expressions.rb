@@ -461,7 +461,7 @@ module MIRLoweringExpressions
       namespace = T.cast(node.target, AST::Identifier).name
       return type_value_zig_name(node.field.to_s) if namespace == "AST"
 
-      return "#{namespace}.#{node.field}"
+      return "#{zig_module_alias(namespace)}.#{node.field}"
     end
 
     Kernel.raise "MIRLowering: unsupported dotted type expression #{node.inspect}"
@@ -557,11 +557,14 @@ module MIRLoweringExpressions
   sig { params(facts: BinaryOperandFacts).returns(T.nilable(BinaryOperationPlan)) }
   def classify_optional_binary_comparison(facts)
     return nil unless OPTIONAL_COMPARISON_OPS.include?(facts.op)
-    return nil unless facts.left_type.optional? != facts.right_type.optional?
+    return nil unless facts.left_type.optional? || facts.right_type.optional?
+
+    both_optional = facts.left_type.optional? && facts.right_type.optional?
+    return nil if both_optional && !(facts.op == :EQ || facts.op == :NEQ)
 
     optional_side = facts.left_type.optional? ? OptionalOperandSide::Left : OptionalOperandSide::Right
     payload_type = optional_side == OptionalOperandSide::Left ? facts.right_type : facts.left_type
-    return nil if payload_type.resolved == :NIL
+    return nil if !both_optional && payload_type.resolved == :NIL
 
     BinaryOperationPlan.new(
       kind: :optional_comparison,
@@ -668,10 +671,21 @@ module MIRLoweringExpressions
     capture_ref = MIR::Ident.new(capture)
     optional_source = optional_side == OptionalOperandSide::Left ? facts.left : facts.right
     then_expr = emit_optional_comparison_then_expr(facts, optional_side, capture_ref)
-    else_expr = MIR::Lit.new(facts.op == :NEQ ? "true" : "false")
+    else_expr = absent_optional_comparison_result(facts, optional_side)
     result = MIR::IfOptional.new(optional_source, capture, then_expr, else_expr)
     result.result_type = Type.new(:Bool)
     result
+  end
+
+  # The unwrapped side turned out to be absent. Against a payload that answer is
+  # fixed; against another optional it depends on whether that one is absent too.
+  sig { params(facts: BinaryOperandFacts, optional_side: OptionalOperandSide).returns(MIR::Node) }
+  def absent_optional_comparison_result(facts, optional_side)
+    other = optional_side == OptionalOperandSide::Left ? facts.right : facts.left
+    other_type = optional_side == OptionalOperandSide::Left ? facts.right_type : facts.left_type
+    return MIR::Lit.new(facts.op == :NEQ ? "true" : "false") unless other_type.optional?
+
+    MIR::BinOp.new(facts.op == :NEQ ? "!=" : "==", other, MIR::Lit.new("null"))
   end
 
   sig { params(facts: BinaryOperandFacts, optional_side: OptionalOperandSide, capture_ref: MIR::Ident).returns(MIR::Node) }
@@ -875,7 +889,6 @@ module MIRLoweringExpressions
     ).returns(T.nilable(Symbol))
   end
   def complex_pipeline_sink_alloc(mir_result, result_type, node)
-    T.bind(self, MIRLowering) rescue nil
     return if MIR::OwnershipEffect.borrowed_view_result?(mir_result)
     return :heap if result_type.observable?
     return unless ownership_tracked_transfer_type?(result_type)
@@ -1192,7 +1205,9 @@ module MIRLoweringExpressions
     return value unless ti.string? || ti.recursive_cleanup_shape?(T.unsafe(mir_schema_lookup)) || ti.needs_cleanup?(T.unsafe(mir_schema_lookup))
 
     alloc = function_state.current_decl_alloc || :heap
-    copied = MIR::DeepCopy.new(value, ti.zig_type, nil, :full_value, alloc)
+    # An Rc/Arc fallback value is retained, never structurally copied.
+    copied = retain_handle_for_destination(value, ti) ||
+      MIR::DeepCopy.new(value, ti.zig_type, nil, :full_value, alloc)
     hoist_alloc(copied, ast_node, err_cleanup: false)
   end
 
@@ -2166,8 +2181,10 @@ module MIRLoweringExpressions
                   field_alloc = mir_owned_alloc(field_value)
                   lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
                   if expected_ft && recursive_field_copy_required?(expected_ft, field_node, field_alloc, field_sink_alloc)
-                    hoist_alloc(MIR::DeepCopy.new(lowered, expected_ft.zig_type, nil, :full_value, field_sink_alloc),
-                      field_node, err_cleanup: true)
+                    # An Rc/Arc field is retained, never structurally copied.
+                    copy = retain_handle_for_destination(lowered, expected_ft) ||
+                      MIR::DeepCopy.new(lowered, expected_ft.zig_type, nil, :full_value, field_sink_alloc)
+                    hoist_alloc(copy, field_node, err_cleanup: true)
                   else
                     lowered
                   end
@@ -2185,15 +2202,31 @@ module MIRLoweringExpressions
       # @boxed field: hoist HeapCreate to a named temp so it is a Let-init,
       # not an anonymous sub-expression (INV-H).
       if v.needs_heap_create
-        zig_t = transpile_type(v.full_type!.resolved.to_s)
+        field_ti = v.full_type!(context: "indirect struct field allocation")
+        # `?T@boxed` is an OPTIONAL POINTER: the box holds the payload and
+        # absence is the null pointer. Boxing the optional itself allocates a
+        # cell for `?T` and hands back `*?T`, which is not the field's type --
+        # and it allocates even when there is nothing to hold.
+        payload_ti = field_ti.optional? ? T.must(field_ti.wrapped_type) : field_ti
+        zig_t = transpile_type(payload_ti.resolved.to_s)
         temp = "__ind_#{lowering_counters.next_block_expr_id}_#{k}"
-        hc = T.cast(with_ownership_consumption_for_value(
-          MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}"),
+        boxed = if field_ti.optional?
+          capture = "__box_some_#{lowering_counters.next_tmp_id}"
+          MIR::IfOptional.new(
+            val, capture,
+            MIR::HeapCreate.new(zig_t, MIR::Ident.new(capture), :heap, "blk_#{k}"),
+            MIR::Lit.new("null"),
+          )
+        else
+          MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
+        end
+        hc = with_ownership_consumption_for_value(
+          boxed,
           val,
           field_node,
           "MIR::HeapCreate",
           target_alloc: :heap,
-        ), MIR::HeapCreate)
+        )
         hoisted.concat(MIR::BindingMaterialization.new(
           name: temp,
           expr: hc,
@@ -2204,9 +2237,16 @@ module MIRLoweringExpressions
         ).statements)
         # errdefer cleans this field if a later allocation (another field or
         # the outer struct pointer) fails.
-        hoisted << MIR::ErrDeferStmt.new(
-          MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap)
-        )
+        destroy = T.let(MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap), MIR::Node)
+        if field_ti.optional?
+          capture = "__box_free_#{lowering_counters.next_tmp_id}"
+          destroy = MIR::IfOptional.new(
+            MIR::Ident.new(temp), capture,
+            MIR::DestroyPtr.new(MIR::Ident.new(capture), :heap),
+            MIR::ScopeBlock.new([]),
+          )
+        end
+        hoisted << MIR::ErrDeferStmt.new(destroy)
         val = MIR::Ident.new(temp)
       end
       { name: k.to_s, value: val, alloc: field_sink_alloc }
@@ -2267,7 +2307,6 @@ module MIRLoweringExpressions
 
   sig { params(field: AST::Node).returns(T.nilable(Type)) }
   def struct_literal_field_actual_type(field)
-    T.bind(self, MIRLowering) rescue nil
     return unless field.is_a?(AST::Identifier)
 
     binding_type = function_state.binding_types[field.name.to_s]
@@ -2509,7 +2548,12 @@ module MIRLoweringExpressions
     # block. Lowering a nil result crashed even the error path (nil.token).
     return MIR::ScopeBlock.new(body) if node.result.nil?
 
-    result = lower(node.result)
+    # The tail expression's materializations belong INSIDE this block: they can
+    # reference locals the block declares, and lower() would otherwise leave
+    # them in function_state.pending_stmts for the enclosing statement to
+    # flush -- above the block, past the declarations they use.
+    result, result_hoists = lower_head { lower(node.result) }
+    body.concat(result_hoists)
     if transfer_name
       cleanup = body.find do |stmt|
         (stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::ErrCleanup)) && stmt.name.to_s == transfer_name
@@ -2520,7 +2564,13 @@ module MIRLoweringExpressions
       end
     end
     body << MIR::BreakStmt.new(label, result)
-    MIR::BlockExpr.new(label, body)
+    block = MIR::BlockExpr.new(label, body)
+    # The tail expression is already annotated, so stamp the block's result
+    # type here; otherwise hoisting re-derives it from the MIR body shape and
+    # fails on anything its shape table doesn't enumerate (tuple literals,
+    # blocks with more than one AllocMark, ...).
+    block.result_type = Type.from_node!(node.result, context: "block expression result")
+    block
   end
 
   sig { params(node: AST::RangeLit).returns(MIR::RangeLit) }
@@ -2776,6 +2826,9 @@ module MIRLoweringExpressions
     if fresh_copy_constructor?(node.value)
       return source
     end
+    # COPY of a NoReturn expression has nothing to duplicate: binding it to a
+    # copy temp emits `const __copy_src = @panic(...)`, which is unreachable.
+    return source if Hoist.noreturn_value?(node.value)
     # A payload-free union constructor (for example `Value.Nil`) is already a
     # fresh value and contains no storage to duplicate. Auto-COPY may wrap it
     # when it appears as an owned fallback; lowering that wrapper as a full
@@ -2842,6 +2895,16 @@ module MIRLoweringExpressions
       # using that payload destination here asks dupeValue to clone T from ?T
       # (or !T), which is both type-incorrect and loses wrapper semantics.
       copy_ti = (ti.optional? || ti.error_union?) ? ti : dst_ti
+      # A carrier DESTINATION is built around the copied payload by the
+      # enclosing wrap; COPY duplicates the plain value, never the handle.
+      # This has to win over the optional/borrowed spellings below, which
+      # would otherwise render the destination's Rc(T)/Arc(T).
+      dst_payload = dst_ti.non_optional_type
+      source_payload = ti.non_optional_type
+      if dst_payload.any_rc? && !source_payload.any_rc?
+        return MIR::DeepCopy.new(source, transpile_type(source_payload), nil, :full_value, alloc,
+          MIR::DeepCopy.copy_shape_for_zig_type(transpile_type(source_payload)), source_payload)
+      end
       copy_zig = if lifecycle.copy_strategy == :generic
         # Generic/projection values already have their concrete Zig type at
         # comptime. Re-rendering the unresolved CLEAR shape here can leak
@@ -2858,6 +2921,12 @@ module MIRLoweringExpressions
         # Borrowing is represented as an implementation pointer, not as part
         # of the copied value's logical type. COPY owns the pointee.
         bare_zig_type(dst_ti)
+      elsif dst_ti.indirect? && !ti.indirect?
+        # Same reasoning as the Rc case below: the destination's box is
+        # created by the enclosing placement step, which allocates the cell
+        # and stores the payload into it. COPY duplicates that payload;
+        # typing it `*T` tells dupeValue the value is already boxed.
+        transpile_type(ti)
       elsif dst_ti.any_rc? && !ti.any_rc?
         # The destination capability is created by the enclosing declaration's
         # CapWrap. COPY must duplicate the plain payload that will be placed in
@@ -3256,6 +3325,7 @@ module MIRLoweringExpressions
     Type.new(type).zig_type
   end
 
+  private :absent_optional_comparison_result
   private :emit_optional_comparison_then_expr
 
   private :aggregate_field_wants_dynamic_slice?

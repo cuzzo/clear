@@ -390,7 +390,7 @@ class SymbolEntry
     families = sync_families
     return false unless families.is_a?(Set)
 
-    !families.empty?
+    !T.must(families).empty?
   end
 
   private
@@ -730,7 +730,8 @@ class SymbolEntry
   sig { params(signature: FunctionSignature).returns(Type) }
   def self.type_from_function_signature(signature)
     param_types = signature.params.map(&:type)
-    Type.function_type_from_parts(param_types, signature.return_type, signature.reentrant, signature)
+    Type.function_type_from_parts(param_types, signature.return_type, signature.reentrant, signature,
+      :clear, signature.params.map { |param| param.mutable == true })
   end
 
   sig { returns(Integer) }

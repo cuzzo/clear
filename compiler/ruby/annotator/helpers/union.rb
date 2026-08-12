@@ -28,7 +28,7 @@ module UnionPayloadCompatibility
       payload = schema.variants[variant_name]
       next unless payload
 
-      concrete_payload = payload
+      concrete_payload = T.must(payload)
       case concrete_payload
       when Type
         matches << variant_name if payload_matches?(concrete_payload, compared_actual)

@@ -221,7 +221,7 @@ module MIRLoweringConcurrency
     capture_state.current_stream_local = prev_stream_local
     capture_state.current_stream_is_inf = prev_stream_is_inf
     capture_state.current_stream_close_label = prev_close_label
-    capture_state.current_fsm_inherited_alloc_names = T.must(prev_inherited_alloc_names)
+    capture_state.current_fsm_inherited_alloc_names = prev_inherited_alloc_names
   end
 
   sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String, close_plans: T::Hash[String, Schemas::ResourceClosePlan]).returns(T::Array[MIR::Stmt]) }
@@ -416,7 +416,7 @@ module MIRLoweringConcurrency
   def lower_do_block(node)
     T.bind(self, MIRLowering) rescue nil
     id = lowering_counters.next_do_block_id
-    branches = node.branches
+    branches = T.cast(node.branches, T::Array[AST::DoBranch])
     n = branches.length
     wg_var = "__do#{id}_wg"
 

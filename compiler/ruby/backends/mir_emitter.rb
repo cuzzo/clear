@@ -547,7 +547,7 @@ class MIREmitter
   sig { params(fields: T::Array[MIR::StructInitField]).returns(String) }
   def emit_struct_init_fields(fields)
     fields.map do |field|
-      ".#{field.name} = #{emit(field.value)}"
+      ".#{zig_field_name(field.name)} = #{emit_struct_init_field_value(field.value)}"
     end.join(", ")
   end
 
@@ -610,7 +610,7 @@ class MIREmitter
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry
     pattern = entry.required_intrinsic_template(IntrinsicTemplateKind::Zig)
     node.args.each_with_index do |a, i|
-      pattern = pattern.split("{#{i}}").join(T.must(emit(a)))
+      pattern = pattern.split("{#{i}}").join(emit(a))
     end
     node.suppress_try ? pattern.delete_prefix("try ") : pattern
   end
@@ -1296,7 +1296,7 @@ class MIREmitter
     cell_zig = T.must(emit(node.cell))
     capture_param = captures.empty? ? "" : ", __captures: anytype"
     capture_suppress = captures.empty? ? "" : "_ = &__captures;"
-    all_capture_args = captures + guard_captures.map { |name| "&#{name}_moved" }
+    all_capture_args = captures + guard_captures.map { |name| "&#{move_guard_name(name)}" }
     capture_args = all_capture_args.empty? ? ".{}" : ".{.{#{all_capture_args.join(', ')}}}"
     <<~ZIG.rstrip
       try CheatLib.polymorphicMutate(#{cell_zig}, #{node.rt}, struct {
@@ -1332,7 +1332,7 @@ class MIREmitter
     end
     capture_param = captures.empty? ? "" : ", __captures: anytype"
     capture_suppress = captures.empty? ? "" : "_ = &__captures;"
-    all_capture_args = captures + guard_captures.map { |name| "&#{name}_moved" }
+    all_capture_args = captures + guard_captures.map { |name| "&#{move_guard_name(name)}" }
     capture_args = all_capture_args.empty? ? ".{&__poly_flow}" : ".{&__poly_flow, .{#{all_capture_args.join(', ')}}}"
     guard_block = ""
     if node.guard_cond
@@ -1603,7 +1603,7 @@ class MIREmitter
   sig { params(node: MIR::WithMatchDispatch).returns(String) }
   def emit_with_match_dispatch(node)
     cell_zig = T.must(emit(node.cell))
-    arms = node.arms
+    arms = T.cast(node.arms, T::Array[MIR::WithMatchArm])
     arm_strs = arms.each_with_index.map { |arm, i|
       probe = emit_with_match_probe(arm.family, cell_zig, node.snapshot_mode)
       head = i.zero? ? "if (comptime #{probe})" : "else if (comptime #{probe})"
@@ -2047,7 +2047,7 @@ class MIREmitter
     vis = node.visibility == :pub ? "pub " : ""
     fields = (node.fields || []).map { |f|
       default = f.default ? " = #{emit(f.default)}" : ""
-      "#{f.name}: #{f.zig_type}#{default},"
+      "#{zig_field_name(f.name)}: #{f.zig_type}#{default},"
     }.join("\n    ")
 
     methods = (node.methods || []).map { |m| emit(m) }.join("\n\n    ")
@@ -2219,7 +2219,16 @@ class MIREmitter
   sig { params(node: MIR::DestructureSet).returns(String) }
   def emit_destructure_set(node)
     targets = node.targets.map { |target| T.must(emit(target)) }.join(", ")
-    "#{targets} = #{emit(node.value)};"
+    # A `var` binding Zig never sees mutated is an error, and a destructure
+    # target is bound in one statement with no later `_ = &name;` to vouch for
+    # it. Ordinary Let emission already appends the same suppression.
+    suppressions = node.targets.filter_map do |target|
+      next unless target.is_a?(MIR::DestructureTarget) && target.declaration_kind == :var
+      next if target.name.to_s == "_"
+
+      " _ = &#{target.name};"
+    end.join
+    "#{targets} = #{emit(node.value)};#{suppressions}"
   end
 
   sig { params(node: MIR::DestructureTarget).returns(String) }
@@ -2235,11 +2244,49 @@ class MIREmitter
     end
   end
 
+  # A binding name may already be an escaped Zig identifier (`@"f2"` for a name
+  # Zig would read as a primitive type). Every identifier DERIVED from one --
+  # a temp, a move guard -- must be built from the bare base, or the escape
+  # lands in the middle of the new name and does not parse.
+  sig { params(name: T.any(String, Symbol)).returns(String) }
+  def zig_bare_name(name)
+    text = name.to_s
+    text.start_with?('@"') && text.end_with?('"') ? T.must(text[2..-2]) : text
+  end
+
+  sig { params(name: T.any(String, Symbol)).returns(String) }
+  def move_guard_name(name)
+    "#{zig_bare_name(name)}_moved"
+  end
+
+  # A struct field named after a Zig keyword needs the escaped spelling in the
+  # declaration and at every access: `comptime: bool` parses as a comptime
+  # field, and `node.comptime` as the start of a comptime block.
+  # A struct-literal field has a known type, so `null` needs no `@as`. Emitting
+  # one names the field's type -- which may live in a package this module never
+  # imported, and then does not resolve. The value is what matters here, not a
+  # redundant annotation Zig infers anyway.
+  sig { params(value: T.untyped).returns(String) }
+  def emit_struct_init_field_value(value)
+    inner = value.is_a?(MIR::Cast) && value.method == :as ? value.expr : nil
+    return "null" if inner.is_a?(MIR::Lit) && inner.value.to_s == "null"
+
+    T.must(emit(value))
+  end
+
+  sig { params(name: T.any(String, Symbol)).returns(String) }
+  def zig_field_name(name)
+    text = name.to_s
+    return text if text.start_with?('@"')
+    ZigType.reserved_identifier?(text) ? "@\"#{text}\"" : text
+  end
+
   sig { params(node: MIR::ReassignWithCleanup).returns(String) }
   def emit_reassign_cleanup(node)
+    base = zig_bare_name(node.name)
     if (try_expr = reassign_success_only_expr(node))
-      opt = "__new_#{node.name}_opt"
-      val = "__new_#{node.name}_val"
+      opt = "__new_#{base}_opt"
+      val = "__new_#{base}_val"
       alloc = alloc_zig(node.alloc)
       return [
         "{",
@@ -2252,7 +2299,7 @@ class MIREmitter
       ].join("\n")
     end
 
-    tmp = "__new_#{node.name}"
+    tmp = "__new_#{base}"
     val = emit(node.value)
     alloc = alloc_zig(node.alloc)
     "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(@TypeOf(#{node.name}), #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
@@ -2408,7 +2455,7 @@ class MIREmitter
       return "return #{inner_call} catch {\n#{indent_block(emit_catch_default_body(node), 4)}\n};"
     end
 
-    clauses = node.clauses
+    clauses = T.cast(node.clauses, T::Array[MIR::CatchClause])
     branch_parts = clauses.each_with_index.map do |clause, index|
       emit_catch_clause(clause, node.rt_name, node.snapshot_type, index.zero?)
     end
@@ -2865,7 +2912,7 @@ class MIREmitter
       use_type = via_pointer ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
       result = direct_uniform_cleanup(use_name, use_type, use_alloc, guarded, via_pointer:)
       if entry.rc_release_fields_cleanup?
-        guard = guarded ? "if (!#{name}_moved) " : ""
+        guard = guarded ? "if (!#{move_guard_name(name)}) " : ""
         result += "\n#{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);"
       end
       result
@@ -2916,7 +2963,7 @@ class MIREmitter
       use_type = vp ? "@TypeOf(#{use_name}.*)" : "@TypeOf(#{use_name})"
       result = guarded_cleanup(use_name, use_type, use_alloc, g, errdefer:, via_pointer: vp)
       if entry.rc_release_fields_cleanup?
-        guard = g ? "if (!#{name}_moved) " : ""
+        guard = g ? "if (!#{move_guard_name(name)}) " : ""
         kw = errdefer ? "errdefer" : "defer"
         result += "#{kw} #{guard}CheatLib.releaseFields(#{entry.base_zig}, #{use_alloc}, #{name}.ctrl.data.*);\n"
       end
@@ -2926,13 +2973,17 @@ class MIREmitter
 
   sig { params(node: MIR::MoveMark).returns(String) }
   def emit_move_mark(node)
-    guard = @move_guard_overrides.fetch(node.name.to_s, "#{node.name}_moved")
+    guard = @move_guard_overrides.fetch(node.name.to_s, move_guard_name(node.name))
     "#{guard} = true;"
   end
 
   sig { params(node: MIR::DeepCopy).returns(T.nilable(String)) }
   def emit_deep_copy(node)
-    src = emit(node.source)
+    src = T.must(emit(node.source))
+    # A noreturn source has nothing to duplicate: binding it to a copy temp
+    # emits `const __copy_src = @panic(...)`, which is unreachable code.
+    return src if src.start_with?("@panic(")
+
     alloc = node.alloc ? alloc_expr(node.alloc) : nil
     # Uniquify the blk label across nested DeepCopy emits in the same scope.
     @deep_copy_counter += 1
@@ -3133,7 +3184,7 @@ class MIREmitter
   def emit_field_get(node)
     object = T.must(emit(node.object))
     object = "(#{object})" if node.object.is_a?(MIR::StructInit) || node.object.is_a?(MIR::TupleLiteral)
-    "#{paren_if_try(object)}.#{node.field}"
+    "#{paren_if_try(object)}.#{zig_field_name(node.field)}"
   end
 
   sig { params(node: MIR::UnionPayloadGet).returns(String) }
@@ -3264,7 +3315,7 @@ class MIREmitter
       value = MIR.struct_init_field_value(field)
       next nil unless name && value
 
-      ".#{name} = #{emit(value)}"
+      ".#{zig_field_name(name)} = #{emit_struct_init_field_value(value)}"
     end.join(", ")
     if node.zig_type
       "#{node.zig_type}{ #{fields} }"
@@ -3341,6 +3392,10 @@ class MIREmitter
     # call site.)
     target_t = node.target_type
     target_t = ZigType.new(target_t).cast_target_type if target_t
+    # `@as(T, @panic("..."))` is unreachable code: a noreturn value already
+    # coerces to every type, so the annotation only breaks the build.
+    return inner if inner.start_with?("@panic(")
+
     case node.method
     when :as
       "@as(#{target_t}, #{inner})"
@@ -3370,7 +3425,9 @@ class MIREmitter
   def emit_orelse(node)
     fallback = emit(node.fallback)
     result_type = node.result_type
-    fallback = "@as(#{result_type.zig_type}, #{fallback})" if result_type
+    # A noreturn fallback (`OR_ELSE panic("...")`) already coerces to the
+    # result type; annotating it makes the whole expression unreachable code.
+    fallback = "@as(#{result_type.zig_type}, #{fallback})" if result_type && !fallback.start_with?("@panic(")
     expr = emit(node.expr)
     expr = "@as(?#{result_type.zig_type}, null)" if result_type && expr == "null"
     "(#{expr} orelse #{fallback})"
@@ -3605,7 +3662,7 @@ class MIREmitter
   def guarded_defer(name, body, guarded, errdefer: false)
     kw = errdefer ? "errdefer" : "defer"
     if guarded
-      "var #{name}_moved = false; _ = &#{name}_moved;\n#{kw} if (!#{name}_moved) #{body};\n"
+      "var #{move_guard_name(name)} = false; _ = &#{move_guard_name(name)};\n#{kw} if (!#{move_guard_name(name)}) #{body};\n"
     elsif body.start_with?("{") && body.end_with?("}")
       "#{kw} #{body}\n"
     else
@@ -3680,7 +3737,7 @@ class MIREmitter
   def direct_cleanup_statement(name, body, guarded)
     stripped = body.strip
     statement = stripped.end_with?(";", "}") ? stripped : "#{stripped};"
-    guarded ? "if (!#{name}_moved) #{statement}" : statement
+    guarded ? "if (!#{move_guard_name(name)}) #{statement}" : statement
   end
 
   sig { params(name: String, zig_type: String, alloc: String, guarded: T::Boolean, via_pointer: T.nilable(T::Boolean)).returns(String) }

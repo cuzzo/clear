@@ -579,7 +579,13 @@ module MIRLoweringFunctions
       heap_carry_return_vars: typed_name_set(node.heap_carry_return_vars),
       returned_names: collect_fn_returned_names(node.body),
       snapshot_types: has_catch ? typed_name_set(node.snapshot_types) : Set.new,
-      fn_alloc_marked_names: {},
+      # A local that shadows a parameter (or the runtime handle) is legal CLEAR
+      # and legal Ruby, but Zig rejects any shadowing. Seeding the name table
+      # with the parameters makes var_decl_safe_name disambiguate such a local
+      # the same way it already disambiguates two same-named locals.
+      fn_alloc_marked_names: node.params.each_with_object({ "rt" => true }) { |p, acc|
+        acc[zig_safe_name(p.name.to_s)] = true
+      },
       lowered_alloc_names: Set.new,
       lowered_guarded_cleanup_names: Set.new,
       decl_zig_name_map: {},
@@ -1283,9 +1289,33 @@ module MIRLoweringFunctions
     hoisted = hoist_alloc(arg, ast_arg, mutable: true)
     return hoisted unless hoisted.equal?(arg)
 
+    # Copying an owned temp into the mutable slot splits ownership: a MUTABLE
+    # param writes its result back into the slot while the cleanup stays on the
+    # original binding, so the callee's value leaks and the original is freed
+    # twice. The temp was hoisted for this call alone -- make it addressable
+    # rather than copying it.
+    owned_temp = pending_owned_let(arg)
+    if owned_temp
+      owned_temp.mutable = true
+      return arg
+    end
+
     name = "__mutable_arg_#{lowering_counters.next_tmp_id}"
     function_state.pending_stmts << MIR::Let.new(name, arg, true, nil, nil)
     MIR::Ident.new(name)
+  end
+
+  # The Let this statement just hoisted for `arg`, when this function owns it.
+  sig { params(arg: MIR::Node).returns(T.nilable(MIR::Let)) }
+  def pending_owned_let(arg)
+    T.bind(self, MIRLowering) rescue nil
+    return nil unless arg.is_a?(MIR::Ident)
+
+    name = arg.name.to_s
+    T.cast(
+      function_state.pending_stmts.find { |stmt| stmt.is_a?(MIR::Let) && stmt.name.to_s == name },
+      T.nilable(MIR::Let),
+    )
   end
 
   sig { params(callee_param: T.nilable(AST::Param), moved_arg: T::Boolean, ti: Type, callee_param_type: Type).returns(T::Boolean) }
@@ -1770,6 +1800,7 @@ module MIRLoweringFunctions
     return false unless a.is_a?(AST::Identifier)
     !!(current_function_collection_param?(a.name) ||
        with_alias_pointer_shaped?(a) ||
+       capture_state.current_lambda_pointer_params.include?(a.name.to_s) ||
        capture_state.current_bg_pointer_captures&.include?(a.name))
   end
 
@@ -1810,7 +1841,7 @@ module MIRLoweringFunctions
     callee_sig = fn_sig_for(node.name)
     callee_sig ||= matched_call_signature(node)
     call_plans = node.kept_edge_plans || {}
-    call_args = node.args
+    call_args = T.cast(node.args, T::Array[AST::Node])
     args_mir = with_kept_edge_call_frame do
       call_args.each_with_index.map do |a, idx|
         lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx, edge_plan: call_plans[idx]))
@@ -1916,7 +1947,7 @@ module MIRLoweringFunctions
       if node.object.is_a?(AST::Identifier) && node.object.symbol&.carrier_contract == :monomorphic
         recv = MIR::ComptimeCarrierPayload.new(recv)
       end
-      method_args = node.args
+      method_args = T.cast(node.args, T::Array[AST::Node])
       [recv] + method_args.each_with_index.map do |a, idx|
         lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx + 1))
       end
@@ -2182,7 +2213,11 @@ module MIRLoweringFunctions
     union_schema = union_schemas[schema_name]
     if union_schema
       variants = union_schema.respond_to?(:variants) ? union_schema.variants : {}
-      return variants.any? { |_, variant_type| Type.variant_has_heap?(variant_type) }
+      # variant_has_heap? only sees a bare heap pointer in the variant slot. A
+      # variant that names a struct owning heap fields is just as owned, and
+      # the recursive shape check below answers that -- so fall through
+      # instead of returning false.
+      return true if variants.any? { |_, variant_type| Type.variant_has_heap?(variant_type) }
     end
 
     ti.ownership_bearing?(T.unsafe(mir_schema_lookup)) ||
@@ -2306,7 +2341,7 @@ module MIRLoweringFunctions
     receiver_type = intrinsic_receiver_type(node)
     stdlib_facts = stdlib_call_facts(node)
     ownership_facts = stdlib_facts.ownership
-    intrinsic_args = node.args
+    intrinsic_args = T.cast(node.args, T::Array[AST::Node])
 
     # Template-based intrinsics: lower args to MIR, apply ownership transforms, emit
     mir_args = if node.is_a?(AST::MethodCall)
@@ -2583,7 +2618,7 @@ module MIRLoweringFunctions
     T.bind(self, MIRLowering) rescue nil
     sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     source = node.respond_to?(:extern_source) ? node.extern_source : nil
-    ast_args = node.args
+    ast_args = T.cast(node.args, T::Array[AST::Node])
     args = ast_args.each_with_index.map do |arg, index|
       param = sig&.params&.[](index)
       lowered = lower_c_abi_callback_arg(arg, param, source)
@@ -2614,7 +2649,7 @@ module MIRLoweringFunctions
   def lower_extern_direct_method(node)
     T.bind(self, MIRLowering) rescue nil
     obj = lower(node.object)
-    ast_args = node.args
+    ast_args = T.cast(node.args, T::Array[AST::Node])
     args = ast_args.map { |a| lower(a) }
     sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     MIR::MethodCall.new(obj, node.name.to_s, args, false, callable_contract_for(sig, [node.object] + ast_args))
@@ -2642,7 +2677,6 @@ module MIRLoweringFunctions
     id = lowering_counters.next_extern_id
     alloc_kind = node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
-    mod_alias = nil unless mod_alias.is_a?(String)
     source = node.respond_to?(:extern_source) ? node.extern_source : nil
     mod_alias = nil if source&.abi == :c
     mod_alias = zig_module_alias(mod_alias) if mod_alias
@@ -2650,10 +2684,10 @@ module MIRLoweringFunctions
     # Separate comptime type args (full_type == :Type) from runtime args.
     # Comptime args can't be struct fields; the emitter renders them directly
     # at the call site after MIRChecker has seen the expression children.
-    ast_args = node.args
+    ast_args = T.cast(node.args, T::Array[AST::Node])
     comptime_args, runtime_ast_args = ast_args.partition { |a| a.full_type! == :Type }
-    comptime_args = comptime_args
-    runtime_ast_args = runtime_ast_args
+    comptime_args = T.cast(comptime_args, T::Array[AST::Node])
+    runtime_ast_args = T.cast(runtime_ast_args, T::Array[AST::Node])
     comptime_mir = comptime_args.map { |a| lower_extern_arg(a) }
 
     sig = fn_sig_for(node.name)
@@ -2776,6 +2810,17 @@ module MIRLoweringFunctions
   # Lambda
   # ================================================================
 
+  # Does the lambda's tail value come out of a pipeline? Its placement belongs
+  # to escape analysis, so lowering leaves it alone.
+  sig { params(expr: AST::Node).returns(T::Boolean) }
+  def lambda_tail_pipeline?(expr)
+    node = T.let(expr, T.untyped)
+    while node.is_a?(AST::BlockExpr) || node.is_a?(AST::Cast)
+      node = node.is_a?(AST::BlockExpr) ? node.result : node.value
+    end
+    node.is_a?(AST::BinaryOp) && node.smooth? == true
+  end
+
   sig { params(node: AST::LambdaLit).returns(MIR::LambdaExpr) }
   def lower_lambda(node)
     T.bind(self, MIRLowering) rescue nil
@@ -2790,6 +2835,10 @@ module MIRLoweringFunctions
       pt_obj = p_type.is_a?(Type) ? p_type : (Type.new(p_type) rescue nil)
       pp = !!(pt_obj && (pt_obj.respond_to?(:needs_pointer_passing?) && pt_obj.needs_pointer_passing? ||
                          (p.mutable && pt_obj.respond_to?(:list_collection?) && pt_obj.list_collection?)))
+      # A MUTABLE lambda parameter is passed by pointer, exactly like a MUTABLE
+      # parameter of a named function.
+      pp ||= p.mutable == true
+      type_str = "*#{type_str}" if p.mutable && !type_str.start_with?("*")
       MIR::Param.new(p.name, type_str, pp)
     }, T::Array[MIR::Param])
 
@@ -2802,24 +2851,45 @@ module MIRLoweringFunctions
     params_list.each { |p| body_mir << MIR::Suppress.new(p.name) }
     body_nodes = AST.lambda_body_nodes(node.body)
     prefix_nodes = body_nodes[0...-1] || []
-    body_mir.concat(lower_body(prefix_nodes))
     return_expr = T.must(body_nodes.last)
     lambda_return = AST::ReturnNode.new(return_expr.respond_to?(:token) ? T.unsafe(return_expr).token : nil, return_expr)
+    previous_pointer_params = capture_state.current_lambda_pointer_params
+    capture_state.current_lambda_pointer_params =
+      params_list.select { |p| p.mutable == true }.map { |p| p.name.to_s }.to_set
+    # Inside the lambda the runtime is its own `_rt` parameter; the enclosing
+    # function's `rt` is not in scope there (Zig rejects the reference).
+    body_mir.concat(runtime_state.with_rt_name("_rt") { lower_body(prefix_nodes) })
     # Capture the return expression's pending hoists INSIDE the lambda: a
     # hoisted allocation (a pipeline block, an owned call) that flushed to
     # the enclosing function's statement list would reference lambda params
     # from outside the lambda struct (undeclared identifier in Zig).
-    return_value, return_pending = lower_head { lower(return_expr) }
-    body_mir.concat(hoist_unhoisted_return_allocs(
-      [*return_pending, MIR::ReturnStmt.new(return_value)],
-      [lambda_return],
-    ))
+    # The tail value leaves the lambda's frame, so it is built on the heap --
+    # the placement a written RETURN gets from escape analysis, which never
+    # sees this synthesized one. A pipeline is the exception: escape analysis
+    # is the single writer of ITS placement (INV-16), and a pipeline whose
+    # placement it left on the frame still fails the checker here rather than
+    # being silently rebuilt somewhere the accumulator does not follow.
+    tail_alloc = lambda_tail_pipeline?(return_expr) ? nil : :heap
+    return_value, return_pending = runtime_state.with_rt_name("_rt") do
+      lower_head { tail_alloc ? with_decl_alloc(tail_alloc) { lower(return_expr) } : lower(return_expr) }
+    end
+    capture_state.current_lambda_pointer_params = previous_pointer_params
+    body_mir.concat([*return_pending, MIR::ReturnStmt.new(return_value)])
     # Lambda bodies are nested functions, not ordinary expression children of
     # the enclosing routine. Run the same allocation normalization and
     # ownership finalization that a top-level function body receives so an
     # owned/fallible final expression is hoisted inside the lambda rather than
     # leaking an unhoisted BlockExpr or TryExpr into its ReturnStmt.
+    #
+    # Finalization is what stamps the ownership facts that make a value block
+    # read as owned, so the return hoist has to run AFTER it -- before, the
+    # block still looks non-allocating and the hoist skips it. The hoisted
+    # binding then needs its own finalization pass.
     body_mir = append_ownership_transfers_for_mir_body(body_mir)
+    hoisted_returns = hoist_unhoisted_return_allocs(body_mir, [lambda_return])
+    unless hoisted_returns.length == body_mir.length
+      body_mir = append_ownership_transfers_for_mir_body(hoisted_returns)
+    end
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
     captures = node.captures&.map { |c|

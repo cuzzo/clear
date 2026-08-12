@@ -26,6 +26,7 @@ class PipelineScalarLowerer < T::Struct
   const :visit_expr, T.proc.params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node)
   const :pipeline_block, T.proc.params(list_node: AST::Node, blk: T.proc.params(items: String, label: String).returns(T::Array[MIR::Emittable])).returns(MIR::BlockExpr)
   const :transpile_type, T.proc.params(type_info: PipelineTypeInput).returns(String)
+  const :loop_mark_stmts, T.proc.returns(T::Array[MIR::Emittable])
 
   sig { params(site: PipelineSite, op: PipelineMaterializedScalarOp).returns(MIR::BlockExpr) }
   def lower(site, op)
@@ -58,7 +59,7 @@ class PipelineScalarLowerer < T::Struct
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("count_result", MIR::Lit.new("0"), true, Type.new("i64"), nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+        scalar_loop(MIR::Ident.new(items), "it", [
           MIR::IfStmt.new(pred_mir, [
             MIR::Set.new(MIR::Ident.new("count_result"),
               MIR::BinOp.new("+", MIR::Ident.new("count_result"), MIR::Lit.new("1"))),
@@ -78,7 +79,7 @@ class PipelineScalarLowerer < T::Struct
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("sum_result", MIR::Lit.new(zero), true, result_type, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+        scalar_loop(MIR::Ident.new(items), "it", [
           MIR::Set.new(MIR::Ident.new("sum_result"),
             MIR::BinOp.new("+", MIR::Ident.new("sum_result"), expr_mir)),
         ], nil),
@@ -95,7 +96,7 @@ class PipelineScalarLowerer < T::Struct
       [
         MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, Type.new("f64"), nil),
         MIR::Let.new("avg_count", MIR::FieldGet.new(MIR::Ident.new(items), "len"), false, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+        scalar_loop(MIR::Ident.new(items), "it", [
           MIR::Set.new(MIR::Ident.new("avg_sum"),
             MIR::BinOp.new("+", MIR::Ident.new("avg_sum"), expr_mir)),
         ], nil),
@@ -125,7 +126,7 @@ class PipelineScalarLowerer < T::Struct
           nil),
         MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, zig_type),
           true, result_type, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+        scalar_loop(MIR::Ident.new(items), "it", [
           MIR::Let.new("min_val", expr_mir, false, nil, nil),
           MIR::IfStmt.new(
             MIR::BinOp.new("<", MIR::Ident.new("min_val"), MIR::Ident.new("min_result")),
@@ -154,7 +155,7 @@ class PipelineScalarLowerer < T::Struct
           nil),
         MIR::Let.new("max_result", sentinel,
           true, result_type, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+        scalar_loop(MIR::Ident.new(items), "it", [
           MIR::Let.new("max_val", expr_mir, false, nil, nil),
           MIR::IfStmt.new(
             MIR::BinOp.new(">", MIR::Ident.new("max_val"), MIR::Ident.new("max_result")),
@@ -173,7 +174,7 @@ class PipelineScalarLowerer < T::Struct
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("any_result", MIR::Lit.new("false"), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+        scalar_loop(MIR::Ident.new(items), "it", [
           MIR::IfStmt.new(pred_mir, [
             MIR::Set.new(MIR::Ident.new("any_result"), MIR::Lit.new("true")),
             MIR::BreakStmt.new(nil, nil),
@@ -191,7 +192,7 @@ class PipelineScalarLowerer < T::Struct
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("all_result", MIR::Lit.new("true"), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+        scalar_loop(MIR::Ident.new(items), "it", [
           MIR::IfStmt.new(MIR::UnaryOp.new("!", pred_mir), [
             MIR::Set.new(MIR::Ident.new("all_result"), MIR::Lit.new("false")),
             MIR::BreakStmt.new(nil, nil),
@@ -212,7 +213,7 @@ class PipelineScalarLowerer < T::Struct
         MIR::Let.new("find_result",
           MIR::Undef.new(nil), true, Type.new(elem_zig_type), nil),
         MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+        scalar_loop(MIR::Ident.new(items), "it", [
           MIR::Let.new("find_matches", pred_mir, false, nil, nil),
           MIR::IfStmt.new(MIR::Ident.new("find_matches"), [
             MIR::Set.new(MIR::Ident.new("find_result"), MIR::Ident.new("it")),
@@ -233,4 +234,29 @@ class PipelineScalarLowerer < T::Struct
   def visit_pipeline_expr_mir(list_node, expr_node, placeholder = "it")
     self.visit_expr.call(list_node, expr_node, placeholder)
   end
+
+  # A scalar pipeline accumulates into a scalar, so anything its body allocates
+  # on the frame dies with the iteration and the loop can rewind -- the same
+  # per-iteration rewind a SELECT element gets. Without it the arena grows for
+  # the whole loop (FRAME_NO_REWIND).
+  sig do
+    params(iter: MIR::Emittable, capture: String, body: T::Array[MIR::Emittable], mark: T.nilable(T::Boolean))
+      .returns(MIR::ForStmt)
+  end
+  def scalar_loop(iter, capture, body, mark = nil)
+    MIR::ForStmt.new(iter, capture, with_iteration_rewind(body), mark)
+  end
+
+  sig { params(body: T::Array[MIR::Emittable]).returns(T::Array[MIR::Emittable]) }
+  def with_iteration_rewind(body)
+    found = T.let(false, T::Boolean)
+    boundary = ->(node) { node.is_a?(MIR::BgBlock) || node.is_a?(MIR::LambdaExpr) }
+    MIR.each_node_until(body, boundary) do |node|
+      found = true if node.is_a?(MIR::AllocMark) && MIR::Placement.frame?(node.alloc)
+    end
+    return body unless found
+
+    self.loop_mark_stmts.call.dup + body
+  end
+
 end

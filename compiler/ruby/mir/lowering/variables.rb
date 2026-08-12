@@ -149,6 +149,7 @@ module MIRLoweringVariables
     facts = var_decl_facts(node)
 
     return lower_module_const(node, facts) if node.module_const
+    return lower_module_global(node, facts) if program_state.module_global_names.include?(node.name.to_s)
 
     # Every allocating sub-expression of the value -- collection init,
     # pipeline, COLLECT, toList, concat -- inherits this binding's
@@ -240,10 +241,15 @@ module MIRLoweringVariables
     # order, with a real runtime at the top of clearMain (see
     # inject_const_init!). The value lives in the program arena and every use
     # borrows it - it is never moved or freed per scope.
-    heap_value = with_decl_alloc(:heap) { lower(node.value) }
-    if facts.has_mir_drop || mir_allocates?(heap_value)
-      return lower_runtime_init_const(node, facts, safe_name, heap_value)
+    heap_value, const_pending = lower_head { with_decl_alloc(:heap) { lower(node.value) } }
+    # An initializer whose parts were already hoisted looks non-allocating by
+    # the time we see it -- the allocation moved into the pending temps, which
+    # have nowhere to live at container scope. It needs the same runtime-init
+    # prologue an obviously-allocating initializer takes.
+    if facts.has_mir_drop || mir_allocates?(heap_value) || const_pending.any?
+      return lower_runtime_init_const(node, facts, safe_name, heap_value, const_pending)
     end
+    function_state.pending_stmts.concat(const_pending)
 
     init = with_decl_alloc(facts.decl_alloc) do
       lower_var_decl_init(node, facts.ft, facts.bare_zig, facts.has_caps, facts.decl_alloc)
@@ -261,21 +267,42 @@ module MIRLoweringVariables
     let
   end
 
+  # A module-level MUTABLE global has the same container-scope problem a CONST
+  # does: its initializer's hoisted temps have nowhere to live. Route an
+  # initializer that allocates (or hoists) through the same init prologue; the
+  # storage stays a `var` because the binding is mutable.
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts).returns(MIR::NodeRoot) }
+  def lower_module_global(node, facts)
+    T.bind(self, MIRLowering) rescue nil
+    safe_name = var_decl_safe_name(node, false)
+    function_state.binding_types[safe_name] = facts.ft
+    heap_value, pending = lower_head { with_decl_alloc(:heap) { lower(node.value) } }
+    if facts.has_mir_drop || mir_allocates?(heap_value) || pending.any?
+      return lower_runtime_init_const(node, facts, safe_name, heap_value, pending)
+    end
+
+    function_state.pending_stmts.concat(pending)
+    MIR::Let.new(safe_name, heap_value, true, facts.annotation, nil)
+  end
+
   # Emit the storage node for a runtime-initialized CONST and record its
   # heap-allocated initializer for clearMain's ordered init prologue. The value
   # transfers into the program-lifetime global (owned sink) with no per-scope
   # cleanup; a fallible (RAISE-able) initializer is rejected - a CONST has no
   # error channel (allocation FAULTs like OOM are still permitted).
-  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, value: MIR::Node).returns(MIR::NodeRoot) }
-  def lower_runtime_init_const(node, facts, safe_name, value)
+  sig { params(node: AST::VarDecl, facts: VarDeclFacts, safe_name: String, value: MIR::Node, prelude: T::Array[MIR::Node]).returns(MIR::NodeRoot) }
+  def lower_runtime_init_const(node, facts, safe_name, value, prelude = [])
     T.bind(self, MIRLowering) rescue nil
     annotation = facts.annotation
-    zig_type = annotation ? annotation.nested_zig_type : transpile_type(facts.ft.resolved.to_s)
+    # `facts.ft.resolved.to_s` is the legacy CLEAR spelling ("String[SET]"),
+    # which transpile_type passes straight through. The Type renders itself.
+    zig_type = annotation ? annotation.nested_zig_type : facts.ft.nested_zig_type
     program_state.runtime_init_consts << ConstInitEntry.new(
       name: safe_name,
       zig_type: zig_type,
       init: value,
-      type_info: facts.ft
+      type_info: facts.ft,
+      prelude: prelude
     )
     MIR::ModuleVar.new(safe_name, zig_type, node.const_visibility)
   end
@@ -392,7 +419,10 @@ module MIRLoweringVariables
     # what makes "@<shape>:<sync>:<ownership>" combinations compose without
     # per-shape × per-cap glue.
     has_caps = !!((ft.any_sync? || ft.ownership != :affine) && !ft.striped?)
-    bare_ft = has_caps ? ft.bare_data_type : ft
+    # `?T@multiowned` is an OPTIONAL HANDLE (`?Rc(T)`), not a handle to an
+    # optional: the carrier wraps the payload and the optional wraps the
+    # carrier, so the wrap is spelled against the non-optional payload.
+    bare_ft = has_caps ? ft.non_optional_type.bare_data_type : ft
     bare_zig = transpile_type(bare_ft)
 
     VarDeclFacts.new(
@@ -476,7 +506,9 @@ module MIRLoweringVariables
     # the names unique so the checker sees independent containers.
     original_safe = safe_name
     if alloc_marked_names.key?(safe_name)
-      safe_name = "#{safe_name}_L#{function_relative_line(node.line)}"
+      # Suffix the CLEAR name, not the escaped spelling: `@"type"_L2` splices
+      # the escape into the middle of a new identifier.
+      safe_name = zig_safe_name("#{node.name}_L#{function_relative_line(node.line)}")
     end
     alloc_marked_names[safe_name] = true
     decl_name_map[node.object_id] = safe_name
@@ -625,9 +657,18 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     mir_alloc = mir_owned_alloc(init) || facts.decl_alloc
     alloc_mark = var_decl_alloc_mark(safe_name, mir_alloc, facts.ft, facts.binding_entry)
+    # An AllocMark asserts the binding owns an allocation. A rodata binding --
+    # an interned symbol, a static string slice -- owns nothing whatever its
+    # initializer allocated along the way, and marking it owned leaves a
+    # scope-local the checker can never see released.
+    return MIR::MaterializationPacket.value_only(let_node) if facts.ft.rodata?
     return MIR::MaterializationPacket.owned(alloc_mark, let_node) unless type_requires_alloc_cleanup?(facts.ft, mir_alloc)
 
-    cleanup_entry = T.must(hoist_cleanup_entry(init, node))
+    # The AllocMark above already fixed this binding's allocator. A cleanup
+    # recipe inherited from the init expression may name a different one
+    # (a heap String recipe for a frame-placed element view), and a binding
+    # has exactly one allocator (INV-1).
+    cleanup_entry = T.must(hoist_cleanup_entry(init, node)).with_alloc(mir_alloc)
     build_drop_entry!(cleanup_entry, node.full_type!, node)
     mark_guarded_cleanup_name!(safe_name) if cleanup_entry.has_moved_guard?
     MIR::MaterializationPacket.owned(alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry))
@@ -733,17 +774,39 @@ module MIRLoweringVariables
     end
 
     retain_source = var_decl_retain_source(node.value)
-    if retain_source.is_a?(AST::Identifier) && node.value.was_moved != true && rc_retain_needed?(retain_source)
-      return make_rc_retain(retain_source)
-    end
+    return make_rc_retain(retain_source) if node.value.was_moved != true && rc_retain_needed?(retain_source)
 
-    placed = with_expected_type(ft) { lower(node.value) }
-    placed = place_value_for_destination(placed, node.value, decl_alloc, ft)
-    if has_caps && !capability_wrapped_mir?(placed) && !source_already_has_declared_capability?(node.value, ft)
+    # A declaration that wraps its value in a carrier receives the PAYLOAD, not
+    # the carrier: placing against the carrier type coerces a plain value to
+    # Rc(T)/Arc(T) and the wrap then builds a handle out of that lie.
+    wraps_value = has_caps && !source_already_has_declared_capability?(node.value, ft)
+    value_ft = wraps_value ? ft.non_optional_type.bare_data_type : ft
+    placed = with_expected_type(value_ft) { lower(node.value) }
+    placed = place_value_for_destination(placed, node.value, decl_alloc, value_ft)
+    # The handle OWNS its payload. Wrapping a borrowed view (a union match
+    # payload, a field read) would hand the handle storage someone else frees.
+    if wraps_value && borrowed_wrap_source?(node.value)
+      placed = MIR::DeepCopy.new(placed, transpile_type(value_ft), nil, :full_value, decl_alloc)
+    end
+    if wraps_value && !capability_wrapped_mir?(placed)
       compose_capability_wrap(placed, bare_zig, ft, decl_alloc)
     else
       placed
     end
+  end
+
+  # Is this value a borrowed view rather than an owned value? A borrowed
+  # HANDLE is excluded: an Rc/Arc is retained, never structurally duplicated.
+  sig { params(value: T.nilable(AST::Node)).returns(T::Boolean) }
+  def borrowed_wrap_source?(value)
+    return false unless value.is_a?(AST::Locatable)
+
+    source = value.full_type!(context: "carrier wrap source")
+    return false if source.any_rc?
+
+    source.borrowed_reference?
+  rescue StandardError
+    false
   end
 
   sig { params(value: AST::Node).returns(AST::Node) }
@@ -903,7 +966,10 @@ module MIRLoweringVariables
       # binding's allocator (one allocator per binding).
       binding_entry = cleanup_entry_for_ast_binding(node) || function_state.bindings[node.name.to_s] || CleanupEntry::NONE
       heap_return_var = current_function_heap_carry_return_var?(node.name.to_s)
-      assign_alloc = if heap_return_var
+      module_global = program_state.module_global_names.include?(node.name.to_s)
+      assign_alloc = if heap_return_var || module_global
+        # A module global lives for the whole program: its storage is the heap
+        # and no scope drops it.
         :heap
       else
         rp ? alloc_from_sym(rp.alloc!) : (binding_entry.present? ? binding_entry.alloc : nil)
@@ -959,7 +1025,29 @@ module MIRLoweringVariables
     T.bind(self, MIRLowering) rescue nil
     value = T.cast(lower(node.value), MIR::Emittable)
     targets = node.targets.map { |target| lower_destructure_target(target) }
+    # A target DECLARED here owns nothing of its own -- the temp the aggregate
+    # arrived in stays its owner. A target that already exists brings its own
+    # cleanup, so the temp has to release or both free the same pieces.
+    function_state.pending_stmts.concat(destructure_source_transfer(node, value))
     MIR::DestructureSet.new(targets, value)
+  end
+
+  sig { params(node: AST::DestructuringAssignment, value: MIR::Emittable).returns(T::Array[MIR::Node]) }
+  def destructure_source_transfer(node, value)
+    T.bind(self, MIRLowering) rescue nil
+    name = value.is_a?(MIR::Ident) ? value.name.to_s : nil
+    return [] unless name
+    return [] unless function_state.guarded_cleanup_names[name]
+
+    reassigns_owner = node.targets.any? do |target|
+      next false if target.name.to_s == "_"
+      next false if target.symbol&.reg.equal?(target)
+      function_state.guarded_cleanup_names[zig_safe_name(target.name)] ||
+        function_state.bindings[target.name.to_s]&.needs_cleanup?
+    end
+    return [] unless reassigns_owner
+
+    ownership_transfer_marks(name, :block_result, move_guarded: true)
   end
 
   sig { params(target: AST::DestructureTarget).returns(MIR::DestructureTarget) }

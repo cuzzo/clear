@@ -3328,8 +3328,11 @@ module DiagnosticRegistry
     },
     MUTABLE_PARAM_NEEDS_RESTRICT: {
       severity: :error, category: :lifetime,
-      template: "Lifetime Error: param `%{name}` is mutable, must be RESTRICTed before it can be borrowed.",
-      summary:  "Mutable parameter must be RESTRICTed before being aliased.",
+      template: "Lifetime Error: cannot borrow through `%{arg}` -- it is mutable and not RESTRICTed. " \
+                "`%{callee}` declares `RETURNS %{name}: T`, so its result borrows from the argument you pass as " \
+                "`%{name}`. Wrap the read in `WITH RESTRICT %{arg} { ... }`, or bind an owned value with " \
+                "`COPY %{callee}(%{arg})` if it must outlive a mutation of `%{arg}`.",
+      summary:  "Borrowing through a mutable argument requires RESTRICT, or COPY to take ownership.",
     },
     LIFETIME_RETURNS_REQUIRES_FAMILY_CONFLICT: {
       severity: :error, category: :lifetime,

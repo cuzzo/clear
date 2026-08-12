@@ -487,8 +487,11 @@ module Annotator
           return unless payload_type
 
           scope = current_scope
-          scope.declare(binding, nil, payload_type, false, false, nil, :stack)
-          og_declare(binding, nil, payload_type)
+          # The IS_A node is the binding's declaration site. Recording it gives
+          # lowering a stable identity to key a rename on when a nested MATCH
+          # binds the same name.
+          scope.declare(binding, condition, payload_type, false, false, nil, :stack)
+          og_declare(binding, condition, payload_type)
           classify_ownership!(scope.local_entry!(binding))
           borrow_match_payload_binding!(binding)
           return
@@ -529,13 +532,8 @@ module Annotator
               # getPtr/getAtPtrOpt), so mutation through the capture is
               # legal and lands in the container. Rc/node-handle payloads
               # are value captures and stay immutable borrows.
-              # A @node handle is itself a pointer into the NodeStore, so
-              # assigning through the capture lands in the stored node --
-              # excluding it here made `IF nodes[i] EXISTS AS n THEN n.f = ...`
-              # fail as an immutable-field assignment. Rc payloads stay
-              # immutable value captures.
               mutable_slot_payload = (unwrapped.struct? || unwrapped.collection?) &&
-                !unwrapped.any_rc?
+                !unwrapped.node_reference? && !unwrapped.any_rc?
               mutable_list_alias = b.expr.is_a?(AST::GetIndex) && root &&
                 !current_scope.is_immutable?(root.name) && mutable_slot_payload
               current_scope.declare(b.name, nil, unwrapped, mutable_list_alias, false, nil, :stack)
@@ -941,8 +939,8 @@ module Annotator
         end
 
         payload_type = match_payload_binding_type(plan, variant_name, T.unsafe(raw_payload), match_case)
-        current_scope.declare(binding, nil, payload_type, false, false, nil, :stack)
-        og_declare(binding, nil, payload_type)
+        current_scope.declare(binding, match_case, payload_type, false, false, nil, :stack)
+        og_declare(binding, match_case, payload_type)
         classify_ownership!(current_scope.local_entry!(binding))
         borrow_match_payload_binding!(binding) unless node.takes
       end

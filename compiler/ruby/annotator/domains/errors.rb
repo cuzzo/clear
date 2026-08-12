@@ -681,7 +681,6 @@ module Annotator
         ).returns(TenseOperationPlan)
       end
       def plan_or_else_with_diagnostic(node, left_type, right_type, operation, recovery)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         TenseOperationPlanner.or_else(
           left_type,
           right_type,

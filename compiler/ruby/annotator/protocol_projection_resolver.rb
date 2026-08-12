@@ -74,12 +74,12 @@ module Annotator
       resolved = TypeExpressionTree.transform(expression) do |candidate|
         kind = candidate.kind
         next candidate unless kind.is_a?(TypeProjectionExpression)
-        projection = kind
+        projection = T.cast(kind, TypeProjectionExpression)
         next candidate if projection.protocol
 
         protocol = projection_protocol(projection, parameter_map, issues)
         next candidate unless protocol
-        protocol_value = protocol
+        protocol_value = T.must(protocol)
 
         projection_kind = TypeProjectionExpression.new(
           owner: projection.owner,
@@ -87,7 +87,7 @@ module Annotator
           protocol: protocol_value.to_sym,
         )
         TypeExpression.new(
-          kind: projection_kind,
+          kind: T.cast(projection_kind, TypeExpressionKind),
           capabilities: candidate.capabilities,
         )
       end
@@ -141,7 +141,7 @@ module Annotator
       result.dup
     end
 
-    sig { params(code: Symbol, values: T.untyped).returns(ProtocolProjectionIssue) }
+    sig { params(code: Symbol, values: T::Hash[Symbol, T.untyped]).returns(ProtocolProjectionIssue) }
     def issue(code, **values)
       arguments = T.let({}, T::Hash[Symbol, String])
       values.each do |key, value|

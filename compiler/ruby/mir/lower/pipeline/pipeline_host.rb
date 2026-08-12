@@ -50,7 +50,6 @@ class PipelineHost
     @pipe_temp_counter = T.let(0, Integer)
     @stream_select_counter = T.let(0, Integer)
     @do_rt_name = T.let(nil, T.nilable(String))
-    @pipeline_node_alloc = T.let(nil, T.nilable(Symbol))
     @materializer = T.let(PipelineMaterializer.new(host: build_materializer_host), PipelineMaterializer)
     @range_lowerer = T.let(PipelineRangeLowerer.new(host: build_range_lowerer_host), PipelineRangeLowerer)
     @binding_chain_lowerer = T.let(build_binding_chain_lowerer, PipelineBindingChainLowerer)
@@ -77,6 +76,7 @@ class PipelineHost
   sig { returns(PipelineScalarLowerer) }
   def build_scalar_lowerer
     PipelineScalarLowerer.new(
+      loop_mark_stmts: -> { @lowering_bridge.pipeline_iteration_loop_marks },
       visit_expr: ->(_list_node, expr_node, placeholder) {
         with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
       },
@@ -192,6 +192,7 @@ class PipelineHost
       lower_each_range: ->(source_node, stages, each_op) { lower_each_range(source_node, stages, each_op) },
       lower_sharded_each: ->(list_node, each_op) { lower_sharded_each(list_node, each_op) },
       ast_stmts_use_placeholder: ->(body_stmts) { ast_stmts_use_placeholder?(body_stmts) },
+      loop_mark_stmts: -> { @lowering_bridge.pipeline_iteration_loop_marks },
       source_alloc_fact: ->(value, name, type_info) {
         fact = @lowering_bridge.pipeline_alloc_mark_fact(
           value, name, fallback_alloc: :heap, type_info: type_info,
@@ -375,7 +376,7 @@ class PipelineHost
       },
       transpile_type: ->(type_name) { transpile_type(type_name) },
       pipeline_alloc: ->(smooth_node) { pipeline_alloc(smooth_node) },
-      pipeline_result_alloc: -> { pipeline_builder_alloc },
+      pipeline_result_alloc: -> { pipeline_result_alloc },
       source_setup: ->(lhs) {
         concurrent_source_setup(lhs)
       },
@@ -692,25 +693,6 @@ class PipelineHost
   # Returns nil for non-migrated operators (caller falls back to string path).
   sig { params(node: AST::BinaryOp).returns(PipelineLoweringResult) }
   def lower_pipeline(node)
-    previous_alloc = @pipeline_node_alloc
-    @pipeline_node_alloc = pipeline_alloc(node)
-    lower_pipeline_body(node)
-  ensure
-    @pipeline_node_alloc = previous_alloc
-  end
-
-  # The allocator a builder must construct this pipeline's result with. It is
-  # the same decision complex_pipeline_sink_alloc frees the result through, so
-  # a builder that reaches for pipeline_result_alloc instead can allocate in
-  # the frame while its cleanup runs against the heap -- INV-1, seen as an
-  # alignment mismatch and double free at scope exit.
-  sig { returns(Symbol) }
-  def pipeline_builder_alloc
-    @pipeline_node_alloc || pipeline_result_alloc
-  end
-
-  sig { params(node: AST::BinaryOp).returns(PipelineLoweringResult) }
-  def lower_pipeline_body(node)
     if node.right.is_a?(AST::SelectOp) && Type.new(node.full_type!).canonical_stream_result?
       return lower_stream_select(PipelineSite.new(list: node.left, options: node), node.right)
     end

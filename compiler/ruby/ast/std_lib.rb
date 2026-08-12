@@ -617,6 +617,18 @@ STD_LIB = T.let({
     is_method: true,
   },
 
+  # "hELLO world".capitalize() -> "Hello world"
+  "capitalize" => {
+    args: [STRING_TYPE],
+    return: STRING_TYPE, return_alloc: :frame,
+    zig: "try CheatLib.stringCapitalize({alloc}, {0})",
+    # No `bc:` — the register VM has no capitalize opcode, and claiming one
+    # would make MIR lowering emit an InlineBc the emitter cannot compile.
+    allocates: true,
+    alloc: :node_storage,
+    is_method: true,
+  },
+
   # contains?("hello", "ll") -> true
   # contains?(arr, item)     -> true/false (linear search, @list or T[])
   "contains?" => [
@@ -1623,9 +1635,11 @@ BUILTIN_OPS = T.let({
   eql:       { zig: "CheatLib.eql({0}, {1})", bc: true, borrows: :all },
   strcmp:    { zig: "CheatLib.strcmp({0}, {1})", bc: true, borrows: :all },
   strEql:    { zig: "CheatLib.strEql({0}, {1})", bc: true, borrows: :all },
-  # O(1) pointer+length comparison for String@symbol. Valid for compiler-pooled
-  # static symbol literals; dynamic String@symbol values must be interned first.
-  symbolEql: { zig: "({0}.ptr == {1}.ptr and {0}.len == {1}.len)", bc: true, borrows: :all },
+  # String@symbol comparison. Symbols have two representations that never share
+  # a pointer -- compiler-pooled rodata literals and runtime intern-table
+  # handles from `symbol(runtime_string)` -- so identity alone is wrong.
+  # std.mem.eql keeps the pointer/length fast path and falls back to content.
+  symbolEql: { zig: "CheatLib.eql({0}, {1})", bc: true, borrows: :all },
 
   # --- String indexing ---
   charAt: { zig: "CheatLib.charAt({0}, {1})", bc: true, borrows: :all },

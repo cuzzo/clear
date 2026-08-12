@@ -946,6 +946,12 @@ module CapabilityHelper
     declare_unwrapped_capability_alias!(fact) if fact.unwraps_sync_alias?
     declare_capability_binding_or_error!(fact)
     declare_capability_projection!(fact)
+    # declare_with_new_capability marks the SOURCE binding, but the body reads
+    # through the alias and Scope#is_restricted? answers per binding. Without
+    # this the alias looks unrestricted, so borrowing through it -- e.g. calling
+    # a `RETURNS self: T` accessor -- is refused.
+    alias_name = fact.alias_name
+    current_scope.resolve_entry(alias_name)&.capabilities&.add(fact.capability) if alias_name
     nil
   end
 

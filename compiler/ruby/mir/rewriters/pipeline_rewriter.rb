@@ -595,11 +595,14 @@ class PipelineRewriter
       # A heap destination (see rewrite_children! VarDecl) owns the accumulator
       # wholesale; otherwise keep the pipeline expression's own stamp.
       decl.storage   = @dest_storage == :heap ? :heap : smooth_node.storage
-      if @dest_storage == :heap
-        sym = SymbolEntry.new(reg: decl, type: Type.new(decl.full_type!), mutable: true, storage: :heap)
-        decl.symbol = sym
-        @list_res_symbols[res_var] = sym
-      end
+      # The accumulator gets a SymbolEntry whatever its initial placement, and
+      # every reference shares it. Escape analysis runs AFTER this rewrite and
+      # promotes bindings through value-block results; without a symbol to
+      # promote, an accumulator feeding a heap binding stayed frame-allocated
+      # (OWNED_RESULT_ALLOC_MISMATCH).
+      sym = SymbolEntry.new(reg: decl, type: Type.new(decl.full_type!), mutable: true, storage: decl.storage)
+      decl.symbol = sym
+      @list_res_symbols[res_var] = sym
       decl.slot_size = Type.new(decl.full_type!).slot_size(T.unsafe(schema_lookup))
       decl.var_used = true
       [decl]
@@ -877,7 +880,7 @@ class PipelineRewriter
     AST.stamp_synthetic_type!(res, smooth_node.full_type!, context: "synthetic AST type")
     if (sym = @list_res_symbols[res_var])
       res.symbol = sym
-      res.storage = :heap
+      res.storage = sym.storage
     else
       res.storage = smooth_node.storage
     end

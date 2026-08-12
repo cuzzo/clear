@@ -154,7 +154,7 @@ module SyntaxTypoScanner
     FixCollector.push(FixableFinding.new(
       level: :error,
       message: T.must(DiagnosticRegistry.format(:LEGACY_MUTATION_NAME_SUFFIX, [])),
-      token: anchor,
+      token: T.cast(anchor, DiagnosticToken),
       category: :mutability,
       fixes: [fix]
     ), true)
@@ -194,7 +194,7 @@ module SyntaxTypoScanner
     finding = FixableFinding.new(
       level: :error,
       message: message,
-      token: anchor,
+      token: T.cast(anchor, DiagnosticToken),
       category: :type,
       fixes: [fix]
     )

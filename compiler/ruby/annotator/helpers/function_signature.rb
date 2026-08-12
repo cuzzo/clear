@@ -94,6 +94,11 @@ class FunctionSignature
     end
   end
 
+  # Stand-in for a registry `validate:` lambda while a signature is
+  # serialized. Procs cannot be marshalled, but every validator is a
+  # registry singleton, so the name is enough to re-link on load.
+  ValidatorRef = Struct.new(:name)
+
   class AnalysisFacts < T::Struct
     extend T::Sig
 
@@ -136,6 +141,29 @@ class FunctionSignature
         emit: emit,
         return_def: return_def
       )
+    end
+
+    sig { returns(T::Hash[Symbol, T.untyped]) }
+    def marshal_dump
+      state = T.let({}, T::Hash[Symbol, T.untyped])
+      instance_variables.each { |ivar| state[ivar] = instance_variable_get(ivar) }
+      validator = state[:@arg_validator]
+      return state unless validator
+
+      name = IntrinsicRegistry.validator_name(validator)
+      raise TypeError, "arg_validator is not a registry validator and cannot be serialized" unless name
+
+      state[:@arg_validator] = ValidatorRef.new(name)
+      state
+    end
+
+    sig { params(state: T::Hash[Symbol, T.untyped]).void }
+    def marshal_load(state)
+      state.each { |ivar, value| instance_variable_set(ivar, value) }
+      reference = @arg_validator
+      return unless reference.is_a?(ValidatorRef)
+
+      @arg_validator = T.let(IntrinsicRegistry.validator_for_name(reference.name), T.nilable(Proc))
     end
   end
   private_constant :Contract, :AnalysisFacts
@@ -723,6 +751,15 @@ class FunctionSignature
     copy
   end
 
+  sig { params(entry: T.nilable(SymbolEntry)).returns(T.nilable(SymbolEntry)) }
+  def self.import_kept_identity_symbol(entry)
+    return nil unless entry&.kept_identity
+
+    copy = entry.dup
+    copy.kept_identity = entry.kept_identity
+    copy
+  end
+
   sig { params(params: T::Array[AST::Param]).returns(T::Array[AST::Param]) }
   def self.copy_params_for_import(params)
     params.map do |param|
@@ -736,7 +773,10 @@ class FunctionSignature
         name_token: param.name_token,
         required: param.required,
         sync: param.sync,
-        symbol: nil
+        # The entry itself is mutable per-unit state, but kept_identity is a
+        # fact about the callee: drop it and an importer cannot tell the callee
+        # keeps the argument, so an Rc crosses the boundary without a retain.
+        symbol: import_kept_identity_symbol(param.symbol)
       )
     end
   end

@@ -25,11 +25,22 @@ module FixableSuggestionHelper
     best_distance <= max_distance ? best.to_s : nil
   end
 
-  sig { params(token: T.nilable(TypoToken), name: String, candidates: T::Array[String], message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
+  # The only thing a suggestion wants from its subject is where to point, and
+  # AnchorToken is exactly that pair. Narrowing to it here means the rest of
+  # the method never reaches through the union with T.unsafe.
+  sig { params(token: T.nilable(Lexer::Token)).returns(AnchorToken) }
+  def typo_anchor(token)
+    return AnchorToken.new(0, 0) if token.nil?
+
+    AnchorToken.new(token.line, token.column)
+  end
+
+  sig { params(token: T.nilable(Lexer::Token), name: String, candidates: T::Array[String], message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(NilClass) }
   def emit_typo_suggestion!(token, name, candidates, message, fix_label,
                             category: :registry, cascade: true)
-    token_line = T.cast(T.unsafe(token).line, Integer)
-    token_column = T.cast(T.unsafe(token).column, Integer)
+    anchor = typo_anchor(token)
+    token_line = anchor.line
+    token_column = anchor.column
     best = closest_name(name, candidates)
     fixes = T.let([], T::Array[Fix])
     if best

@@ -148,6 +148,12 @@ module AST
       dst.can_fail = src.can_fail unless src.can_fail.nil?
       dst.error_kind = src.error_kind if src.error_kind
       dst.error_type = src.error_type if src.error_type
+      # The importing module alias is what qualifies a cross-package call in
+      # the emitted Zig. Dropping it here emitted a bare callee that the
+      # package cannot see.
+      if src.respond_to?(:module_alias) && dst.respond_to?(:module_alias=) && src.module_alias
+        dst.module_alias = src.module_alias
+      end
     end
 
     dst
@@ -374,6 +380,15 @@ module AST
                           keyword_init: true) do
     extend T::Sig
 
+    # ruby-to-clear: field-type var_node=Locatable
+    # ruby-to-clear: field-type alias=?String
+    # ruby-to-clear: field-type alias_mutable=Bool
+    # ruby-to-clear: field-type guard_expr=?Locatable
+    # ruby-to-clear: field-type snapshot_token=?Token
+    # ruby-to-clear: field-type view_token=?Token
+    # ruby-to-clear: field-type view_length=?Locatable
+    # ruby-to-clear: field-type as_token=?Token
+
     sig { params(kw: StructKwargs).void }
     def initialize(**kw)
       super
@@ -387,7 +402,7 @@ module AST
 
     sig { returns(T.nilable(Symbol)) }
     def capability
-      T.must(T.cast(self[:capability], T.nilable(Symbol)))
+      T.cast(self[:capability], T.nilable(Symbol))
     end
 
     sig { params(val: Type).void }
@@ -750,11 +765,11 @@ module AST
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.soa_placeholder_assignment?(node)
     if node.is_a?(AST::BindExpr)
-      bind = node
+      bind = T.cast(node, AST::BindExpr)
       return soa_placeholder_field?(bind.name)
     end
     if node.is_a?(AST::Assignment)
-      assignment = node
+      assignment = T.cast(node, AST::Assignment)
       return soa_placeholder_field?(assignment.name)
     end
 
@@ -2380,6 +2395,9 @@ module AST
     extend T::Sig
     include Locatable
     # ruby-to-clear: field-type op=String@symbol
+    # ruby-to-clear: field-type left=Locatable
+    # ruby-to-clear: field-type right=Locatable
+    # ruby-to-clear: field-type paren_bind=?Bool
     # Derived: comparison/logical -> Bool; otherwise an operand's type.
     sig { returns(Type) }
     def full_type
@@ -2405,7 +2423,7 @@ module AST
     sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     # ruby-to-clear: data-api
     def retain_error_channel=(value)
-      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
+      @retain_error_channel = value
     end
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
@@ -2842,7 +2860,7 @@ module AST
     sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     # ruby-to-clear: data-api
     def retain_error_channel=(value)
-      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
+      @retain_error_channel = value
     end
     sig { returns(T.nilable(Symbol)) }
     def protocol_operation
@@ -2917,7 +2935,7 @@ module AST
     sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     # ruby-to-clear: data-api
     def retain_error_channel=(value)
-      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
+      @retain_error_channel = value
     end
     sig { params(token: Lexer::Token).void }
     def mark_explicit_mutable_receiver!(token)
@@ -3000,6 +3018,8 @@ module AST
     def name; target.name end
   end
   GetIndex     = Struct.new(:token, :target, :index) do
+    # ruby-to-clear: field-type index=Locatable
+    # ruby-to-clear: field-type target=Locatable
     extend T::Sig
     include Locatable
     attr_accessor :safe_nav_chain
@@ -3790,6 +3810,10 @@ module AST
   # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
   BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel, :arena_mode, :can_smash) do
+    # ruby-to-clear: field-type arena_mode=Bool
+    # ruby-to-clear: field-type can_smash=Bool
+    # ruby-to-clear: field-type parallel=Bool
+    # ruby-to-clear: field-type pinned=Bool
     extend T::Sig
     include Locatable
     include HasBodies
@@ -3900,6 +3924,7 @@ module AST
   # case_drops: Array of drop-arrays (parallel to cases), filled by annotator
   # default_drops: drop-array for default branch (or nil), filled by annotator
   MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) do
+    # ruby-to-clear: field-type exhaustive=Bool
     # ruby-to-clear: field-type expr=Locatable
     # ruby-to-clear: field-type cases=[]MatchCase
     # ruby-to-clear: field-type default_case=?([]Locatable)
@@ -3938,6 +3963,10 @@ module AST
   # ForRange: FOR var IN (start ..= end) DO body END
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
   ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter, :tight) do
+    # ruby-to-clear: field-type start_expr=Locatable
+    # ruby-to-clear: field-type end_expr=Locatable
+    # ruby-to-clear: field-type inclusive=Bool
+    # ruby-to-clear: field-type body=[]Locatable
     extend T::Sig
     include Locatable
     include StatementVoidType
@@ -4200,6 +4229,8 @@ module AST
 
   # STUB fn RETURNS value | STUB fn CAPTURES var | STUB fn SEQUENCE [...] | STUB fn WITH lambda
   StubDecl = Struct.new(:token, :function_name, :kind, :value) { include Locatable }
+  # ruby-to-clear: field-type function_name=String
+  # ruby-to-clear: field-type kind=String@symbol
   # kind: :returns, :captures, :sequence, :with
 
   # ruby-to-clear: data-api

@@ -134,7 +134,6 @@ module Annotator
 
       sig { params(node: AST::UnaryOp, plan_input: Type, raw_type: Type).returns(T.nilable(TenseOperationPlan)) }
       def try_value_plan_with_diagnostic(node, plan_input, raw_type)
-        T.bind(self, Annotator::Phases::TypeAnalysisSession)
         TenseOperationPlanner.try_value(plan_input)
       rescue ArgumentError
         error!(node, :UNWRAP_NON_OPTIONAL, got: raw_type)

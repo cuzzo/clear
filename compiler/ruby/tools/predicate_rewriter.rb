@@ -350,6 +350,13 @@ module PredicateRewriter
     case node
     when AST::MethodCall
       leftmost_offset(node.object, source)
+    when AST::GetIndex
+      # A GetIndex/GetField carries the `[` / `.` token, not the receiver's,
+      # so the span would start mid-expression and the rewrite would orphan
+      # the receiver (`m[:a]` became `m([:a])`).
+      leftmost_offset(node.target, source)
+    when AST::GetField
+      leftmost_offset(node.target, source)
     when AST::FuncCall
       offset_for(source, node.token.line, node.token.column) if node.token
     else

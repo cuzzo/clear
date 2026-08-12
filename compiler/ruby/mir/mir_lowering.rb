@@ -56,7 +56,13 @@ class MIRLowering
   # backend namespace so ordinary CLEAR parameters such as `path` remain legal.
   sig { params(name: String).returns(String) }
   def zig_module_alias(name)
-    "__clear_module_#{name.gsub('.', '_')}"
+    # Only the OWNING package of a multi-file group is built, so every
+    # reference -- the import, the type aliases, and a cross-package call's
+    # qualifier -- has to name the owner. Otherwise the same CLEAR type
+    # reaches Zig as two distinct types.
+    importer = program_state.importer
+    canonical = importer.respond_to?(:owning_package_name) ? importer.owning_package_name(name) : name
+    "__clear_module_#{canonical.gsub('.', '_')}"
   end
 
   OwnershipFact = T.type_alias do
@@ -1053,12 +1059,29 @@ class MIRLowering
     out
   end
 
+  # Duplicating an Rc/Arc handle is a RETAIN, never a structural copy -- and an
+  # OPTIONAL handle retains inside the `if present` arm. Returns nil when the
+  # destination is not a handle.
+  sig { params(mir: MIR::Node, ti: Type).returns(T.nilable(MIR::Node)) }
+  def retain_handle_for_destination(mir, ti)
+    payload = ti.optional? ? ti.wrapped_type : ti
+    return nil unless payload&.any_rc?
+
+    fn = payload.shared? ? "arcRetain" : "rcRetain"
+    zig = rc_payload_zig_type(payload)
+    return MIR::RcRetain.new(mir, zig, fn) unless ti.optional?
+
+    capture = "__retain_rc_#{lowering_counters.next_tmp_id}"
+    retained = MIR::IfOptional.new(mir, capture, MIR::RcRetain.new(MIR::Ident.new(capture), zig, fn), MIR::Lit.new("null"))
+    retained.result_type = Type.new(ti)
+    retained
+  end
+
   sig { params(mir: MIR::Node, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
   def copy_owned_value_for_destination(mir, ti, dest_alloc)
     return MIR::DupeSlice.new(mir, dest_alloc) if ti.string?
-    if ti.any_rc?
-      return MIR::RcRetain.new(mir, rc_payload_zig_type(ti), ti.shared? ? "arcRetain" : "rcRetain")
-    end
+    retained = retain_handle_for_destination(mir, ti)
+    return retained if retained
 
     MIR::DeepCopy.new(
       mir,
@@ -1112,9 +1135,8 @@ class MIRLowering
     end
     return place_owned_alloc_mismatch_for_destination(mir, dst_ti, dest_alloc, owned_alloc) if owned_alloc
     return MIR::DupeSlice.new(mir, dest_alloc) if dst_ti.string?
-    if dst_ti.any_rc?
-      return MIR::RcRetain.new(mir, rc_payload_zig_type(dst_ti), dst_ti.shared? ? "arcRetain" : "rcRetain")
-    end
+    retained = retain_handle_for_destination(mir, dst_ti)
+    return retained if retained
 
     # Lazy branch blocks cannot be hoisted outside their branch, but a
     # recursive owned result still needs a named source owner when it is
@@ -1133,6 +1155,55 @@ class MIRLowering
     )
   end
 
+  # A value block that ends in `binding?` hands out the payload but keeps its
+  # own guarded cleanup. Only a consumer that TAKES the result can know the
+  # transfer is due, so claim it here rather than in the block.
+  sig { params(mir: MIR::Node).void }
+  def claim_block_result_ownership!(mir)
+    return unless mir.is_a?(MIR::BlockExpr)
+    return if mir.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) && stmt.target == :block_result }
+
+    break_index = mir.body.rindex { |stmt| stmt.is_a?(MIR::BreakStmt) }
+    return unless break_index
+
+    owner = mir_ident_names(T.cast(mir.body[break_index], MIR::BreakStmt).value).first
+    return unless owner
+
+    cleanup = mir.body.find do |stmt|
+      stmt.is_a?(MIR::Cleanup) && stmt.name.to_s == owner && stmt.cleanup_entry&.[](:has_moved_guard)
+    end
+    return unless cleanup
+
+    mir.body.insert(break_index, *ownership_transfer_marks(owner, :block_result, move_guarded: true))
+  end
+
+  # Reads that hand back a view of storage someone else owns. A method call is
+  # included because it carries `owned_result_alloc` exactly when its result is
+  # the caller's to drop, so the effect below still tells the two apart.
+  CONTAINER_READ_RESULTS = T.let(
+    [MIR::ShardedMapGet, MIR::ItemsAccess, MIR::FieldGet, MIR::MethodCall].freeze,
+    T::Array[T.untyped],
+  )
+
+  # Does the materialized source own what it yields, or is it a view of storage
+  # that outlives it? This path is reached for anything that must be named
+  # before it is copied, which `mir_allocates?` answers for the whole subtree --
+  # a container lookup keyed by an allocating call "allocates" while still
+  # handing back a BORROW, and cleaning that up frees storage the container
+  # still holds. Every other shape constructs a fresh value and keeps the
+  # ownership it always had.
+  sig { params(mir: MIR::Node).returns(T::Boolean) }
+  def owned_branch_source_owns?(mir)
+    result = mir
+    if mir.is_a?(MIR::BlockExpr)
+      result = T.cast(mir.body.reverse.find { |stmt| stmt.is_a?(MIR::BreakStmt) }, T.nilable(MIR::BreakStmt))&.value
+      return true unless result
+    end
+    return true unless CONTAINER_READ_RESULTS.any? { |kind| result.is_a?(kind) }
+
+    MIR::OwnershipEffect.of(result).produces_owned
+  end
+
   sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }
   def copy_lazy_owned_branch_for_destination(mir, type_info, dest_alloc)
     tmp_id = lowering_counters.next_tmp_id
@@ -1140,10 +1211,24 @@ class MIRLowering
     source_name = "__owned_branch_src_#{tmp_id}"
     copy_name = "__owned_branch_copy_val_#{tmp_id}"
 
+    # This path TAKES the block's result (the source binding below owns it and
+    # frees it). A block that yields `binding?` never released its own claim,
+    # so ask for the transfer here -- the block cannot know whether its
+    # consumer takes or merely borrows.
+    claim_block_result_ownership!(mir)
     source_alloc = mir_owned_alloc(mir) || MIR::OwnershipEffect.alloc_of(mir) || dest_alloc
-    source_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false,
-                                        zig_type: type_info.zig_type)
-    build_drop_entry!(source_cleanup, type_info, nil)
+    # ... but only when the block's result is genuinely owned. A block whose
+    # result is a BORROW -- a container lookup whose key needed a temp, so the
+    # lookup got wrapped in a block -- owns nothing, and cleaning it up frees
+    # storage still held by the container. The copy below is what the
+    # destination keeps either way.
+    source_owned = owned_branch_source_owns?(mir)
+    source_cleanup = nil
+    if source_owned
+      source_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false,
+                                          zig_type: type_info.zig_type)
+      build_drop_entry!(source_cleanup, type_info, nil)
+    end
     source = MIR::BindingMaterialization.new(
       name: source_name,
       expr: mir,
@@ -1151,9 +1236,10 @@ class MIRLowering
       type_info: type_info,
       mutable: false,
       cleanup_entry: source_cleanup,
+      ownership_tracked: source_owned,
     )
 
-    copied_expr = MIR::DeepCopy.new(
+    copied_expr = retain_handle_for_destination(MIR::Ident.new(source_name), type_info) || MIR::DeepCopy.new(
       MIR::Ident.new(source_name),
       type_info.zig_type,
       nil,
@@ -1477,6 +1563,7 @@ class MIRLowering
     # Optionality is encoded inside NodeRef's zero sentinel; T@node and
     # ?T@node therefore have the same Zig representation and need no cast.
     return mir if coerced_type.node_reference? && actual_type.node_reference?
+    return mir if carrier_only_coercion?(actual_type, coerced_type)
 
     if coerced_type.node_reference? && !actual_type.node_reference?
       if actual_type.resolved == :NIL
@@ -1489,6 +1576,19 @@ class MIRLowering
     return union_wrapped if union_wrapped
 
     mir_cast(mir, actual_type, coerced_type) || mir
+  end
+
+  # A coercion that only ADDS an ownership/sync carrier is performed
+  # structurally by the declaration's CapWrap. A Zig cast for it would claim a
+  # plain value already is an Rc/Arc handle.
+  sig { params(actual_type: Type, coerced_type: Type).returns(T::Boolean) }
+  def carrier_only_coercion?(actual_type, coerced_type)
+    coerced_payload = coerced_type.non_optional_type
+    actual_payload = actual_type.non_optional_type
+    return false unless coerced_payload.any_rc? || coerced_payload.any_sync?
+    return false if actual_payload.any_rc? || actual_payload.any_sync?
+
+    coerced_payload.resolved == actual_payload.resolved
   end
 
   sig { params(mir: MIR::Emittable, node: AST::Locatable, actual_type: Type, coerced_type: Type).returns(T.nilable(MIR::Emittable)) }
@@ -1753,6 +1853,7 @@ class MIRLowering
     finalize_nested_mir_bodies!(node, state)
     stamp_source_line!(node, line, col)
     append_transfer_marks_to_body!(state, pre_terminator_transfer_marks(node, state.out, body), line, col)
+    node_index = state.out.length
     state.out << node
     append_move_guard_for_transfer_mark!(node, state)
     surface = scan_ownership_surface!(
@@ -1764,13 +1865,26 @@ class MIRLowering
     state.out.concat(surface.facts)
     mark_ownership_finalized_node!(node)
     mark_ownership_finalized_nodes!(surface.facts)
+    transfer_index = state.out.length
     append_transfer_marks_to_body!(
       state,
       ownership_transfers_for_targets(surface.transfer_targets, state),
       line,
       col,
     )
+    # A MoveMark has to PRECEDE the move it guards. When the consuming node is
+    # a terminator -- `RETURN Wrapper{ field: owned }` -- appending after it
+    # both writes the guard too late and emits statements Zig rejects as
+    # unreachable.
+    if terminator_stmt?(node) && state.out.length > transfer_index
+      state.out.insert(node_index, *T.must(state.out.slice!(transfer_index..)))
+    end
     nil
+  end
+
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def terminator_stmt?(node)
+    node.is_a?(MIR::ReturnStmt) || node.is_a?(MIR::BreakStmt) || node.is_a?(MIR::ContinueStmt)
   end
 
   sig { params(state: OwnershipFinalizationContext, marks: T::Array[MIR::Stmt], line: T.nilable(Integer), col: T.nilable(Integer)).void }
@@ -2161,7 +2275,11 @@ class MIRLowering
     return if state.body_transfer_mark_names.include?(name)
     return unless state.alloc_marks.key?(name) || state.body_alloc_mark_names.include?(name)
 
-    ownership_transfer_marks(name, :block_result).each do |mark|
+    # A binding whose cleanup is `_moved`-guarded must have that flag set when
+    # the block hands its value out, or the value is both transferred out and
+    # cleaned up on the way.
+    guarded = state.guarded_cleanup_names.include?(name)
+    ownership_transfer_marks(name, :block_result, move_guarded: guarded).each do |mark|
       state.out << mark
       record_ownership_finalization_node!(state, mark)
     end
@@ -3088,6 +3206,14 @@ class MIRLowering
 
   # Like lower_body, but the last user-visible statement becomes break :label expr
   # instead of a regular statement. Used for IF/MATCH expression branches.
+  # A NoReturn tail expression (`DEFAULT -> panic("...")`) has no value.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def noreturn_result_expr?(node)
+    resolved = node.respond_to?(:resolved_type) ? T.unsafe(node).resolved_type : nil
+    resolved = resolved.resolved if resolved.is_a?(Type)
+    resolved == :NoReturn
+  end
+
   sig { params(stmts: T::Array[LowerableStmt], label: String).returns(T::Array[MIR::Emittable]) }
   def lower_body_with_break(stmts, label)
     return [] if stmts.empty?
@@ -3105,10 +3231,16 @@ class MIRLowering
     # Draining the ambient list wholesale scooped hoists that belong to the
     # ENCLOSING expression (an earlier concat part's owned temp) into this
     # branch's scope — emitted Zig then referenced them outside the branch.
-    result_mir, pending = lower_head { lower(T.must(stmts[last_user_idx])) }
+    result_stmt = T.must(stmts[last_user_idx])
+    result_mir, pending = lower_head { lower(result_stmt) }
     suffix_lowered = lower_body(stmts.drop(last_user_idx + 1))
 
-    tail = pending + suffix_lowered + [MIR::BreakStmt.new(label, T.cast(result_mir, MIR::Node))]
+    # A NoReturn tail yields no value to break with: Zig reads
+    # `break :blk @panic(...)` as unreachable code.
+    terminator = noreturn_result_expr?(result_stmt) ?
+      T.cast(result_mir, MIR::Emittable) :
+      MIR::BreakStmt.new(label, T.cast(result_mir, MIR::Node))
+    tail = pending + suffix_lowered + [terminator]
     prefix_lowered + normalize_allocating_mir_body(tail)
   end
 
@@ -3149,7 +3281,7 @@ class MIRLowering
         lowering_counters.restore!(seed) if seed
         program_state.function_counter_snapshots[stmt.name] = lowering_counters.snapshot
       end
-      lowered = lower(stmt)
+      lowered = lower_top_level(stmt)
       reject_module_scope_cleanup!(stmt, lowered)
       append_lowered_items!(LoweredItemTarget.new(items: items, line: stmt.token&.line), lowered)
     end
@@ -3167,18 +3299,38 @@ class MIRLowering
   # transfers it into its program-lifetime global (owned sink, no per-scope
   # cleanup), and call that at the very top of clearMain so every container-scope
   # read borrows an initialized value.
-  sig { params(items: T::Array[MIR::Node]).void }
-  def inject_const_init!(items)
+  CONST_INIT_FN = "__clear_init_consts"
+  CONST_INIT_GUARD = "__clear_consts_ready"
+
+  sig { params(items: T::Array[MIR::Node], module_scope: T::Boolean).void }
+  def inject_const_init!(items, module_scope: false)
     entries = program_state.runtime_init_consts
-    return if entries.empty?
+    module_inits = program_state.module_const_inits.to_a
+    return if entries.empty? && module_inits.empty?
 
     raw = T.let([], T::Array[MIR::Node])
+    # Two importers of the same package both call its initializer, so the
+    # second call has to be a no-op or the first build leaks.
+    if module_scope
+      items << MIR::Let.new(CONST_INIT_GUARD, MIR::Lit.new("false"), true, Type.new(:Bool), nil)
+      raw << MIR::IfStmt.new(MIR::Ident.new(CONST_INIT_GUARD), [MIR::ReturnStmt.new(nil)], nil)
+      raw << MIR::Set.new(MIR::Ident.new(CONST_INIT_GUARD), MIR::Lit.new("true"))
+    end
+    # An imported module's consts must exist before this program's own
+    # initializers -- or its own body -- can read them.
+    module_inits.each do |alias_name|
+      raw << MIR::Call.new(
+        "#{alias_name}.#{CONST_INIT_FN}", [MIR::Ident.new("rt")], true, false,
+        MIR::CallableContract.no_ownership(1)
+      )
+    end
     entries.each do |entry|
       tmp = "__ci_#{entry.name}"
       # Construct the value into a heap temp, copy it into the program-lifetime
       # global, then transfer the temp's ownership to the sink (the global now
       # owns it program-lifetime; no per-scope cleanup). The store must precede
       # the transfer so the read is not use-after-transfer.
+      raw.concat(entry.prelude)
       raw << MIR::AllocMark.new(tmp, :heap, entry.type_info, :heap)
       raw << MIR::Let.new(tmp, entry.init, false, nil, nil)
       raw << MIR::Set.new(MIR::Ident.new(entry.name), MIR::Ident.new(tmp))
@@ -3186,11 +3338,13 @@ class MIRLowering
     end
     body = finalize_synthetic_const_init_body!(raw)
     items << MIR::FnDef.new(
-      "__clear_init_consts",
+      CONST_INIT_FN,
       [MIR::Param.new("rt", "*Runtime", false)],
       "void",
       body,
-      :private,
+      # The root calls an imported module's initializer across the Zig module
+      # boundary, so a module's copy cannot be private.
+      module_scope ? :pub : :private,
       true,
       []
     )
@@ -3204,7 +3358,7 @@ class MIRLowering
       # in reverse, after every use), then run the ordered init first.
       entries.reverse_each { |entry| main_fn.body.unshift(MIR::ModuleConstFree.new(entry.name)) }
       main_fn.body.unshift(MIR::Call.new(
-        "__clear_init_consts", [MIR::Ident.new("rt")], true, false, MIR::CallableContract.no_ownership(1)
+        CONST_INIT_FN, [MIR::Ident.new("rt")], true, false, MIR::CallableContract.no_ownership(1)
       ))
     end
   end
@@ -3368,34 +3522,70 @@ class MIRLowering
     node.statements.each do |stmt|
       case stmt
       when AST::FunctionDef
-        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower(stmt))
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower_top_level(stmt))
       when AST::StructDef, AST::EnumDef, AST::UnionDef
-        append_lowered_items!(LoweredItemTarget.new(items: type_items, line: stmt.token.line), lower(stmt))
+        append_lowered_items!(LoweredItemTarget.new(items: type_items, line: stmt.token.line), lower_top_level(stmt))
       when AST::RequireNode
-        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: nil), lower(stmt))
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: nil), lower_top_level(stmt))
       when AST::ExternFnDecl, AST::ExternStructDecl
-        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower(stmt))
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower_top_level(stmt))
       when AST::VarDecl, AST::BindExpr
         # Module-scope immutable bindings (e.g. frozen membership tables)
         # become file-scope consts, exactly as lower_program emits them.
-        lowered = lower(stmt)
+        lowered = lower_top_level(stmt)
         reject_module_scope_cleanup!(stmt, lowered)
         append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lowered)
       end
     end
 
+    inject_const_init!(fn_items, module_scope: true)
     LoweredModuleItems.new(items: fn_items, type_items: type_items)
   end
 
   private
 
+  # pending_stmts is hoist scratch for the statement being lowered, but
+  # FunctionState is per-MIRLowering, not per-function. Anything a previous
+  # top-level statement failed to drain surfaces inside the NEXT function's
+  # body -- carrying its AllocMark/ErrCleanup groups without the TransferMarks
+  # that were emitted with the body it actually belongs to. Every top-level
+  # entry point (program and module) starts a statement with empty scratch.
+  sig { params(stmt: AST::Node).returns(T.nilable(LoweredMir)) }
+  def lower_top_level(stmt)
+    function_state.pending_stmts = []
+    # A module-level MUTABLE binding lives for the whole program. Record it
+    # before lowering so an assignment inside a function knows its destination
+    # is the heap and that nothing drops it.
+    program_state.module_global_names.add(stmt.name.to_s) if stmt.is_a?(AST::VarDecl) && !stmt.module_const
+    lowered = lower(stmt)
+    # A container-scope declaration cannot carry a statement suffix: Zig reads
+    # `var x: i64 = 11; _ = &x;` at module scope as a malformed field list.
+    # The unused-binding suppression only belongs inside a function body.
+    items = lowered.is_a?(Array) ? lowered : [lowered]
+    items.each { |item| item.suppression = nil if item.is_a?(MIR::Let) }
+    lowered
+  end
+
   # ================================================================
   # Name and type helpers
   # ================================================================
 
+  # Zig identifiers carry no `?`/`!`, but CLEAR (like Ruby) distinguishes
+  # `raw` from `raw?` and `check` from `check!`. Stripping the mark collapsed
+  # the pair onto one Zig name -- a duplicate declaration, or worse, a silent
+  # call to the wrong one. Encode the mark instead.
+  PREDICATE_SUFFIX = "_p"
+  BANG_SUFFIX = "_bang"
+
   sig { params(name: String).returns(String) }
   def zig_safe_name(name)
-    cleaned = (name.end_with?('!') || name.end_with?('?')) ? name[0..-2] : name
+    cleaned = if name.end_with?('?')
+      "#{name[0..-2]}#{PREDICATE_SUFFIX}"
+    elsif name.end_with?('!')
+      "#{name[0..-2]}#{BANG_SUFFIX}"
+    else
+      name
+    end
     cleaned = Compiler::Entrypoint::ZIG_NAME if cleaned == Compiler::Entrypoint::NAME
     cleaned = T.must(cleaned)
     ZigType.reserved_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
@@ -3579,7 +3769,10 @@ class MIRLowering
   # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
   sig { params(mir_node: MIR::Node, from_type: Type, to_type: Type::TypeInput).returns(T.nilable(MIR::Cast)) }
   def mir_cast(mir_node, from_type, to_type)
+    # A NoReturn value (`panic(...)`) coerces to every type in Zig; wrapping it
+    # in `@as(T, ...)` only produces unreachable code at the use site.
     from_t = from_type
+    return mir_node if from_t.resolved == :NoReturn
     to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
     return nil if from_t.semantic_type_key == to_t.semantic_type_key
     # @boxed is constructed by destination placement (HeapCreate); it is
@@ -3811,7 +4004,7 @@ class MIRLowering
         copy_forbidden = true
       elsif plan.copy_strategy != :bit_copy
         clone_fields << name.to_s
-        field_source = "self.#{name}"
+        field_source = "self.#{zig_safe_name(name.to_s)}"
         # The clone temp is a fresh identifier: a field name (always an
         # identifier) prefixed with `__clone_` is never a Zig keyword, so it
         # needs no `@"..."` quoting. Quoting it yields invalid Zig (`__clone_@"type"`).
@@ -3946,7 +4139,7 @@ class MIRLowering
 
       deinit_entries.each do |de|
         tmp_name = "__dupe_#{de.field}"
-        field_source = "self.#{de.field}"
+        field_source = "self.#{zig_safe_name(de.field.to_s)}"
         dupe_stmts << MIR::Let.new(
           tmp_name,
           MIR::Lit.new("try CheatLib.dupeValue(@TypeOf(#{field_source}), #{field_source}, alloc)"),
@@ -4041,13 +4234,19 @@ class MIRLowering
     cleanup_arms = T.let([], T::Array[MIR::UnionMatchArm])
     needs_cleanup = T.let(false, T::Boolean)
     copy_forbidden = T.let(false, T::Boolean)
-    clone_arms = T.let([], T::Array[String])
+    clone_arms = T.let([], T::Array[MIR::UnionMatchArm])
 
     facts.each do |fact|
       data = fact.data
       if data.nil?
         cleanup_arms << MIR::UnionMatchArm.new(variant: fact.name, payload: nil, body: [])
-        clone_arms << ".#{fact.name} => .{ .#{fact.name} = {} }"
+        clone_arms << MIR::UnionMatchArm.new(
+          variant: fact.name,
+          payload: nil,
+          body: [MIR::ReturnStmt.new(
+            MIR::StructInit.new(nil, [{ name: fact.name, value: MIR::Lit.new("void{}") }]),
+          )],
+        )
         next
       end
 
@@ -4083,12 +4282,21 @@ class MIRLowering
       end
 
       needs_cleanup ||= body.any?
+      # The arm captures by pointer: a by-value capture would put a full copy of
+      # every variant's payload on the frame, once per arm.
       clone_payload = if copy_strategy == :bit_copy
-        payload
+        "#{payload}.*"
       else
-        "try CheatLib.dupeValue(@TypeOf(#{payload}), #{payload}, alloc)"
+        "try CheatLib.dupeValue(@TypeOf(#{payload}.*), #{payload}.*, alloc)"
       end
-      clone_arms << ".#{fact.name} => |#{payload}| .{ .#{fact.name} = #{clone_payload} }"
+      clone_arms << MIR::UnionMatchArm.new(
+        variant: fact.name,
+        payload: payload,
+        pointer_payload: true,
+        body: [MIR::ReturnStmt.new(
+          MIR::StructInit.new(nil, [{ name: fact.name, value: MIR::Lit.new(clone_payload) }]),
+        )],
+      )
       cleanup_arms << MIR::UnionMatchArm.new(
         variant: fact.name,
         payload: payload,
@@ -4098,28 +4306,38 @@ class MIRLowering
     end
 
     methods = T.let([], T::Array[MIR::FnDef])
-    if needs_cleanup
-      statements = T.let([
-        MIR::Suppress.new("alloc"),
-        MIR::UnionMatchStmt.new(MIR::Deref.new(MIR::Ident.new("self")), cleanup_arms, nil),
-      ], T::Array[MIR::Stmt])
-      methods << MIR::FnDef.new(
-        "__clear_drop",
-        [MIR::Param.new("self", "*@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
-        "void",
-        statements,
-        :pub,
-        false,
-        [],
-      )
-    end
-    if needs_cleanup && !copy_forbidden
-      clone_expr = "switch (self) { #{clone_arms.join(', ')}, }"
+    # Emitted even when no variant owns anything. `__clear_drop` is the type's
+    # ownership contract, and cleanup consults it BEFORE falling back to
+    # representation-driven reflection -- which cannot tell an owned String
+    # from a `String@symbol` or a borrow, since all three are []const u8, and
+    # frees the rodata behind a symbol. A union that owns nothing has to say so.
+    statements = T.let([
+      MIR::Suppress.new("alloc"),
+      MIR::UnionMatchStmt.new(MIR::Deref.new(MIR::Ident.new("self")), cleanup_arms, nil),
+    ], T::Array[MIR::Stmt])
+    methods << MIR::FnDef.new(
+      "__clear_drop",
+      [MIR::Param.new("self", "*@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+      "void",
+      statements,
+      :pub,
+      false,
+      [],
+    )
+    # Drop and clone are ONE contract: the runtime reads drop-without-clone as
+    # "linear" and rejects the copy. Now that drop is unconditional, a copyable
+    # union has to carry its clone too, whether or not a variant owns anything.
+    unless copy_forbidden
+      # A switch EXPRESSION gives every arm its own result temp. On a union with
+      # a hundred variants that is megabytes of frame -- enough to blow a 4 MB
+      # fiber stack in the prologue. Returning from each arm reuses the return
+      # slot instead.
       methods << MIR::FnDef.new(
         "__clear_clone",
         [MIR::Param.new("self", "@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
         "@This()",
-        [MIR::ReturnStmt.new(MIR::Lit.new(clone_expr))],
+        # A union whose variants all bit-copy never touches the allocator.
+        [MIR::Suppress.new("alloc"), MIR::UnionMatchStmt.new(MIR::Ident.new("self"), clone_arms, nil)],
         :pub,
         true,
         [],
@@ -4160,6 +4378,11 @@ class MIRLowering
   sig { params(node: AST::Cast).returns(MIR::Cast) }
   def lower_cast(node)
     inner = lower(node.value)
+    # A NoReturn value coerces to every type in Zig; `@as(T, @panic(...))` is
+    # unreachable code at the use site. `CAST(panic("...") AS T)` is how the
+    # translation spells an unreachable fallback.
+    return inner if Hoist.noreturn_value?(node.value)
+
     target_type = transpile_type(node.target)
 
     # Int -> enum: emit `@enumFromInt(value)` instead of `@as(EnumT, value)`.
@@ -4253,7 +4476,11 @@ class MIRLowering
     pkg_inline = node.kind == :package && importer && importer.stdlib_package?(node.path)
 
     if node.kind == :package && !pkg_inline
+      # Only the OWNING package of a multi-file group is built, so both the
+      # import and the type aliases below must name it -- otherwise the same
+      # CLEAR type reaches Zig as two distinct types.
       import_name = node.namespace || node.path
+      import_name = importer.owning_package_name(import_name) if importer.respond_to?(:owning_package_name)
       zig_import_name = zig_module_alias(import_name)
       # The same package can be required by the root and by an inlined local
       # module; both land in one Zig compilation unit, so emit each import
@@ -4264,6 +4491,12 @@ class MIRLowering
       # each pub type to the imported module in the emitted Zig — the same
       # contract EXTERN STRUCT already emits for foreign types.
       pkg_mod = importer&.compile_package(node.path, caller_dir: T.must(program_state.source_dir))
+      # MATCH dispatch reads union_schemas to decide switch-with-payload vs a
+      # tag equality chain. Without the imported package's schemas an
+      # `Imported.Variant AS payload` arm silently lowered to `value ==
+      # Imported.Variant` and never bound the payload.
+      merge_module_schemas!(pkg_mod) if pkg_mod
+      record_module_const_init!(pkg_mod, zig_import_name)
       pkg_scope = pkg_mod&.global_scope
       if pkg_scope
         alias_target = zig_import_name
@@ -4354,6 +4587,17 @@ class MIRLowering
       next nil unless stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
       lower(stmt)
     end.flatten.select { |item| item.is_a?(MIR::Emittable) }
+  end
+
+  # A module's runtime-initialized consts sit in its own Zig file as
+  # `undefined` until its initializer runs. Remember the ones that have an
+  # initializer so the root can call it before anything reads them.
+  sig { params(mod: T.nilable(ModuleImporter::CompiledModule), alias_name: String).void }
+  def record_module_const_init!(mod, alias_name)
+    items = mod&.mir_items
+    return unless items
+    has_init = items.flatten.any? { |item| item.is_a?(MIR::FnDef) && item.name.to_s == CONST_INIT_FN }
+    program_state.module_const_inits << alias_name if has_init
   end
 
   sig { params(mod: ModuleImporter::CompiledModule).void }
@@ -4973,6 +5217,20 @@ class MIRLowering
       return keep if owned_sink_value?(value, ast_node) && !ast_node.is_a?(AST::CopyNode)
       return keep if explicit_owned_sink_transfer?(ast_node, owned_sink_source_node(ast_node))
       raise "annotation admitted an implicit copy of linear type #{lifecycle.type_key}"
+    end
+
+    # A destination that IS an Rc/Arc handle is filled by retaining, whatever
+    # the lifecycle plan of the surface type says: a structural copy of a
+    # handle fabricates an owner that was never counted.
+    handle_ti = dst_ti.optional? ? dst_ti.wrapped_type : dst_ti
+    if handle_ti&.any_rc? && !source.satisfies_rc_sink?
+      return OwnedSinkPlan.new(
+        action: :rc_retain,
+        target_alloc: sink_alloc,
+        zig_type: rc_payload_zig_type(handle_ti),
+        copy_mode: nil,
+        rc_func: handle_ti.shared? ? "arcRetain" : "rcRetain",
+      )
     end
 
     if lifecycle.copy_strategy == :deep_clone || lifecycle.copy_strategy == :generic

@@ -396,18 +396,35 @@ module MIRLoweringLiterals
   def non_empty_hash_literal(node, plan, capability)
     T.bind(self, MIRLowering) rescue nil
     items = T.let([], T::Array[MIR::Stmt])
+    # Pairs now nest their own literals inside this block, so the label must be
+    # unique per literal or an inner map collides with its enclosing one.
+    literal_id = lowering_counters.next_block_expr_id
+    label = "__hm_blk_#{literal_id}"
+    hm_name = "__hm_#{literal_id}"
     alloc_expr = hash_literal_allocator_expr(plan)
-    items << MIR::Let.new("__hm", capability.init_value || hash_literal_init_struct(capability.zig_type, plan.alloc, true), true, nil, nil)
+    items << MIR::Let.new(hm_name, capability.init_value || hash_literal_init_struct(capability.zig_type, plan.alloc, true), true, nil, nil)
     node.pairs.each do |key_node, val_node|
-      items << hash_literal_put_stmt(key_node, val_node, plan, alloc_expr)
+      # Each pair's hoisted temps belong to the pair, not to the enclosing
+      # statement. Draining them at statement level leaves every pair's
+      # errdefer pending for the rest of the literal, and Zig re-emits the
+      # whole pending set at every `try` -- quadratic machine code in the
+      # number of entries. The put consumes the temps in the same scope, so
+      # confining them to a per-pair block keeps the pending set constant.
+      outer_pending = function_state.pending_stmts
+      function_state.pending_stmts = []
+      put_stmt = hash_literal_put_stmt(key_node, val_node, plan, alloc_expr, hm_name)
+      pair_stmts = function_state.pending_stmts
+      function_state.pending_stmts = outer_pending
+      items << (pair_stmts.empty? ? put_stmt : MIR::BlockExpr.new(nil, pair_stmts + [put_stmt]))
     end
-    result = hash_literal_result(MIR::Ident.new("__hm"), plan, capability)
+    result = hash_literal_result(MIR::Ident.new(hm_name), plan, capability)
     if capability.wraps_result?
-      items << MIR::Let.new("__hm_wrapped", result, false, Type.new(plan.type_info), nil)
-      result = MIR::Ident.new("__hm_wrapped")
+      wrapped_name = "__hm_wrapped_#{literal_id}"
+      items << MIR::Let.new(wrapped_name, result, false, Type.new(plan.type_info), nil)
+      result = MIR::Ident.new(wrapped_name)
     end
-    items << MIR::BreakStmt.new("__hm_blk", result)
-    block = MIR::BlockExpr.new("__hm_blk", items)
+    items << MIR::BreakStmt.new(label, result)
+    block = MIR::BlockExpr.new(label, items)
     block.result_type = Type.new(plan.type_info)
     block
   end
@@ -424,12 +441,21 @@ module MIRLoweringLiterals
     )
   end
 
-  sig { params(key_node: AST::Node, val_node: AST::Node, plan: HashLiteralPlan, alloc_expr: MIR::MethodCall).returns(MIR::ExprStmt) }
-  def hash_literal_put_stmt(key_node, val_node, plan, alloc_expr)
+  sig { params(key_node: AST::Node, val_node: AST::Node, plan: HashLiteralPlan, alloc_expr: MIR::MethodCall, hm_name: String).returns(MIR::ExprStmt) }
+  def hash_literal_put_stmt(key_node, val_node, plan, alloc_expr, hm_name)
     T.bind(self, MIRLowering) rescue nil
     key_mir = lower(key_node)
+    value_type = plan.type_info.value_type
     raw_value = with_decl_alloc(plan.alloc) do
-      materialize_owned_sink_value(lower(val_node), val_node, plan.alloc)
+      # The map owns its values, so a value must live in the map's allocator --
+      # storing a @rodata literal directly means the map's cleanup frees
+      # read-only memory. This is the placement step the list literal does.
+      # A nested aggregate value builds against the map's VALUE type; without
+      # it the inner literal guesses from its own items and a `{K}{K}V` map
+      # stores the inner map's entries directly in the outer one.
+      lowered = value_type ? with_expected_type(value_type) { lower(val_node) } : lower(val_node)
+      placed = value_type ? place_value_for_destination(lowered, val_node, plan.alloc, value_type) : lowered
+      materialize_owned_sink_value(placed, val_node, plan.alloc, value_type)
     end
     value_mir = hoist_alloc(raw_value, val_node, err_cleanup: true)
     operands = ownership_operands_for_value(key_mir, key_node, "hash literal key", plan.alloc) +
@@ -441,7 +467,7 @@ module MIRLoweringLiterals
       4,
     )
     MIR::ExprStmt.new(
-      MIR::MethodCall.new(MIR::Ident.new("__hm"), "put", [alloc_expr, alloc_expr, key_mir, value_mir], true, put_contract),
+      MIR::MethodCall.new(MIR::Ident.new(hm_name), "put", [alloc_expr, alloc_expr, key_mir, value_mir], true, put_contract),
       false,
     )
   end
@@ -487,6 +513,10 @@ module MIRLoweringLiterals
   def hash_literal_plan(node)
     T.bind(self, MIRLowering) rescue nil
     expected_ti = Type.from_node(function_state.current_expected_type)
+    # A map literal filling an OPTIONAL slot still builds a map: taking the
+    # expected type as-is renders the container as `?CheatLib.StringMap(V)`,
+    # which is not a struct literal Zig can initialize.
+    expected_ti = expected_ti.non_optional_type if expected_ti&.optional?
     ti = if expected_ti&.map?
       expected_ti
     else

@@ -13,7 +13,8 @@ class ClearParser
     result = CapabilityParseResult.new
     return result unless match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)
 
-    apply_capability!(result, consume(:VAR_ID))
+    capability_token = consume(:VAR_ID)
+    apply_capability!(result, capability_token, capability_token.text!)
 
     # ':' chaining (e.g., @shared:locked, @soa:shared:locked, @list:soa)
     parse_capability_chain!(result)
@@ -127,7 +128,7 @@ class ClearParser
   def token_char?(token, value)
     return false unless token
 
-    token.type == :CHAR && token.value == value
+    token.type == :CHAR && token.text_is?(value)
   end
 
   sig { params(token: T.nilable(Lexer::Token)).returns(T::Boolean) }
@@ -137,7 +138,7 @@ class ClearParser
 
   # Apply a single capability token to the result hash. Detects duplicates.
   sig { params(result: CapabilityParseResult, token: Lexer::Token, value: String, validate_shard_count: T::Boolean).void }
-  def apply_capability!(result, token, value = token.value, validate_shard_count: false)
+  def apply_capability!(result, token, value, validate_shard_count: false)
     emit_boxed_capability_migration(token)
     ownership = CAPABILITY_OWNERSHIP_VALUES[value]
     if ownership
@@ -176,7 +177,7 @@ class ClearParser
       error!(token, :DUPLICATE_SHARD_COUNT_CAP) if result.shard_count
       consume(:CHAR, '(')
       count_tok = consume_number
-      count = count_tok.value.to_i
+      count = count_tok.number_as_integer
       error!(count_tok, :SHARDED_TOO_FEW, count: count) if validate_shard_count && count < 2
       result.shard_count = count
       consume(:CHAR, ')')
@@ -246,15 +247,15 @@ class ClearParser
     if match?(:TYPE_ID)
       typo_tok = current
       emit_typo_suggestion!(
-        typo_tok, typo_tok.value, AST::CAPABILITIES.map(&:to_s),
-        "Unknown WITH capability '#{typo_tok.value}'",
+        typo_tok, typo_tok.display_value, AST::CAPABILITIES.map(&:to_s),
+        "Unknown WITH capability '#{typo_tok.display_value}'",
         "closest WITH capability",
         category: :capability, cascade: true
       )
     end
 
     while match?(:KEYWORD) || match?(:VAR_ID) do
-      capability = if match?(:KEYWORD) && current.value != 'AS'
+      capability = if match?(:KEYWORD) && !current.text_is?('AS')
         cap_tok = consume(:KEYWORD)
         cap = cap_tok.text!.to_sym
         unless AST::CAPABILITIES.include?(cap)
@@ -306,7 +307,7 @@ class ClearParser
       node.polymorphic = polymorphic
       if escape_tok
         node.deadlock_escape = {
-          kind: escape_tok.value == 'POSSIBLE_DEADLOCK' ? :deadlock : :lock_cycle,
+          kind: escape_tok.text_is?('POSSIBLE_DEADLOCK') ? :deadlock : :lock_cycle,
           token: escape_tok,
         }
       end
@@ -321,7 +322,7 @@ class ClearParser
     node.polymorphic = polymorphic
     if escape_tok
       node.deadlock_escape = {
-        kind: escape_tok.value == 'POSSIBLE_DEADLOCK' ? :deadlock : :lock_cycle,
+        kind: escape_tok.text_is?('POSSIBLE_DEADLOCK') ? :deadlock : :lock_cycle,
         token: escape_tok,
       }
     end
@@ -554,7 +555,7 @@ class ClearParser
     return nil unless match!(:KEYWORD, 'RETRY')
     consume(:CHAR, '(')
     tok = consume_number
-    n = tok.value.to_i
+    n = tok.number_as_integer
     error!(tok, :RETRY_N_NONPOSITIVE, got: n) if n <= 0
     consume(:CHAR, ')')
     consume(:KEYWORD, 'THEN')
@@ -626,7 +627,7 @@ class ClearParser
       unless current.type == :VAR_ID
         error!(current, :EXPECTED_CAP_SIGIL_AFTER_COLON)
       end
-      normalized = current.value.start_with?('@') ? current.value : "@#{current.value}"
+      normalized = current.value.start_with?('@') ? current.value : "@#{current.display_value}"
       attrs = CAP_SIGIL_ATTRS[normalized]
       unless attrs
         # Chain form `@shared:foo` arrives without the `@`; root form
@@ -636,7 +637,7 @@ class ClearParser
         candidates = has_at ? CAP_SIGIL_ATTRS.keys : CAP_SIGIL_ATTRS.keys.map { |k| k.sub(/^@/, '') }
         emit_typo_suggestion!(
           current, current.value, candidates,
-          "Unknown capability sigil '#{current.value}'",
+          "Unknown capability sigil '#{current.display_value}'",
           "closest capability sigil",
           category: :capability, cascade: true
         )
@@ -702,7 +703,7 @@ class ClearParser
     consume(:CHAR, ':')
     neg = match!(:CHAR, '-')
     num_tok = consume_number
-    rank = num_tok.value.to_i
+    rank = num_tok.number_as_integer
     rank = -rank if neg
     consume(:CHAR, ')')
     if dims.lock_rank
@@ -856,6 +857,10 @@ class ClearParser
     rule = STMT_RULE_INDEX[ClearParser.token_rule_key(current)]
     return dispatch_stmt_rule(rule) if rule
 
+    # The chain is anchored where its first expression starts, which is the
+    # cursor right here -- reaching back through steps.first.expr.token asks
+    # an AST node union for a field instead.
+    chain_anchor = current
     parsed_var = current.type == :VAR_ID ? parse_var_form : nil
     if parsed_var&.assignment
       consume(:CHAR, ';')
@@ -872,7 +877,7 @@ class ClearParser
       end
 
       unless match?(:KEYWORD, 'THEN')
-        error!(current, :EXPECTED_THEN_AFTER_AS_BG, got: current.value.inspect)
+        error!(current, :EXPECTED_THEN_AFTER_AS_BG, got: current.display_value.inspect)
       end
 
       steps = [AST::ThenStep.new(expr: expr, binding: binding_name)]
@@ -887,7 +892,7 @@ class ClearParser
         steps << AST::ThenStep.new(expr: next_expr, binding: next_binding)
       end
       match!(:CHAR, ';')
-      return AST::ThenChain.new(steps.first.expr.token, steps)
+      return AST::ThenChain.new(chain_anchor, steps)
     end
 
     consume(:CHAR, ';')

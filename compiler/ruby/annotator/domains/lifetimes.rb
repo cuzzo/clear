@@ -601,7 +601,13 @@ module Annotator
         error!(node, :BORROWED_VAR_NOT_FOUND) if borrowed_scope.nil?
         return if T.must(borrowed_scope).is_immutable?(root_var)
 
-        lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : "__borrow_#{root_var}"
+        # VarDecl#name is a String, Assignment#name an Identifier. Both are real
+        # bindings and must borrow under their own name; only a genuinely
+        # unbound result falls back to the synthetic name, whose lifetime
+        # nothing ever ends.
+        lhs_name = node.name
+        lhs_name = lhs_name.name if lhs_name.is_a?(AST::Identifier)
+        lhs_name = "__borrow_#{root_var}" unless lhs_name.is_a?(String)
         mutable = node.is_a?(AST::VarDecl) && node.mutable
         err = ownership_graph.borrow(lhs_name, root_var, mutable: mutable)
         error!(node, :LIFETIME_ALREADY_BORROWED, name: root_var) if err

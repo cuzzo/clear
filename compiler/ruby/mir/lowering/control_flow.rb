@@ -169,6 +169,25 @@ module MIRLoweringControlFlow
     with_pending(subject_pending, MIR::IfStmt.new(cond, then_body, else_body))
   end
 
+  # A payload binding occupies its Zig name for the rest of the branch. Nested
+  # MATCHes that bind the same name (`item` inside an arm that already bound
+  # `item`) would redeclare it, which Zig rejects -- so a colliding binding
+  # takes the same `_L<line>` rename a colliding local declaration takes.
+  sig { params(binding: String, decl: T.untyped, line: T.nilable(Integer)).returns(String) }
+  def payload_binding_name(binding, decl, line)
+    T.bind(self, MIRLowering) rescue nil
+    safe = zig_safe_name(binding)
+    if function_state.alloc_marked_names.key?(safe)
+      suffix = line ? "_L#{function_relative_line(line)}" : "_#{lowering_counters.next_tmp_id}"
+      safe = zig_safe_name("#{binding}#{suffix}")
+    end
+    function_state.alloc_marked_names[safe] = true
+    # Key the rename by the declaration's identity, not by name: a name-keyed
+    # map would keep pointing at the inner binding after the nested MATCH ends.
+    function_state.decl_zig_names[decl.object_id] = safe if decl
+    safe
+  end
+
   sig { params(condition: AST::IsA, subject: MIR::Emittable, variant: String).returns(MatchBody) }
   def runtime_is_a_payload_bindings(condition, subject, variant)
     binding = condition.binding
@@ -177,7 +196,8 @@ module MIRLoweringControlFlow
     payload = T.let(MIR::UnionPayloadGet.new(subject, variant), MIR::Emittable)
     payload = MIR::Deref.new(payload) if condition.runtime_indirect_payload_as
     is_mutable = condition.left.is_a?(AST::Identifier) && condition.left.was_moved == true
-    [MIR::Let.new(binding, payload, is_mutable, nil, "_ = &#{binding};")]
+    safe_binding = payload_binding_name(binding.to_s, condition, condition.line)
+    [MIR::Let.new(safe_binding, payload, is_mutable, nil, "_ = &#{safe_binding};")]
   end
 
   sig { params(node: AST::IfBind).returns(MIR::IfBindStmt) }
@@ -678,15 +698,21 @@ module MIRLoweringControlFlow
       )
       loop_stmt = MIR::ScopeBlock.new([iter_init, while_stmt])
     else
-      is_field_access = node.collection.is_a?(AST::GetField)
       is_param = node.collection.is_a?(AST::Identifier) &&
                  current_function_param_name?(node.collection.name)
       # list_collection? covers T[N]@list (fixed capacity ArrayList) in addition to
       # T[]@list (dynamic). Both map to std.ArrayListUnmanaged and require .items.
+      # A `[]T@list` is an ArrayList and iterates its `.items` whether it is a
+      # local or reached through a field. Only a `T[]` FIELD is a plain slice,
+      # and slices iterate directly.
+      is_field_access = node.collection.is_a?(AST::GetField)
       is_arraylist = (ct.list_collection? || (ct.array? && ct.dynamic?)) &&
-                     !ct.string? && !is_param && !is_field_access
+                     !ct.string? && !is_param &&
+                     !(is_field_access && ct.slice_shaped_field_array?)
       iter = if is_arraylist
         MIR::ListItems.new(coll)
+      elsif is_field_access
+        coll
       elsif is_param
         # @list params are anytype — could be ArrayList (TAKES) or slice (borrow,
         # via .items at call site). MIR::ItemsAccess(safe: true) emits a comptime
@@ -694,8 +720,6 @@ module MIRLoweringControlFlow
         # zero runtime overhead. Defer container shape to the runtime/comptime
         # layer instead of re-deriving from "is this a param?".
         MIR::ItemsAccess.new(coll, true)
-      elsif is_field_access && ct.dynamic_field_array?
-        coll
       else
         MIR::AddressOf.new(coll)
       end
@@ -856,7 +880,9 @@ module MIRLoweringControlFlow
     payload = T.let(MIR::UnionPayloadGet.new(subject, variant.to_s), MIR::Emittable)
     payload = MIR::Deref.new(payload) if match_case.indirect_payload_as
     if match_case.binding
-      return [MIR::Let.new(T.must(match_case.binding), payload, is_mutable, nil, "_ = &#{match_case.binding};")]
+      safe_binding = payload_binding_name(T.must(match_case.binding).to_s, match_case,
+        match_case.respond_to?(:line) ? match_case.line : nil)
+      return [MIR::Let.new(safe_binding, payload, is_mutable, nil, "_ = &#{safe_binding};")]
     end
 
     destructure = match_case.destructure
@@ -1143,6 +1169,10 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     plan = return_lowering_plan(node)
     value = finalize_return_value(node, plan.value)
+
+    # `RETURN panic("...")` has no value to return: the expression itself is
+    # the terminator, and `return @panic(...)` is unreachable code.
+    return T.cast(value, MIR::Emittable) if value && Hoist.noreturn_value?(node.value)
 
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)

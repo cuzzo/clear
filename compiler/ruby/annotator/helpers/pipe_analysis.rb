@@ -1560,7 +1560,7 @@ module PipeAnalysis
     if node.is_a?(AST::Capability)
       [node[:var_node], node[:guard_expr], node[:view_length]].each do |val|
         if val.is_a?(Array) || val.is_a?(AST::Capability) || val.is_a?(AST::Locatable)
-          each_shard_scan_node(val, &blk)
+          each_shard_scan_node(T.cast(val, ShardScanNode), &blk)
         end
       end
       return

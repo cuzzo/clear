@@ -136,7 +136,9 @@ module Hoist
       call.args.each_with_index do |arg, idx|
         next if arg.is_a?(AST::MoveNode) && arg.value.is_a?(AST::Identifier)
         next unless allocating?(arg, schema_lookup)
-        replacement = make_temp!(arg, hoists, counter.next_name, moved: moved_arg?(arg), schema_lookup: schema_lookup)
+        expected = empty_list_literal?(arg) ? callee_param_type(call, idx) : nil
+        replacement = make_temp!(arg, hoists, counter.next_name, moved: moved_arg?(arg),
+          expected_type: expected, schema_lookup: schema_lookup)
         if call.is_a?(AST::FuncCall)
           call.args[idx] = replacement
         elsif call.is_a?(AST::MethodCall)
@@ -164,7 +166,9 @@ module Hoist
       expected = Type.from_node(return_type)
       expected = expected.success_type if expected
       value_type = Type.from_node!(stmt.value, context: "return value hoist")
-      expected = value_type if value_type&.collection?
+      # An empty literal's own collection type is a guess (List<f64>) -- the
+      # declared return type is the only real word on its element.
+      expected = value_type if value_type&.collection? && !empty_list_literal?(stmt.value)
       if stmt.value.is_a?(AST::BinaryOp) && (stmt.value.op == :OR || stmt.value.op == :OR_ELSE)
         right_type = stmt.value.right.is_a?(AST::Locatable) ? stmt.value.right.full_type! : Type.from_node!(stmt.value.right, context: "return OR right hoist")
         expected = right_type if right_type&.collection?
@@ -190,6 +194,9 @@ module Hoist
   sig { params(value: AST::Node, hoists: T::Array[AST::VarDecl], counter: HoistCounter, schema_lookup: T.nilable(Proc), expected_type: T.nilable(Type::TypeInput)).returns(AST::Node) }
   def self.hoist_escape_value!(value, hoists, counter, schema_lookup, expected_type: nil)
     return T.cast(value, AST::Node) if value.is_a?(AST::MoveNode) && value.value.is_a?(AST::Identifier)
+    # A NoReturn expression (`RETURN panic("...")`) escapes nothing -- binding
+    # it emits `const t = @panic(...)`, which Zig rejects as unreachable code.
+    return T.cast(value, AST::Node) if noreturn_value?(value)
     if allocating?(value, schema_lookup)
       return make_temp!(value, hoists, counter.next_name, expected_type: expected_type)
     end
@@ -279,8 +286,26 @@ module Hoist
 
   # For a body-bearing control-flow node, the expression members that
   # are NOT statement bodies. Plain nodes recurse through their fields normally.
+  # A pipeline stage's element expression is a per-iteration body lowered in
+  # its own loop scope with `_` bound. Hoisting an allocating sub-expression
+  # out of it moves the work out of the loop AND strands the placeholder,
+  # which the emitted Zig then reads as an undeclared `@"_"`.
+  PIPELINE_STAGE_NODES = T.let([
+    AST::SelectOp, AST::WhereOp, AST::EachOp, AST::TapOp, AST::AllOp, AST::AnyOp,
+    AST::FindOp, AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
+    AST::TakeWhileOp, AST::SkipOp, AST::OrderByOp, AST::DistinctOp, AST::UnnestOp,
+    AST::IndexOp, AST::ReduceOp,
+  ].freeze, T::Array[T.untyped])
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.pipeline_stage_node?(node)
+    PIPELINE_STAGE_NODES.any? { |klass| node.is_a?(klass) }
+  end
+
   sig { params(node: AST::Node).returns(T::Array[BasicObject]) }
   def self.non_body_exprs(node)
+    return [] if pipeline_stage_node?(node)
+
     case node
     when AST::IfStatement, AST::WhileLoop, AST::WhileBindLoop
       [node.condition]
@@ -331,6 +356,21 @@ module Hoist
     !!(et && !et.primitive? && !et.string?)
   end
 
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.empty_list_literal?(node)
+    node.is_a?(AST::ListLit) && node.items.empty?
+  end
+
+  # An argument hoisted into its own binding loses the call site that gave it a
+  # type. An empty literal has nothing else to go on, so carry the parameter's
+  # type onto the temp.
+  sig { params(call: AST::Node, idx: Integer).returns(T.nilable(Type)) }
+  def self.callee_param_type(call, idx)
+    return nil unless call.respond_to?(:matched_signature)
+    signature = FunctionSignature.unwrap(call.matched_signature)
+    signature&.params&.[](idx)&.type
+  end
+
   sig { params(call: AST::MethodCall).returns(T::Boolean) }
   def self.collection_value_store_call?(call)
     sig = FunctionSignature.unwrap(call.matched_stdlib_def)
@@ -340,6 +380,14 @@ module Hoist
 
     ti = Type.from_node!(call.object, context: "collection value-store receiver")
     !!(ti.is_a?(Type) && ti.collection?)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def self.noreturn_value?(node)
+    return false unless node.respond_to?(:resolved_type)
+    resolved = T.unsafe(node).resolved_type
+    resolved = resolved.resolved if resolved.is_a?(Type)
+    resolved == :NoReturn
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
@@ -446,10 +494,12 @@ module Hoist
     :hoist_escape_value!
   private_class_method :allocating?
   private_class_method :ast_access_path?
+  private_class_method :callee_param_type
   private_class_method :ast_container_borrow_expr?
   private_class_method :collection_value_store_call?
   private_class_method :composite_element_store?
   private_class_method :concat?
+  private_class_method :empty_list_literal?
   private_class_method :each_call
   private_class_method :each_call_like
   private_class_method :each_call_like_child
@@ -654,7 +704,18 @@ module MIRHoistLowering
 
   sig { params(node: MIR::Node, blk: T.proc.params(arg0: MIR::Node).void).void }
   def each_mir_expr_child(node, &blk)
-    return unless node.class.respond_to?(:members)
+    # T::Struct MIR nodes (RegistryCall and friends) have props, not Struct
+    # members. Without this they look childless, so an allocating call nested
+    # under one is never normalized and reaches the checker unhoisted.
+    unless node.class.respond_to?(:members)
+      # Only descend into T::Struct nodes whose children can actually be
+      # replaced -- `replace_t_struct_expr_child!` needs a writable prop or a
+      # rebuildable wrapper. Yielding a child we cannot replace makes the
+      # caller hoist a value that stays referenced in place, leaving its
+      # ErrCleanup without the matching TransferMark.
+      node.child_exprs.each(&blk) if replaceable_t_struct?(node)
+      return
+    end
 
     node.class.members.each do |member|
       value = T.unsafe(node)[member]
@@ -1243,6 +1304,10 @@ module MIRHoistLowering
     case expr
     when MIR::Cast
       expr.expr.is_a?(MIR::Ident)
+    when MIR::OptionalUnwrap
+      # `tmp.?` is a VIEW of a temp that already owns the value. Hoisting it
+      # into a second owned binding gives the same heap parts two cleanups.
+      expr.expr.is_a?(MIR::Ident)
     else
       false
     end
@@ -1262,7 +1327,10 @@ module MIRHoistLowering
   def replace_mir_expr_child!(parent, old_child, new_child)
     return if old_child.equal?(new_child)
     return unless parent.respond_to?(:mir?) && parent.mir?
-    return unless parent.class.respond_to?(:members)
+    unless parent.class.respond_to?(:members)
+      replace_t_struct_expr_child!(parent, old_child, new_child)
+      return
+    end
 
     parent.class.members.each do |member|
       value = T.unsafe(parent)[member]
@@ -1280,6 +1348,48 @@ module MIRHoistLowering
     nil
   end
 
+  # A T::Struct node whose operands live in an array we can rewrite (the
+  # RegistryCall/RegistryCallArg shape). Anything else is left alone.
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def replaceable_t_struct?(node)
+    node.is_a?(MIR::RegistryCall)
+  end
+
+  # A T::Struct MIR node holds its operands in props, and an operand may sit
+  # inside a per-argument wrapper (RegistryCallArg). A `const` prop has no
+  # writer, so the wrapper is rebuilt around the replacement rather than
+  # mutated; the array that holds it is the same object either way.
+  sig { params(parent: MIR::Node, old_child: MIR::Node, new_child: MIR::Node).void }
+  def replace_t_struct_expr_child!(parent, old_child, new_child)
+    return unless parent.class.respond_to?(:props)
+
+    parent.class.props.each_key do |prop|
+      value = T.unsafe(parent).public_send(prop)
+      if value.equal?(old_child)
+        next unless parent.respond_to?(:"#{prop}=")
+        T.unsafe(parent).public_send(:"#{prop}=", new_child)
+        refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
+        return
+      end
+      next unless value.is_a?(Array)
+
+      value.each_with_index do |item, index|
+        if item.equal?(old_child)
+          value[index] = new_child
+        elsif item.respond_to?(:expr) && item.expr.equal?(old_child) && item.class.respond_to?(:props)
+          value[index] = item.class.new(**item.class.props.keys.to_h do |key|
+            [key, key == :expr ? new_child : T.unsafe(item).public_send(key)]
+          end)
+        else
+          next
+        end
+        refresh_ownership_consumption_for_replaced_child!(parent, old_child, new_child)
+        return
+      end
+    end
+    nil
+  end
+
   MirAggregate = T.type_alias do
     T.any(T::Array[T.untyped], T::Hash[T.untyped, T.untyped])
   end
@@ -1288,7 +1398,7 @@ module MIRHoistLowering
   def replace_mir_expr_in_value!(value, old_child, new_child)
     case value
     when Array
-      replaced = T.let(false, T::Boolean)
+      replaced = false
       value.each_with_index do |item, idx|
         if item.equal?(old_child)
           value[idx] = new_child
@@ -1304,7 +1414,7 @@ module MIRHoistLowering
       end
       return replaced
     when Hash
-      replaced = T.let(false, T::Boolean)
+      replaced = false
       value.each_key do |key|
         item = value[key]
         if item.equal?(old_child)
@@ -1482,7 +1592,8 @@ module MIRHoistLowering
       hoist_cleanup_entry(mir.expr, ast_node)
     when MIR::AsyncPayloadTake, MIR::DirectTenseMap, MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
          MIR::Pipeline,
-         MIR::InlineBc, MIR::RegistryCall, MIR::IndexedStore, MIR::ExternTrampoline, MIR::BgBlock
+         MIR::InlineBc, MIR::RegistryCall, MIR::IndexedStore, MIR::ExternTrampoline, MIR::BgBlock,
+         MIR::ShardedMapGet
       cleanup_entry_for_owned_result(ast_node, alloc: alloc) ||
         typed_cleanup_entry_for_mir_result(mir, alloc: alloc) ||
         cleanup_entry_for_ownership_effect(mir, alloc: alloc)
@@ -1605,6 +1716,7 @@ module MIRHoistLowering
     end
   end
 
+  private :replace_t_struct_expr_child!
   private :normalize_allocating_mir_stmt!,
     :normalize_allocating_result_expr!,
     :normalize_stmt_child_exprs!,

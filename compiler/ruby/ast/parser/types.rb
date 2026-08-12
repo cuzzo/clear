@@ -15,9 +15,12 @@ class ClearParser
     consume(:KEYWORD, 'FN')
     consume(:CHAR, '(')
     param_types = []
+    param_mutability = []
     until match?(:CHAR, ')')
+      # A callback parameter the callee may mutate: FN(MUTABLE T) -> R.
+      param_mutability << match!(:KEYWORD, 'MUTABLE')
       # Allow optional name annotation: `name: Type` or just `Type`
-      if match?(:VAR_ID) && peek.type == :CHAR && peek.value == ':'
+      if match?(:VAR_ID) && peek.type == :CHAR && peek.text_is?(':')
         consume(:VAR_ID)   # name is for documentation only
         consume(:CHAR, ':')
       end
@@ -32,13 +35,14 @@ class ClearParser
       abi_token = current
       consume(abi_token.type)
       abi = abi_token.text!.downcase.to_sym
-      error!(abi_token, :PARSER_EXPECTED, expected: "C", got: abi_token.value,
+      error!(abi_token, :PARSER_EXPECTED, expected: "C", got: abi_token.display_value,
         type: abi_token.type, line: abi_token.line) unless abi == :c
     end
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
-      error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.value, type: current.type, line: current.line)
+      error!(current, :PARSER_EXPECTED, expected: "supported function type annotation", got: current.display_value, type: current.type, line: current.line)
     end
-    Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil, abi)
+    Type.function_type_from_parts(param_types, T.unsafe(return_type), false, nil, abi,
+      param_mutability.map { |flag| !!flag })
   end
 
   sig { params(migration_root: T::Boolean).returns(Type) }
@@ -104,7 +108,7 @@ class ClearParser
     # of optional T while ?(T[]) means an optional list of T.
     if optional_prefix == "?" && match?(:CHAR, '(')
       if tense_prefix != "" || error_prefix != ""
-        error!(current, :PARSER_EXPECTED, expected: "a grouped optional without an outer tense/error prefix", got: current.value, type: current.type, line: current.line)
+        error!(current, :PARSER_EXPECTED, expected: "a grouped optional without an outer tense/error prefix", got: current.display_value, type: current.type, line: current.line)
       end
       consume(:CHAR, '(')
       wrapped = parse_type_annotation(migration_root: false)
@@ -190,7 +194,7 @@ class ClearParser
 
       # Case 3: Fixed Explicit "Number[10]"
       elsif match?(:NUMBER) || match?(:INT64)
-        size = consume_number.value.to_i
+        size = consume_number.number_as_integer
         consume(:CHAR, ']')
         inner = "[#{size}]"
 
@@ -202,7 +206,7 @@ class ClearParser
           got: "[?]", type: current.type, line: current.line)
 
       # Case 5: Infinite stream marker "T[INF]" (used inside tense type ~T[INF])
-      elsif match?(:TYPE_ID) && current.value == 'INF'
+      elsif match?(:TYPE_ID) && current.text_is?('INF')
         consume(:TYPE_ID)
         consume(:CHAR, ']')
         inner = "[INF]"
@@ -217,7 +221,7 @@ class ClearParser
         if match!(:CHAR, ']')
           inner += "[]"
         elsif match?(:NUMBER) || match?(:INT64)
-          size = consume_number.value.to_i
+          size = consume_number.number_as_integer
           consume(:CHAR, ']')
           inner += "[#{size}]"
         else
@@ -350,11 +354,11 @@ class ClearParser
     token = T.must(peek_at(0))
     if token.type == :CHAR
       return parse_inline_prefixed_expression if %w[? ! ~].include?(token.value)
-      if token.value == '['
-        return parse_inline_stream_expression if peek_at(1)&.value == '~'
+      if token.text_is?('[')
+        return parse_inline_stream_expression if peek_at(1)&.text_is?('~')
         return parse_inline_linear_expression
       end
-      return parse_inline_map_expression if token.value == '{'
+      return parse_inline_map_expression if token.text_is?('{')
     end
 
     parse_inline_atom_expression
@@ -366,8 +370,8 @@ class ClearParser
     consume(:CHAR, '~')
     cardinality = T.let(:FINITE, T.any(Integer, Symbol))
     if match?(:NUMBER) || match?(:INT64)
-      cardinality = consume_number.value.to_i
-    elsif match?(:TYPE_ID) && current.value == "INF"
+      cardinality = consume_number.number_as_integer
+    elsif match?(:TYPE_ID) && current.text_is?("INF")
       consume(:TYPE_ID, 'INF')
       cardinality = :INF
     end
@@ -390,11 +394,11 @@ class ClearParser
           expected: "an optional stream item such as [~]?T",
           got: "?[~]T", type: prefix_token.type, line: prefix_token.line)
       end
-      return TypeExpression.of(OptionalTypeExpression.new(inner: inner))
+      return TypeExpression.of(OptionalTypeExpression.new(inner: inner), inner.capabilities)
     end
-    return TypeExpression.of(FallibleTypeExpression.new(inner: inner)) if prefix == "!"
+    return TypeExpression.of(FallibleTypeExpression.new(inner: inner), inner.capabilities) if prefix == "!"
 
-    TypeExpression.of(FutureTypeExpression.new(inner: inner))
+    TypeExpression.of(FutureTypeExpression.new(inner: inner), inner.capabilities)
   end
 
   sig { returns(TypeExpression) }
@@ -443,7 +447,7 @@ class ClearParser
     dimensions = T.let([], T::Array[T.any(Integer, Symbol)])
     allocation_hint = T.let(nil, T.nilable(Integer))
     if match?(:NUMBER) || match?(:INT64)
-      dimension = consume_number.value.to_i
+      dimension = consume_number.number_as_integer
     else
       layout = consume(:TYPE_ID).text!
       case layout
@@ -451,25 +455,25 @@ class ClearParser
         kind = layout.downcase.to_sym
         dimension = layout == "List" ? :LIST : :SET
         if match!(:CHAR, '(')
-          allocation_hint = consume_number.value.to_i
+          allocation_hint = consume_number.number_as_integer
           consume(:CHAR, ')')
         end
       when "Pool"
         kind = :pool
         consume(:CHAR, '(')
-        dimension = consume_number.value.to_i
+        dimension = consume_number.number_as_integer
         consume(:CHAR, ')')
       else
         error!(previous, :PARSER_EXPECTED, expected: "an Inline Pivot dimension", got: layout, type: previous.type, line: previous.line)
       end
     end
-    dimensions << T.must(dimension)
+    dimensions << dimension
     while match!(:CHAR, ',')
       if !allocation_hint.nil? || kind == :set || kind == :pool
-        error!(previous, :PARSER_EXPECTED, expected: "integer or List dimensions in a flat rank", got: previous.value, type: previous.type, line: previous.line)
+        error!(previous, :PARSER_EXPECTED, expected: "integer or List dimensions in a flat rank", got: previous.display_value, type: previous.type, line: previous.line)
       end
       if match?(:NUMBER) || match?(:INT64)
-        dimensions << consume_number.value.to_i
+        dimensions << consume_number.number_as_integer
       else
         layout = consume(:TYPE_ID).text!
         unless layout == "List"
@@ -498,7 +502,7 @@ class ClearParser
     else
       parsed_key = parse_inline_type_expression
       if match?(:CHAR, ',')
-        error!(current, :PARSER_EXPECTED, expected: "a closing brace; nested maps use separate brace layers", got: current.value, type: current.type, line: current.line)
+        error!(current, :PARSER_EXPECTED, expected: "a closing brace; nested maps use separate brace layers", got: current.display_value, type: current.type, line: current.line)
       end
       parsed_key
     end
@@ -513,7 +517,7 @@ class ClearParser
     unless parsed.collection.nil?
       error!(previous, :PARSER_EXPECTED,
         expected: "collection topology in the Inline Pivot layer sigil",
-        got: previous.value, type: previous.type, line: previous.line)
+        got: previous.display_value, type: previous.type, line: previous.line)
     end
     TypeCapabilities.new(
       ownership: parsed.ownership || :affine,

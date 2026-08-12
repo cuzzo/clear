@@ -136,13 +136,14 @@ module EscapeAnalysis
     sig { params(node: BasicObject).returns(T::Boolean) }
     def matches?(node)
       case handler
-      when :apply_return_escape_sink! then T.unsafe(node).is_a?(AST::ReturnNode)
-      when :apply_assignment_escape_sink! then T.unsafe(node).is_a?(AST::Assignment)
-      when :apply_binding_escape_sink! then T.unsafe(node).is_a?(AST::VarDecl) || T.unsafe(node).is_a?(AST::BindExpr)
-      when :apply_execution_boundary_escape_sink! then T.unsafe(node).is_a?(AST::BgBlock) || T.unsafe(node).is_a?(AST::BgStreamBlock)
-      when :apply_lambda_escape_sink! then T.unsafe(node).is_a?(AST::LambdaLit)
-      when :apply_func_call_escape_sink! then T.unsafe(node).is_a?(AST::FuncCall)
-      when :apply_method_call_escape_sink! then T.unsafe(node).is_a?(AST::MethodCall)
+      when :apply_return_escape_sink! then node.is_a?(AST::ReturnNode)
+      when :apply_assignment_escape_sink! then node.is_a?(AST::Assignment)
+      when :apply_binding_escape_sink! then node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
+      when :apply_destructuring_escape_sink! then node.is_a?(AST::DestructuringAssignment)
+      when :apply_execution_boundary_escape_sink! then node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock)
+      when :apply_lambda_escape_sink! then node.is_a?(AST::LambdaLit)
+      when :apply_func_call_escape_sink! then node.is_a?(AST::FuncCall)
+      when :apply_method_call_escape_sink! then node.is_a?(AST::MethodCall)
       else false
       end
     end
@@ -174,6 +175,7 @@ module EscapeAnalysis
     :owning_return,
     :enclosing_scope_store,
     :binding_result,
+    :destructured_binding,
     :execution_boundary_capture,
     :lambda_capture,
     :takes_or_mutable_arg,
@@ -191,6 +193,7 @@ module EscapeAnalysis
       :apply_return_escape_sink!,
       :apply_assignment_escape_sink!,
       :apply_binding_escape_sink!,
+      :apply_destructuring_escape_sink!,
       :apply_execution_boundary_escape_sink!,
       :apply_lambda_escape_sink!,
       :apply_func_call_escape_sink!,
@@ -210,6 +213,7 @@ module EscapeAnalysis
     EscapeSink.new(name: :owning_return, node_classes: [AST::ReturnNode], handler: :apply_return_escape_sink!),
     EscapeSink.new(name: :enclosing_scope_store, node_classes: [AST::Assignment], handler: :apply_assignment_escape_sink!),
     EscapeSink.new(name: :binding_result, node_classes: [AST::VarDecl, AST::BindExpr], handler: :apply_binding_escape_sink!),
+    EscapeSink.new(name: :destructured_binding, node_classes: [AST::DestructuringAssignment], handler: :apply_destructuring_escape_sink!),
     EscapeSink.new(name: :execution_boundary_capture, node_classes: [AST::BgBlock, AST::BgStreamBlock], handler: :apply_execution_boundary_escape_sink!),
     EscapeSink.new(name: :lambda_capture, node_classes: [AST::LambdaLit], handler: :apply_lambda_escape_sink!),
     EscapeSink.new(name: :takes_or_mutable_arg, node_classes: [AST::FuncCall], handler: :apply_func_call_escape_sink!),
@@ -415,13 +419,18 @@ module EscapeAnalysis
       body_summaries: BodySummaries,
       on_mutable_violation: T.nilable(T.proc.params(entry: SymbolEntry, arg: AST::Identifier, callee_name: String).void),
       on_family_violation: T.nilable(T.proc.params(arg: AST::Node, source_family: Symbol, dest_family: Symbol, callee_name: String).void),
+      imported_params: T::Hash[String, T::Array[AST::Param]],
     ).void
   end
-  def self.apply_kept_identity_placement!(fn_nodes, body_summaries, on_mutable_violation: nil, on_family_violation: nil)
+  def self.apply_kept_identity_placement!(fn_nodes, body_summaries, on_mutable_violation: nil, on_family_violation: nil, imported_params: {})
     kept_contracts = T.let({}, T::Hash[String, T::Hash[Integer, KeptIdentityContract]])
-    fn_nodes.each do |name, fn|
+    # An imported callee is not in fn_nodes, but it keeps its arguments just
+    # the same. Without its contract the call site gets no edge plan, so the
+    # caller hands over an Rc without a retain.
+    all_params = imported_params.merge(fn_nodes.transform_values(&:params))
+    all_params.each do |name, params|
       by_index = T.let({}, T::Hash[Integer, KeptIdentityContract])
-      fn.params.each_with_index do |param, idx|
+      params.each_with_index do |param, idx|
         entry = param.symbol
         contract = entry&.kept_identity
         next unless entry && contract
@@ -709,6 +718,7 @@ module EscapeAnalysis
     when :apply_return_escape_sink! then apply_return_escape_sink!(T.cast(node, AST::ReturnNode), context)
     when :apply_assignment_escape_sink! then apply_assignment_escape_sink!(T.cast(node, AST::Assignment), context)
     when :apply_binding_escape_sink! then apply_binding_escape_sink!(T.cast(node, T.any(AST::VarDecl, AST::BindExpr)), context)
+    when :apply_destructuring_escape_sink! then apply_destructuring_escape_sink!(T.cast(node, AST::DestructuringAssignment), context)
     when :apply_execution_boundary_escape_sink! then apply_execution_boundary_escape_sink!(T.cast(node, T.any(AST::BgBlock, AST::BgStreamBlock)), context)
     when :apply_lambda_escape_sink! then apply_lambda_escape_sink!(T.cast(node, AST::LambdaLit), context)
     when :apply_func_call_escape_sink! then apply_func_call_escape_sink!(T.cast(node, AST::FuncCall), context)
@@ -743,6 +753,22 @@ module EscapeAnalysis
       mark_symbol_borrow!(node.symbol)
     elsif call_result_is_heap?(node.value, context.fn_nodes, context.schema_lookup, facts_by_name: context.facts_by_name)
       mark_symbol_heap!(node.symbol)
+    end
+  end
+
+  # `_, items = call()` hands each target a piece of an aggregate the callee
+  # allocated on the heap. A destructuring target records no VALUE, only its
+  # symbol, so nothing else places it -- a target declared earlier keeps the
+  # frame allocation its empty-literal initialiser chose.
+  sig { params(node: AST::DestructuringAssignment, context: EscapeContext).void }
+  private_class_method def self.apply_destructuring_escape_sink!(node, context)
+    return unless node.value
+
+    node.targets.each do |target|
+      next if target.name.to_s == "_"
+      ti = Type.from_node!(target, context: "destructured target placement")
+      next unless ti.needs_explicit_cleanup?(:heap, T.unsafe(context.schema_lookup))
+      mark_symbol_heap!(target.symbol)
     end
   end
 
@@ -854,7 +880,8 @@ module EscapeAnalysis
   private_class_method def self.aggregate_contains_heap_owned_value?(node)
     return false unless node
     return false unless node.is_a?(AST::StructLit) || node.is_a?(AST::UnionVariantLit) ||
-                        node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit)
+                        node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit) ||
+                        node.is_a?(AST::TupleLit)
 
     pending = T.let([node], T::Array[AST::Node])
     until pending.empty?
@@ -1208,7 +1235,8 @@ module EscapeAnalysis
     node = unwrap_value(node)
     return true if node.is_a?(AST::Identifier)
     return true if node.is_a?(AST::StructLit) || node.is_a?(AST::UnionVariantLit) ||
-                   node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit)
+                   node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit) ||
+                   node.is_a?(AST::TupleLit)
     false
   end
 
@@ -1520,6 +1548,11 @@ module EscapeAnalysis
   sig { params(facts: FunctionFacts, expr: AST::Node).void }
   private_class_method def self.mark_heap_return!(facts, expr)
     fn = facts.fn
+    # `RETURNS self: T` declares the result a borrow scoped to a parameter, so
+    # the caller's argument already owns the storage. Promoting anything here
+    # would fabricate an owned result out of a view.
+    return unless Array(fn.return_lifetime).empty?
+
     ret = fn.declared_return_type
     ret = ret.value_payload_type if ret
     ret.mark_heap_allocated! if ret

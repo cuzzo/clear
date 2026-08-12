@@ -108,17 +108,20 @@ class TenseLayer < T::Struct
     case layer_kind
     when TenseLayerKind::Fallible
       TypeExpression.new(
-        kind: FallibleTypeExpression.new(inner: inner, error_set: error_set),
+        kind: T.cast(
+          FallibleTypeExpression.new(inner: inner, error_set: error_set),
+          TypeExpressionKind,
+        ),
         capabilities: capabilities,
       )
     when TenseLayerKind::Future
       TypeExpression.new(
-        kind: FutureTypeExpression.new(inner: inner),
+        kind: T.cast(FutureTypeExpression.new(inner: inner), TypeExpressionKind),
         capabilities: capabilities,
       )
     when TenseLayerKind::Optional
       TypeExpression.new(
-        kind: OptionalTypeExpression.new(inner: inner),
+        kind: T.cast(OptionalTypeExpression.new(inner: inner), TypeExpressionKind),
         capabilities: capabilities,
       )
     else
@@ -158,7 +161,7 @@ class TenseEnvelope < T::Struct
       layer_kind = current.kind
       case layer_kind
       when FallibleTypeExpression
-        fallible = layer_kind
+        fallible = T.cast(layer_kind, FallibleTypeExpression)
         layers << TenseLayer.new(
           kind: TenseLayerKind::Fallible,
           capabilities: current.capabilities,
@@ -166,11 +169,11 @@ class TenseEnvelope < T::Struct
         )
         current = fallible.inner
       when FutureTypeExpression
-        future = layer_kind
+        future = T.cast(layer_kind, FutureTypeExpression)
         layers << TenseLayer.new(kind: TenseLayerKind::Future, capabilities: current.capabilities)
         current = future.inner
       when OptionalTypeExpression
-        optional = layer_kind
+        optional = T.cast(layer_kind, OptionalTypeExpression)
         layers << TenseLayer.new(kind: TenseLayerKind::Optional, capabilities: current.capabilities)
         current = optional.inner
       else
@@ -386,7 +389,10 @@ class TenseSelectorPlan < T::Struct
   def stream_result_type(cardinality)
     split = envelope.split_future
     item = TenseEnvelope.wrap_layers(envelope.payload_expression, split.inner)
-    stream_kind = StreamTypeExpression.new(cardinality: cardinality, item: item)
+    stream_kind = T.cast(
+      StreamTypeExpression.new(cardinality: cardinality, item: item),
+      TypeExpressionKind,
+    )
     stream = TypeExpression.of(stream_kind)
     Type.new(TenseEnvelope.wrap_layers(stream, split.outer))
   end
@@ -621,6 +627,16 @@ class TenseOperationPlanner
 
     remaining = envelope.layers.drop(handled.length)
     result = Type.new(TenseEnvelope.wrap_layers(envelope.payload_expression, remaining))
+    # OR_ELSE strips tense layers, not capabilities: the payload expression
+    # does not carry the source's sync/collection/ownership, so rebuilding from
+    # it alone turns `?String@symbol` into a plain String.
+    result.merge_capabilities_from!(type, include_affine_ownership: true)
+    # A fallback that is itself optional cannot make the result definite:
+    # `a OR_ELSE b` with both absent is still absent. Typing it as the payload
+    # makes downstream placement copy a null as though it were present.
+    if recovery == TenseRecovery::Fallback && fallback_type.optional? && !result.optional?
+      result = Type.optional_of(result)
+    end
     if recovery == TenseRecovery::Fallback && fallback_type.resolved != :NoReturn &&
        !result.accepts?(fallback_type) && !fallback_type.accepts?(result)
       raise ArgumentError, "OR_ELSE fallback #{fallback_type.resolved} does not match #{result.resolved}"

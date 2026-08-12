@@ -66,6 +66,8 @@ end
 
 class FunctionParamExpression < T::Struct
   const :expression, TypeExpression
+  # `FN(MUTABLE T) -> R`: the callback may mutate this parameter.
+  const :mutable, T::Boolean, default: false
 end
 
 # Foundation-native function signature: parameters and return spelled as
@@ -362,7 +364,7 @@ class TypeExpressionTree
       TypeExpression.new(kind: FunctionTypeExpression.new(
         signature: FunctionSignatureExpression.new(
           params: signature.params.map do |param|
-            FunctionParamExpression.new(expression: transform(param.expression, &visitor))
+            FunctionParamExpression.new(expression: transform(param.expression, &visitor), mutable: param.mutable)
           end,
           return_expression: transform(signature.return_expression, &visitor),
           reentrant: signature.reentrant,

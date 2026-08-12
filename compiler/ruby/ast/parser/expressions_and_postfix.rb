@@ -96,7 +96,7 @@ class ClearParser
     return unless match?(:CHAR, '!') || match?(:CHAR, '?')
 
     marker = current.value
-    marker += '?' if marker == '!' && peek.type == :CHAR && peek.value == '?'
+    marker += '?' if marker == '!' && peek.type == :CHAR && peek.text_is?('?')
     fix = Fix.new(
       description: fix_description(:INSERT_SELECT_EFFECT_COLON, selector: "SELECT:#{marker}"),
       confidence: :auto,
@@ -270,7 +270,7 @@ class ClearParser
 
   sig { returns(T::Boolean) }
   def conditional_binding_suffix?
-    peek.type == :KEYWORD && peek.value == 'AS'
+    peek.type == :KEYWORD && peek.text_is?('AS')
   end
 
   sig { params(lhs: AST::Node).returns(AST::UnaryOp) }
@@ -346,11 +346,11 @@ class ClearParser
       # Join only this exact positional spelling; ordinary names cannot
       # absorb a trailing number here.
       if name == "_" && (match?(:NUMBER) || match?(:INT64))
-        name = "_#{consume_number.value}"
+        name = "_#{consume_number.display_value}"
       end
 
       # Predicate suffix: name? followed by ( → method call with ? suffix
-      if match?(:CHAR, '?') && peek_at(1)&.value == '('
+      if match?(:CHAR, '?') && peek_at(1)&.text_is?('(')
         consume(:CHAR, '?')
         name = "#{name}?"
       end
@@ -359,7 +359,8 @@ class ClearParser
         # Method Call
         _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
         call = AST::MethodCall.new(name_token, lhs, name, args)
-        stamp_source_range_from_node!(call, lhs, previous)
+        call.source_range = source_range_from_node(lhs, previous)
+        call
       else
         # Field Access
         AST::GetField.new(name_token, lhs, name)
@@ -371,7 +372,7 @@ class ClearParser
   def parse_func_call_suffix(lhs)
     start_token, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
     call = AST::FuncCall.new(start_token, lhs, args)
-    stamp_source_range_from_node!(call, lhs, previous)
+    call.source_range = source_range_from_node(lhs, previous)
     call
   end
 
@@ -429,7 +430,7 @@ class ClearParser
       offset += 1
     end
     dot = peek_at(offset)
-    return nil if markers.empty? || dot.nil? || dot.type != :CHAR || dot.value != "."
+    return nil if markers.empty? || dot.nil? || dot.type != :CHAR || !dot.text_is?(".")
 
     markers
   end
@@ -606,9 +607,12 @@ class ClearParser
 
     case op_val
     when 'AS'
+      # Anchor on the cursor before the operand: reaching for as_rhs.token asks
+      # an AST node union for a field.
+      as_anchor = current
       as_rhs = parse_var_id
       unless as_rhs.is_a?(AST::Identifier)
-        error!(as_rhs, :EXPECTED_IDENT_AFTER_AS, got: "expression")
+        error!(as_anchor, :EXPECTED_IDENT_AFTER_AS, got: "expression")
       end
       return AST::BinaryOp.new(op_token, lhs, :BIND_VAR, as_rhs)
 
@@ -782,12 +786,12 @@ class ClearParser
     end
     # Call-site override syntax is reserved here; the annotator rejects it
     # until runtime semantics are implemented.
-    if current.type == :VAR_ID && (current.value == '@thunk' || current.value == '@maxDepth')
+    if current.type == :VAR_ID && (current.text_is?('@thunk') || current.text_is?('@maxDepth'))
       sigil_tok = consume(:VAR_ID)
       consume(:CHAR, '(')
       n_tok = current
       n_lit = consume_number
-      n = n_lit.value.to_i
+      n = n_lit.number_as_integer
       if n <= 0
         error!(n_tok, :SIGIL_N_NONPOSITIVE, sigil: sigil_tok.text!, count: n)
       end
@@ -835,7 +839,7 @@ class ClearParser
     node = T.let(AST::Identifier.new(var_token, name), AST::Node)
 
     # Predicate suffix: name? followed by ( → function call with ? suffix
-    if match?(:CHAR, '?') && peek_at(1)&.value == '('
+    if match?(:CHAR, '?') && peek_at(1)&.text_is?('(')
       consume(:CHAR, '?')
       name = "#{name}?"
     end
@@ -855,10 +859,10 @@ class ClearParser
     rule = PRIMARY_RULE_INDEX[ClearParser.token_rule_key(current)]
     rule ||= PRIMARY_RULE_INDEX[ClearParser.rule_key(current.type, nil)]
     return dispatch_primary_rule(rule) if rule
-    return parse_unary() if current.type == :CHAR && (AST::UNARY_OPS.include?(current.value) || current.value == '&')
+    return parse_unary() if current.type == :CHAR && (AST::UNARY_OPS.include?(current.value) || current.text_is?('&'))
     lit = parse_lit(:stack)
     return parse_suffixes(lit) if !lit.nil?
-    error!(current, :UNEXPECTED_TOKEN_LINE, value: current.value, type: current.type, line: current.line)
+    error!(current, :UNEXPECTED_TOKEN_LINE, value: current.display_value, type: current.type, line: current.line)
   end
 
   # Returns true if, starting from current position '<', the token stream matches
@@ -873,10 +877,10 @@ class ClearParser
     loop do
       token = peek_at(offset)
       return false unless token
-      if token.type == :CHAR && token.value == '<'
+      if token.type == :CHAR && token.text_is?('<')
         depth += 1
-      elsif token.type == :CHAR && (token.value == '>' || token.value == '>>')
-        depth -= token.value == '>>' ? 2 : 1
+      elsif token.type == :CHAR && (token.text_is?('>') || token.text_is?('>>'))
+        depth -= token.text_is?('>>') ? 2 : 1
         if depth == 0
           following = peek_at(offset + 1)
           return !following.nil? && following.type == :CHAR && following.value == end_char
@@ -1044,7 +1048,7 @@ class ClearParser
     window_token = consume(:KEYWORD, 'WINDOW')
     consume(:CHAR, '(')
     # Named-param form (BatchWindowOp) if first token is VAR_ID followed by ':'
-    if match?(:VAR_ID) && peek.type == :CHAR && peek.value == ':'
+    if match?(:VAR_ID) && peek.type == :CHAR && peek.text_is?(':')
       options = {}
       loop do
         key_tok = consume(:VAR_ID)
@@ -1144,7 +1148,7 @@ class ClearParser
       expr = parse_expression(1)
       AST::AverageOp.new(previous, expr)
     else
-      error!(current, :CONCURRENT_BAD_OP, got: current.value.inspect)
+      error!(current, :CONCURRENT_BAD_OP, got: current.display_value.inspect)
     end
   end
 
@@ -1157,8 +1161,10 @@ class ClearParser
       parse_brace_block
     else
       callback = parse_expression(1)
-      [AST::FuncCall.new(token, callback.respond_to?(:name) ? T.unsafe(callback).name : callback.to_s,
-        [AST::Identifier.new(token, "_")])]
+      # An Identifier callback names the function; anything else stands for
+      # itself. respond_to? here would make the subject the whole node union.
+      callee = callback.is_a?(AST::Identifier) ? callback.name : callback.to_s
+      [AST::FuncCall.new(token, callee, [AST::Identifier.new(token, "_")])]
     end
     AST::EachOp.new(token, body)
   end
@@ -1174,7 +1180,8 @@ class ClearParser
     else
       # Short form: TAP func -> becomes TAP { func(_); }
       expr = parse_expression(1)  # parse_pipe_expression
-      AST::TapOp.new(token, [AST::FuncCall.new(token, expr.respond_to?(:name) ? T.unsafe(expr).name : expr.to_s, [AST::Identifier.new(token, "_")])])
+      callee = expr.is_a?(AST::Identifier) ? expr.name : expr.to_s
+      AST::TapOp.new(token, [AST::FuncCall.new(token, callee, [AST::Identifier.new(token, "_")])])
     end
   end
 

@@ -380,7 +380,11 @@ module Annotator
 
         values = node.pairs.values
         if values.all? { |value| Type.new(value.resolved_type).string? }
-          value_type = :String
+          # Symbols are strings, but interned ones: collapsing them to a plain
+          # String drops @symbol and the map's values become owned slices that
+          # COPY deep-clones and cleanup frees. List literals already preserve
+          # the element capability.
+          value_type = values.all? { |value| value.full_type!(context: "hash literal symbol value").symbol? } ? :"String@symbol" : :String
         else
           value_type = values.first.resolved_type
           symbol_key_map = node.pairs.keys.all? { |key| key.is_a?(AST::Literal) && key.type == :SYMBOL }

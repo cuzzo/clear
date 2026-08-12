@@ -64,10 +64,10 @@ module FsmTransform
       def result_type
         return nil unless call_node
 
-        node = call_node
+        node = T.cast(call_node, AST::Node)
         type_object = node.type_object
         raise "FSM IO suspend result: missing type info" unless type_object
-        concrete_type = type_object
+        concrete_type = T.cast(type_object, Type)
         raise "FSM IO suspend result: unresolved type info" if concrete_type.untyped?
         concrete_type
       end
@@ -89,10 +89,10 @@ module FsmTransform
       def result_type
         return nil unless promise_ast
 
-        node = promise_ast
+        node = T.cast(promise_ast, AST::Node)
         type_object = node.type_object
         raise "FSM NEXT suspend result: missing type info" unless type_object
-        concrete_type = type_object
+        concrete_type = T.cast(type_object, Type)
         raise "FSM NEXT suspend result: unresolved type info" if concrete_type.untyped?
         pt = Type.new(concrete_type)
         pt.tense_type
@@ -386,21 +386,21 @@ module FsmTransform
       stmt = items.fetch(index)
       case stmt
       when AST::WhileLoop
-        loop_stmt = stmt
+        loop_stmt = T.cast(stmt, AST::WhileLoop)
         return true if contains_suspend_anywhere?(loop_stmt.do_branch)
       when AST::WhileBindLoop
-        loop_stmt = stmt
+        loop_stmt = T.cast(stmt, AST::WhileBindLoop)
         return true if contains_suspend_anywhere?(loop_stmt.do_branch)
       when AST::ForRange
-        range_stmt = stmt
+        range_stmt = T.cast(stmt, AST::ForRange)
         return true if contains_suspend_anywhere?(range_stmt.body)
       when AST::ForEach
-        each_stmt = stmt
+        each_stmt = T.cast(stmt, AST::ForEach)
         return true if contains_suspend_anywhere?(each_stmt.body)
       when AST::WithBlock, AST::CatchBlock
         return true
       when AST::IfStatement
-        if_stmt = stmt
+        if_stmt = T.cast(stmt, AST::IfStatement)
         return true if contains_suspend_anywhere?(if_stmt.then_branch)
         else_branch = if_stmt.else_branch
         unless else_branch.nil?
@@ -440,7 +440,7 @@ module FsmTransform
       T.bind(self, T.untyped) rescue nil
       return nil if v.nil?
 
-      value = v
+      value = T.must(v)
       case value
       when AST::FuncCall, AST::MethodCall
         IoSuspend.new(value, value.matched_stdlib_def, name) if io_suspending_call?(value)

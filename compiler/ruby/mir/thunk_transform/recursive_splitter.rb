@@ -175,9 +175,9 @@ module ThunkTransform
       return nil if !stmt.else_branch.nil? && !T.must(stmt.else_branch).empty?
       then_b = T.cast(stmt.then_branch, T.nilable(T::Array[AST::Node]))
       return nil unless then_b
-      then_b = then_b
+      then_b = T.must(then_b)
       return nil if then_b.length != 1
-      ret = then_b.first
+      ret = T.cast(then_b.first, T.nilable(AST::Node))
       return nil unless ret.is_a?(AST::ReturnNode) && ret.value
       return nil if contains_any_call?(stmt.condition, cycle_names)
       return nil if contains_any_call?(ret.value, cycle_names)
@@ -204,7 +204,7 @@ module ThunkTransform
       if node.is_a?(Array)
         node.reverse_each { |child| stack << child }
       else
-        stack << node
+        stack << T.cast(node, AST::Locatable)
       end
       until stack.empty?
         current = T.must(stack.pop)
@@ -228,9 +228,9 @@ module ThunkTransform
       return nil if !stmt.else_branch.nil? && !T.must(stmt.else_branch).empty?
       then_b = T.cast(stmt.then_branch, T.nilable(T::Array[AST::Node]))
       return nil unless then_b
-      then_b = then_b
+      then_b = T.must(then_b)
       return nil if then_b.length != 1
-      ret = then_b.first
+      ret = T.cast(then_b.first, T.nilable(AST::Node))
       return nil unless ret.is_a?(AST::ReturnNode) && ret.value
       return nil if contains_self_call?(stmt.condition, fn_name)
       return nil if contains_self_call?(ret.value, fn_name)

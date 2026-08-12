@@ -117,7 +117,7 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         nodes = T.let([], T::Array[AST::Locatable])
-        AST.each_locatable(program, descend_functions: true) { |node| nodes << node }
+        AST.each_locatable(T.cast(program, AST::Locatable), descend_functions: true) { |node| nodes << node }
 
         nodes.reverse_each do |node|
           next if restamp_binary_type_after_auto!(node)

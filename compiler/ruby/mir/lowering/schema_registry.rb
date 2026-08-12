@@ -101,6 +101,6 @@ class MIRLoweringSchemas
   def schema_key(name)
     return name if name.is_a?(Symbol)
 
-    name.to_sym
+    T.cast(name, String).to_sym
   end
 end

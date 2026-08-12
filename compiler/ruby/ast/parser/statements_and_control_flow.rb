@@ -91,27 +91,27 @@ class ClearParser
 
   sig { params(token: Lexer::Token, body: T::Array[AST::Node]).void }
   def reject_defer_control_flow!(token, body)
-    stack = T.let(body.dup, T::Array[AST::Node])
-    until stack.empty?
-      node = stack.pop
-      next unless node.is_a?(AST::Locatable)
-      if node.is_a?(AST::ReturnNode) || node.is_a?(AST::BreakNode) ||
-         node.is_a?(AST::ContinueNode) || node.is_a?(AST::YieldExpr)
-        kind = node.class.name.to_s.split("::").last
-        error!(token, :DEFER_NO_CONTROL_FLOW, kind: kind)
-      end
-      # FN/lambda bodies are their own control-flow scopes.
-      next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit)
-
-      node.class.members.each do |member|
-        value = T.unsafe(node)[member]
-        if value.is_a?(Array)
-          value.each { |child| stack << child if child.is_a?(AST::Locatable) }
-        elsif value.is_a?(AST::Locatable)
-          stack << value
-        end
+    body.each do |root|
+      # each_locatable already stops at FN/lambda bodies, which are their own
+      # control-flow scopes, and walks children without Struct reflection.
+      AST.each_locatable(root) do |node|
+        kind = defer_control_flow_kind(node)
+        error!(token, :DEFER_NO_CONTROL_FLOW, kind: kind) if kind
       end
     end
+  end
+
+  # The node class name the diagnostic wants, for exactly the four kinds DEFER
+  # rejects. `node.class.name` says this by reflection, which does not survive
+  # translation and cannot be checked.
+  sig { params(node: AST::Node).returns(T.nilable(String)) }
+  def defer_control_flow_kind(node)
+    return "ReturnNode" if node.is_a?(AST::ReturnNode)
+    return "BreakNode" if node.is_a?(AST::BreakNode)
+    return "ContinueNode" if node.is_a?(AST::ContinueNode)
+    return "YieldExpr" if node.is_a?(AST::YieldExpr)
+
+    nil
   end
 
   sig { returns(AST::BreakNode) }
@@ -314,14 +314,14 @@ class ClearParser
 
     start = current.value
     next_token = peek_at(1)
-    suffix = if start == '!' && next_token&.type == :CHAR && T.must(next_token).value == '?'
+    suffix = if start == '!' && next_token&.type == :CHAR && T.must(next_token).text_is?('?')
       "!?".freeze
     else
       start
     end
     required_count = suffix.length
     terminal = peek_at(required_count)
-    return nil unless terminal&.type == :CHAR && T.must(terminal).value == '='
+    return nil unless terminal&.type == :CHAR && T.must(terminal).text_is?('=')
 
     required_count.times { consume(:CHAR) }
     Type.new("#{suffix}Auto")
@@ -465,7 +465,7 @@ class ClearParser
     end
 
     unless result
-      error!(current, :UNEXPECTED_TOKEN_LINE, value: current.value, type: current.type, line: current.line)
+      error!(current, :UNEXPECTED_TOKEN_LINE, value: current.display_value, type: current.type, line: current.line)
     end
 
     consume(:CHAR, '}')
@@ -721,7 +721,7 @@ class ClearParser
       if match?(:CHAR, ':')
         consume(:CHAR, ':')
         # `_` as value means wildcard — ignore this field's value
-        if current.type == :VAR_ID && current.value == '_'
+        if current.type == :VAR_ID && current.text_is?('_')
           consume(:VAR_ID)
           fields << AST::PatternField.new(name: name, value: :wildcard, name_token: name_tok)
         else
@@ -767,7 +767,8 @@ class ClearParser
 
   # Parse a single CATCH WITH filter: a TYPE_ID (error type) or a
   # STRING literal (message).
-  sig { returns(T.nilable(AST::CatchFilter)) }
+  # Every branch either builds a filter or raises, so this never yields nil.
+  sig { returns(AST::CatchFilter) }
   def parse_catch_filter
     if match?(:TYPE_ID)
       tok = consume(:TYPE_ID)

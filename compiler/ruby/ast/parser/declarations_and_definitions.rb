@@ -13,9 +13,9 @@ class ClearParser
 
       # comptime: T — compile-time type parameter (EXTERN FN only)
       is_comptime = false
-      if match?(:VAR_ID) && current.value == "comptime"
+      if match?(:VAR_ID) && current.text_is?("comptime")
         # Peek ahead: if next is ':', it's a comptime param
-        if peek_at(1)&.type == :CHAR && peek_at(1)&.value == ":"
+        if peek_at(1)&.type == :CHAR && peek_at(1)&.text_is?(":")
           consume(:VAR_ID) # consume 'comptime'
           is_comptime = true
         end
@@ -222,7 +222,7 @@ class ClearParser
     elsif match?(:KEYWORD, 'CONST')
       parse_const_decl(visibility)
     else
-      error!(current, :VISIBILITY_BAD_KIND, got: current.value)
+      error!(current, :VISIBILITY_BAD_KIND, got: current.display_value)
     end
   end
 
@@ -236,7 +236,7 @@ class ClearParser
     elsif match?(:KEYWORD, 'STRUCT')
       parse_extern_struct(tok)
     else
-      error!(current, :EXTERN_BAD_KIND, got: current.value)
+      error!(current, :EXTERN_BAD_KIND, got: current.display_value)
     end
   end
 
@@ -321,7 +321,7 @@ class ClearParser
       return :wildcard
     end
 
-    return nil unless match?(:VAR_ID) && peek.type == :CHAR && peek.value == ':'
+    return nil unless match?(:VAR_ID) && peek.type == :CHAR && peek.text_is?(':')
 
     names = T.let([parse_var_id], T::Array[AST::Node])
     consume(:CHAR, ':')
@@ -412,7 +412,7 @@ class ClearParser
       abi_token = current
       consume(abi_token.type)
       abi = abi_token.text!.downcase.to_sym
-      error!(abi_token, :PARSER_EXPECTED, expected: "C or ZIG", got: abi_token.value,
+      error!(abi_token, :PARSER_EXPECTED, expected: "C or ZIG", got: abi_token.display_value,
         type: abi_token.type, line: abi_token.line) unless %i[c zig].include?(abi)
     end
     if match!(:KEYWORD, 'CALLCONV')
@@ -420,7 +420,7 @@ class ClearParser
       consume(callconv_token.type)
       callconv = callconv_token.text!.downcase.to_sym
       error!(callconv_token, :PARSER_EXPECTED, expected: "C, SYSTEM, or WINAPI",
-        got: callconv_token.value, type: callconv_token.type,
+        got: callconv_token.display_value, type: callconv_token.type,
         line: callconv_token.line) unless %i[c system winapi].include?(callconv)
     end
     if match!(:KEYWORD, 'HEADER')
@@ -510,8 +510,8 @@ class ClearParser
     index = @pos
     while index < @tokens.length
       token = T.must(@tokens[index])
-      return true if token.type == :KEYWORD && token.value == 'FOR'
-      return false if token.type == :CHAR && token.value == '{'
+      return true if token.type == :KEYWORD && token.text_is?('FOR')
+      return false if token.type == :CHAR && token.text_is?('{')
       index += 1
     end
     false
@@ -546,7 +546,7 @@ class ClearParser
       else
         error!(current, :PARSER_EXPECTED,
           expected: "FN, METHOD, or } in IMPLEMENTATION",
-          got: current.value, type: current.type, line: current.line)
+          got: current.display_value, type: current.type, line: current.line)
       end
       stamp_source_range!(member, member_start, previous)
       members << member
@@ -1213,7 +1213,7 @@ class ClearParser
     return true if match?(:KEYWORD, 'FN')
     return false unless match?(:KEYWORD, 'PUB') || match?(:KEYWORD, 'PRIVATE')
 
-    peek.type == :KEYWORD && peek.value == 'FN'
+    peek.type == :KEYWORD && peek.text_is?('FN')
   end
 
   sig { returns(T::Array[Symbol]) }
@@ -1304,7 +1304,7 @@ class ClearParser
   # the test-block / when-block parsers; both share the same hook syntax.
   sig { params(first: String, second: String).returns(T::Boolean) }
   def test_hook_match?(first, second)
-    match?(:KEYWORD, first) && @tokens[@pos + 1]&.value == second
+    match?(:KEYWORD, first) && @tokens[@pos + 1]&.text_is?(second) == true
   end
 
   # Parse `BEFORE EACH DO <stmts> END` (or AFTER EACH); returns the body
@@ -1335,11 +1335,11 @@ class ClearParser
     lets = []
 
     until match?(:KEYWORD, 'END')
-      if match?(:KEYWORD, 'TEST') && @tokens[@pos + 1]&.value == 'THAT'
+      if match?(:KEYWORD, 'TEST') && @tokens[@pos + 1]&.text_is?('THAT')
         tests << parse_test_that
       elsif match?(:KEYWORD, 'PENDING') &&
-            @tokens[@pos + 1]&.value == 'TEST' &&
-            @tokens[@pos + 2]&.value == 'THAT'
+            @tokens[@pos + 1]&.text_is?('TEST') &&
+            @tokens[@pos + 2]&.text_is?('THAT')
         # PENDING TEST THAT "..." DO ... END  — type-checked but skipped
         # at runtime via `return error.SkipZigTest;` in lowering.
         consume(:KEYWORD, 'PENDING')
@@ -1420,7 +1420,7 @@ class ClearParser
 
     # Peek: if next is TYPE_ID followed by comma, it's ASSERT_RAISES Kind, ErrorName, expr
     error_name = nil
-    if current.type == :TYPE_ID && @tokens[@pos + 1]&.type == :CHAR && @tokens[@pos + 1]&.value == ','
+    if current.type == :TYPE_ID && @tokens[@pos + 1]&.type == :CHAR && @tokens[@pos + 1]&.text_is?(',')
       error_name = consume(:TYPE_ID).text!
       consume(:CHAR, ',')
     end
@@ -1439,8 +1439,11 @@ class ClearParser
 
     # Parse optional iteration count: x1000 or x 1000
     iterations = 1000  # default
-    if match?(:VAR_ID) && current.value =~ /^x(\d+)$/
-      iterations = $1.to_i
+    # Read the count off the token rather than through $~, which is global
+    # match state the self-hosted parser has no equivalent for.
+    count_text = current.display_value
+    if match?(:VAR_ID) && count_text.match?(/\Ax\d+\z/)
+      iterations = count_text[1..].to_i
       consume(:VAR_ID)
     end
     consume(:CHAR, ';')
