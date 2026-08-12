@@ -1134,7 +1134,7 @@ class MIRLowering
   def widen_symbol_to_bytes(mir, source_node)
     return mir unless source_node
 
-    ti = Type.from_node!(source_node, context: "symbol widening") rescue nil
+    ti = Type.from_node(source_node)
     return mir unless ti&.symbol?
 
     MIR::FieldGet.new(mir, "bytes")
@@ -4417,8 +4417,11 @@ class MIRLowering
 
     # `CAST(sym AS String)` IS the widening from an interned handle to the
     # bytes behind it -- not a coercion Zig can do, now that Symbol is its own
-    # type. Read the field instead of casting.
-    if target_type == "[]const u8"
+    # type. Read the field instead of casting. The condition is the TYPE's,
+    # not the rendered Zig string's: semantic decisions in lowering come from
+    # Type stamps (INV-7 territory), and two types may render alike.
+    cast_target = Type.new(node.target)
+    if cast_target.string? && !cast_target.symbol? && !cast_target.optional?
       widened = widen_symbol_to_bytes(inner, node.value)
       return widened unless widened.equal?(inner)
     end
