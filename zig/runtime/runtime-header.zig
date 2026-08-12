@@ -1111,6 +1111,11 @@ pub const CheatLib = struct {
     // =========================================================================
 
     const DataStructures = @import("../lib/data-structures.zig").bind(struct {
+        /// The interned-handle type, so container key normalization can test
+        /// for it by NAME. Matching structurally on a `bytes` field would also
+        /// unwrap any user struct that happens to have one.
+        pub const Symbol = CheatLib.Symbol;
+
         pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
             CheatLib.cleanup(T, alloc, cptr);
         }

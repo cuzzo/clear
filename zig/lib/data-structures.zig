@@ -192,9 +192,12 @@ pub fn bind(comptime deps: type) type {
     /// Map keys are bytes. A `String@symbol` key arrives as a Symbol handle --
     /// same bytes, different type -- so normalize at the boundary rather than
     /// making every caller unwrap. Anything already byte-shaped passes through.
+    ///
+    /// The test is by NAME, matching CheatLib.bytesOf: structural matching on
+    /// a `bytes` field would also unwrap a user struct that happens to have
+    /// one, silently keying the map on that field.
     pub inline fn keyBytes(key: anytype) []const u8 {
-        const K = @TypeOf(key);
-        if (comptime @typeInfo(K) == .@"struct" and @hasField(K, "bytes")) return key.bytes;
+        if (comptime @TypeOf(key) == deps.Symbol) return key.bytes;
         return key;
     }
 
