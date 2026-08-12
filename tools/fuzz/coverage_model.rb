@@ -271,7 +271,8 @@ module FuzzCoverageModel
     provenance_round_trip_matrix: profile(
       failure_proves: 'A value read back out of a container, struct, or optional keeps the ' \
                       'provenance it was stored with: owned values are freed exactly once, ' \
-                      'and statics are never freed.'
+                      'and statics are never freed.',
+      high_risk: true
     ),
     match_matrix: profile(
       failure_proves: 'MATCH lowering over union/scalar shapes binds payloads and cleans owned arms.'

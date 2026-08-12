@@ -1,0 +1,18 @@
+diff --git a/compiler/ruby/ast/type.rb b/compiler/ruby/ast/type.rb
+index 5fdcd05605..8eb2f2662a 100644
+--- a/compiler/ruby/ast/type.rb
++++ b/compiler/ruby/ast/type.rb
+@@ -5676,11 +5676,8 @@ class Type
+       return signed_integer? ? "isize" : "usize"
+     end
+     if resolved == :String || string?
+-      # An interned symbol is represented exactly like a String and owned by
+-      # nobody. Spelling both []const u8 left every downstream consumer --
+-      # cleanup above all -- unable to tell them apart.
+-      return "CheatLib.Symbol" if symbol?
+-
++      # MUTANT: spell a symbol the same as a String, so nothing downstream can
++      # tell an interned handle from an owned one.
+       return "[]const u8"
+     end
+ 

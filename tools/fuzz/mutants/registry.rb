@@ -25,6 +25,16 @@ module FuzzMutants
 
   REGISTRY = T.let([
     Mutant.new(
+      name: :symbol_spelled_as_string,
+      description: 'Render `String@symbol` as []const u8 again, so an interned handle is ' \
+                   'indistinguishable from an owned String and a container of symbols frees ' \
+                   'the .rodata behind them.',
+      invariant: :symbol_provenance_round_trip,
+      patch: File.join(PATCH_DIR, 'symbol_spelled_as_string.patch'),
+      templates: [:provenance_round_trip_matrix],
+      kill: { bucket: :fail, min_delta: 1 }
+    ),
+    Mutant.new(
       name: :pipeline_reduce_owned_accumulator_unclassified,
       description: 'Stop descending value-BlockExpr bodies during cleanup classification, so a desugared REDUCE\'s owned (String) accumulator never gets a cleanup entry and its per-step reassignment falls back to a bare Set. The composite-element matrix must reject the resulting unhoisted/leaked owned accumulator.',
       invariant: :pipeline_reduce_owned_accumulator,
