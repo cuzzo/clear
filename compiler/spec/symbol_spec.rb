@@ -461,6 +461,37 @@ RSpec.describe "String@symbol" do
       expect(zig.index("const __clear_symbol_0")).to be < zig.index("pub fn label")
     end
 
+    it "widens a symbol to its bytes at every String coercion boundary" do
+      # A Symbol is a distinct handle type; every String-typed position must
+      # read `.bytes` (a borrow of interned storage) or Zig rejects the
+      # program. Pinned per-boundary so a regression names the site.
+      zig = compile_symbol_src(<<~CLEAR)
+        FN borrow_len(s: String) RETURNS Int64 ->
+          RETURN s.length();
+        END
+        FN consume(TAKES s: String) RETURNS Int64 ->
+          RETURN s.length();
+        END
+        FN main() RETURNS Void ->
+          MUTABLE tag: String@symbol = :alpha;
+          MUTABLE casted: String = CAST(tag AS String);
+          n = borrow_len(tag);
+          MUTABLE doomed: String@symbol = :alpha;
+          m = consume(doomed);
+          print("tag is ${tag}");
+          RETURN;
+        END
+      CLEAR
+      # CAST reads the field...
+      expect(zig).to match(/\.bytes/)
+      # ...a borrowing String param gets the bytes, not the handle...
+      expect(zig).to match(/borrow_len\([^)]*\.bytes\)/)
+      # ...TAKES gets an owned COPY of the bytes, never the interned storage...
+      expect(zig).to match(/dupe\(u8, [^)]*\.bytes\)/)
+      # ...and an interpolated symbol concatenates as bytes.
+      expect(zig).to match(/concat\([^;]*\.bytes/)
+    end
+
     it "emits symbol == symbol comparison as an interning-agnostic equality" do
       zig = compile_symbol_src(<<~CLEAR)
         FN main() RETURNS Void ->

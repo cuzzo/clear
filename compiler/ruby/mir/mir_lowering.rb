@@ -4405,7 +4405,10 @@ class MIRLowering
   # - cheat_runtime: CLEAR runtime, wired via build.zig as a module
   EXTERN_MODULE_ROOTS = T.let(%w[std builtin cheat_runtime].to_set.freeze, T::Set[String])
 
-  sig { params(node: AST::Cast).returns(MIR::Cast) }
+  # Returns MIR::Node, not MIR::Cast: widening `CAST(sym AS String)` is a
+  # field read of the interned handle, and a noreturn value passes through
+  # unchanged.
+  sig { params(node: AST::Cast).returns(MIR::Node) }
   def lower_cast(node)
     inner = lower(node.value)
     # A NoReturn value coerces to every type in Zig; `@as(T, @panic(...))` is
