@@ -1111,10 +1111,10 @@ pub const CheatLib = struct {
     // =========================================================================
 
     const DataStructures = @import("../lib/data-structures.zig").bind(struct {
-        /// The interned-handle type, so container key normalization can test
-        /// for it by NAME. Matching structurally on a `bytes` field would also
-        /// unwrap any user struct that happens to have one.
-        pub const Symbol = CheatLib.Symbol;
+        /// The bytes behind a String or a Symbol; identity for anything
+        /// already byte-shaped. Container key normalization delegates here so
+        /// the nominal Symbol test has exactly one implementation.
+        pub const bytesOf = CheatLib.bytesOf;
 
         pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
             CheatLib.cleanup(T, alloc, cptr);
@@ -1144,7 +1144,6 @@ pub const CheatLib = struct {
     pub const makeHashMap = DataStructures.makeHashMap;
     pub const mapPut = DataStructures.mapPut;
     pub const StringMap = DataStructures.StringMap;
-    pub const InternedValueStringMap = DataStructures.InternedValueStringMap;
     pub const mapPromote = DataStructures.mapPromote;
     pub const mapDeinit = DataStructures.mapDeinit;
     pub const mapGet = DataStructures.mapGet;
@@ -1620,7 +1619,6 @@ pub const CheatLib = struct {
     pub const ShardedPool = DataStructures.ShardedPool;
     pub const ShardedList = DataStructures.ShardedList;
     pub const Set = DataStructures.Set;
-    pub const InternedStringSet = DataStructures.InternedStringSet;
     pub const PartitionedStringMap = DataStructures.PartitionedStringMap;
     pub const PartitionedNumericMap = DataStructures.PartitionedNumericMap;
     pub const ShardedStringMap = DataStructures.ShardedStringMap;
@@ -4057,12 +4055,12 @@ pub const CheatLib = struct {
 
         // 6. Set(U)
         if (comptime isSetType(T)) {
-            // Release owned keys before freeing the backing map. Interned
-            // sets never own their elements — backing map only.
-            const set_interned = comptime @hasDecl(T, "interned_elements") and T.interned_elements;
+            // Release owned keys before freeing the backing map. A set of
+            // Symbols needs no exemption: dupe/cleanup of a Symbol are a bit
+            // copy and a no-op, so the uniform path is already correct.
             const InnerMap = @TypeOf(ptr.inner);
             const inner_info = @typeInfo(InnerMap);
-            if (!set_interned and inner_info == .@"struct") {
+            if (inner_info == .@"struct") {
                 var it = ptr.inner.keyIterator();
                 while (it.next()) |key_ptr| {
                     const KeyT = @TypeOf(key_ptr.*);
@@ -4421,10 +4419,9 @@ pub const CheatLib = struct {
             errdefer result.deinit(alloc);
             var src_mut = value;
             var it = src_mut.keyIterator();
-            const set_interned = comptime @hasDecl(T, "interned_elements") and T.interned_elements;
             while (it.next()) |k| {
                 const ElemT = @TypeOf(k.*);
-                const copied = if (comptime !set_interned and needsCleanup(ElemT))
+                const copied = if (comptime needsCleanup(ElemT))
                     try dupeValue(ElemT, k.*, alloc)
                 else
                     k.*;
@@ -4506,10 +4503,9 @@ pub const CheatLib = struct {
             errdefer result.deinit(alloc, alloc);
             var src_mut = value;
             var it = src_mut.inner.iterator();
-            const map_interned = comptime @hasDecl(T, "interned_values") and T.interned_values;
             while (it.next()) |entry| {
                 const ValT = @TypeOf(entry.value_ptr.*);
-                const v = if (comptime !map_interned and needsCleanup(ValT))
+                const v = if (comptime needsCleanup(ValT))
                     try dupeValue(ValT, entry.value_ptr.*, alloc)
                 else
                     entry.value_ptr.*;

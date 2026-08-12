@@ -191,31 +191,20 @@ pub fn bind(comptime deps: type) type {
     // -----------------------------------------------------------------------
     /// Map keys are bytes. A `String@symbol` key arrives as a Symbol handle --
     /// same bytes, different type -- so normalize at the boundary rather than
-    /// making every caller unwrap. Anything already byte-shaped passes through.
-    ///
-    /// The test is by NAME, matching CheatLib.bytesOf: structural matching on
-    /// a `bytes` field would also unwrap a user struct that happens to have
-    /// one, silently keying the map on that field.
+    /// making every caller unwrap. One implementation: CheatLib.bytesOf,
+    /// threaded through the bind deps because this file cannot import it.
     pub inline fn keyBytes(key: anytype) []const u8 {
-        if (comptime @TypeOf(key) == deps.Symbol) return key.bytes;
-        return key;
+        return deps.bytesOf(key);
     }
 
+    // A map of interned symbols needs no special variant: CheatLib.Symbol's
+    // drop is a no-op, so the ordinary owned-value map leaves intern-table
+    // storage alone. InternedValueStringMap/InternedStringSet existed because
+    // a symbol was spelled []const u8 and the containers could not tell it
+    // from an owned String.
     pub fn StringMap(comptime V: type) type {
-        return StringMapImpl(V, true);
-    }
-
-    /// String map whose values are interned symbols. The intern table owns
-    /// them for the runtime's lifetime, so the map must never free a value —
-    /// doing so misaligned-frees intern-table storage.
-    pub fn InternedValueStringMap() type {
-        return StringMapImpl([]const u8, false);
-    }
-
-    fn StringMapImpl(comptime V: type, comptime owned_values: bool) type {
         return struct {
             const Self = @This();
-            pub const interned_values = !owned_values;
             inner: std.StringHashMapUnmanaged(V) = .{},
             alloc: std.mem.Allocator = std.heap.page_allocator, // overwritten at init
 
@@ -235,7 +224,7 @@ pub fn bind(comptime deps: type) type {
                 _ = bucket_alloc;
                 const stored_value = value;
                 if (self.inner.getPtr(key)) |val_ptr| {
-                    if (comptime owned_values) cleanup(V, self.alloc, val_ptr);
+                    cleanup(V, self.alloc, val_ptr);
                     val_ptr.* = stored_value;
                     return;
                 }
@@ -260,7 +249,7 @@ pub fn bind(comptime deps: type) type {
                 if (self.inner.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
                     var val = kv.value;
-                    if (comptime owned_values) cleanup(V, self.alloc, &val);
+                    cleanup(V, self.alloc, &val);
                 }
             }
 
@@ -274,7 +263,7 @@ pub fn bind(comptime deps: type) type {
                 var it = self.inner.iterator();
                 while (it.next()) |entry| {
                     self.alloc.free(entry.key_ptr.*);
-                    if (comptime owned_values) cleanup(V, self.alloc, entry.value_ptr);
+                    cleanup(V, self.alloc, entry.value_ptr);
                 }
                 self.inner.deinit(self.alloc);
             }
@@ -2479,17 +2468,10 @@ pub fn bind(comptime deps: type) type {
     // AutoHashMapUnmanaged(T, void) for other types.
     // -----------------------------------------------------------------------
     pub fn Set(comptime T: type) type {
-        return SetImpl(T, true);
+        return SetImpl(T);
     }
 
-    /// Set of interned strings (CLEAR `[Set]String@symbol`): elements are
-    /// intern-table/rodata handles the set never owns. No frees on
-    /// duplicate insert, remove, or deinit; COPY reuses element pointers.
-    pub fn InternedStringSet() type {
-        return SetImpl([]const u8, false);
-    }
-
-    fn SetImpl(comptime T: type, comptime owned_elements: bool) type {
+    fn SetImpl(comptime T: type) type {
         const is_string = T == []const u8;
         const Context = struct {
             pub fn hash(_: @This(), key: T) u64 {
@@ -2516,7 +2498,6 @@ pub fn bind(comptime deps: type) type {
             std.HashMapUnmanaged(T, void, Context, std.hash_map.default_max_load_percentage);
         return struct {
             const Self = @This();
-            pub const interned_elements = !owned_elements;
             inner: Map = .{},
 
             pub fn initCapacity(alloc: std.mem.Allocator, capacity: u32) !Self {
@@ -2528,7 +2509,7 @@ pub fn bind(comptime deps: type) type {
             pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !void {
                 if (is_string) {
                     if (self.inner.contains(value)) {
-                        if (owned_elements) alloc.free(value);
+                        alloc.free(value);
                     } else {
                         try self.inner.put(alloc, value, {});
                     }
@@ -2549,7 +2530,7 @@ pub fn bind(comptime deps: type) type {
             pub fn remove(self: *Self, alloc: std.mem.Allocator, value: T) void {
                 if (is_string) {
                     if (self.inner.fetchRemove(value)) |kv| {
-                        if (owned_elements) alloc.free(kv.key);
+                        alloc.free(kv.key);
                     }
                 } else {
                     if (self.inner.fetchRemove(value)) |kv| {
@@ -2573,10 +2554,8 @@ pub fn bind(comptime deps: type) type {
 
             pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
                 if (is_string) {
-                    if (owned_elements) {
-                        var it = self.inner.keyIterator();
-                        while (it.next()) |key_ptr| alloc.free(key_ptr.*);
-                    }
+                    var it = self.inner.keyIterator();
+                    while (it.next()) |key_ptr| alloc.free(key_ptr.*);
                 } else if (comptime needsCleanup(T)) {
                     var it = self.inner.keyIterator();
                     while (it.next()) |key_ptr| cleanup(T, alloc, key_ptr);
