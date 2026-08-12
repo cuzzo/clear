@@ -666,7 +666,13 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # experimental incremental path. Only the persistent watch command opts in.
   cmd_parts << '-fno-incremental'
 
-  unless module_mode
+  if module_mode
+    # `clear test` builds Debug by default. An explicit level lets a suite run
+    # the LLVM backend instead of the self-hosted one -- which is where the
+    # lexer keyword miscompile lived -- and turns on the safety checks that a
+    # Debug arena hides.
+    cmd_parts += ['-O', opt_level] unless opt_level == 'Debug'
+  else
     bin_name = "#{File.basename(output)}-#{$$}"
     cmd_parts += ['-O', opt_level] + extra_flags
     cmd_parts += ['-fno-strip'] if profile
@@ -1365,6 +1371,15 @@ when 'test'
     exec(RbConfig.ruby, compat_script, *compat_args)
   end
 
+  # Opt into an optimized test build. ReleaseSafe keeps the safety checks and
+  # routes through LLVM rather than the self-hosted backend.
+  test_opt_level = if test_args.delete('--safe')
+                     'ReleaseSafe'
+                   elsif test_args.delete('--optimized')
+                     'ReleaseFast'
+                   else
+                     'Debug'
+                   end
   profile_mode = test_args.delete('--profile')
   strict_mode = test_args.delete('--strict')
   frame_debug = test_args.delete('--debug-frame') || test_args.delete('--no-frame')
@@ -1602,6 +1617,9 @@ when 'test'
     cmd_parts += ['--global-cache-dir', File.join(build_dir, '.zig-global-cache')]
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
+    # `--safe` / `--optimized` route through LLVM rather than the self-hosted
+    # backend, which is where the lexer keyword miscompile lived.
+    cmd_parts += ['-O', test_opt_level] unless test_opt_level == 'Debug' 
     cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))
     if tag_filters.empty?
       cmd_parts += ['--test-filter', File.basename(source)]

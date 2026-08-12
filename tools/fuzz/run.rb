@@ -54,6 +54,10 @@ OptionParser.new do |o|
   o.on('--clean')               { opts[:clean] = true }
   o.on('--templates LIST')      { |v| opts[:templates] = v.split(',').map(&:to_sym) }
   o.on('--jobs N', Integer)     { |v| opts[:jobs] = v }
+  # Run the cells through LLVM with safety on instead of the self-hosted
+  # backend. Catches miscompiles the default backend introduces (the lexer
+  # keyword comparison was one) and safety checks a Debug arena hides.
+  o.on('--safe')                { opts[:safe] = true; $fuzz_safe_mode = true }
   o.on('--bisect-positives')    { opts[:bisect_positives] = true }
   o.on('--shard I/N') do |v|
     idx, total = v.split('/', 2).map(&:to_i)
@@ -187,6 +191,9 @@ def run_pass_bundle(entries, out_dir, bundle_name: 'all-fuzz')
     'runtime/switch.S', 'runtime/onRoot.S',
     '-lc'
   ]
+  # --safe routes the bundle through LLVM with safety on rather than the
+  # self-hosted backend. Set by run.rb's option parser.
+  zig_args += ['-O', 'ReleaseSafe'] if $fuzz_safe_mode
   out, status =
     if coverage_enabled
       ZigCoverageSupport.run_zig_test(
@@ -619,7 +626,7 @@ def per_file_run(emitted)
     path, expected = entry[:path], entry[:expected]
     short = File.basename(path)
     print "[#{i + 1}/#{emitted.size}] #{short} (#{expected})... "
-    out = `#{clear} test #{path} 2>&1`
+    out = `#{clear} test #{path}#{opts[:safe] ? ' --safe' : ''} 2>&1`
     status = $?.exitstatus
 
     compile_error = out.include?('MIR ownership verification failed') ||
