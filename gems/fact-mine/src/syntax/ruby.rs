@@ -1817,13 +1817,6 @@ impl NormalizedLanguageBehavior for RubyNormalizedBehavior {
             ],
         })
     }
-
-    // ALIAS-SPECIFIC START: Ruby syntax normalization lives outside the
-    // language-neutral fixed-point engine.
-    fn alias_normalizer(&self) -> &'static dyn crate::syntax::cfg::aliasing::AliasNormalizer {
-        crate::syntax::ruby_alias::normalizer()
-    }
-    // ALIAS-SPECIFIC END
     fn supports_parameter_normalization(&self) -> bool {
         true
     }

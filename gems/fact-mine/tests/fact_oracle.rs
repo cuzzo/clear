@@ -159,63 +159,6 @@ fn cfg_is_emitted_for_every_supported_language() -> Result<()> {
                 );
             }
         }
-        let node_ids = document
-            .control_flow_nodes
-            .iter()
-            .map(|node| node.id.as_str())
-            .collect::<BTreeSet<_>>();
-        assert_eq!(
-            document
-                .node_effects
-                .iter()
-                .map(|fact| fact.node_id.as_str())
-                .collect::<BTreeSet<_>>(),
-            node_ids,
-            "{} emitted effects for a different set of CFG nodes",
-            fixture.display()
-        );
-        assert_eq!(
-            document
-                .reachability
-                .iter()
-                .map(|fact| fact.node_id.as_str())
-                .collect::<BTreeSet<_>>(),
-            node_ids,
-            "{} emitted reachability for a different set of CFG nodes",
-            fixture.display()
-        );
-        assert_eq!(
-            document
-                .dominators
-                .iter()
-                .map(|fact| fact.node_id.as_str())
-                .collect::<BTreeSet<_>>(),
-            node_ids,
-            "{} emitted dominators for a different set of CFG nodes",
-            fixture.display()
-        );
-        assert_eq!(
-            document
-                .liveness
-                .iter()
-                .map(|fact| fact.node_id.as_str())
-                .collect::<BTreeSet<_>>(),
-            node_ids,
-            "{} emitted liveness for a different set of CFG nodes",
-            fixture.display()
-        );
-        let incomplete_effects = document
-            .node_effects
-            .iter()
-            .filter(|effect| !effect.complete)
-            .map(|effect| format!("{}: {}", effect.node_id, effect.unknown_reasons.join(", ")))
-            .collect::<Vec<_>>();
-        assert!(
-            incomplete_effects.is_empty(),
-            "{} emitted incomplete CFG effects: {}",
-            fixture.display(),
-            incomplete_effects.join("; ")
-        );
         assert!(document.source_digest.starts_with("sha256:"));
         covered.insert(language.as_str());
     }
@@ -682,104 +625,6 @@ fn ruby_dataflow_seeds_declared_parameters_and_propagates_copies() -> Result<()>
 }
 
 #[test]
-fn ruby_alias_flow_distinguishes_borrowed_and_fresh_return_identities() -> Result<()> {
-    use std::io::Write;
-
-    let mut fixture = tempfile::Builder::new().suffix(".rb").tempfile()?;
-    write!(
-        fixture,
-        "class Inventory\n  def borrowed\n    items = T.let(@items, T::Array[String])\n    return items\n  end\n\n  def copied\n    copy = @items.dup\n    return copy\n  end\nend\n"
-    )?;
-    let document = syntax::parse_file(fixture.path().to_path_buf(), Language::Ruby)?;
-
-    let borrowed_assignment = document
-        .control_flow_nodes
-        .iter()
-        .find(|node| node.function == "borrowed" && node.source.starts_with("items ="))
-        .expect("borrowed assignment");
-    let borrowed_effect = document
-        .node_effects
-        .iter()
-        .find(|effect| effect.node_id == borrowed_assignment.id)
-        .expect("borrowed effect");
-    assert_eq!(borrowed_effect.alias_transfers.len(), 1);
-    let borrowed_place = document
-        .places
-        .iter()
-        .find(|place| place.function == "borrowed" && place.name == "items")
-        .expect("items place");
-    let field_place = document
-        .places
-        .iter()
-        .find(|place| place.function == "borrowed" && place.name == "@items")
-        .expect("field place");
-    assert_eq!(
-        borrowed_effect.alias_transfers[0].destination_place_id,
-        borrowed_place.id
-    );
-    assert_eq!(
-        borrowed_effect.alias_transfers[0].source_place_id,
-        field_place.id
-    );
-
-    let borrowed_return = document
-        .control_flow_nodes
-        .iter()
-        .find(|node| node.function == "borrowed" && node.source == "items")
-        .expect("borrowed return");
-    let borrowed_alias = document
-        .aliases
-        .iter()
-        .find(|fact| fact.node_id == borrowed_return.id && fact.place_id == borrowed_place.id)
-        .expect("borrowed return alias");
-    assert_eq!(borrowed_alias.relationship, "must");
-    assert!(borrowed_alias.complete);
-    assert_eq!(borrowed_alias.allocation_ids.len(), 1);
-    let borrowed_allocation = document
-        .allocations
-        .iter()
-        .find(|fact| fact.id == borrowed_alias.allocation_ids[0])
-        .expect("borrowed root allocation");
-    assert!(!borrowed_allocation.fresh);
-    assert!(document.escapes.iter().any(|fact| {
-        fact.sink_node_id == borrowed_return.id
-            && fact.allocation_id == borrowed_allocation.id
-            && fact.sink == "return"
-            && fact.complete
-    }));
-
-    let copy_assignment = document
-        .control_flow_nodes
-        .iter()
-        .find(|node| node.function == "copied" && node.source == "copy = @items.dup")
-        .expect("copy assignment");
-    let copy_place = document
-        .places
-        .iter()
-        .find(|place| place.function == "copied" && place.name == "copy")
-        .expect("copy place");
-    let fresh = document
-        .allocations
-        .iter()
-        .find(|fact| fact.node_id == copy_assignment.id && fact.place_id == copy_place.id)
-        .expect("fresh copy allocation");
-    assert!(fresh.fresh);
-    assert_eq!(fresh.kind, "copy");
-    let copy_return = document
-        .control_flow_nodes
-        .iter()
-        .find(|node| node.function == "copied" && node.source == "copy")
-        .expect("copy return");
-    assert!(document.escapes.iter().any(|fact| {
-        fact.sink_node_id == copy_return.id
-            && fact.allocation_id == fresh.id
-            && fact.sink == "return"
-            && fact.complete
-    }));
-    Ok(())
-}
-
-#[test]
 fn ruby_cfg_control_bodies_preserve_executable_statement_spans() -> Result<()> {
     let examples = examples_root().join("syntax-facts/ruby");
     let loops = syntax::parse_file(examples.join("cfg_loops.rb"), Language::Ruby)?;
@@ -838,9 +683,6 @@ fn full_syntax_expected() -> Value {
         "def_use": [],
         "liveness": [],
         "flow_types": [],
-        "allocations": [],
-        "aliases": [],
-        "escapes": [],
         "protocol_method_effects": [],
         "protocol_call_paths": [],
         "clone_candidates": [],

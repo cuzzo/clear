@@ -6225,6 +6225,7 @@ impl<'source> TreeSitterNormalizer<'source> {
         {
             return Some(block);
         }
+
         self.named_children(node).into_iter().find(|child| {
             self.normalization_adapter
                 .check_node_role(*child, "block_or_do_block")
