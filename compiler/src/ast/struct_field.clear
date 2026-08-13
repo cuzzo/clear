@@ -2,7 +2,7 @@ REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
 # Ruby module AST
 PUB STRUCT StructField {
   type: Type,
-  default: ?SchemasResourceSchemaFieldMetadataValue@boxed,
+  default: ?Locatable@boxed,
   borrowed: Bool
 }
 

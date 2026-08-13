@@ -210,19 +210,27 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (default_value == NIL) THEN
         default_value = COPY hash[symbol("default")];
       END
+      # `default` is stored in the metadata union but the field holds a
+      # Locatable, so take that variant rather than the whole union.
+      MUTABLE default_node: ?Locatable = NIL;
+      IF default_value EXISTS AS default_present THEN
+        IF default_present IS_A Locatable AS default_locatable THEN
+          default_node = COPY default_locatable;
+        END
+      END
       MUTABLE borrowed_value: ?SchemasResourceSchemaFieldMetadataValue = COPY hash[:borrowed];
       IF (borrowed_value == NIL) THEN
         borrowed_value = COPY hash[symbol("borrowed")];
       END
       IF raw_type_value EXISTS AS raw_type_value_value THEN
         IF raw_type_value_value IS_A SchemasResourceSchemaFieldMetadataValue.Type AS field_type THEN
-          RETURN StructField{ type: COPY field_type, default: COPY default_value, borrowed: !((borrowed_value == NIL)) };
+          RETURN StructField{ type: COPY field_type, default: COPY default_node, borrowed: !((borrowed_value == NIL)) };
         END
         IF raw_type_value_value IS_A SchemasResourceSchemaFieldMetadataValue.TypeMultiowned AS field_type THEN
-          RETURN StructField{ type: COPY field_type, default: COPY default_value, borrowed: !((borrowed_value == NIL)) };
+          RETURN StructField{ type: COPY field_type, default: COPY default_node, borrowed: !((borrowed_value == NIL)) };
         END
       ELSE
-        RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: COPY default_value, borrowed: !((borrowed_value == NIL)) };
+        RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: COPY default_node, borrowed: !((borrowed_value == NIL)) };
       END
     END
     IF field IS_A SchemasResourceSchemaFieldInput.Type AS field_type THEN
@@ -553,13 +561,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF raw_type_value EXISTS AS raw_type_value_value THEN
         IF raw_type_value_value IS_A SchemasResourceSchemaFieldMetadataValue.Type AS field_type THEN
-          RETURN StructField{ type: COPY field_type, default: COPY default_value, borrowed: !((borrowed_value == NIL)) };
+          RETURN StructField{ type: COPY field_type, default: COPY default_node, borrowed: !((borrowed_value == NIL)) };
         END
         IF raw_type_value_value IS_A SchemasResourceSchemaFieldMetadataValue.TypeMultiowned AS field_type THEN
-          RETURN StructField{ type: COPY field_type, default: COPY default_value, borrowed: !((borrowed_value == NIL)) };
+          RETURN StructField{ type: COPY field_type, default: COPY default_node, borrowed: !((borrowed_value == NIL)) };
         END
       ELSE
-        RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: COPY default_value, borrowed: !((borrowed_value == NIL)) };
+        RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: COPY default_node, borrowed: !((borrowed_value == NIL)) };
       END
     END
     IF field IS_A SchemasResourceSchemaFieldInput.Type AS field_type THEN
