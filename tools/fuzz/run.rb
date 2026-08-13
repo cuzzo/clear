@@ -210,15 +210,17 @@ def run_pass_bundle(entries, out_dir, bundle_name: 'all-fuzz', safe: false)
   suffix = coverage_enabled ? " under kcov" : ""
   puts "[fuzz] pass bundle #{bundle_name}#{suffix}: #{entries.size} cells in #{format('%.2f', elapsed)}s"
 
-  if !status.success? || out.include?('FAIL')
-    return [[], [[zig_path, out]], [], []]
-  end
-
   leak = out =~ /MEMORY LEAKS:\s*[1-9]/ ||
          out.include?('[DebugAllocator] (err)') ||
          out.include?('[gpa] (err)') ||
          out =~ /\d+ tests leaked memory/
+
+  # Order matters, and it is the order the isolated lanes already use: a
+  # leaking bundle exits non-zero, so checking the status first classifies
+  # every leak as a plain failure and the leak lane never sees one.
+  return [[], [[zig_path, out]], [], []] if out.include?('FAIL')
   return [[], [], [], [[zig_path, out]]] if leak
+  return [[], [[zig_path, out]], [], []] unless status.success?
 
   [entries.map { |e| e[:path] }, [], [], []]
 ensure
@@ -281,7 +283,10 @@ def print_failure_excerpt(out)
       first = [failure_index - 8, 0].max
       lines[first, 40]
     else
-      lines.first(40)
+      # No marker: the run died without reporting one (a panic, a signal, a
+      # killed test binary). Whatever happened is at the END of the output --
+      # printing the first 40 lines shows 40 passing cells and nothing else.
+      lines.last(40)
     end
   excerpt.each { |line| puts "      #{line}" }
   return unless lines.size > excerpt.size
