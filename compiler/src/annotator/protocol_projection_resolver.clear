@@ -73,15 +73,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE matching = bounds |> WHERE (TRY (protocolProjectionResolver__associated_types(rtoc_self_view, _))).contains?(projection.member);
       IF (matching.length() == 0) THEN
         MUTABLE available = (bounds |> UNNEST TRY (protocolProjectionResolver__associated_types(rtoc_self_view, _))) |> DISTINCT _ |> SELECT COPY _;
-        &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_UNKNOWN_ASSOCIATED_TYPE, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocol: bounds.join(" & "), :available: Values{ StringValue: COPY IF available.empty?() THEN
-          "none"
-        ELSE
-          available.join(", ")
-        END }}));
+      MUTABLE available_text: String = "none";
+      IF !(available.empty?()) THEN
+        available_text = available.join(", ");
+      END
+        &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_UNKNOWN_ASSOCIATED_TYPE, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocol: Values{ StringValue: COPY bounds.join(" & ") }, :available: Values{ StringValue: COPY available_text }}));
         RETURN NIL;
       END
       IF (matching.length() > 1) THEN
-        &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocols: matching.join(", ")}));
+        &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocols: Values{ StringValue: COPY matching.join(", ") }}));
         RETURN NIL;
       END
       MUTABLE result: ?String = COPY matching.first();
