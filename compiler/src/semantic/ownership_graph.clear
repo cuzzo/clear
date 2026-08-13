@@ -395,11 +395,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (TRY (ownershipGraph__edges_to(rtoc_self_view, Path{ PlaceId: COPY current }))) |> ANY ((_.kind == :borrows) OR (_.kind == :borrows_mut)) THEN
         RETURN FALSE;
       END
-      MUTABLE parent = placeId__parent(current);
-      IF !(parent) THEN
+      IF placeId__parent(current) EXISTS AS parent THEN
+        current = COPY parent;
+      ELSE
         BREAK;
       END
-      current = parent;
     END
     RETURN TRUE;
 }
@@ -409,11 +409,10 @@ FN ownershipGraph__live?(self: OwnershipGraph, path: String) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((IF ownershipGraph__node_for(rtoc_self_view, path) != NIL THEN
-      ownershipNode__live?(((ownershipGraph__node_for(rtoc_self_view, path))?))
-    ELSE
-      NIL
-    END) OR_ELSE FALSE);
+    IF ownershipGraph__node_for(rtoc_self_view, path) EXISTS AS node THEN
+      RETURN ownershipNode__live?(node);
+    END
+    RETURN FALSE;
 }
 END
 FN ownershipGraph__moved?(self: OwnershipGraph, path: String) RETURNS Bool
@@ -421,11 +420,10 @@ FN ownershipGraph__moved?(self: OwnershipGraph, path: String) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((IF ownershipGraph__node_for(rtoc_self_view, path) != NIL THEN
-      ownershipNode__moved?(((ownershipGraph__node_for(rtoc_self_view, path))?))
-    ELSE
-      NIL
-    END) OR_ELSE FALSE);
+    IF ownershipGraph__node_for(rtoc_self_view, path) EXISTS AS node THEN
+      RETURN ownershipNode__moved?(node);
+    END
+    RETURN FALSE;
 }
 END
 FN ownershipGraph__fork_lightweight(self: OwnershipGraph) RETURNS LightweightSnapshot
@@ -460,14 +458,14 @@ FN ownershipGraph__restore_lightweight(MUTABLE self: OwnershipGraph, snapshot_va
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     lightweightSnapshot__each_place_state(snapshot_value, %(place: PlaceId, state: String@symbol) USE(snapshot_value, rtoc_self_view) -> {
-    MUTABLE node: ?OwnershipNode = COPY rtoc_self_view.nodes[place];
-    IF !(node) THEN
-        RETURN;
+    IF rtoc_self_view.nodes.contains?(place) THEN
+      MUTABLE node: OwnershipNode = COPY UNWRAP (rtoc_self_view.nodes[place]);
+      node.state = COPY state;
+      node.move_line = lightweightSnapshot__move_line_for_place(snapshot_value, place);
+      node.move_col = lightweightSnapshot__move_col_for_place(snapshot_value, place);
+      node.move_action = lightweightSnapshot__move_action_for_place(snapshot_value, place);
+      rtoc_self_view.nodes[place] = node;
     END
-    node.state = COPY state;
-    node.move_line = lightweightSnapshot__move_line_for_place(snapshot_value, place);
-    node.move_col = lightweightSnapshot__move_col_for_place(snapshot_value, place);
-    node.move_action = lightweightSnapshot__move_action_for_place(snapshot_value, place);
     rubyToClearVoid()
     });
     MUTABLE target_count = snapshot_value.edge_count;
