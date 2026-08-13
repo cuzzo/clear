@@ -143,6 +143,10 @@ class FunctionSignature
       )
     end
 
+    # Ruby's Marshal hooks for the host compiler's unit cache. The self-hosted
+    # compiler has no Marshal, and reflection over instance variables has no
+    # CLEAR spelling, so this pair is host-only by construction.
+    # ruby-to-clear: skip
     sig { returns(T::Hash[Symbol, T.untyped]) }
     def marshal_dump
       state = T.let({}, T::Hash[Symbol, T.untyped])
@@ -157,6 +161,10 @@ class FunctionSignature
       state
     end
 
+    # Ruby's Marshal hooks for the host compiler's unit cache. The self-hosted
+    # compiler has no Marshal, and reflection over instance variables has no
+    # CLEAR spelling, so this pair is host-only by construction.
+    # ruby-to-clear: skip
     sig { params(state: T::Hash[Symbol, T.untyped]).void }
     def marshal_load(state)
       state.each { |ivar, value| instance_variable_set(ivar, value) }
