@@ -124,7 +124,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.entries[name];
 }
 END
-FN scopeTypes__keys(self: ScopeTypes) RETURNS ![]String@symbol
+# keys() hands back map-owned Strings, not interned handles; see KeyList.
+FN scopeTypes__keys(self: ScopeTypes) RETURNS ![]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

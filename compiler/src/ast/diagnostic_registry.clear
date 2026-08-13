@@ -33,7 +33,8 @@ END
 FN diagnosticRegistry__known?(code: String@symbol) RETURNS Bool ->
   RETURN diagnosticRegistry__all().contains?(code);
 END
-FN diagnosticRegistry__codes() RETURNS ![]String@symbol ->
+# keys() hands back map-owned Strings, not interned handles; see KeyList.
+FN diagnosticRegistry__codes() RETURNS ![]String ->
   RETURN diagnosticRegistry__all().keys();
 END
 FN diagnosticRegistry__pending?(code: String@symbol) RETURNS Bool ->

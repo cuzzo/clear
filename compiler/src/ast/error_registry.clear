@@ -24,7 +24,10 @@ FN aST__error_types() RETURNS !{String@symbol}ErrorTypeEntry ->
   error_types_value = COPY (CAST({:LockTimeout: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "LockTimeout", id: 1, first_site: NIL }, :LockCycle: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "LockCycle", id: 2, first_site: NIL }, :Deadlock: ErrorTypeEntry{ kind: :System, zig_name: COPY "Deadlock", id: 3, first_site: NIL }, :UnexpectedRecursion: ErrorTypeEntry{ kind: :System, zig_name: COPY "UnexpectedRecursion", id: 4, first_site: NIL }, :MaxDepthExceeded: ErrorTypeEntry{ kind: :System, zig_name: COPY "MaxDepthExceeded", id: 5, first_site: NIL }, :MvccConflict: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "MvccConflict", id: 6, first_site: NIL }, :AtomicConflict: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "AtomicConflict", id: 7, first_site: NIL }, :GuardFail: ErrorTypeEntry{ kind: :Transient, zig_name: COPY "GuardFail", id: 8, first_site: NIL }, :PreconditionFail: ErrorTypeEntry{ kind: :Input, zig_name: COPY "PreconditionFail", id: 9, first_site: NIL }, :OutOfMemory: ErrorTypeEntry{ kind: :System, zig_name: COPY "OutOfMemory", id: 10, first_site: NIL }} AS {String@symbol}ErrorTypeEntry));
   RETURN COPY error_types_value;
 END
-FN aST__error_type_names() RETURNS ![]String@symbol ->
+# keys() returns the map's OWN keys -- duplicated on insert, freed at deinit
+# -- so they are owned Strings even though the map is looked up with interned
+# symbol handles. Same retyping as the Ruby side's KeyList.
+FN aST__error_type_names() RETURNS ![]String ->
   RETURN (TRY (aST__error_types())).keys();
 END
 FN aST__error_kind?(sym: ?String@symbol) RETURNS Bool ->
