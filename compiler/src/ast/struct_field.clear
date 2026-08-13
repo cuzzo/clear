@@ -6,14 +6,12 @@ PUB STRUCT StructField {
   borrowed: Bool
 }
 
-# Wraps a parsed default expression as the metadata value the slot holds.
-PUB FN structField__node_default(node: ?Locatable) RETURNS ?SchemasResourceSchemaFieldMetadataValue ->
-  IF node EXISTS AS present THEN
-    RETURN SchemasResourceSchemaFieldMetadataValue{ Locatable: COPY present };
-  END
-  RETURN NIL;
+# The slot holds the parsed default expression itself; it used to be wrapped in
+# the metadata union it travels through, which every reader then had to unwrap.
+PUB FN structField__node_default(node: ?Locatable) RETURNS ?Locatable ->
+  RETURN COPY node;
 END
-PUB FN structField__default(self: StructField) RETURNS ?SchemasResourceSchemaFieldMetadataValue ->
+PUB FN structField__default(self: StructField) RETURNS ?Locatable ->
   RETURN COPY self.default;
 END
 PUB FN structField__borrowed(self: StructField) RETURNS Bool ->
