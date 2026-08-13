@@ -28,13 +28,25 @@ producers:
   compiler-coverage-raw:
     executor: command
     test_timing: {language: ruby, test_set: compiler-spec}
-    argv: [bundle, exec, prspec, compiler/spec/]
+    argv:
+      - sh
+      - -c
+      - >-
+        repo_root="$PWD" &&
+        work="$PWD/.giga/work/compiler-repository" &&
+        rm -rf "$work" &&
+        mkdir -p "$work" "$repo_root/.giga/coverage/compiler" "$repo_root/.giga/tmp/compiler" &&
+        git archive HEAD | tar -x -C "$work" &&
+        cp -aL node_modules "$work/node_modules" &&
+        cp -aL vendor "$work/vendor" &&
+        cd "$work" &&
+        COVERAGE=1
+        COVERAGE_DIR="$repo_root/.giga/coverage/compiler"
+        TMPDIR="$repo_root/.giga/tmp/compiler"
+        NPM_CONFIG_PACKAGE_LOCK=false
+        bundle exec prspec compiler/spec/
     timeout_seconds: 1800
     max_output_bytes: 67108864
-    environment:
-      COVERAGE: "1"
-      COVERAGE_DIR: .giga/coverage/compiler
-      TMPDIR: .giga/tmp/compiler
     produces:
       - kind: auxiliary
         format: simplecov
