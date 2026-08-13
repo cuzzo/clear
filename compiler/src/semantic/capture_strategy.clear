@@ -1,0 +1,212 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+# Ruby module CaptureStrategy
+PUB STRUCT AllocMarkPlan {
+  ctx_init_name: String,
+  alloc_sym: String@symbol
+}
+PUB STRUCT CleanupPlan {
+  ctx_init_name: String,
+  alloc_sym: String@symbol
+}
+PUB STRUCT MoveMarkPlan {
+  source_name: String
+}
+PUB UNION MarkerPlanEntry { AllocMarkPlan: AllocMarkPlan, CleanupPlan: CleanupPlan, MoveMarkPlan: MoveMarkPlan }
+PUB STRUCT ByValue {
+  zig_type: String,
+  ctx_init_name: String
+}
+
+PUB FN byValue__marker_plan(self: ByValue) RETURNS ![]MarkerPlanEntry ->
+  RETURN CAST(( { MUTABLE rtoc_empty_list_1: []MarkerPlanEntry = List[]; rtoc_empty_list_1 } ) AS []MarkerPlanEntry);
+END
+PUB FN byValue__needs_capture_site_annotation?(self: ByValue) RETURNS Bool ->
+  RETURN FALSE;
+END
+PUB STRUCT RcClone {
+  zig_type: String,
+  ctx_init_name: String
+}
+
+PUB FN rcClone__marker_plan(self: RcClone) RETURNS ![]MarkerPlanEntry ->
+  RETURN CAST(( { MUTABLE rtoc_empty_list_2: []MarkerPlanEntry = List[]; rtoc_empty_list_2 } ) AS []MarkerPlanEntry);
+END
+PUB FN rcClone__needs_capture_site_annotation?(self: RcClone) RETURNS Bool ->
+  RETURN FALSE;
+END
+PUB STRUCT FreshHeapCopy {
+  zig_type: String,
+  ctx_init_name: String,
+  alloc_sym: String@symbol
+}
+
+PUB FN freshHeapCopy__marker_plan(self: FreshHeapCopy) RETURNS ![]MarkerPlanEntry ->
+  RETURN CAST([MarkerPlanEntry{ AllocMarkPlan: COPY AllocMarkPlan{ ctx_init_name: COPY self.ctx_init_name, alloc_sym: COPY self.alloc_sym } }, MarkerPlanEntry{ CleanupPlan: COPY CleanupPlan{ ctx_init_name: COPY self.ctx_init_name, alloc_sym: COPY self.alloc_sym } }] AS []MarkerPlanEntry);
+END
+PUB FN freshHeapCopy__needs_capture_site_annotation?(self: FreshHeapCopy) RETURNS Bool ->
+  RETURN TRUE;
+END
+PUB STRUCT MoveInto {
+  zig_type: String,
+  ctx_init_name: String,
+  source_name: String
+}
+
+PUB FN moveInto__marker_plan(self: MoveInto) RETURNS ![]MarkerPlanEntry ->
+  RETURN CAST([MarkerPlanEntry{ MoveMarkPlan: COPY MoveMarkPlan{ source_name: COPY self.source_name } }] AS []MarkerPlanEntry);
+END
+PUB FN moveInto__needs_capture_site_annotation?(self: MoveInto) RETURNS Bool ->
+  RETURN TRUE;
+END
+PUB STRUCT Refuse {
+  reason: String@symbol,
+  owner_name: String
+}
+
+PUB FN refuse__marker_plan(self: Refuse) RETURNS ![]MarkerPlanEntry ->
+  RETURN CAST(( { MUTABLE rtoc_empty_list_3: []MarkerPlanEntry = List[]; rtoc_empty_list_3 } ) AS []MarkerPlanEntry);
+END
+PUB FN refuse__needs_capture_site_annotation?(self: Refuse) RETURNS Bool ->
+  RETURN FALSE;
+END
+PUB UNION Strategy { ByValue: ByValue, RcClone: RcClone, FreshHeapCopy: FreshHeapCopy, MoveInto: MoveInto, Refuse: Refuse }
+PUB STRUCT CaptureSiteInfo {
+  copied_names: [Set]String,
+  moved_names: [Set]String
+}
+
+PUB FN captureSiteInfo__copied?(self: CaptureSiteInfo, name: String) RETURNS Bool ->
+  RETURN self.copied_names.contains?(name);
+END
+PUB FN captureSiteInfo__moved?(self: CaptureSiteInfo, name: String) RETURNS Bool ->
+  RETURN self.moved_names.contains?(name);
+END
+PUB FN captureSiteInfo__empty() RETURNS CaptureSiteInfo ->
+  RETURN CaptureSiteInfo{ copied_names: COPY Set[], moved_names: COPY Set[] };
+END
+PUB FN captureStrategy__classify(name: String, type: Type, site_info: CaptureSiteInfo, is_resource: Bool = FALSE, schema_lookup: ?Any = NIL) RETURNS !Strategy ->
+  MUTABLE zig_t = TRY (captureStrategy__field_zig_type(type));
+  IF captureSiteInfo__moved?(site_info, name) THEN
+    RETURN Strategy{ MoveInto: COPY MoveInto{ zig_type: COPY zig_t, ctx_init_name: COPY name, source_name: COPY name } };
+  END
+  IF captureSiteInfo__copied?(site_info, name) THEN
+    MUTABLE alloc_sym = captureStrategy__fiber_copy_alloc_for(type);
+    RETURN Strategy{ FreshHeapCopy: COPY FreshHeapCopy{ zig_type: COPY zig_t, ctx_init_name: COPY name, alloc_sym: COPY alloc_sym } };
+  END
+  IF is_resource THEN
+    RETURN Strategy{ MoveInto: COPY MoveInto{ zig_type: COPY zig_t, ctx_init_name: COPY name, source_name: COPY name } };
+  END
+  IF captureStrategy__owned_affine_promise_handle?(type) THEN
+    RETURN Strategy{ MoveInto: COPY MoveInto{ zig_type: COPY zig_t, ctx_init_name: COPY name, source_name: COPY name } };
+  END
+  IF captureStrategy__safe_shared_across_fibers?(type) THEN
+    RETURN Strategy{ RcClone: COPY RcClone{ zig_type: COPY zig_t, ctx_init_name: COPY name } };
+  END
+  IF captureStrategy__pinned_sync_collection?(type) THEN
+    RETURN Strategy{ ByValue: COPY ByValue{ zig_type: COPY zig_t, ctx_init_name: COPY name } };
+  END
+  IF captureStrategy__value_like?(type, schema_lookup) THEN
+    RETURN Strategy{ ByValue: COPY ByValue{ zig_type: COPY zig_t, ctx_init_name: COPY name } };
+  END
+  IF captureStrategy__deep_copy_capture?(type, schema_lookup) THEN
+    MUTABLE alloc_sym = captureStrategy__fiber_copy_alloc_for(type);
+    RETURN Strategy{ FreshHeapCopy: COPY FreshHeapCopy{ zig_type: COPY zig_t, ctx_init_name: COPY name, alloc_sym: COPY alloc_sym } };
+  END
+  RETURN Strategy{ Refuse: COPY Refuse{ reason: COPY captureStrategy__refuse_reason_for(type), owner_name: COPY name } };
+END
+PUB FN captureStrategy__owned_affine_promise_handle?(type: Type) RETURNS !Bool ->
+  IF !((TRUE AND type__future?(type))) THEN
+    RETURN FALSE;
+  END
+  IF (TRUE AND TRY (type__stream?(type))) THEN
+    RETURN FALSE;
+  END
+  IF (TRUE AND type__shared_promise?(type)) THEN
+    RETURN FALSE;
+  END
+  IF (TRUE AND type__promise_list?(type)) THEN
+    RETURN FALSE;
+  END
+  IF (TRUE AND type__observable?(type)) THEN
+    RETURN FALSE;
+  END
+  RETURN TRUE;
+END
+PUB FN captureStrategy__value_like?(type: Type, schema_lookup: ?Any = NIL) RETURNS !Bool ->
+  IF type__primitive?(type) THEN
+    RETURN TRUE;
+  END
+  IF ((TRUE AND TRY (type__string?(type))) AND type__rodata?(type)) THEN
+    RETURN TRUE;
+  END
+  IF (TRUE AND TRY (type__string?(type))) THEN
+    RETURN FALSE;
+  END
+  IF (TRUE AND type__id_handle?(type)) THEN
+    RETURN TRUE;
+  END
+  IF ((schema_lookup != NIL) AND TRUE) THEN
+    IF TRY (type__implicitly_copyable?(type, schema_lookup)) THEN
+      RETURN TRUE;
+    END
+  END
+  IF (TRUE AND TRY (type__copyable?(type))) THEN
+    RETURN TRUE;
+  END
+  RETURN FALSE;
+END
+PUB FN captureStrategy__deep_copy_capture?(type: Type, schema_lookup: ?Any = NIL) RETURNS !Bool ->
+  IF type__needs_pointer_passing?(type) THEN
+    RETURN FALSE;
+  END
+  IF (((type__future?(type) OR type__any_sync?(type)) OR TRY (type__any_rc?(type))) OR type__resource?(type)) THEN
+    RETURN FALSE;
+  END
+  IF type__borrowed_reference?(type) THEN
+    RETURN FALSE;
+  END
+  RETURN TRY (type__ownership_bearing?(type, schema_lookup));
+END
+PUB FN captureStrategy__safe_shared_across_fibers?(type: Type) RETURNS !Bool ->
+  IF (TRUE AND type__atomic_ptr?(type)) THEN
+    RETURN TRUE;
+  END
+  MUTABLE zig = TRY (type__zig_type(type));
+  RETURN (zig.startsWith?("CheatLib.Arc(") OR zig.startsWith?("CheatLib.Rc("));
+END
+PUB FN captureStrategy__pinned_sync_collection?(type: Type) RETURNS Bool ->
+  RETURN (type__collection?(type) AND type__any_sync?(type));
+END
+PUB FN captureStrategy__fiber_copy_alloc_for(ignored_type: Type) RETURNS String@symbol ->
+  RETURN :heap;
+END
+PUB FN captureStrategy__field_zig_type(type: Type) RETURNS !String ->
+  MUTABLE base = TRY (type__zig_type(type, FALSE, TRUE));
+  IF (TRUE AND type__atomic_ptr?(type)) THEN
+    RETURN base;
+  END
+  IF ((TRUE AND type__needs_pointer_passing?(type))) THEN
+    RETURN "*${base}";
+  ELSE
+    RETURN base;
+  END
+END
+PUB FN captureStrategy__refuse_reason_for(type: Type) RETURNS String@symbol ->
+  IF (TRUE AND type__needs_pointer_passing?(type)) THEN
+    RETURN :pointer_passed_without_transfer;
+  END
+  IF type__list_collection?(type) THEN
+    RETURN :list_borrow_without_transfer;
+  END
+  IF type__pool?(type) THEN
+    RETURN :pool_borrow_without_transfer;
+  END
+  IF type__array?(type) THEN
+    RETURN :array_borrow_without_transfer;
+  END
+  IF (TRUE AND type__heap?(type)) THEN
+    RETURN :heap_backed_without_transfer;
+  END
+  RETURN :unclassified_capture;
+END
+# End Ruby module CaptureStrategy

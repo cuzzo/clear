@@ -1,0 +1,49 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f66756e6374696f6e5f72656769737472792e636c656172" AS function_registry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f70726f64756374732e636c656172" AS annotation_products
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f626f64795f616e616c797369732e636c656172" AS body_analysis
+REQUIRE "pkg:rtoc_73656d616e7469632f73656d616e7469635f6964732e636c656172" AS semantic_ids
+REQUIRE "pkg:rtoc_616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+PUB STRUCT SemanticIndex {
+  program: Program,
+  root_scope: Scope@multiowned,
+  function_registry: FunctionRegistry,
+  id_index: SemanticIdIndex,
+  annotation_products: AnnotationProducts@multiowned
+}
+
+PUB FN semanticIndex__from_products(annotation_products: AnnotationProducts, id_index: SemanticIdIndex) RETURNS !SemanticIndex ->
+  MUTABLE resolution: ?ResolutionFacts = COPY annotation_products.resolution;
+  MUTABLE typed_program: ?TypedProgramFacts = COPY annotation_products.typed_program;
+  MUTABLE audit: ?CapabilityAuditReport = COPY annotation_products.capability_audit;
+  IF !((((resolution != NIL) AND (typed_program != NIL)) AND (audit != NIL))) THEN
+    panic("semantic index requires complete annotation products");
+  END
+  IF !(capabilityAuditReport__success?(audit)) THEN
+    panic("semantic index requires a successful capability audit");
+  END
+  IF !(annotation_products.frozen?()) THEN
+    panic("semantic index requires a frozen annotation product ledger");
+  END
+  RETURN SemanticIndex{ program: CAST(COPY KEEP resolution.program AS Program), root_scope: KEEP resolution.root_scope, function_registry: COPY resolution.function_registry, id_index: COPY id_index, annotation_products: annotation_products };
+END
+PUB FN semanticIndex__typed_program(self: SemanticIndex) RETURNS TypedProgramFacts@multiowned EFFECTS REENTRANT ->
+  MUTABLE rtoc_owned_return_1: TypedProgramFacts@multiowned = UNWRAP ((KEEP self.annotation_products).typed_program);
+  RETURN rtoc_owned_return_1;
+END
+PUB FN semanticIndex__capability_audit(self: SemanticIndex) RETURNS CapabilityAuditReport@multiowned EFFECTS REENTRANT ->
+  MUTABLE rtoc_owned_return_2: CapabilityAuditReport@multiowned = UNWRAP ((KEEP self.annotation_products).capability_audit);
+  RETURN rtoc_owned_return_2;
+END
+PUB FN semanticIndex__function_nodes(self: SemanticIndex) RETURNS !{String}FunctionDef ->
+  RETURN COPY self.function_registry.nodes;
+END
+PUB FN semanticIndex__function_node(self: SemanticIndex, name: String) RETURNS ?FunctionDef ->
+  RETURN CAST(COPY UNWRAP (self.function_registry[name]) AS ?FunctionDef);
+END
+PUB FN semanticIndex__body_summaries(self: SemanticIndex) RETURNS !{String}FunctionBodySummary EFFECTS REENTRANT ->
+  RETURN COPY semanticIndex__typed_program(self).body_summaries;
+END

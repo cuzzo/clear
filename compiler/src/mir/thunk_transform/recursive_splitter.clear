@@ -1,0 +1,512 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+# Ruby module ThunkTransform
+# Ruby module ThunkTransform::RecursiveSplitter
+PUB UNION ThunkScanNode { Program: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, StructDef: StructDef, VarDecl: VarDecl, Assignment: Assignment, DestructureTarget: DestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, UnaryOp: UnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MethodCall: MethodCall, GetField: GetField, GetIndex: GetIndex, Cast: Cast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, DeferStmt: DeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, OptionalUnwrap: OptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, BlockExpr: BlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, RangeLit: RangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, EnumDef: EnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, DoBlock: DoBlock, BgBlock: BgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, ArrayValue: []Node, FunctionDef: FunctionDef, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB STRUCT BaseCase {
+  cond_ast: Locatable,
+  value_ast: Locatable
+}
+PUB STRUCT RecursiveCombine {
+  lhs: Locatable,
+  op: String@symbol,
+  args: []Locatable
+}
+PUB STRUCT MutualTailCall {
+  name: String,
+  args: []Locatable
+}
+PUB STRUCT Plan {
+  base_cases: []BaseCase,
+  combine_lhs: Locatable,
+  combine_op: String@symbol,
+  recurse_args: []Locatable,
+  final_return: ReturnNode
+}
+PUB STRUCT MutualPlan {
+  base_cases: []BaseCase,
+  target_fn: String,
+  target_args: []Locatable,
+  final_return: ReturnNode
+}
+PUB STRUCT MutualThunkPlan {
+  cycle_fns: []FunctionDef,
+  own_plan: MutualPlan
+}
+supported_ops = [:ADD, :SUB, :MUL, :DIV];
+PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS ?Plan ->
+  IF (body.length() == 0) THEN
+    RETURN NIL;
+  END
+  MUTABLE stmts = COPY body;
+  MUTABLE base_cases = List[];
+  MUTABLE i = 0;
+  WHILE (i < (stmts.length() - 1)) DO
+    MUTABLE stmt = COPY UNWRAP (stmts[i]);
+    MUTABLE bc: ?BaseCase = recursiveSplitter__match_base_case(stmt, fn_name);
+    IF bc EXISTS AS bc_value THEN
+      &base_cases.append(bc_value);
+      i = (i + 1);
+    ELSE
+      RETURN NIL;
+    END
+  END
+  MUTABLE final = COPY UNWRAP (stmts.last());
+  IF final IS_A ReturnNode AS return_node THEN
+    MUTABLE final_value = return_node.value;
+    IF !(final_value) THEN
+      RETURN NIL;
+    END
+    MUTABLE combine: ?RecursiveCombine = recursiveSplitter__match_recursive_combine(final_value, fn_name);
+    IF combine EXISTS AS combine_value THEN
+      RETURN Plan{ base_cases: COPY base_cases, combine_lhs: COPY combine_value.lhs, combine_op: COPY combine_value.op, recurse_args: COPY combine_value.args, final_return: COPY return_node };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN recursiveSplitter__split_mutual(body: []Locatable, fn_name: String, partner_names: []String) RETURNS ?MutualPlan ->
+  IF (body.length() == 0) THEN
+    RETURN NIL;
+  END
+  MUTABLE cycle = ((partner_names + [fn_name])) |> SELECT _.toString() |> DISTINCT _;
+  MUTABLE stmts = COPY body;
+  MUTABLE base_cases = List[];
+  MUTABLE i = 0;
+  WHILE (i < (stmts.length() - 1)) DO
+    MUTABLE stmt = COPY UNWRAP (stmts[i]);
+    MUTABLE bc: ?BaseCase = recursiveSplitter__match_mutual_base_case(stmt, cycle);
+    IF bc EXISTS AS bc_value THEN
+      &base_cases.append(bc_value);
+      i = (i + 1);
+    ELSE
+      RETURN NIL;
+    END
+  END
+  MUTABLE final = COPY UNWRAP (stmts.last());
+  IF final IS_A ReturnNode AS return_node THEN
+  IF return_node.value THEN
+      MUTABLE target: ?MutualTailCall = recursiveSplitter__match_tail_mutual_call(return_node.value, partner_names);
+      IF target EXISTS AS target_value THEN
+        RETURN MutualPlan{ base_cases: COPY base_cases, target_fn: COPY target_value.name, target_args: COPY target_value.args, final_return: COPY return_node };
+      ELSE
+        RETURN NIL;
+      END
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN recursiveSplitter__match_mutual_base_case(stmt: Locatable, cycle_names: [Set]String) RETURNS ?BaseCase ->
+  IF stmt IS_A IfStatement AS if_statement THEN
+    IF (!((if_statement.else_branch == NIL)) AND !((UNWRAP (if_statement.else_branch)).empty?())) THEN
+      RETURN NIL;
+    END
+    MUTABLE then_b: ?[]Locatable = CAST(if_statement.then_branch AS ?[]Locatable);
+    IF then_b EXISTS AS then_b_value THEN
+      MUTABLE then_b_value = COPY then_b_value;
+      IF (then_b_value.length() != 1) THEN
+        RETURN NIL;
+      END
+      MUTABLE ret = then_b_value.first();
+      IF !((ret IS_A ReturnNode AND ret.value())) THEN
+        RETURN NIL;
+      END
+      IF recursiveSplitter__contains_any_call?(castLocatableToOptionalThunkScanNode(if_statement.condition), cycle_names) THEN
+        RETURN NIL;
+      END
+      IF recursiveSplitter__contains_any_call?(ret.value(), cycle_names) THEN
+        RETURN NIL;
+      END
+      RETURN BaseCase{ cond_ast: COPY if_statement.condition, value_ast: COPY ret.value() };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN recursiveSplitter__match_tail_mutual_call(node: Locatable, partner_names: []String) RETURNS ?MutualTailCall ->
+  IF node IS_A FuncCall AS func_call THEN
+    MUTABLE partners = (partner_names |> SELECT _.toString()) |> DISTINCT _;
+    MUTABLE name: String = COPY CAST(func_call.name AS String);
+    IF !(partners.contains?(name)) THEN
+      RETURN NIL;
+    END
+    RETURN MutualTailCall{ name: COPY name, args: COPY func_call.args };
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set: [Set]String) RETURNS Bool ->
+  IF node EXISTS AS node_value THEN
+    MUTABLE stack: []Locatable = ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } );
+    IF node_value IS_A []Node AS array THEN
+      MUTABLE rtoc_reverse_items_2: []Node = array;
+      MUTABLE rtoc_reverse_i_3 = rtoc_reverse_items_2.length() - 1;
+      WHILE rtoc_reverse_i_3 >= 0 DO
+  &stack.append(COPY (rtoc_reverse_items_2[rtoc_reverse_i_3])?);
+  rtoc_reverse_i_3 = rtoc_reverse_i_3 - 1;
+      END
+    ELSE
+      &stack.append(castThunkScanNodeToLocatable(COPY node_value));
+    END
+    WHILE !((stack.length() == 0)) DO
+      MUTABLE current = UNWRAP (&stack.pop());
+      IF (current IS_A FunctionDef OR current IS_A LambdaLit) THEN
+        CONTINUE;
+      END
+      IF current IS_A FuncCall AS func_call THEN
+        MUTABLE name: String = CAST(func_call.name AS String);
+        IF names_set.contains?(name) THEN
+          RETURN TRUE;
+        END
+      END
+      aST__each_child_node(current, %(child: Locatable) USE(MUTABLE stack) -> {
+  &stack.append(COPY child);
+  rubyToClearVoid()
+      });
+    END
+    RETURN FALSE;
+  ELSE
+    RETURN FALSE;
+  END
+END
+PRIVATE FN recursiveSplitter__match_base_case(stmt: Locatable, fn_name: String) RETURNS ?BaseCase ->
+  IF stmt IS_A IfStatement AS if_statement THEN
+    IF (!((if_statement.else_branch == NIL)) AND !((UNWRAP (if_statement.else_branch)).empty?())) THEN
+      RETURN NIL;
+    END
+    MUTABLE then_b: ?[]Locatable = CAST(if_statement.then_branch AS ?[]Locatable);
+    IF then_b EXISTS AS then_b_value THEN
+      MUTABLE then_b_value = COPY then_b_value;
+      IF (then_b_value.length() != 1) THEN
+        RETURN NIL;
+      END
+      MUTABLE ret = then_b_value.first();
+      IF !((ret IS_A ReturnNode AND ret.value())) THEN
+        RETURN NIL;
+      END
+      IF recursiveSplitter__contains_self_call?(castLocatableToOptionalThunkScanNode(if_statement.condition), fn_name) THEN
+        RETURN NIL;
+      END
+      IF recursiveSplitter__contains_self_call?(ret.value(), fn_name) THEN
+        RETURN NIL;
+      END
+      RETURN BaseCase{ cond_ast: COPY if_statement.condition, value_ast: COPY ret.value() };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN recursiveSplitter__match_recursive_combine(expr: Locatable, fn_name: String) RETURNS ?RecursiveCombine ->
+  IF expr IS_A BinaryOp AS binary_op THEN
+    IF !(supported_ops.contains?(binary_op.op)) THEN
+      RETURN NIL;
+    END
+    MUTABLE left_call: ?FuncCall = recursiveSplitter__direct_self_call(binary_op.left, fn_name);
+    MUTABLE right_call: ?FuncCall = recursiveSplitter__direct_self_call(binary_op.right, fn_name);
+    IF ((left_call != NIL) AND !(recursiveSplitter__contains_self_call?(castLocatableToOptionalThunkScanNode(binary_op.right), fn_name))) THEN
+      RETURN RecursiveCombine{ lhs: COPY binary_op.right, op: COPY binary_op.op, args: COPY left_call.args };
+    ELSE_IF ((right_call != NIL) AND !(recursiveSplitter__contains_self_call?(castLocatableToOptionalThunkScanNode(binary_op.left), fn_name))) THEN
+      RETURN RecursiveCombine{ lhs: COPY binary_op.left, op: COPY binary_op.op, args: COPY right_call.args };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN recursiveSplitter__direct_self_call(node: Locatable, fn_name: String) RETURNS ?FuncCall ->
+  IF node IS_A FuncCall AS func_call THEN
+    MUTABLE name: String = COPY CAST(func_call.name AS String);
+    IF !((name == fn_name)) THEN
+      RETURN NIL;
+    END
+    RETURN COPY func_call;
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN recursiveSplitter__contains_self_call?(node: ?ThunkScanNode, fn_name: String) RETURNS Bool ->
+  RETURN recursiveSplitter__contains_any_call?(node, [fn_name] |> DISTINCT _);
+END
+# End Ruby module ThunkTransform::RecursiveSplitter
+# End Ruby module ThunkTransform
+FN castLocatableToOptionalThunkScanNode(value: Locatable) RETURNS ?ThunkScanNode ->
+  PARTIAL MATCH value START
+    Locatable.Program AS cast_payload -> RETURN ThunkScanNode{ Program: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN ThunkScanNode{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN ThunkScanNode{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN ThunkScanNode{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN ThunkScanNode{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN ThunkScanNode{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN ThunkScanNode{ ConformanceDef: COPY cast_payload };,
+    Locatable.StructDef AS cast_payload -> RETURN ThunkScanNode{ StructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN ThunkScanNode{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN ThunkScanNode{ Assignment: COPY cast_payload };,
+    Locatable.DestructureTarget AS cast_payload -> RETURN ThunkScanNode{ DestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN ThunkScanNode{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN ThunkScanNode{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN ThunkScanNode{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN ThunkScanNode{ IsA: COPY cast_payload };,
+    Locatable.UnaryOp AS cast_payload -> RETURN ThunkScanNode{ UnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN ThunkScanNode{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN ThunkScanNode{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN ThunkScanNode{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN ThunkScanNode{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN ThunkScanNode{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN ThunkScanNode{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN ThunkScanNode{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN ThunkScanNode{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN ThunkScanNode{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN ThunkScanNode{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN ThunkScanNode{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN ThunkScanNode{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN ThunkScanNode{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN ThunkScanNode{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN ThunkScanNode{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN ThunkScanNode{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN ThunkScanNode{ FuncCall: COPY cast_payload };,
+    Locatable.MethodCall AS cast_payload -> RETURN ThunkScanNode{ MethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN ThunkScanNode{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN ThunkScanNode{ GetIndex: COPY cast_payload };,
+    Locatable.Cast AS cast_payload -> RETURN ThunkScanNode{ Cast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN ThunkScanNode{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN ThunkScanNode{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN ThunkScanNode{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN ThunkScanNode{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN ThunkScanNode{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN ThunkScanNode{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN ThunkScanNode{ Require: COPY cast_payload };,
+    Locatable.DeferStmt AS cast_payload -> RETURN ThunkScanNode{ DeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN ThunkScanNode{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN ThunkScanNode{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN ThunkScanNode{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN ThunkScanNode{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN ThunkScanNode{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN ThunkScanNode{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN ThunkScanNode{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN ThunkScanNode{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN ThunkScanNode{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN ThunkScanNode{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN ThunkScanNode{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN ThunkScanNode{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN ThunkScanNode{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN ThunkScanNode{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN ThunkScanNode{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN ThunkScanNode{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN ThunkScanNode{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN ThunkScanNode{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN ThunkScanNode{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN ThunkScanNode{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN ThunkScanNode{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN ThunkScanNode{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN ThunkScanNode{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN ThunkScanNode{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN ThunkScanNode{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN ThunkScanNode{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN ThunkScanNode{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN ThunkScanNode{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN ThunkScanNode{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN ThunkScanNode{ Copy: COPY cast_payload };,
+    Locatable.OptionalUnwrap AS cast_payload -> RETURN ThunkScanNode{ OptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN ThunkScanNode{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN ThunkScanNode{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN ThunkScanNode{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN ThunkScanNode{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN ThunkScanNode{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN ThunkScanNode{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN ThunkScanNode{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN ThunkScanNode{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN ThunkScanNode{ RecoverOp: COPY cast_payload };,
+    Locatable.BlockExpr AS cast_payload -> RETURN ThunkScanNode{ BlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN ThunkScanNode{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN ThunkScanNode{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN ThunkScanNode{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN ThunkScanNode{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN ThunkScanNode{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN ThunkScanNode{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN ThunkScanNode{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN ThunkScanNode{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN ThunkScanNode{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN ThunkScanNode{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN ThunkScanNode{ StructPattern: COPY cast_payload };,
+    Locatable.RangeLit AS cast_payload -> RETURN ThunkScanNode{ RangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN ThunkScanNode{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN ThunkScanNode{ ExternStructDecl: COPY cast_payload };,
+    Locatable.EnumDef AS cast_payload -> RETURN ThunkScanNode{ EnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN ThunkScanNode{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN ThunkScanNode{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN ThunkScanNode{ StaticCall: COPY cast_payload };,
+    Locatable.DoBlock AS cast_payload -> RETURN ThunkScanNode{ DoBlock: COPY cast_payload };,
+    Locatable.BgBlock AS cast_payload -> RETURN ThunkScanNode{ BgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN ThunkScanNode{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN ThunkScanNode{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN ThunkScanNode{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN ThunkScanNode{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN ThunkScanNode{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN ThunkScanNode{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN ThunkScanNode{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN ThunkScanNode{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN ThunkScanNode{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN ThunkScanNode{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN ThunkScanNode{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN ThunkScanNode{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN ThunkScanNode{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN ThunkScanNode{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN ThunkScanNode{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN ThunkScanNode{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN ThunkScanNode{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN ThunkScanNode{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN ThunkScanNode{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN ThunkScanNode{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN ThunkScanNode{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN ThunkScanNode{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?ThunkScanNode");
+  END
+  panic("Invalid cast to ?ThunkScanNode");
+END
+FN castThunkScanNodeToLocatable(value: ThunkScanNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    ThunkScanNode.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
+    ThunkScanNode.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    ThunkScanNode.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    ThunkScanNode.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    ThunkScanNode.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    ThunkScanNode.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    ThunkScanNode.StructDef AS cast_payload -> RETURN Locatable{ StructDef: COPY cast_payload };,
+    ThunkScanNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    ThunkScanNode.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    ThunkScanNode.DestructureTarget AS cast_payload -> RETURN Locatable{ DestructureTarget: COPY cast_payload };,
+    ThunkScanNode.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    ThunkScanNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    ThunkScanNode.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    ThunkScanNode.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    ThunkScanNode.UnaryOp AS cast_payload -> RETURN Locatable{ UnaryOp: COPY cast_payload };,
+    ThunkScanNode.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    ThunkScanNode.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    ThunkScanNode.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    ThunkScanNode.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    ThunkScanNode.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    ThunkScanNode.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    ThunkScanNode.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    ThunkScanNode.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    ThunkScanNode.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    ThunkScanNode.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    ThunkScanNode.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    ThunkScanNode.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    ThunkScanNode.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    ThunkScanNode.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    ThunkScanNode.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    ThunkScanNode.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    ThunkScanNode.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    ThunkScanNode.MethodCall AS cast_payload -> RETURN Locatable{ MethodCall: COPY cast_payload };,
+    ThunkScanNode.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    ThunkScanNode.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    ThunkScanNode.Cast AS cast_payload -> RETURN Locatable{ Cast: COPY cast_payload };,
+    ThunkScanNode.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    ThunkScanNode.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    ThunkScanNode.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    ThunkScanNode.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    ThunkScanNode.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    ThunkScanNode.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    ThunkScanNode.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    ThunkScanNode.DeferStmt AS cast_payload -> RETURN Locatable{ DeferStmt: COPY cast_payload };,
+    ThunkScanNode.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    ThunkScanNode.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    ThunkScanNode.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    ThunkScanNode.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    ThunkScanNode.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    ThunkScanNode.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    ThunkScanNode.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    ThunkScanNode.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    ThunkScanNode.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    ThunkScanNode.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    ThunkScanNode.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    ThunkScanNode.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    ThunkScanNode.OptionalUnwrap AS cast_payload -> RETURN Locatable{ OptionalUnwrap: COPY cast_payload };,
+    ThunkScanNode.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    ThunkScanNode.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    ThunkScanNode.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    ThunkScanNode.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    ThunkScanNode.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    ThunkScanNode.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    ThunkScanNode.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    ThunkScanNode.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    ThunkScanNode.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    ThunkScanNode.BlockExpr AS cast_payload -> RETURN Locatable{ BlockExpr: COPY cast_payload };,
+    ThunkScanNode.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    ThunkScanNode.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    ThunkScanNode.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    ThunkScanNode.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    ThunkScanNode.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    ThunkScanNode.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    ThunkScanNode.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    ThunkScanNode.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    ThunkScanNode.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    ThunkScanNode.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    ThunkScanNode.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    ThunkScanNode.RangeLit AS cast_payload -> RETURN Locatable{ RangeLit: COPY cast_payload };,
+    ThunkScanNode.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    ThunkScanNode.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    ThunkScanNode.EnumDef AS cast_payload -> RETURN Locatable{ EnumDef: COPY cast_payload };,
+    ThunkScanNode.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    ThunkScanNode.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    ThunkScanNode.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    ThunkScanNode.DoBlock AS cast_payload -> RETURN Locatable{ DoBlock: COPY cast_payload };,
+    ThunkScanNode.BgBlock AS cast_payload -> RETURN Locatable{ BgBlock: COPY cast_payload };,
+    ThunkScanNode.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    ThunkScanNode.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    ThunkScanNode.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    ThunkScanNode.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    ThunkScanNode.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    ThunkScanNode.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    ThunkScanNode.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    ThunkScanNode.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    ThunkScanNode.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    ThunkScanNode.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    ThunkScanNode.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    ThunkScanNode.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    ThunkScanNode.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    ThunkScanNode.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    ThunkScanNode.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    ThunkScanNode.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    ThunkScanNode.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    ThunkScanNode.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    ThunkScanNode.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    ThunkScanNode.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    ThunkScanNode.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    ThunkScanNode.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    ThunkScanNode.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    ThunkScanNode.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    ThunkScanNode.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    ThunkScanNode.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    ThunkScanNode.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    ThunkScanNode.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    ThunkScanNode.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    ThunkScanNode.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    ThunkScanNode.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    ThunkScanNode.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    ThunkScanNode.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    ThunkScanNode.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    ThunkScanNode.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    ThunkScanNode.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    ThunkScanNode.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    ThunkScanNode.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    ThunkScanNode.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    ThunkScanNode.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    ThunkScanNode.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

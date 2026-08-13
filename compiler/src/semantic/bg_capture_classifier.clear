@@ -1,0 +1,107 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_73656d616e7469632f636170747572655f73747261746567792e636c656172" AS capture_strategy
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f6361706162696c69746965732e636c656172" AS capabilities
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+# Ruby module BgCaptureClassifier
+PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?Any = NIL) RETURNS !{String}CaptureAnalysis ->
+  MUTABLE analyses: {String}CaptureAnalysis = {};
+  fn_nodes.keys() |> EACH {
+  MUTABLE fn_value: FunctionDef = (fn_nodes[_] OR_ELSE CAST(panic("missing hash key") AS FunctionDef));
+  IF !((IF fn_value != NIL THEN
+      fn_value.body
+    ELSE
+      NIL
+    END)) THEN
+    CONTINUE;
+  END
+  MUTABLE live_param_syms = TRY (scope__live_param_syms(fn_value));
+  TRY (aST__each_capture_analysis(fn_value.body, %(a: CaptureAnalysisValue) USE(MUTABLE analyses, live_param_syms, schema_lookup, fn_value) -> {
+    TRY (bgCaptureClassifier__classify_one_mut(&a, live_param_syms, schema_lookup));
+    analyses["${fn_value.name}:${a.object_id()}"] = a;
+    rubyToClearVoid()
+  }));
+  };
+  RETURN analyses;
+END
+PUB FN bgCaptureClassifier__classify_one_mut(MUTABLE a: CaptureAnalysis, live_param_syms: {String}SymbolEntry, schema_lookup: ?Any = NIL) RETURNS !{String}Strategy ->
+  a.capture_symbols.keys() |> EACH {
+  MUTABLE ignored_entry: SymbolEntry@multiowned = (a.capture_symbols[_] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
+  MUTABLE live: ?SymbolEntry = COPY live_param_syms[_];
+  IF live EXISTS AS live_value THEN
+      a.capture_symbols[_] = KEEP live_value;
+  END
+  };
+  MUTABLE site_info = CaptureSiteInfo{ copied_names: COPY a.site_copied, moved_names: COPY a.site_moved };
+  MUTABLE strategies: {String}Strategy = {};
+  a.captures.keys() |> EACH {
+  MUTABLE type_obj: Type = (a.captures[_] OR_ELSE CAST(panic("missing hash key") AS Type));
+  MUTABLE sym: ?SymbolEntry@multiowned = COPY a.capture_symbols[_];
+  MUTABLE t: ?Type@multiowned = TRY (bgCaptureClassifier__resolve_capture_type(type_obj, sym));
+  IF !(t) THEN
+      CONTINUE;
+  END
+  strategies[_] = TRY (captureStrategy__classify(_, CAST(t AS Type), site_info, a.resource_captures.contains?(_), schema_lookup));
+  };
+  a.strategies = strategies;
+  a.move_mark_names = strategies.each_with_object(Set[], %(tuple_param_0, set: Tuple<String,Strategy>) -> {
+  MUTABLE n = tuple_param_0._0;
+  MUTABLE s = tuple_param_0._1;
+  IF s IS_A MoveInto THEN
+    RETURN &set.append(COPY n);
+  END
+  NIL
+  });
+  a.alloc_mark_entries = strategies.each_with_object({}, %(tuple_param_0, h: Tuple<String,Strategy>) -> {
+  MUTABLE n = tuple_param_0._0;
+  MUTABLE s = tuple_param_0._1;
+  IF s IS_A FreshHeapCopy THEN
+    h[n] = s.alloc_sym();
+    RETURN NIL;
+  END
+  NIL
+  });
+  RETURN strategies;
+END
+PUB FN bgCaptureClassifier__resolve_capture_type(type_obj: ?Type, sym: ?SymbolEntry) RETURNS !?Type ->
+  IF type_obj EXISTS AS type_obj_value THEN
+    MUTABLE type_obj_value_mutable = COPY type_obj_value;
+    MUTABLE base = TRY (type__new(castTypeToTypeConstructionInput(type_obj_value_mutable)));
+    IF sym EXISTS AS sym_value THEN
+      MUTABLE sym_value_mutable = COPY sym_value;
+      TRY (type__apply_bg_capture_symbol_mut(&base, symbolEntry__storage(sym_value_mutable), symbolEntry__sync(sym_value_mutable)));
+      bgCaptureClassifier__apply_capture_storage_provenance_mut(&base, symbolEntry__storage(sym_value_mutable));
+      IF symbolEntry__borrowed_alias(sym_value_mutable) THEN
+        type__mark_borrowed_reference_mut(&base);
+      END
+      RETURN base;
+    ELSE
+      RETURN base;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN bgCaptureClassifier__apply_capture_storage_provenance_mut(MUTABLE type: Type, storage: String@symbol) RETURNS Void ->
+  IF (storage == :heap) THEN
+    type__mark_heap_allocated_mut(&type);
+  ELSE_IF (storage == :frame) THEN
+    type__mark_frame_allocated_mut(&type);
+  ELSE_IF (storage == :borrow) THEN
+    type__mark_borrowed_reference_mut(&type);
+  END
+END
+# End Ruby module BgCaptureClassifier
+FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
+    Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
+    Type.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
+  END
+  panic("Invalid cast to TypeConstructionInput");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

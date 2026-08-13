@@ -1,0 +1,50 @@
+# Ruby module OwnershipEdgePlanner
+carriers: [3]String@symbol = [:plain, :multiowned, :shared];
+fan_outs: [3]String@symbol = [:move, :keep, :copy];
+PUB STRUCT Plan {
+  op: ?String@symbol,
+  error_kind: ?String@symbol
+}
+PUB FN ownershipEdgePlanner__select(source_carrier: String@symbol, fan_out: String@symbol, at_unique_boundary: Bool = FALSE) RETURNS !Plan ->
+  IF !(carriers.contains?(source_carrier)) THEN
+    panic("unknown source carrier {}");
+  END
+  IF !(fan_outs.contains?(fan_out)) THEN
+    panic("unknown fan-out {}");
+  END
+  IF (fan_out == :move) THEN
+    RETURN Plan{ op: COPY ownershipEdgePlanner__move_op(source_carrier), error_kind: NIL };
+  ELSE_IF (fan_out == :keep) THEN
+    RETURN Plan{ op: COPY ownershipEdgePlanner__keep_op(source_carrier), error_kind: NIL };
+  ELSE
+    RETURN ownershipEdgePlanner__select_copy(source_carrier, at_unique_boundary);
+  END
+END
+PUB FN ownershipEdgePlanner__move_op(source_carrier: String@symbol) RETURNS String@symbol ->
+  IF (source_carrier == :plain) THEN
+    RETURN :payload_move;
+  END
+  IF (source_carrier == :multiowned) THEN
+    RETURN :rc_handle_move;
+  END
+  RETURN :arc_handle_move;
+END
+PUB FN ownershipEdgePlanner__keep_op(source_carrier: String@symbol) RETURNS String@symbol ->
+  IF (source_carrier == :plain) THEN
+    RETURN :payload_copy;
+  END
+  IF (source_carrier == :multiowned) THEN
+    RETURN :rc_retain;
+  END
+  RETURN :arc_retain;
+END
+PUB FN ownershipEdgePlanner__select_copy(source_carrier: String@symbol, at_unique_boundary: Bool) RETURNS Plan ->
+  IF (source_carrier == :plain) THEN
+    RETURN Plan{ op: :payload_copy, error_kind: NIL };
+  END
+  IF at_unique_boundary THEN
+    RETURN Plan{ op: :shared_to_unique_copy, error_kind: NIL };
+  END
+  RETURN Plan{ op: NIL, error_kind: :copy_needs_unique_boundary };
+END
+# End Ruby module OwnershipEdgePlanner

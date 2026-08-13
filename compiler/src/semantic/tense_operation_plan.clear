@@ -1,0 +1,496 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f747970655f65787072657373696f6e2e636c656172" AS type_expression
+REQUIRE "pkg:rtoc_6173742f747970655f6361706162696c69746965732e636c656172" AS type_capabilities
+PUB ENUM TenseLayerKind { Fallible, Future, Optional }
+PUB ENUM TenseOperationKind { Try, Unwrap, Next, OrElseValue, OrElseRaise, OrElseExit, OrElsePass, OrElseBreak, OrElsePrune, IsOk, Exists, Navigate, AsyncJoin, Select }
+PUB ENUM TenseBackendForm { ZigTry, OptionalTry, OptionalUnwrap, PromiseNext, SharedPromiseNext, ObservableStringNext, ZigCatch, ZigOptionalFallback, FallibleTest, OptionalTest, DirectMap, FutureMap, AsyncJoin, Select }
+PUB ENUM TensePropagation { None, Failure, AbsenceAsFailure }
+PUB ENUM TenseRecovery { None, Fallback, Raise, Exit, Pass, Break, Prune }
+PUB ENUM TenseHandleUse { None, Consume, SharedRead }
+PUB STRUCT TenseLayer {
+  kind: TenseLayerKind,
+  capabilities: TypeCapabilities,
+  error_set: ?TypeExpression
+}
+
+PUB FN tenseLayer__marker(self: TenseLayer) RETURNS String ->
+  IF (self.kind == TenseLayerKind.Fallible) THEN
+    RETURN "!";
+  ELSE_IF (self.kind == TenseLayerKind.Future) THEN
+    RETURN "~";
+  ELSE_IF (self.kind == TenseLayerKind.Optional) THEN
+    RETURN "?";
+  ELSE
+    RETURN "";
+  END
+END
+PUB FN tenseLayer__wrap(self: TenseLayer, inner: TypeExpression) RETURNS !TypeExpression ->
+  MUTABLE layer_kind = COPY self.kind;
+  IF (layer_kind == TenseLayerKind.Fallible) THEN
+    RETURN TypeExpression{ kind: COPY FallibleTypeExpression{ inner: COPY inner, error_set: COPY self.error_set }, capabilities: COPY self.capabilities };
+  ELSE_IF (layer_kind == TenseLayerKind.Future) THEN
+    RETURN TypeExpression{ kind: COPY FutureTypeExpression{ inner: COPY inner }, capabilities: COPY self.capabilities };
+  ELSE_IF (layer_kind == TenseLayerKind.Optional) THEN
+    RETURN TypeExpression{ kind: COPY OptionalTypeExpression{ inner: COPY inner }, capabilities: COPY self.capabilities };
+  ELSE
+    panic("unknown tense layer kind {}");
+  END
+END
+PUB STRUCT TenseFutureSplit {
+  outer: []TenseLayer,
+  inner: []TenseLayer
+}
+PUB STRUCT TenseEnvelope {
+  layers: []TenseLayer,
+  payload_expression: TypeExpression
+}
+
+valid_orders: [12]String = ["", "!", "?", "!?", "~", "~!", "~?", "~!?", "!~", "!~!", "!~?", "!~!?"];
+PUB FN tenseEnvelope__from_type(type: Type) RETURNS !TenseEnvelope ->
+  RETURN TRY (tenseEnvelope__from_expression(type.shape.expression));
+END
+PUB FN tenseEnvelope__from_expression(expression: TypeExpression) RETURNS !TenseEnvelope ->
+  MUTABLE layers: []TenseLayer = ( { MUTABLE rtoc_empty_list_1: []TenseLayer = List[]; rtoc_empty_list_1 } );
+  MUTABLE current: TypeExpression = COPY expression;
+  WHILE TRUE DO
+    MUTABLE layer_kind = COPY current.kind;
+    IF (layer_kind IS_A FallibleTypeExpression) THEN
+      MUTABLE fallible = COPY layer_kind;
+      &layers.append(TenseLayer{ kind: COPY TenseLayerKind.Fallible, capabilities: COPY current.capabilities, error_set: COPY fallible.error_set() });
+      current = fallible.inner();
+    ELSE_IF (layer_kind IS_A FutureTypeExpression) THEN
+      MUTABLE future = COPY layer_kind;
+      &layers.append(TenseLayer{ kind: COPY TenseLayerKind.Future, capabilities: COPY current.capabilities, error_set: NIL });
+      current = future.inner();
+    ELSE_IF (layer_kind IS_A OptionalTypeExpression) THEN
+      MUTABLE optional = layer_kind;
+      &layers.append(TenseLayer{ kind: COPY TenseLayerKind.Optional, capabilities: COPY current.capabilities, error_set: NIL });
+      current = optional.inner();
+    ELSE
+      BREAK;
+    END
+  END
+  MUTABLE envelope = TenseEnvelope{ layers: COPY layers, payload_expression: COPY current };
+  IF !(tenseEnvelope__valid?(envelope)) THEN
+    panic("unsupported tense order {}");
+  END
+  RETURN envelope;
+END
+PUB FN tenseEnvelope__order(self: TenseEnvelope) RETURNS String ->
+  MUTABLE rtoc_tuple_return_2 = ( { MUTABLE rtoc_map_results = CAST([] AS []String); self.layers |> EACH { &rtoc_map_results.append(COPY tenseLayer__marker(_)); }; rtoc_map_results } ).join("");
+  RETURN rtoc_tuple_return_2;
+END
+PUB FN tenseEnvelope__valid?(self: TenseEnvelope) RETURNS Bool ->
+  RETURN valid_orders.contains?(tenseEnvelope__order(self));
+END
+PUB FN tenseEnvelope__asynchronous?(self: TenseEnvelope) RETURNS Bool ->
+  RETURN self.layers |> ANY (_.kind == TenseLayerKind.Future);
+END
+PUB FN tenseEnvelope__fallible?(self: TenseEnvelope) RETURNS Bool ->
+  RETURN self.layers |> ANY (_.kind == TenseLayerKind.Fallible);
+END
+PUB FN tenseEnvelope__optional?(self: TenseEnvelope) RETURNS Bool ->
+  RETURN self.layers |> ANY (_.kind == TenseLayerKind.Optional);
+END
+PUB FN tenseEnvelope__payload_type(self: TenseEnvelope) RETURNS !Type ->
+  RETURN TRY (type__from_child_expression(self.payload_expression));
+END
+PUB FN tenseEnvelope__wrap(self: TenseEnvelope, payload: TypeExpression) RETURNS !TypeExpression EFFECTS REENTRANT ->
+  MUTABLE inner = COPY payload;
+  MUTABLE index = self.layers.length();
+  WHILE (index > 0) DO
+    index = (index - 1);
+    inner = TRY (tenseLayer__wrap(UNWRAP (self.layers[index]), inner));
+  END
+  RETURN inner;
+END
+PUB FN tenseEnvelope__split_future(self: TenseEnvelope) RETURNS TenseFutureSplit ->
+  MUTABLE index: ?Int64 = NIL;
+  MUTABLE cursor: Int64 = 0;
+  WHILE (cursor < self.layers.length()) DO
+    IF ((UNWRAP (self.layers[cursor])).kind == TenseLayerKind.Future) THEN
+      index = cursor;
+      BREAK;
+    END
+    cursor = (cursor + 1);
+  END
+  IF index EXISTS AS index_value THEN
+    RETURN TenseFutureSplit{ outer: COPY self.layers |> LIMIT index_value, inner: COPY self.layers |> SKIP (index_value + 1) };
+  ELSE
+    RETURN TenseFutureSplit{ outer: COPY List[], inner: COPY self.layers };
+  END
+END
+PUB FN tenseEnvelope__wrap_layers(payload: TypeExpression, selected_layers: []TenseLayer) RETURNS !TypeExpression ->
+  MUTABLE inner = COPY payload;
+  MUTABLE index = selected_layers.length();
+  WHILE (index > 0) DO
+    index = (index - 1);
+    inner = TRY (tenseLayer__wrap(UNWRAP (selected_layers[index]), inner));
+  END
+  RETURN inner;
+END
+PUB FN tenseEnvelope__layer_index(self: TenseEnvelope, kind: TenseLayerKind) RETURNS ?Int64 ->
+  MUTABLE index: Int64 = 0;
+  WHILE (index < self.layers.length()) DO
+    IF ((UNWRAP (self.layers[index])).kind == kind) THEN
+      RETURN index;
+    END
+    index = (index + 1);
+  END
+  RETURN NIL;
+END
+PUB FN tenseEnvelope__future_before?(self: TenseEnvelope, limit_value: Int64) RETURNS Bool ->
+  MUTABLE index: Int64 = 0;
+  WHILE (index < limit_value) DO
+    IF ((UNWRAP (self.layers[index])).kind == TenseLayerKind.Future) THEN
+      RETURN TRUE;
+    END
+    index = (index + 1);
+  END
+  RETURN FALSE;
+END
+PUB FN tenseEnvelope__without_layer(self: TenseEnvelope, index_value: Int64) RETURNS !Type ->
+  MUTABLE retained = TRY (tenseEnvelope__layers_without(self, index_value));
+  RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(self.payload_expression, retained)) }));
+END
+PUB FN tenseEnvelope__layers_without(self: TenseEnvelope, index_value: Int64) RETURNS ![]TenseLayer ->
+  MUTABLE retained: []TenseLayer = ( { MUTABLE rtoc_empty_list_3: []TenseLayer = List[]; rtoc_empty_list_3 } );
+  MUTABLE layer_index: Int64 = 0;
+  FOR _ IN self.layers DO
+  IF !((layer_index == index_value)) THEN
+      &retained.append(COPY _);
+  END
+  layer_index = (layer_index + 1);
+  END
+  RETURN retained;
+END
+PUB STRUCT TenseOperationPlan {
+  operation: TenseOperationKind,
+  input_type: Type,
+  result_type: Type,
+  backend_form: TenseBackendForm,
+  consumed_layers: []TenseLayer,
+  preserved_layers: []TenseLayer,
+  navigation_layers: []TenseLayer,
+  propagation: TensePropagation,
+  recovery: TenseRecovery,
+  handle_use: TenseHandleUse,
+  suspends: Bool,
+  may_terminate_current_flow: Bool,
+  refinement_type: ?Type
+}
+
+PUB FN tenseOperationPlan__consumes_handle?(self: TenseOperationPlan) RETURNS Bool ->
+  RETURN (self.handle_use == TenseHandleUse.Consume);
+END
+PUB FN tenseOperationPlan__recovery_operation?(self: TenseOperationPlan) RETURNS Bool ->
+  RETURN ((((((self.operation == TenseOperationKind.OrElseValue) OR (self.operation == TenseOperationKind.OrElseRaise)) OR (self.operation == TenseOperationKind.OrElseExit)) OR (self.operation == TenseOperationKind.OrElsePass)) OR (self.operation == TenseOperationKind.OrElseBreak)) OR (self.operation == TenseOperationKind.OrElsePrune));
+END
+PUB FN tenseOperationPlan__owns_result?(self: TenseOperationPlan) RETURNS Bool ->
+  RETURN (self.backend_form == TenseBackendForm.FutureMap);
+END
+PUB STRUCT TenseJoinPlan {
+  result_type: ?Type,
+  reason: ?String@symbol
+}
+
+PUB FN tenseJoinPlan__success?(self: TenseJoinPlan) RETURNS Bool ->
+  RETURN !((self.result_type == NIL));
+END
+PUB STRUCT TenseSelectorPlan {
+  value_type: Type,
+  envelope: TenseEnvelope
+}
+
+PUB FN tenseSelectorPlan__required_order(self: TenseSelectorPlan) RETURNS String ->
+  RETURN tenseEnvelope__order(self.envelope);
+END
+PUB FN tenseSelectorPlan__leaf_type(self: TenseSelectorPlan) RETURNS !Type ->
+  RETURN CAST(TRY (tenseEnvelope__payload_type(self.envelope)) AS Type);
+END
+PUB FN tenseSelectorPlan__asynchronous?(self: TenseSelectorPlan) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN tenseEnvelope__asynchronous?(self.envelope);
+END
+PUB FN tenseSelectorPlan__fallible?(self: TenseSelectorPlan) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN tenseEnvelope__fallible?(self.envelope);
+END
+PUB FN tenseSelectorPlan__required_mode(self: TenseSelectorPlan) RETURNS ?String@symbol ->
+  IF (tenseEnvelope__fallible?(self.envelope) AND tenseEnvelope__optional?(self.envelope)) THEN
+    RETURN :fallible_optional;
+  END
+  IF tenseEnvelope__fallible?(self.envelope) THEN
+    RETURN :fallible;
+  END
+  IF tenseEnvelope__optional?(self.envelope) THEN
+    RETURN :optional;
+  END
+  RETURN NIL;
+END
+PUB FN tenseSelectorPlan__stream_result_type(self: TenseSelectorPlan, cardinality: TypeExpressionDimension) RETURNS !Type ->
+  MUTABLE split = tenseEnvelope__split_future(self.envelope);
+  MUTABLE item = TRY (tenseEnvelope__wrap_layers(self.envelope.payload_expression, split.inner));
+  MUTABLE stream_kind = StreamTypeExpression{ cardinality: COPY cardinality, item: COPY item };
+  MUTABLE stream = typeExpression__of(stream_kind);
+  RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(stream, split.outer)) }));
+END
+PUB FN tenseOperationPlanner__navigation_markers() RETURNS ![]String ->
+  RETURN ["!", "?", "!?", "~", "~!", "~?", "~!?", "!~", "!~!", "!~?", "!~!?"];
+END
+PRIVATE FN tenseOperationPlanner__find_layer(envelopes: []TenseEnvelope, kind: TenseLayerKind) RETURNS ?TenseLayer ->
+  MUTABLE envelope_index: Int64 = 0;
+  WHILE (envelope_index < envelopes.length()) DO
+    MUTABLE envelope = COPY UNWRAP (envelopes[envelope_index]);
+    MUTABLE layer_index: Int64 = 0;
+    WHILE (layer_index < envelope.layers.length()) DO
+      MUTABLE layer = COPY UNWRAP (envelope.layers[layer_index]);
+      IF (layer.kind == kind) THEN
+        RETURN COPY layer;
+      END
+      layer_index = (layer_index + 1);
+    END
+    envelope_index = (envelope_index + 1);
+  END
+  RETURN NIL;
+END
+PUB FN tenseOperationPlanner__selector(type: Type) RETURNS !TenseSelectorPlan ->
+  RETURN TenseSelectorPlan{ value_type: COPY type, envelope: COPY TRY (tenseEnvelope__from_type(type)) };
+END
+PUB FN tenseOperationPlanner__try_value(type: Type) RETURNS !TenseOperationPlan ->
+  MUTABLE envelope = TRY (tenseEnvelope__from_type(type));
+  MUTABLE first: ?TenseLayer = COPY envelope.layers.first();
+  IF (first?.kind == TenseLayerKind.Fallible) THEN
+    MUTABLE result = TRY (tenseEnvelope__without_layer(envelope, 0));
+    tenseOperationPlanner__preserve_value_metadata_mut(CAST(result AS Type), type);
+    RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Try, type, CAST(result AS Type), TenseBackendForm.ZigTry, [first?], envelope.layers |> SKIP 1, ( { MUTABLE rtoc_empty_list_4: []TenseLayer = List[]; rtoc_empty_list_4 } ), TensePropagation.Failure, TenseRecovery.None, TenseHandleUse.None, FALSE, TRUE);
+  END
+  IF (first?.kind == TenseLayerKind.Optional) THEN
+    MUTABLE result = TRY (tenseEnvelope__without_layer(envelope, 0));
+    tenseOperationPlanner__preserve_value_metadata_mut(CAST(result AS Type), type);
+    RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Try, type, CAST(result AS Type), TenseBackendForm.OptionalTry, [first?], envelope.layers |> SKIP 1, ( { MUTABLE rtoc_empty_list_5: []TenseLayer = List[]; rtoc_empty_list_5 } ), TensePropagation.AbsenceAsFailure, TenseRecovery.None, TenseHandleUse.None, FALSE, TRUE);
+  END
+  panic("TRY requires an outer fallible or optional layer, got {}");
+END
+PUB FN tenseOperationPlanner__unwrap(type: Type) RETURNS !TenseOperationPlan ->
+  MUTABLE envelope = TRY (tenseEnvelope__from_type(type));
+  MUTABLE optional_index: ?Int64 = tenseEnvelope__layer_index(envelope, TenseLayerKind.Optional);
+  IF optional_index EXISTS AS optional_index_value THEN
+    MUTABLE optional_index_value_mutable = COPY optional_index_value;
+    IF tenseEnvelope__future_before?(envelope, optional_index_value_mutable) THEN
+      panic("UNWRAP requires an immediately available optional layer, got {}");
+    ELSE
+      MUTABLE index = optional_index_value_mutable;
+      MUTABLE consumed = COPY UNWRAP (envelope.layers[index]);
+      MUTABLE result = TRY (tenseEnvelope__without_layer(envelope, index));
+      TRY (type__merge_capabilities_from_mut(&result, type, TRUE, TRUE));
+      type__copy_placement_from_mut(&result, type);
+      RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Unwrap, type, CAST(result AS Type), TenseBackendForm.OptionalUnwrap, [consumed], TRY (tenseEnvelope__layers_without(envelope, index)), ( { MUTABLE rtoc_empty_list_6: []TenseLayer = List[]; rtoc_empty_list_6 } ));
+    END
+  ELSE
+    panic("UNWRAP requires an immediately available optional layer, got {}");
+  END
+END
+PUB FN tenseOperationPlanner__next_value(type: Type, shared_value: Bool = FALSE) RETURNS !TenseOperationPlan ->
+  MUTABLE envelope = TRY (tenseEnvelope__from_type(type));
+  MUTABLE first: ?TenseLayer = COPY envelope.layers.first();
+  IF !((first?.kind == TenseLayerKind.Future)) THEN
+    panic("NEXT requires an outer future layer, got {}");
+  END
+  MUTABLE result = TRY (tenseEnvelope__without_layer(envelope, 0));
+  type__copy_placement_from_mut(&result, type);
+  MUTABLE handle_use =   IF shared_value THEN
+    TenseHandleUse.SharedRead
+  ELSE
+    TenseHandleUse.Consume
+  END;
+  MUTABLE backend =   IF (type__observable?(type) AND TRY (type__string?((TRY (tenseEnvelope__payload_type(envelope)))))) THEN
+    TenseBackendForm.ObservableStringNext
+  ELSE_IF shared_value THEN
+    TenseBackendForm.SharedPromiseNext
+  ELSE
+    TenseBackendForm.PromiseNext
+  END;
+  RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Next, type, CAST(result AS Type), backend, [first?], envelope.layers |> SKIP 1, ( { MUTABLE rtoc_empty_list_7: []TenseLayer = List[]; rtoc_empty_list_7 } ), TensePropagation.None, TenseRecovery.None, handle_use, TRUE);
+END
+PUB FN tenseOperationPlanner__is_ok(type: Type) RETURNS !TenseOperationPlan ->
+  MUTABLE envelope = TRY (tenseEnvelope__from_type(type));
+  MUTABLE first: ?TenseLayer = COPY envelope.layers.first();
+  IF !((first?.kind == TenseLayerKind.Fallible)) THEN
+    panic("IS_OK requires an outer fallible layer, got {}");
+  END
+  RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.IsOk, type, TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), TenseBackendForm.FallibleTest, ( { MUTABLE rtoc_empty_list_8: []TenseLayer = List[]; rtoc_empty_list_8 } ), envelope.layers, ( { MUTABLE rtoc_empty_list_9: []TenseLayer = List[]; rtoc_empty_list_9 } ), TensePropagation.None, TenseRecovery.None, TenseHandleUse.None, FALSE, FALSE, CAST(TRY (tenseEnvelope__without_layer(envelope, 0)) AS ?Type));
+END
+PUB FN tenseOperationPlanner__exists(type: Type) RETURNS !TenseOperationPlan ->
+  MUTABLE envelope = TRY (tenseEnvelope__from_type(type));
+  MUTABLE optional_index: ?Int64 = tenseEnvelope__layer_index(envelope, TenseLayerKind.Optional);
+  IF optional_index EXISTS AS optional_index_value THEN
+    IF tenseEnvelope__future_before?(envelope, optional_index_value) THEN
+      panic("EXISTS requires an immediately available optional layer, got {}");
+    ELSE
+      RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Exists, type, TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), TenseBackendForm.OptionalTest, ( { MUTABLE rtoc_empty_list_10: []TenseLayer = List[]; rtoc_empty_list_10 } ), envelope.layers, ( { MUTABLE rtoc_empty_list_11: []TenseLayer = List[]; rtoc_empty_list_11 } ), TensePropagation.None, TenseRecovery.None, TenseHandleUse.None, FALSE, FALSE, CAST(TRY (tenseEnvelope__without_layer(envelope, optional_index_value)) AS ?Type));
+    END
+  ELSE
+    panic("EXISTS requires an immediately available optional layer, got {}");
+  END
+END
+PUB FN tenseOperationPlanner__navigation_payload(type: Type) RETURNS !Type ->
+  MUTABLE envelope = TRY (tenseEnvelope__from_type(type));
+  MUTABLE payload = TRY (tenseEnvelope__payload_type(envelope));
+  IF !(tenseEnvelope__asynchronous?(envelope)) THEN
+    TRY (type__merge_capabilities_from_mut(&payload, type, TRUE, TRUE));
+    type__copy_placement_from_mut(&payload, type);
+  END
+  RETURN CAST(payload AS Type);
+END
+PUB FN tenseOperationPlanner__navigate(receiver_type: Type, mapped_type: Type, markers: String, shared_value: Bool = FALSE) RETURNS !TenseOperationPlan ->
+  MUTABLE receiver = TRY (tenseEnvelope__from_type(receiver_type));
+  IF !(((TRY (tenseOperationPlanner__navigation_markers())).contains?(markers) AND (tenseEnvelope__order(receiver) == markers))) THEN
+    panic("navigation marker {} must match receiver tense order {}");
+  END
+  IF (TRY (type__canonical_stream_result?(receiver_type)) OR TRY (type__stream?(receiver_type))) THEN
+    panic("navigation maps one future value; streams require SELECT");
+  END
+  MUTABLE mapped = TRY (tenseEnvelope__from_type(mapped_type));
+  IF (tenseEnvelope__asynchronous?(receiver) AND tenseEnvelope__asynchronous?(mapped)) THEN
+    panic("future navigation cannot implicitly create a nested future");
+  END
+  MUTABLE combined = TRY (tenseOperationPlanner__normalize_navigation_layers((receiver.layers + mapped.layers)));
+  MUTABLE result = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(mapped.payload_expression, combined)) }));
+  tenseOperationPlanner__preserve_value_metadata_mut(&result, mapped_type);
+  MUTABLE handle_use = TenseHandleUse.None;
+  IF tenseEnvelope__asynchronous?(receiver) THEN
+    handle_use =     IF shared_value THEN
+      TenseHandleUse.SharedRead
+    ELSE
+      TenseHandleUse.Consume
+    END;
+  END
+  RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Navigate, receiver_type, result, IF tenseEnvelope__asynchronous?(receiver) THEN
+    TenseBackendForm.FutureMap
+  ELSE
+    TenseBackendForm.DirectMap
+  END, ( { MUTABLE rtoc_empty_list_12: []TenseLayer = List[]; rtoc_empty_list_12 } ), combined, receiver.layers, TensePropagation.None, TenseRecovery.None, handle_use);
+END
+PUB FN tenseOperationPlanner__or_else(type: Type, fallback_type: Type, operation: TenseOperationKind = TenseOperationKind.OrElseValue, recovery: TenseRecovery = TenseRecovery.Fallback) RETURNS !TenseOperationPlan ->
+  MUTABLE envelope = TRY (tenseEnvelope__from_type(type));
+  MUTABLE recoverable: []TenseLayer = ( { MUTABLE rtoc_empty_list_13: []TenseLayer = List[]; rtoc_empty_list_13 } );
+  MUTABLE layer_index: Int64 = 0;
+  WHILE (layer_index < envelope.layers.length()) DO
+    MUTABLE layer = COPY UNWRAP (envelope.layers[layer_index]);
+    IF (layer.kind == TenseLayerKind.Future) THEN
+      BREAK;
+    END
+    &recoverable.append(COPY layer);
+    layer_index = (layer_index + 1);
+  END
+  MUTABLE available = recoverable |> WHERE ((_.kind == TenseLayerKind.Fallible) OR (_.kind == TenseLayerKind.Optional));
+  IF (available.length() == 0) THEN
+    panic("OR_ELSE requires a recoverable outer layer, got {}");
+  END
+  MUTABLE handled: []TenseLayer = List[];
+  IF (recovery == TenseRecovery.Fallback) THEN
+    handled = available;
+  ELSE
+    handled = available |> WHERE (_.kind == TenseLayerKind.Fallible);
+  END
+  MUTABLE remaining = envelope.layers |> SKIP handled.length();
+  MUTABLE result = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(envelope.payload_expression, remaining)) }));
+  TRY (type__merge_capabilities_from_mut(&result, type, TRUE, TRUE));
+  IF (((recovery == TenseRecovery.Fallback) AND type__optional?(fallback_type)) AND !(type__optional?(result))) THEN
+    result = TRY (type__optional_of(TypeTypeInput{ Type: COPY result }));
+  END
+  IF ((((recovery == TenseRecovery.Fallback) AND (type__resolved(fallback_type) != :NoReturn)) AND !(TRY (type__accepts?(result, fallback_type)))) AND !(TRY (type__accepts?(fallback_type, result)))) THEN
+    panic("OR_ELSE fallback {} does not match {}");
+  END
+  MUTABLE backend = IF available |> ANY (_.kind == TenseLayerKind.Fallible) THEN
+    TenseBackendForm.ZigCatch
+  ELSE
+    TenseBackendForm.ZigOptionalFallback
+  END;
+  RETURN tenseOperationPlanner__operation_plan(operation, type, result, backend, handled, remaining, ( { MUTABLE rtoc_empty_list_14: []TenseLayer = List[]; rtoc_empty_list_14 } ), TensePropagation.None, recovery, TenseHandleUse.None, FALSE, (type__resolved(fallback_type) == :NoReturn));
+END
+PUB FN tenseOperationPlanner__join_async_results(types: []Type) RETURNS !TenseJoinPlan ->
+  MUTABLE live_types = types |> WHERE !((type__resolved(_) == :Never));
+  IF (live_types.length() == 0) THEN
+    RETURN TenseJoinPlan{ reason: :empty, result_type: NIL };
+  END
+  MUTABLE saw_nil = live_types |> ANY (type__resolved(_) == symbol("NIL"));
+  MUTABLE envelopes = (live_types |> WHERE !((type__resolved(_) == symbol("NIL")))) |> SELECT TRY (tenseEnvelope__from_type(_));
+  IF (envelopes.length() == 0) THEN
+    RETURN TenseJoinPlan{ result_type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: symbol("NIL") })), reason: NIL };
+  END
+  MUTABLE future_states = (envelopes |> SELECT tenseEnvelope__asynchronous?(_)) |> DISTINCT _ |> SELECT COPY _;
+  IF (future_states.length() > 1) THEN
+    RETURN TenseJoinPlan{ reason: :future_mismatch, result_type: NIL };
+  END
+  MUTABLE future = (future_states.first() == TRUE);
+  IF (saw_nil AND future) THEN
+    RETURN TenseJoinPlan{ reason: :future_mismatch, result_type: NIL };
+  END
+  MUTABLE payload_keys = CAST(((envelopes |> SELECT type__semantic_type_key((TRY (tenseEnvelope__payload_type(_))))) |> DISTINCT _) AS []String);
+  IF (payload_keys.length() > 1) THEN
+    RETURN TenseJoinPlan{ reason: :payload_mismatch, result_type: NIL };
+  END
+  MUTABLE first = COPY UNWRAP (envelopes.first());
+  MUTABLE payload = TRY (type__copy_type(CAST(TRY (tenseEnvelope__payload_type(first)) AS Type)));
+  MUTABLE layers: []TenseLayer = ( { MUTABLE rtoc_empty_list_15: []TenseLayer = List[]; rtoc_empty_list_15 } );
+  IF future THEN
+    MUTABLE future_layer = UNWRAP (tenseOperationPlanner__find_layer([first], TenseLayerKind.Future));
+    &layers.append(future_layer);
+  END
+  IF envelopes |> ANY tenseEnvelope__fallible?(_) THEN
+    MUTABLE fallible_layer = UNWRAP (tenseOperationPlanner__find_layer(envelopes, TenseLayerKind.Fallible));
+    &layers.append(fallible_layer);
+  END
+  IF (saw_nil OR (envelopes |> ANY tenseEnvelope__optional?(_))) THEN
+    MUTABLE optional_layer: ?TenseLayer = tenseOperationPlanner__find_layer(envelopes, TenseLayerKind.Optional);
+    &layers.append(((optional_layer OR_ELSE TenseLayer{ kind: COPY TenseLayerKind.Optional, capabilities: COPY typeCapabilities__new(), error_set: NIL })));
+  END
+  MUTABLE joined = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(payload.shape.expression, layers)) }));
+  TRY (type__merge_capabilities_from_mut(&joined, payload, TRUE, TRUE));
+  RETURN TenseJoinPlan{ result_type: COPY joined, reason: NIL };
+END
+PRIVATE FN tenseOperationPlanner__operation_plan(operation: TenseOperationKind, input: Type, result: Type, backend: TenseBackendForm, consumed: []TenseLayer, preserved: []TenseLayer, navigation: []TenseLayer, propagation: TensePropagation = TensePropagation.None, recovery: TenseRecovery = TenseRecovery.None, handle_use: TenseHandleUse = TenseHandleUse.None, suspends: Bool = FALSE, may_terminate: Bool = FALSE, refinement: ?Type = NIL) RETURNS TenseOperationPlan ->
+  RETURN TenseOperationPlan{ operation: COPY operation, input_type: COPY input, result_type: COPY result, backend_form: COPY backend, consumed_layers: COPY consumed, preserved_layers: COPY preserved, navigation_layers: COPY navigation, propagation: COPY propagation, recovery: COPY recovery, handle_use: COPY handle_use, suspends: COPY suspends, may_terminate_current_flow: COPY may_terminate, refinement_type: COPY refinement };
+END
+PRIVATE FN tenseOperationPlanner__normalize_navigation_layers(layers: []TenseLayer) RETURNS ![]TenseLayer ->
+  MUTABLE future_count = layers |> COUNT (_.kind == TenseLayerKind.Future);
+  IF (future_count > 1) THEN
+    panic("navigation cannot contain more than one future boundary");
+  END
+  MUTABLE result: []TenseLayer = ( { MUTABLE rtoc_empty_list_16: []TenseLayer = List[]; rtoc_empty_list_16 } );
+  MUTABLE segment: []TenseLayer = ( { MUTABLE rtoc_empty_list_17: []TenseLayer = List[]; rtoc_empty_list_17 } );
+  FOR _ IN layers DO
+  IF (_.kind == TenseLayerKind.Future) THEN
+    result = ruby_array_concat_TenseLayer(result, TRY (tenseOperationPlanner__normalize_immediate_navigation_segment(segment)));
+    &result.append(COPY _);
+    segment = ( { MUTABLE rtoc_empty_list_18: []TenseLayer = List[]; rtoc_empty_list_18 } );
+  ELSE
+    &segment.append(COPY _);
+  END
+  END
+  result = ruby_array_concat_TenseLayer(result, TRY (tenseOperationPlanner__normalize_immediate_navigation_segment(segment)));
+  RETURN result;
+END
+PRIVATE FN tenseOperationPlanner__normalize_immediate_navigation_segment(layers: []TenseLayer) RETURNS ![]TenseLayer ->
+  MUTABLE fallible: ?TenseLayer = layers |> FIND (_.kind == TenseLayerKind.Fallible);
+  MUTABLE optional: ?TenseLayer = layers |> FIND (_.kind == TenseLayerKind.Optional);
+  MUTABLE result: []TenseLayer = ( { MUTABLE rtoc_empty_list_20: []TenseLayer = List[]; rtoc_empty_list_20 } );
+  IF fallible EXISTS AS fallible_value THEN
+    &result.append(fallible_value);
+  END
+  IF optional EXISTS AS optional_value THEN
+    &result.append(optional_value);
+  END
+  RETURN result;
+END
+PRIVATE FN tenseOperationPlanner__preserve_value_metadata_mut(MUTABLE result: Type, source: Type) RETURNS !Void ->
+  TRY (type__merge_capabilities_from_mut(&result, source, TRUE, TRUE));
+  type__copy_placement_from_mut(&result, source);
+END
+FN ruby_array_concat_TenseLayer(left: []TenseLayer, right: []TenseLayer) RETURNS []TenseLayer ->
+  MUTABLE result: []TenseLayer = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END

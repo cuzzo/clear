@@ -1023,9 +1023,9 @@ FN build_atomic_escape_migration_fix(source_sym: SymbolEntry, source_name: Strin
     RETURN NIL;
   END
 END
-FN auto_rank_candidates(ops: [Set]String@symbol) RETURNS !Any[]Candidate ->
+FN auto_rank_candidates(ops: [Set]String@symbol) RETURNS ![]AutoCandidate ->
   IF (FALSE OR ops.empty?()) THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_6: Auto[]Candidate = List[]; rtoc_empty_list_6 } ) AS Auto[]Candidate);
+    RETURN CAST(( { MUTABLE rtoc_empty_list_6: []AutoCandidate = List[]; rtoc_empty_list_6 } ) AS []AutoCandidate);
   END
   MUTABLE agg = {};
   MUTABLE rtoc_idx = 0;
@@ -1071,7 +1071,7 @@ FN build_auto_candidate_fix(slot: Slot, type_sym: String@symbol, note: ?String, 
     ""
   END}), [edit__new(span__new(NIL, auto_tok.line(), auto_tok.column(), "Auto".codepointCount()), type_str)], :interactive));
 END
-FN build_auto_op_evidence_block(ops: [Set]String@symbol, candidates: Any[]Candidate) RETURNS String ->
+FN build_auto_op_evidence_block(ops: [Set]String@symbol, candidates: []AutoCandidate) RETURNS String ->
   IF (candidates.length() == 0) THEN
     RETURN "";
   END

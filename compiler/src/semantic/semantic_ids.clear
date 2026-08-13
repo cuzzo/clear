@@ -1,0 +1,84 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+# Ruby module Semantic
+PUB STRUCT DefId {
+  value: Int64
+}
+PUB STRUCT BodyId {
+  value: Int64
+}
+PUB STRUCT ScopeId {
+  value: Int64
+}
+PUB STRUCT LocalId {
+  value: Int64
+}
+PUB STRUCT PlaceId {
+  value: Int64
+}
+PUB STRUCT CallSiteId {
+  value: Int64
+}
+PUB STRUCT SuspendPointId {
+  value: Int64
+}
+PUB STRUCT PredicateId {
+  value: Int64
+}
+PUB STRUCT CapabilityId {
+  value: Int64
+}
+PUB STRUCT SyntheticLocalId {
+  value: Int64
+}
+MUTABLE unassigned_def_id: DefId = DefId{ value: 0 };
+MUTABLE unassigned_body_id: BodyId = BodyId{ value: 0 };
+MUTABLE unassigned_scope_id: ScopeId = ScopeId{ value: 0 };
+MUTABLE unassigned_local_id: LocalId = LocalId{ value: 0 };
+MUTABLE unassigned_place_id: PlaceId = PlaceId{ value: 0 };
+MUTABLE unassigned_call_site_id: CallSiteId = CallSiteId{ value: 0 };
+MUTABLE unassigned_suspend_point_id: SuspendPointId = SuspendPointId{ value: 0 };
+MUTABLE unassigned_predicate_id: PredicateId = PredicateId{ value: 0 };
+MUTABLE unassigned_capability_id: CapabilityId = CapabilityId{ value: 0 };
+MUTABLE unassigned_synthetic_local_id: SyntheticLocalId = SyntheticLocalId{ value: 0 };
+PUB STRUCT BodyIdentity {
+  definition_id: DefId,
+  body_id: BodyId
+}
+
+PUB FN bodyIdentity__unassigned() RETURNS BodyIdentity ->
+  RETURN BodyIdentity{ definition_id: COPY unassigned_def_id, body_id: COPY unassigned_body_id };
+END
+PUB FN bodyIdentity__for_ordinal(ordinal: Int64) RETURNS BodyIdentity ->
+  RETURN BodyIdentity{ definition_id: COPY DefId{ value: COPY ordinal }, body_id: COPY BodyId{ value: COPY ordinal } };
+END
+PUB STRUCT CallSiteFact {
+  id: CallSiteId,
+  node: Any@multiowned,
+  callee_name: String,
+  args: []Locatable,
+  fn_var_call: Bool,
+  propagates_failure: Bool
+}
+PUB STRUCT LocalFact {
+  id: LocalId,
+  place_id: PlaceId,
+  name: String
+}
+PUB STRUCT SuspendPointFact {
+  id: SuspendPointId,
+  kind: String@symbol,
+  node: Locatable
+}
+PUB STRUCT SemanticIdIndex {
+  definitions: {String}DefId,
+  bodies: {String}BodyId
+}
+
+PUB FN semanticIdIndex__definition_id_for(self: SemanticIdIndex, name: String) RETURNS ?DefId ->
+  RETURN COPY self.definitions[name];
+END
+PUB FN semanticIdIndex__body_id_for(self: SemanticIdIndex, name: String) RETURNS ?BodyId ->
+  RETURN COPY self.bodies[name];
+END
+# End Ruby module Semantic
