@@ -909,7 +909,7 @@ FN testDef__stmt?(self: TestDef) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT Let {
-  name: Name,
+  name: String,
   init: Emittable,
   mutable: Bool,
   annotation: ?Type,
@@ -935,7 +935,7 @@ END
 FN let__set_const_visibility(MUTABLE self: Let, value: ?String@symbol) RETURNS Void ->
   self.const_visibility = COPY value;
 END
-FN let__initialize(MUTABLE self: Let, name: Name, init: Emittable, mutable_value: Bool, annotation: ?Type = NIL, suppression: ?String = NIL, alias_safe: ?Bool = NIL) RETURNS Void ->
+FN let__initialize(MUTABLE self: Let, name: String, init: Emittable, mutable_value: Bool, annotation: ?Type = NIL, suppression: ?String = NIL, alias_safe: ?Bool = NIL) RETURNS Void ->
   self.module_const = NIL;
   self.const_visibility = NIL;
 END
@@ -11898,70 +11898,106 @@ FN ownershipEffect__from_effects(effects_value: []OwnershipEffect) RETURNS Owner
   RETURN ownershipEffect__effect_when(!((owned.length() == 0)), ownershipEffect__owned(ownershipEffect__converged_effect_alloc(owned), :uniform));
 END
 FN ownershipEffect__from_children(children: []Emittable) RETURNS OwnershipEffect ->
-  RETURN ownershipEffect__from_effects(children |> SELECT _.ownership_effect());
+  MUTABLE child_effects: []OwnershipEffect = [];
+  FOR child IN children DO
+    &child_effects.append(TRY (emittable__ownership_effect(child)));
+  END
+  RETURN ownershipEffect__from_effects(child_effects);
 END
 FN ownershipEffect__from_try_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type, fallback_is_literal: Bool, left_never_success: Bool) RETURNS OwnershipEffect ->
-  RETURN ownershipEffect__first_active_effect([[ownershipEffect__same_owned_alloc?(left, right), left], [owned_cleanup_result?(left, result_type), left], [(left.produces_owned AND fallback_is_literal), left], [(right.produces_owned AND left_never_success), right]]);
+  RETURN ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{ownershipEffect__owned_cleanup_result?(left, result_type), left}, Tuple{(left.produces_owned AND fallback_is_literal), left}, Tuple{(right.produces_owned AND left_never_success), right}]);
 END
 FN ownershipEffect__from_optional_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type) RETURNS OwnershipEffect ->
-  RETURN ownershipEffect__first_active_effect([[ownershipEffect__same_owned_alloc?(left, right), left], [owned_cleanup_result?(left, result_type), left], [owned_cleanup_result?(right, result_type), right]]);
+  RETURN ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{ownershipEffect__owned_cleanup_result?(left, result_type), left}, Tuple{ownershipEffect__owned_cleanup_result?(right, result_type), right}]);
 END
 FN ownershipEffect__from_required_branch_pair(left: OwnershipEffect, right: OwnershipEffect) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__effect_when(ownershipEffect__same_owned_alloc?(left, right), left);
 END
 FN ownershipEffect__from_pipeline(sink_alloc: ?String@symbol, inner: ?Emittable) RETURNS OwnershipEffect ->
-  RETURN ownershipEffect__first_active_effect(CAST(Tuple{[!((sink_alloc == NIL)), ownershipEffect__owned(sink_alloc)], CAST(Tuple{TRUE, ownershipEffect__of(inner)} AS Tuple<Bool, OwnershipEffect>)} AS Tuple<[]OwnershipEffect, Tuple<Bool, OwnershipEffect>>));
+  RETURN ownershipEffect__first_active_effect([Tuple{!((sink_alloc == NIL)), ownershipEffect__owned(sink_alloc)}, Tuple{TRUE, ownershipEffect__of(inner)}]);
 END
 FN ownershipEffect__from_block_body(body: []Emittable, result_type: ?Type, borrowed_view: Bool = FALSE) RETURNS OwnershipEffect ->
   MUTABLE stmts = COPY body;
-  MUTABLE break_stmt = stmts.reverse().grep(BreakStmt).first();
-  MUTABLE value = (IF break_stmt != NIL THEN
-    (break_stmt?).value()
-  ELSE
-    NIL
-  END);
-  RETURN ownershipEffect__first_active_effect(CAST(Tuple{[TRUE, transferred_break_ident_effect(stmts, value)], CAST(Tuple{TRUE, ownershipEffect__of(value)} AS Tuple<Bool, OwnershipEffect>), [TRUE, block_result_transfer_effect(stmts, value)], [(cleanup_result_type?(result_type) AND !(((borrowed_view OR borrowed_break_value?(value))))), ownershipEffect__owned(NIL, :uniform)]} AS Tuple<[]Bool, Tuple<Bool, OwnershipEffect>, []Bool, []OwnershipEffect>));
+  MUTABLE value: ?Emittable = NIL;
+  MUTABLE idx: Int64 = (stmts.length() - 1);
+  WHILE (idx >= 0) DO
+    IF UNWRAP (stmts[idx]) IS_A BreakStmt AS break_stmt THEN
+      value = COPY break_stmt.value;
+      idx = -1;
+    ELSE
+      idx = (idx - 1);
+    END
+  END
+  RETURN ownershipEffect__first_active_effect([
+    Tuple{TRUE, ownershipEffect__transferred_break_ident_effect(stmts, value)},
+    Tuple{TRUE, ownershipEffect__of(value)},
+    Tuple{TRUE, ownershipEffect__block_result_transfer_effect(stmts, value)},
+    Tuple{(ownershipEffect__cleanup_result_type?(result_type) AND !((borrowed_view OR ownershipEffect__borrowed_break_value?(value)))), ownershipEffect__owned(NIL, :uniform)}
+  ]);
 END
 PRIVATE FN ownershipEffect__borrowed_break_value?(value: ?Emittable) RETURNS Bool ->
   RETURN ((value != NIL) AND (value IS_A SliceExpr));
 END
 FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS Bool ->
-  MUTABLE block = ([node]).grep(MIRBlockExpr).first();
-  IF !(block) THEN
-    RETURN FALSE;
+  IF node EXISTS AS node_value THEN
+    IF node_value IS_A MIRBlockExpr AS block THEN
+      IF block.borrowed_view THEN
+        RETURN TRUE;
+      END
+      MUTABLE value: ?Emittable = NIL;
+      MUTABLE idx: Int64 = (block.body.length() - 1);
+      WHILE (idx >= 0) DO
+        IF UNWRAP (block.body[idx]) IS_A BreakStmt AS break_stmt THEN
+          value = COPY break_stmt.value;
+          idx = -1;
+        ELSE
+          idx = (idx - 1);
+        END
+      END
+      RETURN ownershipEffect__borrowed_break_value?(value);
+    END
   END
-  IF block.borrowed_view() THEN
-    RETURN TRUE;
-  END
-  MUTABLE value = (IF block.body().reverse().grep(BreakStmt).first() != NIL THEN
-    ((block.body().reverse().grep(BreakStmt).first())?).value()
-  ELSE
-    NIL
-  END);
-  RETURN borrowed_break_value?(value);
+  RETURN FALSE;
 END
 PRIVATE FN ownershipEffect__effect_when(active: Bool, effect: OwnershipEffect) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__first_active_effect([CAST(Tuple{active, effect} AS Tuple<Bool, OwnershipEffect>)]);
 END
 PRIVATE FN ownershipEffect__first_active_effect(candidates: []Tuple<Bool, OwnershipEffect>) RETURNS OwnershipEffect ->
-  RETURN (((IF candidates |> FIND (TRUE AND _._1.produces_owned()) != NIL THEN
-    ((candidates |> FIND (TRUE AND _._1.produces_owned()))?).last()
-  ELSE
-    NIL
-  END)) OR_ELSE ownershipEffect__none());
+  FOR candidate IN candidates DO
+    IF (candidate._0 AND candidate._1.produces_owned) THEN
+      RETURN COPY candidate._1;
+    END
+  END
+  RETURN ownershipEffect__none();
 END
 PRIVATE FN ownershipEffect__converged_effect_alloc(effects_value: []OwnershipEffect) RETURNS ?String@symbol ->
-  MUTABLE allocs = ((effects_value |> SELECT _.alloc) |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
+  MUTABLE allocs: []String@symbol = [];
+  FOR effect IN effects_value DO
+    IF effect.alloc EXISTS AS effect_alloc THEN
+      IF !(allocs.contains?(effect_alloc)) THEN
+        &allocs.append(COPY effect_alloc);
+      END
+    END
+  END
   RETURN ownershipEffect__unique_symbol_or_nil(allocs);
 END
 PRIVATE FN ownershipEffect__unique_symbol_or_nil(symbols: []String@symbol) RETURNS ?String@symbol ->
-  RETURN COPY ({1: symbols.first()})[(CAST((symbols |> DISTINCT _) AS []String@symbol)).length()];
+  MUTABLE unique: []String@symbol = [];
+  FOR symbol_value IN symbols DO
+    IF !(unique.contains?(symbol_value)) THEN
+      &unique.append(COPY symbol_value);
+    END
+  END
+  IF (unique.length() == 1) THEN
+    RETURN COPY symbols.first();
+  END
+  RETURN NIL;
 END
 PRIVATE FN ownershipEffect__same_owned_alloc?(left: OwnershipEffect, right: OwnershipEffect) RETURNS Bool ->
   RETURN ((left.produces_owned AND right.produces_owned) AND (left.alloc == right.alloc));
 END
 PRIVATE FN ownershipEffect__owned_cleanup_result?(effect: OwnershipEffect, result_type: ?Type) RETURNS Bool ->
-  RETURN (((effect.produces_owned AND cleanup_result_type?(result_type))) == TRUE);
+  RETURN (((effect.produces_owned AND ownershipEffect__cleanup_result_type?(result_type))) == TRUE);
 END
 PRIVATE FN ownershipEffect__cleanup_result_type?(result_type: ?Type) RETURNS !Bool ->
   IF result_type EXISTS AS result_type_value THEN
@@ -11971,30 +12007,41 @@ PRIVATE FN ownershipEffect__cleanup_result_type?(result_type: ?Type) RETURNS !Bo
   END
 END
 PRIVATE FN ownershipEffect__transferred_break_ident_effect(stmts: []Emittable, value: ?Emittable) RETURNS OwnershipEffect ->
-  MUTABLE ident = ([value]).grep(Ident).first();
-  MUTABLE name = COPY CAST((((IF ident != NIL THEN
-    (ident?).name()
-  ELSE
-    NIL
-  END) OR_ELSE "")) AS String);
-  MUTABLE mark = stmts.grep(AllocMark) |> FIND (_.name() == name);
-  MUTABLE transfer = stmts.grep(TransferMark) |> FIND (_.name() == name);
-  MUTABLE let = stmts.grep(Let) |> FIND (_.name() == name);
-  MUTABLE init_effect = ownershipEffect__of((IF let != NIL THEN
-    (let?).init()
-  ELSE
-    NIL
-  END));
-  MUTABLE cleanup_kind = (({TRUE: (init_effect.cleanup_kind OR_ELSE :uniform), FALSE: :uniform})[init_effect.produces_owned] OR :uniform);
-  MUTABLE active = ((!((name.length() == 0)) AND !((mark == NIL))) AND !((transfer == NIL)));
-  RETURN ownershipEffect__effect_when(active, ownershipEffect__owned((IF mark != NIL THEN
-    (mark?).alloc()
-  ELSE
-    NIL
-  END), cleanup_kind, TRUE, name));
+  MUTABLE name: String = "";
+  IF value EXISTS AS value_node THEN
+    IF value_node IS_A Ident AS ident THEN
+      name = COPY ident.name;
+    END
+  END
+  MUTABLE mark_alloc: ?String@symbol = NIL;
+  MUTABLE has_mark = FALSE;
+  MUTABLE has_transfer = FALSE;
+  MUTABLE init_effect = ownershipEffect__none();
+  FOR stmt IN stmts DO
+    IF stmt IS_A AllocMark AS alloc_mark THEN
+      IF (alloc_mark.name == name) THEN
+        has_mark = TRUE;
+        mark_alloc = COPY alloc_mark.alloc;
+      END
+    ELSE_IF stmt IS_A TransferMark AS transfer_mark THEN
+      IF (transfer_mark.name == name) THEN
+        has_transfer = TRUE;
+      END
+    ELSE_IF stmt IS_A Let AS let_stmt THEN
+      IF (let_stmt.name == name) THEN
+        init_effect = ownershipEffect__of(let_stmt.init);
+      END
+    END
+  END
+  MUTABLE cleanup_kind: String@symbol = :uniform;
+  IF init_effect.produces_owned THEN
+    cleanup_kind = (COPY init_effect.cleanup_kind OR_ELSE :uniform);
+  END
+  MUTABLE active = ((!((name.length() == 0)) AND has_mark) AND has_transfer);
+  RETURN ownershipEffect__effect_when(active, ownershipEffect__owned(mark_alloc, cleanup_kind, TRUE, name));
 END
 PRIVATE FN ownershipEffect__block_result_transfer_effect(stmts: []Emittable, value: ?Emittable) RETURNS OwnershipEffect ->
-  MUTABLE result_names = ident_names_in_expr(value);
+  MUTABLE result_names = TRY (ownershipEffect__ident_names_in_expr(value));
   IF result_names.empty?() THEN
     RETURN ownershipEffect__none();
   END
@@ -12002,13 +12049,21 @@ PRIVATE FN ownershipEffect__block_result_transfer_effect(stmts: []Emittable, val
   RETURN ownershipEffect__effect_when(!(transferred_allocs.empty?()), ownershipEffect__owned(ownershipEffect__unique_symbol_or_nil(transferred_allocs), :uniform));
 END
 PRIVATE FN ownershipEffect__ident_names_in_expr(value: ?Emittable) RETURNS ![]String EFFECTS REENTRANT ->
-  IF value IS_A Ident AS ident THEN
-    RETURN CAST([CAST(ident.name AS String)] AS []String);
-  ELSE_IF (value IS_A Emittable) THEN
-    RETURN CAST(((value.child_exprs() |> UNNEST ident_names_in_expr(_)) |> DISTINCT _) AS []String);
-  ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_196: []String = List[]; rtoc_empty_list_196 } ) AS []String);
+  MUTABLE names: []String = [];
+  IF value EXISTS AS value_node THEN
+    IF value_node IS_A Ident AS ident THEN
+      &names.append(COPY ident.name);
+      RETURN names;
+    END
+    FOR child IN (TRY (emittable__child_exprs(value_node))) DO
+      FOR child_name IN (TRY (ownershipEffect__ident_names_in_expr(child))) DO
+        IF !(names.contains?(child_name)) THEN
+          &names.append(COPY child_name);
+        END
+      END
+    END
   END
+  RETURN names;
 END
 STRUCT StructInitField {
   name: String@symbol,
@@ -12027,7 +12082,7 @@ FN structInitField__get_index(self: StructInitField, key: String@symbol) RETURNS
     RETURN NIL;
   END
 END
-FN mIR__named_field(name: Name, value: Emittable) RETURNS StructInitField ->
+FN mIR__named_field(name: String@symbol, value: Emittable) RETURNS StructInitField ->
   RETURN StructInitField{ name: castNameToStringSymbol(COPY name), value: COPY value, alloc: NIL };
 END
 FN mIR__if_binding(expr: Emittable, capture: MirCapture) RETURNS !{String@symbol}NamedMirFieldValue ->
@@ -15392,4 +15447,509 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect ->
     RETURN shardedMapGet__ownership_effect(payload);
   END
   RETURN ownershipEffect__none();
+END
+
+FN emittable__child_exprs(value: Emittable) RETURNS ![]Emittable ->
+  IF value IS_A FnDef AS payload THEN
+    RETURN fnDef__child_exprs(payload);
+  END
+  IF value IS_A ProtocolAdapterDef AS payload THEN
+    RETURN protocolAdapterDef__child_exprs(payload);
+  END
+  IF value IS_A FieldDef AS payload THEN
+    RETURN fieldDef__child_exprs(payload);
+  END
+  IF value IS_A UnionTypeDef AS payload THEN
+    RETURN unionTypeDef__child_exprs(payload);
+  END
+  IF value IS_A Import AS payload THEN
+    RETURN import__child_exprs(payload);
+  END
+  IF value IS_A TypeAlias AS payload THEN
+    RETURN typeAlias__child_exprs(payload);
+  END
+  IF value IS_A CExternFnDecl AS payload THEN
+    RETURN cExternFnDecl__child_exprs(payload);
+  END
+  IF value IS_A CExternStructDef AS payload THEN
+    RETURN cExternStructDef__child_exprs(payload);
+  END
+  IF value IS_A ModuleNamespace AS payload THEN
+    RETURN moduleNamespace__child_exprs(payload);
+  END
+  IF value IS_A TestDef AS payload THEN
+    RETURN testDef__child_exprs(payload);
+  END
+  IF value IS_A Let AS payload THEN
+    RETURN let__child_exprs(payload);
+  END
+  IF value IS_A Set AS payload THEN
+    RETURN set__child_exprs(payload);
+  END
+  IF value IS_A DestructureSet AS payload THEN
+    RETURN destructureSet__child_exprs(payload);
+  END
+  IF value IS_A ReassignWithCleanup AS payload THEN
+    RETURN reassignWithCleanup__child_exprs(payload);
+  END
+  IF value IS_A ResourceClose AS payload THEN
+    RETURN resourceClose__child_exprs(payload);
+  END
+  IF value IS_A IfStmt AS payload THEN
+    RETURN ifStmt__child_exprs(payload);
+  END
+  IF value IS_A IfBindStmt AS payload THEN
+    RETURN ifBindStmt__child_exprs(payload);
+  END
+  IF value IS_A WhileStmt AS payload THEN
+    RETURN whileStmt__child_exprs(payload);
+  END
+  IF value IS_A ForStmt AS payload THEN
+    RETURN forStmt__child_exprs(payload);
+  END
+  IF value IS_A ScopeBlock AS payload THEN
+    RETURN scopeBlock__child_exprs(payload);
+  END
+  IF value IS_A SwitchStmt AS payload THEN
+    RETURN switchStmt__child_exprs(payload);
+  END
+  IF value IS_A UnionMatchStmt AS payload THEN
+    RETURN unionMatchStmt__child_exprs(payload);
+  END
+  IF value IS_A IfChain AS payload THEN
+    RETURN ifChain__child_exprs(payload);
+  END
+  IF value IS_A ReturnStmt AS payload THEN
+    RETURN returnStmt__child_exprs(payload);
+  END
+  IF value IS_A BreakStmt AS payload THEN
+    RETURN breakStmt__child_exprs(payload);
+  END
+  IF value IS_A BreakExpr AS payload THEN
+    RETURN breakExpr__child_exprs(payload);
+  END
+  IF value IS_A ContinueStmt AS payload THEN
+    RETURN continueStmt__child_exprs(payload);
+  END
+  IF value IS_A Panic AS payload THEN
+    RETURN panic__child_exprs(payload);
+  END
+  IF value IS_A AssertStmt AS payload THEN
+    RETURN assertStmt__child_exprs(payload);
+  END
+  IF value IS_A AssertRaisesCheck AS payload THEN
+    RETURN assertRaisesCheck__child_exprs(payload);
+  END
+  IF value IS_A TestPreamble AS payload THEN
+    RETURN testPreamble__child_exprs(payload);
+  END
+  IF value IS_A DebugOnly AS payload THEN
+    RETURN debugOnly__child_exprs(payload);
+  END
+  IF value IS_A Sort AS payload THEN
+    RETURN sort__child_exprs(payload);
+  END
+  IF value IS_A SoaFieldAccess AS payload THEN
+    RETURN soaFieldAccess__child_exprs(payload);
+  END
+  IF value IS_A TryOrPanic AS payload THEN
+    RETURN tryOrPanic__child_exprs(payload);
+  END
+  IF value IS_A IndexInsert AS payload THEN
+    RETURN indexInsert__child_exprs(payload);
+  END
+  IF value IS_A BatchWindowPush AS payload THEN
+    RETURN batchWindowPush__child_exprs(payload);
+  END
+  IF value IS_A BatchWindowFlush AS payload THEN
+    RETURN batchWindowFlush__child_exprs(payload);
+  END
+  IF value IS_A ErrDeferStmt AS payload THEN
+    RETURN errDeferStmt__child_exprs(payload);
+  END
+  IF value IS_A ExprStmt AS payload THEN
+    RETURN exprStmt__child_exprs(payload);
+  END
+  IF value IS_A DiscardOwned AS payload THEN
+    RETURN discardOwned__child_exprs(payload);
+  END
+  IF value IS_A ThunkTrampoline AS payload THEN
+    RETURN thunkTrampoline__child_exprs(payload);
+  END
+  IF value IS_A MutualThunkTrampoline AS payload THEN
+    RETURN mutualThunkTrampoline__child_exprs(payload);
+  END
+  IF value IS_A StreamSpawn AS payload THEN
+    RETURN streamSpawn__child_exprs(payload);
+  END
+  IF value IS_A FsmStructure AS payload THEN
+    RETURN fsmStructure__child_exprs(payload);
+  END
+  IF value IS_A DirectTenseMap AS payload THEN
+    RETURN directTenseMap__child_exprs(payload);
+  END
+  IF value IS_A AsyncPayloadTake AS payload THEN
+    RETURN asyncPayloadTake__child_exprs(payload);
+  END
+  IF value IS_A FsmIoBody AS payload THEN
+    RETURN fsmIoBody__child_exprs(payload);
+  END
+  IF value IS_A StreamYield AS payload THEN
+    RETURN streamYield__child_exprs(payload);
+  END
+  IF value IS_A FsmB1Body AS payload THEN
+    RETURN fsmB1Body__child_exprs(payload);
+  END
+  IF value IS_A FsmGenericBody AS payload THEN
+    RETURN fsmGenericBody__child_exprs(payload);
+  END
+  IF value IS_A FailureAction AS payload THEN
+    RETURN failureAction__child_exprs(payload);
+  END
+  IF value IS_A CapabilityLockTarget AS payload THEN
+    RETURN capabilityLockTarget__child_exprs(payload);
+  END
+  IF value IS_A CapabilityLockAddress AS payload THEN
+    RETURN capabilityLockAddress__child_exprs(payload);
+  END
+  IF value IS_A SortedLockAcquire AS payload THEN
+    RETURN sortedLockAcquire__child_exprs(payload);
+  END
+  IF value IS_A FallibleLockBinding AS payload THEN
+    RETURN fallibleLockBinding__child_exprs(payload);
+  END
+  IF value IS_A CatchWrapper AS payload THEN
+    RETURN catchWrapper__child_exprs(payload);
+  END
+  IF value IS_A Noop AS payload THEN
+    RETURN noop__child_exprs(payload);
+  END
+  IF value IS_A Comment AS payload THEN
+    RETURN comment__child_exprs(payload);
+  END
+  IF value IS_A Suppress AS payload THEN
+    RETURN suppress__child_exprs(payload);
+  END
+  IF value IS_A PubConst AS payload THEN
+    RETURN pubConst__child_exprs(payload);
+  END
+  IF value IS_A ModuleVar AS payload THEN
+    RETURN moduleVar__child_exprs(payload);
+  END
+  IF value IS_A ModuleConstFree AS payload THEN
+    RETURN moduleConstFree__child_exprs(payload);
+  END
+  IF value IS_A HeapCreate AS payload THEN
+    RETURN heapCreate__child_exprs(payload);
+  END
+  IF value IS_A DupeSlice AS payload THEN
+    RETURN dupeSlice__child_exprs(payload);
+  END
+  IF value IS_A AllocSlice AS payload THEN
+    RETURN allocSlice__child_exprs(payload);
+  END
+  IF value IS_A FreeSlice AS payload THEN
+    RETURN freeSlice__child_exprs(payload);
+  END
+  IF value IS_A DestroyPtr AS payload THEN
+    RETURN destroyPtr__child_exprs(payload);
+  END
+  IF value IS_A Cleanup AS payload THEN
+    RETURN cleanup__child_exprs(payload);
+  END
+  IF value IS_A ErrCleanup AS payload THEN
+    RETURN errCleanup__child_exprs(payload);
+  END
+  IF value IS_A MoveMark AS payload THEN
+    RETURN moveMark__child_exprs(payload);
+  END
+  IF value IS_A DeepCopy AS payload THEN
+    RETURN deepCopy__child_exprs(payload);
+  END
+  IF value IS_A ContainerInit AS payload THEN
+    RETURN containerInit__child_exprs(payload);
+  END
+  IF value IS_A CapWrap AS payload THEN
+    RETURN capWrap__child_exprs(payload);
+  END
+  IF value IS_A SharePromote AS payload THEN
+    RETURN sharePromote__child_exprs(payload);
+  END
+  IF value IS_A RcRetain AS payload THEN
+    RETURN rcRetain__child_exprs(payload);
+  END
+  IF value IS_A ComptimeCarrierPayload AS payload THEN
+    RETURN comptimeCarrierPayload__child_exprs(payload);
+  END
+  IF value IS_A MonomorphicKeep AS payload THEN
+    RETURN monomorphicKeep__child_exprs(payload);
+  END
+  IF value IS_A RcRelease AS payload THEN
+    RETURN rcRelease__child_exprs(payload);
+  END
+  IF value IS_A RcDowngrade AS payload THEN
+    RETURN rcDowngrade__child_exprs(payload);
+  END
+  IF value IS_A WeakUpgrade AS payload THEN
+    RETURN weakUpgrade__child_exprs(payload);
+  END
+  IF value IS_A AllocatorRef AS payload THEN
+    RETURN allocatorRef__child_exprs(payload);
+  END
+  IF value IS_A FreezeExpr AS payload THEN
+    RETURN freezeExpr__child_exprs(payload);
+  END
+  IF value IS_A MakeList AS payload THEN
+    RETURN makeList__child_exprs(payload);
+  END
+  IF value IS_A FrameSave AS payload THEN
+    RETURN frameSave__child_exprs(payload);
+  END
+  IF value IS_A FrameRestore AS payload THEN
+    RETURN frameRestore__child_exprs(payload);
+  END
+  IF value IS_A CapabilityUnwrap AS payload THEN
+    RETURN capabilityUnwrap__child_exprs(payload);
+  END
+  IF value IS_A SnapshotRead AS payload THEN
+    RETURN snapshotRead__child_exprs(payload);
+  END
+  IF value IS_A SnapshotTransaction AS payload THEN
+    RETURN snapshotTransaction__child_exprs(payload);
+  END
+  IF value IS_A SnapshotMultiTxn AS payload THEN
+    RETURN snapshotMultiTxn__child_exprs(payload);
+  END
+  IF value IS_A PolymorphicMutate AS payload THEN
+    RETURN polymorphicMutate__child_exprs(payload);
+  END
+  IF value IS_A PolymorphicMutateFlow AS payload THEN
+    RETURN polymorphicMutateFlow__child_exprs(payload);
+  END
+  IF value IS_A PolymorphicFlowSignal AS payload THEN
+    RETURN polymorphicFlowSignal__child_exprs(payload);
+  END
+  IF value IS_A WithMatchDispatch AS payload THEN
+    RETURN withMatchDispatch__child_exprs(payload);
+  END
+  IF value IS_A AllocMark AS payload THEN
+    RETURN allocMark__child_exprs(payload);
+  END
+  IF value IS_A OwnedCreate AS payload THEN
+    RETURN ownedCreate__child_exprs(payload);
+  END
+  IF value IS_A OwnedDestroy AS payload THEN
+    RETURN ownedDestroy__child_exprs(payload);
+  END
+  IF value IS_A OwnedTransfer AS payload THEN
+    RETURN ownedTransfer__child_exprs(payload);
+  END
+  IF value IS_A OwnedBorrow AS payload THEN
+    RETURN ownedBorrow__child_exprs(payload);
+  END
+  IF value IS_A OwnedStore AS payload THEN
+    RETURN ownedStore__child_exprs(payload);
+  END
+  IF value IS_A OwnedReturn AS payload THEN
+    RETURN ownedReturn__child_exprs(payload);
+  END
+  IF value IS_A ReturnMark AS payload THEN
+    RETURN returnMark__child_exprs(payload);
+  END
+  IF value IS_A TransferMark AS payload THEN
+    RETURN transferMark__child_exprs(payload);
+  END
+  IF value IS_A ReassignMark AS payload THEN
+    RETURN reassignMark__child_exprs(payload);
+  END
+  IF value IS_A FieldCleanupMark AS payload THEN
+    RETURN fieldCleanupMark__child_exprs(payload);
+  END
+  IF value IS_A Call AS payload THEN
+    RETURN call__child_exprs(payload);
+  END
+  IF value IS_A RuntimeCall AS payload THEN
+    RETURN runtimeCall__child_exprs(payload);
+  END
+  IF value IS_A TailCall AS payload THEN
+    RETURN tailCall__child_exprs(payload);
+  END
+  IF value IS_A FieldGet AS payload THEN
+    RETURN fieldGet__child_exprs(payload);
+  END
+  IF value IS_A UnionPayloadGet AS payload THEN
+    RETURN unionPayloadGet__child_exprs(payload);
+  END
+  IF value IS_A IndexGet AS payload THEN
+    RETURN indexGet__child_exprs(payload);
+  END
+  IF value IS_A ProtocolCall AS payload THEN
+    RETURN protocolCall__child_exprs(payload);
+  END
+  IF value IS_A FallibleOk AS payload THEN
+    RETURN fallibleOk__child_exprs(payload);
+  END
+  IF value IS_A FutureReady AS payload THEN
+    RETURN futureReady__child_exprs(payload);
+  END
+  IF value IS_A Lit AS payload THEN
+    RETURN lit__child_exprs(payload);
+  END
+  IF value IS_A SymbolLit AS payload THEN
+    RETURN symbolLit__child_exprs(payload);
+  END
+  IF value IS_A VoidLiteral AS payload THEN
+    RETURN voidLiteral__child_exprs(payload);
+  END
+  IF value IS_A DefaultValue AS payload THEN
+    RETURN defaultValue__child_exprs(payload);
+  END
+  IF value IS_A EnumTag AS payload THEN
+    RETURN enumTag__child_exprs(payload);
+  END
+  IF value IS_A EnumOrdinal AS payload THEN
+    RETURN enumOrdinal__child_exprs(payload);
+  END
+  IF value IS_A Ident AS payload THEN
+    RETURN ident__child_exprs(payload);
+  END
+  IF value IS_A TupleLiteral AS payload THEN
+    RETURN tupleLiteral__child_exprs(payload);
+  END
+  IF value IS_A FnRef AS payload THEN
+    RETURN fnRef__child_exprs(payload);
+  END
+  IF value IS_A LockAcquire AS payload THEN
+    RETURN lockAcquire__child_exprs(payload);
+  END
+  IF value IS_A TypeOf AS payload THEN
+    RETURN typeOf__child_exprs(payload);
+  END
+  IF value IS_A TypeEq AS payload THEN
+    RETURN typeEq__child_exprs(payload);
+  END
+  IF value IS_A StructInit AS payload THEN
+    RETURN structInit__child_exprs(payload);
+  END
+  IF value IS_A ArrayInit AS payload THEN
+    RETURN arrayInit__child_exprs(payload);
+  END
+  IF value IS_A ArrayDefaultInit AS payload THEN
+    RETURN arrayDefaultInit__child_exprs(payload);
+  END
+  IF value IS_A SliceExpr AS payload THEN
+    RETURN sliceExpr__child_exprs(payload);
+  END
+  IF value IS_A ConcatStr AS payload THEN
+    RETURN concatStr__child_exprs(payload);
+  END
+  IF value IS_A TryExpr AS payload THEN
+    RETURN tryExpr__child_exprs(payload);
+  END
+  IF value IS_A TryCatch AS payload THEN
+    RETURN tryCatch__child_exprs(payload);
+  END
+  IF value IS_A Orelse AS payload THEN
+    RETURN orelse__child_exprs(payload);
+  END
+  IF value IS_A Conditional AS payload THEN
+    RETURN conditional__child_exprs(payload);
+  END
+  IF value IS_A IfOptional AS payload THEN
+    RETURN ifOptional__child_exprs(payload);
+  END
+  IF value IS_A Comptime AS payload THEN
+    RETURN comptime__child_exprs(payload);
+  END
+  IF value IS_A UnionVariantGet AS payload THEN
+    RETURN unionVariantGet__child_exprs(payload);
+  END
+  IF value IS_A ListItems AS payload THEN
+    RETURN listItems__child_exprs(payload);
+  END
+  IF value IS_A ListLength AS payload THEN
+    RETURN listLength__child_exprs(payload);
+  END
+  IF value IS_A AddressOf AS payload THEN
+    RETURN addressOf__child_exprs(payload);
+  END
+  IF value IS_A Deref AS payload THEN
+    RETURN deref__child_exprs(payload);
+  END
+  IF value IS_A PointerCast AS payload THEN
+    RETURN pointerCast__child_exprs(payload);
+  END
+  IF value IS_A ConstCast AS payload THEN
+    RETURN constCast__child_exprs(payload);
+  END
+  IF value IS_A DefaultStreamCapacity AS payload THEN
+    RETURN defaultStreamCapacity__child_exprs(payload);
+  END
+  IF value IS_A NextPromiseList AS payload THEN
+    RETURN nextPromiseList__child_exprs(payload);
+  END
+  IF value IS_A Undef AS payload THEN
+    RETURN undef__child_exprs(payload);
+  END
+  IF value IS_A TypeSentinel AS payload THEN
+    RETURN typeSentinel__child_exprs(payload);
+  END
+  IF value IS_A IterRange AS payload THEN
+    RETURN iterRange__child_exprs(payload);
+  END
+  IF value IS_A TryOptional AS payload THEN
+    RETURN tryOptional__child_exprs(payload);
+  END
+  IF value IS_A ForeignOwnedUnwrap AS payload THEN
+    RETURN foreignOwnedUnwrap__child_exprs(payload);
+  END
+  IF value IS_A ForeignSliceView AS payload THEN
+    RETURN foreignSliceView__child_exprs(payload);
+  END
+  IF value IS_A HasField AS payload THEN
+    RETURN hasField__child_exprs(payload);
+  END
+  IF value IS_A ItemsAccess AS payload THEN
+    RETURN itemsAccess__child_exprs(payload);
+  END
+  IF value IS_A OwnedSlice AS payload THEN
+    RETURN ownedSlice__child_exprs(payload);
+  END
+  IF value IS_A LambdaExpr AS payload THEN
+    RETURN lambdaExpr__child_exprs(payload);
+  END
+  IF value IS_A Pipeline AS payload THEN
+    RETURN pipeline__child_exprs(payload);
+  END
+  IF value IS_A RegistryCall AS payload THEN
+    RETURN registryCall__child_exprs(payload);
+  END
+  IF value IS_A IndexedStore AS payload THEN
+    RETURN indexedStore__child_exprs(payload);
+  END
+  IF value IS_A CFunctionAdapter AS payload THEN
+    RETURN cFunctionAdapter__child_exprs(payload);
+  END
+  IF value IS_A ExternTrampoline AS payload THEN
+    RETURN externTrampoline__child_exprs(payload);
+  END
+  IF value IS_A ObservableConsumerSpawn AS payload THEN
+    RETURN observableConsumerSpawn__child_exprs(payload);
+  END
+  IF value IS_A ShardConcurrentEach AS payload THEN
+    RETURN shardConcurrentEach__child_exprs(payload);
+  END
+  IF value IS_A InlineBc AS payload THEN
+    RETURN inlineBc__child_exprs(payload);
+  END
+  IF value IS_A OrElseExitBcRewrite AS payload THEN
+    RETURN orElseExitBcRewrite__child_exprs(payload);
+  END
+  IF value IS_A ShardedMapPut AS payload THEN
+    RETURN shardedMapPut__child_exprs(payload);
+  END
+  IF value IS_A ShardedMapGet AS payload THEN
+    RETURN shardedMapGet__child_exprs(payload);
+  END
+  RETURN empty_child_exprs;
 END
