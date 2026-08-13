@@ -944,7 +944,7 @@ FN let__child_exprs(self: Let) RETURNS ![]Emittable ->
 END
 FN let__explicit_ownership_contract(self: Let) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF TRUE THEN
-    RETURN self.init.explicit_ownership_contract();
+    RETURN emittable__explicit_ownership_contract(self.init);
   ELSE
     RETURN NIL;
   END
@@ -1346,7 +1346,7 @@ FN ifStmt__body_slots(MUTABLE self: IfStmt) RETURNS ![]MIRBodySlot ->
   IF self.else_body THEN
     &slots.append(ifStmt__body_slot(self, :else_body, self.else_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.else_body = new_body;
-  NIL
+  rubyToClearVoid()
     }));
   END
   RETURN slots;
@@ -1398,8 +1398,13 @@ END
 FN ifStmt__stmt?(self: IfStmt) RETURNS Bool ->
   RETURN TRUE;
 END
+PUB STRUCT MIRIfBinding {
+  expr: Emittable,
+  capture: MirCapture
+}
+
 STRUCT IfBindStmt {
-  bindings: Emittable,
+  bindings: []MIRIfBinding,
   then_body: Any@multiowned,
   else_body: Any@multiowned,
   lowered_node_id: Any@multiowned,
@@ -1409,13 +1414,9 @@ STRUCT IfBindStmt {
 }
 
 FN ifBindStmt__child_exprs(self: IfBindStmt) RETURNS ![]Emittable ->
-  MUTABLE exprs: []Any = List[];
-  IF self.bindings != NIL THEN
-    exprs = COPY ((self.bindings)?) |> SELECT (IF _ IS_A {}Any THEN
-    _[:expr]
-  ELSE
-    NIL
-  END);
+  MUTABLE exprs: []Emittable = List[];
+  FOR binding IN self.bindings DO
+    &exprs.append(COPY binding.expr);
   END
   RETURN ifBindStmt__compact_child_exprs(self, exprs);
 END
@@ -1427,7 +1428,7 @@ FN ifBindStmt__body_slots(MUTABLE self: IfBindStmt) RETURNS ![]MIRBodySlot ->
   IF self.else_body THEN
     &slots.append(ifBindStmt__body_slot(self, :else_body, self.else_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.else_body = new_body;
-  NIL
+  rubyToClearVoid()
     }));
   END
   RETURN slots;
@@ -1693,7 +1694,7 @@ END
 UNION SwitchPattern { Emittable: Emittable, EnumSwitchPattern: EnumSwitchPattern }
 STRUCT SwitchStmt {
   subject: Emittable,
-  arms: Emittable,
+  arms: []SwitchArm,
   default_body: Any@multiowned,
   lowered_node_id: Any@multiowned,
   ownership_consumption: Any@multiowned,
@@ -1703,29 +1704,32 @@ STRUCT SwitchStmt {
 
 FN switchStmt__child_exprs(self: SwitchStmt) RETURNS ![]Emittable ->
   MUTABLE pattern_exprs: []Emittable = ( { MUTABLE rtoc_empty_list_24: []Emittable = List[]; rtoc_empty_list_24 } );
-  FOR _ IN (self.arms) DO
-  FOR _ IN _.patterns() DO
-  IF _ IS_A Emittable THEN
-    &pattern_exprs.append(_);
+  FOR arm IN self.arms DO
+    FOR pattern IN arm.patterns DO
+      IF pattern IS_A Emittable AS pattern_expr THEN
+        &pattern_exprs.append(COPY pattern_expr);
+      END
+    END
   END
-  END
-  END
-  RETURN switchStmt__compact_child_exprs(self, [CAST(self.subject AS Any), CAST(pattern_exprs AS Any)]);
+  &pattern_exprs.append(COPY self.subject);
+  RETURN switchStmt__compact_child_exprs(self, pattern_exprs);
 END
 FN switchStmt__body_slots(MUTABLE self: SwitchStmt) RETURNS ![]MIRBodySlot ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_25: []MIRBodySlot = List[]; rtoc_empty_list_25 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.arms.length() DO
-  &slots.append(switchStmt__body_slot(self, symbol("arms_${rtoc_idx}"), self.arms[rtoc_idx].body(), %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
-    self.arms[rtoc_idx].body = new_body;
-    NIL
+  &slots.append(switchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (self.arms[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
+    MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
+    rtoc_slot_arm.body = new_body;
+    self.arms[rtoc_idx] = rtoc_slot_arm;
+    rubyToClearVoid()
   }));
   rtoc_idx = rtoc_idx + 1;
   END
   IF self.default_body THEN
     &slots.append(switchStmt__body_slot(self, :default_body, self.default_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.default_body = new_body;
-  NIL
+  rubyToClearVoid()
     }));
   END
   RETURN slots;
@@ -1779,7 +1783,7 @@ FN switchStmt__stmt?(self: SwitchStmt) RETURNS Bool ->
 END
 STRUCT UnionMatchStmt {
   subject: Emittable,
-  arms: Any@multiowned,
+  arms: []UnionMatchArm,
   default_body: Any@multiowned,
   lowered_node_id: Any@multiowned,
   ownership_consumption: Any@multiowned,
@@ -1792,13 +1796,15 @@ FN unionMatchStmt__child_exprs(self: UnionMatchStmt) RETURNS ![]Emittable ->
 END
 FN unionMatchStmt__body_slots(MUTABLE self: UnionMatchStmt) RETURNS ![]MIRBodySlot ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_27: []MIRBodySlot = List[]; rtoc_empty_list_27 } );
-  IF self.arms != NIL THEN
-      MUTABLE rtoc_each_items_28 = ((self.arms)?);
+  IF TRUE THEN
+      MUTABLE rtoc_each_items_28 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_28.length() DO
-      &slots.append(unionMatchStmt__body_slot(self, symbol("arms_${rtoc_idx}"), rtoc_each_items_28[rtoc_idx].body(), %(new_body: []Emittable) USE(rtoc_each_items_28, rtoc_idx) -> {
-        rtoc_each_items_28[rtoc_idx].body = new_body;
-        NIL
+      &slots.append(unionMatchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_28[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
+        MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
+        rtoc_slot_arm.body = new_body;
+        self.arms[rtoc_idx] = rtoc_slot_arm;
+        rubyToClearVoid()
       }));
       rtoc_idx = rtoc_idx + 1;
       END
@@ -1806,7 +1812,7 @@ FN unionMatchStmt__body_slots(MUTABLE self: UnionMatchStmt) RETURNS ![]MIRBodySl
   IF self.default_body THEN
     &slots.append(unionMatchStmt__body_slot(self, :default_body, self.default_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.default_body = new_body;
-  NIL
+  rubyToClearVoid()
     }));
   END
   RETURN slots;
@@ -1859,7 +1865,7 @@ FN unionMatchStmt__stmt?(self: UnionMatchStmt) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT IfChain {
-  branches: Emittable,
+  branches: []IfChainBranch,
   default_body: Any@multiowned,
   lowered_node_id: Any@multiowned,
   ownership_consumption: Any@multiowned,
@@ -1868,22 +1874,28 @@ STRUCT IfChain {
 }
 
 FN ifChain__child_exprs(self: IfChain) RETURNS ![]Emittable ->
-  RETURN ifChain__compact_child_exprs(self, ((self.branches |> SELECT _.cond()) OR_ELSE List[]));
+  MUTABLE conds: []Emittable = List[];
+  FOR branch IN self.branches DO
+    &conds.append(COPY branch.cond);
+  END
+  RETURN ifChain__compact_child_exprs(self, conds);
 END
 FN ifChain__body_slots(MUTABLE self: IfChain) RETURNS ![]MIRBodySlot ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_30: []MIRBodySlot = List[]; rtoc_empty_list_30 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.branches.length() DO
-  &slots.append(ifChain__body_slot(self, symbol("branches_${rtoc_idx}"), self.branches[rtoc_idx].body(), %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
-    self.branches[rtoc_idx].body = new_body;
-    NIL
+  &slots.append(ifChain__body_slot(self, symbol("branches_${rtoc_idx.toString()}"), UNWRAP (self.branches[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
+    MUTABLE rtoc_slot_arm = COPY UNWRAP (self.branches[rtoc_idx]);
+    rtoc_slot_arm.body = new_body;
+    self.branches[rtoc_idx] = rtoc_slot_arm;
+    rubyToClearVoid()
   }));
   rtoc_idx = rtoc_idx + 1;
   END
   IF self.default_body THEN
     &slots.append(ifChain__body_slot(self, :default_body, self.default_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.default_body = new_body;
-  NIL
+  rubyToClearVoid()
     }));
   END
   RETURN slots;
@@ -2915,18 +2927,18 @@ FN deferStmt__body_slots(MUTABLE self: MIRDeferStmt) RETURNS ![]MIRBodySlot ->
   IF self.body IS_A []Emittable THEN
     RETURN CAST([deferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body), %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.body = new_body;
-  NIL
+  rubyToClearVoid()
     })] AS []MIRBodySlot);
   ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_47: []MIRBodySlot = List[]; rtoc_empty_list_47 } ) AS []MIRBodySlot);
   END
 END
 FN deferStmt__child_exprs(self: MIRDeferStmt) RETURNS ![]Emittable ->
-  IF self.body IS_A []Emittable THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_48: []Emittable = List[]; rtoc_empty_list_48 } ) AS []Emittable);
-  ELSE
-    RETURN deferStmt__compact_child_exprs(self, [CAST(self.body AS Any)]);
+  MUTABLE exprs: []Emittable = List[];
+  IF self.body IS_A Emittable AS body_expr THEN
+    &exprs.append(COPY body_expr);
   END
+  RETURN deferStmt__compact_child_exprs(self, exprs);
 END
 FN deferStmt__body(self: MIRDeferStmt) RETURNS DeferBody ->
   RETURN COPY self.body;
@@ -2993,18 +3005,18 @@ FN errDeferStmt__body_slots(MUTABLE self: ErrDeferStmt) RETURNS ![]MIRBodySlot -
   IF self.body IS_A []Emittable THEN
     RETURN CAST([errDeferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body), %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.body = new_body;
-  NIL
+  rubyToClearVoid()
     })] AS []MIRBodySlot);
   ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_50: []MIRBodySlot = List[]; rtoc_empty_list_50 } ) AS []MIRBodySlot);
   END
 END
 FN errDeferStmt__child_exprs(self: ErrDeferStmt) RETURNS ![]Emittable ->
-  IF self.body IS_A []Emittable THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_51: []Emittable = List[]; rtoc_empty_list_51 } ) AS []Emittable);
-  ELSE
-    RETURN errDeferStmt__compact_child_exprs(self, [CAST(self.body AS Any)]);
+  MUTABLE exprs: []Emittable = List[];
+  IF self.body IS_A Emittable AS body_expr THEN
+    &exprs.append(COPY body_expr);
   END
+  RETURN errDeferStmt__compact_child_exprs(self, exprs);
 END
 FN errDeferStmt__body(self: ErrDeferStmt) RETURNS DeferBody ->
   RETURN COPY self.body;
@@ -3070,7 +3082,7 @@ FN exprStmt__child_exprs(self: ExprStmt) RETURNS ![]Emittable ->
 END
 FN exprStmt__explicit_ownership_contract(self: ExprStmt) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF TRUE THEN
-    RETURN self.expr.explicit_ownership_contract();
+    RETURN emittable__explicit_ownership_contract(self.expr);
   ELSE
     RETURN NIL;
   END
@@ -3267,7 +3279,7 @@ FN bgBlock__body_slots(MUTABLE self: MIRBgBlock) RETURNS ![]MIRBodySlot ->
   IF self.run_body THEN
     RETURN CAST([bgBlock__body_slot(self, :run_body, self.run_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.run_body = new_body;
-  NIL
+  rubyToClearVoid()
     })] AS []MIRBodySlot);
   ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_55: []MIRBodySlot = List[]; rtoc_empty_list_55 } ) AS []MIRBodySlot);
@@ -4202,16 +4214,18 @@ FN catchWrapper__body_slots(MUTABLE self: CatchWrapper) RETURNS ![]MIRBodySlot -
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_68: []MIRBodySlot = List[]; rtoc_empty_list_68 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.clauses.length() DO
-  &slots.append(catchWrapper__body_slot(self, symbol("clauses_${rtoc_idx}"), self.clauses[rtoc_idx].body(), %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
-    self.clauses[rtoc_idx].body = new_body;
-    NIL
+  &slots.append(catchWrapper__body_slot(self, symbol("clauses_${rtoc_idx.toString()}"), UNWRAP (self.clauses[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
+    MUTABLE rtoc_slot_arm = COPY UNWRAP (self.clauses[rtoc_idx]);
+    rtoc_slot_arm.body = new_body;
+    self.clauses[rtoc_idx] = rtoc_slot_arm;
+    rubyToClearVoid()
   }));
   rtoc_idx = rtoc_idx + 1;
   END
   IF catchWrapper__has_default(self) THEN
     &slots.append(catchWrapper__body_slot(self, :default_body, self.default_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.default_body = new_body;
-  NIL
+  rubyToClearVoid()
     }));
   END
   RETURN slots;
@@ -4309,9 +4323,9 @@ FN doBlock__body_slots(MUTABLE self: MIRDoBlock) RETURNS ![]MIRBodySlot ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_70: []MIRBodySlot = List[]; rtoc_empty_list_70 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.branch_bodies.length() DO
-  &slots.append(doBlock__body_slot(self, symbol("branch_bodies_${rtoc_idx}"), self.branch_bodies[rtoc_idx]?, %(new_body: []Emittable) USE(rtoc_idx, MUTABLE self) -> {
+  &slots.append(doBlock__body_slot(self, symbol("branch_bodies_${rtoc_idx.toString()}"), self.branch_bodies[rtoc_idx]?, %(new_body: []Emittable) USE(rtoc_idx, MUTABLE self) -> {
     self.branch_bodies[rtoc_idx] = COPY new_body;
-    NIL
+    rubyToClearVoid()
   }));
   rtoc_idx = rtoc_idx + 1;
   END
@@ -6590,7 +6604,7 @@ FN polymorphicMutateFlow__body_slots(MUTABLE self: PolymorphicMutateFlow) RETURN
   IF self.guard_fail_body THEN
     &slots.append(polymorphicMutateFlow__body_slot(self, :guard_fail_body, self.guard_fail_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.guard_fail_body = new_body;
-  NIL
+  rubyToClearVoid()
     }));
   END
   RETURN slots;
@@ -6724,13 +6738,15 @@ FN withMatchDispatch__child_exprs(self: WithMatchDispatch) RETURNS ![]Emittable 
 END
 FN withMatchDispatch__body_slots(self: WithMatchDispatch) RETURNS ![]MIRBodySlot ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_108: []MIRBodySlot = List[]; rtoc_empty_list_108 } );
-  IF self.arms != NIL THEN
-      MUTABLE rtoc_each_items_109 = ((self.arms)?);
+  IF TRUE THEN
+      MUTABLE rtoc_each_items_109 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_109.length() DO
-      &slots.append(withMatchDispatch__body_slot(self, symbol("arms_${rtoc_idx}"), rtoc_each_items_109[rtoc_idx].body(), %(new_body: []Emittable) USE(rtoc_each_items_109, rtoc_idx) -> {
-        rtoc_each_items_109[rtoc_idx].body = new_body;
-        NIL
+      &slots.append(withMatchDispatch__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_109[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
+        MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
+        rtoc_slot_arm.body = new_body;
+        self.arms[rtoc_idx] = rtoc_slot_arm;
+        rubyToClearVoid()
       }));
       rtoc_idx = rtoc_idx + 1;
       END
@@ -13984,6 +14000,179 @@ END
 FN ruby_wrap_optional_String_symbol_StructInitFieldValue(value: ?String@symbol) RETURNS ?StructInitFieldValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN StructInitFieldValue{ SymbolValue: COPY optional_payload };
+  END
+  RETURN NIL;
+END
+
+FN emittable__explicit_ownership_contract(value: Emittable) RETURNS ?OwnershipContract@multiowned ->
+  PARTIAL MATCH value START
+    Emittable.FnDef AS payload -> RETURN fnDef__explicit_ownership_contract(payload);,
+    Emittable.ProtocolAdapterDef AS payload -> RETURN protocolAdapterDef__explicit_ownership_contract(payload);,
+    Emittable.FieldDef AS payload -> RETURN fieldDef__explicit_ownership_contract(payload);,
+    Emittable.UnionTypeDef AS payload -> RETURN unionTypeDef__explicit_ownership_contract(payload);,
+    Emittable.Import AS payload -> RETURN import__explicit_ownership_contract(payload);,
+    Emittable.TypeAlias AS payload -> RETURN typeAlias__explicit_ownership_contract(payload);,
+    Emittable.CExternFnDecl AS payload -> RETURN cExternFnDecl__explicit_ownership_contract(payload);,
+    Emittable.CExternStructDef AS payload -> RETURN cExternStructDef__explicit_ownership_contract(payload);,
+    Emittable.ModuleNamespace AS payload -> RETURN moduleNamespace__explicit_ownership_contract(payload);,
+    Emittable.TestDef AS payload -> RETURN testDef__explicit_ownership_contract(payload);,
+    Emittable.Let AS payload -> RETURN let__explicit_ownership_contract(payload);,
+    Emittable.Set AS payload -> RETURN set__explicit_ownership_contract(payload);,
+    Emittable.DestructureSet AS payload -> RETURN destructureSet__explicit_ownership_contract(payload);,
+    Emittable.ReassignWithCleanup AS payload -> RETURN reassignWithCleanup__explicit_ownership_contract(payload);,
+    Emittable.ResourceClose AS payload -> RETURN resourceClose__explicit_ownership_contract(payload);,
+    Emittable.IfStmt AS payload -> RETURN ifStmt__explicit_ownership_contract(payload);,
+    Emittable.IfBindStmt AS payload -> RETURN ifBindStmt__explicit_ownership_contract(payload);,
+    Emittable.WhileStmt AS payload -> RETURN whileStmt__explicit_ownership_contract(payload);,
+    Emittable.ForStmt AS payload -> RETURN forStmt__explicit_ownership_contract(payload);,
+    Emittable.ScopeBlock AS payload -> RETURN scopeBlock__explicit_ownership_contract(payload);,
+    Emittable.SwitchStmt AS payload -> RETURN switchStmt__explicit_ownership_contract(payload);,
+    Emittable.UnionMatchStmt AS payload -> RETURN unionMatchStmt__explicit_ownership_contract(payload);,
+    Emittable.IfChain AS payload -> RETURN ifChain__explicit_ownership_contract(payload);,
+    Emittable.ReturnStmt AS payload -> RETURN returnStmt__explicit_ownership_contract(payload);,
+    Emittable.BreakStmt AS payload -> RETURN breakStmt__explicit_ownership_contract(payload);,
+    Emittable.BreakExpr AS payload -> RETURN breakExpr__explicit_ownership_contract(payload);,
+    Emittable.ContinueStmt AS payload -> RETURN continueStmt__explicit_ownership_contract(payload);,
+    Emittable.Panic AS payload -> RETURN panic__explicit_ownership_contract(payload);,
+    Emittable.AssertStmt AS payload -> RETURN assertStmt__explicit_ownership_contract(payload);,
+    Emittable.AssertRaisesCheck AS payload -> RETURN assertRaisesCheck__explicit_ownership_contract(payload);,
+    Emittable.TestPreamble AS payload -> RETURN testPreamble__explicit_ownership_contract(payload);,
+    Emittable.DebugOnly AS payload -> RETURN debugOnly__explicit_ownership_contract(payload);,
+    Emittable.Sort AS payload -> RETURN sort__explicit_ownership_contract(payload);,
+    Emittable.SoaFieldAccess AS payload -> RETURN soaFieldAccess__explicit_ownership_contract(payload);,
+    Emittable.TryOrPanic AS payload -> RETURN tryOrPanic__explicit_ownership_contract(payload);,
+    Emittable.IndexInsert AS payload -> RETURN indexInsert__explicit_ownership_contract(payload);,
+    Emittable.BatchWindowPush AS payload -> RETURN batchWindowPush__explicit_ownership_contract(payload);,
+    Emittable.BatchWindowFlush AS payload -> RETURN batchWindowFlush__explicit_ownership_contract(payload);,
+    Emittable.ErrDeferStmt AS payload -> RETURN errDeferStmt__explicit_ownership_contract(payload);,
+    Emittable.ExprStmt AS payload -> RETURN exprStmt__explicit_ownership_contract(payload);,
+    Emittable.DiscardOwned AS payload -> RETURN discardOwned__explicit_ownership_contract(payload);,
+    Emittable.ThunkTrampoline AS payload -> RETURN thunkTrampoline__explicit_ownership_contract(payload);,
+    Emittable.MutualThunkTrampoline AS payload -> RETURN mutualThunkTrampoline__explicit_ownership_contract(payload);,
+    Emittable.StreamSpawn AS payload -> RETURN streamSpawn__explicit_ownership_contract(payload);,
+    Emittable.FsmStructure AS payload -> RETURN fsmStructure__explicit_ownership_contract(payload);,
+    Emittable.DirectTenseMap AS payload -> RETURN directTenseMap__explicit_ownership_contract(payload);,
+    Emittable.AsyncPayloadTake AS payload -> RETURN asyncPayloadTake__explicit_ownership_contract(payload);,
+    Emittable.FsmIoBody AS payload -> RETURN fsmIoBody__explicit_ownership_contract(payload);,
+    Emittable.StreamYield AS payload -> RETURN streamYield__explicit_ownership_contract(payload);,
+    Emittable.FsmB1Body AS payload -> RETURN fsmB1Body__explicit_ownership_contract(payload);,
+    Emittable.FsmGenericBody AS payload -> RETURN fsmGenericBody__explicit_ownership_contract(payload);,
+    Emittable.FailureAction AS payload -> RETURN failureAction__explicit_ownership_contract(payload);,
+    Emittable.CapabilityLockTarget AS payload -> RETURN capabilityLockTarget__explicit_ownership_contract(payload);,
+    Emittable.CapabilityLockAddress AS payload -> RETURN capabilityLockAddress__explicit_ownership_contract(payload);,
+    Emittable.SortedLockAcquire AS payload -> RETURN sortedLockAcquire__explicit_ownership_contract(payload);,
+    Emittable.FallibleLockBinding AS payload -> RETURN fallibleLockBinding__explicit_ownership_contract(payload);,
+    Emittable.CatchWrapper AS payload -> RETURN catchWrapper__explicit_ownership_contract(payload);,
+    Emittable.Noop AS payload -> RETURN noop__explicit_ownership_contract(payload);,
+    Emittable.Comment AS payload -> RETURN comment__explicit_ownership_contract(payload);,
+    Emittable.Suppress AS payload -> RETURN suppress__explicit_ownership_contract(payload);,
+    Emittable.PubConst AS payload -> RETURN pubConst__explicit_ownership_contract(payload);,
+    Emittable.ModuleVar AS payload -> RETURN moduleVar__explicit_ownership_contract(payload);,
+    Emittable.ModuleConstFree AS payload -> RETURN moduleConstFree__explicit_ownership_contract(payload);,
+    Emittable.HeapCreate AS payload -> RETURN heapCreate__explicit_ownership_contract(payload);,
+    Emittable.DupeSlice AS payload -> RETURN dupeSlice__explicit_ownership_contract(payload);,
+    Emittable.AllocSlice AS payload -> RETURN allocSlice__explicit_ownership_contract(payload);,
+    Emittable.FreeSlice AS payload -> RETURN freeSlice__explicit_ownership_contract(payload);,
+    Emittable.DestroyPtr AS payload -> RETURN destroyPtr__explicit_ownership_contract(payload);,
+    Emittable.Cleanup AS payload -> RETURN cleanup__explicit_ownership_contract(payload);,
+    Emittable.ErrCleanup AS payload -> RETURN errCleanup__explicit_ownership_contract(payload);,
+    Emittable.MoveMark AS payload -> RETURN moveMark__explicit_ownership_contract(payload);,
+    Emittable.DeepCopy AS payload -> RETURN deepCopy__explicit_ownership_contract(payload);,
+    Emittable.ContainerInit AS payload -> RETURN containerInit__explicit_ownership_contract(payload);,
+    Emittable.CapWrap AS payload -> RETURN capWrap__explicit_ownership_contract(payload);,
+    Emittable.SharePromote AS payload -> RETURN sharePromote__explicit_ownership_contract(payload);,
+    Emittable.RcRetain AS payload -> RETURN rcRetain__explicit_ownership_contract(payload);,
+    Emittable.ComptimeCarrierPayload AS payload -> RETURN comptimeCarrierPayload__explicit_ownership_contract(payload);,
+    Emittable.MonomorphicKeep AS payload -> RETURN monomorphicKeep__explicit_ownership_contract(payload);,
+    Emittable.RcRelease AS payload -> RETURN rcRelease__explicit_ownership_contract(payload);,
+    Emittable.RcDowngrade AS payload -> RETURN rcDowngrade__explicit_ownership_contract(payload);,
+    Emittable.WeakUpgrade AS payload -> RETURN weakUpgrade__explicit_ownership_contract(payload);,
+    Emittable.AllocatorRef AS payload -> RETURN allocatorRef__explicit_ownership_contract(payload);,
+    Emittable.FreezeExpr AS payload -> RETURN freezeExpr__explicit_ownership_contract(payload);,
+    Emittable.MakeList AS payload -> RETURN makeList__explicit_ownership_contract(payload);,
+    Emittable.FrameSave AS payload -> RETURN frameSave__explicit_ownership_contract(payload);,
+    Emittable.FrameRestore AS payload -> RETURN frameRestore__explicit_ownership_contract(payload);,
+    Emittable.CapabilityUnwrap AS payload -> RETURN capabilityUnwrap__explicit_ownership_contract(payload);,
+    Emittable.SnapshotRead AS payload -> RETURN snapshotRead__explicit_ownership_contract(payload);,
+    Emittable.SnapshotTransaction AS payload -> RETURN snapshotTransaction__explicit_ownership_contract(payload);,
+    Emittable.SnapshotMultiTxn AS payload -> RETURN snapshotMultiTxn__explicit_ownership_contract(payload);,
+    Emittable.PolymorphicMutate AS payload -> RETURN polymorphicMutate__explicit_ownership_contract(payload);,
+    Emittable.PolymorphicMutateFlow AS payload -> RETURN polymorphicMutateFlow__explicit_ownership_contract(payload);,
+    Emittable.PolymorphicFlowSignal AS payload -> RETURN polymorphicFlowSignal__explicit_ownership_contract(payload);,
+    Emittable.WithMatchDispatch AS payload -> RETURN withMatchDispatch__explicit_ownership_contract(payload);,
+    Emittable.AllocMark AS payload -> RETURN allocMark__explicit_ownership_contract(payload);,
+    Emittable.OwnedCreate AS payload -> RETURN ownedCreate__explicit_ownership_contract(payload);,
+    Emittable.OwnedDestroy AS payload -> RETURN ownedDestroy__explicit_ownership_contract(payload);,
+    Emittable.OwnedTransfer AS payload -> RETURN ownedTransfer__explicit_ownership_contract(payload);,
+    Emittable.OwnedBorrow AS payload -> RETURN ownedBorrow__explicit_ownership_contract(payload);,
+    Emittable.OwnedStore AS payload -> RETURN ownedStore__explicit_ownership_contract(payload);,
+    Emittable.OwnedReturn AS payload -> RETURN ownedReturn__explicit_ownership_contract(payload);,
+    Emittable.ReturnMark AS payload -> RETURN returnMark__explicit_ownership_contract(payload);,
+    Emittable.TransferMark AS payload -> RETURN transferMark__explicit_ownership_contract(payload);,
+    Emittable.ReassignMark AS payload -> RETURN reassignMark__explicit_ownership_contract(payload);,
+    Emittable.FieldCleanupMark AS payload -> RETURN fieldCleanupMark__explicit_ownership_contract(payload);,
+    Emittable.Call AS payload -> RETURN call__explicit_ownership_contract(payload);,
+    Emittable.RuntimeCall AS payload -> RETURN runtimeCall__explicit_ownership_contract(payload);,
+    Emittable.TailCall AS payload -> RETURN tailCall__explicit_ownership_contract(payload);,
+    Emittable.FieldGet AS payload -> RETURN fieldGet__explicit_ownership_contract(payload);,
+    Emittable.UnionPayloadGet AS payload -> RETURN unionPayloadGet__explicit_ownership_contract(payload);,
+    Emittable.IndexGet AS payload -> RETURN indexGet__explicit_ownership_contract(payload);,
+    Emittable.ProtocolCall AS payload -> RETURN protocolCall__explicit_ownership_contract(payload);,
+    Emittable.FallibleOk AS payload -> RETURN fallibleOk__explicit_ownership_contract(payload);,
+    Emittable.FutureReady AS payload -> RETURN futureReady__explicit_ownership_contract(payload);,
+    Emittable.Lit AS payload -> RETURN lit__explicit_ownership_contract(payload);,
+    Emittable.SymbolLit AS payload -> RETURN symbolLit__explicit_ownership_contract(payload);,
+    Emittable.VoidLiteral AS payload -> RETURN voidLiteral__explicit_ownership_contract(payload);,
+    Emittable.DefaultValue AS payload -> RETURN defaultValue__explicit_ownership_contract(payload);,
+    Emittable.EnumTag AS payload -> RETURN enumTag__explicit_ownership_contract(payload);,
+    Emittable.EnumOrdinal AS payload -> RETURN enumOrdinal__explicit_ownership_contract(payload);,
+    Emittable.Ident AS payload -> RETURN ident__explicit_ownership_contract(payload);,
+    Emittable.TupleLiteral AS payload -> RETURN tupleLiteral__explicit_ownership_contract(payload);,
+    Emittable.FnRef AS payload -> RETURN fnRef__explicit_ownership_contract(payload);,
+    Emittable.LockAcquire AS payload -> RETURN lockAcquire__explicit_ownership_contract(payload);,
+    Emittable.TypeOf AS payload -> RETURN typeOf__explicit_ownership_contract(payload);,
+    Emittable.TypeEq AS payload -> RETURN typeEq__explicit_ownership_contract(payload);,
+    Emittable.StructInit AS payload -> RETURN structInit__explicit_ownership_contract(payload);,
+    Emittable.ArrayInit AS payload -> RETURN arrayInit__explicit_ownership_contract(payload);,
+    Emittable.ArrayDefaultInit AS payload -> RETURN arrayDefaultInit__explicit_ownership_contract(payload);,
+    Emittable.SliceExpr AS payload -> RETURN sliceExpr__explicit_ownership_contract(payload);,
+    Emittable.ConcatStr AS payload -> RETURN concatStr__explicit_ownership_contract(payload);,
+    Emittable.TryExpr AS payload -> RETURN tryExpr__explicit_ownership_contract(payload);,
+    Emittable.TryCatch AS payload -> RETURN tryCatch__explicit_ownership_contract(payload);,
+    Emittable.Orelse AS payload -> RETURN orelse__explicit_ownership_contract(payload);,
+    Emittable.Conditional AS payload -> RETURN conditional__explicit_ownership_contract(payload);,
+    Emittable.IfOptional AS payload -> RETURN ifOptional__explicit_ownership_contract(payload);,
+    Emittable.Comptime AS payload -> RETURN comptime__explicit_ownership_contract(payload);,
+    Emittable.UnionVariantGet AS payload -> RETURN unionVariantGet__explicit_ownership_contract(payload);,
+    Emittable.ListItems AS payload -> RETURN listItems__explicit_ownership_contract(payload);,
+    Emittable.ListLength AS payload -> RETURN listLength__explicit_ownership_contract(payload);,
+    Emittable.AddressOf AS payload -> RETURN addressOf__explicit_ownership_contract(payload);,
+    Emittable.Deref AS payload -> RETURN deref__explicit_ownership_contract(payload);,
+    Emittable.PointerCast AS payload -> RETURN pointerCast__explicit_ownership_contract(payload);,
+    Emittable.ConstCast AS payload -> RETURN constCast__explicit_ownership_contract(payload);,
+    Emittable.DefaultStreamCapacity AS payload -> RETURN defaultStreamCapacity__explicit_ownership_contract(payload);,
+    Emittable.NextPromiseList AS payload -> RETURN nextPromiseList__explicit_ownership_contract(payload);,
+    Emittable.Undef AS payload -> RETURN undef__explicit_ownership_contract(payload);,
+    Emittable.TypeSentinel AS payload -> RETURN typeSentinel__explicit_ownership_contract(payload);,
+    Emittable.IterRange AS payload -> RETURN iterRange__explicit_ownership_contract(payload);,
+    Emittable.TryOptional AS payload -> RETURN tryOptional__explicit_ownership_contract(payload);,
+    Emittable.ForeignOwnedUnwrap AS payload -> RETURN foreignOwnedUnwrap__explicit_ownership_contract(payload);,
+    Emittable.ForeignSliceView AS payload -> RETURN foreignSliceView__explicit_ownership_contract(payload);,
+    Emittable.HasField AS payload -> RETURN hasField__explicit_ownership_contract(payload);,
+    Emittable.ItemsAccess AS payload -> RETURN itemsAccess__explicit_ownership_contract(payload);,
+    Emittable.OwnedSlice AS payload -> RETURN ownedSlice__explicit_ownership_contract(payload);,
+    Emittable.LambdaExpr AS payload -> RETURN lambdaExpr__explicit_ownership_contract(payload);,
+    Emittable.Pipeline AS payload -> RETURN pipeline__explicit_ownership_contract(payload);,
+    Emittable.RegistryCall AS payload -> RETURN registryCall__explicit_ownership_contract(payload);,
+    Emittable.IndexedStore AS payload -> RETURN indexedStore__explicit_ownership_contract(payload);,
+    Emittable.CFunctionAdapter AS payload -> RETURN cFunctionAdapter__explicit_ownership_contract(payload);,
+    Emittable.ExternTrampoline AS payload -> RETURN externTrampoline__explicit_ownership_contract(payload);,
+    Emittable.ObservableConsumerSpawn AS payload -> RETURN observableConsumerSpawn__explicit_ownership_contract(payload);,
+    Emittable.ShardConcurrentEach AS payload -> RETURN shardConcurrentEach__explicit_ownership_contract(payload);,
+    Emittable.InlineBc AS payload -> RETURN inlineBc__explicit_ownership_contract(payload);,
+    Emittable.OrElseExitBcRewrite AS payload -> RETURN orElseExitBcRewrite__explicit_ownership_contract(payload);,
+    Emittable.ShardedMapPut AS payload -> RETURN shardedMapPut__explicit_ownership_contract(payload);,
+    Emittable.ShardedMapGet AS payload -> RETURN shardedMapGet__explicit_ownership_contract(payload);,
   END
   RETURN NIL;
 END
