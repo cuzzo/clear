@@ -1614,14 +1614,18 @@ INDEX_OPS = T.let({
 # new collection types only need a dispatch_key entry + this table entry.
 # ============================================================================
 COLLECTION_METHOD_CONFIGS = T.let({
+  # The label is diagnostic text. A receiver whose element/value type has not
+  # resolved (an optional collection read straight out of a map index, say)
+  # must still produce a message -- crashing here replaces the diagnostic the
+  # user needed with a NoMethodError from inside the registry.
   pool:           { registry: POOL_METHODS, tag: :pool_method,
-                    label: ->(t) { "Pool<#{t.element_type.resolved}>" } },
+                    label: ->(t) { "Pool<#{t.element_type&.resolved || 'Unknown'}>" } },
   set_collection: { registry: SET_METHODS,  tag: :set_method,
-                    label: ->(t) { "Set<#{t.element_type.resolved}>" } },
+                    label: ->(t) { "Set<#{t.element_type&.resolved || 'Unknown'}>" } },
   string_map:     { registry: MAP_METHODS,  tag: :map_method,
-                    label: ->(t) { "HashMap<#{t.value_type.resolved}>" } },
+                    label: ->(t) { "HashMap<#{t.value_type&.resolved || 'Unknown'}>" } },
   numeric_map:    { registry: MAP_METHODS,  tag: :map_method,
-                    label: ->(t) { "HashMap<#{t.value_type.resolved}>" } },
+                    label: ->(t) { "HashMap<#{t.value_type&.resolved || 'Unknown'}>" } },
 }.freeze, T::Hash[Symbol, T.untyped])
 
 # ============================================================================

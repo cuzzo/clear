@@ -360,12 +360,26 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN (rtoc_self_view.edges |> WHERE (place_set.contains?(ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _.from })) OR place_set.contains?(ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _.to })))) DO
     TRY (ownershipGraph__remove_edge(&rtoc_self_view, _));
     END
-    FOR child_set IN rtoc_self_view.children.values() DO
+    FOR parent_key IN rtoc_self_view.children.keys() DO
       FOR place IN places DO
-        &child_set.remove(place);
+        IF rtoc_self_view.children[parent_key] EXISTS AS child_set THEN
+          &child_set.remove(place);
+        END
       END
     END
-    &rtoc_self_view.children.delete_if(%(parent: Tuple<PlaceId, [Set]PlaceId>, children) USE(place_set) -> (place_set.contains?(parent) OR resourceClosePlan__empty?(children)));
+    MUTABLE doomed_parents: []PlaceId = [];
+    FOR parent IN rtoc_self_view.children.keys() DO
+      MUTABLE parent_children_count = 0;
+      IF rtoc_self_view.children[parent] EXISTS AS parent_children THEN
+        parent_children_count = parent_children.length();
+      END
+      IF (place_set.contains?(parent) OR (parent_children_count == 0)) THEN
+        &doomed_parents.append(COPY parent);
+      END
+    END
+    FOR parent IN doomed_parents DO
+      &rtoc_self_view.children.delete(parent);
+    END
     RETURN places.length();
 }
 END
