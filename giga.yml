@@ -1,0 +1,305 @@
+version: 1
+
+profiles:
+  ci:
+    producers:
+      - compiler-coverage-raw
+      - compiler-coverage
+      - zig-coverage-raw
+      - zig-coverage
+    max_parallel_producers: 2
+    required_evidence: [coverage]
+  analyse:
+    producers:
+      - compiler-facts
+      - zig-facts
+      - compiler-decomplex
+      - zig-decomplex
+      - compiler-nil-kill
+      - zig-nil-kill
+      - compiler-espalier
+      - zig-espalier
+      - compiler-slopcop
+      - zig-slopcop
+    max_parallel_producers: 4
+    required_evidence: [sarif, architecture]
+
+producers:
+  compiler-coverage-raw:
+    executor: command
+    test_timing: {language: ruby, test_set: compiler-spec}
+    argv: [bundle, exec, prspec, compiler/spec/]
+    timeout_seconds: 1800
+    max_output_bytes: 67108864
+    environment:
+      COVERAGE: "1"
+      COVERAGE_DIR: .giga/coverage/compiler
+      TMPDIR: .giga/tmp/compiler
+    produces:
+      - kind: auxiliary
+        format: simplecov
+        path: .giga/coverage/compiler/.resultset.json
+        complete: true
+        evidence_scope:
+          selection: compiler-ruby
+          test_set: compiler-spec
+          source_root: compiler/ruby
+
+  compiler-coverage:
+    executor: gigasail
+    argv: [coverage-normalize, simplecov, rb, simplecov, "0.22.0", "{input:report}"]
+    needs: [compiler-coverage-raw]
+    inputs:
+      report: {producer: compiler-coverage-raw, kind: auxiliary, format: simplecov}
+    produces:
+      - kind: coverage
+        format: coverage-facts
+        path: .giga/evidence/compiler-coverage.json
+        complete: true
+        evidence_scope:
+          selection: compiler-ruby
+          test_set: compiler-spec
+          source_root: compiler/ruby
+
+  zig-coverage-raw:
+    executor: command
+    test_timing: {language: zig, test_set: unit}
+    argv:
+      - sh
+      - -c
+      - >-
+        rm -rf .giga/work/zig-repository &&
+        mkdir -p .giga/work/zig-repository .giga/cache/zig-local .giga/cache/zig-global &&
+        git archive HEAD zig tools/zig_coverage_sanitize.rb | tar -x -C .giga/work/zig-repository &&
+        cd .giga/work/zig-repository/zig &&
+        zig build test -Dcoverage
+        --cache-dir ../../../cache/zig-local
+        --global-cache-dir ../../../cache/zig-global
+    timeout_seconds: 3600
+    max_output_bytes: 134217728
+    produces:
+      - kind: auxiliary
+        format: cobertura
+        path: .giga/work/zig-repository/zig/zig-out/coverage/merged/kcov-merged/cobertura.xml
+        complete: true
+        evidence_scope:
+          selection: zig-production
+          test_set: zig-unit
+          source_root: zig
+
+  zig-coverage:
+    executor: gigasail
+    argv: [coverage-normalize, cobertura, zig, kcov-zig-llvm, "0.16.0", "{input:report}"]
+    needs: [zig-coverage-raw]
+    inputs:
+      report: {producer: zig-coverage-raw, kind: auxiliary, format: cobertura}
+    produces:
+      - kind: coverage
+        format: coverage-facts
+        path: .giga/evidence/zig-coverage.json
+        complete: true
+        evidence_scope:
+          selection: zig-production
+          test_set: zig-unit
+          source_root: zig
+
+  compiler-facts:
+    executor: gigasail
+    argv: [fact-mine-native, --production, --vcs, git]
+    working_directory: compiler/ruby
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/compiler-fact-mine.sarif
+        complete: true
+        evidence_scope: {selection: compiler-production, test_set: static-analysis}
+      - kind: auxiliary
+        format: fact-mine-profile
+        path: .giga/evidence/compiler-fact-mine-profile.json
+        complete: true
+        evidence_scope: {selection: compiler-production, test_set: static-analysis}
+
+  zig-facts:
+    executor: gigasail
+    argv: [fact-mine-native, --production, --vcs, git]
+    working_directory: zig
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/zig-fact-mine.sarif
+        complete: true
+        evidence_scope: {selection: zig-production, test_set: static-analysis}
+      - kind: auxiliary
+        format: fact-mine-profile
+        path: .giga/evidence/zig-fact-mine-profile.json
+        complete: true
+        evidence_scope: {selection: zig-production, test_set: static-analysis}
+
+  compiler-decomplex:
+    executor: command
+    argv: [decomplex-rust, report, --format, sarif, --output, .giga/evidence/compiler-decomplex.sarif, --vcs, git, compiler/ruby]
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    needs: [compiler-facts]
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/compiler-decomplex.sarif
+        complete: true
+        evidence_scope: {selection: compiler-production, test_set: static-analysis}
+
+  zig-decomplex:
+    executor: command
+    argv: [decomplex-rust, report, --format, sarif, --output, .giga/evidence/zig-decomplex.sarif, --vcs, git, zig]
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    needs: [zig-facts]
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/zig-decomplex.sarif
+        complete: true
+        evidence_scope: {selection: zig-production, test_set: static-analysis}
+
+  compiler-nil-kill:
+    executor: command
+    argv: [nil-kill, static, --root, ., --vcs, git, --source-role, production, --fact-mine, "{input:facts}", --no-static-output, --espalier-output, .giga/evidence/compiler-nil-kill-espalier.json, --sarif-output, .giga/evidence/compiler-nil-kill.sarif, compiler/ruby]
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    environment: {NIL_KILL_ROOT: .}
+    needs: [compiler-facts]
+    inputs:
+      facts: {producer: compiler-facts, kind: auxiliary, format: fact-mine-profile}
+    produces:
+      - kind: auxiliary
+        format: nil-kill-espalier-static
+        path: .giga/evidence/compiler-nil-kill-espalier.json
+        complete: true
+        evidence_scope: {selection: compiler-production, test_set: static-analysis}
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/compiler-nil-kill.sarif
+        complete: true
+        evidence_scope: {selection: compiler-production, test_set: static-analysis}
+
+  zig-nil-kill:
+    executor: command
+    argv: [nil-kill, static, --root, ., --vcs, git, --source-role, production, --fact-mine, "{input:facts}", --no-static-output, --espalier-output, .giga/evidence/zig-nil-kill-espalier.json, --sarif-output, .giga/evidence/zig-nil-kill.sarif, zig]
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    environment: {NIL_KILL_ROOT: .}
+    needs: [zig-facts]
+    inputs:
+      facts: {producer: zig-facts, kind: auxiliary, format: fact-mine-profile}
+    produces:
+      - kind: auxiliary
+        format: nil-kill-espalier-static
+        path: .giga/evidence/zig-nil-kill-espalier.json
+        complete: true
+        evidence_scope: {selection: zig-production, test_set: static-analysis}
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/zig-nil-kill.sarif
+        complete: true
+        evidence_scope: {selection: zig-production, test_set: static-analysis}
+
+  compiler-espalier:
+    executor: command
+    argv: [espalier, --format, architecture, --vcs, git, --production, --fact-mine, "{input:facts}", --nil-kill, "{input:nil_kill}", --output, .giga/evidence/compiler-architecture.json, --sarif-output, .giga/evidence/compiler-espalier.sarif, --compact-sarif, compiler/ruby]
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    needs: [compiler-facts, compiler-nil-kill]
+    inputs:
+      facts: {producer: compiler-facts, kind: auxiliary, format: fact-mine-profile}
+      nil_kill: {producer: compiler-nil-kill, kind: auxiliary, format: nil-kill-espalier-static}
+    produces:
+      - kind: architecture
+        format: architecture
+        path: .giga/evidence/compiler-architecture.json
+        complete: true
+        evidence_scope: {selection: compiler-production, test_set: static-analysis}
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/compiler-espalier.sarif
+        complete: true
+        evidence_scope: {selection: compiler-production, test_set: static-analysis}
+
+  zig-espalier:
+    executor: command
+    argv: [espalier, --format, architecture, --vcs, git, --production, --fact-mine, "{input:facts}", --nil-kill, "{input:nil_kill}", --output, .giga/evidence/zig-architecture.json, --sarif-output, .giga/evidence/zig-espalier.sarif, --compact-sarif, zig]
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    needs: [zig-facts, zig-nil-kill]
+    inputs:
+      facts: {producer: zig-facts, kind: auxiliary, format: fact-mine-profile}
+      nil_kill: {producer: zig-nil-kill, kind: auxiliary, format: nil-kill-espalier-static}
+    produces:
+      - kind: architecture
+        format: architecture
+        path: .giga/evidence/zig-architecture.json
+        complete: true
+        evidence_scope: {selection: zig-production, test_set: static-analysis}
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/zig-espalier.sarif
+        complete: true
+        evidence_scope: {selection: zig-production, test_set: static-analysis}
+
+  compiler-slopcop:
+    executor: command
+    argv: [slopcop, constraints, --repo=., --all, --language=ruby, --fact-mine, "{input:facts}", --sarif=.giga/evidence/compiler-slopcop.sarif]
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    needs: [compiler-facts]
+    inputs:
+      facts: {producer: compiler-facts, kind: auxiliary, format: fact-mine-profile}
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/compiler-slopcop.sarif
+        complete: true
+        evidence_scope: {selection: compiler-production, test_set: constraint-analysis}
+
+  zig-slopcop:
+    executor: command
+    argv: [slopcop, constraints, --repo=., --all, --language=zig, --fact-mine, "{input:facts}", --sarif=.giga/evidence/zig-slopcop.sarif]
+    timeout_seconds: 600
+    max_output_bytes: 33554432
+    needs: [zig-facts]
+    inputs:
+      facts: {producer: zig-facts, kind: auxiliary, format: fact-mine-profile}
+    produces:
+      - kind: sarif
+        format: sarif
+        path: .giga/evidence/zig-slopcop.sarif
+        complete: true
+        evidence_scope: {selection: zig-production, test_set: constraint-analysis}
+
+review:
+  checks_enabled: false
+  tests:
+    precommit: {profiles: [ci, analyse], mutation: false}
+    premerge: {profiles: [ci, analyse], mutation: false}
+  packages:
+    compiler:
+      paths: [compiler/**]
+      producers:
+        - compiler-coverage
+        - compiler-facts
+        - compiler-decomplex
+        - compiler-nil-kill
+        - compiler-espalier
+        - compiler-slopcop
+    zig:
+      paths: [zig/**]
+      producers:
+        - zig-coverage
+        - zig-facts
+        - zig-decomplex
+        - zig-nil-kill
+        - zig-espalier
+        - zig-slopcop
