@@ -1,0 +1,28 @@
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
+
+# Hand-written: ruby-to-clear cannot translate module_importer.rb, whose cache
+# lookup forwards a block (`cache.fetch(key, paths, &block)`) and so has no
+# inlinable CLEAR fallback.
+#
+# The annotator only needs the TYPE and two entry points -- it holds the
+# importer as `?ModuleImporter` and reads exactly two fields off a compiled
+# module. Resolution passes NIL for the importer whenever there is nothing to
+# import, which is the path the byte-compatibility harness takes, so these
+# bodies stay unimplemented until the self-hosted compiler drives imports
+# itself.
+PUB STRUCT CompiledModule {
+  global_scope: Scope@multiowned,
+  source_dir: String
+}
+
+PUB STRUCT ModuleImporter {
+  source_dir: String
+}
+
+PUB FN moduleImporter__compile_package(MUTABLE self: ModuleImporter, path: String, caller_dir: String) RETURNS !?CompiledModule ->
+  RETURN panic("module import is not available in the self-hosted annotator yet");
+END
+
+PUB FN moduleImporter__compile_file(MUTABLE self: ModuleImporter, path: String, caller_dir: String) RETURNS !?CompiledModule ->
+  RETURN panic("module import is not available in the self-hosted annotator yet");
+END
