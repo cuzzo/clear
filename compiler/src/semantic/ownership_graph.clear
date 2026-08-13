@@ -206,7 +206,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN ownershipGraph__declare(MUTABLE self: OwnershipGraph, path: String, kind: String@symbol = :affine, type_info: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), scope_depth: Int64 = 0, line: Int64 = 0) RETURNS !?[Set]String
+FN ownershipGraph__declare(MUTABLE self: OwnershipGraph, path: String, kind: String@symbol = :affine, type_info: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), scope_depth: Int64 = 0, line: Int64 = 0) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -216,10 +216,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF parent EXISTS AS parent_value THEN
       (TRY (ownershipGraph__children_for_place(rtoc_self_view, parent_value))).insert(place);
     END
-    RETURN NIL;
+    RETURN;
 }
 END
-FN ownershipGraph__transfer(MUTABLE self: OwnershipGraph, from_value: String, to: String, at_token: ?Token = NIL, action: String@symbol = :move) RETURNS !?[Set]String
+FN ownershipGraph__transfer(MUTABLE self: OwnershipGraph, from_value: String, to: String, at_token: ?Token = NIL, action: String@symbol = :move) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -228,13 +228,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE source_value_mutable = COPY source_value;
       rtoc_self_view.nodes[ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY to })] = COPY OwnershipNode{ path: COPY to, kind: COPY source_value_mutable.kind, state: :live, type_info: COPY ownershipNode__full_type(source_value_mutable), scope_depth: source_value_mutable.scope_depth, line: source_value_mutable.line, move_line: NIL, move_col: NIL, move_action: NIL, move_consumer_param_type: NIL };
       ownershipGraph__record_move_site(rtoc_self_view, &source_value_mutable, at_token, action);
-      RETURN TRY (ownershipGraph__invalidate(rtoc_self_view, from_value, source_value_mutable));
+      TRY (ownershipGraph__invalidate(rtoc_self_view, from_value, source_value_mutable));
+      RETURN;
     ELSE
-      RETURN NIL;
+      RETURN;
     END
 }
 END
-FN ownershipGraph__mark_moved(self: OwnershipGraph, path: String, at_token: ?Token = NIL, action: String@symbol = :move, consumer_param_type: ?TypeTypeInput = NIL) RETURNS !?[Set]String
+FN ownershipGraph__mark_moved(self: OwnershipGraph, path: String, at_token: ?Token = NIL, action: String@symbol = :move, consumer_param_type: ?TypeTypeInput = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -242,9 +243,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF source EXISTS AS source_value THEN
       MUTABLE source_value_mutable = COPY source_value;
       ownershipGraph__record_move_site(rtoc_self_view, &source_value_mutable, at_token, action, consumer_param_type);
-      RETURN TRY (ownershipGraph__invalidate(rtoc_self_view, path, source_value_mutable));
+      TRY (ownershipGraph__invalidate(rtoc_self_view, path, source_value_mutable));
+      RETURN;
     ELSE
-      RETURN NIL;
+      RETURN;
     END
 }
 END
@@ -542,7 +544,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN result |> ORDER_BY _;
 }
 END
-PRIVATE FN ownershipGraph__invalidate(self: OwnershipGraph, path: String, move_source: ?OwnershipNode = NIL) RETURNS !?[Set]String
+PRIVATE FN ownershipGraph__invalidate(self: OwnershipGraph, path: String, move_source: ?OwnershipNode = NIL) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -557,9 +559,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       node_value_mutable.state = :moved;
       FOR _ IN (TRY (ownershipGraph__children_for(rtoc_self_view, path))) DO
-      TRY (ownershipGraph__invalidate(rtoc_self_view, _.path(), move_source));
+      TRY (ownershipGraph__invalidate(rtoc_self_view, _.path, move_source));
       END
-      RETURN NIL;
+      RETURN;
     ELSE
       RETURN;
     END
@@ -578,7 +580,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       node.move_col = at_token_value.column;
       RETURN at_token_value.column;
     ELSE
-      RETURN;
+      RETURN NIL;
     END
 }
 END
@@ -588,8 +590,8 @@ PRIVATE FN ownershipGraph__collect_descendants(self: OwnershipGraph, path: Strin
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (ownershipGraph__children_for(rtoc_self_view, path))) DO
-    &result.append(_.path());
-    TRY (ownershipGraph__collect_descendants(rtoc_self_view, _.path(), &result));
+    &result.append(_.path);
+    TRY (ownershipGraph__collect_descendants(rtoc_self_view, _.path, &result));
     END
     RETURN result |> DISTINCT _;
 }
