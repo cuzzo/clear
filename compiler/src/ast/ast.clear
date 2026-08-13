@@ -6299,7 +6299,10 @@ PUB FN aST__borrowed_ownership_view?(node: ?Locatable) RETURNS Bool ->
       IF root EXISTS AS root_value THEN
         sym = COPY KEEP root_value.symbol;
       END
-      RETURN !(!((((sym != NIL) AND ((symbolEntry__is_param(sym) OR sym.reg))))));
+      IF sym EXISTS AS sym_value THEN
+        RETURN (symbolEntry__is_param(sym_value) OR (sym_value.reg != NIL));
+      END
+      RETURN FALSE;
     ELSE
       RETURN FALSE;
     END
