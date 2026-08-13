@@ -256,7 +256,7 @@ producers:
     max_output_bytes: 33554432
     needs: [compiler-facts]
     inputs:
-      facts: {producer: compiler-facts, kind: auxiliary, format: fact-mine-profile}
+      facts: {producer: compiler-facts, kind: sarif, format: sarif}
     produces:
       - kind: sarif
         format: sarif
@@ -271,7 +271,7 @@ producers:
     max_output_bytes: 33554432
     needs: [zig-facts]
     inputs:
-      facts: {producer: zig-facts, kind: auxiliary, format: fact-mine-profile}
+      facts: {producer: zig-facts, kind: sarif, format: sarif}
     produces:
       - kind: sarif
         format: sarif
