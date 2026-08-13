@@ -37,17 +37,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(kind IS_A TypeProjectionExpression) THEN
         RETURN candidate;
     END
-    MUTABLE projection = kind;
-    IF projection.protocol() THEN
-        RETURN candidate;
+    MUTABLE result_expression: TypeExpression = candidate;
+    IF kind IS_A TypeProjectionExpression AS projection THEN
+      IF projection.protocol == NIL THEN
+        MUTABLE protocol: ?String = TRY (protocolProjectionResolver__projection_protocol(rtoc_self_view, projection, parameter_map, &issues));
+        IF protocol EXISTS AS protocol_value THEN
+          MUTABLE projection_kind = TypeProjectionExpression{ owner: COPY projection.owner, member: COPY projection.member, protocol: COPY symbol(protocol_value) };
+          result_expression = TypeExpression{ kind: COPY TypeExpressionKind{ TypeProjectionExpression: COPY projection_kind }, capabilities: COPY candidate.capabilities };
+        END
+      END
     END
-    MUTABLE protocol: ?String = TRY (protocolProjectionResolver__projection_protocol(rtoc_self_view, projection, parameter_map, &issues));
-    IF !(protocol) THEN
-        RETURN candidate;
-    END
-    MUTABLE protocol_value: ?String = protocol;
-    MUTABLE projection_kind = TypeProjectionExpression{ owner: COPY projection.owner(), member: COPY projection.member(), protocol: COPY symbol(protocol_value) };
-    TypeExpression{ kind: COPY projection_kind, capabilities: COPY candidate.capabilities }
+    result_expression
     });
     RETURN ProtocolProjectionResult{ expression: COPY resolved, issues: COPY issues };
 }
