@@ -339,7 +339,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE places: []PlaceId = ( { MUTABLE rtoc_empty_list_8: []PlaceId = List[]; rtoc_empty_list_8 } );
     rtoc_self_view.nodes.keys() |> EACH {
     MUTABLE node: OwnershipNode = (rtoc_self_view.nodes[_] OR_ELSE CAST(panic("missing hash key") AS OwnershipNode));
-    IF (ownershipGraph__scope_depth(node) >= scope_depth) THEN
+    IF (node.scope_depth >= scope_depth) THEN
       &places.append(COPY _);
     END
     };
@@ -347,7 +347,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN 0;
     END
     IF archive THEN
-      rtoc_self_view.completed_nodes = places.to_h(%(place: PlaceId) USE(rtoc_self_view) -> CAST(Tuple{place, UNWRAP (rtoc_self_view.nodes[place])} AS Tuple<PlaceId, OwnershipNode>));
+      MUTABLE archived: {PlaceId}OwnershipNode = {};
+      FOR place IN places DO
+        archived[place] = COPY UNWRAP (rtoc_self_view.nodes[place]);
+      END
+      rtoc_self_view.completed_nodes = archived;
     END
     MUTABLE place_set = places |> DISTINCT _;
     FOR _ IN places DO
@@ -356,8 +360,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN (rtoc_self_view.edges |> WHERE (place_set.contains?(ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _.from })) OR place_set.contains?(ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _.to })))) DO
     TRY (ownershipGraph__remove_edge(&rtoc_self_view, _));
     END
-    FOR _ IN rtoc_self_view.children.values() DO
-    _.subtract(place_set);
+    FOR child_set IN rtoc_self_view.children.values() DO
+      FOR place IN places DO
+        &child_set.remove(place);
+      END
     END
     &rtoc_self_view.children.delete_if(%(parent: Tuple<PlaceId, [Set]PlaceId>, children) USE(place_set) -> (place_set.contains?(parent) OR resourceClosePlan__empty?(children)));
     RETURN places.length();
