@@ -1317,8 +1317,17 @@ module RubyToClear
 
     def integer_conversion_code(receiver_node, receiver_code)
       receiver_type = inferred_clear_type_for_node(receiver_node)
-      union_payload_cast_code(receiver_code, receiver_type, "Int64") ||
-        propagate_fallible_expression("#{method_receiver_code(receiver_code)}.toInt()")
+      cast = union_payload_cast_code(receiver_code, receiver_type, "Int64")
+      return cast if cast
+
+      call = "#{method_receiver_code(receiver_code)}.toInt()"
+      # Only String.toInt() can fail (bad digits); the numeric overloads are
+      # total, so TRY on them is an unwrap of a non-optional Int64 and the
+      # frontend rejects it.
+      base = receiver_type.to_s.delete_prefix("?").split("@").first
+      return call if %w[Int64 Float64 UInt64].include?(base)
+
+      propagate_fallible_expression(call)
     end
 
     def string_conversion_code(receiver_node, receiver_code)
@@ -4686,7 +4695,8 @@ end
     end
 
     def materialize_borrowed_code(code, node)
-      return code unless stored_borrowed_value?(node) || returning_borrowed_owned_read?(node)
+      return code unless stored_borrowed_value?(node) || returning_borrowed_owned_read?(node) ||
+        narrowed_binding_read?(code)
       semantic_type = @typed_ir.value_for(node)&.type&.to_clear
       value_type = semantic_type || inferred_clear_type(node)
       return code if value_type.to_s.delete_prefix("?").end_with?("@symbol")
@@ -4762,6 +4772,15 @@ end
     # bare borrow. `copyable_local_read_source?` only inspects instance-variable
     # fields, so const-declared struct fields (which live in `@struct_fields`)
     # slip through — this covers them for return position.
+    # A name bound by an optional guard (`x EXISTS AS x_value`) is a BORROW of
+    # the payload, so handing it out of the function needs the same COPY a
+    # borrowed field read needs. This was the single largest hand-fix class in
+    # the parser migration ("Copy the value narrowed out of a local optional
+    # before returning it").
+    def narrowed_binding_read?(code)
+      @active_narrowed_binding_names.include?(code)
+    end
+
     def returning_borrowed_owned_read?(node)
       value_node = sorbet_unwrapped_value(node) || node
       return false unless value_node.is_a?(Prism::CallNode) && value_node.receiver
