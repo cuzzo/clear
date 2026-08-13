@@ -10439,66 +10439,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF implicit_safe_nav THEN
       obj_type = TRY (type__wrapped_type(obj_type));
     END
-    MUTABLE config: ?Any@multiowned = COPY (CAST({:pool: {:registry: CAST({"insert": {:arity: 1, :tag: :pool_method, :allocates: TRUE, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :bc: TRUE, :takes_args: [0], :zig: "try {0}.insert({alloc}, {1})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node: MethodCall, args: []Any, obj_type, error_fn) -> {
-    MUTABLE elem = obj_type.element_type();
-    MUTABLE arg_type = args[0].resolved_type();
-    IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
-        runtimeCallSpec__call(error_fn, node, "Pool.insert: argument type ${arg_type} does not match pool element type ${elem.resolved()}");
-    END
-    NIL
-    }, :return_type: :r_id_element, :is_method: TRUE}, "get": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.get({1})", :return_type: :r_optional_element, :container_borrow: TRUE, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.remove({1})", :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "{0}.length()", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "({0}.get({1}) != null)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}} AS {String}Any@multiowned), :tag: :pool_method, :label: %(t) -> "Pool<${t.element_type().resolved()}>"}, :set_collection: {:registry: CAST({"insert": {:arity: 1, :tag: :set_method, :allocates: TRUE, :zig: "try {0}.insert({alloc}, {1})", :bc: TRUE, :alloc: :receiver_storage, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :takes_args: [0], :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node: MethodCall, args: []Any, obj_type, error_fn) -> {
-    MUTABLE elem = obj_type.element_type();
-    MUTABLE arg_type = args[0].resolved_type();
-    IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
-        runtimeCallSpec__call(error_fn, node, "Set.insert: argument type ${arg_type} does not match set element type ${elem.resolved()}");
-    END
-    NIL
-    }, :return_type: :Void, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :set_method, :zig: "{0}.contains({1})", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :set_method, :zig: "{0}.remove({alloc}, {1})", :bc: TRUE, :alloc: :heap, :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :set_method, :zig: "CheatLib.len({0})", :bc: TRUE, :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() == 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() > 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}} AS {String}Any@multiowned), :tag: :set_method, :label: %(t) -> "Set<${t.element_type().resolved()}>"}, :string_map: {:registry: CAST({"put": {:arity: 2, :tag: :map_method, :allocates: TRUE, :mutates_receiver: TRUE, :bc: TRUE, :takes_args: [1], :zig: "try {0}.put({alloc}, {alloc}, {1}, {2})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("String{}"), :String, {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, String@symbol, {Any}Any>), :numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})", :validate: %(node: MethodCall, args: []Any, obj_type, error_fn) -> {
-    MUTABLE actual_key = &args[0].full_type_mut("HashMap.put key");
-    MUTABLE expected_key = TRY (type__key_type(obj_type));
-    IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-        runtimeCallSpec__call(error_fn, node, "HashMap.put: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-    END
-    NIL
-    }, :return_type: :Void, :is_method: TRUE}, "delete": {:arity: 1, :tag: :map_method, :bc: TRUE, :zig: "{0}.remove({alloc}, {1})", :alloc: :receiver_storage, :mutates_receiver: TRUE, :numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})", :validate: %(node: MethodCall, args: []Any, obj_type, error_fn) -> {
-    MUTABLE actual_key = &args[0].full_type_mut("HashMap.delete key");
-    MUTABLE expected_key = TRY (type__key_type(obj_type));
-    IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-        runtimeCallSpec__call(error_fn, node, "HashMap.delete: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-    END
-    NIL
-    }, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :map_method, :zig: "{0}.contains({1})", :bc: TRUE, :numeric_zig: "CheatLib.numericMapContains({key_zig}, {val_zig}, {0}, {1})", :validate: %(node: MethodCall, args: []Any, obj_type, error_fn) -> {
-    MUTABLE actual_key = &args[0].full_type_mut("HashMap.contains? key");
-    MUTABLE expected_key = TRY (type__key_type(obj_type));
-    IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-        runtimeCallSpec__call(error_fn, node, "HashMap.contains?: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-    END
-    NIL
-    }, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "count": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "keys": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.keys({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_key_list, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() == 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() > 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "values": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.values({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_value_list, :borrows: :all, :is_method: TRUE}} AS {String}Any@multiowned), :tag: :map_method, :label: %(t) -> "HashMap<${t.value_type().resolved()}>"}, :numeric_map: {:registry: CAST({"put": {:arity: 2, :tag: :map_method, :allocates: TRUE, :mutates_receiver: TRUE, :bc: TRUE, :takes_args: [1], :zig: "try {0}.put({alloc}, {alloc}, {1}, {2})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("String{}"), :String, {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, String@symbol, {Any}Any>), :numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})", :validate: %(node: MethodCall, args: []Any, obj_type, error_fn) -> {
-    MUTABLE actual_key = &args[0].full_type_mut("HashMap.put key");
-    MUTABLE expected_key = TRY (type__key_type(obj_type));
-    IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-        runtimeCallSpec__call(error_fn, node, "HashMap.put: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-    END
-    NIL
-    }, :return_type: :Void, :is_method: TRUE}, "delete": {:arity: 1, :tag: :map_method, :bc: TRUE, :zig: "{0}.remove({alloc}, {1})", :alloc: :receiver_storage, :mutates_receiver: TRUE, :numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})", :validate: %(node: MethodCall, args: []Any, obj_type, error_fn) -> {
-    MUTABLE actual_key = &args[0].full_type_mut("HashMap.delete key");
-    MUTABLE expected_key = TRY (type__key_type(obj_type));
-    IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-        runtimeCallSpec__call(error_fn, node, "HashMap.delete: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-    END
-    NIL
-    }, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :map_method, :zig: "{0}.contains({1})", :bc: TRUE, :numeric_zig: "CheatLib.numericMapContains({key_zig}, {val_zig}, {0}, {1})", :validate: %(node: MethodCall, args: []Any, obj_type, error_fn) -> {
-    MUTABLE actual_key = &args[0].full_type_mut("HashMap.contains? key");
-    MUTABLE expected_key = TRY (type__key_type(obj_type));
-    IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-        runtimeCallSpec__call(error_fn, node, "HashMap.contains?: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-    END
-    NIL
-    }, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "count": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "keys": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.keys({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_key_list, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() == 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() > 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "values": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.values({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_value_list, :borrows: :all, :is_method: TRUE}} AS {String}Any@multiowned), :tag: :map_method, :label: %(t) -> "HashMap<${t.value_type().resolved()}>"}} AS {String@symbol}Any@multiowned))[TRY (type__dispatch_key(obj_type))];
+    MUTABLE config: ?CollectionMethodConfig = collectionMethodConfig__for(type__dispatch_key(obj_type));
     IF config EXISTS AS config_value THEN
-      MUTABLE config_value_mutable = COPY config_value;
-      MUTABLE handled: ?Bool = typeAnalysisSession__resolve_typed_method(&rtoc_self_view, &node, obj_type, config_value_mutable[:registry], config_value_mutable[:tag], runtimeCallSpec__call(config_value_mutable[:label], obj_type));
+      MUTABLE handled: ?Bool = typeAnalysisSession__resolve_typed_method(&rtoc_self_view, &node, obj_type, config_value.registry, config_value.tag, TRY (collectionMethodConfig__label(config_value, obj_type)));
       MUTABLE navigation = ((node.object IS_A OptionalUnwrap AND node.object.safe_navigation?()) OR implicit_safe_nav);
       IF ((handled != NIL) AND navigation) THEN
         MUTABLE result = &node.full_type_mut("safe-navigation method result");
@@ -10552,6 +10495,46 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
+PUB STRUCT CollectionMethodConfig {
+  registry: String@symbol,
+  tag: String@symbol,
+  label_container: String
+}
+
+# Ruby COLLECTION_METHOD_CONFIGS. The label was a lambda over the receiver;
+# every arm prints "Container<element-or-value>", so the container name is the
+# only thing that varies.
+PUB FN collectionMethodConfig__for(dispatch_key: String@symbol) RETURNS ?CollectionMethodConfig ->
+  IF (dispatch_key == :pool) THEN
+    RETURN CollectionMethodConfig{ registry: :pool_methods, tag: :pool_method, label_container: "Pool" };
+  END
+  IF (dispatch_key == :set_collection) THEN
+    RETURN CollectionMethodConfig{ registry: :set_methods, tag: :set_method, label_container: "Set" };
+  END
+  IF (dispatch_key == :string_map) THEN
+    RETURN CollectionMethodConfig{ registry: :map_methods, tag: :map_method, label_container: "HashMap" };
+  END
+  IF (dispatch_key == :numeric_map) THEN
+    RETURN CollectionMethodConfig{ registry: :map_methods, tag: :map_method, label_container: "HashMap" };
+  END
+  RETURN NIL;
+END
+
+# A receiver whose element/value type has not resolved must still produce a
+# message, so an unresolved part reads "Unknown" rather than failing.
+PUB FN collectionMethodConfig__label(self: CollectionMethodConfig, obj_type: Type) RETURNS !String ->
+  MUTABLE part: ?Type = NIL;
+  IF (self.label_container == "HashMap") THEN
+    part = TRY (type__value_type(obj_type));
+  ELSE
+    part = TRY (type__element_type(obj_type));
+  END
+  IF part EXISTS AS part_value THEN
+    RETURN "${self.label_container}<${type__resolved(part_value)}>";
+  END
+  RETURN "${self.label_container}<Unknown>";
+END
+
 PRIVATE FN typeAnalysisSession__resolve_typed_method(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, obj_type: Type, registry: {RegistryKey}RawRegistryEntry, tag_field: String@symbol, type_label: String) RETURNS !?Bool
   REQUIRES self: LOCAL
 ->

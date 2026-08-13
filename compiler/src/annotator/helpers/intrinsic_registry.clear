@@ -1,741 +1,120 @@
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
-REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572655f72657475726e732e636c656172"
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172"
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f72657475726e2e636c656172"
-REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f6172675f737065632e636c656172"
-REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f656d69742e636c656172"
-REQUIRE "pkg:rtoc_6173742f7374645f6c69622e636c656172"
-REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172"
-REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f636f6e74726163742e636c656172"
-# Ruby module IntrinsicRegistry
-UNION LookupResult { FunctionSignatureMultiowned: FunctionSignature@multiowned, ArrayValue: []FunctionSignature@multiowned }
-UNION RegistryKey { StringValue: String, SymbolValue: String@symbol }
-UNION RawArgSpecEntry { SymbolValue: String@symbol, StringValue: String, AnyMultiowned: Any@multiowned }
-UNION RawArgSpec { SymbolValue: String@symbol, StringValue: String, AnyMultiowned: Any@multiowned, ArrayValue: []RawArgSpecEntry }
-UNION RawRegistryEntry { AnyMultiowned: Any@multiowned, ArrayValue: []Any@multiowned }
-UNION RawEmitInput { AnyMultiowned: Any@multiowned, ArrayValue: []Any@multiowned, SymbolValue: String@symbol, StringValue: String, Float64Value: Float64, BoolValue: Bool }
-UNION EmitPassthroughValue { StringValue: String, SymbolValue: String@symbol, AnyMultiowned: Any@multiowned, ArrayValue: []@multiowned Any }
-UNION ReturnDescriptor { TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, AnyMultiowned: Any@multiowned, Type: Type }
-UNION IntegerValue { Int64Value: Int64, StringValue: String }
-UNION IntegerInput { Int64Value: Int64, StringValue: String, ArrayValue: []IntegerValue }
-UNION SymbolInput { StringValue: String, SymbolValue: String@symbol }
-MUTABLE sigs_cache: {String@symbol}{String}?LookupResult = {};
-registry_constants: [6]String@symbol = [:STD_LIB, :POOL_METHODS, :SET_METHODS, :MAP_METHODS, :INDEX_OPS, :BUILTIN_OPS];
-MUTABLE registry_values_value: {String@symbol}{RegistryKey}RawRegistryEntry = {};
-MUTABLE map_method_aliases_value: {String}String = {};
-fs_keys = [:args, :arity, :validate, :return, :return_type, :can_fail, :error_fallible, :needs_rt];
-emit_bool = [:bc, :is_method, :suspends, :narrows_collection, :narrows_receiver_collection, :mutates_receiver, :allocates, :takes_value, :container_borrow];
-emit_strsym = [:zig, :numeric_zig, :sharded_zig, :shard_direct_zig];
-emit_str = [:reject_error, :elem];
-emit_sym = [:tag, :builtin, :alloc, :return_alloc, :val_alloc, :key_alloc, :shard_alloc, :sharded_alloc, :reject_when, :bc_op, :error_kind, :error_type];
-emit_pass = [:borrows, :fallible_clauses, :fsm_setup, :fsm_state_decls, :fsm_finish_block, :fsm_state_finalize, :fsm_finish_value, :label];
-emit_intarr = [:takes_args];
-emit_nested = [:eql, :strcmp, :cleanup, :assert, :array, :list, :pool, :set, :get, :string_raw, :string_symbol, :string_map, :numeric_map, :set_collection];
-PRIVATE FN intrinsicRegistry__build_emit(h: ?RawEmitInput, registries: {String@symbol}{RegistryKey}RawRegistryEntry) RETURNS !?IntrinsicEmit ->
-  IF !(((h != NIL) AND (h IS_A {}Any))) THEN
+REQUIRE "pkg:rtoc_6173742f7374645f6c69625f72656769737472792e636c656172"
+
+# Ruby module IntrinsicRegistry.
+#
+# The Ruby version converts the registry hashes into typed signatures at
+# startup. CLEAR has no dynamic value type, so that conversion happens at build
+# time instead (tools/gen_intrinsic_registry_clear.rb) and this file is only
+# the lookup surface over the generated tables. A registry is identified by its
+# name, not by passing the hash itself around.
+PUB UNION Name { StringValue: String, SymbolValue: String@symbol }
+
+PUB FN intrinsicRegistry__name_string(name: Name) RETURNS String ->
+  PARTIAL MATCH name START
+    Name.StringValue AS text -> RETURN COPY text;
+  END
+  RETURN COPY CAST(name AS String);
+END
+
+PUB FN intrinsicRegistry__overloads(registry: String@symbol, name: String) RETURNS ![]FunctionSignature@multiowned ->
+  MUTABLE table = TRY (stdLibRegistry__table(registry));
+  MUTABLE found: ?[]FunctionSignature@multiowned = COPY table[name];
+  IF found EXISTS AS found_value THEN
+    RETURN COPY found_value;
+  END
+  # MAP_METHODS aliases `insert` onto `put`.
+  IF ((registry == :map_methods) AND (name == "insert")) THEN
+    MUTABLE aliased: ?[]FunctionSignature@multiowned = COPY table["put"];
+    IF aliased EXISTS AS aliased_value THEN
+      RETURN COPY aliased_value;
+    END
+  END
+  MUTABLE empty: []FunctionSignature@multiowned = [];
+  RETURN empty;
+END
+
+# Ruby: `FunctionSignature.unwrap(lookup(...))`. `unwrap` answers nil for an
+# ARRAY of overloads, so a name with more than one signature has no single
+# definition -- callers that want them all ask for overloads.
+PUB FN intrinsicRegistry__lookup_single(registry: String@symbol, name: String) RETURNS !?FunctionSignature@multiowned ->
+  MUTABLE all = TRY (intrinsicRegistry__overloads(registry, name));
+  IF (all.length() != 1) THEN
     RETURN NIL;
   END
-  MUTABLE e = IntrinsicEmit{ zig: NIL, numeric_zig: NIL, sharded_zig: NIL, shard_direct_zig: NIL, fsm_setup: List[], fsm_state_decls: List[], fsm_finish_block: List[], fsm_state_finalize: List[], fsm_setup_present: FALSE, fsm_state_decls_present: FALSE, fsm_finish_block_present: FALSE, fsm_state_finalize_present: FALSE, fsm_finish_value: NIL, bc: FALSE, is_method: FALSE, suspends: FALSE, narrows_collection: FALSE, narrows_receiver_collection: FALSE, mutates_receiver: FALSE, allocates: FALSE, takes_value: FALSE, container_borrow: FALSE, tag: NIL, builtin: NIL, alloc: NIL, return_alloc: NIL, val_alloc: NIL, key_alloc: NIL, shard_alloc: NIL, sharded_alloc: NIL, borrows: NIL, reject_when: NIL, bc_op: NIL, error_kind: NIL, error_type: NIL, registry: NIL, elem: NIL, fallible_clauses: NIL, lifetime: List[], reject_error: NIL, arity: NIL, takes_args: List[], label: NIL, eql: NIL, strcmp: NIL, cleanup: NIL, assert: NIL, array: NIL, list: NIL, pool: NIL, set: NIL, get: NIL, string_raw: NIL, string_symbol: NIL, string_map: NIL, numeric_map: NIL, set_collection: NIL };
-  h.keys() |> EACH {
-  MUTABLE v: Any = (h[_] OR_ELSE panic("missing hash key"));
-  MUTABLE key = _;
-  IF !((fs_keys.contains?(key) OR (v == NIL))) THEN
-      IF emit_bool.contains?(key) THEN
-        TRY (intrinsicRegistry__assign_emit_bool(&e, key, !(!(v))));
-      ELSE_IF emit_strsym.contains?(key) OR emit_pass.contains?(key) THEN
-        TRY (intrinsicRegistry__assign_emit_value(&e, key, v));
-      ELSE_IF emit_str.contains?(key) THEN
-        TRY (intrinsicRegistry__assign_emit_string(&e, key, CAST(v AS String)));
-      ELSE_IF (key == :lifetime) THEN
-        e.lifetime = (TRY (intrinsicRegistry__normalize_lifetime(v))) |> SELECT intrinsicRegistry__lifetime_source_string(_);
-      ELSE_IF emit_sym.contains?(key) THEN
-        TRY (intrinsicRegistry__assign_emit_symbol(&e, key, TRY (intrinsicRegistry__coerce_symbol(CAST(v AS SymbolInput)))));
-      ELSE_IF emit_intarr.contains?(key) THEN
-        TRY (intrinsicRegistry__assign_emit_int_array(&e, key, TRY (intrinsicRegistry__coerce_int_array(CAST(v AS IntegerInput)))));
-      ELSE_IF emit_nested.contains?(key) THEN
-        TRY (intrinsicRegistry__assign_emit_nested(&e, key, TRY (intrinsicRegistry__nested_emit(v, registries))));
-      ELSE
-        panic("IntrinsicRegistry: unmapped registry key {}");
-      END
-  END
-  };
-  RETURN e;
+  RETURN COPY UNWRAP (all[0]);
 END
-FN intrinsicRegistry__assign_emit_bool(MUTABLE e: IntrinsicEmit, key: String@symbol, value: Bool) RETURNS !Void ->
-  IF (key == :bc) THEN
-    e.bc = COPY value;
-  ELSE_IF (key == :is_method) THEN
-    e.is_method = COPY value;
-  ELSE_IF (key == :suspends) THEN
-    e.suspends = COPY value;
-  ELSE_IF (key == :narrows_collection) THEN
-    e.narrows_collection = COPY value;
-  ELSE_IF (key == :narrows_receiver_collection) THEN
-    e.narrows_receiver_collection = COPY value;
-  ELSE_IF (key == :mutates_receiver) THEN
-    e.mutates_receiver = COPY value;
-  ELSE_IF (key == :allocates) THEN
-    e.allocates = COPY value;
-  ELSE_IF (key == :takes_value) THEN
-    e.takes_value = COPY value;
-  ELSE_IF (key == :container_borrow) THEN
-    e.container_borrow = COPY value;
-  ELSE
-    TRY (intrinsicRegistry__unknown_emit_key_mut(key));
+
+PUB FN intrinsicRegistry__to_return_type(rdef: FunctionReturn) RETURNS !Type ->
+  IF rdef.fixed EXISTS AS fixed_type THEN
+    RETURN COPY fixed_type;
   END
+  RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
 END
-FN intrinsicRegistry__assign_emit_value(MUTABLE e: IntrinsicEmit, key: String@symbol, value: ?EmitPassthroughValue) RETURNS !Void ->
-  IF (key == :zig) THEN
-    e.zig = COPY castOptionalEmitPassthroughValueToOptionalIntrinsicEmitStrOrSym(value);
-  ELSE_IF (key == :numeric_zig) THEN
-    e.numeric_zig = COPY castOptionalEmitPassthroughValueToOptionalIntrinsicEmitStrOrSym(value);
-  ELSE_IF (key == :sharded_zig) THEN
-    e.sharded_zig = COPY castOptionalEmitPassthroughValueToOptionalIntrinsicEmitStrOrSym(value);
-  ELSE_IF (key == :shard_direct_zig) THEN
-    e.shard_direct_zig = COPY castOptionalEmitPassthroughValueToOptionalIntrinsicEmitStrOrSym(value);
-  ELSE_IF (key == :borrows) THEN
-    e.borrows = CAST(value AS ?Any);
-  ELSE_IF (key == :fallible_clauses) THEN
-    e.fallible_clauses = castOptionalEmitPassthroughValueToAnyMultiowned(value);
-  ELSE_IF (key == :fsm_setup) THEN
-    e.fsm_setup = COPY castOptionalEmitPassthroughValueToAnyMultiowned(value);
-    e.fsm_setup_present = TRUE;
-  ELSE_IF (key == :fsm_state_decls) THEN
-    e.fsm_state_decls = COPY castOptionalEmitPassthroughValueToAnyMultiowned(value);
-    e.fsm_state_decls_present = TRUE;
-  ELSE_IF (key == :fsm_finish_block) THEN
-    e.fsm_finish_block = COPY castOptionalEmitPassthroughValueToAnyMultiowned(value);
-    e.fsm_finish_block_present = TRUE;
-  ELSE_IF (key == :fsm_state_finalize) THEN
-    e.fsm_state_finalize = COPY castOptionalEmitPassthroughValueToAnyMultiowned(value);
-    e.fsm_state_finalize_present = TRUE;
-  ELSE_IF (key == :fsm_finish_value) THEN
-    e.fsm_finish_value = castOptionalEmitPassthroughValueToAnyMultiowned(value);
-  ELSE_IF (key == :label) THEN
-    e.label = castOptionalEmitPassthroughValueToOptionalAnyMultiowned(value);
-  ELSE
-    TRY (intrinsicRegistry__unknown_emit_key_mut(key));
-  END
-END
-FN intrinsicRegistry__assign_emit_string(MUTABLE e: IntrinsicEmit, key: String@symbol, value: String) RETURNS !Void ->
-  IF (key == :reject_error) THEN
-    e.reject_error = COPY value;
-  ELSE_IF (key == :elem) THEN
-    e.elem = COPY value;
-  ELSE
-    TRY (intrinsicRegistry__unknown_emit_key_mut(key));
-  END
-END
-FN intrinsicRegistry__assign_emit_symbol(MUTABLE e: IntrinsicEmit, key: String@symbol, value: String@symbol) RETURNS !Void ->
-  IF (key == :tag) THEN
-    e.tag = COPY value;
-  ELSE_IF (key == :builtin) THEN
-    e.builtin = COPY value;
-  ELSE_IF (key == :alloc) THEN
-    e.alloc = COPY value;
-  ELSE_IF (key == :return_alloc) THEN
-    e.return_alloc = COPY value;
-  ELSE_IF (key == :val_alloc) THEN
-    e.val_alloc = COPY value;
-  ELSE_IF (key == :key_alloc) THEN
-    e.key_alloc = COPY value;
-  ELSE_IF (key == :shard_alloc) THEN
-    e.shard_alloc = COPY value;
-  ELSE_IF (key == :sharded_alloc) THEN
-    e.sharded_alloc = COPY value;
-  ELSE_IF (key == :reject_when) THEN
-    e.reject_when = COPY value;
-  ELSE_IF (key == :bc_op) THEN
-    e.bc_op = COPY value;
-  ELSE_IF (key == :error_kind) THEN
-    e.error_kind = COPY value;
-  ELSE_IF (key == :error_type) THEN
-    e.error_type = COPY value;
-  ELSE
-    TRY (intrinsicRegistry__unknown_emit_key_mut(key));
-  END
-END
-FN intrinsicRegistry__assign_emit_int_array(MUTABLE e: IntrinsicEmit, key: String@symbol, value: []Int64) RETURNS !Void ->
-  IF (key == :takes_args) THEN
-    e.takes_args = COPY value;
-  ELSE
-    TRY (intrinsicRegistry__unknown_emit_key_mut(key));
-  END
-END
-FN intrinsicRegistry__assign_emit_nested(MUTABLE e: IntrinsicEmit, key: String@symbol, value: ?IntrinsicEmit) RETURNS !Void ->
-  IF (key == :eql) THEN
-    e.eql = COPY value;
-  ELSE_IF (key == :strcmp) THEN
-    e.strcmp = COPY value;
-  ELSE_IF (key == :cleanup) THEN
-    e.cleanup = COPY value;
-  ELSE_IF (key == :assert) THEN
-    e.assert = COPY value;
-  ELSE_IF (key == :array) THEN
-    e.array = COPY value;
-  ELSE_IF (key == :list) THEN
-    e.list = COPY value;
-  ELSE_IF (key == :pool) THEN
-    e.pool = COPY value;
-  ELSE_IF (key == :set) THEN
-    e.set = COPY value;
-  ELSE_IF (key == :get) THEN
-    e.get = COPY value;
-  ELSE_IF (key == :string_raw) THEN
-    e.string_raw = COPY value;
-  ELSE_IF (key == :string_symbol) THEN
-    e.string_symbol = COPY value;
-  ELSE_IF (key == :string_map) THEN
-    e.string_map = COPY value;
-  ELSE_IF (key == :numeric_map) THEN
-    e.numeric_map = COPY value;
-  ELSE_IF (key == :set_collection) THEN
-    e.set_collection = COPY value;
-  ELSE
-    TRY (intrinsicRegistry__unknown_emit_key_mut(key));
-  END
-END
-FN intrinsicRegistry__coerce_int_array(value: IntegerInput) RETURNS ![]Int64 ->
-  IF value IS_A []IntegerValue AS array THEN
-    RETURN array |> SELECT TRY (intrinsicRegistry__coerce_integer(_));
-  END
-  IF value IS_A Int64 AS int64 THEN
-    RETURN CAST([int64] AS []Int64);
-  END
-  IF value IS_A String AS string THEN
-    RETURN CAST([TRY (string.toInt())] AS []Int64);
-  END
-  panic("IntrinsicRegistry: expected integer-compatible value");
-END
-FN intrinsicRegistry__normalize_integer_array(value: ?IntegerInput) RETURNS ![]Int64 ->
-  IF value EXISTS AS value_value THEN
-    RETURN TRY (intrinsicRegistry__coerce_int_array(value_value));
-  ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_1: []Int64 = List[]; rtoc_empty_list_1 } ) AS []Int64);
-  END
-END
-FN intrinsicRegistry__coerce_integer<T>(value: T) RETURNS !Int64 ->
-  COMPTIME IF T IS_A Int64 THEN
-    RETURN COPY value;
-  END
-  COMPTIME IF T IS_A String THEN
-    RETURN TRY (value.toInt());
-  END
-  panic("IntrinsicRegistry: expected integer-compatible value");
-END
-# Diverges: the key is unmapped, so there is no value to hand back. `Auto` in a
-# public signature is rejected across a package boundary, and NoReturn is the
-# honest spelling anyway.
-FN intrinsicRegistry__unknown_emit_key_mut(key: String@symbol) RETURNS NoReturn ->
-  panic("IntrinsicRegistry: unmapped registry key {}");
-END
-FN intrinsicRegistry__coerce_symbol<T>(value: T) RETURNS !String@symbol ->
-  COMPTIME IF T IS_A String@symbol THEN
-    RETURN COPY value;
-  END
-  COMPTIME IF T IS_A String THEN
-    RETURN symbol(value);
-  END
-  panic("IntrinsicRegistry: expected symbol-compatible value");
-END
-PRIVATE FN intrinsicRegistry__nested_emit(v: ?RawEmitInput, registries: {String@symbol}{RegistryKey}RawRegistryEntry) RETURNS !?IntrinsicEmit ->
-  IF !(((v != NIL) AND (v IS_A {}Any))) THEN
-    RETURN NIL;
-  END
-  MUTABLE ptr = COPY v.substr(:registry, 1);
-  IF ptr THEN
-    MUTABLE name: ?String@symbol = intrinsicRegistry__registry_name_for(registries, CAST(ptr AS {RegistryKey}RawRegistryEntry));
-    IF name EXISTS AS name_value THEN
-      RETURN IntrinsicEmit{ registry: COPY name_value, zig: NIL, numeric_zig: NIL, sharded_zig: NIL, shard_direct_zig: NIL, fsm_setup: List[], fsm_state_decls: List[], fsm_finish_block: List[], fsm_state_finalize: List[], fsm_setup_present: FALSE, fsm_state_decls_present: FALSE, fsm_finish_block_present: FALSE, fsm_state_finalize_present: FALSE, fsm_finish_value: NIL, bc: FALSE, is_method: FALSE, suspends: FALSE, narrows_collection: FALSE, narrows_receiver_collection: FALSE, mutates_receiver: FALSE, allocates: FALSE, takes_value: FALSE, container_borrow: FALSE, tag: NIL, builtin: NIL, alloc: NIL, return_alloc: NIL, val_alloc: NIL, key_alloc: NIL, shard_alloc: NIL, sharded_alloc: NIL, borrows: NIL, reject_when: NIL, bc_op: NIL, error_kind: NIL, error_type: NIL, elem: NIL, fallible_clauses: NIL, lifetime: List[], reject_error: NIL, arity: NIL, takes_args: List[], label: NIL, eql: NIL, strcmp: NIL, cleanup: NIL, assert: NIL, array: NIL, list: NIL, pool: NIL, set: NIL, get: NIL, string_raw: NIL, string_symbol: NIL, string_map: NIL, numeric_map: NIL, set_collection: NIL };
-    END
-    RETURN IntrinsicEmit{ registry: :unknown, zig: NIL, numeric_zig: NIL, sharded_zig: NIL, shard_direct_zig: NIL, fsm_setup: List[], fsm_state_decls: List[], fsm_finish_block: List[], fsm_state_finalize: List[], fsm_setup_present: FALSE, fsm_state_decls_present: FALSE, fsm_finish_block_present: FALSE, fsm_state_finalize_present: FALSE, fsm_finish_value: NIL, bc: FALSE, is_method: FALSE, suspends: FALSE, narrows_collection: FALSE, narrows_receiver_collection: FALSE, mutates_receiver: FALSE, allocates: FALSE, takes_value: FALSE, container_borrow: FALSE, tag: NIL, builtin: NIL, alloc: NIL, return_alloc: NIL, val_alloc: NIL, key_alloc: NIL, shard_alloc: NIL, sharded_alloc: NIL, borrows: NIL, reject_when: NIL, bc_op: NIL, error_kind: NIL, error_type: NIL, elem: NIL, fallible_clauses: NIL, lifetime: List[], reject_error: NIL, arity: NIL, takes_args: List[], label: NIL, eql: NIL, strcmp: NIL, cleanup: NIL, assert: NIL, array: NIL, list: NIL, pool: NIL, set: NIL, get: NIL, string_raw: NIL, string_symbol: NIL, string_map: NIL, numeric_map: NIL, set_collection: NIL };
-  END
-  RETURN TRY (intrinsicRegistry__build_emit(v, registries));
-END
-FN intrinsicRegistry__registry_name_for(registries: {String@symbol}{RegistryKey}RawRegistryEntry, target: {RegistryKey}RawRegistryEntry) RETURNS ?String@symbol ->
-  MUTABLE names = registries.keys();
-  MUTABLE i: Int64 = 0;
-  WHILE (i < names.length()) DO
-    MUTABLE name = COPY UNWRAP (names[i]);
-    IF (UNWRAP (registries[name])).equal?(target) THEN
-      RETURN name;
-    END
-    i = (i + 1);
-  END
-  i = 0;
-  WHILE (i < names.length()) DO
-    name = COPY UNWRAP (names[i]);
-    IF intrinsicRegistry__registry_matches?(UNWRAP (registries[name]), target) THEN
-      RETURN name;
-    END
-    i = (i + 1);
-  END
-  RETURN NIL;
-END
-FN intrinsicRegistry__registry_matches?(left: {RegistryKey}RawRegistryEntry, right: {RegistryKey}RawRegistryEntry) RETURNS Bool ->
-  IF !((left.count() == right.count())) THEN
+
+PUB FN intrinsicRegistry__collection_element_evidence_method?(name: Name, arity: Int64) RETURNS !Bool ->
+  IF (arity != 1) THEN
     RETURN FALSE;
   END
-  MUTABLE left_keys = left.keys();
-  MUTABLE right_keys = right.keys();
+  MUTABLE method_name = intrinsicRegistry__name_string(name);
+  registries: [3]String@symbol = [:std_lib, :pool_methods, :set_methods];
   MUTABLE i: Int64 = 0;
-  WHILE (i < left_keys.length()) DO
-    MUTABLE wanted = intrinsicRegistry__registry_key_string(UNWRAP (left_keys[i]));
-    MUTABLE found: Bool = FALSE;
-    MUTABLE j: Int64 = 0;
-    WHILE (j < right_keys.length()) DO
-      IF (intrinsicRegistry__registry_key_string(UNWRAP (right_keys[j])) == wanted) THEN
-        found = TRUE;
-        BREAK;
+  WHILE (i < registries.length()) DO
+    MUTABLE found: ?FunctionSignature@multiowned = TRY (intrinsicRegistry__lookup_single(registries[i], method_name));
+    IF found EXISTS AS found_value THEN
+      MUTABLE found_mutable = COPY found_value;
+      IF (TRY (functionSignature__intrinsic_contract(&found_mutable))).behavior.is_method THEN
+        IF TRY (functionSignature__intrinsic_collection_narrowing?(&found_mutable)) THEN
+          RETURN TRUE;
+        END
       END
-      j = (j + 1);
     END
-    IF !(found) THEN
+    i = (i + 1);
+  END
+  RETURN FALSE;
+END
+
+PUB FN intrinsicRegistry__map_pair_evidence_method?(name: Name, arity: Int64) RETURNS !Bool ->
+  IF (arity != 2) THEN
+    RETURN FALSE;
+  END
+  MUTABLE found: ?FunctionSignature@multiowned = TRY (intrinsicRegistry__lookup_single(:map_methods, intrinsicRegistry__name_string(name)));
+  IF found EXISTS AS found_value THEN
+    MUTABLE found_mutable = COPY found_value;
+    IF !((TRY (functionSignature__intrinsic_contract(&found_mutable))).behavior.is_method) THEN
       RETURN FALSE;
     END
-    i = (i + 1);
+    RETURN (TRY (functionSignature__mutates_receiver?(&found_mutable)) AND TRY (functionSignature__takes_ownership?(&found_mutable)));
   END
-  RETURN TRUE;
+  RETURN FALSE;
 END
-FN intrinsicRegistry__registry_key_string(key: RegistryKey) RETURNS String ->
-  IF key IS_A String AS string THEN
-    RETURN COPY string;
-  END
-  RETURN COPY CAST(key AS String);
-END
-FN intrinsicRegistry__to_return_type(rdef: FunctionReturn) RETURNS !Type ->
-  IF functionReturn__fixed?(rdef) THEN
-    MUTABLE fixed = COPY rdef.fixed;
-    RETURN fixed;
-  ELSE
-    RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
-  END
-END
-FN intrinsicRegistry__to_return_def(v: ?ReturnDescriptor) RETURNS !FunctionReturn@multiowned ->
-  IF v EXISTS AS v_value THEN
-    IF v_value IS_A Type AS type THEN
-      RETURN functionReturn__fixed(type);
-    END
-    IF v_value IS_A Any AS any THEN
-      panic("IntrinsicRegistry: Proc return descriptor is not allowed; use a declarative directive (r_* variant or infer_* host method)");
-    END
-    IF v_value IS_A {}Any THEN
-      MUTABLE raw_type = COPY v_value.substr(:type, 1);
-      IF raw_type THEN
-        RETURN functionReturn__fixed(TRY (type__new(castTypeTypeInputToTypeConstructionInput(CAST(raw_type AS TypeTypeInput)), CAST(v_value.substr(:ownership, 1) AS ?String@symbol), CAST(v_value.substr(:sync, 1) AS ?String@symbol))));
-      END
-      RETURN functionReturn__fixed(TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })));
-    END
-    IF v_value IS_A String@symbol AS string_symbol THEN
-      MUTABLE kind: ?String@symbol = COPY (CAST({:r_element_of: :ElementOf, :r_optional_element: :OptionalOfElement, :r_id_element: :IdOfElement, :r_optional_value: :OptionalOfValue, :r_value_list: :ValueList, :r_key_list: :KeyList} AS {String@symbol}String@symbol))[string_symbol];
-      IF kind EXISTS AS kind_value THEN
-        RETURN TRY (functionReturn__variant(kind_value));
-      END
-    END
-    MUTABLE s = COPY CAST(v_value AS String);
-    IF (s.startsWith?("infer_") OR s.startsWith?("macro_")) THEN
-      RETURN functionReturn__infer(TRY (intrinsicRegistry__coerce_symbol(v_value)));
-    END
-    RETURN functionReturn__fixed(TRY (type__new(castReturnDescriptorToTypeConstructionInput(v_value))));
-  ELSE
-    RETURN functionReturn__fixed(TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })));
-  END
-END
-PRIVATE FN intrinsicRegistry__convert_entry(ignored_name: RegistryKey, h: Any, registries: {String@symbol}{RegistryKey}RawRegistryEntry) RETURNS !FunctionSignature@multiowned ->
-  MUTABLE ret = h[:return];
-  IF h.key?(:return_type) THEN
-    ret = h[:return_type];
-  END
-  MUTABLE rdef = TRY (intrinsicRegistry__to_return_def(CAST(ret AS ?ReturnDescriptor)));
-  MUTABLE params = TRY (intrinsicRegistry__params_from_arg_spec(h[:args], h));
-  MUTABLE fs = TRY (functionSignature__new(params, TypeTypeInput{ Type: COPY TRY (intrinsicRegistry__to_return_type(rdef)) }, FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (intrinsicRegistry__normalize_lifetime(h[:lifetime])) }, NIL, ( { MUTABLE rtoc_empty_list_2: []String@symbol = List[]; rtoc_empty_list_2 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_3: []String@symbol = List[]; rtoc_empty_list_3 } ), NIL, ( { MUTABLE rtoc_empty_list_4: []String@symbol = List[]; rtoc_empty_list_4 } ), TRUE, CAST(h[:needs_rt] AS ?Bool), CAST(h[:can_fail] AS ?Bool), NIL, CAST(h[:error_fallible] AS ?Bool), NIL, NIL, NIL, NIL, NIL, NIL, CAST(h[:validate] AS ?Any@multiowned), CAST(h[:args] AS ?IntrinsicArgSpecRawArgSpec), CAST(h[:arity] AS ?Int64), TRY (intrinsicRegistry__build_emit(RawEmitInput{ AnyMultiowned: COPY h }, registries)), rdef));
-  RETURN fs;
-END
-PRIVATE FN intrinsicRegistry__normalize_lifetime(value: ?FunctionSignatureLifetimeInput) RETURNS ![]FunctionSignatureLifetimeSource ->
-  IF value EXISTS AS value_value THEN
-    IF value_value IS_A []FunctionSignatureLifetimeSource AS array THEN
-      RETURN COPY array;
-    END
-    RETURN CAST([castFunctionSignatureLifetimeInputToFunctionSignatureLifetimeSource(value_value)] AS []FunctionSignatureLifetimeSource);
-  ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_5: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_5 } ) AS []FunctionSignatureLifetimeSource);
-  END
-END
-FN intrinsicRegistry__lifetime_source_string(value: FunctionSignatureLifetimeSource) RETURNS String ->
-  IF value IS_A String AS string THEN
-    RETURN COPY string;
-  END
-  RETURN COPY CAST(value AS String);
-END
-PRIVATE FN intrinsicRegistry__params_from_arg_spec(spec: ?RawArgSpec, h: Any) RETURNS ![]Param ->
-  MUTABLE arg_specs = TRY (intrinsicArgSpec__list_from_registry(castOptionalRawArgSpecToOptionalIntrinsicArgSpecRawArgSpec(spec)));
-  MUTABLE takes_args = TRY (intrinsicRegistry__normalize_integer_array(UNWRAP (CAST(h[:takes_args] AS ?IntegerInput))));
-  MUTABLE mutates_receiver = (h[:mutates_receiver] == TRUE);
-  MUTABLE params: []Param = ( { MUTABLE rtoc_empty_list_6: []Param = List[]; rtoc_empty_list_6 } );
-  MUTABLE i: Int64 = 0;
-  WHILE (i < arg_specs.length()) DO
-    MUTABLE arg_def = COPY UNWRAP (arg_specs[i]);
-    MUTABLE takes_index = IF (((h[:is_method] == TRUE) OR mutates_receiver)) THEN
-      (i - 1)
-    ELSE
-      i
-    END;
-    MUTABLE takes_by_index = ((takes_index >= 0) AND takes_args.contains?(takes_index));
-    &params.append(Param{ name: (arg_def.name OR_ELSE "arg${i.toString()}"), type: COPY arg_def.type, required: TRUE, mutable: ( { MUTABLE rtoc_optional_or_source_7: ?Bool = arg_def.mutable; MUTABLE rtoc_optional_or_result_8: ?Bool = NIL; IF rtoc_optional_or_source_7 != NIL THEN rtoc_optional_or_result_8 = COPY rtoc_optional_or_source_7; ELSE rtoc_optional_or_result_8 = (((i == 0) AND mutates_receiver)); END rtoc_optional_or_result_8 } ), takes: ( { MUTABLE rtoc_optional_or_source_9: ?Bool = arg_def.takes; MUTABLE rtoc_optional_or_result_10: ?Bool = NIL; IF rtoc_optional_or_source_9 != NIL THEN rtoc_optional_or_result_10 = COPY rtoc_optional_or_source_9; ELSE rtoc_optional_or_result_10 = takes_by_index; END rtoc_optional_or_result_10 } ), default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: :polymorphic });
-    i = (i + 1);
-  END
-  RETURN params;
-END
-FN intrinsicRegistry__sigs(reg: {RegistryKey}RawRegistryEntry) RETURNS !{String}?LookupResult ->
-  MUTABLE registry_map = TRY (intrinsicRegistry__registries());
-  MUTABLE cache_key: ?String@symbol = intrinsicRegistry__registry_name_for(registry_map, reg);
-  IF cache_key EXISTS AS cache_key_value THEN
-    MUTABLE cached: ?{String}?LookupResult = COPY sigs_cache[cache_key_value];
-    IF cached EXISTS AS cached_value THEN
-      RETURN COPY cached_value;
-    END
-  END
-  MUTABLE out: {String}?LookupResult = {};
-  MUTABLE names = reg.keys();
-  MUTABLE entries = reg.values();
-  MUTABLE i: Int64 = 0;
-  WHILE (i < names.length()) DO
-    MUTABLE name = COPY UNWRAP (names[i]);
-    MUTABLE entry = COPY UNWRAP (entries[i]);
-    MUTABLE key = intrinsicRegistry__registry_key_string(name);
-    IF entry IS_A []Any@multiowned AS array THEN
-      MUTABLE overloads: []FunctionSignature@multiowned = ( { MUTABLE rtoc_empty_list_11: []FunctionSignature@multiowned = List[]; rtoc_empty_list_11 } );
-      MUTABLE j: Int64 = 0;
-      WHILE (j < array.length()) DO
-        &overloads.append(TRY (intrinsicRegistry__convert_entry(name, UNWRAP (array[j]), registry_map)));
-        j = (j + 1);
-      END
-      out[key] = LookupResult{ FunctionSignatureMultiowned: COPY overloads };
-    ELSE_IF entry IS_A {}Any THEN
-      out[key] = LookupResult{ FunctionSignatureMultiowned: COPY TRY (intrinsicRegistry__convert_entry(name, castRawRegistryEntryToAnyMultiowned(entry), registry_map)) };
-    END
-    i = (i + 1);
-  END
-  IF cache_key EXISTS AS cache_key_value THEN
-    sigs_cache[cache_key_value] = out;
-  END
-  RETURN out;
-END
-PRIVATE FN intrinsicRegistry__registries() RETURNS !{String@symbol}{RegistryKey}RawRegistryEntry ->
-  MUTABLE out: {String@symbol}{RegistryKey}RawRegistryEntry = {};
-  MUTABLE values = TRY (intrinsicRegistry__registry_values());
-  MUTABLE i: Int64 = 0;
-  WHILE (i < registry_constants.length()) DO
-    MUTABLE constant_name = UNWRAP (registry_constants[i]);
-    MUTABLE registry: ?{RegistryKey}RawRegistryEntry = COPY values[constant_name];
-    IF registry EXISTS AS registry_value THEN
-      out[constant_name] = COPY registry_value;
-    END
-    i = (i + 1);
-  END
-  RETURN out;
-END
-PRIVATE FN intrinsicRegistry__registry_values() RETURNS !{String@symbol}{RegistryKey}RawRegistryEntry ->
-  IF (registry_values_value.count() == 0) THEN
-    intrinsicRegistry__populate_registry_values();
-  END
-  RETURN registry_values_value;
-END
-PRIVATE FN intrinsicRegistry__populate_registry_values() RETURNS !Void ->
-  registry_values_value[:STD_LIB] = std_lib;
-  registry_values_value[:POOL_METHODS] = {"insert": {:arity: 1, :tag: :pool_method, :allocates: TRUE, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :bc: TRUE, :takes_args: [0], :zig: "try {0}.insert({alloc}, {1})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE elem = TRY (type__element_type(obj_type));
-  MUTABLE arg_type = args[0].resolved_type();
-  IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
-      runtimeCallSpec__call(error_fn, node, "Pool.insert: argument type ${arg_type} does not match pool element type ${elem.resolved()}");
-  END
-  NIL
-  }, :return_type: :r_id_element, :is_method: TRUE}, "get": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.get({1})", :return_type: :r_optional_element, :container_borrow: TRUE, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.remove({1})", :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "{0}.length()", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "({0}.get({1}) != null)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}};
-  registry_values_value[:SET_METHODS] = {"insert": {:arity: 1, :tag: :set_method, :allocates: TRUE, :zig: "try {0}.insert({alloc}, {1})", :bc: TRUE, :alloc: :receiver_storage, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :takes_args: [0], :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE elem = TRY (type__element_type(obj_type));
-  MUTABLE arg_type = args[0].resolved_type();
-  IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
-      runtimeCallSpec__call(error_fn, node, "Set.insert: argument type ${arg_type} does not match set element type ${elem.resolved()}");
-  END
-  NIL
-  }, :return_type: :Void, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :set_method, :zig: "{0}.contains({1})", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :set_method, :zig: "{0}.remove({alloc}, {1})", :bc: TRUE, :alloc: :heap, :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :set_method, :zig: "CheatLib.len({0})", :bc: TRUE, :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() == 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() > 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}};
-  registry_values_value[:MAP_METHODS] = {"put": {:arity: 2, :tag: :map_method, :allocates: TRUE, :mutates_receiver: TRUE, :bc: TRUE, :takes_args: [1], :zig: "try {0}.put({alloc}, {alloc}, {1}, {2})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("String{}"), :String, {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, String@symbol, {Any}Any>), :numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.put key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.put: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Void, :is_method: TRUE}, "delete": {:arity: 1, :tag: :map_method, :bc: TRUE, :zig: "{0}.remove({alloc}, {1})", :alloc: :receiver_storage, :mutates_receiver: TRUE, :numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.delete key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.delete: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :map_method, :zig: "{0}.contains({1})", :bc: TRUE, :numeric_zig: "CheatLib.numericMapContains({key_zig}, {val_zig}, {0}, {1})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.contains? key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.contains?: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "count": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "keys": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.keys({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_key_list, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() == 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() > 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "values": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.values({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_value_list, :borrows: :all, :is_method: TRUE}};
-  registry_values_value[:INDEX_OPS] = {:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}};
-  registry_values_value[:BUILTIN_OPS] = {:eql: {:zig: "CheatLib.eql({0}, {1})", :bc: TRUE, :borrows: :all}, :strcmp: {:zig: "CheatLib.strcmp({0}, {1})", :bc: TRUE, :borrows: :all}, :strEql: {:zig: "CheatLib.strEql({0}, {1})", :bc: TRUE, :borrows: :all}, :symbolEql: {:zig: "CheatLib.eql({0}, {1})", :bc: TRUE, :borrows: :all}, :charAt: {:zig: "CheatLib.charAt({0}, {1})", :bc: TRUE, :borrows: :all}, :getAt: {:zig: "CheatLib.getAt({0}, {1})", :bc: TRUE, :borrows: :all}, :getAtOpt: {:zig: "CheatLib.getAtOpt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :getAtPtrOpt: {:zig: "CheatLib.getAtPtrOpt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :getOptionalPtr: {:zig: "CheatLib.getOptionalPtr({0})", :bc: FALSE, :borrows: :all}, :getNodeAt: {:zig: "CheatLib.getNodeAt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :setAt: {:zig: "CheatLib.setAt({0}, {1}, {2})", :bc: TRUE, :borrows: :all}, :numericMapGet: {:zig: "CheatLib.numericMapGet({0}, {1}, {2}, {3})", :bc: TRUE, :borrows: :all}, :intAdd: {:zig: "CheatLib.intAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :intSub: {:zig: "CheatLib.intSub({0}, {1})", :bc: TRUE, :borrows: :all}, :intMul: {:zig: "CheatLib.intMul({0}, {1})", :bc: TRUE, :borrows: :all}, :intDiv: {:zig: "@divTrunc({0}, {1})", :bc: TRUE, :borrows: :all}, :intMod: {:zig: "@mod({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapAdd: {:zig: "CheatLib.wrapAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapSub: {:zig: "CheatLib.wrapSub({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapMul: {:zig: "CheatLib.wrapMul({0}, {1})", :bc: TRUE, :borrows: :all}, :checkAdd: {:zig: "CheatLib.checkAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :checkSub: {:zig: "CheatLib.checkSub({0}, {1})", :bc: TRUE, :borrows: :all}, :checkMul: {:zig: "CheatLib.checkMul({0}, {1})", :bc: TRUE, :borrows: :all}, :assert: {:zig: "CheatLib.assert({0}, {1})", :bc: TRUE, :borrows: :all}, :dupeUnionValue: {:zig: "try CheatLib.dupeUnionValue({0}, {1}, {2})", :bc: TRUE, :allocates: TRUE}, :cleanupAt: {:zig: "CheatLib.cleanupAt({0}, {1}, {2}, {3})", :bc: TRUE, :allocates: FALSE, :borrows: :all}, :streamDupeBytes: {:zig: "try {0}.dupe(u8, {1})", :bc: TRUE, :allocates: TRUE}, :setMemberGet: {:zig: "if ({0}.contains({1})) @as({2}, {1}) else null", :bc: TRUE, :borrows: :all}, :cleanup: {:zig: "CheatLib.cleanup({0}, {1}, {2})", :bc: TRUE, :allocates: FALSE, :borrows: :all}, :needsCleanup: {:zig: "CheatLib.needsCleanup({0})", :bc: TRUE, :borrows: :all}, :concurrentBoundedSelect: {:zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :allocates: TRUE}, :concurrentBoundedSelectPreservingErrors: {:zig: "try CheatLib.concurrentBoundedSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :bc_op: :concurrentBoundedSelect, :allocates: TRUE}, :concurrentBoundedWhere: {:zig: "try CheatLib.concurrentBoundedWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :bc: TRUE, :allocates: TRUE}, :concurrentBoundedEach: {:zig: "try CheatLib.concurrentBoundedEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})", :bc: TRUE, :borrows: :all}, :concurrentStreamSelect: {:zig: "try CheatLib.concurrentStreamSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12})", :bc: TRUE, :allocates: TRUE}, :concurrentStreamSelectPreservingErrors: {:zig: "try CheatLib.concurrentStreamSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12})", :bc: TRUE, :bc_op: :concurrentStreamSelect, :allocates: TRUE}, :concurrentStreamWhere: {:zig: "try CheatLib.concurrentStreamWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :allocates: TRUE}, :concurrentStreamEach: {:zig: "try CheatLib.concurrentStreamEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :borrows: :all}, :concurrentListSelect: {:zig: "try CheatLib.concurrentListSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :allocates: TRUE}, :concurrentListSelectPreservingErrors: {:zig: "try CheatLib.concurrentListSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :bc: TRUE, :bc_op: :concurrentListSelect, :allocates: TRUE}, :promiseListToStream: {:zig: "try CheatLib.promiseListToStream({0}, {1}, {2}, {3})", :allocates: TRUE}, :concurrentListWhere: {:zig: "try CheatLib.concurrentListWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})", :allocates: TRUE}, :concurrentListEach: {:zig: "try CheatLib.concurrentListEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListEachInPlace: {:zig: "try CheatLib.concurrentListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListCount: {:zig: "try CheatLib.concurrentListCount({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListReduce: {:zig: "try CheatLib.concurrentListReduce({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :borrows: :all}, :concurrentShardedListEachInPlace: {:zig: "try CheatLib.concurrentShardedListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})", :borrows: :all}, :concurrentShardedPoolEachInPlace: {:zig: "try CheatLib.concurrentShardedPoolEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})", :borrows: :all}};
-  (CAST({"insert": "put"} AS {String}String)).keys() |> EACH {
-  MUTABLE value: String = ((CAST({"insert": "put"} AS {String}String))[_] OR_ELSE CAST(panic("missing hash key") AS String));
-  map_method_aliases_value[_] = COPY value;
-  };
-  RETURN NIL;
-END
-FN intrinsicRegistry__fs<T>(x: T, name: RegistryKey = RegistryKey{ StringValue: COPY "_inline" }) RETURNS !?FunctionSignature@multiowned ->
-  COMPTIME IF T IS_A FunctionSignature@multiowned THEN
-    MUTABLE rtoc_owned_return_12: ?FunctionSignature@multiowned = x;
-    RETURN rtoc_owned_return_12;
-  END
-  IF T IS_A {}Any THEN
-    RETURN TRY (intrinsicRegistry__convert_entry(name, x, TRY (intrinsicRegistry__registries())));
-  END
-END
-PUB FN intrinsicRegistry__collection_element_evidence_method?(name: Name, arity: Int64) RETURNS !Bool ->
-  IF !((arity == 1)) THEN
-    RETURN FALSE;
-  END
-  MUTABLE method_name = COPY CAST(name AS String);
-  MUTABLE registries: Tuple<Any@multiowned, Any, Any> = CAST(Tuple{std_lib, {"insert": {:arity: 1, :tag: :pool_method, :allocates: TRUE, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :bc: TRUE, :takes_args: [0], :zig: "try {0}.insert({alloc}, {1})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE elem = TRY (type__element_type(obj_type));
-  MUTABLE arg_type = args[0].resolved_type();
-  IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
-      runtimeCallSpec__call(error_fn, node, "Pool.insert: argument type ${arg_type} does not match pool element type ${elem.resolved()}");
-  END
-  NIL
-  }, :return_type: :r_id_element, :is_method: TRUE}, "get": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.get({1})", :return_type: :r_optional_element, :container_borrow: TRUE, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.remove({1})", :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "{0}.length()", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "({0}.get({1}) != null)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}}, {"insert": {:arity: 1, :tag: :set_method, :allocates: TRUE, :zig: "try {0}.insert({alloc}, {1})", :bc: TRUE, :alloc: :receiver_storage, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :takes_args: [0], :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE elem = TRY (type__element_type(obj_type));
-  MUTABLE arg_type = args[0].resolved_type();
-  IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
-      runtimeCallSpec__call(error_fn, node, "Set.insert: argument type ${arg_type} does not match set element type ${elem.resolved()}");
-  END
-  NIL
-  }, :return_type: :Void, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :set_method, :zig: "{0}.contains({1})", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :set_method, :zig: "{0}.remove({alloc}, {1})", :bc: TRUE, :alloc: :heap, :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :set_method, :zig: "CheatLib.len({0})", :bc: TRUE, :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() == 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() > 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}}} AS Tuple<Any@multiowned, Any, Any>);
+
+PUB FN intrinsicRegistry__collection_value_store_method?(name: Name, arity: Int64) RETURNS !Bool ->
+  MUTABLE method_name = intrinsicRegistry__name_string(name);
+  registries: [4]String@symbol = [:std_lib, :pool_methods, :set_methods, :map_methods];
   MUTABLE i: Int64 = 0;
   WHILE (i < registries.length()) DO
-    MUTABLE registry = UNWRAP (registries[i]);
-    MUTABLE fs: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX(TRY (intrinsicRegistry__lookup(registry, RegistryKey{ StringValue: COPY method_name }))));
-    IF !(fs?.intrinsic_contract?.behavior?.is_method) THEN
-      i = (i + 1);
-      CONTINUE;
-    END
-    IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_13 = UNWRAP (fs);
-    TRY (functionSignature__intrinsic_collection_narrowing?(&rtoc_mutable_receiver_13)) } THEN
-      RETURN TRUE;
+    MUTABLE found: ?FunctionSignature@multiowned = TRY (intrinsicRegistry__lookup_single(registries[i], method_name));
+    IF found EXISTS AS found_value THEN
+      MUTABLE found_mutable = COPY found_value;
+      MUTABLE declared_arity: ?Int64 = functionSignature__arity(found_mutable);
+      MUTABLE param_arity = ((TRY (functionSignature__params(found_mutable))).length() - 1);
+      IF (param_arity < 0) THEN
+        param_arity = 0;
+      END
+      MUTABLE method_arity = (declared_arity OR_ELSE param_arity);
+      IF (method_arity == arity) THEN
+        IF (TRY (functionSignature__intrinsic_contract(&found_mutable))).behavior.is_method THEN
+          IF (TRY (functionSignature__mutates_receiver?(&found_mutable)) AND TRY (functionSignature__takes_ownership?(&found_mutable))) THEN
+            RETURN TRUE;
+          END
+        END
+      END
     END
     i = (i + 1);
   END
   RETURN FALSE;
-END
-PUB FN intrinsicRegistry__map_pair_evidence_method?(name: Name, arity: Int64) RETURNS !Bool ->
-  IF !((arity == 2)) THEN
-    RETURN FALSE;
-  END
-  MUTABLE fs: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX(TRY (intrinsicRegistry__lookup({"put": {:arity: 2, :tag: :map_method, :allocates: TRUE, :mutates_receiver: TRUE, :bc: TRUE, :takes_args: [1], :zig: "try {0}.put({alloc}, {alloc}, {1}, {2})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("String{}"), :String, {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, String@symbol, {Any}Any>), :numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.put key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.put: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Void, :is_method: TRUE}, "delete": {:arity: 1, :tag: :map_method, :bc: TRUE, :zig: "{0}.remove({alloc}, {1})", :alloc: :receiver_storage, :mutates_receiver: TRUE, :numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.delete key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.delete: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :map_method, :zig: "{0}.contains({1})", :bc: TRUE, :numeric_zig: "CheatLib.numericMapContains({key_zig}, {val_zig}, {0}, {1})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.contains? key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.contains?: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "count": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "keys": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.keys({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_key_list, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() == 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() > 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "values": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.values({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_value_list, :borrows: :all, :is_method: TRUE}}, RegistryKey{ StringValue: COPY CAST(name AS String) }))));
-  IF !(fs?.intrinsic_contract?.behavior?.is_method) THEN
-    RETURN FALSE;
-  END
-  RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_14 = UNWRAP (fs);
-  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_14)) } AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_15 = UNWRAP (fs);
-  TRY (functionSignature__takes_ownership?(&rtoc_mutable_receiver_15)) });
-END
-FN intrinsicRegistry__collection_value_store_method?(name: Name, arity: Int64) RETURNS !Bool ->
-  MUTABLE method_name = COPY CAST(name AS String);
-  MUTABLE registries: Tuple<Any@multiowned, Any, Any, Any> = CAST(Tuple{std_lib, {"insert": {:arity: 1, :tag: :pool_method, :allocates: TRUE, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :bc: TRUE, :takes_args: [0], :zig: "try {0}.insert({alloc}, {1})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE elem = TRY (type__element_type(obj_type));
-  MUTABLE arg_type = args[0].resolved_type();
-  IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
-      runtimeCallSpec__call(error_fn, node, "Pool.insert: argument type ${arg_type} does not match pool element type ${elem.resolved()}");
-  END
-  NIL
-  }, :return_type: :r_id_element, :is_method: TRUE}, "get": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.get({1})", :return_type: :r_optional_element, :container_borrow: TRUE, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.remove({1})", :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "{0}.length()", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "({0}.get({1}) != null)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}}, {"insert": {:arity: 1, :tag: :set_method, :allocates: TRUE, :zig: "try {0}.insert({alloc}, {1})", :bc: TRUE, :alloc: :receiver_storage, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :takes_args: [0], :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE elem = TRY (type__element_type(obj_type));
-  MUTABLE arg_type = args[0].resolved_type();
-  IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
-      runtimeCallSpec__call(error_fn, node, "Set.insert: argument type ${arg_type} does not match set element type ${elem.resolved()}");
-  END
-  NIL
-  }, :return_type: :Void, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :set_method, :zig: "{0}.contains({1})", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :set_method, :zig: "{0}.remove({alloc}, {1})", :bc: TRUE, :alloc: :heap, :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :set_method, :zig: "CheatLib.len({0})", :bc: TRUE, :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() == 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() > 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}}, {"put": {:arity: 2, :tag: :map_method, :allocates: TRUE, :mutates_receiver: TRUE, :bc: TRUE, :takes_args: [1], :zig: "try {0}.put({alloc}, {alloc}, {1}, {2})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("String{}"), :String, {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, String@symbol, {Any}Any>), :numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.put key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.put: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Void, :is_method: TRUE}, "delete": {:arity: 1, :tag: :map_method, :bc: TRUE, :zig: "{0}.remove({alloc}, {1})", :alloc: :receiver_storage, :mutates_receiver: TRUE, :numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.delete key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.delete: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :map_method, :zig: "{0}.contains({1})", :bc: TRUE, :numeric_zig: "CheatLib.numericMapContains({key_zig}, {val_zig}, {0}, {1})", :validate: %(node, args: []Any, obj_type, error_fn) -> {
-  MUTABLE actual_key = &args[0].full_type_mut("HashMap.contains? key");
-  MUTABLE expected_key = TRY (type__key_type(obj_type));
-  IF !(TRY (type__accepts_map_key?(obj_type, actual_key))) THEN
-      runtimeCallSpec__call(error_fn, node, "HashMap.contains?: key must be ${TRY (type__surface_name(expected_key))}, got ${TRY (type__surface_name(actual_key))}");
-  END
-  NIL
-  }, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "count": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :map_method, :zig: "{0}.count()", :bc: TRUE, :numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "keys": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.keys({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_key_list, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() == 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :map_method, :zig: "({0}.count() > 0)", :bc: TRUE, :numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "values": {:arity: 0, :tag: :map_method, :allocates: TRUE, :bc: TRUE, :zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)", :alloc: :node_storage, :sharded_zig: "try {0}.values({alloc})", :sharded_alloc: :heap, :numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})", :return_type: :r_value_list, :borrows: :all, :is_method: TRUE}}} AS Tuple<Any@multiowned, Any, Any, Any>);
-  MUTABLE i: Int64 = 0;
-  WHILE (i < registries.length()) DO
-    MUTABLE registry = UNWRAP (registries[i]);
-    MUTABLE fs: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX(TRY (intrinsicRegistry__lookup(registry, RegistryKey{ StringValue: COPY method_name }))));
-    IF fs EXISTS AS fs_value THEN
-      MUTABLE fs_value_mutable = COPY fs_value;
-      MUTABLE method_arity = (functionSignature__arity(fs_value_mutable) OR_ELSE ([((TRY (functionSignature__params(fs_value_mutable))).length() - 1), 0]).max());
-      IF ((((method_arity == arity) AND ((TRY (functionSignature__intrinsic_contract(&fs_value_mutable))).behavior).is_method) AND TRY (functionSignature__mutates_receiver?(&fs_value_mutable))) AND TRY (functionSignature__takes_ownership?(&fs_value_mutable))) THEN
-        RETURN TRUE;
-      END
-      i = (i + 1);
-    ELSE
-      i = (i + 1);
-      CONTINUE;
-    END
-  END
-  RETURN FALSE;
-END
-FN intrinsicRegistry__overloads(reg: {RegistryKey}RawRegistryEntry, name: RegistryKey) RETURNS ![]FunctionSignature@multiowned ->
-  MUTABLE result: ?LookupResult = TRY (intrinsicRegistry__lookup(reg, name));
-  IF result? IS_A []FunctionSignature@multiowned AS array THEN
-    RETURN array;
-  END
-  IF result? IS_A FunctionSignature AS function_signature THEN
-    RETURN CAST([function_signature] AS []FunctionSignature@multiowned);
-  END
-  RETURN CAST(( { MUTABLE rtoc_empty_list_16: []FunctionSignature@multiowned = List[]; rtoc_empty_list_16 } ) AS []FunctionSignature@multiowned);
-END
-FN intrinsicRegistry__lookup(reg: {RegistryKey}RawRegistryEntry, name: RegistryKey) RETURNS !?LookupResult ->
-  MUTABLE result: ?LookupResult = COPY (TRY (intrinsicRegistry__sigs(reg)))[intrinsicRegistry__registry_key_string(name)];
-  IF result EXISTS AS result_value THEN
-    RETURN COPY result_value;
-  END
-  IF TRY (intrinsicRegistry__map_methods_registry?(reg)) THEN
-    MUTABLE alias_name: ?String = COPY map_method_aliases_value[CAST(name AS String)];
-    IF alias_name EXISTS AS alias_name_value THEN
-      RETURN COPY (TRY (intrinsicRegistry__sigs(reg)))[alias_name_value];
-    END
-  END
-  RETURN NIL;
-END
-PRIVATE FN intrinsicRegistry__map_methods_registry?(reg: {RegistryKey}RawRegistryEntry) RETURNS !Bool ->
-  MUTABLE map_methods: ?{RegistryKey}RawRegistryEntry = COPY (TRY (intrinsicRegistry__registry_values()))[:MAP_METHODS];
-  IF map_methods EXISTS AS map_methods_value THEN
-    RETURN intrinsicRegistry__registry_matches?(reg, map_methods_value);
-  ELSE
-    RETURN FALSE;
-  END
-END
-# End Ruby module IntrinsicRegistry
-FN castFunctionSignatureLifetimeInputToFunctionSignatureLifetimeSource(value: FunctionSignatureLifetimeInput) RETURNS FunctionSignatureLifetimeSource ->
-  PARTIAL MATCH value START
-    FunctionSignatureLifetimeInput.StringValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ StringValue: COPY cast_payload };,
-    FunctionSignatureLifetimeInput.SymbolValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to FunctionSignatureLifetimeSource");
-  END
-  panic("Invalid cast to FunctionSignatureLifetimeSource");
-END
-FN castOptionalEmitPassthroughValueToAnyMultiowned(value: ?EmitPassthroughValue) RETURNS Any@multiowned ->
-  IF value != NIL THEN
-    IF value IS_A Any@multiowned AS cast_payload THEN
-      RETURN cast_payload;
-    END
-  END
-  RETURN panic("Invalid cast to Any@multiowned");
-END
-FN castOptionalEmitPassthroughValueToOptionalAnyMultiowned(value: ?EmitPassthroughValue) RETURNS ?Any@multiowned ->
-  IF value != NIL THEN
-    IF value IS_A Any@multiowned AS cast_payload THEN
-      RETURN cast_payload;
-    END
-  END
-  RETURN NIL;
-END
-FN castOptionalEmitPassthroughValueToOptionalIntrinsicEmitStrOrSym(value: ?EmitPassthroughValue) RETURNS ?IntrinsicEmitStrOrSym ->
-  IF value == NIL THEN
-    panic("Invalid cast to ?IntrinsicEmitStrOrSym");
-  END
-  PARTIAL MATCH value? START
-    EmitPassthroughValue.StringValue AS cast_payload -> RETURN IntrinsicEmitStrOrSym{ StringValue: COPY cast_payload };,
-    EmitPassthroughValue.SymbolValue AS cast_payload -> RETURN IntrinsicEmitStrOrSym{ SymbolValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?IntrinsicEmitStrOrSym");
-  END
-  panic("Invalid cast to ?IntrinsicEmitStrOrSym");
-END
-FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
-  IF value == NIL THEN
-    panic("Invalid cast to ?X");
-  END
-  PARTIAL MATCH value? START
-    LookupResult.FunctionSignatureMultiowned AS cast_payload -> RETURN X{ FunctionSignatureMultiowned: COPY cast_payload };,
-    LookupResult.ArrayValue AS cast_payload -> RETURN X{ ArrayValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?X");
-  END
-  panic("Invalid cast to ?X");
-END
-FN castOptionalRawArgSpecToOptionalIntrinsicArgSpecRawArgSpec(value: ?RawArgSpec) RETURNS ?IntrinsicArgSpecRawArgSpec ->
-  IF value == NIL THEN
-    panic("Invalid cast to ?IntrinsicArgSpecRawArgSpec");
-  END
-  PARTIAL MATCH value? START
-    RawArgSpec.SymbolValue AS cast_payload -> RETURN IntrinsicArgSpecRawArgSpec{ SymbolValue: COPY cast_payload };,
-    RawArgSpec.StringValue AS cast_payload -> RETURN IntrinsicArgSpecRawArgSpec{ StringValue: COPY cast_payload };,
-    RawArgSpec.AnyMultiowned AS cast_payload -> RETURN IntrinsicArgSpecRawArgSpec{ AnyMultiowned: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?IntrinsicArgSpecRawArgSpec");
-  END
-  panic("Invalid cast to ?IntrinsicArgSpecRawArgSpec");
-END
-FN castRawRegistryEntryToAnyMultiowned(value: RawRegistryEntry) RETURNS Any@multiowned ->
-  IF value IS_A Any@multiowned AS cast_payload THEN
-    RETURN cast_payload;
-  END
-  RETURN panic("Invalid cast to Any@multiowned");
-END
-FN castReturnDescriptorToTypeConstructionInput(value: ReturnDescriptor) RETURNS TypeConstructionInput ->
-  PARTIAL MATCH value START
-    ReturnDescriptor.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
-    ReturnDescriptor.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
-    ReturnDescriptor.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
-  END
-  panic("Invalid cast to TypeConstructionInput");
-END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
-  PARTIAL MATCH value START
-    TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
-    TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
-    TypeTypeInput.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
-    TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
-  END
-  panic("Invalid cast to TypeConstructionInput");
 END
