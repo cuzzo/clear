@@ -320,13 +320,14 @@ FN lifecycleRegistry__type_inventory(program: Program, schema_lookup: FN(String@
   aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE types) -> {
   # `typed?` is `!full_type.untyped?` on the Ruby side; there is no such method
   # on Locatable here, so ask the type directly.
-  IF !(type__untyped?(node.full_type_mut("lifecycle inventory"))) THEN
-      TRY (lifecycleRegistry__add_type_mut(&types, &node.full_type_mut("lifecycle inventory")));
+  IF !(type__untyped?(TRY (aST__full_type_mut(node)))) THEN
+      MUTABLE node_type: Type = TRY (aST__full_type_mut(node));
+      TRY (lifecycleRegistry__add_type_mut(&types, node_type));
   END
   rubyToClearVoid()
   });
-  TRY (lifecycleRegistry__add_declaration_types_mut(types, program));
-  TRY (lifecycleRegistry__add_instantiated_schema_types_mut(types, schema_lookup));
+  TRY (lifecycleRegistry__add_declaration_types_mut(&types, program));
+  TRY (lifecycleRegistry__add_instantiated_schema_types_mut(&types, schema_lookup));
   RETURN types;
 END
 FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, binding_nodes: []SemanticLifecycleRegistryBindingNode, linear_resource_facts: ?LinearResourceFacts = NIL, inventory: ?{String}Type = NIL) RETURNS !LifecycleRegistry@multiowned ->
