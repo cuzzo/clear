@@ -60,6 +60,7 @@ producers:
 
   compiler-coverage:
     executor: gigasail
+    working_directory: compiler
     argv: [coverage-normalize, simplecov, rb, simplecov, "0.22.0", "{input:report}"]
     needs: [compiler-coverage-raw]
     inputs:
@@ -72,7 +73,7 @@ producers:
         evidence_scope:
           selection: compiler-ruby
           test_set: compiler-spec
-          source_root: compiler/ruby
+          source_root: ruby
 
   zig-coverage-raw:
     executor: command
@@ -102,6 +103,7 @@ producers:
 
   zig-coverage:
     executor: gigasail
+    working_directory: zig
     argv: [coverage-normalize, cobertura, zig, kcov-zig-llvm, "0.16.0", "{input:report}"]
     needs: [zig-coverage-raw]
     inputs:
@@ -114,7 +116,6 @@ producers:
         evidence_scope:
           selection: zig-production
           test_set: zig-unit
-          source_root: zig
 
   compiler-facts:
     executor: gigasail
