@@ -10,7 +10,7 @@ EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
+FN lifecyclePlanRegexMatch?(subject: String, pattern: String) RETURNS Bool ->
   RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
 END
 FN regexReplaceFirst(subject: String, pattern: String, replacement: String) RETURNS String ->
@@ -267,7 +267,7 @@ PRIVATE FN lifecyclePlanner__generic_parameter?(type_info: Type, schema_lookup: 
     RETURN lifecyclePlanner__generic_parameter?(wrapped_value, schema_lookup);
   END
   MUTABLE name = COPY CAST(type__resolved(type_info) AS String);
-  RETURN (regexMatch?(name, "\\A[A-Z]\\z") AND ((schema_lookup(type__resolved(type_info))) == NIL));
+  RETURN (lifecyclePlanRegexMatch?(name, "\\A[A-Z]\\z") AND ((schema_lookup(type__resolved(type_info))) == NIL));
 END
 PRIVATE FN lifecyclePlanner__mutable_owned_string_binding?(type_info: Type, node: Locatable) RETURNS !Bool ->
   IF !(TRY (type__string?(type_info))) THEN
