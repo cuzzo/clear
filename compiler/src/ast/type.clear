@@ -2479,7 +2479,7 @@ PUB FN type__resource?(self: Type) RETURNS Bool ->
   END
   RETURN type__resource_type_symbol?(type__resolved(self));
 END
-STRUCT ResourceCloseResult {
+PUB STRUCT ResourceCloseResult {
   is_resource: Bool,
   close_plan: ?ResourceClosePlan
 }
