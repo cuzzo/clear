@@ -532,8 +532,13 @@ module Annotator
               # getPtr/getAtPtrOpt), so mutation through the capture is
               # legal and lands in the container. Rc/node-handle payloads
               # are value captures and stay immutable borrows.
+              # A @node handle is itself a pointer into the NodeStore, so
+              # assigning through the capture lands in the stored node --
+              # excluding it here made `IF nodes[i] EXISTS AS n THEN n.f = ...`
+              # fail as an immutable-field assignment. Rc payloads stay
+              # immutable value captures.
               mutable_slot_payload = (unwrapped.struct? || unwrapped.collection?) &&
-                !unwrapped.node_reference? && !unwrapped.any_rc?
+                !unwrapped.any_rc?
               mutable_list_alias = b.expr.is_a?(AST::GetIndex) && root &&
                 !current_scope.is_immutable?(root.name) && mutable_slot_payload
               current_scope.declare(b.name, nil, unwrapped, mutable_list_alias, false, nil, :stack)
