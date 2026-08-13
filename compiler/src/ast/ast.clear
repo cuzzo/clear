@@ -1798,7 +1798,7 @@ PUB STRUCT WithBlock {
   capabilities: []Capability,
   body: []Locatable,
   deferred_drops: ?[]DeferredDrop,
-  capability_plan: ?PassStateValue,
+  capability_plan: ?WithCapabilityPlan,
   arms: ?[]WithMatchArm,
   can_fail: ?Bool,
   coerced_type_object: ?Type,

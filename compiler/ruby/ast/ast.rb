@@ -3096,6 +3096,9 @@ module AST
   # handling for EXCLUSIVE / write_locked_read captures.
   # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
   WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops, :capability_plan) do
+    # The plan is a WithCapabilityPlan; without naming it the generated record
+    # takes the pass-state union it is stored in and every read needs a cast.
+    # ruby-to-clear: field-type capability_plan=?WithCapabilityPlan
     # ruby-to-clear: field-type body=[]Locatable
     extend T::Sig
     include Locatable

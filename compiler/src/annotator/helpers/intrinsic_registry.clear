@@ -224,7 +224,10 @@ FN intrinsicRegistry__coerce_integer<T>(value: T) RETURNS !Int64 ->
   END
   panic("IntrinsicRegistry: expected integer-compatible value");
 END
-FN intrinsicRegistry__unknown_emit_key_mut(key: String@symbol) RETURNS Auto ->
+# Diverges: the key is unmapped, so there is no value to hand back. `Auto` in a
+# public signature is rejected across a package boundary, and NoReturn is the
+# honest spelling anyway.
+FN intrinsicRegistry__unknown_emit_key_mut(key: String@symbol) RETURNS NoReturn ->
   panic("IntrinsicRegistry: unmapped registry key {}");
 END
 FN intrinsicRegistry__coerce_symbol<T>(value: T) RETURNS !String@symbol ->
