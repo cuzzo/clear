@@ -596,19 +596,34 @@ END
 PUB UNION SchemaValue { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
 PUB UNION FieldBearingSchema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, InlineStructVariantMultiowned: InlineStructVariant@multiowned }
 PUB FN struct?(s: ?SchemaValue) RETURNS Bool ->
-  RETURN ((s != NIL) AND (s? IS_A StructSchema));
+  IF s EXISTS AS schema_value THEN
+    RETURN schema_value IS_A StructSchema;
+  END
+  RETURN FALSE;
 END
 PUB FN union?(s: ?SchemaValue) RETURNS Bool ->
-  RETURN ((s != NIL) AND (s? IS_A UnionSchema));
+  IF s EXISTS AS schema_value THEN
+    RETURN schema_value IS_A UnionSchema;
+  END
+  RETURN FALSE;
 END
 PUB FN enum?(s: ?SchemaValue) RETURNS Bool ->
-  RETURN ((s != NIL) AND (s? IS_A EnumSchema));
+  IF s EXISTS AS schema_value THEN
+    RETURN schema_value IS_A EnumSchema;
+  END
+  RETURN FALSE;
 END
 PUB FN resource?(s: ?SchemaValue) RETURNS Bool ->
-  RETURN ((s != NIL) AND (s? IS_A ResourceSchema));
+  IF s EXISTS AS schema_value THEN
+    RETURN schema_value IS_A ResourceSchema;
+  END
+  RETURN FALSE;
 END
-PUB FN inline_struct?(v: Object) RETURNS Bool ->
-  RETURN v IS_A InlineStructVariant;
+PUB FN inline_struct?(v: ?SchemasUnionSchemaVariantValue) RETURNS Bool ->
+  IF v EXISTS AS variant_value THEN
+    RETURN variant_value IS_A InlineStructVariant;
+  END
+  RETURN FALSE;
 END
 PUB FN field_bearing?(s: ?SchemaValue) RETURNS Bool ->
   RETURN (((s != NIL) AND (s? IS_A StructSchema)) OR ((s != NIL) AND (s? IS_A ResourceSchema)));
