@@ -485,25 +485,29 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE all_paths = ((own_nodes.keys() + other_nodes.keys())) |> DISTINCT _ |> SELECT COPY _;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < all_paths.length() DO
-      MUTABLE mine: ?OwnershipNode = COPY own_nodes[all_paths[rtoc_idx]];
-      MUTABLE theirs: ?OwnershipNode = COPY other_nodes[all_paths[rtoc_idx]];
+      MUTABLE current_path: PlaceId = COPY UNWRAP (all_paths[rtoc_idx]);
+      MUTABLE mine: ?OwnershipNode = COPY own_nodes[current_path];
+      MUTABLE theirs: ?OwnershipNode = COPY other_nodes[current_path];
       IF !(((mine != NIL) AND (theirs != NIL))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (mine.state != theirs.state) THEN
-          IF ([mine.state, theirs.state] == [:live, :moved]) OR ([mine.state, theirs.state] == [:moved, :live]) THEN
-            &errors.append("variable '${all_paths[rtoc_idx]}' is moved in one branch but live in the other");
-          ELSE_IF ([mine.state, theirs.state] == [:live, :dropped]) OR ([mine.state, theirs.state] == [:dropped, :live]) THEN
+      MUTABLE mine_value: OwnershipNode = COPY UNWRAP (mine);
+      MUTABLE theirs_value: OwnershipNode = COPY UNWRAP (theirs);
+      IF (mine_value.state != theirs_value.state) THEN
+          IF ([mine_value.state, theirs_value.state] == [:live, :moved]) OR ([mine_value.state, theirs_value.state] == [:moved, :live]) THEN
+            &errors.append("variable '${current_path.path}' is moved in one branch but live in the other");
+          ELSE_IF ([mine_value.state, theirs_value.state] == [:live, :dropped]) OR ([mine_value.state, theirs_value.state] == [:dropped, :live]) THEN
         
           END
-          IF ownershipNode__moved?(theirs) THEN
-            mine.state = :moved;
-            mine.move_line = theirs.move_line;
-            mine.move_col = theirs.move_col;
-            mine.move_action = theirs.move_action;
+          IF ownershipNode__moved?(theirs_value) THEN
+            mine_value.state = :moved;
+            mine_value.move_line = theirs_value.move_line;
+            mine_value.move_col = theirs_value.move_col;
+            mine_value.move_action = theirs_value.move_action;
           END
       END
+      own_nodes[current_path] = mine_value;
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE existing = (rtoc_self_view.edges |> SELECT CAST(Tuple{_.from, _.to, _.kind} AS Tuple<String, String, String@symbol>)) |> DISTINCT _;
