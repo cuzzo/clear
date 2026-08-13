@@ -1,0 +1,10 @@
+# `UNWRAP (expr).method()` unwraps the PARENTHESIZED expression and then calls
+# the method on the result. It used to hand the whole postfix chain to UNWRAP,
+# so this called .length() on the OPTIONAL and then tried to unwrap the Int64
+# that came back -- "Cannot unwrap non-optional type 'Int64'".
+FN main() RETURNS Void ->
+  MUTABLE m: {String}[]Int64 = {};
+  m["a"] = [1_i64, 2_i64];
+  n = UNWRAP (m["a"]).length();
+  ASSERT n == 2_i64, "UNWRAP takes the parenthesized operand, then .length() applies to it";
+END

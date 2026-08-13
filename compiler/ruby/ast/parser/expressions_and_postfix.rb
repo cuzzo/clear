@@ -382,6 +382,11 @@ class ClearParser
   sig { returns(AST::UnaryOp) }
   def parse_try_expression
     token = consume(:KEYWORD, 'TRY')
+    # NOT the same rule as UNWRAP, deliberately. TRY has to wrap whatever
+    # PRODUCES the error, and in a chain that is the last call, not the
+    # parenthesized head: `TRY (UNWRAP parts[0]).toInt()` propagates toInt's
+    # failure. Binding TRY to the parenthesized group instead would leave it
+    # with a non-fallible operand and nothing to propagate.
     AST::UnaryOp.new(token, :TRY, parse_unary)
   end
 
@@ -391,6 +396,18 @@ class ClearParser
   sig { returns(AST::OptionalUnwrap) }
   def parse_unwrap_expression
     token = consume(:KEYWORD, 'UNWRAP')
+    # `UNWRAP (expr).method()` unwraps the PARENTHESIZED expression, then calls
+    # the method on the result. Falling through to parse_unary would hand the
+    # whole postfix chain to UNWRAP, so `UNWRAP (m[k]).length()` unwrapped the
+    # LENGTH -- the parens say what the operand is, and any suffix after them
+    # applies to the unwrapped value.
+    if current.type == :CHAR && current.value == '('
+      consume(:CHAR, '(')
+      inner = parse_expression
+      consume(:CHAR, ')')
+      return parse_suffixes(AST::OptionalUnwrap.new(token, inner))
+    end
+
     AST::OptionalUnwrap.new(token, parse_unary)
   end
 
