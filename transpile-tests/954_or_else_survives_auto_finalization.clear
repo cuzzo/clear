@@ -1,0 +1,19 @@
+# OR_ELSE over a map read and into an inferred binding. Auto-finalization
+# restamps binary operators after the unifier runs; it used to restamp OR_ELSE
+# (and SMOOTH, and BIND_VAR) through the ordinary operator table, which does
+# not know them because visit_BinaryOp routes them to their own visitors, so it
+# reported "Unknown operator: OR_ELSE" against valid code. The failing programs
+# were compiler sources; this pins the shapes.
+FN allocator_name(rt_name: ?String) RETURNS String ->
+  MUTABLE rt = (rt_name OR_ELSE "rt");
+  RETURN "${rt}.heapAlloc()";
+END
+
+FN main() RETURNS Void ->
+  MUTABLE m: {String}String = {};
+  m["a"] = "value";
+  MUTABLE looked_up = (m["missing"] OR_ELSE "fallback");
+  ASSERT looked_up == "fallback", "OR_ELSE over a map read types through auto finalization";
+  ASSERT allocator_name(NIL) == "rt.heapAlloc()", "OR_ELSE into an inferred binding keeps its type";
+  ASSERT allocator_name("ctx") == "ctx.heapAlloc()", "the present case still wins";
+END

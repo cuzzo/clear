@@ -11,6 +11,9 @@ module Annotator
     module AutoFinalization
       extend T::Sig
 
+      # Operators visit_BinaryOp dispatches to a dedicated visitor.
+      OWN_VISITOR_BINARY_OPS = T.let(%i[OR_ELSE SMOOTH BIND_VAR].freeze, T::Array[Symbol])
+
       sig { params(program: AST::Program).void }
       def finalize_auto_types!(program)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -184,6 +187,13 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         return false unless node.is_a?(AST::BinaryOp)
+        # Tense and binding operators never went through Type.binary_op in the
+        # first place -- visit_BinaryOp routes them to their own visitors, which
+        # stamp the result from the recovery plan. Restamping them here asks
+        # Type.binary_op for an operator it does not know and reports the
+        # resulting "Unknown operator" as a user-facing type error.
+        return false if OWN_VISITOR_BINARY_OPS.include?(node.op)
+
         left_type = auto_finalization_node_type(node.left)
         right_type = auto_finalization_node_type(node.right)
         return false if stale_auto_node_type?(left_type) || stale_auto_node_type?(right_type)

@@ -11656,13 +11656,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE string_name = COPY (name OR_ELSE "");
-      IF !((string_name.length() == 0)) THEN
-          &names.append(string_name);
+      IF name EXISTS AS string_name THEN
+        IF !((string_name.length() == 0)) THEN
+          &names.append(COPY string_name);
+        END
       END
     rtoc_idx = rtoc_idx + 1;
     END
-    RETURN CAST((names |> DISTINCT _) AS []String);
+    MUTABLE distinct_names: []String = [];
+    FOR raw_name IN names DO
+      IF !(distinct_names.contains?(raw_name)) THEN
+        &distinct_names.append(COPY raw_name);
+      END
+    END
+    RETURN distinct_names;
 }
 END
 FN ownershipContract__empty?(MUTABLE self: OwnershipContract) RETURNS Bool
@@ -11677,7 +11684,15 @@ PRIVATE FN ownershipContract__normalize_names(self: OwnershipContract, names: []
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN CAST(((names |> SELECT _.toString()) |> WHERE !(_.empty?()) |> DISTINCT _) AS []String);
+    MUTABLE normalized: []String = [];
+    FOR raw_name IN names DO
+      IF !(raw_name.empty?()) THEN
+        IF !(normalized.contains?(raw_name)) THEN
+          &normalized.append(COPY raw_name);
+        END
+      END
+    END
+    RETURN normalized;
 }
 END
 FN ownershipContract__new(operands: []OwnershipOperandFact, produces: []String, borrows: []String, covers_consuming_params: Bool = FALSE) RETURNS !OwnershipContract@multiowned ->
