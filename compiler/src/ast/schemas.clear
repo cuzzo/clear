@@ -70,9 +70,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-FN enumSchema__new(variants: []SchemasEnumSchemaVariantInputItem, visibility: String@symbol = :package) RETURNS EnumSchema@multiowned ->
+PUB FN enumSchema__new(variants: []SchemasEnumSchemaVariantInputItem, visibility: String@symbol = :package) RETURNS !EnumSchema@multiowned ->
   MUTABLE self = EnumSchema{ variants: Set[], visibility: COPY visibility };
-  enumSchema__initialize(&self, variants, visibility);
+  TRY (enumSchema__initialize(&self, variants, visibility));
   RETURN self @multiowned;
 END
 PUB ENUM ResourceCloseCallKind { Method, Function, CFunction }
@@ -194,7 +194,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN out;
 }
 END
-PUB FN resourceSchema__normalize_field(self: ResourceSchema, field: SchemasResourceSchemaFieldInput) RETURNS StructField
+PUB FN resourceSchema__normalize_field(self: ResourceSchema, field: SchemasResourceSchemaFieldInput) RETURNS !StructField
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -245,9 +245,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
 }
 END
-FN resourceSchema__new(close_plan: ResourceClosePlan, static_methods: {String}{String@symbol}SchemasResourceSchemaStaticMethodValue, fields: {String@symbol}SchemasResourceSchemaFieldInput, type_params: []String@symbol, extern_module: ?String = NIL, as_type: ?String = NIL, visibility: String@symbol = :package, methods: {String@symbol}FunctionSignature@multiowned) RETURNS ResourceSchema@multiowned ->
+PUB FN resourceSchema__new(close_plan: ResourceClosePlan, static_methods: {String}{String@symbol}SchemasResourceSchemaStaticMethodValue, fields: {String@symbol}SchemasResourceSchemaFieldInput, type_params: []String@symbol, extern_module: ?String = NIL, as_type: ?String = NIL, visibility: String@symbol = :package, methods: {String@symbol}FunctionSignature@multiowned) RETURNS !ResourceSchema@multiowned ->
   MUTABLE self = ResourceSchema{ as_type: COPY as_type, close_plan: COPY close_plan, extern_module: COPY extern_module, fields: {}, methods: COPY methods, static_methods: COPY static_methods, type_params: COPY type_params, visibility: COPY visibility };
-  resourceSchema__initialize(&self, close_plan, static_methods, fields, type_params, extern_module, as_type, visibility, methods);
+  TRY (resourceSchema__initialize(&self, close_plan, static_methods, fields, type_params, extern_module, as_type, visibility, methods));
   RETURN self @multiowned;
 END
 PUB STRUCT InlineStructDeinitEntry {
@@ -324,9 +324,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN out;
 }
 END
-FN inlineStructVariant__new(fields: {String@symbol}TypeTypeInput, deinit_entries: []InlineStructDeinitEntry) RETURNS InlineStructVariant@multiowned ->
+PUB FN inlineStructVariant__new(fields: {String@symbol}TypeTypeInput, deinit_entries: []InlineStructDeinitEntry) RETURNS !InlineStructVariant@multiowned ->
   MUTABLE self = InlineStructVariant{ deinit_entries: COPY deinit_entries, fields: {} };
-  inlineStructVariant__initialize(&self, fields, deinit_entries);
+  TRY (inlineStructVariant__initialize(&self, fields, deinit_entries));
   RETURN self @multiowned;
 END
 PUB STRUCT UnionSchema {
@@ -417,9 +417,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.type_params;
 }
 END
-FN unionSchema__new(variants: {String@symbol}?SchemasUnionSchemaVariantInput, type_params: []String@symbol, visibility: String@symbol = :package) RETURNS UnionSchema@multiowned ->
+PUB FN unionSchema__new(variants: {String@symbol}?SchemasUnionSchemaVariantInput, type_params: []String@symbol, visibility: String@symbol = :package) RETURNS !UnionSchema@multiowned ->
   MUTABLE self = UnionSchema{ type_params: COPY type_params, variants: {}, visibility: COPY visibility };
-  unionSchema__initialize(&self, variants, type_params, visibility);
+  TRY (unionSchema__initialize(&self, variants, type_params, visibility));
   RETURN self @multiowned;
 END
 PUB STRUCT StructSchema {
@@ -464,7 +464,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE keys = rtoc_self_view.fields.keys();
     MUTABLE i: Int64 = 0;
     WHILE (i < keys.length()) DO
-      MUTABLE default_value = COPY (UNWRAP (rtoc_self_view.fields[UNWRAP (keys[i])])).default;
+      MUTABLE default_value: ?Locatable = COPY (UNWRAP (rtoc_self_view.fields[UNWRAP (keys[i])])).default;
       IF default_value EXISTS AS present_default THEN
         out[UNWRAP (keys[i])] = COPY present_default;
       END
@@ -539,7 +539,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN out;
 }
 END
-PUB FN structSchema__normalize_field(self: StructSchema, field: SchemasStructSchemaFieldInput) RETURNS StructField
+PUB FN structSchema__normalize_field(self: StructSchema, field: SchemasStructSchemaFieldInput) RETURNS !StructField
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -588,9 +588,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
 }
 END
-FN structSchema__new(fields: {String@symbol}SchemasStructSchemaFieldInput, type_params: []String@symbol, generic_params: []GenericParamDecl, methods: {String@symbol}FunctionSignature@multiowned, static_methods: {String@symbol}FunctionSignature@multiowned, visibility: String@symbol = :package, extern_module: ?String = NIL, as_type: ?String = NIL) RETURNS StructSchema@multiowned ->
+PUB FN structSchema__new(fields: {String@symbol}SchemasStructSchemaFieldInput, type_params: []String@symbol, generic_params: []GenericParamDecl, methods: {String@symbol}FunctionSignature@multiowned, static_methods: {String@symbol}FunctionSignature@multiowned, visibility: String@symbol = :package, extern_module: ?String = NIL, as_type: ?String = NIL) RETURNS !StructSchema@multiowned ->
   MUTABLE self = StructSchema{ as_type: COPY as_type, extern_module: COPY extern_module, fields: {}, generic_params: COPY generic_params, methods: COPY methods, static_methods: COPY static_methods, type_params: COPY type_params, visibility: COPY visibility };
-  structSchema__initialize(&self, fields, type_params, generic_params, methods, static_methods, visibility, extern_module, as_type);
+  TRY (structSchema__initialize(&self, fields, type_params, generic_params, methods, static_methods, visibility, extern_module, as_type));
   RETURN self @multiowned;
 END
 PUB UNION SchemaValue { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
