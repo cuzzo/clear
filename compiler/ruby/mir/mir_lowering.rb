@@ -4939,7 +4939,8 @@ class MIRLowering
     recv = hoist_alloc(recv, recv_ast) if mir_allocates?(recv)
     return nil unless ti.string?
 
-    MIR::Cast.new(MIR::ListLength.new(recv), "i64", :intCast)
+    # `.len` reads bytes; a Symbol receiver widens like any String position.
+    MIR::Cast.new(MIR::ListLength.new(widen_symbol_to_bytes(recv, recv_ast)), "i64", :intCast)
   end
 
   # Rc/Arc capability values expose ordinary methods and TAKES boundaries in

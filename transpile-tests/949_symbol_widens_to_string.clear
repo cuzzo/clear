@@ -30,4 +30,9 @@ FN main() RETURNS Void ->
   ASSERT joined == "xalpha", "symbol concatenates after CAST";
   MUTABLE inline_join = ("y" $+ tag);
   ASSERT inline_join == "yalpha", "symbol concatenates directly";
+
+  # Registry calls widen too: a declared-String argument or receiver takes the
+  # bytes, and the `.len` fast path reads them.
+  ASSERT tag.length() == 5, "length on a symbol receiver";
+  ASSERT tag.capitalize() == "Alpha", "string method on a symbol receiver";
 END

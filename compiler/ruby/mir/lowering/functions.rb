@@ -94,6 +94,11 @@ module MIRLoweringFunctions
     const :takes, T::Boolean
     const :coerce_type, T.nilable(Symbol)
     const :sink_type, T.nilable(Type)
+    # The registry declares this argument as a plain String ([]const u8), so a
+    # Symbol argument must widen to its bytes -- the same coercion user calls
+    # perform at cross_boundary_arg. False for :Any and container positions,
+    # whose element types (a Set of symbols, say) take the handle itself.
+    const :declared_byte_string, T::Boolean, default: false
 
     sig { params(arg_zig: String).returns(String) }
     def coerce_zig(arg_zig)
@@ -1493,6 +1498,9 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
         takes: ownership.takes?(index),
         coerce_type: stdlib_coerce_type(param.type),
         sink_type: stdlib_sink_type_for_arg(receiver_type, index, ownership.takes?(index)),
+        # The registry declares plain byte strings as :String; the interned
+        # handle is only ever a RETURN sync (`symbol()`), never a param spelling.
+        declared_byte_string: stdlib_coerce_type(param.type) == :String,
       )
     end
     StdlibCallFacts.new(args: facts, ownership: ownership)
@@ -2507,6 +2515,9 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     materialized_args = mir_args.dup
     stdlib_facts.args.each do |arg_fact|
       index = arg_fact.index
+      if arg_fact.declared_byte_string
+        materialized_args[index] = widen_symbol_to_bytes(T.must(materialized_args[index]), arg_fact.ast_arg)
+      end
       next unless ownership_facts.takes?(index)
 
       placed_arg = place_value_for_destination(
