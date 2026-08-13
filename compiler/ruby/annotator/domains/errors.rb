@@ -569,7 +569,12 @@ module Annotator
         # return leaves it nil while registry-built keys()/values() results
         # stamp :affine explicitly — the same type, printed identically.
         elem_own = ->(t) { t.elem_ownership == :affine ? nil : t.elem_ownership }
-        (expected_t.ownership == actual_t.ownership &&
+        # The same defaulting one level up. A declared return type is stamped
+        # :affine; a value the pipeline built (`|> DISTINCT`) leaves ownership
+        # nil. Both mean "owned by whoever receives it" and print identically,
+        # so comparing them raw rejects `RETURN items |> DISTINCT _;`.
+        own = ->(t) { t.ownership == :affine ? nil : t.ownership }
+        (own.call(expected_t) == own.call(actual_t) &&
           expected_t.sync == actual_t.sync &&
           layout_ok &&
           elem_own.call(expected_t) == elem_own.call(actual_t) &&

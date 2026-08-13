@@ -1,0 +1,11 @@
+# A declared return type is stamped :affine; a value the pipeline built leaves
+# ownership nil. Both mean "owned by whoever receives it" and print identically,
+# so comparing them raw rejected this with "expected '![Set]String', but
+# returned '[Set]String'" -- the same type on both sides.
+FN dedupe(MUTABLE items: []String) RETURNS ![Set]String ->
+  RETURN items |> DISTINCT _;
+END
+FN main() RETURNS Void ->
+  MUTABLE xs: []String = [COPY "a", COPY "b", COPY "a"];
+  ASSERT (TRY dedupe(&xs)).length() == 2_i64, "fallible fn returns the DISTINCT set";
+END
