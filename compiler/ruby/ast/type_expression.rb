@@ -803,8 +803,14 @@ class TypeExpressionPrinter
       when :INFERRED then "[*]"
       else "[#{dimension}]"
       end
-    else
+    elsif dimension.is_a?(Integer)
+      # Spell the Integer arm out rather than leaving it to `else`: the CLEAR
+      # translation narrows an `is_a?` THEN branch and interpolates the narrowed
+      # binding, but an unnarrowed `else` still holds the whole union, which has
+      # no string form.
       "[#{dimension}]"
+    else
+      T.absurd(dimension)
     end
   end
 

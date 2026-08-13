@@ -788,6 +788,14 @@ module RubyToClear
       if sorbet_call?(node)
         return "" if node.name.to_s == "bind"
 
+        # `T.absurd(x)` is Sorbet's exhaustiveness marker: the branch is
+        # unreachable because the union has no members left. CLEAR has no
+        # equivalent declaration, and the value still has the union type there,
+        # so spell the unreachability out as a panic.
+        if node.name.to_s == "absurd"
+          return "panic(\"unreachable: exhaustive union match\")"
+        end
+
         if node.name.to_s == "cast" && (cast_code = sorbet_cast_expression(node))
           return cast_code
         end
