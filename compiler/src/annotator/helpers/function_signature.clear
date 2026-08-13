@@ -18,7 +18,7 @@ PUB STRUCT FunctionSignature {
 PUB UNION FunctionSignatureLifetimeSource { StringValue: String, SymbolValue: String@symbol }
 PUB UNION FunctionSignatureLifetimeInput { StringValue: String, SymbolValue: String@symbol, ArrayValue: []FunctionSignatureLifetimeSource }
 UNION FunctionSignatureSyncSource { FunctionDefMultiowned: FunctionDef@multiowned, FunctionDef: FunctionDef }
-STRUCT Contract {
+PUB STRUCT Contract {
   extern: Bool,
   extern_effects: {String@symbol}ExternEffectValue,
   extern_source: ?ExternSource,
@@ -60,7 +60,7 @@ FN contract__new(params: []Param, visibility: ?String@symbol = NIL, type_params:
   TRY (contract__initialize(&self, params, visibility, type_params, reentrant, extern, module_alias, extern_effects, extern_source, fn_type_params, owner_type, owner_type_params, intrinsic));
   RETURN self @multiowned;
 END
-STRUCT AnalysisFacts {
+PUB STRUCT AnalysisFacts {
   needs_rt: ?Bool,
   can_fail: ?Bool,
   alloc_fault: ?Bool,
