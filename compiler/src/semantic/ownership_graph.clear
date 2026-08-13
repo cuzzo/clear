@@ -632,7 +632,10 @@ PRIVATE FN ownershipGraph__edges_to(self: OwnershipGraph, path: Path) RETURNS ![
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_self_view.edges_by_target[ownershipGraph__place_id(rtoc_self_view, path)] = (rtoc_self_view.edges_by_target[ownershipGraph__place_id(rtoc_self_view, path)] OR_ELSE List[]);
-    RETURN rtoc_self_view.edges_by_target[ownershipGraph__place_id(rtoc_self_view, path)];
+    IF rtoc_self_view.edges_by_target[ownershipGraph__place_id(rtoc_self_view, path)] EXISTS AS found_edges THEN
+      RETURN COPY found_edges;
+    END
+    RETURN [];
 }
 END
 PRIVATE FN ownershipGraph__edges_from(self: OwnershipGraph, path: Path) RETURNS ![]Edge
@@ -640,7 +643,10 @@ PRIVATE FN ownershipGraph__edges_from(self: OwnershipGraph, path: Path) RETURNS 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_self_view.edges_by_source[ownershipGraph__place_id(rtoc_self_view, path)] = (rtoc_self_view.edges_by_source[ownershipGraph__place_id(rtoc_self_view, path)] OR_ELSE List[]);
-    RETURN rtoc_self_view.edges_by_source[ownershipGraph__place_id(rtoc_self_view, path)];
+    IF rtoc_self_view.edges_by_source[ownershipGraph__place_id(rtoc_self_view, path)] EXISTS AS found_edges THEN
+      RETURN COPY found_edges;
+    END
+    RETURN [];
 }
 END
 PRIVATE FN ownershipGraph__children_for(self: OwnershipGraph, path: String) RETURNS ![Set]PlaceId
@@ -654,8 +660,12 @@ PRIVATE FN ownershipGraph__children_for_place(self: OwnershipGraph, place: Place
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    rtoc_self_view.children[place] = (rtoc_self_view.children[place] OR_ELSE Set[]);
-    RETURN rtoc_self_view.children[place];
+    IF rtoc_self_view.children[place] EXISTS AS existing_children THEN
+      RETURN COPY existing_children;
+    END
+    MUTABLE fresh: [Set]PlaceId = Set[];
+    rtoc_self_view.children[place] = COPY fresh;
+    RETURN fresh;
 }
 END
 PRIVATE FN ownershipGraph__place_id(self: OwnershipGraph, path: Path) RETURNS PlaceId
