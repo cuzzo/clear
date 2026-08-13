@@ -626,7 +626,10 @@ PUB FN inline_struct?(v: ?SchemasUnionSchemaVariantValue) RETURNS Bool ->
   RETURN FALSE;
 END
 PUB FN field_bearing?(s: ?SchemaValue) RETURNS Bool ->
-  RETURN (((s != NIL) AND (s? IS_A StructSchema)) OR ((s != NIL) AND (s? IS_A ResourceSchema)));
+  IF s EXISTS AS schema_value THEN
+    RETURN ((schema_value IS_A StructSchema) OR (schema_value IS_A ResourceSchema));
+  END
+  RETURN FALSE;
 END
 # End Ruby module Schemas
 FN castSchemasUnionSchemaVariantInputToOptionalSchemasUnionSchemaVariantValue(value: SchemasUnionSchemaVariantInput) RETURNS ?SchemasUnionSchemaVariantValue ->
