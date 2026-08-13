@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_6173742f7374645f6c69625f72656769737472792e636c656172"
 REQUIRE "pkg:fs"
 REQUIRE "pkg:path"
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
@@ -12594,7 +12595,7 @@ PRIVATE FN typeAnalysisSession__visit_IntrinsicFunc(MUTABLE self: TypeAnalysisSe
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE matched_def = COPY matched_def_input;
-    MUTABLE definitions: []FunctionSignature@multiowned = TRY (intrinsicRegistry__overloads(std_lib, node.name()));
+    MUTABLE definitions: []FunctionSignature@multiowned = TRY (intrinsicRegistry__overloads(:std_lib, node.name()));
     matched_def = (matched_def OR_ELSE typeAnalysisSession__find_matching_intrinsic(rtoc_self_view, definitions, args));
     IF matched_def EXISTS AS matched_def_value THEN
       MUTABLE matched_def_value_mutable = COPY matched_def_value;
@@ -12783,10 +12784,8 @@ PRIVATE FN typeAnalysisSession__resolve_intrinsic_method_call_mut(MUTABLE self: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE intrinsic_defs: ?Any@multiowned = COPY std_lib[node.name];
-    IF intrinsic_defs EXISTS AS intrinsic_defs_value THEN
-      MUTABLE intrinsic_defs_value_mutable = COPY intrinsic_defs_value;
-      MUTABLE definitions: []FunctionSignature@multiowned = TRY (intrinsicRegistry__overloads(std_lib, RegistryKey{ StringValue: COPY node.name }));
+    MUTABLE definitions: []FunctionSignature@multiowned = TRY (intrinsicRegistry__overloads(:std_lib, node.name));
+    IF (definitions.length() > 0) THEN
       MUTABLE method_overloads: []FunctionSignature@multiowned = definitions |> WHERE { MUTABLE rtoc_mutable_block_param_307 = COPY _;
       ((TRY (functionSignature__intrinsic_contract(&rtoc_mutable_block_param_307))).behavior).is_method };
       IF (method_overloads.length() == 0) THEN

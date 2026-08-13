@@ -29,7 +29,7 @@ PUB STRUCT StmtCall {
 }
 PUB STRUCT IoSubmit {
   verb: String@symbol,
-  waiter: Any@multiowned,
+  waiter: Waiter,
   extra_args: []Expr
 }
 PUB STRUCT IfFieldSubLtZeroReturnCall {
@@ -108,7 +108,7 @@ PUB FN fsmOpsBinOp__right(self: FsmOpsBinOp) RETURNS IntCast ->
 END
 PUB UNION Expr { ArgRef: ArgRef, StateField: StateField, SubField: SubField, LocalRef: LocalRef, AddrOf: AddrOf, IntCast: IntCast, CallExpr: CallExpr, AllocExpr: AllocExpr, SliceUntilIntCast: SliceUntilIntCast, FsmOpsBinOp: FsmOpsBinOp, Emittable: Emittable }
 PUB UNION Stmt { AssignField: AssignField, LetConst: LetConst, ErrDeferCall: ErrDeferCall, ErrDeferFreeField: ErrDeferFreeField, DeferFreeField: DeferFreeField, StmtCall: StmtCall, IoSubmit: IoSubmit, IfFieldSubLtZeroReturnCall: IfFieldSubLtZeroReturnCall }
-UNION WalkValue { AssignField: AssignField, LetConst: LetConst, ErrDeferCall: ErrDeferCall, ErrDeferFreeField: ErrDeferFreeField, DeferFreeField: DeferFreeField, StmtCall: StmtCall, IoSubmit: IoSubmit, IfFieldSubLtZeroReturnCall: IfFieldSubLtZeroReturnCall, ArgRef: ArgRef, StateField: StateField, SubField: SubField, LocalRef: LocalRef, AddrOf: AddrOf, IntCast: IntCast, CallExpr: CallExpr, AllocExpr: AllocExpr, SliceUntilIntCast: SliceUntilIntCast, FsmOpsBinOp: FsmOpsBinOp, Emittable: Emittable, FunctionPath: FunctionPath, ArrayValue: []Any@multiowned, StringValue: String, SymbolValue: String@symbol, Int64Value: Int64, BoolValue: Bool }
+UNION WalkValue { AssignField: AssignField, LetConst: LetConst, ErrDeferCall: ErrDeferCall, ErrDeferFreeField: ErrDeferFreeField, DeferFreeField: DeferFreeField, StmtCall: StmtCall, IoSubmit: IoSubmit, IfFieldSubLtZeroReturnCall: IfFieldSubLtZeroReturnCall, ArgRef: ArgRef, StateField: StateField, SubField: SubField, LocalRef: LocalRef, AddrOf: AddrOf, IntCast: IntCast, CallExpr: CallExpr, AllocExpr: AllocExpr, SliceUntilIntCast: SliceUntilIntCast, FsmOpsBinOp: FsmOpsBinOp, Emittable: Emittable, FunctionPath: FunctionPath, ArrayValue: []Expr, OpsArrayValue: []OpsOrExprItem, StringValue: String, SymbolValue: String@symbol, Int64Value: Int64, BoolValue: Bool }
 FN addrOf__expr(self: AddrOf) RETURNS Expr ->
   RETURN COPY Expr{ StateField: COPY self.expr };
 END
@@ -142,7 +142,7 @@ PUB FN dSL__io_submit(verb: String@symbol, waiter: Waiter, extra_args: []Expr) R
     waiter_op_branch_value = castWaiterToStateField(waiter);
   END
   MUTABLE waiter_op: StateField = waiter_op_branch_value?;
-  RETURN IoSubmit{ verb: COPY verb, waiter: waiter_op, extra_args: COPY extra_args };
+  RETURN IoSubmit{ verb: COPY verb, waiter: Waiter{ StateField: COPY waiter_op }, extra_args: COPY extra_args };
 END
 PUB FN dSL__if_neg_return_call(field: String, sub: String, return_fn: FunctionPath, return_args: []SubField) RETURNS IfFieldSubLtZeroReturnCall ->
   RETURN IfFieldSubLtZeroReturnCall{ field: COPY field, sub: COPY sub, return_fn: COPY return_fn, return_args: COPY return_args };
@@ -226,8 +226,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF op IS_A StmtCall AS stmt_call THEN
       RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY Call{ callee: COPY lowerer__resolve_fn(rtoc_self_view, stmt_call.fn), args: COPY stmt_call.args |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, _)), try_wrap: stmt_call.is_try, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     ELSE_IF op IS_A IoSubmit AS io_submit THEN
-      MUTABLE verb_fn: ?String = COPY (CAST({:read: "submitReadForFsm", :write: "submitWriteForFsm", :recv: "submitRecvForFsm", :send: "submitSendForFsm"} AS {String@symbol}String))[io_submit.verb] OR CAST(panic("FsmOps::IoSubmit unknown verb {}") AS String);
-      MUTABLE all_args = ([MIRUnaryOp{ op: "&", operand: COPY TRY (lowerer__lower_expr(rtoc_self_view, io_submit.waiter)), lowered_node_id: NIL, ownership_consumption: NIL }] + ((io_submit.extra_args) |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, _))));
+      MUTABLE verb_fn: ?String = COPY (CAST({:read: "submitReadForFsm", :write: "submitWriteForFsm", :recv: "submitRecvForFsm", :send: "submitSendForFsm"} AS {String@symbol}String))[io_submit.verb] OR_ELSE CAST(panic("FsmOps::IoSubmit unknown verb {}") AS String);
+      MUTABLE all_args = ([MIRUnaryOp{ op: "&", operand: COPY TRY (lowerer__lower_expr(rtoc_self_view, castWaiterToExpr(io_submit.waiter))), lowered_node_id: NIL, ownership_consumption: NIL }] + ((io_submit.extra_args) |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, _))));
       MUTABLE receiver = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY lowerer__ctx_ident(rtoc_self_view) }, field: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "getSched", args: ( { MUTABLE rtoc_empty_list_1: []Any = List[]; rtoc_empty_list_1 } ), try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ MIRMethodCall: COPY receiver }, method: UNWRAP (COPY verb_fn), args: COPY all_args, try_wrap: TRUE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     ELSE_IF op IS_A IfFieldSubLtZeroReturnCall AS if_field_sub_lt_zero_return_call THEN
@@ -310,9 +310,9 @@ FN lowerer__new(ctx_id: Int64, arg_mirs: []Emittable) RETURNS Lowerer@multiowned
 END
 FN fsmOps__referenced_state_fields(ops_or_expr: []OpsOrExprItem) RETURNS ![]String ->
   MUTABLE out = List[];
-  fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(ops_or_expr AS []Any@multiowned) }, %(node: ?WalkValue) USE(MUTABLE out) -> {
+  fsmOps__walk(WalkValue{ OpsArrayValue: COPY ops_or_expr }, %(node: ?WalkValue) USE(MUTABLE out) -> {
   IF node? IS_A StateField AS state_field THEN
-      &out.append(state_field.name);
+      &out.append(COPY state_field.name);
   END
   rubyToClearVoid()
   });
@@ -323,7 +323,7 @@ FN fsmOps__alloc_state_fields(ops: []Stmt) RETURNS ![]String ->
   FOR _ IN ops DO
   IF _ IS_A AssignField AS assign_field THEN
   IF assign_field.value IS_A AllocExpr THEN
-    &out.append(assign_field.field);
+    &out.append(COPY assign_field.field);
   END
   END
   END
@@ -333,9 +333,9 @@ FN fsmOps__free_state_fields(ops: []Stmt) RETURNS ![]String ->
   MUTABLE out = List[];
   FOR _ IN ops DO
   IF _ IS_A ErrDeferFreeField AS err_defer_free_field THEN
-    &out.append(err_defer_free_field.field);
+    &out.append(COPY err_defer_free_field.field);
   ELSE_IF _ IS_A DeferFreeField AS defer_free_field THEN
-    &out.append(defer_free_field.field);
+    &out.append(COPY defer_free_field.field);
   END
   END
   RETURN CAST((out |> DISTINCT _) AS []Any);
@@ -354,9 +354,15 @@ FN fsmOps__finish_value_aliases_finalized_state?(expr: ?Expr, finalize_ops: []St
 END
 FN fsmOps__walk(node: ?WalkValue, block: FN(?WalkValue) -> Void) RETURNS Void EFFECTS REENTRANT ->
   IF node EXISTS AS node_value THEN
-    IF node_value IS_A []Any@multiowned AS array THEN
-      FOR _ IN array DO
-      fsmOps__walk(CAST(_ AS ?WalkValue), block);
+    IF node_value IS_A []Expr AS expr_array THEN
+      FOR expr_item IN expr_array DO
+      fsmOps__walk(castExprToOptionalWalkValue(expr_item), block);
+      END
+      RETURN;
+    END
+    IF node_value IS_A []OpsOrExprItem AS ops_array THEN
+      FOR ops_item IN ops_array DO
+      fsmOps__walk(castOpsOrExprItemToOptionalWalkValue(ops_item), block);
       END
       RETURN;
     END
@@ -366,20 +372,24 @@ FN fsmOps__walk(node: ?WalkValue, block: FN(?WalkValue) -> Void) RETURNS Void EF
     ELSE_IF node_value IS_A LetConst AS let_const THEN
       fsmOps__walk(WalkValue{ IntCast: COPY let_const.value }, block);
     ELSE_IF node_value IS_A ErrDeferCall AS err_defer_call THEN
-      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(err_defer_call.args AS []Any@multiowned) }, block);
+      FOR err_defer_arg IN err_defer_call.args DO
+      fsmOps__walk(WalkValue{ StateField: COPY err_defer_arg }, block);
+      END
     ELSE_IF node_value IS_A StmtCall AS stmt_call THEN
-      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(stmt_call.args AS []Any@multiowned) }, block);
+      fsmOps__walk(WalkValue{ ArrayValue: COPY stmt_call.args }, block);
     ELSE_IF node_value IS_A CallExpr AS call_expr THEN
-      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(call_expr.args AS []Any@multiowned) }, block);
+      fsmOps__walk(WalkValue{ ArrayValue: COPY call_expr.args }, block);
     ELSE_IF node_value IS_A IoSubmit AS io_submit THEN
-      fsmOps__walk(WalkValue{ ArrayValue: COPY io_submit.waiter }, block);
-      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(io_submit.extra_args AS []Any@multiowned) }, block);
+      fsmOps__walk(castWaiterToOptionalWalkValue(io_submit.waiter), block);
+      fsmOps__walk(WalkValue{ ArrayValue: COPY io_submit.extra_args }, block);
     ELSE_IF node_value IS_A IfFieldSubLtZeroReturnCall AS if_field_sub_lt_zero_return_call THEN
-      fsmOps__walk(WalkValue{ ArrayValue: COPY CAST(if_field_sub_lt_zero_return_call.return_args AS []Any@multiowned) }, block);
+      FOR return_arg IN if_field_sub_lt_zero_return_call.return_args DO
+      fsmOps__walk(WalkValue{ SubField: COPY return_arg }, block);
+      END
     ELSE_IF node_value IS_A SubField AS sub_field THEN
       fsmOps__walk(WalkValue{ StateField: COPY sub_field.base }, block);
     ELSE_IF node_value IS_A AddrOf AS addr_of THEN
-      fsmOps__walk(WalkValue{ StateField: COPY addrOf__expr(addr_of) }, block);
+      fsmOps__walk(castExprToOptionalWalkValue(addrOf__expr(addr_of)), block);
     ELSE_IF node_value IS_A IntCast AS int_cast THEN
       fsmOps__walk(castExprToOptionalWalkValue(intCast__expr(int_cast)), block);
     ELSE_IF node_value IS_A AllocExpr AS alloc_expr THEN
@@ -438,4 +448,44 @@ FN castWaiterToStateField(value: Waiter) RETURNS StateField ->
 END
 FN rubyToClearVoid() RETURNS Void ->
   RETURN;
+END
+
+FN castWaiterToOptionalWalkValue(value: Waiter) RETURNS ?WalkValue ->
+  PARTIAL MATCH value START
+    Waiter.StateField AS state_field -> RETURN WalkValue{ StateField: COPY state_field };
+  END
+  RETURN NIL;
+END
+
+FN castWaiterToExpr(value: Waiter) RETURNS Expr ->
+  PARTIAL MATCH value START
+    Waiter.StateField AS state_field -> RETURN Expr{ StateField: COPY state_field };
+  END
+  panic("FsmOps::IoSubmit waiter is not an expression");
+END
+
+FN castOpsOrExprItemToOptionalWalkValue(value: OpsOrExprItem) RETURNS ?WalkValue ->
+  PARTIAL MATCH value START
+    OpsOrExprItem.AssignField AS cast_payload -> RETURN WalkValue{ AssignField: COPY cast_payload };,
+    OpsOrExprItem.LetConst AS cast_payload -> RETURN WalkValue{ LetConst: COPY cast_payload };,
+    OpsOrExprItem.ErrDeferCall AS cast_payload -> RETURN WalkValue{ ErrDeferCall: COPY cast_payload };,
+    OpsOrExprItem.ErrDeferFreeField AS cast_payload -> RETURN WalkValue{ ErrDeferFreeField: COPY cast_payload };,
+    OpsOrExprItem.DeferFreeField AS cast_payload -> RETURN WalkValue{ DeferFreeField: COPY cast_payload };,
+    OpsOrExprItem.StmtCall AS cast_payload -> RETURN WalkValue{ StmtCall: COPY cast_payload };,
+    OpsOrExprItem.IoSubmit AS cast_payload -> RETURN WalkValue{ IoSubmit: COPY cast_payload };,
+    OpsOrExprItem.IfFieldSubLtZeroReturnCall AS cast_payload -> RETURN WalkValue{ IfFieldSubLtZeroReturnCall: COPY cast_payload };,
+    OpsOrExprItem.ArgRef AS cast_payload -> RETURN WalkValue{ ArgRef: COPY cast_payload };,
+    OpsOrExprItem.StateField AS cast_payload -> RETURN WalkValue{ StateField: COPY cast_payload };,
+    OpsOrExprItem.SubField AS cast_payload -> RETURN WalkValue{ SubField: COPY cast_payload };,
+    OpsOrExprItem.LocalRef AS cast_payload -> RETURN WalkValue{ LocalRef: COPY cast_payload };,
+    OpsOrExprItem.AddrOf AS cast_payload -> RETURN WalkValue{ AddrOf: COPY cast_payload };,
+    OpsOrExprItem.IntCast AS cast_payload -> RETURN WalkValue{ IntCast: COPY cast_payload };,
+    OpsOrExprItem.CallExpr AS cast_payload -> RETURN WalkValue{ CallExpr: COPY cast_payload };,
+    OpsOrExprItem.AllocExpr AS cast_payload -> RETURN WalkValue{ AllocExpr: COPY cast_payload };,
+    OpsOrExprItem.SliceUntilIntCast AS cast_payload -> RETURN WalkValue{ SliceUntilIntCast: COPY cast_payload };,
+    OpsOrExprItem.FsmOpsBinOp AS cast_payload -> RETURN WalkValue{ FsmOpsBinOp: COPY cast_payload };,
+    OpsOrExprItem.Emittable AS cast_payload -> RETURN WalkValue{ Emittable: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?WalkValue");
+  END
+  panic("Invalid cast to ?WalkValue");
 END
