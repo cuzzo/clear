@@ -327,7 +327,7 @@ PUB FN typeExpressionTree__with_nominal_arguments(expression: TypeExpression, na
     RETURN COPY expression;
   END
 END
-FN typeExpressionTree__transform(expression: TypeExpression, visitor: FN(TypeExpression) -> TypeExpression) RETURNS TypeExpression EFFECTS REENTRANT ->
+PUB FN typeExpressionTree__transform(expression: TypeExpression, visitor: FN(TypeExpression) -> TypeExpression) RETURNS TypeExpression EFFECTS REENTRANT ->
   MUTABLE kind = COPY expression.kind;
   MUTABLE cap = COPY expression.capabilities;
   MUTABLE rebuilt_branch_value: ?TypeExpression = NIL;
