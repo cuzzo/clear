@@ -83,7 +83,7 @@ producers:
       - >-
         rm -rf .giga/work/zig-repository &&
         mkdir -p .giga/work/zig-repository .giga/cache/zig-local .giga/cache/zig-global &&
-        git archive HEAD zig tools/zig_coverage_sanitize.rb | tar -x -C .giga/work/zig-repository &&
+        git archive HEAD zig tools/zig_coverage_sanitize.rb tools/zig_dwarf_line_audit.rb | tar -x -C .giga/work/zig-repository &&
         cd .giga/work/zig-repository/zig &&
         zig build test -Dcoverage
         --cache-dir ../../../cache/zig-local
