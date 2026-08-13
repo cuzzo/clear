@@ -678,6 +678,28 @@ RSpec.describe MIREmitter do
     expect(e.emit(node)).to eq("User{ .id = 1, .name = \"alice\" }")
   end
 
+  it "drops the @as around a NIL struct field" do
+    # The field type may live in a package this module never imported, so
+    # naming it does not resolve; a struct literal infers `null` anyway.
+    node = MIR::StructInit.new("Node", [
+      { name: "name", value: MIR::Lit.new("\"n\"") },
+      { name: "plan", value: MIR::Cast.new(MIR::Lit.new("null"), "?ResourceClosePlan", :as) }
+    ])
+    expect(e.emit(node)).to eq("Node{ .name = \"n\", .plan = null }")
+  end
+
+  it "keeps a non-NIL @as in a struct field" do
+    node = MIR::StructInit.new("Node", [
+      { name: "count", value: MIR::Cast.new(MIR::Lit.new("0"), "i64", :as) }
+    ])
+    expect(e.emit(node)).to eq("Node{ .count = @as(i64, 0) }")
+  end
+
+  it "escapes a struct field named after a Zig keyword" do
+    node = MIR::StructInit.new("Node", [{ name: "comptime", value: MIR::Lit.new("true") }])
+    expect(e.emit(node)).to eq("Node{ .@\"comptime\" = true }")
+  end
+
   it "emits anonymous struct init" do
     node = MIR::StructInit.new(nil, [{ name: "x", value: MIR::Lit.new("1") }])
     expect(e.emit(node)).to eq(".{ .x = 1 }")

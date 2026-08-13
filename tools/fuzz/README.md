@@ -56,7 +56,7 @@ actually selected, rejects both baseline and semantic runs if any result is a
 timeout, compares individual surviving mutant IDs, and writes
 `semantic-mutant-delta/v1` facts.
 
-    bundle exec ruby gems/gigasail/tools/mutant-converters/semantic_mutant.rb \
+    bundle exec ruby gems/lineage/tools/mutant-converters/semantic_mutant.rb \
       --out /tmp/clear-semantic-mutants --timeout 60 --min-new-kills 1
 
 The final paired run selected the same 369 parser mutants on both sides and
@@ -211,7 +211,6 @@ expected hard error is absent.
 | `fsm_edge_matrix`           | 8               | Additional FSM splitter edges around OR fallbacks, nested loop/branch suspension, stream branches, locks before NEXT, and known early-return lowering failures. |
 | `diagnostic_policy_matrix`  | 16              | Policy-heavy front-end diagnostics for reentrancy, hold-lock-across-yield, lock ordering, handlers, and ownership/fixable rejection paths. |
 | `pipeline_source_shape_matrix` | 44           | Pipeline source/terminal shapes across range, BG STREAM, bounded promises, strings, and observable terminals. |
-| `pipeline_consumer_position_matrix` | 26      | Where a pipeline result lands: bound inside FOR/WHILE/MATCH-arm-in-loop, iterated under IF, used as an IF condition, re-piped mid-chain, or escaped into TAKES, a struct field, or an outer list. |
 | `semantic_equivalence_matrix` | 531           | Recursively derived Int64, Bool, String, struct, list, map, and Tuple equivalences crossed with compatible local, call, aggregate, ownership, and pipeline slots — including stream-pipeline productions (identity SELECT into fused SUM, observing selectors over owned stream items, identity re-stream drained by WHILE-EXISTS). |
 | `semantic_gap_matrix` | 21                    | Raw positive witnesses for every fixed compiler defect found by the original, capability-expansion, whole-program, and migration-completion campaigns. |
 | `semantic_capability_matrix` | 17             | Closed reviewed capability allowlist across String, struct, list, map, Tuple, synchronized struct, and shared-atomic Int64 payloads. |
@@ -238,7 +237,9 @@ expected hard error is absent.
 | `extern_boundary_matrix`     | 6            | Negative extern declaration/call boundaries for free functions, trampolines, extern methods/resources, generic comptime calls, and tight-loop rejection. |
 | `kept_identity_matrix`       | 105          | Retained identity v4 keep edges: caller model x destination x post-call use x arity x fallibility; declaration-sited negative cells (KEPT_IDENTITY_NEEDS_MODEL, use-after-GIVE). |
 | `carrier_ownership_matrix`   | 15           | Retained identity v5 carrier ownership: source carrier x contract x fan-out. Positives leak-checked (@multiowned/@shared KEEP retain, shared->unique OWN COPY, last-use move, SHARED multi-consume, OWN COPY detach, MONOMORPHIC carrier threading, MONOMORPHIC KEEP per carrier); negatives pin KEEP_ON_KNOWN_CARRIER, COPY_ON_POLYMORPHIC_PARAM, COPY_RETAINED_NEEDS_UNIQUE, CARRIER_POLYMORPHIC_FANOUT, ARG_NEEDS_SHARED, RETAINED_NEEDS_OWN_COPY, OWN_ALONE_UNSUPPORTED. |
-| `curated_gap_corpus`         | 556          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
+| `provenance_round_trip_matrix` | 36         | A value read back out of a map, list, struct field, or optional keeps the provenance it was stored with: owned values are freed exactly once, statics and borrows never. |
+| `pipeline_consumer_position_matrix` | 26      | Where a pipeline result lands: bound inside FOR/WHILE/MATCH-arm-in-loop, iterated under IF, used as an IF condition, re-piped mid-chain, or escaped into TAKES, a struct field, or an outer list. |
+| `curated_gap_corpus`         | 605          | Self-contained `transpile-tests/*.clear` corpus reused as broad compile-mode fuzz coverage for parser, annotator, MIR lowering, and emission. |
 | `tense_predicate_matrix`     | 11           | Postfix tense predicates, stacked refinement, readiness polling, and ambiguous optional-Boolean rejection. |
 | `next_tense_matrix`          | 9            | NEXT across future/stream values and their fallible/optional tense permutations, including invalid redundant and missing unwraps. |
 | `tense_operation_plan_matrix` | 34          | Executable annotation-to-MIR handoff coverage for TRY, UNWRAP, OR_ELSE, tense predicates, ordered tense navigation, scalar NEXT, and fallible promise-list aggregation. |

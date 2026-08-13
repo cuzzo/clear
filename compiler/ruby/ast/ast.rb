@@ -37,6 +37,7 @@ module AST
       # A static call carries the same call metadata: annotation copies it onto
       # the synthetic FuncCall it resolves through.
       AST::StaticCall,
+      AST::OptionalUnwrap, AST::TupleLit, AST::Cast,
     )
   end
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
@@ -148,6 +149,12 @@ module AST
       dst.can_fail = src.can_fail unless src.can_fail.nil?
       dst.error_kind = src.error_kind if src.error_kind
       dst.error_type = src.error_type if src.error_type
+      # The importing module alias is what qualifies a cross-package call in
+      # the emitted Zig. Dropping it here emitted a bare callee that the
+      # package cannot see.
+      if src.is_a?(AST::FuncCall) && dst.is_a?(AST::FuncCall) && src.module_alias
+        dst.module_alias = src.module_alias
+      end
     end
 
     dst
@@ -373,6 +380,15 @@ module AST
                           :resolved_type, :old_scope,
                           keyword_init: true) do
     extend T::Sig
+
+    # ruby-to-clear: field-type var_node=Locatable
+    # ruby-to-clear: field-type alias=?String
+    # ruby-to-clear: field-type alias_mutable=Bool
+    # ruby-to-clear: field-type guard_expr=?Locatable
+    # ruby-to-clear: field-type snapshot_token=?Token
+    # ruby-to-clear: field-type view_token=?Token
+    # ruby-to-clear: field-type view_length=?Locatable
+    # ruby-to-clear: field-type as_token=?Token
 
     sig { params(kw: StructKwargs).void }
     def initialize(**kw)
@@ -2380,6 +2396,9 @@ module AST
     extend T::Sig
     include Locatable
     # ruby-to-clear: field-type op=String@symbol
+    # ruby-to-clear: field-type left=Locatable
+    # ruby-to-clear: field-type right=Locatable
+    # ruby-to-clear: field-type paren_bind=?Bool
     # Derived: comparison/logical -> Bool; otherwise an operand's type.
     sig { returns(Type) }
     def full_type
@@ -3000,6 +3019,8 @@ module AST
     def name; target.name end
   end
   GetIndex     = Struct.new(:token, :target, :index) do
+    # ruby-to-clear: field-type index=Locatable
+    # ruby-to-clear: field-type target=Locatable
     extend T::Sig
     include Locatable
     attr_accessor :safe_nav_chain
@@ -3790,6 +3811,10 @@ module AST
   # Captured affine variables are MOVED into the fiber (not borrowed by pointer).
   # stack_size: :standard (default, 16 KB) | :micro (4 KB) | :large (64 KB) | :xl (256 KB)
   BgBlock           = Struct.new(:token, :body, :deferred_drops, :stack_size, :pinned, :parallel, :arena_mode, :can_smash) do
+    # ruby-to-clear: field-type arena_mode=Bool
+    # ruby-to-clear: field-type can_smash=Bool
+    # ruby-to-clear: field-type parallel=Bool
+    # ruby-to-clear: field-type pinned=Bool
     extend T::Sig
     include Locatable
     include HasBodies
@@ -3900,6 +3925,7 @@ module AST
   # case_drops: Array of drop-arrays (parallel to cases), filled by annotator
   # default_drops: drop-array for default branch (or nil), filled by annotator
   MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) do
+    # ruby-to-clear: field-type exhaustive=Bool
     # ruby-to-clear: field-type expr=Locatable
     # ruby-to-clear: field-type cases=[]MatchCase
     # ruby-to-clear: field-type default_case=?([]Locatable)
@@ -3938,6 +3964,10 @@ module AST
   # ForRange: FOR var IN (start ..= end) DO body END
   # inclusive: true = ..= (start to end), false = ..< (start to end-1)
   ForRange          = Struct.new(:token, :var_name, :start_expr, :end_expr, :inclusive, :body, :deferred_drops, :mark_per_iter, :tight) do
+    # ruby-to-clear: field-type start_expr=Locatable
+    # ruby-to-clear: field-type end_expr=Locatable
+    # ruby-to-clear: field-type inclusive=Bool
+    # ruby-to-clear: field-type body=[]Locatable
     extend T::Sig
     include Locatable
     include StatementVoidType
@@ -4200,6 +4230,8 @@ module AST
 
   # STUB fn RETURNS value | STUB fn CAPTURES var | STUB fn SEQUENCE [...] | STUB fn WITH lambda
   StubDecl = Struct.new(:token, :function_name, :kind, :value) { include Locatable }
+  # ruby-to-clear: field-type function_name=String
+  # ruby-to-clear: field-type kind=String@symbol
   # kind: :returns, :captures, :sequence, :with
 
   # ruby-to-clear: data-api

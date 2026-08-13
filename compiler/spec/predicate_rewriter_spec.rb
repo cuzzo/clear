@@ -51,6 +51,21 @@ RSpec.describe PredicateRewriter do
       expect(rw(src)).not_to include("x != NIL")
     end
 
+    it "keeps the receiver when the operand is an index or field access" do
+      # GetIndex/GetField carry the `[` / `.` token, not the receiver's, so a
+      # span taken from the node's own token started mid-expression and the
+      # rewrite orphaned the receiver (`m[:a]` became `m([:a])`).
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          m: {String@symbol}Int64 = {:a: 1};
+          IF m[:a] != NIL THEN RETURN; END
+          RETURN;
+        END
+      CLEAR
+      expect(rw(src)).to include("(m[:a]).present?()")
+      expect(rw(src)).not_to include("m([:a])")
+    end
+
     it "leaves the reversed `NIL == x` form alone (RHS-only rewrite in v1)" do
       # The reversed form is rare and bounding the right operand's
       # source span without a full expression parser is unreliable.

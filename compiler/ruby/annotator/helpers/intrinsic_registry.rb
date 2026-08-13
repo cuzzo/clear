@@ -44,6 +44,13 @@ module IntrinsicRegistry
   REGISTRY_VALUES = T.let({}, RegistryMap)
   MAP_METHOD_ALIASES_VALUE = T.let({}, T::Hash[String, String])
 
+  # `validate:` lambdas are the only unserializable values a FunctionSignature
+  # carries, and every one of them is a registry singleton. Naming them lets a
+  # signature cross a process boundary (worker compiles, on-disk module cache)
+  # as a reference instead of a copy.
+  VALIDATORS_BY_NAME = T.let({}, T::Hash[String, Proc])
+  VALIDATOR_NAMES = T.let({}, T::Hash[Integer, String])
+
   # Keys consumed at the FunctionSignature level (not IntrinsicEmit).
   FS_KEYS = %i[args arity validate return return_type can_fail error_fallible needs_rt].freeze
 
@@ -504,9 +511,49 @@ module IntrinsicRegistry
     MAP_METHOD_ALIASES.each do |key, value|
       MAP_METHOD_ALIASES_VALUE[key] = value
     end
+    name_validators!
     nil
   end
   private_class_method :populate_registry_values
+
+  sig { returns(NilClass) }
+  def self.name_validators!
+    REGISTRY_VALUES.each do |registry_name, registry|
+      registry.each do |key, entry|
+        entries = entry.is_a?(Array) ? entry : [entry]
+        entries.each_with_index do |raw, index|
+          next unless raw.is_a?(Hash)
+
+          validator = raw[:validate]
+          next unless validator.is_a?(Proc)
+
+          name = "#{registry_name}:#{registry_key_string(key)}:#{index}"
+          VALIDATORS_BY_NAME[name] = validator
+          VALIDATOR_NAMES[validator.object_id] = name
+        end
+      end
+    end
+    nil
+  end
+  private_class_method :name_validators!
+
+  # Stable name for a registry `validate:` lambda, or nil when the Proc did
+  # not come from a registry (nothing else may cross a process boundary).
+  sig { params(validator: T.nilable(Proc)).returns(T.nilable(String)) }
+  def self.validator_name(validator)
+    return nil if validator.nil?
+
+    registry_values
+    VALIDATOR_NAMES[validator.object_id]
+  end
+
+  sig { params(name: T.nilable(String)).returns(T.nilable(Proc)) }
+  def self.validator_for_name(name)
+    return nil if name.nil?
+
+    registry_values
+    VALIDATORS_BY_NAME[name]
+  end
 
   # Idempotent normalizer for the flag-day migration: returns a
   # FunctionSignature for a registry/ad-hoc entry Hash, passes a

@@ -34,7 +34,9 @@ require 'set'
 require 'json'
 require 'rbconfig'
 require 'open3'
+require 'etc'
 require_relative 'compiler/ruby/tools/clear_build_support'
+require_relative 'compiler/ruby/compiler/package_source'
 require_relative 'tools/zig_coverage_support'
 
 # Coverage bootstrap MUST run before any compiler/ruby require so SimpleCov can
@@ -251,7 +253,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def incremental_transpile_runner(source:, source_dir:, pkg_paths:, use_c_allocator:, use_debug_allocator:, default_stack:, ownership_mode:, transpile_flag:, cache_path:)
+def incremental_transpile_runner(source:, source_dir:, pkg_paths:, use_c_allocator:, use_debug_allocator:, default_stack:, main_tier:, ownership_mode:, transpile_flag:, cache_path:)
   require_relative 'compiler/ruby/incremental'
   fingerprint = Digest::SHA256.hexdigest([
     ClearBuildSupport.compiler_signature(BUILD_SUPPORT_CONFIG),
@@ -269,6 +271,7 @@ def incremental_transpile_runner(source:, source_dir:, pkg_paths:, use_c_allocat
       use_c_allocator: use_c_allocator,
       use_debug_allocator: use_debug_allocator,
       default_stack: default_stack,
+      main_tier: main_tier,
       ownership_mode: ownership_mode
     ),
     module_path: source,
@@ -373,7 +376,16 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   package_imports = closure_paths.flat_map do |dep_path|
     File.read(dep_path).scan(/REQUIRE\s+"pkg:([^"]+)"(?:\s+AS\s+([A-Za-z_]\w*))?/)
   end.uniq
-  pkg_requires = pkg_paths.keys
+  # A member of a multi-file package compiles as part of that unit, never on
+  # its own -- transpiling it standalone as well declares everything in it
+  # twice, and its sibling REQUIREs cannot resolve without the group anyway.
+  grouped_member_paths = pkg_paths.values
+    .select { |spec| spec.to_s.include?(",") }
+    .flat_map { |spec| spec.to_s.split(",").map { |m| File.expand_path(m.strip) } }
+    .to_set
+  pkg_requires = pkg_paths.reject { |_name, spec|
+    !spec.to_s.include?(",") && grouped_member_paths.include?(File.expand_path(spec.to_s))
+  }.keys
   pkg_flags = pkg_paths.map do |pkg_name, pkg_path|
     "--pkg #{pkg_name}=#{pkg_path}"
   end.join(" ")
@@ -385,6 +397,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   build_dir = coverage_module_mode ? ZIG_DIR : File.join(ZIG_DIR, ".clear-cache", cache_key)
   cleanup_paths = []
   FileUtils.mkdir_p(build_dir)
+  ClearBuildSupport.prune_build_cache!(File.join(ZIG_DIR, ".clear-cache"), keep: build_dir) unless coverage_module_mode
   unless coverage_module_mode
     ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
     ClearBuildSupport.ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
@@ -392,6 +405,17 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   end
   cache_dir = coverage_module_mode ? File.join(ZIG_DIR, ".clear-cache", "#{cache_key}-coverage-cache") : File.join(build_dir, '.zig-cache')
   global_cache_dir = coverage_module_mode ? File.join(ZIG_DIR, ".clear-cache", "#{cache_key}-coverage-global-cache") : File.join(build_dir, '.global-zig-cache')
+
+  # Per-REQUIRE-unit cache. The transpile cache above keys the whole program
+  # on all of its sources, so one edit recompiles every imported module; this
+  # one keeps the modules that edit did not reach. Shared across roots, and
+  # read by ModuleImporter in-process or in the transpiler subprocess.
+  unless bypass_transpile_cache
+    ENV['CLEAR_MODULE_CACHE_DIR'] ||= File.join(ZIG_DIR, '.clear-module-cache')
+    ENV['CLEAR_MODULE_CACHE_KEY'] ||= Digest::SHA256.hexdigest(
+      [ClearBuildSupport.compiler_signature(BUILD_SUPPORT_CONFIG), transpile_flag].join("\0")
+    )
+  end
 
   tmp_name = coverage_module_mode ? "._clear_cov_#{base_name}_#{$$}.zig" : "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)
@@ -404,6 +428,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       use_c_allocator: use_c_allocator,
       use_debug_allocator: use_debug_allocator,
       default_stack: default_stack,
+      main_tier: main_tier,
       ownership_mode: ownership_mode,
       transpile_flag: transpile_flag,
       cache_path: File.join(build_dir, 'root.clearc')
@@ -446,6 +471,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       zig_code = zig_code.gsub("@import(\"#{zig_name}\")", "@import(\"#{pkg_name}.zig\")")
       zig_code = zig_code.gsub("@import(\"#{zig_name}.zig\")", "@import(\"#{pkg_name}.zig\")")
     end
+  end
+  # A member of a multi-file package is emitted as its OWNER's module (only the
+  # owner is built), and the owner may never appear in a REQUIRE, so the scan
+  # above does not know its name. Map every built package name too.
+  pkg_requires.each do |pkg_name|
+    zig_code = zig_code.gsub("@import(\"#{pkg_name}\")", "@import(\"#{pkg_name}.zig\")")
   end
   # EXTERN ... FROM "cheat_runtime" emits `@import("cheat_runtime")`, but in
   # the standalone (`./clear build`) flow there is no Zig module by that
@@ -490,22 +521,42 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   end
 
   # Transpile package modules to .zig files
-  pkg_modules = pkg_requires.map do |pkg_name|
+  build_pkg_module = lambda do |pkg_name|
     pkg_path = ClearBuildSupport.find_package_source(pkg_name, start_dir: source_dir)
     error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
     # Collect transitive package deps for nested REQUIRE "pkg:..."
-    pkg_src = File.read(pkg_path)
-    nested_imports = pkg_src.scan(/REQUIRE\s+"pkg:([^"]+)"(?:\s+AS\s+([A-Za-z_]\w*))?/)
-    nested_pkgs = nested_imports.map(&:first).uniq
-    nested_flags = nested_pkgs.map { |np|
-      np_path = ClearBuildSupport.find_package_source(np, start_dir: File.dirname(pkg_path))
-      error "Package '#{np}' not found from #{File.dirname(pkg_path)}" unless np_path
-      "--pkg #{np}=#{np_path}"
-    }.join(" ")
+    # A multi-file package registers its members as one comma-joined spec, so
+    # scan every member -- reading the spec as a single path raises ENOENT.
+    pkg_members = pkg_path.split(',').map(&:strip)
+    # A multi-file package is ONE compilation unit. Transpiling a single member
+    # makes its sibling REQUIREs resolve back to the whole package, which then
+    # declares that member twice; merging first is what the importer does for
+    # the same reason.
+    pkg_root = pkg_members.first
+    pkg_src = if pkg_members.length > 1
+      merged = PackageSource.merge(pkg_members, resolve_pkg: ->(name) { pkg_paths[name] })
+      pkg_root = File.join(build_dir, "#{pkg_name}.merged.clear")
+      ClearBuildSupport.write_if_changed(pkg_root, merged.source)
+      merged.source
+    else
+      File.read(pkg_root)
+    end
+    # A package's own REQUIREs reach further packages, so pass the whole
+    # transitive closure: one level leaves the sub-transpile unable to resolve
+    # anything a nested package itself requires. Keep this package's own entry
+    # too -- for a multi-file unit that registration is what tells the importer
+    # its members belong together.
+    # Import-rewrite below needs the (pkg, alias) pairs, not just the names.
+    nested_imports = pkg_src.scan(/REQUIRE\s+"pkg:([^"]+)"(?:\s+AS\s+([A-Za-z_]\w*))?/).uniq
+    nested_flags = pkg_members
+      .flat_map { |member| ClearBuildSupport.collect_package_dependencies(member).to_a }
+      .uniq { |np, _| np }
+      .map { |np, np_path| "--pkg #{np}=#{np_path}" }
+      .join(" ")
     begin
       pkg_zig, _pkg_cache_file = ClearBuildSupport.transpile_cached(
         config: BUILD_SUPPORT_CONFIG,
-        source_path: pkg_path,
+        source_path: pkg_root,
         mode: :module,
         transpile_flag: "--module #{nested_flags}".strip,
         source_text: pkg_src,
@@ -523,6 +574,11 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       pkg_zig = pkg_zig.gsub("@import(\"#{zig_name}\")", "@import(\"#{np}.zig\")")
       pkg_zig = pkg_zig.gsub("@import(\"#{zig_name}.zig\")", "@import(\"#{np}.zig\")")
     end
+    # A member of a multi-file package is emitted as its OWNER's module (only
+    # the owner is built), and the owner may never appear in a REQUIRE here.
+    pkg_requires.each do |built|
+      pkg_zig = pkg_zig.gsub("@import(\"#{built}\")", "@import(\"#{built}.zig\")")
+    end
     # A package can own EXTERN ... FROM "module" declarations; its emitted
     # named imports must resolve to the FFI files copied into the build dir.
     ffi_modules.each do |m, _src_mod|
@@ -537,6 +593,18 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     cleanup_paths << pkg_zig_file if coverage_module_mode && !preexisting_pkg
     pkg_name
   end
+
+  # Warm the content-addressed transpile cache first. Each package is an
+  # independent transpile, so forked workers populate exactly what the serial
+  # pass below then reads back as cache hits -- the same shape as incremental
+  # compilation, and parallelism stays at this one call site.
+  ClearBuildSupport.prewarm_in_parallel(
+    pkg_requires,
+    jobs: (ENV['CLEAR_JOBS'] || Etc.nprocessors).to_i.clamp(1, 32),
+    &build_pkg_module
+  )
+
+  pkg_modules = pkg_requires.map(&build_pkg_module)
 
   # Publish the root last. A persistent Zig watcher may react to every rename;
   # writing dependencies first guarantees that it never observes a new root
@@ -598,7 +666,13 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # experimental incremental path. Only the persistent watch command opts in.
   cmd_parts << '-fno-incremental'
 
-  unless module_mode
+  if module_mode
+    # `clear test` builds Debug by default. An explicit level lets a suite run
+    # the LLVM backend instead of the self-hosted one -- which is where the
+    # lexer keyword miscompile lived -- and turns on the safety checks that a
+    # Debug arena hides.
+    cmd_parts += ['-O', opt_level] unless opt_level == 'Debug'
+  else
     bin_name = "#{File.basename(output)}-#{$$}"
     cmd_parts += ['-O', opt_level] + extra_flags
     cmd_parts += ['-fno-strip'] if profile
@@ -896,6 +970,7 @@ when 'build', 'watch'
   # Parse build flags
   remaining = []
   stack_check = nil  # auto: on for release/safe, off for debug
+  main_tier_override = nil  # --main-tier: the recursive self-hosted parser needs more than the 64KB debug default
   i = 0
   while i < args.length
     case args[i]
@@ -921,6 +996,11 @@ when 'build', 'watch'
     when '--no-stack-check'
       stack_check = false  # explicit override
       i += 1
+    when '--main-tier'
+      tier_arg = args[i + 1]
+      error "--main-tier needs a tier (micro|standard|large|xl|service)" unless tier_arg
+      main_tier_override = tier_arg.downcase.to_sym
+      i += 2
     when '--force'
       @force_build = true
       i += 1
@@ -1028,7 +1108,7 @@ when 'build', 'watch'
     exit 0
   end
 
-  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache, ownership_mode: ownership_mode)
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator, bypass_transpile_cache: bypass_transpile_cache, ownership_mode: ownership_mode, main_tier: main_tier_override)
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
 
@@ -1291,6 +1371,15 @@ when 'test'
     exec(RbConfig.ruby, compat_script, *compat_args)
   end
 
+  # Opt into an optimized test build. ReleaseSafe keeps the safety checks and
+  # routes through LLVM rather than the self-hosted backend.
+  test_opt_level = if test_args.delete('--safe')
+                     'ReleaseSafe'
+                   elsif test_args.delete('--optimized')
+                     'ReleaseFast'
+                   else
+                     'Debug'
+                   end
   profile_mode = test_args.delete('--profile')
   strict_mode = test_args.delete('--strict')
   frame_debug = test_args.delete('--debug-frame') || test_args.delete('--no-frame')
@@ -1472,17 +1561,14 @@ when 'test'
     end
     zig_code = zig_code.gsub('@import("runtime-header.zig")', '@import("runtime/runtime-header.zig")')
 
-    # Write to a build dir matching normal build layout. Transpiled tests
-    # import runtime/runtime-header.zig and lib/* via directory-relative
-    # paths; top-level zig/*.zig symlinks are no longer sufficient after the
-    # Zig 0.16 runtime/layout changes.
-    #
-    # The build dir stays per-process: it holds the generated
-    # ._clear_tmp_<base>.zig, and concurrent or successive tests sharing one
-    # would read each other's source.
+    # Write to a minimal per-process build dir matching normal build layout.
+    # Transpiled tests import runtime/runtime-header.zig and lib/* via
+    # directory-relative paths; top-level zig/*.zig symlinks are no longer
+    # sufficient after the Zig 0.16 runtime/layout changes.
     base_name = File.basename(source, '.clear')
     build_dir = coverage_mode ? ZIG_DIR : File.join(ZIG_DIR, ".build-#{$$}")
     cleanup_paths = []
+    ClearBuildSupport.reap_orphan_build_dirs!(ZIG_DIR) unless coverage_mode
     FileUtils.mkdir_p(build_dir)
     unless coverage_mode
       ClearBuildSupport.ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
@@ -1542,6 +1628,9 @@ when 'test'
     cmd_parts += ['--global-cache-dir', File.join(shared_zig_cache, 'global')]
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
+    # `--safe` / `--optimized` route through LLVM rather than the self-hosted
+    # backend, which is where the lexer keyword miscompile lived.
+    cmd_parts += ['-O', test_opt_level] unless test_opt_level == 'Debug' 
     cmd_parts.concat(c_ffi_link_flags(c_libraries, build_dir, cleanup_paths))
     if tag_filters.empty?
       cmd_parts += ['--test-filter', File.basename(source)]

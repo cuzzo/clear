@@ -1334,6 +1334,27 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("errdefer CheatLib.cleanup(@TypeOf(__dupe_errMsg), alloc, &__dupe_errMsg)")
       expect(zig).to include("result.errKind = __dupe_errKind")
     end
+
+    # A switch EXPRESSION gives every arm its own result temp, and a by-value
+    # capture adds a copy of each payload, so the frame grows with the variant
+    # count. The parser's 130-variant Locatable reached 2.5 MB that way and
+    # faulted in the prologue on a 4 MB stack.
+    it "clones a union arm by arm so the frame does not scale with variant count" do
+      src = <<~CLEAR
+        STRUCT Wrapped { label: String }
+        UNION Shape { Left: Wrapped, Right: Wrapped }
+        FN main() RETURNS Void ->
+            v = Shape{ Left: Wrapped{ label: "x" } };
+            copied = COPY v;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+
+      expect(zig).not_to include("return switch (self)")
+      expect(zig).to include(".Left => |*__payload_Left|")
+      expect(zig).to include("return .{ .Left = try CheatLib.dupeValue(@TypeOf(__payload_Left.*), __payload_Left.*, alloc) }")
+    end
   end
 
   describe "RETURN fn(borrowed_arg) does NOT suppress borrowed arg cleanup" do

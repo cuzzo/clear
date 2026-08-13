@@ -1,0 +1,19 @@
+# A nested map value builds against the outer map's VALUE type. Without it the
+# inner literal guessed from its own items and the outer map stored the inner
+# map's ENTRIES directly.
+
+UNION Entry { SymbolValue: String@symbol, StringValue: String }
+
+FN table() RETURNS {String@symbol}{String@symbol}?Entry ->
+  RETURN {:A: {:severity: Entry{ SymbolValue: :error }, :text: Entry{ StringValue: COPY "boom" }}};
+END
+
+FN main() RETURNS Void ->
+  t = table();
+  IF t[:A] EXISTS AS row THEN
+    ASSERT (row[:severity]) != NIL, "the nested row is a map of its own";
+  ELSE
+    ASSERT FALSE, "expected the A row";
+  END
+  print("ok");
+END

@@ -3960,7 +3960,7 @@ RSpec.describe "MIR gap-burn characterization" do
     nonempty_striped = AST::HashLit.new(tok, { lit("k") => lit(1, type: :Int64) }, :heap)
     nonempty_striped.full_type = striped_string
     nonempty_striped_result = hash_low.send(:lower_hash_lit, nonempty_striped)
-    striped_wrapped = nonempty_striped_result.body.grep(MIR::Let).find { |stmt| stmt.name == "__hm_wrapped" }
+    striped_wrapped = nonempty_striped_result.body.grep(MIR::Let).find { |stmt| stmt.name.start_with?("__hm_wrapped") }
     expect(striped_wrapped.init).to be_a(MIR::CapWrap)
 
     striped_numeric = Type.new("HashMap<Int64, Int64>", ownership: :shared, sync: :locked, shard_count: 4)
@@ -3981,10 +3981,10 @@ RSpec.describe "MIR gap-burn characterization" do
     nonempty_shared.full_type = shared_numeric
     nonempty_result = hash_low.send(:lower_hash_lit, nonempty_shared)
     expect(nonempty_result).to be_a(MIR::BlockExpr)
-    wrapped_let = nonempty_result.body.grep(MIR::Let).find { |stmt| stmt.name == "__hm_wrapped" }
+    wrapped_let = nonempty_result.body.grep(MIR::Let).find { |stmt| stmt.name.start_with?("__hm_wrapped") }
     expect(wrapped_let.init).to be_a(MIR::CapWrap)
-    expect(wrapped_let.init.inner.name).to eq("__hm")
-    expect(nonempty_result.body.last.value.name).to eq("__hm_wrapped")
+    expect(wrapped_let.init.inner.name).to start_with("__hm")
+    expect(nonempty_result.body.last.value.name).to start_with("__hm_wrapped")
 
     scalar_typed_list = AST::ListLit.new(tok, [], :heap)
     scalar_typed_list.full_type = Type.new(:Int64)

@@ -77,6 +77,7 @@ class PipelineHost
   sig { returns(PipelineScalarLowerer) }
   def build_scalar_lowerer
     PipelineScalarLowerer.new(
+      loop_mark_stmts: -> { @lowering_bridge.pipeline_iteration_loop_marks },
       visit_expr: ->(_list_node, expr_node, placeholder) {
         with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
       },
@@ -192,6 +193,7 @@ class PipelineHost
       lower_each_range: ->(source_node, stages, each_op) { lower_each_range(source_node, stages, each_op) },
       lower_sharded_each: ->(list_node, each_op) { lower_sharded_each(list_node, each_op) },
       ast_stmts_use_placeholder: ->(body_stmts) { ast_stmts_use_placeholder?(body_stmts) },
+      loop_mark_stmts: -> { @lowering_bridge.pipeline_iteration_loop_marks },
       source_alloc_fact: ->(value, name, type_info) {
         fact = @lowering_bridge.pipeline_alloc_mark_fact(
           value, name, fallback_alloc: :heap, type_info: type_info,

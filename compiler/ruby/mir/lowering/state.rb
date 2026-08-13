@@ -76,6 +76,9 @@ class ConstInitEntry < T::Struct
   const :zig_type, String
   const :init, MIR::Node
   const :type_info, T.untyped, default: nil
+  # Statements the initializer hoisted (owned temps and their marks). They must
+  # run inside the init prologue, ahead of the value that references them.
+  const :prelude, T::Array[MIR::Node], default: []
 end
 
 class MIRLoweringProgramState < T::Struct
@@ -102,6 +105,13 @@ class MIRLoweringProgramState < T::Struct
   prop :fn_nodes, FnNodeMap, factory: -> { {} }
   prop :function_counter_snapshots, T::Hash[String, MIRLoweringCounterSnapshot], factory: -> { {} }
   prop :runtime_init_consts, T::Array[ConstInitEntry], factory: -> { [] }
+  # Zig aliases of imported modules that declare runtime-initialized consts,
+  # in require order -- the root calls each before its own initializers.
+  prop :module_const_inits, T::Set[String], factory: -> { Set.new }
+  # Names declared by a module-level `MUTABLE x = ...`. Their storage is the
+  # program lifetime, so an assignment into one targets the heap allocator and
+  # drops nothing.
+  prop :module_global_names, T::Set[String], factory: -> { Set.new }
 end
 
 class MIRLoweringCaptureState < T::Struct
@@ -111,6 +121,9 @@ class MIRLoweringCaptureState < T::Struct
   CaptureSymbols = T.type_alias { T::Hash[String, SymbolEntry] }
 
   prop :current_bg_pointer_captures, T.nilable(T::Set[String]), default: nil
+  # MUTABLE lambda parameters arrive as pointers, so `&p` inside the body must
+  # not take a second address.
+  prop :current_lambda_pointer_params, T::Set[String], factory: -> { Set.new }
   prop :current_fiber_capture_symbols, CaptureSymbols, factory: -> { {} }
   prop :do_capture_map, T.nilable(CaptureMap), default: nil
   prop :current_stream_is_inf, T.nilable(T::Boolean), default: nil

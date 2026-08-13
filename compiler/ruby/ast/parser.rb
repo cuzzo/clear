@@ -144,8 +144,8 @@ class ClearParser
           AST::MinOp, AST::MaxOp, AST::AverageOp)
   end
 
-  @gradual_mode = T.let(false, T.nilable(T::Boolean))
-  @ownership_mode = T.let(:default, T.nilable(Symbol))
+  @gradual_mode = T.let(false, T::Boolean)
+  @ownership_mode = T.let(:default, Symbol)
 
   sig do
     params(
@@ -207,23 +207,23 @@ class ClearParser
     # build, one mode.
     sig { returns(T::Boolean) }
     def gradual_mode
-      T.must(@gradual_mode)
+      @gradual_mode
     end
 
     sig { params(value: T::Boolean).returns(T::Boolean) }
     def gradual_mode=(value)
-      @gradual_mode = T.let(value, T.nilable(T::Boolean))
+      @gradual_mode = value
       value
     end
 
     sig { returns(Symbol) }
     def ownership_mode
-      @ownership_mode || :default
+      @ownership_mode
     end
 
     sig { params(value: Symbol).returns(Symbol) }
     def ownership_mode=(value)
-      @ownership_mode = T.let(value, T.nilable(Symbol))
+      @ownership_mode = value
       value
     end
 
@@ -244,7 +244,7 @@ class ClearParser
     current_token = current
     unless current_token.type == :EOF
       error!(current_token, :PARSER_EXPECTED,
-        expected: "end of type", got: current_token.value,
+        expected: "end of type", got: current_token.display_value,
         type: current_token.type, line: current_token.line)
     end
     syntax

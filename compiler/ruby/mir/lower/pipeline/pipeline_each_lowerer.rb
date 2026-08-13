@@ -48,6 +48,7 @@ class PipelineEachLowerer < T::Struct
   const :lower_sharded_each, T.proc.params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock)
   const :ast_stmts_use_placeholder, T.proc.params(body_stmts: T::Array[AST::Node]).returns(T::Boolean)
   const :next_index_name, T.proc.returns(String)
+  const :loop_mark_stmts, T.proc.returns(T::Array[MIR::Emittable])
   const :source_alloc_fact, T.proc.params(value: MIR::Node, name: String, type_info: Type).returns(T.nilable([MIR::AllocMark, CleanupEntry]))
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(PipelineEachResult) }
@@ -239,8 +240,33 @@ class PipelineEachLowerer < T::Struct
     stmts << MIR::Cleanup.new("__each_src", fact[1]) if fact
     stmts << MIR::Let.new("__each_items",
       MIR::ItemsAccess.new(MIR::Ident.new("__each_src"), true), false, nil, nil)
-    stmts << MIR::ForStmt.new(MIR::Ident.new("__each_items"), "__each_item", list_body_mir, nil)
+    # Zig rejects an unused capture, and a body that ignores the item is
+    # ordinary (`list |> EACH { count = count + 1; }`). Vouch for the capture
+    # rather than predicting whether the body reads it.
+    stmts << MIR::ForStmt.new(MIR::Ident.new("__each_items"), "__each_item",
+      [MIR::Suppress.new("__each_item")] + with_iteration_rewind(list_body_mir), nil)
     MIR::ScopeBlock.new(stmts)
+  end
+
+  # An EACH body that allocates frame transients each turn needs the loop's
+  # per-iteration arena rewind, the same one the SELECT element gets. Without
+  # it the arena grows for the whole loop and the checker rejects the body's
+  # iteration-scoped allocations (FRAME_NO_REWIND).
+  sig { params(body: T::Array[MIR::Emittable]).returns(T::Array[MIR::Emittable]) }
+  def with_iteration_rewind(body)
+    return body unless body_frame_transients?(body)
+
+    self.loop_mark_stmts.call.dup + body
+  end
+
+  sig { params(body: T::Array[MIR::Emittable]).returns(T::Boolean) }
+  def body_frame_transients?(body)
+    found = T.let(false, T::Boolean)
+    boundary = ->(node) { node.is_a?(MIR::BgBlock) || node.is_a?(MIR::LambdaExpr) }
+    MIR.each_node_until(body, boundary) do |node|
+      found = true if node.is_a?(MIR::AllocMark) && MIR::Placement.frame?(node.alloc)
+    end
+    found
   end
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(MIR::ScopeBlock) }
@@ -267,12 +293,11 @@ class PipelineEachLowerer < T::Struct
     end_mir = self.visit_mir.call(range.finish)
     end_expr = range.inclusive ? MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
     range_body_mir = self.visit_body_with_placeholder.call(each_op.body, "__each_item")
-    capture_name = self.ast_stmts_use_placeholder.call(each_op.body) ? "__each_item" : "_"
 
     MIR::ForStmt.new(
       MIR::IterRange.new(start_mir, end_expr, :i64),
-      capture_name,
-      range_body_mir,
+      "__each_item",
+      [MIR::Suppress.new("__each_item")] + range_body_mir,
       nil,
     )
   end

@@ -1,0 +1,36 @@
+STRUCT Leaf { names: []String }
+STRUCT Other { n: Int64 }
+UNION Kind { Leaf: Leaf, Other: Other }
+STRUCT Expr { kind: Kind@boxed }
+
+FN make(label: String) RETURNS Expr ->
+  MUTABLE ns: []String = List[];
+  &ns.append(COPY label);
+  RETURN Expr{ kind: Kind{ Leaf: Leaf{ names: ns } } };
+END
+
+# A value block ending in `slot?` hands out its binding's payload while the
+# binding still owns it. Whoever TAKES that result must claim the transfer, or
+# the block's own cleanup frees the value on the way out and the receiver is
+# left holding a dangling one.
+FN from_raw(flag: Bool) RETURNS Expr ->
+  MUTABLE supplied: ?Expr = NIL;
+  MUTABLE parsed: Expr = (supplied OR_ELSE ({ MUTABLE marker = 0; MUTABLE slot: ?Expr = NIL;
+    IF flag THEN
+      slot = make("one");
+    ELSE
+      slot = make("two");
+    END
+    slot? }));
+  RETURN parsed;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE a = from_raw(TRUE);
+  MUTABLE seen = 0_i64;
+  IF a.kind IS_A Leaf AS leaf THEN
+    seen = leaf.names.length();
+    ASSERT (UNWRAP (leaf.names[0])) == "one", "the escaped block result is intact, not freed";
+  END
+  ASSERT seen == 1, "the block result kept its contents";
+END

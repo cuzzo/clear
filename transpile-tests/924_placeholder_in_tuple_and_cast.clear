@@ -1,0 +1,31 @@
+# The pipeline placeholder rewriter dispatches on node type, and had no case
+# for a tuple literal, a CAST, or a VarDecl initializer. A `_` nested inside
+# any of them survived into the emitted Zig as the identifier `@"_"`, which
+# does not exist -- the loop binds `__each_item`.
+
+STRUCT Bindings { entries: {String}Int64 }
+
+FN bindings__pairs(self: Bindings) RETURNS ![]Tuple<String, Int64>
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS view {
+  MUTABLE pairs: []Tuple<String, Int64> = List[];
+  # `_` inside a tuple literal, and inside a CAST, both nested in an EACH body.
+  view.entries.keys() |> EACH { &pairs.append(CAST(Tuple{COPY _, COPY (view.entries[_] OR_ELSE 0_i64)} AS Tuple<String, Int64>)); };
+  # `_` inside a VarDecl initializer in an EACH body.
+  MUTABLE total = 0_i64;
+  view.entries.keys() |> EACH {
+    MUTABLE entry: Int64 = (view.entries[_] OR_ELSE 0_i64);
+    total = (total + entry);
+  };
+  ASSERT total == 3_i64, "the VarDecl initializer saw each key";
+  RETURN pairs;
+}
+END
+
+FN main() RETURNS !Void ->
+  b = Bindings{ entries: {"a": 1_i64, "b": 2_i64} };
+  pairs = TRY bindings__pairs(b);
+  ASSERT pairs.length() == 2_i64, "both keys visited";
+  print("ok");
+END

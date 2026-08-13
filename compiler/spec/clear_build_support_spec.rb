@@ -512,4 +512,28 @@ RSpec.describe ClearBuildSupport do
       expect(described_class.run_transpiler(failing_config, "", source)).to be_nil
     end
   end
+  # Parallel workers each build their own cache key into the same root, so a
+  # rule that drops all but the newest N entries deletes a directory another
+  # process is building into -- that process then fails to symlink the runtime
+  # into its own cache with ENOENT.
+  it "prunes only build-cache entries nobody has touched for an hour" do
+    Dir.mktmpdir do |root|
+      crowd = 12.times.map { |i| File.join(root, format("key%02d", i)) }
+      crowd.each { |path| FileUtils.mkdir_p(path) }
+      described_class.prune_build_cache!(root, keep: crowd.first)
+      expect(crowd.select { |path| File.directory?(path) }).to eq(crowd)
+
+      stale = File.join(root, "stale")
+      FileUtils.mkdir_p(stale)
+      touch_at(stale, Time.now.to_i - ClearBuildSupport::CACHE_ENTRY_MAX_AGE_SECONDS - 60)
+      keep = File.join(root, "keep")
+      FileUtils.mkdir_p(keep)
+      touch_at(keep, Time.now.to_i - ClearBuildSupport::CACHE_ENTRY_MAX_AGE_SECONDS - 60)
+
+      described_class.prune_build_cache!(root, keep: keep)
+
+      expect(File.directory?(stale)).to be(false)
+      expect(File.directory?(keep)).to be(true)
+    end
+  end
 end

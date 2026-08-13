@@ -65,6 +65,12 @@ module Annotator
           language_mode: language_mode,
           strict_test: strict_test
         ), Context)
+        # Derived views of the frozen local_function_facts. Reentrance BFS
+        # indexes them once per queue step, so rebuilding per call is O(fns)
+        # inside an O(fns) walk. Keyed by the facts table they came from, so a
+        # republished TypedProgramFacts invalidates them.
+        @derived_call_views = T.let({}, T::Hash[Symbol, T::Hash[String, T::Set[String]]])
+        @derived_call_views_source = T.let(nil, T.nilable(TypedProgramFacts::LocalFacts))
       end
 
       sig { void }
@@ -104,12 +110,30 @@ module Annotator
 
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_call_graph
-        local_function_facts.transform_values { |function| function.callees.to_set }
+        derived_call_view(:callees) { |function| function.callees.to_set }
       end
 
       sig { returns(T::Hash[String, T::Set[String]]) }
       def function_propagating_callees
-        local_function_facts.transform_values { |function| function.propagating_callees.to_set }
+        derived_call_view(:propagating) { |function| function.propagating_callees.to_set }
+      end
+
+      sig do
+        params(kind: Symbol, block: T.proc.params(arg0: LocalFunctionFacts).returns(T::Set[String]))
+          .returns(T::Hash[String, T::Set[String]])
+      end
+      def derived_call_view(kind, &block)
+        facts = local_function_facts
+        unless @derived_call_views_source.equal?(facts)
+          @derived_call_views_source = facts
+          @derived_call_views.clear
+        end
+        cached = @derived_call_views[kind]
+        return cached if cached
+
+        view = T.let({}, T::Hash[String, T::Set[String]])
+        facts.each { |name, function| view[name] = block.call(function) }
+        @derived_call_views[kind] = view.freeze
       end
 
       sig { params(name: String).returns(T::Boolean) }

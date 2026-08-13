@@ -1,0 +1,30 @@
+# Interned symbols are owned by the runtime intern table for the process
+# lifetime. A `{String}String@symbol` map monomorphized to the owned-value
+# StringMap freed every value at deinit (and on overwrite/delete), which is a
+# misaligned free of intern-table storage. The map must select the
+# interned-value representation, mirroring `@set` of symbols.
+
+PUB FN op_table() RETURNS {String}String@symbol ->
+  RETURN CAST({"+": :ADD, "-": :SUB} AS {String}String@symbol);
+END
+
+PUB FN lookup(op_val: String) RETURNS String@symbol ->
+  RETURN (op_table()[op_val] OR_ELSE :UNKNOWN);
+END
+
+FN main() RETURNS Void ->
+  known = lookup("+");
+  unknown = lookup("?");
+  ASSERT known == :ADD, "known op resolves";
+  ASSERT unknown == :UNKNOWN, "unknown op falls back";
+
+  MUTABLE m: {String}String@symbol = {"a": :ADD};
+  m["a"] = :SUB;
+  ASSERT UNWRAP (m["a"]) == :SUB, "overwrite keeps the interned value alive";
+  &m.delete("a");
+  ASSERT m.length() == 0_i64, "delete drops the entry without freeing the symbol";
+  survivor = lookup("-");
+  ASSERT survivor == :SUB, "the symbol survives the map that held it";
+
+  print("ok");
+END

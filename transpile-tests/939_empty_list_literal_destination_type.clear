@@ -1,0 +1,28 @@
+STRUCT Item { n: Int64 }
+STRUCT Bag { items: []Item }
+
+FN takes(label: String, items: []Item) RETURNS Int64 ->
+  MUTABLE mine: []Item = COPY items;
+  &mine.append(Item{ n: 2 });
+  RETURN mine.length();
+END
+FN empty_fallible() RETURNS ![]Item ->
+  RETURN List[];
+END
+FN main() RETURNS Void ->
+  ASSERT takes("empty", List[]) == 1, "an empty literal argument takes the parameter element type";
+  MUTABLE grown: []Item = TRY (empty_fallible());
+  &grown.append(Item{ n: 3 });
+  ASSERT grown.length() == 1, "an empty literal return takes the declared return element type";
+  MUTABLE bag = Bag{ items: List[] };
+  &bag.items.append(Item{ n: 4 });
+  ASSERT bag.items.length() == 1, "an empty literal struct field takes the field element type";
+  bag.items = List[];
+  ASSERT bag.items.length() == 0, "an empty literal field assignment takes the field element type";
+  MUTABLE shelves: {String}[]Item = {};
+  shelves["a"] = List[];
+  ASSERT (UNWRAP (shelves["a"])).length() == 0, "an empty literal map value takes the map value element type";
+  MUTABLE declared: []Item = List[];
+  &declared.append(Item{ n: 5 });
+  ASSERT declared.length() == 1, "an empty literal declaration takes the declared element type";
+END

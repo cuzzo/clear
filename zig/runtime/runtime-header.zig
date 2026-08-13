@@ -1111,6 +1111,11 @@ pub const CheatLib = struct {
     // =========================================================================
 
     const DataStructures = @import("../lib/data-structures.zig").bind(struct {
+        /// The bytes behind a String or a Symbol; identity for anything
+        /// already byte-shaped. Container key normalization delegates here so
+        /// the nominal Symbol test has exactly one implementation.
+        pub const bytesOf = CheatLib.bytesOf;
+
         pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
             CheatLib.cleanup(T, alloc, cptr);
         }
@@ -1614,7 +1619,6 @@ pub const CheatLib = struct {
     pub const ShardedPool = DataStructures.ShardedPool;
     pub const ShardedList = DataStructures.ShardedList;
     pub const Set = DataStructures.Set;
-    pub const InternedStringSet = DataStructures.InternedStringSet;
     pub const PartitionedStringMap = DataStructures.PartitionedStringMap;
     pub const PartitionedNumericMap = DataStructures.PartitionedNumericMap;
     pub const ShardedStringMap = DataStructures.ShardedStringMap;
@@ -2277,8 +2281,8 @@ pub const CheatLib = struct {
     // schedulers/threads.
 
     // String Equality (Content check)
-    pub fn strEql(s1: []const u8, s2: []const u8) bool {
-        return std.mem.eql(u8, s1, s2);
+    pub fn strEql(s1: anytype, s2: anytype) bool {
+        return std.mem.eql(u8, bytesOf(s1), bytesOf(s2));
     }
 
     // Lexicographic string comparison. Returns -1, 0, or 1.
@@ -2295,6 +2299,8 @@ pub const CheatLib = struct {
     pub fn eql(a: anytype, b: @TypeOf(a)) bool {
         const T = @TypeOf(a);
         const info = @typeInfo(T);
+
+        if (T == Symbol) return a.eqlSymbol(b);
 
         // For slices (like strings), use mem.eql
         if (info == .pointer and info.pointer.size == .slice) {
@@ -2763,6 +2769,17 @@ pub const CheatLib = struct {
         const buf = try allocator.alloc(u8, str.len);
         for (str, 0..) |c, idx| {
             buf[idx] = std.ascii.toUpper(c);
+        }
+        return buf;
+    }
+
+    // capitalize(str) -> new string with the first ASCII byte uppercased and
+    // the rest lowered, matching Ruby's String#capitalize.
+    pub fn stringCapitalize(allocator: std.mem.Allocator, str: []const u8) ![]const u8 {
+        Runtime.profileAlloc(str.len);
+        const buf = try allocator.alloc(u8, str.len);
+        for (str, 0..) |c, idx| {
+            buf[idx] = if (idx == 0) std.ascii.toUpper(c) else std.ascii.toLower(c);
         }
         return buf;
     }
@@ -3757,6 +3774,53 @@ pub const CheatLib = struct {
         }
     }
 
+    /// An interned string: a `:literal` points at .rodata, `symbol(str)` points
+    /// into the Runtime's pool. Either way the bytes outlive every handle and
+    /// belong to nobody, so a Symbol is Copy and dropping one is a no-op.
+    ///
+    /// Keeping it distinct from []const u8 is the whole point. The two are
+    /// identical in representation, so while a symbol was spelled []const u8
+    /// nothing downstream could tell it from an owned String -- a collection of
+    /// symbols freed its elements and handed .rodata to the allocator. Only the
+    /// type can carry that fact.
+    pub const Symbol = struct {
+        bytes: []const u8,
+
+        pub fn __clear_drop(self: *@This(), alloc: std.mem.Allocator) void {
+            _ = self;
+            _ = alloc;
+        }
+
+        pub fn __clear_clone(self: @This(), alloc: std.mem.Allocator) !@This() {
+            _ = alloc;
+            return self;
+        }
+
+        /// Interning makes identity pointer identity, so that is the fast path.
+        /// It is not sufficient alone: `:alpha` in two modules is two rodata
+        /// constants, and a pooled symbol is a third address for the same name.
+        pub fn eqlSymbol(self: @This(), other: @This()) bool {
+            if (self.bytes.ptr == other.bytes.ptr) return true;
+            return std.mem.eql(u8, self.bytes, other.bytes);
+        }
+    };
+
+    /// The bytes behind a String or a Symbol. Widening a symbol to a string is
+    /// always safe -- it is a borrow of interned storage -- so the conversion
+    /// resolves at comptime instead of at every call site.
+    pub inline fn bytesOf(value: anytype) []const u8 {
+        const T = @TypeOf(value);
+        if (comptime T == Symbol) return value.bytes;
+        return value;
+    }
+
+    /// Wrap interned bytes as a Symbol. A helper rather than a struct literal
+    /// because the stdlib zig templates substitute `{0}`-style holes and do not
+    /// escape braces.
+    pub inline fn symbolOf(bytes: []const u8) Symbol {
+        return .{ .bytes = bytes };
+    }
+
     /// Unified comptime cleanup for any CLEAR type.
     /// Dispatches to the correct cleanup function based on structural type analysis.
     /// For types that need no cleanup (primitives, enums, plain structs without RC fields),
@@ -3991,12 +4055,12 @@ pub const CheatLib = struct {
 
         // 6. Set(U)
         if (comptime isSetType(T)) {
-            // Release owned keys before freeing the backing map. Interned
-            // sets never own their elements — backing map only.
-            const set_interned = comptime @hasDecl(T, "interned_elements") and T.interned_elements;
+            // Release owned keys before freeing the backing map. A set of
+            // Symbols needs no exemption: dupe/cleanup of a Symbol are a bit
+            // copy and a no-op, so the uniform path is already correct.
             const InnerMap = @TypeOf(ptr.inner);
             const inner_info = @typeInfo(InnerMap);
-            if (!set_interned and inner_info == .@"struct") {
+            if (inner_info == .@"struct") {
                 var it = ptr.inner.keyIterator();
                 while (it.next()) |key_ptr| {
                     const KeyT = @TypeOf(key_ptr.*);
@@ -4156,6 +4220,13 @@ pub const CheatLib = struct {
         }
         if (T == []u8) {
             return if (value.len > 0) try alloc.dupe(u8, value) else value;
+        }
+
+        // The mirror of the optional case below: a copy whose DESTINATION is a
+        // concrete T can be fed an already-narrowed `?T` source. The narrowing
+        // is the caller's proof of presence, so unwrap and copy the payload.
+        if (comptime info != .optional and @typeInfo(@TypeOf(value)) == .optional) {
+            return try dupeValue(T, value.?, alloc);
         }
 
         // Copy and drop are one compiler-generated semantic contract. A type
@@ -4348,10 +4419,9 @@ pub const CheatLib = struct {
             errdefer result.deinit(alloc);
             var src_mut = value;
             var it = src_mut.keyIterator();
-            const set_interned = comptime @hasDecl(T, "interned_elements") and T.interned_elements;
             while (it.next()) |k| {
                 const ElemT = @TypeOf(k.*);
-                const copied = if (comptime !set_interned and needsCleanup(ElemT))
+                const copied = if (comptime needsCleanup(ElemT))
                     try dupeValue(ElemT, k.*, alloc)
                 else
                     k.*;

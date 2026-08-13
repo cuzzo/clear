@@ -36,9 +36,9 @@ module ErrorHelper
     token = diagnostic_token(node_or_token)
 
     # 2. Determine Message
-    message = T.let("", String)
+    message = T.let("", T.nilable(String))
     if code_or_message.is_a?(Symbol)
-      message = DiagnosticRegistry.format_from_hash(code_or_message, args, kwargs) || ""
+      message = DiagnosticRegistry.format_from_hash(code_or_message, args, kwargs)
       raise "Internal Compiler Error: Unknown error code :#{code_or_message}" unless message
     else
       # C. Legacy Support (Raw String)

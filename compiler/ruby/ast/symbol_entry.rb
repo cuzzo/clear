@@ -50,7 +50,9 @@ class SymbolEntry
 
   @next_binding_id = T.let(0, Integer)
   TypeInput = T.type_alias { T.nilable(T.any(Type::TypeInput, FunctionSignature)) }
-  RegInput = T.type_alias { T.nilable(T.any(AST::Node, String, Symbol)) }
+  # A MATCH payload binding records its MatchCase arm as `reg` so lowering can
+  # rename a nested rebind of the same name; MatchCase is not Locatable.
+  RegInput = T.type_alias { T.nilable(T.any(AST::Node, AST::MatchCase, String, Symbol)) }
   LifetimeSourceInput = T.type_alias { T.any(SymbolEntry, Symbol) }
   LifetimeInput = T.type_alias { T.nilable(T.any(Symbol, T::Array[LifetimeSourceInput], T::Hash[Symbol, T::Array[LifetimeSourceInput]])) }
 
@@ -730,7 +732,8 @@ class SymbolEntry
   sig { params(signature: FunctionSignature).returns(Type) }
   def self.type_from_function_signature(signature)
     param_types = signature.params.map(&:type)
-    Type.function_type_from_parts(param_types, signature.return_type, signature.reentrant, signature)
+    Type.function_type_from_parts(param_types, signature.return_type, signature.reentrant, signature,
+      :clear, signature.params.map { |param| param.mutable == true })
   end
 
   sig { returns(Integer) }

@@ -1,0 +1,33 @@
+# A callback that mutates what it is handed: `FN(MUTABLE T) -> R`. Function
+# types could not express a mutable parameter at all, so a block could only
+# read -- the call site's `&` was rejected as 'not MUTABLE'.
+
+STRUCT Counter { n: Int64 }
+
+FN bump_twice<Elem>(MUTABLE self: Counter, blk: FN(MUTABLE Counter) -> Elem) RETURNS []Elem
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+    MUTABLE out: []Elem = List[];
+    &out.append(blk(&view));
+    &out.append(blk(&view));
+    RETURN out;
+}
+END
+
+FN step(MUTABLE self: Counter) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+    view.n = (view.n + 1_i64);
+    RETURN view.n;
+}
+END
+
+FN main() RETURNS Void ->
+  MUTABLE c = Counter{ n: 0_i64 };
+  got = bump_twice(&c, %(MUTABLE view: Counter) -> step(&view));
+  ASSERT got.length() == 2_i64, "two";
+  ASSERT UNWRAP (got[1_i64]) == 2_i64, "second is 2";
+  print("ok");
+END

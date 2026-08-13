@@ -1,0 +1,41 @@
+# A binding whose type needs no drop -- an interned String@symbol -- owns no
+# allocation, so it must not carry an AllocMark. The allocating-init plan
+# stamped one anyway and then skipped the Cleanup, leaving a scope-local the
+# checker could never see released: returning through a WITH scope failed with
+# OWNERSHIP_UNVERIFIED_PATH.
+
+STRUCT BinaryOp { token: String, op: String@symbol }
+UNION Locatable { BinaryOp: BinaryOp }
+STRUCT Parser { pos: Int64, src: String }
+
+PUB FN op_table() RETURNS {String}String@symbol ->
+  RETURN CAST({"+": :ADD} AS {String}String@symbol);
+END
+
+PUB FN parser__wrap(MUTABLE self: Parser, op_val: String) RETURNS !Locatable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+  view.pos = (view.pos + 1_i64);
+  op_sym = (op_table()[op_val] OR_ELSE symbol(op_val));
+  RETURN Locatable{ BinaryOp: COPY BinaryOp{ token: COPY view.src, op: op_sym } };
+}
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE p = Parser{ pos: 0_i64, src: "t" };
+  known = TRY parser__wrap(&p, "+");
+  PARTIAL MATCH known START
+    Locatable.BinaryOp AS bin -> ASSERT bin.op == :ADD, "table hit keeps the pooled symbol";,
+    DEFAULT -> ASSERT FALSE, "expected a BinaryOp";
+  END
+
+  unknown = TRY parser__wrap(&p, "^");
+  PARTIAL MATCH unknown START
+    Locatable.BinaryOp AS bin -> ASSERT bin.op == symbol("^"), "fallback interns the raw op";,
+    DEFAULT -> ASSERT FALSE, "expected a BinaryOp";
+  END
+  ASSERT p.pos == 2_i64, "the WITH view mutation still lands on the receiver";
+
+  print("ok");
+END

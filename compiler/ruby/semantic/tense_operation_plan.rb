@@ -621,6 +621,16 @@ class TenseOperationPlanner
 
     remaining = envelope.layers.drop(handled.length)
     result = Type.new(TenseEnvelope.wrap_layers(envelope.payload_expression, remaining))
+    # OR_ELSE strips tense layers, not capabilities: the payload expression
+    # does not carry the source's sync/collection/ownership, so rebuilding from
+    # it alone turns `?String@symbol` into a plain String.
+    result.merge_capabilities_from!(type, include_affine_ownership: true)
+    # A fallback that is itself optional cannot make the result definite:
+    # `a OR_ELSE b` with both absent is still absent. Typing it as the payload
+    # makes downstream placement copy a null as though it were present.
+    if recovery == TenseRecovery::Fallback && fallback_type.optional? && !result.optional?
+      result = Type.optional_of(result)
+    end
     if recovery == TenseRecovery::Fallback && fallback_type.resolved != :NoReturn &&
        !result.accepts?(fallback_type) && !fallback_type.accepts?(result)
       raise ArgumentError, "OR_ELSE fallback #{fallback_type.resolved} does not match #{result.resolved}"

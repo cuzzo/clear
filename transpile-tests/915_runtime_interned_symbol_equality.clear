@@ -1,0 +1,24 @@
+# A String@symbol has two representations that never share a pointer: the
+# compiler-pooled rodata literal (`:ADD`) and the runtime intern-table handle
+# `symbol(s)` returns for a string only known at runtime. Comparing them by
+# pointer identity reported "not equal" for the same symbol.
+
+FN pick(index: Int64) RETURNS String ->
+  IF (index == 0_i64) THEN
+    RETURN "ADD";
+  END
+  RETURN "SUB";
+END
+
+FN main() RETURNS Void ->
+  interned = symbol(pick(0_i64));
+  other = symbol(pick(1_i64));
+
+  ASSERT interned == :ADD, "runtime-interned symbol equals the pooled literal";
+  ASSERT other != :ADD, "a different symbol still compares unequal";
+  ASSERT other == :SUB, "the second runtime-interned symbol matches its literal";
+  ASSERT interned == symbol(pick(0_i64)), "interning is stable across calls";
+  ASSERT :ADD == :ADD, "pooled literals still compare equal";
+
+  print("ok");
+END

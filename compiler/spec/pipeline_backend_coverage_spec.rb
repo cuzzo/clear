@@ -399,6 +399,7 @@ class PipelineEachCoverageHost
   def services
     PipelineEachLowerer.new(
         source_alloc_fact: ->(_value, _name, _type_info) { nil },
+      loop_mark_stmts: -> { [] },
       bc_target: -> { @bc_target },
       visit_mir: ->(node) { each_visit_mir(node) },
       visit_body_with_placeholder: ->(_body_stmts, placeholder) {
@@ -1334,6 +1335,21 @@ RSpec.describe "pipeline backend coverage" do
       expect(each_lowerer.lower(scalar, each_op)).to be_nil
     end
 
+    it "names the range capture and vouches for it" do
+      range = typed(AST::RangeLit.new(tok, lit(0), lit(2), true), Type.new(:"~Int64[]"))
+
+      with_placeholder = each_lowerer.lower(range, each_op)
+      expect(with_placeholder.capture).to eq("__each_item")
+      expect(with_placeholder.iter.end_val).to eq(MIR::BinOp.new("+", MIR::Lit.new("2"), MIR::Lit.new("1")))
+
+      # A body that ignores the item keeps the same capture: Zig rejects an
+      # unused one, so the body opens with `_ = &__each_item;` rather than the
+      # capture being renamed on a usage guess the scan can get wrong.
+      each_host.use_placeholder = false
+      without_placeholder = each_lowerer.lower(range, AST::EachOp.new(tok, []))
+      expect(without_placeholder.capture).to eq("__each_item")
+      expect(without_placeholder.body.first).to be_a(MIR::Suppress)
+    end
     it "lowers range literals with placeholder-aware capture names" do
       range = typed(AST::RangeLit.new(tok, lit(0), lit(2), true), Type.new(:"~Int64[]"))
 
@@ -1341,11 +1357,16 @@ RSpec.describe "pipeline backend coverage" do
       expect(with_placeholder.capture).to eq("__each_item")
       expect(with_placeholder.iter.end_val).to eq(MIR::BinOp.new("+", MIR::Lit.new("2"), MIR::Lit.new("1")))
 
+      # The capture is always bound and vouched for with a Suppress, rather
+      # than predicting from the body whether it is read: Zig rejects an unused
+      # capture, and `list |> EACH { count = count + 1; }` is ordinary.
       each_host.use_placeholder = false
       without_placeholder = each_lowerer.lower(range, AST::EachOp.new(tok, []))
-      expect(without_placeholder.capture).to eq("_")
+      expect(without_placeholder.capture).to eq("__each_item")
     end
+
   end
+
 
   describe PipelineContextState do
     it "derives immutable context snapshots for pipeline placeholder state" do
@@ -2551,5 +2572,32 @@ RSpec.describe "pipeline backend coverage" do
       block = block_breaking_on(slice, borrowed_view: false)
       expect(MIR::OwnershipEffect.borrowed_view_result?(block)).to be true
     end
+  end
+end
+
+RSpec.describe PipelinePlaceholderRewriter do
+  # HashLit pairs are keyed by AST nodes, and `storage` is a Struct member that
+  # escape analysis stamps after the key is already in the hash. That leaves the
+  # key's hash bucket stale, so re-looking it up with `fetch` raised KeyError on
+  # a key `pairs.keys` had just handed back.
+  it "rewrites pairs whose key node was mutated after insertion" do
+    tok = Lexer::Token.new(:CHAR, ":", 1, 1)
+    key = AST::Literal.new(tok, :SYMBOL, "sym", nil)
+    value = AST::Identifier.new(tok, "_")
+    node = AST::HashLit.new(tok, { key => value }, nil)
+
+    key.storage = :heap
+
+    context = PipelineContextState.new(
+      placeholder_name: "_",
+      acc_placeholder: nil,
+      join_param_map: nil,
+      named_bindings: {},
+      soa_each_mode: false,
+      soa_rewrite_active: false,
+      soa_needed_fields: Set.new
+    )
+
+    expect { PipelinePlaceholderRewriter.new(context).substitute(node) }.not_to raise_error
   end
 end

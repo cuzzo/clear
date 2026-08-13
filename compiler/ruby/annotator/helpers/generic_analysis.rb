@@ -139,10 +139,20 @@ module GenericAnalysis
 
   sig { params(type_obj: Type).returns(Type) }
   def type_annotation_inner(type_obj)
-    return T.must(type_obj.payload_type) if type_obj.error_union?
-    return T.must(type_obj.wrapped_type) if type_obj.optional?
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
+    # Tense prefixes stack (`!?T`), so peel every layer -- a single unwrap
+    # leaves `!?String[]@set` looking like a non-array to the shape checks.
+    inner = type_obj
+    loop do
+      next_inner = if inner.error_union?
+        inner.payload_type
+      elsif inner.optional?
+        inner.wrapped_type
+      end
+      return inner unless next_inner
 
-    type_obj
+      inner = next_inner
+    end
   end
 
   sig { params(facts: TypeAnnotationFacts).void }

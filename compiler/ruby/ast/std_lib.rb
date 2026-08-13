@@ -24,7 +24,10 @@ STD_LIB = T.let({
   "symbol" => {
     args: [STRING_TYPE],
     return: {type: STRING_TYPE, sync: :symbol},
-    zig: "try {rt}.internSymbol({0})",
+    # Wrapped, because a Symbol is a distinct type from the []const u8 the
+    # intern table hands back -- that distinction is what stops cleanup from
+    # treating an intern-table handle as an owned String.
+    zig: "CheatLib.symbolOf(try {rt}.internSymbol({0}))",
     bc: false,
     allocates: true,
     needs_rt: true,
@@ -612,6 +615,18 @@ STD_LIB = T.let({
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringUppercase({alloc}, {0})",
     bc: true,
+    allocates: true,
+    alloc: :node_storage,
+    is_method: true,
+  },
+
+  # "hELLO world".capitalize() -> "Hello world"
+  "capitalize" => {
+    args: [STRING_TYPE],
+    return: STRING_TYPE, return_alloc: :frame,
+    zig: "try CheatLib.stringCapitalize({alloc}, {0})",
+    # No `bc:` — the register VM has no capitalize opcode, and claiming one
+    # would make MIR lowering emit an InlineBc the emitter cannot compile.
     allocates: true,
     alloc: :node_storage,
     is_method: true,
@@ -1623,9 +1638,11 @@ BUILTIN_OPS = T.let({
   eql:       { zig: "CheatLib.eql({0}, {1})", bc: true, borrows: :all },
   strcmp:    { zig: "CheatLib.strcmp({0}, {1})", bc: true, borrows: :all },
   strEql:    { zig: "CheatLib.strEql({0}, {1})", bc: true, borrows: :all },
-  # O(1) pointer+length comparison for String@symbol. Valid for compiler-pooled
-  # static symbol literals; dynamic String@symbol values must be interned first.
-  symbolEql: { zig: "({0}.ptr == {1}.ptr and {0}.len == {1}.len)", bc: true, borrows: :all },
+  # String@symbol comparison. Symbols have two representations that never share
+  # a pointer -- compiler-pooled rodata literals and runtime intern-table
+  # handles from `symbol(runtime_string)` -- so identity alone is wrong.
+  # std.mem.eql keeps the pointer/length fast path and falls back to content.
+  symbolEql: { zig: "CheatLib.eql({0}, {1})", bc: true, borrows: :all },
 
   # --- String indexing ---
   charAt: { zig: "CheatLib.charAt({0}, {1})", bc: true, borrows: :all },

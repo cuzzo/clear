@@ -141,7 +141,7 @@ module Annotator
       result.dup
     end
 
-    sig { params(code: Symbol, values: T.untyped).returns(ProtocolProjectionIssue) }
+    sig { params(code: Symbol, values: T.any(Symbol, String)).returns(ProtocolProjectionIssue) }
     def issue(code, **values)
       arguments = T.let({}, T::Hash[Symbol, String])
       values.each do |key, value|

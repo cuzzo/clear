@@ -166,15 +166,20 @@ class PipelinePlaceholderRewriter
     when AST::BinaryOp then substitute_binary_op(node)
     when AST::GetField then substitute_get_field(node)
     when AST::GetIndex then substitute_get_index(node)
+    when AST::VarDecl then substitute_var_decl(node)
     when AST::BindExpr then substitute_bind_expr(node)
     when AST::Assignment then substitute_assignment(node)
     when AST::UnaryOp then substitute_unary_op(node)
+    when AST::OptionalUnwrap then substitute_optional_unwrap(node)
+    when AST::IsA then substitute_is_a(node)
     when AST::CopyNode, AST::MoveNode, AST::KeepNode, AST::ShareNode
       substitute_value_wrapper(node)
     when AST::WithBlock then substitute_with_block(node)
     when AST::StructLit then substitute_struct_lit(node)
     when AST::HashLit then substitute_hash_lit(node)
     when AST::ListLit then substitute_list_lit(node)
+    when AST::TupleLit then substitute_tuple_lit(node)
+    when AST::Cast then substitute_cast(node)
     when AST::BlockExpr then substitute_block_expr(node)
     when AST::Assert then substitute_assert(node)
     when AST::IfStatement then substitute_if_statement(node)
@@ -272,6 +277,35 @@ class PipelinePlaceholderRewriter
     new_ia = AST::GetIndex.new(node.token, new_target, new_index)
     copy_type_info(node, new_ia)
     new_ia
+  end
+
+  # A VarDecl carries the declaration's symbol, storage and cleanup stamps, so
+  # it is rewritten in place: rebuilding it would drop them. The initializer is
+  # the only place a placeholder can appear.
+  # An IS_A test rewrites in place: the node carries the annotator's runtime
+  # payload stamps, and only its subject can hold a placeholder.
+  sig { params(node: AST::IsA).returns(AST::Node) }
+  def substitute_is_a(node)
+    new_left = substitute(node.left)
+    node.left = new_left unless new_left.equal?(node.left)
+    node
+  end
+
+  sig { params(node: AST::OptionalUnwrap).returns(AST::Node) }
+  def substitute_optional_unwrap(node)
+    new_target = substitute(node.target)
+    return node if new_target.equal?(node.target)
+
+    new_unwrap = AST::OptionalUnwrap.new(node.token, new_target)
+    copy_type_info(node, new_unwrap)
+    new_unwrap
+  end
+
+  sig { params(node: AST::VarDecl).returns(AST::Node) }
+  def substitute_var_decl(node)
+    new_value = substitute(node.value)
+    node.value = new_value unless new_value.equal?(node.value)
+    node
   end
 
   sig { params(node: AST::BindExpr).returns(AST::Node) }
@@ -444,17 +478,34 @@ class PipelinePlaceholderRewriter
     new_ll
   end
 
+  sig { params(node: AST::TupleLit).returns(AST::Node) }
+  def substitute_tuple_lit(node)
+    new_items = node.items.map { |item| substitute(item) }
+    return node if new_items == node.items
+
+    new_tl = AST::TupleLit.new(node.token, new_items, node.storage)
+    copy_type_info(node, new_tl)
+    new_tl
+  end
+
+  sig { params(node: AST::Cast).returns(AST::Node) }
+  def substitute_cast(node)
+    new_value = substitute(node.value)
+    return node if new_value.equal?(node.value)
+
+    new_cast = AST::Cast.new(node.token, new_value, node.target)
+    copy_type_info(node, new_cast)
+    new_cast
+  end
+
   sig { params(node: AST::HashLit).returns(AST::Node) }
   def substitute_hash_lit(node)
     pairs = T.let(node.pairs, T::Hash[AST::Node, AST::Node])
     new_pairs = T.let({}, T::Hash[AST::Node, AST::Node])
-    keys = pairs.keys
-    index = 0
-    while index < keys.length
-      key = keys.fetch(index)
-      new_pairs[key] = substitute(pairs.fetch(key))
-      index += 1
-    end
+    # Iterate the pairs rather than looking each key back up: the keys are AST
+    # nodes whose stamps are mutated after insertion, which leaves their hash
+    # buckets stale and makes `fetch` miss a key that `keys` just handed us.
+    pairs.each { |key, value| new_pairs[key] = substitute(value) }
     return node if new_pairs == pairs
 
     new_hl = AST::HashLit.new(node.token, new_pairs, node.storage)

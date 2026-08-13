@@ -168,7 +168,9 @@ RSpec.describe "SELECT tense assignment matrix" do
     expect(out).to match(/const __tmp_\d+ = try __select_promise\d+\.next\(\)/)
     expect(out).to match(/const __select_promise\d+ = try plainLater\(/)
     expect(out).to match(/const __select_promise\d+ = try later\(/)
-    expect(out).to match(/\(try __select_promise\d+\.next\(\)\)\.value/)
+    # The awaited value is unwrapped before `.value` is read, whether the
+    # await is read inline or through a hoisted temp.
+    expect(out).to match(/\(try (?:__tmp_\d+|__select_promise\d+\.next\(\))\)\.value/)
     expect(out).not_to include("try try")
   end
 

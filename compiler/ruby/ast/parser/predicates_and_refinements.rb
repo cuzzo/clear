@@ -11,7 +11,7 @@ class ClearParser
   def parse_comptime_statement
     consume(:KEYWORD, 'COMPTIME')
     unless match?(:KEYWORD, 'IF')
-      error!(current, :PARSER_EXPECTED, expected: "IF", got: current.value, type: current.type, line: current.line)
+      error!(current, :PARSER_EXPECTED, expected: "IF", got: current.display_value, type: current.type, line: current.line)
     end
     parse_if_statement(is_comptime: true)
   end
@@ -94,7 +94,7 @@ class ClearParser
 
       break unless match?(:KEYWORD, 'AND') || match?(:KEYWORD, 'OR')
       operator = consume(:KEYWORD)
-      error!(operator, :CONDITIONAL_BINDING_UNDER_OR) if operator.value == 'OR'
+      error!(operator, :CONDITIONAL_BINDING_UNDER_OR) if operator.text_is?('OR')
     end
 
     if match?(:ARROW, '->')
@@ -134,7 +134,7 @@ class ClearParser
       return false if depth == 0 && ((token.type == :KEYWORD && %w[THEN ELSE END].include?(token.value)) || token.type == :ARROW || token.type == :EOF)
       if token.type == :KEYWORD && %w[EXISTS IS_OK].include?(token.value)
         following = peek_at(offset + 1)
-        return true if following && following.type == :KEYWORD && following.value == 'AS'
+        return true if following && following.type == :KEYWORD && following.text_is?('AS')
       end
       offset += 1
     end
@@ -145,7 +145,7 @@ class ClearParser
     return [node] unless node.is_a?(AST::BinaryOp)
     if node.op == :BIND_VAR
       right = T.cast(node.right, AST::Identifier)
-      predicate = node.token.value == 'IS_OK' ? :is_ok : :exists
+      predicate = node.token.text_is?('IS_OK') ? :is_ok : :exists
       return [AST::Binding.new(expr: node.left, name: right.name, name_token: right.token, predicate: predicate)]
     end
     if node.op == :OR && contains_refinement_binding?(node)
@@ -205,7 +205,7 @@ class ClearParser
   sig { params(expr: AST::Node).returns(AST::Binding) }
   def parse_conditional_binding(expr)
     predicate_tok = consume(:KEYWORD)
-    predicate = predicate_tok.value == 'IS_OK' ? :is_ok : :exists
+    predicate = predicate_tok.text_is?('IS_OK') ? :is_ok : :exists
     consume(:KEYWORD, 'AS')
     name_tok = consume(:VAR_ID)
     AST::Binding.new(expr: expr, name: name_tok.text!, name_token: name_tok, predicate: predicate)

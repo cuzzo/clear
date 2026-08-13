@@ -9,3 +9,28 @@ END
 PUB FN square(x: Number) RETURNS Number ->
   RETURN multiply(x, x);
 END
+
+PUB STRUCT Tag { name: String, weight: Int64 }
+
+PUB FN tag(name: String, weight: Int64) RETURNS Tag ->
+  RETURN Tag{ name: COPY name, weight: weight };
+END
+
+# A module-scope table built from allocating calls: its hoisted temps must not
+# drain into the next function's body.
+tags: [2]Tag = [tag("alpha", 1), tag("beta", 2)];
+
+PUB FN tag_weight(index: Int64) RETURNS Int64 ->
+  RETURN tags[index].weight;
+END
+
+# An imported union: MATCH dispatch in a CONSUMING package has to see this
+# schema, or `Shape.Circle AS payload` lowers to a tag equality test and never
+# binds the payload.
+PUB STRUCT Circle { radius: Int64 }
+PUB STRUCT Square { side: Int64 }
+PUB UNION Shape { Circle: Circle, Square: Square }
+
+PUB FN circle(radius: Int64) RETURNS Shape ->
+  RETURN Shape{ Circle: Circle{ radius: radius } };
+END

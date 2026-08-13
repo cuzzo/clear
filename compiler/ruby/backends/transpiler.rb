@@ -314,6 +314,12 @@ class ZigTranspiler
       ""
     end
 
+    # A module that RAISEs names `ErrorName.<Type>`, so it needs the same
+    # per-program enum the root emits. Ids come from the shared registry: the
+    # stdlib seed is fixed and user types are numbered in first-use order over
+    # the module's import closure, which every module in a package shares.
+    error_name_enum = body.include?("ErrorName.") ? "#{emit_error_name_enum}\n" : ""
+
     <<~ZIG
       const std = @import("std");
       const CheatHeader = @import("cheat_runtime");
@@ -321,6 +327,7 @@ class ZigTranspiler
       const Runtime = CheatHeader.Runtime;
       const EbrContext = CheatHeader.EbrContext;
       #{safety_line}
+      #{error_name_enum}
       #{body}
       #{test_block}
     ZIG

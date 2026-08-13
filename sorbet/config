@@ -55,3 +55,4 @@
 --suppress-error-code=7034
 --suppress-error-code=7006
 --suppress-error-code=7050
+--ignore=compiler/.ruby-rbs/

@@ -1,0 +1,24 @@
+# A map literal filling an OPTIONAL slot still builds a map. Taking the
+# expected type as-is rendered the container as `?CheatLib.StringMap(V)`,
+# which is not a struct literal Zig can initialize.
+
+STRUCT Entry { name: String }
+
+FN lookup(want: String) RETURNS ?{String}Entry ->
+  IF want == "none" THEN
+    RETURN NIL;
+  END
+  found: ?{String}Entry = {"a": Entry{ name: COPY "alpha" }};
+  RETURN found;
+END
+
+FN main() RETURNS Void ->
+  hit: ?{String}Entry = lookup("any");
+  IF hit EXISTS AS table THEN
+    ASSERT (UNWRAP table["a"]).name == "alpha", "the optional map literal built a map";
+  ELSE
+    ASSERT FALSE, "expected a table";
+  END
+  ASSERT lookup("none") == NIL, "the NIL path still returns nothing";
+  print("ok");
+END

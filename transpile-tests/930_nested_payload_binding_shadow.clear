@@ -1,0 +1,28 @@
+# Two payload bindings of the same name nest: the inner one shadows the outer
+# in CLEAR (and in Ruby), but Zig rejects every shadowing. The rename is keyed
+# by the binding's DECLARATION -- a name-keyed map would keep pointing at the
+# inner binding after the nested block ends, so the outer reference below the
+# nested IF has to resolve back to the outer payload.
+
+STRUCT Ident { name: String }
+STRUCT Call { name: String }
+UNION Node { Ident: Ident, Call: Call }
+
+PUB FN describe(dst: Node, src: Node) RETURNS String ->
+  IF dst IS_A Ident AS item THEN
+    IF src IS_A Ident AS item THEN
+      RETURN COPY item.name;
+    END
+    RETURN COPY item.name;
+  END
+  RETURN COPY "none";
+END
+
+FN main() RETURNS Void ->
+  d = Node{ Ident: Ident{ name: COPY "a" } };
+  s = Node{ Ident: Ident{ name: COPY "b" } };
+  ASSERT describe(d, s) == "b", "inner payload binding wins";
+  c = Node{ Call: Call{ name: COPY "c" } };
+  ASSERT describe(d, c) == "a", "outer payload binding when inner misses";
+  print("ok");
+END

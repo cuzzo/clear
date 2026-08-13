@@ -407,6 +407,17 @@ module MIR
     def expr?; false; end
     sig { returns(OwnershipEffect) }
     def ownership_effect; OwnershipEffect.none; end
+    # Does this node MATERIALIZE a value, as opposed to projecting one out of
+    # something that already exists? A construction owns what it yields; a
+    # field read, an element read, an unwrap or a cast is a view of storage
+    # someone else owns, and giving one of those a cleanup frees storage its
+    # owner still holds.
+    #
+    # It lives here rather than in a list somewhere because it is a fact about
+    # the node. A list has to be found and updated when a construction is
+    # added; an override next to its siblings does not.
+    sig { returns(T::Boolean) }
+    def materializes_value?; false; end
     sig { returns(T::Array[Emittable]) }
     def child_exprs; EMPTY_CHILD_EXPRS; end
     sig { returns(T::Array[Emittable]) }
@@ -3046,6 +3057,8 @@ module MIR
   HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(zig_type: String, init: T.untyped, alloc: Symbol, label: T.nilable(String)).void }
     def initialize(zig_type, init, alloc, label = nil)
       super(zig_type, init, alloc, label)
@@ -3068,6 +3081,8 @@ module MIR
   DupeSlice = Struct.new(:source, :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(source: T.untyped, alloc: Symbol).void }
     def initialize(source, alloc)
       super(source, alloc)
@@ -3088,6 +3103,8 @@ module MIR
   AllocSlice = Struct.new(:elem_type, :len, :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(elem_type: String, len: T.untyped, alloc: Symbol).void }
     def initialize(elem_type, len, alloc)
       super(elem_type, len, alloc)
@@ -3192,6 +3209,8 @@ module MIR
                         :alloc, :copy_shape, :type_info) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig do
       params(
         source: T.untyped,
@@ -3241,6 +3260,8 @@ module MIR
                              :capacity) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(zig_type: String, strategy: Symbol, alloc: T.nilable(Symbol), capacity: T.untyped).void }
     def initialize(zig_type, strategy, alloc, capacity)
       super(zig_type, strategy, alloc, capacity)
@@ -3269,6 +3290,9 @@ module MIR
                        :own_fn,    # "arcCreate", "rcCreate", nil
                        :alloc) do
     extend T::Sig
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
+
     include Expr
     sig { params(inner: T.untyped, zig_base: String, strategy: Symbol, sync_fn: T.nilable(String), sync_type: T.nilable(String), own_fn: T.nilable(String), alloc: Symbol).void }
     def initialize(inner, zig_base, strategy, sync_fn, sync_type, own_fn, alloc)
@@ -3417,6 +3441,8 @@ module MIR
   MakeList = Struct.new(:elem_type, :items, :alloc, :minimum_capacity) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol, minimum_capacity: T.nilable(Integer)).void }
     def initialize(elem_type, items, alloc, minimum_capacity = nil)
       super(elem_type, items, alloc, minimum_capacity)
@@ -4247,6 +4273,8 @@ module MIR
   TupleLiteral = Struct.new(:items) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { returns(T::Array[Emittable]) }
     def child_exprs
       values = T.let([], T::Array[Emittable::ChildExprValue])
@@ -4300,6 +4328,8 @@ module MIR
   StructInit = Struct.new(:zig_type, :fields) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     # zig_type: String or nil (nil -> anonymous .{})
     # fields: [MIR::StructInitField] (legacy hash fields are still readable)
     sig { returns(T::Array[Emittable]) }
@@ -4325,6 +4355,8 @@ module MIR
   ArrayInit = Struct.new(:elem_type, :count, :items) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([items])
     sig { returns(T::Array[Emittable]) }
@@ -4429,6 +4461,8 @@ module MIR
   ConcatStr = Struct.new(:parts, :alloc, :rt_expr) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(parts: T::Array[T.untyped], alloc: Symbol, rt_expr: T.nilable(String)).void }
     def initialize(parts, alloc, rt_expr)
       super(parts, alloc, rt_expr)
@@ -4918,6 +4952,8 @@ module MIR
   OwnedSlice = Struct.new(:expr, :alloc) do
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(expr: Emittable, alloc: Symbol).void }
     def initialize(expr, alloc)
       super(expr, alloc)

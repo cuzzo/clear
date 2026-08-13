@@ -1,0 +1,57 @@
+# A `String@symbol` is a distinct handle type, but in CLEAR it reads as a
+# String. Every borrow position typed String must widen the handle to the
+# bytes behind it -- and a TAKES position must receive an owned COPY, because
+# the callee frees its parameter and interned bytes are nobody's to free.
+FN borrow_len(s: String) RETURNS Int64 ->
+  RETURN s.length();
+END
+
+FN consume(TAKES s: String) RETURNS Int64 ->
+  RETURN s.length();
+END
+
+FN echo(tag: String@symbol) RETURNS String ->
+  RETURN CAST(tag AS String);
+END
+
+FN main() RETURNS Void ->
+  MUTABLE tag: String@symbol = :alpha;
+
+  ASSERT borrow_len(tag) == 5, "symbol borrows into a String param";
+  # TAKES moves its argument (the annotator's rule for every non-COPY arg),
+  # so hand it a second binding of the same interned symbol.
+  MUTABLE doomed: String@symbol = :alpha;
+  ASSERT consume(doomed) == 5, "symbol into TAKES gets an owned copy";
+  ASSERT echo(tag) == "alpha", "symbol returned through a String return";
+
+  print("tag is ${tag}");
+  print(tag);
+  MUTABLE joined = ("x" $+ CAST(tag AS String));
+  ASSERT joined == "xalpha", "symbol concatenates after CAST";
+  MUTABLE inline_join = ("y" $+ tag);
+  ASSERT inline_join == "yalpha", "symbol concatenates directly";
+
+  # Registry calls widen too: a declared-String argument or receiver takes the
+  # bytes, and the `.len` fast path reads them.
+  ASSERT tag.length() == 5, "length on a symbol receiver";
+  ASSERT tag.capitalize() == "Alpha", "string method on a symbol receiver";
+
+  MUTABLE maybe: ?String = NIL;
+  MUTABLE merged = "${(maybe OR_ELSE tag)}";
+  ASSERT merged == "alpha", "symbol fallback merges into a String";
+
+  # The reverse merges hold their types: a symbol fallback into a symbol slot
+  # stays a handle, and a string LITERAL fallback narrows into one (rodata is
+  # immortal, so wrapping it orphans nothing).
+  MUTABLE none: ?String@symbol = NIL;
+  MUTABLE kept: String@symbol = (none OR_ELSE :beta);
+  ASSERT kept == :beta, "symbol fallback into a symbol merge stays a handle";
+  MUTABLE narrowed: String@symbol = (none OR_ELSE "gamma");
+  ASSERT narrowed == symbol("gamma"), "a literal fallback narrows into a symbol merge";
+
+  # A message-less ASSERT lowers to Zig's expectEqualStrings instead of
+  # CheatLib.assert, and that helper takes []const u8 -- one more String
+  # coercion boundary the handle has to widen at.
+  ASSERT tag == :alpha;
+  ASSERT echo(tag) == "alpha";
+END

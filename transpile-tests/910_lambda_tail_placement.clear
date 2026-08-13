@@ -1,0 +1,28 @@
+# A lambda's tail value leaves the lambda's frame, so it must be built on the
+# heap. The synthesized RETURN is created during MIR lowering, after escape
+# analysis, so nothing had made that placement decision: the hoisted return
+# binding was heap while the value itself was built on the frame
+# (OWNED_RESULT_ALLOC_MISMATCH).
+
+FN collect<Elem>(count: Int64, blk: FN(Int64) -> Elem) RETURNS ![]Elem ->
+  MUTABLE items: []Elem = List[];
+  MUTABLE i = 0_i64;
+  WHILE (i < count) DO
+    &items.append(blk(i));
+    i = (i + 1_i64);
+  END
+  RETURN items;
+END
+
+FN labels(n: Int64) RETURNS ![]Tuple<String, String> ->
+  RETURN TRY (collect(n, %(i: Int64) -> {
+    word = "item";
+    Tuple{COPY word, COPY word}
+  }));
+END
+
+FN main() RETURNS !Void ->
+  out = TRY (labels(2_i64));
+  ASSERT out.length() == 2_i64, "two";
+  print("ok");
+END

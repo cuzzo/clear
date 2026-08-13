@@ -1,0 +1,20 @@
+# A struct field named after a Zig keyword needs the escaped spelling
+# everywhere it appears: `comptime: bool` parses as a comptime field and
+# `n.comptime` as the start of a comptime block. The declaration, accesses,
+# struct-literal inits and the generated __clear_clone body all have to agree.
+# The AST nodes being translated for self-hosting carry `comptime`, `fn`,
+# `error` and `type` fields, so this is not hypothetical.
+
+STRUCT Node { comptime: Bool, fn: String, error: String@symbol }
+
+FN main() RETURNS Void ->
+  MUTABLE n = Node{ comptime: TRUE, fn: COPY "f", error: :NONE };
+  n.comptime = FALSE;
+  n.fn = COPY "g";
+  ASSERT !n.comptime, "keyword field write";
+  ASSERT n.fn == "g", "keyword string field reassign with cleanup";
+  ASSERT n.error == :NONE, "keyword symbol field";
+  m = COPY n;
+  ASSERT m.fn == "g", "clone through keyword fields";
+  print("ok");
+END

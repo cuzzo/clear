@@ -1,0 +1,32 @@
+STRUCT Rule { action: String }
+
+FN build() RETURNS {String}Rule ->
+  RETURN {"a\x00b": Rule{ action: COPY "parse_stmt" }};
+END
+
+CONST IDX: {String}Rule = build();
+
+FN make_key(left: String, right: String) RETURNS String ->
+  RETURN ((COPY left $+ "\x00") $+ COPY right);
+END
+
+# A container lookup whose key needs a temp gets wrapped in a block, and owned
+# placement treated that block's result as owned -- so it cleaned up a value
+# the map still holds. The first call freed the map's own strings; every later
+# lookup read (and re-freed) them. Only the COPY below belongs to the caller.
+FN look() RETURNS String ->
+  MUTABLE found: ?Rule = IDX[make_key("a", "b")];
+  IF found EXISTS AS rule THEN
+    RETURN COPY rule.action;
+  END
+  RETURN COPY "none";
+END
+
+FN main() RETURNS Void ->
+  first = look();
+  second = look();
+  third = look();
+  ASSERT first == "parse_stmt", "the const map survives the first lookup";
+  ASSERT second == "parse_stmt", "the const map survives a repeated lookup";
+  ASSERT third == "parse_stmt", "the const map is not freed by its readers";
+END

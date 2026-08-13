@@ -1,0 +1,28 @@
+STRUCT Leaf { names: []String }
+UNION Kind { Leaf: Leaf }
+STRUCT Item { kind: Kind@boxed }
+
+FN make_item() RETURNS Item ->
+  MUTABLE ns: []String = List[];
+  &ns.append("x");
+  RETURN Item{ kind: Kind{ Leaf: Leaf{ names: ns } } };
+END
+
+# A list returned inside a TUPLE escapes just as much as one returned bare.
+# The hoisted tuple temp was promoted to the heap but its elements were not,
+# so the list kept a frame allocation that outlived its frame.
+FN collect<Elem>(count: Int64, blk: FN() -> Elem) RETURNS Tuple<Int64, []Elem> ->
+  MUTABLE items: []Elem = List[];
+  MUTABLE i = 0_i64;
+  WHILE (i < count) DO
+    &items.append(blk());
+    i = (i + 1);
+  END
+  RETURN Tuple{count, items};
+END
+
+FN main() RETURNS Void ->
+  _, MUTABLE got = collect(2, make_item);
+  ASSERT got.length() == 2, "the tuple-returned list survives its frame";
+  ASSERT (UNWRAP (got[0])).kind IS_A Leaf, "the escaped elements are intact";
+END

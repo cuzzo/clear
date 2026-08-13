@@ -199,9 +199,11 @@ RSpec.describe "String@symbol" do
       expect(t.ownership_bearing?).to be false
     end
 
-    it "zig_type is []const u8 (same wire type as String)" do
+    it "zig_type is a distinct Symbol, not the String wire type" do
+      # Sharing []const u8 with String is what let cleanup free an interned
+      # handle: nothing downstream could tell the two apart.
       t = Type.new(:String, sync: :symbol)
-      expect(t.zig_type).to eq("[]const u8")
+      expect(t.zig_type).to eq("CheatLib.Symbol")
     end
 
     it "symbol type via constructor sets provenance to :rodata explicitly" do
@@ -430,8 +432,8 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      expect(zig).to include('const __clear_symbol_0: []const u8 = "ok";')
-      expect(zig).to include("const x: []const u8 = __clear_symbol_0;")
+      expect(zig).to include('const __clear_symbol_0: CheatLib.Symbol = .{ .bytes = "ok" };')
+      expect(zig).to match(/const x = __clear_symbol_\d+;/)
     end
 
     it "deduplicates repeated static symbol literals" do
@@ -445,8 +447,8 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      expect(zig.scan(/const __clear_symbol_\d+: \[\]const u8 = "foo";/).size).to eq(1)
-      expect(zig.scan(/const __clear_symbol_\d+: \[\]const u8 = "bar";/).size).to eq(1)
+      expect(zig.scan(/const __clear_symbol_\d+: CheatLib\.Symbol = \.\{ \.bytes = "foo" \};/).size).to eq(1)
+      expect(zig.scan(/const __clear_symbol_\d+: CheatLib\.Symbol = \.\{ \.bytes = "bar" \};/).size).to eq(1)
     end
 
     it "emits the static symbol pool for modules before exported items" do
@@ -455,11 +457,42 @@ RSpec.describe "String@symbol" do
           RETURN :ok;
         END
       CLEAR
-      expect(zig).to include('const __clear_symbol_0: []const u8 = "ok";')
+      expect(zig).to include('const __clear_symbol_0: CheatLib.Symbol = .{ .bytes = "ok" };')
       expect(zig.index("const __clear_symbol_0")).to be < zig.index("pub fn label")
     end
 
-    it "emits symbol == symbol comparison as pointer+length check" do
+    it "widens a symbol to its bytes at every String coercion boundary" do
+      # A Symbol is a distinct handle type; every String-typed position must
+      # read `.bytes` (a borrow of interned storage) or Zig rejects the
+      # program. Pinned per-boundary so a regression names the site.
+      zig = compile_symbol_src(<<~CLEAR)
+        FN borrow_len(s: String) RETURNS Int64 ->
+          RETURN s.length();
+        END
+        FN consume(TAKES s: String) RETURNS Int64 ->
+          RETURN s.length();
+        END
+        FN main() RETURNS Void ->
+          MUTABLE tag: String@symbol = :alpha;
+          MUTABLE casted: String = CAST(tag AS String);
+          n = borrow_len(tag);
+          MUTABLE doomed: String@symbol = :alpha;
+          m = consume(doomed);
+          print("tag is ${tag}");
+          RETURN;
+        END
+      CLEAR
+      # CAST reads the field...
+      expect(zig).to match(/\.bytes/)
+      # ...a borrowing String param gets the bytes, not the handle...
+      expect(zig).to match(/borrow_len\([^)]*\.bytes\)/)
+      # ...TAKES gets an owned COPY of the bytes, never the interned storage...
+      expect(zig).to match(/dupe\(u8, [^)]*\.bytes\)/)
+      # ...and an interpolated symbol concatenates as bytes.
+      expect(zig).to match(/concat\([^;]*\.bytes/)
+    end
+
+    it "emits symbol == symbol comparison as an interning-agnostic equality" do
       zig = compile_symbol_src(<<~CLEAR)
         FN main() RETURNS Void ->
           a = :foo;
@@ -468,15 +501,15 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      # symbolEql expands to pointer+length comparison, not CheatLib.eql
-      expect(zig).to include(".ptr ==")
-      expect(zig).to include(".len ==")
-      expect(zig).to include("const a: []const u8 = __clear_symbol_0;")
-      expect(zig).to include("const b: []const u8 = __clear_symbol_0;")
-      expect(zig).not_to include("CheatLib.eql")
+      # Pooled literals and runtime intern-table handles never share a pointer,
+      # so symbolEql keeps the pointer fast path inside CheatLib.eql rather
+      # than comparing identity alone.
+      expect(zig).to include("CheatLib.eql(a, b)")
+      expect(zig).to match(/const a = __clear_symbol_\d+;/)
+      expect(zig).to match(/const b = __clear_symbol_\d+;/)
     end
 
-    it "emits != between symbols as negated pointer check" do
+    it "emits != between symbols as a negated equality" do
       zig = compile_symbol_src(<<~CLEAR)
         FN main() RETURNS Void ->
           a = :foo;
@@ -485,7 +518,7 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      expect(zig).to include(".ptr ==")
+      expect(zig).to include("!CheatLib.eql(a, b)")
     end
 
     it "emits ASSERT with symbol comparison" do
@@ -509,7 +542,7 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      expect(zig).to include('const __clear_symbol_0: []const u8 = "debug";')
+      expect(zig).to include('const __clear_symbol_0: CheatLib.Symbol = .{ .bytes = "debug" };')
       expect(zig).to include("tag_label(__clear_symbol_0)")
     end
 
@@ -522,9 +555,9 @@ RSpec.describe "String@symbol" do
           RETURN;
         END
       CLEAR
-      expect(zig).to include('const __clear_symbol_0: []const u8 = "release";')
-      # Return type is []const u8 (same wire type)
-      expect(zig).to include("[]const u8")
+      expect(zig).to include('const __clear_symbol_0: CheatLib.Symbol = .{ .bytes = "release" };')
+      # The return type is the Symbol handle, not the String wire type.
+      expect(zig).to match(/fn mode\(.*\) !?CheatLib\.Symbol/)
     end
 
     it "lowers symbol intrinsic to runtime interning" do

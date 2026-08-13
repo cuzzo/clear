@@ -44,6 +44,32 @@ class Lexer
       raise TokenPayloadError, payload_error("text", "String")
     end
 
+    # Does this token's payload read as exactly `expected`?
+    #
+    # `token.value == "AS"` says the same thing only because Ruby lets a
+    # String-or-Integer-or-Float payload be compared to anything. A typed
+    # payload has to be narrowed to its String variant before the comparison
+    # means anything, and this is that narrowing, named once.
+    sig { params(expected: String).returns(T::Boolean) }
+    def text_is?(expected)
+      payload = value
+      return false unless payload.is_a?(String)
+
+      payload == expected
+    end
+
+    # consume_number yields an INT64 or a NUMBER token, and a count wants a
+    # whole number from either. `value.to_i` says that in Ruby only because the
+    # payload is untyped; naming the variants says it in both languages.
+    sig { returns(Integer) }
+    def number_as_integer
+      payload = value
+      return payload if payload.is_a?(Integer)
+      return payload.to_i if payload.is_a?(Float)
+
+      raise TokenPayloadError, payload_error("number", "Integer or Float")
+    end
+
     sig { returns(Integer) }
     def integer!
       payload = value

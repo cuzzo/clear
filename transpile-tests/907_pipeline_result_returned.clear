@@ -1,0 +1,25 @@
+# A pipeline result bound to a local that is then RETURNED: escape analysis
+# promotes the binding to the heap, and the pipeline's accumulator must be
+# promoted with it. The rewriter only gave the accumulator a SymbolEntry when
+# it could already see a heap destination, so there was nothing for escape
+# analysis to promote and the accumulator stayed frame-allocated
+# (OWNED_RESULT_ALLOC_MISMATCH).
+
+FN strip(value: String) RETURNS String ->
+  RETURN value.substr(1_i64, (value.length() - 1_i64));
+END
+
+FN table() RETURNS {String}Int64 ->
+  RETURN {"@a": 1_i64, "@b": 2_i64};
+END
+
+FN names() RETURNS []String ->
+  candidates = table().keys() |> SELECT strip(_);
+  RETURN candidates;
+END
+
+FN main() RETURNS Void ->
+  n = names();
+  ASSERT n.length() == 2_i64, "two";
+  print("ok");
+END

@@ -55,6 +55,56 @@ module ClearBuildSupport
     true
   end
 
+  # The per-program build caches live on a tmpfs that fills after a few dozen
+  # large builds, and a full cache is reported as `DWARF TODO: 'NoSpaceLeft'`
+  # rather than as a disk error. Drop the ones nobody has touched in a while.
+  #
+  # Age, not entry count, is the only safe criterion: parallel workers each
+  # build their own cache key, so a count-based rule deletes a directory
+  # another process is building into and that process then fails to symlink
+  # into its own cache.
+  CACHE_ENTRY_MAX_AGE_SECONDS = 3600
+
+  sig { params(cache_root: String, keep: String).void }
+  def self.prune_build_cache!(cache_root, keep:)
+    keep_real = File.expand_path(keep)
+    # This build is using its directory now, whether or not it just created it.
+    FileUtils.touch(keep) if File.directory?(keep)
+    cutoff = Time.now - CACHE_ENTRY_MAX_AGE_SECONDS
+    Dir.glob(File.join(cache_root, '*')).each do |path|
+      next unless File.directory?(path)
+      next if File.expand_path(path) == keep_real
+      next if File.mtime(path) > cutoff
+
+      FileUtils.rm_rf(path)
+    end
+  rescue StandardError
+    # Pruning is opportunistic; a build must never fail because of it.
+    nil
+  end
+
+  # A build killed mid-run (ENOSPC, timeout, SIGKILL) never reaches its
+  # rm_rf, so `.build-<pid>` directories accumulate. Reap the ones whose
+  # process is gone.
+  sig { params(zig_dir: String).void }
+  def self.reap_orphan_build_dirs!(zig_dir)
+    Dir.glob(File.join(zig_dir, '.build-*')).each do |path|
+      pid = File.basename(path).delete_prefix('.build-').to_i
+      next if pid <= 0 || pid == Process.pid
+
+      begin
+        Process.kill(0, pid)
+        next # still running
+      rescue Errno::ESRCH
+        FileUtils.rm_rf(path)
+      rescue Errno::EPERM
+        next # someone else's process
+      end
+    end
+  rescue StandardError
+    nil
+  end
+
   sig { params(link_path: String, target_path: String).void }
   def self.ensure_symlink(link_path, target_path)
     if File.symlink?(link_path)
@@ -172,6 +222,46 @@ module ClearBuildSupport
     out = File.join(Dir.tmpdir, "clear_pkg_#{pkg_name}.clear")
     File.write(out, merged.source)
     out
+  end
+
+  # Run `block` over `items` in forked workers purely for its cache side
+  # effects, then return. Every expensive step behind it -- transpile_cached,
+  # the module cache -- is content-addressed on disk, so a child populates
+  # exactly what the serial pass that follows will look up. Nothing is read
+  # back from the children, which is what keeps this to one call site instead
+  # of threading results through the build.
+  #
+  # Falls back to serial when jobs <= 1 or fork is unavailable.
+  sig do
+    params(items: T::Array[T.untyped], jobs: Integer, block: T.proc.params(item: T.untyped).void).void
+  end
+  def self.prewarm_in_parallel(items, jobs:, &block)
+    return if items.empty?
+    if jobs <= 1 || !Process.respond_to?(:fork)
+      items.each { |item| block.call(item) }
+      return
+    end
+
+    queue = items.dup
+    running = T.let({}, T::Hash[Integer, T::Boolean])
+    until queue.empty? && running.empty?
+      while running.size < jobs && !queue.empty?
+        item = queue.shift
+        pid = Process.fork do
+          begin
+            block.call(item)
+          rescue StandardError, SystemExit
+            # A warm-up failure is never fatal: the serial pass re-runs the
+            # same work and reports the real diagnostic in the right order.
+          end
+          Process.exit!(0)
+        end
+        running[pid] = true
+      end
+      pid, _ = Process.wait2
+      running.delete(pid)
+    end
+    nil
   end
 
   sig { params(pkg_name: String, start_dir: String).returns(T.nilable(String)) }

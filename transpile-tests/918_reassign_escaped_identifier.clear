@@ -1,0 +1,32 @@
+# A binding whose name reads as a Zig primitive type (`f2`, `i8`, `u3`) is
+# emitted as an escaped identifier, `@"f2"`. Templates that DERIVE an
+# identifier from a binding name spliced the escape into the middle of the new
+# name: `const __new_@"f2" = ...` for reassign temps, `var @"f2"_moved = false`
+# for move guards. Neither is valid Zig.
+
+PUB FN pick(index: Int64) RETURNS String ->
+  IF (index == 0_i64) THEN
+    RETURN COPY "zero";
+  END
+  RETURN COPY "other";
+END
+
+PUB FN consume(TAKES text: String) RETURNS Int64 ->
+  RETURN text.length();
+END
+
+FN main() RETURNS Void ->
+  MUTABLE f2: String = COPY "start";
+  f2 = pick(0_i64);
+  ASSERT f2 == "zero", "reassignment through an escaped name";
+
+  MUTABLE i8: String = COPY "start";
+  i8 = pick(1_i64);
+  ASSERT i8 == "other", "a second escaped name reassigns independently";
+
+  # A move guard: the owned value is given away, so cleanup must be skipped.
+  MUTABLE u3: String = pick(0_i64);
+  ASSERT consume(GIVE u3) == 4_i64, "move guard on an escaped name";
+
+  print("ok");
+END

@@ -1,0 +1,18 @@
+# `?T@boxed` is an optional POINTER: the box holds the payload and absence is
+# the null pointer. Boxing the optional itself allocated a cell for `?T`,
+# handed back `*?T`, and allocated even for NIL.
+
+STRUCT Leaf { n: Int64 }
+STRUCT Wrap { value: ?Node@boxed }
+UNION Node { Leaf: Leaf, Wrap: Wrap }
+
+FN build(inner: ?Node) RETURNS Wrap ->
+  RETURN Wrap{ value: COPY inner };
+END
+
+FN main() RETURNS Void ->
+  w = build(Node{ Leaf: Leaf{ n: 7 } });
+  ASSERT w.value != NIL, "a present optional is boxed";
+  ASSERT build(NIL).value == NIL, "an absent optional boxes nothing";
+  print("ok");
+END

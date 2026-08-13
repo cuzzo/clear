@@ -174,3 +174,37 @@ test "heapAlloc uses pinned local allocator when set" {
     // They should be different allocators
     try std.testing.expect(global.ptr != pinned.ptr);
 }
+
+test "owns: current storage, retired storage, and foreign pointers" {
+    // `owns` backs the frame allocator's foreign-free check, so its three
+    // answers are load-bearing: memory the arena currently holds is owned,
+    // memory it handed out and has since reclaimed is STILL owned (a no-op
+    // cleanup may run after the rewind that trimmed the block -- that
+    // sequence is legitimate), and anything else is a foreign free.
+    var static_buf: [512]u8 = undefined;
+    var arena = CheatArena.init(std.testing.allocator, &static_buf);
+    defer arena.deinit();
+
+    // Static-block storage is owned.
+    const in_static = arena.alloc(64, 8, 0).?;
+    try std.testing.expect(arena.owns(in_static));
+
+    // Overflow-block storage is owned while live...
+    const mark = arena.getMark();
+    const spilled = arena.alloc(8 * 1024, 8, 0).?;
+    try std.testing.expect(arena.owns(spilled));
+
+    // ...and stays owned after the rewind retires its block: the envelope
+    // remembers reclaimed address space precisely so late no-op cleanups are
+    // not misread as foreign.
+    arena.rewind(mark);
+    try std.testing.expect(arena.owns(spilled));
+
+    // Memory this arena never handed out is foreign -- rodata and the heap
+    // are the callers that must be rejected.
+    const rodata: []const u8 = "not the arena's to free";
+    try std.testing.expect(!arena.owns(@constCast(rodata.ptr)));
+    const heap = try std.testing.allocator.alloc(u8, 32);
+    defer std.testing.allocator.free(heap);
+    try std.testing.expect(!arena.owns(heap.ptr));
+}

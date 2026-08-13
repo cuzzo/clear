@@ -202,12 +202,22 @@ module Semantic
         return LifecyclePlan.new(type_key: type_key, drop_strategy: :none, copy_strategy: :bit_copy)
       end
 
+      # An Rc/Arc CARRIER is itself the owned thing: a handle is released by
+      # decrementing its refcount, and where its payload came from does not
+      # change that. Only the payload can be a borrow.
+      if type_info.any_rc? && !type_info.rodata?
+        return LifecyclePlan.new(type_key: type_key, drop_strategy: :release, copy_strategy: :retain)
+      end
+
       if type_info.borrowed_reference? || type_info.rodata?
         copy = if resource_facts.contains?(type_info)
           :forbidden
         elsif type_info.any_rc?
           :retain
-        elsif type_info.string? || type_info.recursive_cleanup_shape?(schema_lookup)
+        elsif type_info.string? || type_info.recursive_cleanup_shape?(schema_lookup, nil, ignore_borrow: true)
+          # COPY through a borrow duplicates what the POINTEE owns. A bit copy
+          # here aliases the pointee's heap fields into a second value that is
+          # then cleaned up independently.
           :deep_clone
         else
           :bit_copy

@@ -63,7 +63,9 @@ RSpec.describe "COMPTIME IF type predicates" do
     CLEAR
 
     expect(zig).to include("fn handle(comptime T: type, x: T)")
-    expect(zig).to include("if (comptime (T == []const u8))")
+    # `String@symbol` is its own Zig type, so the predicate can finally tell a
+    # symbol from a String -- against []const u8 it matched both.
+    expect(zig).to include("if (comptime (T == CheatLib.Symbol))")
   end
 
   it "allows a then-branch type binding" do

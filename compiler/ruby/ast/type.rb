@@ -67,6 +67,10 @@ class Type
   # ruby-to-clear: pub
   class FunctionTypeParam < T::Struct
     const :type, Type
+    # A callback can only mutate what its parameter declares mutable, exactly
+    # like a named function's MUTABLE parameter: the value is passed by pointer
+    # and the call site marks it with `&`.
+    const :mutable, T::Boolean, default: false
   end
 
   # ruby-to-clear: pub
@@ -86,7 +90,7 @@ class Type
   sig { params(signature: FunctionType).returns(TypeExpressionKind) }
   def self.function_type_expression_for(signature)
     FunctionTypeExpression.new(signature: FunctionSignatureExpression.new(
-        params: signature.params.map { |param| FunctionParamExpression.new(expression: param.type.shape.expression) },
+        params: signature.params.map { |param| FunctionParamExpression.new(expression: param.type.shape.expression, mutable: param.mutable) },
         return_expression: signature.return_type.shape.expression,
         reentrant: signature.reentrant,
         abi: signature.abi,
@@ -102,7 +106,7 @@ class Type
     return payload unless payload.nil?
 
     FunctionType.new(
-      params: expression.signature.params.map { |param| FunctionTypeParam.new(type: Type.new(param.expression)) },
+      params: expression.signature.params.map { |param| FunctionTypeParam.new(type: Type.new(param.expression), mutable: param.mutable) },
       return_type: Type.new(expression.signature.return_expression),
       reentrant: expression.signature.reentrant,
       abi: expression.signature.abi,
@@ -1115,12 +1119,25 @@ class Type
     generic_instance_of(:StreamStep, [item_type])
   end
 
-  sig { params(param_types: T::Array[Type], return_type: Type, reentrant: T::Boolean, source_signature: T.nilable(BasicObject), abi: Symbol).returns(Type) }
-  def self.function_type_from_parts(param_types, return_type, reentrant, source_signature, abi = :clear)
+  sig do
+    params(
+      param_types: T::Array[Type],
+      return_type: Type,
+      reentrant: T::Boolean,
+      source_signature: T.nilable(BasicObject),
+      abi: Symbol,
+      mutable_flags: T::Array[T::Boolean],
+    ).returns(Type)
+  end
+  def self.function_type_from_parts(param_types, return_type, reentrant, source_signature, abi = :clear,
+                                    mutable_flags = [])
     params = T.let([], T::Array[FunctionTypeParam])
     i = T.let(0, Integer)
     while i < param_types.length
-      params << FunctionTypeParam.new(type: copy_type(T.must(param_types[i])))
+      params << FunctionTypeParam.new(
+        type: copy_type(T.must(param_types[i])),
+        mutable: mutable_flags[i] == true,
+      )
       i += 1
     end
 
@@ -1493,21 +1510,17 @@ class Type
       return BinaryOpResult.new(error: "Operator $+ requires at least one String operand, got #{t_left} and #{t_right}")
     end
 
-    left_coercion = (!left_type.string? && safe_autocast?(t_left, :String)) ? :String : nil
-    right_coercion = (!right_type.string? && safe_autocast?(t_right, :String)) ? :String : nil
-    BinaryOpResult.new(type: Type.new(:String), left_coercion: left_coercion,
-      right_coercion: right_coercion, storage: :frame)
-  end
+    # There is no bit-level coercion from a number or a Bool to a string:
+    # rendering one allocates. Ask for the `.toString()` that does it rather
+    # than stamping a coercion the emitter can only turn into `@as([]const u8, n)`.
+    non_string = !left_type.string? ? t_left : (!right_type.string? ? t_right : nil)
+    if non_string
+      return BinaryOpResult.new(
+        error: "Operator $+ requires String operands, got #{non_string} - call .toString() on it",
+      )
+    end
 
-  sig { params(from_type: Symbol, to_type: Symbol).returns(T::Boolean) }
-  def self.safe_autocast?(from_type, to_type)
-    from_t = Type.new(from_type.to_s.to_sym)
-    to_t   = Type.new(to_type.to_s.to_sym)
-    return false if from_t.fn_type? || to_t.fn_type?
-    # Any numeric -> any numeric (implicit promotion/narrowing handled by Zig casts)
-    return true if from_t.numeric? && to_t.numeric?
-    # Original types that can auto-cast to strings
-    [:Float64, :Int64, :Bool, :Byte].include?(from_t.resolved)
+    BinaryOpResult.new(type: Type.new(:String), storage: :frame)
   end
 
   public
@@ -2959,6 +2972,15 @@ class Type
     sync == :raw
   end
 
+  # A String-typed slot that renders as bytes ([]const u8) rather than as the
+  # interned Symbol handle. This is the target every symbol-widening site
+  # tests for; naming it once keeps the three coercion boundaries (CAST,
+  # placement, call arguments) from each re-spelling the pair.
+  sig { returns(T::Boolean) }
+  def byte_string?
+    string? && !symbol?
+  end
+
   sig { returns(T::Boolean) }
   def symbol?
     sync == :symbol
@@ -3445,9 +3467,11 @@ class Type
     (list_collection? || fixed_soa?) && soa?
   end
 
+  # A `T[]` field renders as a Zig slice, but a `[]T@list` field is an
+  # ArrayList: only the latter iterates through `.items`.
   sig { returns(T::Boolean) }
-  def dynamic_field_array?
-    array? && (dynamic? || list_collection?)
+  def slice_shaped_field_array?
+    array? && dynamic? && !list_collection?
   end
 
   sig { returns(T::Boolean) }
@@ -4327,15 +4351,18 @@ class Type
 
   # ── Recursive type analysis (mirrors Zig comptime functions) ──────
 
-  sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String])).returns(T::Boolean) }
-  def recursive_cleanup_shape?(schema_lookup = nil, seen = nil)
+  # `ignore_borrow` asks about the POINTEE's shape rather than the borrow's:
+  # a borrow owns nothing to drop, but COPY through one still has to duplicate
+  # whatever the pointee owns.
+  sig { params(schema_lookup: T.nilable(SchemaLookup), seen: T.nilable(T::Set[String]), ignore_borrow: T::Boolean).returns(T::Boolean) }
+  def recursive_cleanup_shape?(schema_lookup = nil, seen = nil, ignore_borrow: false)
     return false if node_reference?
     seen_set = T.let(seen || Set.new, T::Set[String])
     key = type_id.key
     return false if seen_set.include?(key)
     seen_set << key
 
-    return false if borrowed_reference?
+    return false if borrowed_reference? && !ignore_borrow
     # Symbols are interned, process-lifetime string data. They have String's
     # representation, but never own the backing bytes and therefore must not
     # make an enclosing collection recursively cleanup-bearing.
@@ -5280,7 +5307,7 @@ class Type
   # ruby-to-clear: effects reentrant
   def function_type_key
     sig = T.must(function_type)
-    param_keys = sig.params.map { |param| param.type.semantic_type_key }
+    param_keys = sig.params.map { |param| param.mutable ? "MUTABLE #{param.type.semantic_type_key}" : param.type.semantic_type_key }
     params_key = param_keys.join(",")
 
     "fn(#{params_key})->#{sig.return_type.semantic_type_key};reentrant=#{sig.reentrant};abi=#{sig.abi}"
@@ -5495,6 +5522,10 @@ class Type
       return "CheatLib.NumericMapType(#{numeric_key_zig}, #{val_zig})"
     end
 
+    # A symbol value needs no special map: CheatLib.Symbol's drop is a no-op,
+    # so the ordinary owned-value StringMap leaves intern-table storage alone.
+    # The old InternedValueStringMap existed because a symbol was spelled
+    # []const u8 and the map could not tell it from an owned String.
     "CheatLib.StringMap(#{val_zig})"
   end
 
@@ -5573,7 +5604,9 @@ class Type
       while i < fn_raw.params.length
         p = fn_raw.params.fetch(i)
         t = p.type
-        param_types_zig << t.zig_type(is_param: true)
+        param_zig = t.zig_type(is_param: true)
+        param_zig = "*#{param_zig}" if p.mutable && !param_zig.start_with?("*")
+        param_types_zig << param_zig
         i += 1
       end
       ret_zig = fn_raw.return_type.zig_type
@@ -5607,6 +5640,11 @@ class Type
       return signed_integer? ? "isize" : "usize"
     end
     if resolved == :String || string?
+      # An interned symbol is represented exactly like a String and owned by
+      # nobody. Spelling both []const u8 left every downstream consumer --
+      # cleanup above all -- unable to tell them apart.
+      return "CheatLib.Symbol" if symbol?
+
       return "[]const u8"
     end
 
@@ -5639,10 +5677,8 @@ class Type
     # 3d. Handle @set collection
     if set_collection?
       elem = T.must(element_type)
-      # Interned symbols are rodata/intern-table handles the set never
-      # owns; the owned-string Set would free them on duplicate insert
-      # and at deinit (misaligned free of rodata).
-      return "CheatLib.InternedStringSet()" if elem.symbol?
+      # Same for a set of symbols: Symbol drops to nothing, so the ordinary
+      # Set is correct without a separate interned representation.
       base_zig = elem.nested_zig_type(is_param: is_param, is_field: is_field)
       return "CheatLib.Set(#{base_zig})"
     end
@@ -5806,7 +5842,9 @@ class Type
       param_types,
       return_type.is_a?(Type) ? return_type : Type.new(return_type),
       raw.reentrant,
-      signature
+      signature,
+      :clear,
+      raw.params.map { |param| param.mutable == true },
     )
   end
 end
@@ -5994,22 +6032,16 @@ module Schemas
 
     sig { returns(Schemas::ResourceClosePlan) }
     attr_reader :close_plan
-
     sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
     attr_reader :static_methods
-
     sig { returns(T::Hash[String, AST::StructField]) }
     attr_reader :fields
-
     sig { returns(T.nilable(String)) }
     attr_reader :extern_module
-
     sig { returns(T.nilable(String)) }
     attr_reader :as_type
-
     sig { returns(Symbol) }
     attr_reader :visibility
-
     sig { returns(Schemas::ResourceSchema::MethodsMap) }
     attr_reader :methods
     sig { returns(T::Array[Symbol]) }
@@ -6187,7 +6219,6 @@ module Schemas
 
     sig { returns(Schemas::UnionSchema::VariantMap) }
     attr_reader :variants
-
     sig { returns(Symbol) }
     attr_reader :visibility
     sig { returns(T::Array[Symbol]) }
@@ -6256,16 +6287,12 @@ module Schemas
 
     sig { returns(T::Hash[String, AST::StructField]) }
     attr_reader :fields
-
     sig { returns(MethodsMap) }
     attr_reader :methods
-
     sig { returns(Symbol) }
     attr_reader :visibility
-
     sig { returns(T.nilable(String)) }
     attr_reader :extern_module
-
     sig { returns(T.nilable(String)) }
     attr_reader :as_type
     sig { returns(T::Array[Symbol]) }

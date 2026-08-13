@@ -1,0 +1,16 @@
+STRUCT Tag { name: String@symbol, count: Int64 }
+STRUCT Holder { tags: []Tag }
+
+FN build() RETURNS Holder ->
+  RETURN Holder{ tags: [Tag{ name: :alpha, count: 1 }, Tag{ name: :beta, count: 2 }] };
+END
+
+# A struct whose fields own nothing got no `__clear_drop`, so cleanup fell
+# through to representation-driven reflection -- which sees []const u8 and frees
+# it, though a String@symbol is rodata. The type has to state that it owns
+# nothing rather than say nothing at all. Same contract as the union case in
+# 946; a struct reaches it through a different lowering path.
+FN main() RETURNS Void ->
+  MUTABLE h = build();
+  ASSERT h.tags.length() == 2, "both tags survive cleanup";
+END

@@ -1,0 +1,42 @@
+# An allocating call nested inside a control condition (`f(x).field == y`) must
+# be hoisted. The normalizer walked only Struct-based MIR nodes, so anything
+# under a T::Struct node -- RegistryCall, which is what `==` on symbols lowers
+# to -- was invisible and the call reached the checker unhoisted
+# (UNHOISTED_ALLOC). The WHILE form also proves the hoist stays per-iteration.
+
+STRUCT Tok { text: String, kind: String@symbol }
+STRUCT Stream { toks: []Tok, pos: Int64 }
+
+PUB FN stream__current(self: Stream) RETURNS Tok
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS view {
+    RETURN COPY UNWRAP (view.toks[view.pos]);
+}
+END
+
+PUB FN stream__count_words(MUTABLE self: Stream) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+    MUTABLE n = 0_i64;
+    WHILE (stream__current(view).kind != :eof) DO
+      IF (stream__current(view).kind == :word) THEN
+        n = (n + 1_i64);
+      END
+      view.pos = (view.pos + 1_i64);
+    END
+    RETURN n;
+}
+END
+
+FN main() RETURNS Void ->
+  MUTABLE s = Stream{ toks: [
+    Tok{ text: "a", kind: :word },
+    Tok{ text: "+", kind: :op },
+    Tok{ text: "b", kind: :word },
+    Tok{ text: "", kind: :eof }
+  ], pos: 0_i64 };
+  ASSERT stream__count_words(&s) == 2_i64, "two words before eof";
+  print("ok");
+END

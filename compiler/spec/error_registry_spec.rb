@@ -274,4 +274,33 @@ RSpec.describe AST do
       end
     end
   end
+
+  # A module compiles to its own Zig file, so a RAISE inside it names
+  # `ErrorName.<Type>` with no definition in scope unless the module emits the
+  # enum too. Only the root program used to.
+  describe "module emission" do
+    require_relative "../ruby/backends/transpiler" unless defined?(ZigTranspiler)
+
+    it "emits the ErrorName enum in a module that raises" do
+      out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
+        PUB FN check(limit: Int64) RETURNS !Void ->
+          IF (limit > 10_i64) THEN
+            RAISE Input, Exceeded, "over the limit";
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(out).to include("pub const ErrorName = enum(u32) {")
+      expect(out).to include("ErrorName.Exceeded")
+    end
+
+    it "omits the enum from a module that never names one" do
+      out = ZigTranspiler.new.transpile_as_module(<<~CLEAR)
+        PUB FN double(value: Int64) RETURNS Int64 ->
+          RETURN (value * 2_i64);
+        END
+      CLEAR
+      expect(out).not_to include("pub const ErrorName")
+    end
+  end
 end

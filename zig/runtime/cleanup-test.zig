@@ -595,6 +595,25 @@ test "dupeUnionValue deep-copies string variant independently" {
     CheatLib.cleanup(TestValue, alloc, &copy_mut);
 }
 
+test "dupeValue copies the payload of an already-narrowed optional source" {
+    const alloc = std.testing.allocator;
+
+    var items = std.ArrayListUnmanaged([]const u8).empty;
+    try items.append(alloc, try alloc.dupe(u8, "a"));
+    const narrowed: ?StringListValue = StringListValue{ .Items = items };
+
+    // The destination type is concrete; the source arrives optional because the
+    // caller narrowed it. Copying must reach the payload's clone glue.
+    const copied = try CheatLib.dupeValue(StringListValue, narrowed, alloc);
+    try std.testing.expectEqual(@as(usize, 1), copied.Items.items.len);
+    try std.testing.expectEqualStrings("a", copied.Items.items[0]);
+
+    var orig_mut = narrowed.?;
+    CheatLib.cleanup(StringListValue, alloc, &orig_mut);
+    var copy_mut = copied;
+    CheatLib.cleanup(StringListValue, alloc, &copy_mut);
+}
+
 test "dupeValue deep-copies union ArrayList string payload elements independently" {
     const alloc = std.testing.allocator;
 

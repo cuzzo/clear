@@ -9,6 +9,21 @@ class ClearParser
     true
   end
 
+  # The parser anchors every diagnostic on a token it already holds, never on
+  # an AST node, so it does not need ErrorHelper's `respond_to?(:token)` walk.
+  # Saying so is what lets the self-hosted parser type this surface at all: a
+  # duck-typed subject would have to be the whole AST::Locatable union, and
+  # reading a field off a union is not something CLEAR can express.
+  # Parameter types stay as wide as ErrorHelper's -- sorbet-runtime requires
+  # an override to be contravariant -- but the return types are narrowed to
+  # the token the parser actually always has, which is what the self-hosted
+  # signatures are written against.
+  sig { params(node_or_token: T.untyped).returns(T.nilable(Lexer::Token)) }
+  def diagnostic_token(node_or_token) = node_or_token
+
+  sig { params(token: DiagnosticToken).returns(T.nilable(Lexer::Token)) }
+  def source_error_token(token) = T.cast(token, T.nilable(Lexer::Token))
+
   include ErrorHelper
 
   SYNTAX_TOKENS_AT_STATEMENT_END = T.let(
@@ -18,6 +33,10 @@ class ClearParser
 
   # Partial-class files are compiled as separate CLEAR packages during
   # self-hosting, so restate the storage types they read from parser.rb.
+  # ruby-to-clear: field-type budget=FrontendResourceBudget@multiowned
+  # ruby-to-clear: field-type wrapper_operand_precedence=?Int64
+  # ruby-to-clear: field-type delimiter_closings=[]?Int64
+  # ruby-to-clear: field-type gradual=Bool
   # ruby-to-clear: field-type pos=Int64
   # ruby-to-clear: field-type source_code=String
   # ruby-to-clear: field-type tokens=[]Token
@@ -85,7 +104,7 @@ class ClearParser
       @pos += 1
       tok
     else
-      error!(current, :EXPECTED_NUMBER, value: current.value, type: current.type)
+      error!(current, :EXPECTED_NUMBER, value: current.display_value, type: current.type)
     end
   end
 
@@ -153,7 +172,7 @@ class ClearParser
       error!(token, :LEGACY_MUTATION_NAME_SUFFIX)
     end
 
-    error!(token, :PARSER_EXPECTED, expected: expected_value || expected_type, got: token.value, type: token.type, line: token.line)
+    error!(token, :PARSER_EXPECTED, expected: expected_value || expected_type, got: token.display_value, type: token.type, line: token.line)
   end
 
   # Insert `<expected>` at the end of the previous source line (right
@@ -178,7 +197,7 @@ class ClearParser
              code: :PARSER_EXPECTED_AT_END_OF_LINE,
              expected: expected_value,
              expected_line: prev_tok.line,
-             got: next_tok.value,
+             got: next_tok.display_value,
              got_line: next_tok.line,
              category: :type, level: :error,
              fixes: [fix], raise_in_collector: true)
@@ -200,7 +219,7 @@ class ClearParser
     fixable!(token,
       code: :PARSER_EXPECTED_BEFORE_TOKEN,
       expected: expected_value,
-      got: token.value,
+      got: token.display_value,
       line: token.line,
       category: :type, level: :error,
       fixes: [fix], raise_in_collector: true)
@@ -300,13 +319,16 @@ class ClearParser
   # an expression.  The token carried by a MethodCall is the method name, not
   # the beginning of `receiver.method(...)`; diagnostics and source rewrites
   # need the latter.
-  sig { params(node: AST::Node, first: AST::Locatable, last: Lexer::Token).returns(AST::Node) }
-  def stamp_source_range_from_node!(node, first, last)
+  # Returns the range rather than stamping it: the caller holds the concrete
+  # node and can assign the field directly, which is one narrowing instead of
+  # one per node type.
+  sig { params(first: AST::Locatable, last: Lexer::Token).returns(AST::SourceRange) }
+  def source_range_from_node(first, last)
     source_range = first.source_range
     raise "Internal: source range missing from postfix receiver" unless source_range
     range = source_range
     end_offset = last.end_offset || ((last.start_offset || range.end_offset) + last.value.to_s.bytesize)
-    node.source_range = AST::SourceRange.new(
+    AST::SourceRange.new(
       file: range.file || last.file,
       start_offset: range.start_offset,
       end_offset: end_offset,
@@ -315,6 +337,5 @@ class ClearParser
       end_line: last.end_line || last.line,
       end_column: last.end_column || (last.column + last.value.to_s.length),
     )
-    node
   end
 end

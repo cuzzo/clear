@@ -44,7 +44,10 @@ RSpec.describe Type, "binary operator type checking" do
   it "reserves + for numeric addition and $+ for string concatenation" do
     expect_reject_expr('"a" + "b"', returns: "String")
     expect_reject_expr('1 $+ 2', returns: "String")
-    expect(Type.binary_op(:CONCAT, Type.new(:String), Type.new(:Int64)).type.resolved).to eq(:String)
+    # A number has no bit-level coercion to a string; the emitter could only
+    # render it as `@as([]const u8, n)`, which is not valid Zig.
+    expect(Type.binary_op(:CONCAT, Type.new(:String), Type.new(:Int64)).error)
+      .to include("call .toString()")
   end
 
   it "accepts valid boolean logic" do

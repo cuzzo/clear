@@ -66,7 +66,7 @@ class StringConcatRewriter
   def rewrite_body!(body)
     index = 0
     while index < body.length
-      body[index] = rewrite_required_node!(T.must(body[index]))
+      body[index] = rewrite_required_node!(body.fetch(index))
       index += 1
     end
   end

@@ -54,6 +54,10 @@ OptionParser.new do |o|
   o.on('--clean')               { opts[:clean] = true }
   o.on('--templates LIST')      { |v| opts[:templates] = v.split(',').map(&:to_sym) }
   o.on('--jobs N', Integer)     { |v| opts[:jobs] = v }
+  # Run the cells through LLVM with safety on instead of the self-hosted
+  # backend. Catches miscompiles the default backend introduces (the lexer
+  # keyword comparison was one) and safety checks a Debug arena hides.
+  o.on('--safe')                { opts[:safe] = true }
   o.on('--bisect-positives')    { opts[:bisect_positives] = true }
   o.on('--shard I/N') do |v|
     idx, total = v.split('/', 2).map(&:to_i)
@@ -136,7 +140,7 @@ def ensure_symlink(link_path, target_path)
   File.symlink(target_path, link_path)
 end
 
-def run_pass_bundle(entries, out_dir, bundle_name: 'all-fuzz')
+def run_pass_bundle(entries, out_dir, bundle_name: 'all-fuzz', safe: false)
   return [[], [], [], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -187,6 +191,9 @@ def run_pass_bundle(entries, out_dir, bundle_name: 'all-fuzz')
     'runtime/switch.S', 'runtime/onRoot.S',
     '-lc'
   ]
+  # --safe routes the bundle through LLVM with safety on rather than the
+  # self-hosted backend.
+  zig_args += ['-O', 'ReleaseSafe'] if safe
   out, status =
     if coverage_enabled
       ZigCoverageSupport.run_zig_test(
@@ -203,15 +210,17 @@ def run_pass_bundle(entries, out_dir, bundle_name: 'all-fuzz')
   suffix = coverage_enabled ? " under kcov" : ""
   puts "[fuzz] pass bundle #{bundle_name}#{suffix}: #{entries.size} cells in #{format('%.2f', elapsed)}s"
 
-  if !status.success? || out.include?('FAIL')
-    return [[], [[zig_path, out]], [], []]
-  end
-
   leak = out =~ /MEMORY LEAKS:\s*[1-9]/ ||
          out.include?('[DebugAllocator] (err)') ||
          out.include?('[gpa] (err)') ||
          out =~ /\d+ tests leaked memory/
+
+  # Order matters, and it is the order the isolated lanes already use: a
+  # leaking bundle exits non-zero, so checking the status first classifies
+  # every leak as a plain failure and the leak lane never sees one.
+  return [[], [[zig_path, out]], [], []] if out.include?('FAIL')
   return [[], [], [], [[zig_path, out]]] if leak
+  return [[], [[zig_path, out]], [], []] unless status.success?
 
   [entries.map { |e| e[:path] }, [], [], []]
 ensure
@@ -222,7 +231,7 @@ ensure
   end
 end
 
-def run_parallel_pass_bundles(entries, out_dir, default_workers)
+def run_parallel_pass_bundles(entries, out_dir, default_workers, safe: false)
   return [[], [], [], []] if entries.empty?
 
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -238,7 +247,7 @@ def run_parallel_pass_bundles(entries, out_dir, default_workers)
     pid = Process.fork do
       reader.close
       simplecov_child_command!("fuzz-pass-bundle-#{index}")
-      result = run_pass_bundle(chunk, out_dir, bundle_name: "all-fuzz-#{index}")
+      result = run_pass_bundle(chunk, out_dir, bundle_name: "all-fuzz-#{index}", safe: safe)
       writer.write(Marshal.dump(result))
       writer.close
       exit 0
@@ -274,7 +283,10 @@ def print_failure_excerpt(out)
       first = [failure_index - 8, 0].max
       lines[first, 40]
     else
-      lines.first(40)
+      # No marker: the run died without reporting one (a panic, a signal, a
+      # killed test binary). Whatever happened is at the END of the output --
+      # printing the first 40 lines shows 40 passing cells and nothing else.
+      lines.last(40)
     end
   excerpt.each { |line| puts "      #{line}" }
   return unless lines.size > excerpt.size
@@ -475,13 +487,13 @@ def run_compile_only_negative_coverage(entries, default_workers)
   [pass, mismatched]
 end
 
-def coverage_run(emitted, out_dir, default_workers)
+def coverage_run(emitted, out_dir, default_workers, safe: false)
   pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
   negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
 
   if ZigCoverageSupport.enabled?
-    pass_ok, fails, mir_errors, leaks = run_parallel_pass_bundles(pass_entries, out_dir, default_workers)
+    pass_ok, fails, mir_errors, leaks = run_parallel_pass_bundles(pass_entries, out_dir, default_workers, safe: safe)
   else
     pass_ok, mir_errors, leaks = run_compile_only_positive_coverage(pass_entries, default_workers)
     fails = []
@@ -568,7 +580,7 @@ def run_fail_complete_bundles(entries, out_dir)
   result = FuzzFailComplete.run(entries) do |batch|
     attempts += 1
     puts "[fuzz] fail-complete bundle attempt #{attempts}: #{batch.size} cells"
-    batch_result = run_pass_bundle(batch, out_dir)
+    batch_result = run_pass_bundle(batch, out_dir, safe: safe)
     if batch.size == 1
       # A singleton bundle diagnostic belongs to its sole source cell. Keep
       # that identity instead of reporting the transient all-fuzz.zig path.
@@ -586,7 +598,7 @@ def run_fail_complete_bundles(entries, out_dir)
   result
 end
 
-def hybrid_run(emitted, out_dir, default_workers, bisect_positives: false)
+def hybrid_run(emitted, out_dir, default_workers, bisect_positives: false, safe: false)
   pass_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :pass }
   negative_entries = emitted.select { |e| e[:kind] != :mir_checker && e[:expected] == :compile_error }
   mir_negative_entries = emitted.select { |e| e[:kind] == :mir_checker && e[:expected] == :compile_error }
@@ -596,7 +608,7 @@ def hybrid_run(emitted, out_dir, default_workers, bisect_positives: false)
     if bisect_positives
       run_fail_complete_bundles(bundled_pass_entries, out_dir)
     else
-      run_parallel_pass_bundles(bundled_pass_entries, out_dir, default_workers)
+      run_parallel_pass_bundles(bundled_pass_entries, out_dir, default_workers, safe: safe)
     end
   iso_ok, iso_fails, iso_mir_errors, iso_leaks = run_positive_files(isolated_pass_entries, out_dir, default_workers)
   negative_ok, unexpected_pass = run_negative_builds(negative_entries, out_dir, default_workers)
@@ -619,7 +631,7 @@ def per_file_run(emitted)
     path, expected = entry[:path], entry[:expected]
     short = File.basename(path)
     print "[#{i + 1}/#{emitted.size}] #{short} (#{expected})... "
-    out = `#{clear} test #{path} 2>&1`
+    out = `#{clear} test #{path}#{opts[:safe] ? ' --safe' : ''} 2>&1`
     status = $?.exitstatus
 
     compile_error = out.include?('MIR ownership verification failed') ||
@@ -665,9 +677,9 @@ end
 
 pass, fails, leaks, mir_errors, unexpected_pass =
   if ENV['COVERAGE'] == '1'
-    coverage_run(emitted, opts[:out], opts[:jobs])
+    coverage_run(emitted, opts[:out], opts[:jobs], safe: opts[:safe])
   else
-    hybrid_run(emitted, opts[:out], opts[:jobs], bisect_positives: opts[:bisect_positives])
+    hybrid_run(emitted, opts[:out], opts[:jobs], bisect_positives: opts[:bisect_positives], safe: opts[:safe])
   end
 
 if ZigCoverageSupport.enabled?

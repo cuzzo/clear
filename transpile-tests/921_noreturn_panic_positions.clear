@@ -1,0 +1,49 @@
+# `panic(...)` is declared NoReturn, so it yields no value. Wrapping it in a
+# value-producing construct emits code Zig rejects as unreachable:
+#   break :__match_1 @panic(...)             (a MATCH arm)
+#   const __hoist_1 = @as(T, @panic(...))    (a hoisted RETURN value)
+#   return @as(T, @panic(...))
+#   (x orelse @as(T, @panic(...)))           (an OR_ELSE fallback)
+#   blk: { const __copy_src = @panic(...); (a COPY of that fallback)
+# Each position has to emit the panic as the terminator it is.
+
+STRUCT GetField { name: String }
+STRUCT Other { n: Int64 }
+UNION Locatable { GetField: GetField, Other: Other }
+
+FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+  IF value IS_A GetField AS payload THEN
+    RETURN COPY payload;
+  END
+  RETURN panic("Invalid cast to GetField");
+END
+
+FN classify(kind: String@symbol) RETURNS Int64 ->
+  RETURN PARTIAL MATCH kind START
+    :a -> 1_i64,
+    :b -> 2_i64,
+    DEFAULT -> panic("unknown kind")
+  END;
+END
+
+STRUCT Entry { n: Int64 }
+
+FN fetch(entries: {String}Entry, key: String) RETURNS Entry ->
+  RETURN (entries[key] OR_ELSE CAST(panic("missing hash key") AS Entry));
+END
+
+STRUCT Named { name: String }
+
+FN fetch_owned(entries: {String}Named, key: String) RETURNS Named ->
+  RETURN COPY (entries[key] OR_ELSE CAST(panic("missing hash key") AS Named));
+END
+
+FN main() RETURNS Void ->
+  g = castLocatableToGetField(Locatable{ GetField: GetField{ name: COPY "f" } });
+  ASSERT g.name == "f", "the non-panicking cast path still returns its value";
+  ASSERT classify(:a) == 1_i64, "first match arm";
+  ASSERT classify(:b) == 2_i64, "second match arm";
+  ASSERT fetch({"a": Entry{ n: 1_i64 }}, "a").n == 1_i64, "the OR_ELSE hit path still yields its value";
+  ASSERT fetch_owned({"a": Named{ name: COPY "x" }}, "a").name == "x", "a COPY of that fallback still copies the hit";
+  print("ok");
+END

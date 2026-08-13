@@ -1,0 +1,20 @@
+# A `String@symbol` is interned: a literal points at rodata, and `symbol(str)`
+# points into the Runtime's pool. Neither is the container's to free. But a
+# symbol lowered to a plain []const u8 is indistinguishable from an owned
+# String, so a collection of symbols freed its elements -- handing .rodata to
+# the allocator. The type has to carry the fact.
+FN main() RETURNS Void ->
+  MUTABLE holder: []String@symbol = [];
+  &holder.append(:alpha);
+  &holder.append(:beta);
+
+  MUTABLE first: String@symbol = UNWRAP (holder[0]);
+  ASSERT first == :alpha, "a symbol read out of a list is intact";
+
+  MUTABLE again: String@symbol = UNWRAP (holder[0]);
+  ASSERT again == :alpha, "the first read did not free the list's element";
+
+  MUTABLE keyed: {String@symbol}Int64 = {};
+  keyed[:alpha] = 1;
+  ASSERT (UNWRAP (keyed[:alpha])) == 1, "a symbol works as a map key";
+END

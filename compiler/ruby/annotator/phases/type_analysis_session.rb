@@ -734,6 +734,25 @@ class Annotator::Phases::TypeAnalysisSession
   end
   private :validate_copy_linear_resource_facts!
 
+  # Signatures imported from another package carry their params (and the
+  # kept_identity stamped when that package was compiled), but their bodies are
+  # not in this unit's function registry.
+  sig { params(fn_nodes: T::Hash[String, AST::FunctionDef]).returns(T::Hash[String, T::Array[AST::Param]]) }
+  def imported_kept_params(fn_nodes)
+    out = T.let({}, T::Hash[String, T::Array[AST::Param]])
+    semantic_root_scope.visible_entries.each do |name, entry|
+      key = name.to_s
+      next if fn_nodes.key?(key)
+      signature = entry.fn_signature
+      next unless signature
+      params = signature.params
+      next unless params.any? { |param| param.symbol&.kept_identity }
+      out[key] = params
+    end
+    out
+  end
+  private :imported_kept_params
+
   sig { params(resolution: Annotator::Phases::ResolutionFacts).void }
   def apply_keep_analysis!(resolution)
     fn_nodes = resolution.function_registry.nodes
@@ -742,6 +761,7 @@ class Annotator::Phases::TypeAnalysisSession
     EscapeAnalysis.apply_kept_identity_placement!(
       fn_nodes,
       body_summaries,
+      imported_params: imported_kept_params(fn_nodes),
       on_mutable_violation: lambda { |entry, arg, callee_name|
         sink = entry.kept_identity&.sink ||
           fn_nodes[callee_name]&.params&.find { |p| p.symbol&.kept_identity }&.symbol&.kept_identity&.sink ||

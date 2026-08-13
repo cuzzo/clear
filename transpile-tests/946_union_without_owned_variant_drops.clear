@@ -1,0 +1,16 @@
+PUB UNION Dim { Int64Value: Int64, SymbolValue: String@symbol }
+
+STRUCT Holder { dims: []Dim }
+
+FN build() RETURNS Holder ->
+  RETURN Holder{ dims: [Dim{ SymbolValue: :LIST }, Dim{ Int64Value: 3 }] };
+END
+
+# A union whose variants own nothing got no `__clear_drop`, so cleanup fell
+# through to representation-driven reflection -- which sees []const u8 and
+# frees it, even though a String@symbol is rodata. The type has to state that
+# it owns nothing rather than say nothing at all.
+FN main() RETURNS Void ->
+  MUTABLE h = build();
+  ASSERT h.dims.length() == 2, "both dimensions survive cleanup";
+END

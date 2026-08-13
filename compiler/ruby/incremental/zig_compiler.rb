@@ -18,6 +18,7 @@ module Incremental
     const :test_mode, T::Boolean, default: false
     const :strict_test, T::Boolean, default: false
     const :default_stack, T.nilable(String), default: nil
+    const :main_tier, T.nilable(Symbol), default: nil
     const :ownership_mode, Symbol, default: :default
   end
 
@@ -66,7 +67,7 @@ module Incremental
         test_mode: @config.test_mode,
         strict_test: @config.strict_test,
         exact_tiers: {},
-        main_tier: nil,
+        main_tier: @config.main_tier,
         default_stack: @config.default_stack,
         ownership_mode: @config.ownership_mode,
         function_counter_seeds: function_counter_seeds,

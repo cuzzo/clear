@@ -443,39 +443,6 @@ test "typed-key maps support structural keys and own their key data" {
     try std.testing.expectEqual(@as(i64, 0), CheatLib.numericMapCount(Key, i64, map));
 }
 
-test "InternedStringSet never frees interned elements (insert/dup/remove/deinit)" {
-    const allocator = std.testing.allocator;
-    var set: CheatLib.InternedStringSet() = .{};
-    defer set.deinit(allocator);
-
-    // Rodata literals stand in for intern-table symbols: any free would
-    // crash or corrupt, and std.testing.allocator would flag a non-owned
-    // pointer immediately.
-    try set.insert(allocator, "alpha");
-    try set.insert(allocator, "beta");
-    try set.insert(allocator, "alpha"); // duplicate: must NOT free
-    try std.testing.expectEqual(@as(i64, 2), set.length());
-    try std.testing.expect(set.contains("alpha"));
-
-    set.remove(allocator, "beta"); // must NOT free
-    try std.testing.expectEqual(@as(i64, 1), set.length());
-}
-
-test "InternedStringSet cleanup and dupeValue reuse element pointers" {
-    const allocator = std.testing.allocator;
-    var set: CheatLib.InternedStringSet() = .{};
-    try set.insert(allocator, "gamma");
-    try set.insert(allocator, "delta");
-
-    var copy = try CheatLib.dupeValue(CheatLib.InternedStringSet(), set, allocator);
-    try std.testing.expectEqual(@as(i64, 2), copy.length());
-    try std.testing.expect(copy.contains("gamma"));
-
-    // Generic cleanup path must only free the backing maps.
-    CheatLib.cleanup(CheatLib.InternedStringSet(), allocator, &copy);
-    CheatLib.cleanup(CheatLib.InternedStringSet(), allocator, &set);
-}
-
 test "owned-string Set still frees duplicates and elements at deinit" {
     const allocator = std.testing.allocator;
     var set: CheatLib.Set([]const u8) = .{};
@@ -538,4 +505,18 @@ test "sharded getPtr reaches an aggregate payload without copying it" {
     const observed = map.getPtr("n") orelse return error.MissingSlot;
     try std.testing.expectEqual(@as(usize, 1), observed.edges.items.len);
     try std.testing.expectEqual(@as(i64, 5), observed.edges.items[0]);
+}
+test "owned-value StringMap still frees replaced and removed values" {
+    const allocator = std.testing.allocator;
+    var map: CheatLib.StringMap([]const u8) = .{};
+    map.alloc = allocator;
+    defer map.deinit(allocator, allocator);
+
+    try map.put(allocator, allocator, "k", try allocator.dupe(u8, "first"));
+    try map.put(allocator, allocator, "k", try allocator.dupe(u8, "second")); // frees "first"
+    try map.put(allocator, allocator, "j", try allocator.dupe(u8, "third"));
+    try std.testing.expectEqual(@as(i64, 2), map.count());
+
+    map.remove(allocator, "j"); // frees "third"
+    try std.testing.expectEqual(@as(i64, 1), map.count());
 }

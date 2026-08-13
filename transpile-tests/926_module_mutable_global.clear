@@ -1,0 +1,44 @@
+# A module-level `MUTABLE x = ...` is module state: `x = value` inside a
+# function has to REASSIGN it. The routine-body scope was seeded empty, so the
+# name resolved to nothing and the assignment silently declared a shadowing
+# local -- the global never changed, and the emitted Zig redeclared the name:
+#
+#   const next_id: i64 = CheatLib.intAdd(next_id, 1);
+
+MUTABLE next_id: Int64 = 11;
+MUTABLE last_len: Int64 = 0_i64;
+# A global that OWNS heap memory: it lives for the whole program, so the
+# assignment targets the heap allocator and nothing drops it.
+MUTABLE seen: ?[]Int64 = NIL;
+
+PUB FN take_id() RETURNS Int64 ->
+  MUTABLE id = COPY next_id;
+  next_id = (next_id + 1_i64);
+  RETURN id;
+END
+
+PUB FN label(name: String) RETURNS Int64 ->
+  last_len = name.length();
+  RETURN last_len;
+END
+
+PUB FN remember(value: Int64) RETURNS !Int64 ->
+  IF seen == NIL THEN
+    seen = List[];
+  END
+  IF seen EXISTS AS found THEN
+    RETURN found.length();
+  END
+  RETURN 0_i64;
+END
+
+FN main() RETURNS !Void ->
+  ASSERT take_id() == 11_i64, "first id";
+  ASSERT take_id() == 12_i64, "the global advanced";
+  ASSERT next_id == 13_i64, "and is visible from the outside";
+
+  ASSERT label("abc") == 3_i64, "second global reassigned";
+  ASSERT last_len == 3_i64, "and kept the new value";
+  ASSERT (TRY remember(1_i64)) == 0_i64, "an owned global is assignable";
+  print("ok");
+END

@@ -406,3 +406,75 @@ RSpec.describe SemanticAnnotator do
     end
   end
 end
+
+RSpec.describe "WITH alias capability" do
+  # declare_with_new_capability marks the SOURCE binding, but the body reads
+  # through the alias and Scope#is_restricted? answers per binding. Without the
+  # alias carrying the capability, borrowing through it -- calling a
+  # `RETURNS self: T` accessor -- was refused as MUTABLE_PARAM_NEEDS_RESTRICT.
+  it "carries the capability onto the WITH alias, not only its source" do
+    src = <<~CLEAR
+      STRUCT Box { items: []Int64, pos: Int64 }
+
+      PUB FN box__at(self: Box) RETURNS self: Int64
+        REQUIRES self: LOCAL
+      ->
+      WITH POLYMORPHIC self AS view {
+          RETURN UNWRAP (view.items[view.pos]);
+      }
+      END
+
+      PUB FN box__step(MUTABLE self: Box) RETURNS Int64
+        REQUIRES self: LOCAL
+      ->
+      WITH POLYMORPHIC self AS MUTABLE view {
+          IF box__at(view) == 0_i64 THEN
+            RETURN 0_i64;
+          END
+          RETURN 1_i64;
+      }
+      END
+    CLEAR
+
+    importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+    expect { CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd) }
+      .not_to raise_error
+  end
+end
+
+RSpec.describe "lambda capture capabilities" do
+  # A capture is the same binding seen from inside the lambda, so it keeps the
+  # source's capabilities. declare_captures inherited ownership identity but not
+  # capabilities, so capturing a WITH alias with USE(MUTABLE ...) produced an
+  # entry with none -- Scope#is_restricted? was false for it, and borrowing
+  # through the capture (calling a `RETURNS self: T` accessor) was refused.
+  it "carries the source's capabilities onto a USE capture" do
+    src = <<~CLEAR
+      STRUCT Cursor { items: []Int64, pos: Int64 }
+
+      PUB FN cursor__at(self: Cursor) RETURNS self: Int64
+        REQUIRES self: LOCAL
+      ->
+      WITH POLYMORPHIC self AS view {
+          RETURN UNWRAP (view.items[view.pos]);
+      }
+      END
+
+      PUB FN apply(blk: FN() -> Int64) RETURNS Int64 ->
+        RETURN blk();
+      END
+
+      PUB FN cursor__first(MUTABLE self: Cursor) RETURNS Int64
+        REQUIRES self: LOCAL
+      ->
+      WITH POLYMORPHIC self AS MUTABLE view {
+          RETURN apply(%() USE(MUTABLE view) -> cursor__at(view));
+      }
+      END
+    CLEAR
+
+    importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+    expect { CompilerFrontend.compile(src, importer: importer, source_dir: Dir.pwd) }
+      .not_to raise_error
+  end
+end

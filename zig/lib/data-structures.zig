@@ -53,7 +53,11 @@ pub fn bind(comptime deps: type) type {
             const return_type = get_info.return_type.?;
             return struct {
                 pub const StorageType = Storage;
-                pub const Key = get_info.params[1].type.?;
+                // `get` takes `anytype` so a Symbol key can normalize to bytes
+                // at the boundary, which leaves its param type null. A map that
+                // states its own key type is the authority; fall back to
+                // reflection for those that do not.
+                pub const Key = if (@hasDecl(Storage, "Key")) Storage.Key else get_info.params[1].type.?;
                 pub const Value = @typeInfo(return_type).optional.child;
             };
         }
@@ -185,6 +189,19 @@ pub fn bind(comptime deps: type) type {
     // HashMap@sharded(N) at the declaration site is a one-line change that
     // doesn't ripple through function signatures.
     // -----------------------------------------------------------------------
+    /// Map keys are bytes. A `String@symbol` key arrives as a Symbol handle --
+    /// same bytes, different type -- so normalize at the boundary rather than
+    /// making every caller unwrap. One implementation: CheatLib.bytesOf,
+    /// threaded through the bind deps because this file cannot import it.
+    pub inline fn keyBytes(key: anytype) []const u8 {
+        return deps.bytesOf(key);
+    }
+
+    // A map of interned symbols needs no special variant: CheatLib.Symbol's
+    // drop is a no-op, so the ordinary owned-value map leaves intern-table
+    // storage alone. InternedValueStringMap/InternedStringSet existed because
+    // a symbol was spelled []const u8 and the containers could not tell it
+    // from an owned String.
     pub fn StringMap(comptime V: type) type {
         return struct {
             const Self = @This();
@@ -198,7 +215,11 @@ pub fn bind(comptime deps: type) type {
             /// TAKES ownership of value. Strings are duped (may be rodata/frame).
             /// TAKES ownership of value. No implicit copies. Caller must
             /// ensure all data (including strings) is heap-owned.
-            pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
+            /// Byte-keyed: a `String@symbol` lookup normalizes through keyBytes.
+            pub const Key = []const u8;
+
+            pub fn put(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, key_in: anytype, value: V) !void {
+                const key = keyBytes(key_in);
                 _ = key_alloc;
                 _ = bucket_alloc;
                 const stored_value = value;
@@ -212,15 +233,18 @@ pub fn bind(comptime deps: type) type {
             }
 
 
-            pub fn get(self: anytype, key: []const u8) ?V {
+            pub fn get(self: anytype, key_in: anytype) ?V {
+                const key = keyBytes(key_in);
                 return self.inner.get(key);
             }
 
-            pub fn contains(self: anytype, key: []const u8) bool {
+            pub fn contains(self: anytype, key_in: anytype) bool {
+                const key = keyBytes(key_in);
                 return self.inner.contains(key);
             }
 
-            pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key: []const u8) void {
+            pub fn remove(self: *Self, key_alloc: std.mem.Allocator, key_in: anytype) void {
+                const key = keyBytes(key_in);
                 _ = key_alloc;
                 if (self.inner.fetchRemove(key)) |kv| {
                     self.alloc.free(kv.key);
@@ -247,7 +271,8 @@ pub fn bind(comptime deps: type) type {
             /// Free heap-allocated payloads inside tagged union values.
 
             // Delegate to inner for code that still uses raw HashMap API
-            pub fn getPtr(self: *Self, key: []const u8) ?*V {
+            pub fn getPtr(self: *Self, key_in: anytype) ?*V {
+                const key = keyBytes(key_in);
                 return self.inner.getPtr(key);
             }
 
@@ -2443,17 +2468,10 @@ pub fn bind(comptime deps: type) type {
     // AutoHashMapUnmanaged(T, void) for other types.
     // -----------------------------------------------------------------------
     pub fn Set(comptime T: type) type {
-        return SetImpl(T, true);
+        return SetImpl(T);
     }
 
-    /// Set of interned strings (CLEAR `[Set]String@symbol`): elements are
-    /// intern-table/rodata handles the set never owns. No frees on
-    /// duplicate insert, remove, or deinit; COPY reuses element pointers.
-    pub fn InternedStringSet() type {
-        return SetImpl([]const u8, false);
-    }
-
-    fn SetImpl(comptime T: type, comptime owned_elements: bool) type {
+    fn SetImpl(comptime T: type) type {
         const is_string = T == []const u8;
         const Context = struct {
             pub fn hash(_: @This(), key: T) u64 {
@@ -2480,7 +2498,6 @@ pub fn bind(comptime deps: type) type {
             std.HashMapUnmanaged(T, void, Context, std.hash_map.default_max_load_percentage);
         return struct {
             const Self = @This();
-            pub const interned_elements = !owned_elements;
             inner: Map = .{},
 
             pub fn initCapacity(alloc: std.mem.Allocator, capacity: u32) !Self {
@@ -2492,7 +2509,7 @@ pub fn bind(comptime deps: type) type {
             pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !void {
                 if (is_string) {
                     if (self.inner.contains(value)) {
-                        if (owned_elements) alloc.free(value);
+                        alloc.free(value);
                     } else {
                         try self.inner.put(alloc, value, {});
                     }
@@ -2513,7 +2530,7 @@ pub fn bind(comptime deps: type) type {
             pub fn remove(self: *Self, alloc: std.mem.Allocator, value: T) void {
                 if (is_string) {
                     if (self.inner.fetchRemove(value)) |kv| {
-                        if (owned_elements) alloc.free(kv.key);
+                        alloc.free(kv.key);
                     }
                 } else {
                     if (self.inner.fetchRemove(value)) |kv| {
@@ -2537,10 +2554,8 @@ pub fn bind(comptime deps: type) type {
 
             pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
                 if (is_string) {
-                    if (owned_elements) {
-                        var it = self.inner.keyIterator();
-                        while (it.next()) |key_ptr| alloc.free(key_ptr.*);
-                    }
+                    var it = self.inner.keyIterator();
+                    while (it.next()) |key_ptr| alloc.free(key_ptr.*);
                 } else if (comptime needsCleanup(T)) {
                     var it = self.inner.keyIterator();
                     while (it.next()) |key_ptr| cleanup(T, alloc, key_ptr);

@@ -1,0 +1,17 @@
+# An EACH body that ignores the item is ordinary CLEAR, but the list lowerer
+# always named the loop capture `__each_item` -- and Zig rejects an unused
+# capture. Vouch for it instead of predicting whether the body reads it: the
+# usage scan does not see every position a `_` can appear in.
+
+FN main() RETURNS Void ->
+  MUTABLE total = 0_i64;
+  names: []String = ["a", "b"];
+  kinds: []String = ["x", "y"];
+  names |> EACH {
+    kinds |> EACH {
+      total = (total + 1_i64);
+    };
+  };
+  ASSERT total == 4_i64, "nested each";
+  print("ok");
+END

@@ -1,0 +1,15 @@
+# A block expression's tail materializations must stay INSIDE the block: they
+# can reference locals the block declares. lower_block_expr left them in
+# function_state.pending_stmts, so the enclosing statement flushed them ABOVE
+# the block and the generated Zig used `x` before its declaration.
+
+FN pair(a: String, b: String) RETURNS Tuple<String, String> ->
+  RETURN ( { MUTABLE x = COPY a; MUTABLE y = COPY b; Tuple{COPY x, COPY y} } );
+END
+
+FN main() RETURNS Void ->
+  first, second = pair("hi", "there");
+  ASSERT first == "hi", "first";
+  ASSERT second == "there", "second";
+  print("ok");
+END

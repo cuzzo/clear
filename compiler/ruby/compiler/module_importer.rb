@@ -3,6 +3,7 @@ require "sorbet-runtime"
 
 require "set"
 require_relative "package_source"
+require_relative "../incremental/module_cache"
 
 class ModuleImportError < StandardError; end
 class CircularDependencyError < ModuleImportError; end
@@ -60,6 +61,8 @@ class ModuleImporter
     # member file (directly or via its own single-file pkg name) is aliased
     # to the whole package so the unit is never split.
     @package_members = T.let({}, T::Hash[String, String])
+    # Cross-run store for compiled units. Nil unless `clear` asked for one.
+    @unit_cache = T.let(Incremental::ModuleCache.from_env, T.nilable(Incremental::ModuleCache))
     @pkg_paths.each do |name, value|
       next unless value.to_s.include?(",")
 
@@ -75,6 +78,17 @@ class ModuleImporter
   #   2. First-party stdlib at <stdlib_root>/<name>/src/lib.clear
   #
   # @param pkg_name [String] Package name (e.g. "math", "testing")
+  # The package that actually owns a required name. A single-file package whose
+  # file belongs to a multi-file package IS that package -- and only the owner
+  # is built, so the emitted Zig must import (and alias through) the owner.
+  sig { params(pkg_name: String).returns(String) }
+  def owning_package_name(pkg_name)
+    path = @pkg_paths[pkg_name.to_s]
+    return pkg_name.to_s if path.nil? || path.to_s.include?(",")
+
+    @package_members[File.expand_path(path.to_s)] || pkg_name.to_s
+  end
+
   sig { params(pkg_name: String, caller_dir: String).returns(T.nilable(ModuleImporter::CompiledModule)) }
   def compile_package(pkg_name, caller_dir: @base_dir)
     path = @pkg_paths[pkg_name.to_s] || resolve_stdlib_package(pkg_name)
@@ -100,7 +114,10 @@ class ModuleImporter
   sig { params(pkg_name: String, members: T::Array[String]).returns(T.nilable(ModuleImporter::CompiledModule)) }
   def compile_package_group(pkg_name, members)
     cache_key = "pkg-group:#{pkg_name}"
-    return @module_cache[cache_key] if @module_cache.key?(cache_key)
+    if @module_cache.key?(cache_key)
+      @unit_cache&.reuse(cache_key)
+      return @module_cache[cache_key]
+    end
 
     if @compiling.include?(cache_key)
       cycle = @compiling.to_a.map { |p| File.basename(p.to_s) }.join(" -> ")
@@ -114,25 +131,27 @@ class ModuleImporter
 
     @compiling.add(cache_key)
     begin
-      merged = PackageSource.merge(members, resolve_pkg: ->(name) { @pkg_paths[name] || resolve_stdlib_package(name) })
-      source_dir = File.dirname(T.must(merged.member_paths.first))
+      mod = with_unit_cache(cache_key, members) do
+        merged = PackageSource.merge(members, resolve_pkg: ->(name) { @pkg_paths[name] || resolve_stdlib_package(name) })
+        source_dir = File.dirname(T.must(merged.member_paths.first))
 
-      saved_gradual = ClearParser.gradual_mode
-      ClearParser.gradual_mode = false
-      ast = begin
-        budget = FrontendResourceBudget.new
-        tokens = Lexer.new(merged.source, file: "pkg:#{pkg_name}", budget: budget).tokenize
-        ClearParser.new(tokens, merged.source, budget: budget).parse
-      ensure
-        ClearParser.gradual_mode = saved_gradual
+        saved_gradual = ClearParser.gradual_mode
+        ClearParser.gradual_mode = false
+        ast = begin
+          budget = FrontendResourceBudget.new
+          tokens = Lexer.new(merged.source, file: "pkg:#{pkg_name}", budget: budget).tokenize
+          ClearParser.new(tokens, merged.source, budget: budget).parse
+        ensure
+          ClearParser.gradual_mode = saved_gradual
+        end
+
+        reject_auto_in_public_signatures!(ast, "pkg:#{pkg_name}")
+
+        annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: merged.source)
+        annotator.annotate!(ast)
+
+        compile_module_mir(ast, annotator, source_dir)
       end
-
-      reject_auto_in_public_signatures!(ast, "pkg:#{pkg_name}")
-
-      annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: merged.source)
-      annotator.annotate!(ast)
-
-      mod = compile_module_mir(ast, annotator, source_dir)
 
       @module_cache[cache_key] = mod
       mod
@@ -174,7 +193,10 @@ class ModuleImporter
     owner = @package_members[abs_path]
     return compile_package(owner, caller_dir: caller_dir) if owner
 
-    return @module_cache[abs_path] if @module_cache.key?(abs_path)
+    if @module_cache.key?(abs_path)
+      @unit_cache&.reuse(abs_path)
+      return @module_cache[abs_path]
+    end
 
     if @compiling.include?(abs_path)
       cycle = @compiling.to_a.map { |p| File.basename(p) }.join(" -> ")
@@ -185,31 +207,33 @@ class ModuleImporter
 
     @compiling.add(abs_path)
     begin
-      source     = File.read(abs_path)
-      source_dir = File.dirname(abs_path)
+      mod = with_unit_cache(abs_path, [abs_path]) do
+        source     = File.read(abs_path)
+        source_dir = File.dirname(abs_path)
 
-      # STRICT-imports boundary (gradual-typing.md §7): imported modules
-      # must export concrete types in their public surface. Force the
-      # parser into strict mode (gradual=false) for the duration of the
-      # imported module's parse so `--gradual` from the top-level build
-      # never propagates across module boundaries. Explicit `Auto` in
-      # source still tokenizes; the post-parse check below catches it.
-      saved_gradual = ClearParser.gradual_mode
-      ClearParser.gradual_mode = false
-      ast = begin
-        budget = FrontendResourceBudget.new
-        tokens = Lexer.new(source, file: abs_path, budget: budget).tokenize
-        ClearParser.new(tokens, source, budget: budget).parse
-      ensure
-        ClearParser.gradual_mode = saved_gradual
+        # STRICT-imports boundary (gradual-typing.md §7): imported modules
+        # must export concrete types in their public surface. Force the
+        # parser into strict mode (gradual=false) for the duration of the
+        # imported module's parse so `--gradual` from the top-level build
+        # never propagates across module boundaries. Explicit `Auto` in
+        # source still tokenizes; the post-parse check below catches it.
+        saved_gradual = ClearParser.gradual_mode
+        ClearParser.gradual_mode = false
+        ast = begin
+          budget = FrontendResourceBudget.new
+          tokens = Lexer.new(source, file: abs_path, budget: budget).tokenize
+          ClearParser.new(tokens, source, budget: budget).parse
+        ensure
+          ClearParser.gradual_mode = saved_gradual
+        end
+
+        reject_auto_in_public_signatures!(ast, abs_path)
+
+        annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
+        annotator.annotate!(ast)
+
+        compile_module_mir(ast, annotator, source_dir)
       end
-
-      reject_auto_in_public_signatures!(ast, abs_path)
-
-      annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir, source_code: source)
-      annotator.annotate!(ast)
-
-      mod = compile_module_mir(ast, annotator, source_dir)
 
       @module_cache[abs_path] = mod
       mod
@@ -257,6 +281,20 @@ class ModuleImporter
   end
 
   private
+
+  # Route one compilation unit through the cross-run unit cache when one is
+  # configured. Every REQUIRE the block issues re-enters the importer, so the
+  # cache sees the unit's transitive source set without a second dependency scan.
+  sig do
+    params(unit_key: String, member_paths: T::Array[String], block: T.proc.returns(ModuleImporter::CompiledModule))
+      .returns(ModuleImporter::CompiledModule)
+  end
+  def with_unit_cache(unit_key, member_paths, &block)
+    cache = @unit_cache
+    return block.call unless cache
+
+    cache.fetch(unit_key, member_paths, &block)
+  end
 
   sig { params(ast: AST::Program, annotator: SemanticAnnotator, source_dir: String).returns(ModuleImporter::CompiledModule) }
   def compile_module_mir(ast, annotator, source_dir)
