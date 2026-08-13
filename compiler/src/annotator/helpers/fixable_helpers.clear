@@ -32,7 +32,7 @@ FN escapeRegex(value: String) RETURNS String ->
   RETURN compilerRegexEscape(value);
 END
 
-UNION Reg { VarDecl: VarDecl, DestructureTarget: DestructureTarget }
+UNION FixableReg { VarDecl: VarDecl, DestructureTarget: DestructureTarget }
 # Ruby module FixableHelper
 signed_order = [:Int8, :Int16, :Int32, :Int64];
 unsigned_order = [:Byte, :UInt16, :UInt32, :UInt64];
@@ -56,13 +56,13 @@ STRUCT AutoCandidate {
   type_sym: String@symbol,
   note: ?String
 }
-FN emit_mutable_unused_finding_mut(reg: ?Reg, name: String) RETURNS !Void ->
+FN emit_mutable_unused_finding_mut(reg: ?FixableReg, name: String) RETURNS !Void ->
   IF reg EXISTS AS reg_value THEN
     MUTABLE tok_branch_value: ?Token = NIL;
     IF reg_value IS_A VarDecl AS var_decl THEN
       tok_branch_value = varDecl__token(var_decl);
     ELSE
-      tok_branch_value = (MATCH reg_value START Reg.VarDecl AS item -> item.token, Reg.DestructureTarget AS item -> item.token END);
+      tok_branch_value = (MATCH reg_value START FixableReg.VarDecl AS item -> item.token, FixableReg.DestructureTarget AS item -> item.token END);
     END
     MUTABLE tok: Token = tok_branch_value?;
     MUTABLE fixes = List[];

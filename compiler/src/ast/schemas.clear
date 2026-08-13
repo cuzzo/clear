@@ -632,7 +632,7 @@ PUB FN field_bearing?(s: ?SchemaValue) RETURNS Bool ->
   RETURN FALSE;
 END
 # End Ruby module Schemas
-FN castSchemasUnionSchemaVariantInputToOptionalSchemasUnionSchemaVariantValue(value: SchemasUnionSchemaVariantInput) RETURNS ?SchemasUnionSchemaVariantValue ->
+PUB FN castSchemasUnionSchemaVariantInputToOptionalSchemasUnionSchemaVariantValue(value: SchemasUnionSchemaVariantInput) RETURNS ?SchemasUnionSchemaVariantValue ->
   PARTIAL MATCH value START
     SchemasUnionSchemaVariantInput.FunctionType AS cast_payload -> RETURN SchemasUnionSchemaVariantValue{ FunctionType: COPY cast_payload };,
     SchemasUnionSchemaVariantInput.TypeMultiowned AS cast_payload -> RETURN SchemasUnionSchemaVariantValue{ TypeMultiowned: COPY cast_payload };,

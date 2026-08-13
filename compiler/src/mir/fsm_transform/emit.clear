@@ -668,7 +668,7 @@ PRIVATE FN emit__register_recursive_destroy_actions_mut(MUTABLE ctx: FsmEmitCont
   IF !(close_plan) THEN
       CONTINUE;
   END
-  (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :capture, name: COPY _, target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, _) }, cleanup_entry: cleanupEntry__build(:resource, :heap, FALSE, {:resource_close_plan: close_plan}), guard: NIL, allocator: NIL } });
+  (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :capture, name: COPY _, target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, _) }, cleanup_entry: cleanupEntry__build(:resource, :heap, FALSE, close_plan), guard: NIL, allocator: NIL } });
   };
   FOR _ IN ctx.fresh_heap_cleanup_names DO
   (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :fresh_heap, name: COPY _, target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, _) }, cleanup_entry: cleanupEntry__build(:uniform, :heap, TRUE), allocator: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, "alloc") }, guard: NIL } });

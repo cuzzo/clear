@@ -13,7 +13,7 @@ EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_reg
 PUB UNION Alloc { SymbolValue: String@symbol, Emittable: Emittable }
 UNION CExternFnDeclReturnValue { StringValue: String, SymbolValue: String@symbol }
 UNION CExternStructDefReturnValue { StringValue: String, SymbolValue: String@symbol }
-UNION Capture { StringValue: String, SymbolValue: String@symbol }
+UNION MirCapture { StringValue: String, SymbolValue: String@symbol }
 UNION EnumDefReturnValue { StringValue: String, SymbolValue: String@symbol }
 UNION MIRReturnValue { StringValue: String, SymbolValue: String@symbol }
 UNION MutualThunkArmReturnValue { StringValue: String, ArrayValue: []ThunkBaseCase, ArrayValue2: []ThunkFrameInit }
@@ -11975,7 +11975,7 @@ END
 FN mIR__named_field(name: Name, value: Emittable) RETURNS StructInitField ->
   RETURN StructInitField{ name: castNameToStringSymbol(COPY name), value: COPY value, alloc: NIL };
 END
-FN mIR__if_binding(expr: Emittable, capture: Capture) RETURNS !{String@symbol}NamedMirFieldValue ->
+FN mIR__if_binding(expr: Emittable, capture: MirCapture) RETURNS !{String@symbol}NamedMirFieldValue ->
   MUTABLE binding: {String@symbol}NamedMirFieldValue = {};
   binding[:expr] = NamedMirFieldValue{ Emittable: COPY expr };
   binding[:capture] = castCaptureToNamedMirFieldValue(COPY capture);
@@ -13930,10 +13930,10 @@ FOR _ IN ([InlineBc, ShardedMapPut, ShardedMapGet]) DO
 _.prepend(StdlibDefFsCoercion);
 END
 # End Ruby module MIR
-FN castCaptureToNamedMirFieldValue(value: Capture) RETURNS NamedMirFieldValue ->
+FN castCaptureToNamedMirFieldValue(value: MirCapture) RETURNS NamedMirFieldValue ->
   PARTIAL MATCH value START
-    Capture.StringValue AS cast_payload -> RETURN NamedMirFieldValue{ StringValue: COPY cast_payload };,
-    Capture.SymbolValue AS cast_payload -> RETURN NamedMirFieldValue{ SymbolValue: COPY cast_payload };,
+    MirCapture.StringValue AS cast_payload -> RETURN NamedMirFieldValue{ StringValue: COPY cast_payload };,
+    MirCapture.SymbolValue AS cast_payload -> RETURN NamedMirFieldValue{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to NamedMirFieldValue");
   END
   panic("Invalid cast to NamedMirFieldValue");

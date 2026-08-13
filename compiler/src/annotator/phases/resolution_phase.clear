@@ -34,7 +34,7 @@ EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, repla
 EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerCountOccurrences(text: String, needle: String) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerLastIndex(text: String, needle: String) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
-UNION CodeOrMessage { StringValue: String, SymbolValue: String@symbol }
+UNION ResolutionCodeOrMessage { StringValue: String, SymbolValue: String@symbol }
 PUB UNION ResolutionSessionReturnValue { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, TokenMultiowned: Token@multiowned, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, Token: Token }
 # Ruby module Annotator
 # Ruby module Annotator::Phases
@@ -178,14 +178,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN type_params DO
     MUTABLE name = symbol(_);
     IF seen.contains?(name) THEN
-        resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], {:param: _, :kind: kind, :name: node.name()});
+        resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], {:param: _, :kind: kind, :name: node.name()});
     END
     IF builtin_type_parameter_names.contains?(name) THEN
-        resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS }, [], {:param: _});
+        resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS }, [], {:param: _});
     END
     IF (rtoc_self_view.local_type_declaration_names.contains?(name) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = resolutionSession__current_scope(rtoc_self_view);
     scope__resolve_type_entry(rtoc_local_receiver_1, name) }) THEN
-        resolutionSession__error_mut(rtoc_self_view, resolutionSession__generic_param_token(rtoc_self_view, node, _), CodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS_NOMINAL }, [], {:param: _});
+        resolutionSession__error_mut(rtoc_self_view, resolutionSession__generic_param_token(rtoc_self_view, node, _), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS_NOMINAL }, [], {:param: _});
     END
     &seen.insert(name);
     END
@@ -248,7 +248,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE seen: [Set]String = Set[];
     FOR _ IN requirements DO
     IF seen.contains?(_.name) THEN
-        resolutionSession__error_mut(rtoc_self_view, KEEP _.token, CodeOrMessage{ SymbolValue: :UNION_METHOD_DUPLICATE }, [], {:union: node.name, :method: _.name});
+        resolutionSession__error_mut(rtoc_self_view, KEEP _.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_DUPLICATE }, [], {:union: node.name, :method: _.name});
     END
     &seen.insert(COPY _.name);
     END
@@ -285,7 +285,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF signature EXISTS AS signature_value THEN
         resolutionSession__validate_union_method_visibility_mut(rtoc_self_view, node, requirement, signature_value);
         IF (requirement.params.length() != (TRY (functionSignature__params(signature_value))).length()) THEN
-          resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, CodeOrMessage{ SymbolValue: :UNION_METHOD_WRONG_ARITY }, [], {:union: node.name, :method: requirement.name, :expected_arity: requirement.params.length(), :fn: requirement.name, :got_arity: (TRY (functionSignature__params(signature_value))).length()});
+          resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_WRONG_ARITY }, [], {:union: node.name, :method: requirement.name, :expected_arity: requirement.params.length(), :fn: requirement.name, :got_arity: (TRY (functionSignature__params(signature_value))).length()});
         END
         MUTABLE rtoc_idx = 0;
         WHILE rtoc_idx < requirement.params.length() DO
@@ -300,7 +300,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, CodeOrMessage{ SymbolValue: :UNION_METHOD_PARAM_TYPE }, [], {:union: node.name, :method: requirement.name, :index: (rtoc_idx + 1), :expected: expected_name, :fn: requirement.name, :got: actual_name});
+      resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_PARAM_TYPE }, [], {:union: node.name, :method: requirement.name, :index: (rtoc_idx + 1), :expected: expected_name, :fn: requirement.name, :got: actual_name});
     rtoc_idx = rtoc_idx + 1;
         END
         MUTABLE return_type: ?Type = COPY requirement.return_type;
@@ -310,12 +310,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF (((expected_return == actual_return) OR (expected_return == :Any)) OR (actual_return == :Any)) THEN
             RETURN;
           END
-          resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, CodeOrMessage{ SymbolValue: :UNION_METHOD_RETURN_TYPE }, [], {:union: node.name, :method: requirement.name, :expected: expected_return, :fn: requirement.name, :got: actual_return});
+          resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_RETURN_TYPE }, [], {:union: node.name, :method: requirement.name, :expected: expected_return, :fn: requirement.name, :got: actual_return});
         ELSE
           RETURN;
         END
       ELSE
-        resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, CodeOrMessage{ SymbolValue: :UNION_METHOD_MISSING }, [], {:union: node.name, :method: requirement.name, :fn: requirement.name});
+        resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_MISSING }, [], {:union: node.name, :method: requirement.name, :fn: requirement.name});
         RETURN;
       END
     ELSE
@@ -323,7 +323,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         resolutionSession__queue_synthetic_function_mut(&rtoc_self_view, FunctionDef{ token: CAST(COPY KEEP requirement.token AS Token), name: COPY requirement.name, params: COPY ( { MUTABLE rtoc_map_results = CAST([] AS []Param); requirement.params |> EACH { &rtoc_map_results.append(COPY unionMethodParamRequirement__to_param(_)); }; rtoc_map_results } ), captures: List[], return_type: COPY requirement.return_type, return_lifetime: NIL, body: COPY requirement.body, catch_clauses: NIL, default_catch: NIL, visibility: COPY requirement.visibility, deferred_drops: NIL, uses_frame: NIL, explicit_return_type: NIL, type_params: NIL, tail_call: NIL, requires: NIL, arrow_token: NIL, name_token: NIL, effects_decl: NIL, effects_span: NIL, max_depth_n: NIL, tight_reentrance: NIL, requires_clauses: NIL, return_type_token: NIL, pre_clauses: NIL, post_clauses: NIL, is_method: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, effect_set: NIL, inferred_effects: NIL, reentrance_kind: NIL, thunk_plan: NIL, mutual_thunk_plan: NIL, needs_rt: NIL, fn_value_ref: NIL, alloc_fault: NIL, error_fallible: NIL, uses_heap: NIL, uses_alloc: NIL, uses_rt: NIL, effects: NIL, snapshot_types: NIL, stack_tier: NIL, stack_vars_bytes: NIL, moved_guard_info: NIL, cleanup_bindings: NIL, heap_carry_return: NIL, heap_carry_return_vars: NIL, fsm_eligible: NIL, fsm_ineligible_reason: NIL, fsm_suspend_points: NIL, conformance_protocol: NIL, generic_params: List[], implementation_owner: NIL, semantic_with_blocks: List[], source_name: "" });
         RETURN;
       END
-      resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, CodeOrMessage{ SymbolValue: :UNION_METHOD_MISSING }, [], {:union: node.name, :method: requirement.name, :fn: requirement.name});
+      resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_MISSING }, [], {:union: node.name, :method: requirement.name, :fn: requirement.name});
       RETURN;
     END
 }
@@ -340,7 +340,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE labels = {:pub: "PUB", :private: "PRIVATE", :package: "package"};
-    resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, CodeOrMessage{ SymbolValue: :UNION_METHOD_WRONG_VISIBILITY }, [], {:union: node.name, :method: requirement.name, :declared_vis: UNWRAP (labels[requirement.visibility]), :fn: requirement.name, :fn_vis: UNWRAP (labels[actual])});
+    resolutionSession__error_mut(rtoc_self_view, KEEP requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_WRONG_VISIBILITY }, [], {:union: node.name, :method: requirement.name, :declared_vis: UNWRAP (labels[requirement.visibility]), :fn: requirement.name, :fn_vis: UNWRAP (labels[actual])});
 }
 END
 PRIVATE FN resolutionSession__source_code(self: ResolutionSession) RETURNS ?String
@@ -350,7 +350,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 
 }
 END
-PRIVATE FN resolutionSession__error_mut(self: ResolutionSession, node_or_token: Any, code_or_message: CodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
+PRIVATE FN resolutionSession__error_mut(self: ResolutionSession, node_or_token: Any, code_or_message: ResolutionCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -684,20 +684,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE owner_name = resolutionSession__conformance_base_name(rtoc_self_view, rtoc_mutable_block_param_14.owner_type);
     MUTABLE protocol: ?ProtocolDef = COPY rtoc_self_view.protocols[protocol_name];
     IF !(protocol) THEN
-        resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, CodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_PROTOCOL }, [], {:protocol: protocol_name});
+        resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_PROTOCOL }, [], {:protocol: protocol_name});
     END
     MUTABLE local_owner = local_structs[owner_name];
     MUTABLE owner_params: ?[]GenericParamDecl = resolutionSession__conformance_owner_params(rtoc_self_view, owner_name, local_owner);
     IF !(owner_params) THEN
-        resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, CodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_OWNER }, [], {:owner: owner_name});
+        resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_OWNER }, [], {:owner: owner_name});
     END
     resolutionSession__infer_conformance_owner_application_mut(rtoc_self_view, &rtoc_mutable_block_param_14, owner_name, owner_params);
     IF !((local_owner OR local_protocols.contains?(protocol_name))) THEN
-        resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, CodeOrMessage{ SymbolValue: :CONFORMANCE_ORPHAN }, [], {:protocol: protocol_name, :owner: owner_name});
+        resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_ORPHAN }, [], {:protocol: protocol_name, :owner: owner_name});
     END
     MUTABLE key = "${protocol_name}:${owner_name}";
     IF seen.contains?(key) THEN
-        resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, CodeOrMessage{ SymbolValue: :CONFORMANCE_DUPLICATE }, [], {:protocol: protocol_name, :owner: owner_name});
+        resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_DUPLICATE }, [], {:protocol: protocol_name, :owner: owner_name});
     END
     &seen.insert(key);
     resolutionSession__validate_conformance_arity_mut(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name, owner_params);
@@ -718,7 +718,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE inherited_names = (_.declaration.binders |> SELECT _.name) |> DISTINCT _;
     FOR _ IN _.generic_params DO
     IF inherited_names.contains?(_.name) THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR _), CodeOrMessage{ SymbolValue: :IMPLEMENTATION_MEMBER_SHADOWS_OWNER }, [], {:owner: _.owner_name, :name: _.name, :member: source_name});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR _), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_MEMBER_SHADOWS_OWNER }, [], {:owner: _.owner_name, :name: _.name, :member: source_name});
     END
     END
     _.generic_params = (_.declaration.binders + _.generic_params);
@@ -744,7 +744,7 @@ PRIVATE FN resolutionSession__prepare_conformance_receiver_mut(self: ResolutionS
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE receiver: ?Param = COPY member.params.first();
     IF !(((receiver != NIL) AND (receiver.name == "self"))) THEN
-      resolutionSession__error_mut(rtoc_self_view, member, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_METHOD_NEEDS_SELF }, [], {:owner: resolution.owner_name, :name: member.source_name});
+      resolutionSession__error_mut(rtoc_self_view, member, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_METHOD_NEEDS_SELF }, [], {:owner: resolution.owner_name, :name: member.source_name});
     END
     MUTABLE receiver_value: Param = receiver?;
     IF type__any?(receiver_value.type) THEN
@@ -770,10 +770,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE protocol_args = TRY (type__generic_args(declaration.protocol_type));
     MUTABLE owner_args = TRY (type__generic_args(declaration.owner_type));
     IF (protocol_args.length() != protocol.associated_types.length()) THEN
-      resolutionSession__error_mut(rtoc_self_view, declaration, CodeOrMessage{ SymbolValue: :CONFORMANCE_PROTOCOL_ARITY }, [], {:protocol: protocol.name, :expected: protocol.associated_types.length(), :got: protocol_args.length()});
+      resolutionSession__error_mut(rtoc_self_view, declaration, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_PROTOCOL_ARITY }, [], {:protocol: protocol.name, :expected: protocol.associated_types.length(), :got: protocol_args.length()});
     END
     IF (owner_args.length() != owner_params.length()) THEN
-      resolutionSession__error_mut(rtoc_self_view, declaration, CodeOrMessage{ SymbolValue: :CONFORMANCE_OWNER_ARITY }, [], {:owner: owner_name, :expected: owner_params.length(), :got: owner_args.length()});
+      resolutionSession__error_mut(rtoc_self_view, declaration, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_OWNER_ARITY }, [], {:owner: owner_name, :expected: owner_params.length(), :got: owner_args.length()});
     END
     resolutionSession__validate_conformance_binders_mut(rtoc_self_view, declaration);
     resolutionSession__validate_generic_bounds_mut(rtoc_self_view, declaration.binders);
@@ -797,13 +797,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END)
       } |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
       IF (scopeBindings__length(names) != owner_params.length()) THEN
-        resolutionSession__error_mut(rtoc_self_view, declaration, CodeOrMessage{ SymbolValue: :CONFORMANCE_BINDERS_CANNOT_INFER }, [], {:owner: owner_name, :expected: owner_params.length(), :got: scopeBindings__length(names)});
+        resolutionSession__error_mut(rtoc_self_view, declaration, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_BINDERS_CANNOT_INFER }, [], {:owner: owner_name, :expected: owner_params.length(), :got: scopeBindings__length(names)});
       END
       binders = names |> SELECT GenericParamDecl{ token: declaration.token, name: COPY _, bounds: List[] };
       declaration.binders = binders;
     END
     IF (binders.length() != owner_params.length()) THEN
-      resolutionSession__error_mut(rtoc_self_view, declaration, CodeOrMessage{ SymbolValue: :CONFORMANCE_OWNER_ARITY }, [], {:owner: owner_name, :expected: owner_params.length(), :got: binders.length()});
+      resolutionSession__error_mut(rtoc_self_view, declaration, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_OWNER_ARITY }, [], {:owner: owner_name, :expected: owner_params.length(), :got: binders.length()});
     END
     declaration.owner_type = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TypeExpression{ kind: COPY NamedTypeExpression{ name: COPY symbol(owner_name), arguments: COPY binders |> SELECT typeExpression__of(NamedTypeExpression{ name: COPY symbol(_.name), arguments: List[] }) }, capabilities: COPY declaration.owner_type.capabilities } }));
 }
@@ -838,14 +838,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN declaration.binders DO
     MUTABLE name = symbol(_.name);
     IF seen.contains?(name) THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE declaration), CodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], {:param: _.name, :kind: "conformance", :name: resolutionSession__conformance_base_name(rtoc_self_view, declaration.owner_type)});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE declaration), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], {:param: _.name, :kind: "conformance", :name: resolutionSession__conformance_base_name(rtoc_self_view, declaration.owner_type)});
     END
     IF builtin_type_parameter_names.contains?(name) THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE declaration), CodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS }, [], {:param: _.name});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE declaration), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS }, [], {:param: _.name});
     END
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_16 = resolutionSession__current_scope(rtoc_self_view);
     scope__resolve_type_entry(rtoc_local_receiver_16, name) } THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE declaration), CodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS_NOMINAL }, [], {:param: _.name});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE declaration), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS_NOMINAL }, [], {:param: _.name});
     END
     &seen.insert(name);
     END
@@ -876,7 +876,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE members: {String}FunctionDef = {};
     FOR _ IN declaration.members DO
     IF members.contains?(_.name) THEN
-        resolutionSession__error_mut(rtoc_self_view, _, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: "${protocol.name} FOR ${owner_name}", :name: _.name});
+        resolutionSession__error_mut(rtoc_self_view, _, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: "${protocol.name} FOR ${owner_name}", :name: _.name});
     END
     members[_.name] = COPY _;
     END
@@ -889,7 +889,7 @@ PRIVATE FN resolutionSession__visit_RequireNode(self: ResolutionSession, MUTABLE
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE importer: ?ModuleImporter@multiowned = resolutionSession__active_importer(rtoc_self_view);
     IF !(importer) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :REQUIRE_NEEDS_IMPORTER });
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :REQUIRE_NEEDS_IMPORTER });
     END
     MUTABLE mod_branch_value: ?CompiledModule = NIL;
     IF (node.kind == :package) THEN
@@ -1112,14 +1112,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(owner) THEN
         IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_28 = resolutionSession__current_scope(rtoc_self_view);
         scope__resolve_type_entry(rtoc_local_receiver_28, type__to_sym(_.owner_name)) } THEN
-          resolutionSession__error_mut(rtoc_self_view, _.owner_token, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_NONLOCAL_OWNER }, [], {:owner: _.owner_name});
+          resolutionSession__error_mut(rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_NONLOCAL_OWNER }, [], {:owner: _.owner_name});
         ELSE
-          resolutionSession__error_mut(rtoc_self_view, _.owner_token, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_UNKNOWN_OWNER }, [], {:owner: _.owner_name});
+          resolutionSession__error_mut(rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_UNKNOWN_OWNER }, [], {:owner: _.owner_name});
         END
     END
     MUTABLE previous: ?ImplementationDef = COPY seen[_.owner_name];
     IF previous EXISTS AS previous_value THEN
-        resolutionSession__error_mut(rtoc_self_view, _.owner_token, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE }, [], {:owner: _.owner_name});
+        resolutionSession__error_mut(rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE }, [], {:owner: _.owner_name});
     END
     seen[_.owner_name] = COPY _;
     resolutionSession__validate_implementation_file_mut(rtoc_self_view, _, UNWRAP (owner));
@@ -1139,7 +1139,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rtoc_mutable_block_param_29 = COPY _;
       MUTABLE source_name = rtoc_mutable_block_param_29.name;
       IF member_names.contains?(source_name) THEN
-          resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_29, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: rtoc_mutable_block_param_29.owner.name, :name: source_name});
+          resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_29, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: rtoc_mutable_block_param_29.owner.name, :name: source_name});
       END
       &member_names.insert(source_name);
       resolutionSession__prepare_implementation_member_mut(rtoc_self_view, &rtoc_mutable_block_param_29, rtoc_mutable_block_param_29, source_name);
@@ -1158,7 +1158,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE inherited_names = (inherited |> SELECT _.name) |> DISTINCT _;
     FOR _ IN member.generic_params DO
     IF inherited_names.contains?(_.name) THEN
-      resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE member), CodeOrMessage{ SymbolValue: :IMPLEMENTATION_MEMBER_SHADOWS_OWNER }, [], {:owner: resolution.owner.name, :name: _.name, :member: source_name});
+      resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE member), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_MEMBER_SHADOWS_OWNER }, [], {:owner: resolution.owner.name, :name: _.name, :member: source_name});
     END
     END
     member.generic_params = (inherited + member.generic_params);
@@ -1189,7 +1189,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      resolutionSession__error_mut(rtoc_self_view, member, CodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_TYPE_ARG }, [], {:type: rtoc_each_items_30[rtoc_idx]});
+      resolutionSession__error_mut(rtoc_self_view, member, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_TYPE_ARG }, [], {:type: rtoc_each_items_30[rtoc_idx]});
     rtoc_idx = rtoc_idx + 1;
     END
     END
@@ -1247,7 +1247,7 @@ PRIVATE FN resolutionSession__prepare_method_receiver_mut(self: ResolutionSessio
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE receiver: ?Param = COPY member.params.first();
     IF !(((receiver != NIL) AND (receiver.name == "self"))) THEN
-      resolutionSession__error_mut(rtoc_self_view, member, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_METHOD_NEEDS_SELF }, [], {:owner: resolution.owner.name, :name: member.source_name});
+      resolutionSession__error_mut(rtoc_self_view, member, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_METHOD_NEEDS_SELF }, [], {:owner: resolution.owner.name, :name: member.source_name});
     END
     MUTABLE receiver_value: Param = receiver?;
     IF !(type__any?(receiver_value.type)) THEN
@@ -1270,7 +1270,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (implementation_file == owner_file) THEN
       RETURN;
     END
-    resolutionSession__error_mut(rtoc_self_view, implementation.owner_token, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_WRONG_FILE }, [], {:owner: owner.name, :implementation_file: (implementation_file OR_ELSE "<source>"), :owner_file: (owner_file OR_ELSE "<source>")});
+    resolutionSession__error_mut(rtoc_self_view, implementation.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_WRONG_FILE }, [], {:owner: owner.name, :implementation_file: (implementation_file OR_ELSE "<source>"), :owner_file: (owner_file OR_ELSE "<source>")});
 }
 END
 PRIVATE FN resolutionSession__resolve_owner_generic_bindings_mut(self: ResolutionSession, implementation: ImplementationDef, owner: StructDef) RETURNS ![]OwnerGenericBinding
@@ -1280,19 +1280,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE binders = COPY implementation.binders;
     MUTABLE owner_params = COPY owner.generic_params;
     IF (binders.length() != owner_params.length()) THEN
-      resolutionSession__error_mut(rtoc_self_view, implementation.owner_token, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_ARITY }, [], {:owner: owner.name, :expected: owner_params.length(), :got: binders.length(), :expected_params: (owner_params |> SELECT _.name).join(", ")});
+      resolutionSession__error_mut(rtoc_self_view, implementation.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_ARITY }, [], {:owner: owner.name, :expected: owner_params.length(), :got: binders.length(), :expected_params: (owner_params |> SELECT _.name).join(", ")});
     END
     MUTABLE seen: [Set]String = Set[];
     FOR _ IN binders DO
     IF !((_.bounds.length() == 0)) THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE implementation), CodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_HAS_BOUND }, [], {:name: _.name});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE implementation), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_HAS_BOUND }, [], {:name: _.name});
     END
     IF seen.contains?(_.name) THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE implementation), CodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_DUPLICATE }, [], {:name: _.name, :owner: owner.name});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE implementation), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_DUPLICATE }, [], {:name: _.name, :owner: owner.name});
     END
     IF (builtin_type_parameter_names.contains?(symbol(_.name)) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_32 = resolutionSession__current_scope(rtoc_self_view);
     scope__resolve_type_entry(rtoc_local_receiver_32, symbol(_.name)) }) THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE implementation), CodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_SHADOWS_TYPE }, [], {:name: _.name});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE implementation), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_SHADOWS_TYPE }, [], {:name: _.name});
     END
     &seen.insert(COPY _.name);
     END
@@ -1334,7 +1334,7 @@ PRIVATE FN resolutionSession__register_function_signature(self: ResolutionSessio
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (node.is_method AND (node.implementation_owner == NIL)) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :TOP_LEVEL_METHOD_REQUIRES_IMPLEMENTATION }, [], {:name: node.source_name});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :TOP_LEVEL_METHOD_REQUIRES_IMPLEMENTATION }, [], {:name: node.source_name});
     END
     IF node.type_params.any?() THEN
       resolutionSession__validate_type_param_list_mut(rtoc_self_view, Node{ FunctionDef: COPY node }, node.type_params, "function");
@@ -1410,7 +1410,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       IF !(parameter_names.contains?(root)) THEN
-          resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :LIFETIME_ROOT_NOT_PARAM }, [], {:name: root});
+          resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :LIFETIME_ROOT_NOT_PARAM }, [], {:name: root});
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -1421,7 +1421,7 @@ PRIVATE FN resolutionSession__validate_c_extern_signature_mut(self: ResolutionSe
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(node.return_type) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :C_EXTERN_UNSUPPORTED_TYPE }, [], {:position: "return", :type: "implicit Any", :reason: "C functions require an explicit ABI return type"});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :C_EXTERN_UNSUPPORTED_TYPE }, [], {:position: "return", :type: "implicit Any", :reason: "C functions require an explicit ABI return type"});
     END
     resolutionSession__validate_c_boundary_type_mut(rtoc_self_view, node, UNWRAP (node.return_type), "return", TRUE);
     FOR _ IN node.params DO
@@ -1435,7 +1435,7 @@ PRIVATE FN resolutionSession__validate_c_boundary_type_mut(self: ResolutionSessi
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE reason: ?String = resolutionSession__c_boundary_rejection(rtoc_self_view, type, return_position);
     IF reason EXISTS AS reason_value THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :C_EXTERN_UNSUPPORTED_TYPE }, [], {:position: position, :type: TRY (type__surface_name(castTypeToTypeTypeInput(type))), :reason: reason_value});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :C_EXTERN_UNSUPPORTED_TYPE }, [], {:position: position, :type: TRY (type__surface_name(castTypeToTypeTypeInput(type))), :reason: reason_value});
     ELSE
       RETURN;
     END
@@ -1513,7 +1513,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       key = node.name();
     END
     IF seen.contains?(key) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: label, :name: key});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: label, :name: key});
     END
     seen[key] = castNodeToLocatable(COPY node);
 }
@@ -1526,7 +1526,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     scope__local_entry(rtoc_local_receiver_44, node.name) })) THEN
       RETURN;
     END
-    resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :DUPLICATE_FUNCTION_DECLARATION }, [], {:name: node.name});
+    resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_FUNCTION_DECLARATION }, [], {:name: node.name});
 }
 END
 PRIVATE FN resolutionSession__reject_duplicate_extern_function_mut(self: ResolutionSession, node: ExternFnDecl) RETURNS Void
@@ -1537,7 +1537,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     scope__local_entry(rtoc_local_receiver_45, node.name) })) THEN
       RETURN;
     END
-    resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :DUPLICATE_FUNCTION_DECLARATION }, [], {:name: node.name});
+    resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_FUNCTION_DECLARATION }, [], {:name: node.name});
 }
 END
 PRIVATE FN resolutionSession__duplicate_signature_binding?(self: ResolutionSession, entry: ?SymbolEntry) RETURNS Bool
@@ -1564,7 +1564,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE owner = (node.owner_type OR_ELSE "<unknown>");
-    resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :DUPLICATE_EXTERN_METHOD_DECLARATION }, [], {:owner: owner, :name: node.name});
+    resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_EXTERN_METHOD_DECLARATION }, [], {:owner: owner, :name: node.name});
 }
 END
 PRIVATE FN resolutionSession__emit_protocol_projection_issue_mut(self: ResolutionSession, node: Node, issue: ProtocolProjectionIssue) RETURNS !Void
@@ -1573,13 +1573,13 @@ PRIVATE FN resolutionSession__emit_protocol_projection_issue_mut(self: Resolutio
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE arguments = COPY issue.arguments;
     IF (issue.code == :GENERIC_PROJECTION_UNKNOWN_OWNER) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :GENERIC_PROJECTION_UNKNOWN_OWNER }, [], {:owner: UNWRAP (arguments[:owner]), :member: UNWRAP (arguments[:member])});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_PROJECTION_UNKNOWN_OWNER }, [], {:owner: UNWRAP (arguments[:owner]), :member: UNWRAP (arguments[:member])});
     ELSE_IF (issue.code == :GENERIC_PROJECTION_NEEDS_PROTOCOL) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :GENERIC_PROJECTION_NEEDS_PROTOCOL }, [], {:owner: UNWRAP (arguments[:owner]), :member: UNWRAP (arguments[:member]), :protocol: UNWRAP (arguments[:protocol])});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_PROJECTION_NEEDS_PROTOCOL }, [], {:owner: UNWRAP (arguments[:owner]), :member: UNWRAP (arguments[:member]), :protocol: UNWRAP (arguments[:protocol])});
     ELSE_IF (issue.code == :GENERIC_UNKNOWN_ASSOCIATED_TYPE) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_ASSOCIATED_TYPE }, [], {:owner: UNWRAP (arguments[:owner]), :member: UNWRAP (arguments[:member]), :protocol: UNWRAP (arguments[:protocol]), :available: UNWRAP (arguments[:available])});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_ASSOCIATED_TYPE }, [], {:owner: UNWRAP (arguments[:owner]), :member: UNWRAP (arguments[:member]), :protocol: UNWRAP (arguments[:protocol]), :available: UNWRAP (arguments[:available])});
     ELSE_IF (issue.code == :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE }, [], {:owner: UNWRAP (arguments[:owner]), :member: UNWRAP (arguments[:member]), :protocols: UNWRAP (arguments[:protocols])});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE }, [], {:owner: UNWRAP (arguments[:owner]), :member: UNWRAP (arguments[:member]), :protocols: UNWRAP (arguments[:protocols])});
     ELSE
       panic("Unhandled protocol projection issue {}");
     END
@@ -1618,22 +1618,22 @@ PRIVATE FN resolutionSession__register_protocol_declaration(MUTABLE self: Resolu
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (resolutionSession__protocol_declared?(rtoc_self_view, node.name) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_46 = resolutionSession__current_scope(rtoc_self_view);
     scope__resolve_type_entry(rtoc_local_receiver_46, type__to_sym(node.name)) }) THEN
-      resolutionSession__error_mut(rtoc_self_view, node.name_token, CodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: "protocol", :name: node.name});
+      resolutionSession__error_mut(rtoc_self_view, node.name_token, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: "protocol", :name: node.name});
     END
     MUTABLE seen_associated: [Set]String = Set[];
     FOR _ IN node.associated_types DO
     IF seen_associated.contains?(_.name) THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE node), CodeOrMessage{ SymbolValue: :GENERIC_DUPLICATE_TYPE_PARAM }, [], {:param: _.name, :struct: node.name});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE node), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUPLICATE_TYPE_PARAM }, [], {:param: _.name, :struct: node.name});
     END
     IF !((_.bounds.length() == 0)) THEN
-        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE node), CodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_HAS_BOUND }, [], {:name: _.name});
+        resolutionSession__error_mut(rtoc_self_view, (KEEP _.token OR_ELSE node), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_HAS_BOUND }, [], {:name: _.name});
     END
     &seen_associated.insert(COPY _.name);
     END
     MUTABLE seen_requirements: [Set]String = Set[];
     FOR _ IN node.requirements DO
     IF seen_requirements.contains?(_.name) THEN
-        resolutionSession__error_mut(rtoc_self_view, _, CodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: node.name, :name: _.name});
+        resolutionSession__error_mut(rtoc_self_view, _, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: node.name, :name: _.name});
     END
     &seen_requirements.insert(COPY _.name);
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ProtocolRequirement: COPY _ }, :Void));
@@ -1871,7 +1871,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     FOR _ IN node.field_decls.values() DO
     IF TRY (type__preallocation_hint?(_.type)) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :COLLECTION_HINT_VALUE_ONLY });
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :COLLECTION_HINT_VALUE_ONLY });
     END
     END
     MUTABLE tp_names = resolutionSession__type_params(rtoc_self_view, node.type_params);
@@ -1884,7 +1884,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((type__multiowned?(ft) OR type__shared?(ft))) THEN
         CONTINUE;
     END
-    resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :GENERIC_IDENTITY_FIELD_UNSUPPORTED }, [], {:struct: node.name, :field: _, :param: CAST(type__resolved(ft) AS String)});
+    resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_IDENTITY_FIELD_UNSUPPORTED }, [], {:struct: node.name, :field: _, :param: CAST(type__resolved(ft) AS String)});
     };
     resolutionSession__stamp_field_defaults_mut(rtoc_self_view, node.field_decls);
     resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ StructDef: COPY node }, symbol(node.name), ScopeScopeTypeSchema{ StructSchemaMultiowned: COPY TRY (structSchema__new(node.field_decls, resolutionSession__type_params(rtoc_self_view, node.type_params), node.generic_params, {}, {}, (node.visibility OR :package))) });
@@ -1902,7 +1902,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      resolutionSession__error_mut(rtoc_self_view, (IF KEEP _.bounds[rtoc_idx]?.token != NIL THEN KEEP _.bounds[rtoc_idx]?.token ELSE KEEP _.token END), CodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_PROTOCOL }, [], {:protocol: TRY (type__surface_name(castTypeToTypeTypeInput(_.bounds[rtoc_idx]?.type)))});
+      resolutionSession__error_mut(rtoc_self_view, (IF KEEP _.bounds[rtoc_idx]?.token != NIL THEN KEEP _.bounds[rtoc_idx]?.token ELSE KEEP _.token END), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_PROTOCOL }, [], {:protocol: TRY (type__surface_name(castTypeToTypeTypeInput(_.bounds[rtoc_idx]?.type)))});
     rtoc_idx = rtoc_idx + 1;
     END
     END
@@ -1938,7 +1938,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       resolutionSession__validate_type_param_list_mut(rtoc_self_view, Node{ UnionDef: COPY node }, node.type_params, "union");
     END
     IF (node.type_params.any?() AND (node.variants |> ANY schemas__inline_struct?(_._1))) THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :UNION_INLINE_IN_GENERIC });
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :UNION_INLINE_IN_GENERIC });
     END
     resolutionSession__register_inline_struct_variants_mut(rtoc_self_view, node);
     resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, type__to_sym(node.name), ScopeScopeTypeSchema{ UnionSchemaMultiowned: COPY TRY (unionSchema__new(node.variants, resolutionSession__type_params(rtoc_self_view, node.type_params), (node.visibility OR :package))) });
@@ -1982,7 +1982,7 @@ PRIVATE FN resolutionSession__declare_type_schema_mut(self: ResolutionSession, n
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_62 = resolutionSession__current_scope(rtoc_self_view);
     scope__resolve_type_entry(rtoc_local_receiver_62, name) } THEN
-      resolutionSession__error_mut(rtoc_self_view, node, CodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: "type", :name: name});
+      resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: "type", :name: name});
     END
     resolutionSession__current_scope(rtoc_self_view).declare_type(name, schema);
 }
@@ -2076,7 +2076,7 @@ PUB FN resolutionPhase__run(program: Program, importer: ?ModuleImporter, source_
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
-FN castCodeOrMessageToOptionalString(value: CodeOrMessage) RETURNS ?String ->
+FN castCodeOrMessageToOptionalString(value: ResolutionCodeOrMessage) RETURNS ?String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END

@@ -31,15 +31,15 @@ PUB FN hoistCounter__next_name(MUTABLE self: HoistCounter) RETURNS String ->
   self.value = next_value;
   RETURN "__hoist_${next_value.toString()}";
 END
-PUB STRUCT Result {
+PUB STRUCT HoistResult {
   bindings_by_function: {String}[]VarDecl
 }
 
-PUB FN result__empty?(self: Result) RETURNS Bool EFFECTS REENTRANT ->
+PUB FN result__empty?(self: HoistResult) RETURNS Bool EFFECTS REENTRANT ->
   RETURN (self.bindings_by_function.count() == 0);
 END
 pipeline_stage_nodes: [19]Any@multiowned = [AST.SelectOp, AST.WhereOp, AST.EachOp, AST.TapOp, AST.AllOp, AST.AnyOp, AST.FindOp, AST.CountOp, AST.SumOp, AST.AverageOp, AST.MinOp, AST.MaxOp, AST.TakeWhileOp, AST.SkipOp, AST.OrderByOp, AST.DistinctOp, AST.UnnestOp, AST.IndexOp, AST.ReduceOp];
-PUB FN hoist__apply_mut(ast: ASTProgram, schema_lookup: ?Any = NIL) RETURNS !Result ->
+PUB FN hoist__apply_mut(ast: ASTProgram, schema_lookup: ?Any = NIL) RETURNS !HoistResult ->
   TRY (mIRPassState__class_require_mut(ast, :string_concat_rewritten, {:consumer: "Hoist"}));
   MUTABLE bindings_by_function: {String}[]VarDecl = {};
   MUTABLE rtoc_idx = 0;
@@ -62,7 +62,7 @@ PUB FN hoist__apply_mut(ast: ASTProgram, schema_lookup: ?Any = NIL) RETURNS !Res
   END
   MUTABLE rtoc_mutable_receiver_2 = mIRPassState__for_mut(Program{ ASTProgram: COPY ast });
   TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_2, :hoisted));
-  RETURN Result{ bindings_by_function: COPY bindings_by_function };
+  RETURN HoistResult{ bindings_by_function: COPY bindings_by_function };
 END
 PRIVATE FN hoist__synthesized_body?(fn_value: FunctionDef) RETURNS Bool ->
   RETURN !(!(((((TRUE AND fn_value.thunk_plan)) OR ((TRUE AND fn_value.mutual_thunk_plan))))));

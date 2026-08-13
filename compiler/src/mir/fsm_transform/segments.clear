@@ -3,7 +3,7 @@ REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" 
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f636f6e74726163742e636c656172" AS intrinsic_contract
-UNION CallNode { FuncCall: FuncCall, MethodCall: MethodCall }
+UNION SegmentsCallNode { FuncCall: FuncCall, MethodCall: MethodCall }
 # Ruby module FsmTransform
 # Ruby module FsmTransform::Segments
 PUB UNION LockCap { CapabilityTransition: CapabilityTransition, SymbolValue: String@symbol }
@@ -394,12 +394,12 @@ PRIVATE FN segments__suspend_for(v: ?Locatable, name: ?String) RETURNS ?SegmentT
     RETURN NIL;
   END
 END
-PRIVATE FN segments__io_suspending_call?(call_node: CallNode) RETURNS !Bool ->
+PRIVATE FN segments__io_suspending_call?(call_node: SegmentsCallNode) RETURNS !Bool ->
   MUTABLE md: ?FunctionSignature@multiowned = NIL;
   MATCH call_node START
-    CallNode.FuncCall AS item ->
+    SegmentsCallNode.FuncCall AS item ->
       md = COPY item.matched_stdlib_def;,
-    CallNode.MethodCall AS item ->
+    SegmentsCallNode.MethodCall AS item ->
       md = COPY item.matched_stdlib_def;,
   END
   RETURN !(!(((((md != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_7 = (md?);
@@ -437,12 +437,12 @@ PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable
 END
 # End Ruby module FsmTransform::Segments
 # End Ruby module FsmTransform
-FN castLocatableToCallNode(value: Locatable) RETURNS CallNode ->
+FN castLocatableToCallNode(value: Locatable) RETURNS SegmentsCallNode ->
   PARTIAL MATCH value START
-    Locatable.FuncCall AS cast_payload -> RETURN CallNode{ FuncCall: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to CallNode");
+    Locatable.FuncCall AS cast_payload -> RETURN SegmentsCallNode{ FuncCall: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to SegmentsCallNode");
   END
-  panic("Invalid cast to CallNode");
+  panic("Invalid cast to SegmentsCallNode");
 END
 FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START

@@ -13,7 +13,7 @@ PUB STRUCT ScopeId {
 PUB STRUCT LocalId {
   value: Int64
 }
-PUB STRUCT PlaceId {
+PUB STRUCT SemanticPlaceId {
   value: Int64
 }
 PUB STRUCT CallSiteId {
@@ -35,7 +35,7 @@ MUTABLE unassigned_def_id: DefId = DefId{ value: 0 };
 MUTABLE unassigned_body_id: BodyId = BodyId{ value: 0 };
 MUTABLE unassigned_scope_id: ScopeId = ScopeId{ value: 0 };
 MUTABLE unassigned_local_id: LocalId = LocalId{ value: 0 };
-MUTABLE unassigned_place_id: PlaceId = PlaceId{ value: 0 };
+MUTABLE unassigned_place_id: SemanticPlaceId = SemanticPlaceId{ value: 0 };
 MUTABLE unassigned_call_site_id: CallSiteId = CallSiteId{ value: 0 };
 MUTABLE unassigned_suspend_point_id: SuspendPointId = SuspendPointId{ value: 0 };
 MUTABLE unassigned_predicate_id: PredicateId = PredicateId{ value: 0 };
@@ -62,7 +62,7 @@ PUB STRUCT CallSiteFact {
 }
 PUB STRUCT LocalFact {
   id: LocalId,
-  place_id: PlaceId,
+  place_id: SemanticPlaceId,
   name: String
 }
 PUB STRUCT SuspendPointFact {
