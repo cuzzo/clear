@@ -221,7 +221,9 @@ module MIRLoweringConcurrency
     capture_state.current_stream_local = prev_stream_local
     capture_state.current_stream_is_inf = prev_stream_is_inf
     capture_state.current_stream_close_label = prev_close_label
-    capture_state.current_fsm_inherited_alloc_names = prev_inherited_alloc_names
+    # `ensure` may run before line 213 assigns (an earlier statement raised);
+    # the prop setter rejects nil, so only restore a snapshot that was taken.
+    capture_state.current_fsm_inherited_alloc_names = prev_inherited_alloc_names unless prev_inherited_alloc_names.nil?
   end
 
   sig { params(caps: FiberCtxBuilder::Result, analysis: T.nilable(CapabilityHelper::CaptureAnalysis), receiver: String, close_plans: T::Hash[String, Schemas::ResourceClosePlan]).returns(T::Array[MIR::Stmt]) }
@@ -416,7 +418,7 @@ module MIRLoweringConcurrency
   def lower_do_block(node)
     T.bind(self, MIRLowering) rescue nil
     id = lowering_counters.next_do_block_id
-    branches = T.cast(node.branches, T::Array[AST::DoBranch])
+    branches = node.branches
     n = branches.length
     wg_var = "__do#{id}_wg"
 

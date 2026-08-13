@@ -610,7 +610,7 @@ class MIREmitter
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry
     pattern = entry.required_intrinsic_template(IntrinsicTemplateKind::Zig)
     node.args.each_with_index do |a, i|
-      pattern = pattern.split("{#{i}}").join(emit(a))
+      pattern = pattern.split("{#{i}}").join(T.must(emit(a)))
     end
     node.suppress_try ? pattern.delete_prefix("try ") : pattern
   end
@@ -1603,7 +1603,7 @@ class MIREmitter
   sig { params(node: MIR::WithMatchDispatch).returns(String) }
   def emit_with_match_dispatch(node)
     cell_zig = T.must(emit(node.cell))
-    arms = T.cast(node.arms, T::Array[MIR::WithMatchArm])
+    arms = node.arms
     arm_strs = arms.each_with_index.map { |arm, i|
       probe = emit_with_match_probe(arm.family, cell_zig, node.snapshot_mode)
       head = i.zero? ? "if (comptime #{probe})" : "else if (comptime #{probe})"
@@ -2457,7 +2457,7 @@ class MIREmitter
       return "return #{inner_call} catch {\n#{indent_block(emit_catch_default_body(node), 4)}\n};"
     end
 
-    clauses = T.cast(node.clauses, T::Array[MIR::CatchClause])
+    clauses = node.clauses
     branch_parts = clauses.each_with_index.map do |clause, index|
       emit_catch_clause(clause, node.rt_name, node.snapshot_type, index.zero?)
     end
@@ -3386,7 +3386,7 @@ class MIREmitter
 
   sig { params(node: MIR::Cast).returns(String) }
   def emit_cast(node)
-    inner = emit(node.expr)
+    inner = T.must(emit(node.expr))
     # `@as(!T, ...)` and `@as(!?T, ...)` parse as `@as(boolean_not, ...)`
     # in expression context. Force type interpretation by prefixing with
     # `anyerror`. (Same workaround as Promise(anyerror!T) in type.rb's
@@ -3425,7 +3425,7 @@ class MIREmitter
 
   sig { params(node: MIR::Orelse).returns(String) }
   def emit_orelse(node)
-    fallback = emit(node.fallback)
+    fallback = T.must(emit(node.fallback))
     result_type = node.result_type
     # A noreturn fallback (`OR_ELSE panic("...")`) already coerces to the
     # result type; annotating it makes the whole expression unreachable code.

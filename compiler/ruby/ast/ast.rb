@@ -37,6 +37,7 @@ module AST
       # A static call carries the same call metadata: annotation copies it onto
       # the synthetic FuncCall it resolves through.
       AST::StaticCall,
+      AST::OptionalUnwrap, AST::TupleLit, AST::Cast,
     )
   end
   BgNode = T.type_alias { T.any(AST::BgBlock, AST::BgStreamBlock) }
@@ -151,7 +152,7 @@ module AST
       # The importing module alias is what qualifies a cross-package call in
       # the emitted Zig. Dropping it here emitted a bare callee that the
       # package cannot see.
-      if src.respond_to?(:module_alias) && dst.respond_to?(:module_alias=) && src.module_alias
+      if src.is_a?(AST::FuncCall) && dst.is_a?(AST::FuncCall) && src.module_alias
         dst.module_alias = src.module_alias
       end
     end
@@ -402,7 +403,7 @@ module AST
 
     sig { returns(T.nilable(Symbol)) }
     def capability
-      T.cast(self[:capability], T.nilable(Symbol))
+      T.must(T.cast(self[:capability], T.nilable(Symbol)))
     end
 
     sig { params(val: Type).void }
@@ -765,11 +766,11 @@ module AST
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.soa_placeholder_assignment?(node)
     if node.is_a?(AST::BindExpr)
-      bind = T.cast(node, AST::BindExpr)
+      bind = node
       return soa_placeholder_field?(bind.name)
     end
     if node.is_a?(AST::Assignment)
-      assignment = T.cast(node, AST::Assignment)
+      assignment = node
       return soa_placeholder_field?(assignment.name)
     end
 
@@ -2423,7 +2424,7 @@ module AST
     sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     # ruby-to-clear: data-api
     def retain_error_channel=(value)
-      @retain_error_channel = value
+      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
     end
     # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
     # outer scope. The lowering's `descend` helper consults this and wraps
@@ -2860,7 +2861,7 @@ module AST
     sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     # ruby-to-clear: data-api
     def retain_error_channel=(value)
-      @retain_error_channel = value
+      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
     end
     sig { returns(T.nilable(Symbol)) }
     def protocol_operation
@@ -2935,7 +2936,7 @@ module AST
     sig { params(value: T.nilable(T::Boolean)).returns(T.nilable(T::Boolean)) }
     # ruby-to-clear: data-api
     def retain_error_channel=(value)
-      @retain_error_channel = value
+      @retain_error_channel = T.let(value, T.nilable(T::Boolean))
     end
     sig { params(token: Lexer::Token).void }
     def mark_explicit_mutable_receiver!(token)

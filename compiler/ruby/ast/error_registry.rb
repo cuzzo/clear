@@ -97,10 +97,10 @@ module AST
 
   sig { returns(T::Hash[Symbol, T::Hash[Symbol, T.untyped]]) }
   def self.error_types
-    return T.must(@error_types) unless @error_types.nil?
+    return @error_types unless @error_types.nil?
 
     @error_types = BASE_ERROR_TYPES.dup
-    T.must(@error_types)
+    @error_types
   end
 
   sig { returns(T::Array[Symbol]) }

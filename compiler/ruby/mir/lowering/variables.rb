@@ -774,7 +774,9 @@ module MIRLoweringVariables
     end
 
     retain_source = var_decl_retain_source(node.value)
-    return make_rc_retain(retain_source) if node.value.was_moved != true && rc_retain_needed?(retain_source)
+    # rc_retain_needed? is false for anything but an Identifier; the is_a?
+    # check only surfaces that fact for the type checker.
+    return make_rc_retain(retain_source) if retain_source.is_a?(AST::Identifier) && node.value.was_moved != true && rc_retain_needed?(retain_source)
 
     # A declaration that wraps its value in a carrier receives the PAYLOAD, not
     # the carrier: placing against the carrier type coerces a plain value to

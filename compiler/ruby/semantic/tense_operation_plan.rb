@@ -108,20 +108,17 @@ class TenseLayer < T::Struct
     case layer_kind
     when TenseLayerKind::Fallible
       TypeExpression.new(
-        kind: T.cast(
-          FallibleTypeExpression.new(inner: inner, error_set: error_set),
-          TypeExpressionKind,
-        ),
+        kind: FallibleTypeExpression.new(inner: inner, error_set: error_set),
         capabilities: capabilities,
       )
     when TenseLayerKind::Future
       TypeExpression.new(
-        kind: T.cast(FutureTypeExpression.new(inner: inner), TypeExpressionKind),
+        kind: FutureTypeExpression.new(inner: inner),
         capabilities: capabilities,
       )
     when TenseLayerKind::Optional
       TypeExpression.new(
-        kind: T.cast(OptionalTypeExpression.new(inner: inner), TypeExpressionKind),
+        kind: OptionalTypeExpression.new(inner: inner),
         capabilities: capabilities,
       )
     else
@@ -161,7 +158,7 @@ class TenseEnvelope < T::Struct
       layer_kind = current.kind
       case layer_kind
       when FallibleTypeExpression
-        fallible = T.cast(layer_kind, FallibleTypeExpression)
+        fallible = layer_kind
         layers << TenseLayer.new(
           kind: TenseLayerKind::Fallible,
           capabilities: current.capabilities,
@@ -169,11 +166,11 @@ class TenseEnvelope < T::Struct
         )
         current = fallible.inner
       when FutureTypeExpression
-        future = T.cast(layer_kind, FutureTypeExpression)
+        future = layer_kind
         layers << TenseLayer.new(kind: TenseLayerKind::Future, capabilities: current.capabilities)
         current = future.inner
       when OptionalTypeExpression
-        optional = T.cast(layer_kind, OptionalTypeExpression)
+        optional = layer_kind
         layers << TenseLayer.new(kind: TenseLayerKind::Optional, capabilities: current.capabilities)
         current = optional.inner
       else
@@ -389,10 +386,7 @@ class TenseSelectorPlan < T::Struct
   def stream_result_type(cardinality)
     split = envelope.split_future
     item = TenseEnvelope.wrap_layers(envelope.payload_expression, split.inner)
-    stream_kind = T.cast(
-      StreamTypeExpression.new(cardinality: cardinality, item: item),
-      TypeExpressionKind,
-    )
+    stream_kind = StreamTypeExpression.new(cardinality: cardinality, item: item)
     stream = TypeExpression.of(stream_kind)
     Type.new(TenseEnvelope.wrap_layers(stream, split.outer))
   end

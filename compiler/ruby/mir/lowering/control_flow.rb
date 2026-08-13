@@ -881,7 +881,7 @@ module MIRLoweringControlFlow
     payload = MIR::Deref.new(payload) if match_case.indirect_payload_as
     if match_case.binding
       safe_binding = payload_binding_name(T.must(match_case.binding).to_s, match_case,
-        match_case.respond_to?(:line) ? match_case.line : nil)
+        match_case.respond_to?(:line) ? match_case.public_send(:line) : nil)
       return [MIR::Let.new(safe_binding, payload, is_mutable, nil, "_ = &#{safe_binding};")]
     end
 
@@ -1172,7 +1172,7 @@ module MIRLoweringControlFlow
 
     # `RETURN panic("...")` has no value to return: the expression itself is
     # the terminator, and `return @panic(...)` is unreachable code.
-    return T.cast(value, MIR::Emittable) if value && Hoist.noreturn_value?(node.value)
+    return value if value && Hoist.noreturn_value?(node.value)
 
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)

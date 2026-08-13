@@ -60,7 +60,7 @@ module PackageSource
       # `String#each_line` is callback-based and cannot carry the mutable
       # body_lines accumulator through a CLEAR closure capture.
       File.read(path).split("\n").each do |raw_line|
-        line = T.cast(raw_line, String)
+        line = raw_line
         m = REQUIRE_LINE.match(line)
         unless m
           body_lines << "#{line}\n"
@@ -174,7 +174,7 @@ module PackageSource
       list = if resolved.is_a?(String)
         resolved.split(",")
       else
-        T.cast(resolved, T::Array[String])
+        resolved
       end
       expanded = T.let([], T::Array[String])
       list.each { |path| expanded << File.expand_path(path.strip) }

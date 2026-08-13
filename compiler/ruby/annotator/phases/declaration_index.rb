@@ -90,7 +90,7 @@ module Annotator
       sig { params(program: AST::Program).returns(T::Array[ErrorTypeRegistration]) }
       def self.collect_error_type_registrations(program)
         registrations = T.let([], T::Array[ErrorTypeRegistration])
-        AST.each_locatable(T.cast(program, AST::Locatable), descend_functions: true) do |node|
+        AST.each_locatable(program, descend_functions: true) do |node|
           case node
           when AST::Raise
             kind = node.kind
@@ -98,8 +98,8 @@ module Annotator
             next if kind.nil? || type_name.nil?
 
             registrations << ErrorTypeRegistration.new(
-              kind: T.must(kind),
-              type_name: T.must(type_name),
+              kind: kind,
+              type_name: type_name,
               token: node.token
             )
           when AST::OrElseExit
@@ -108,8 +108,8 @@ module Annotator
             next if kind.nil? || type_name.nil?
 
             registrations << ErrorTypeRegistration.new(
-              kind: T.must(kind),
-              type_name: T.must(type_name),
+              kind: kind,
+              type_name: type_name,
               token: node.token
             )
           end

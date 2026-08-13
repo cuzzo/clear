@@ -356,7 +356,7 @@ module Semantic
     def self.type_inventory(program, schema_lookup)
       types = T.let({}, T::Hash[String, Type])
 
-      AST.each_locatable(T.cast(program, AST::Locatable), descend_functions: true) do |node|
+      AST.each_locatable(program, descend_functions: true) do |node|
         add_type!(types, node.full_type!(context: "lifecycle inventory")) if node.typed?
       end
       add_declaration_types!(types, program)
@@ -376,7 +376,7 @@ module Semantic
       add_monomorphic_carrier_plans!(plans, program)
       binding_plans = T.let({}, BindingPlanMap)
       inventoried_bindings = T.let(binding_nodes.dup, T::Array[BindingNode])
-      AST.each_locatable(T.cast(program, AST::Locatable), descend_functions: true) do |node|
+      AST.each_locatable(program, descend_functions: true) do |node|
         next unless node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr) || node.is_a?(AST::DestructureTarget)
         next if node.is_a?(AST::BindExpr) && node.mode == :assign
         next unless node.typed?
@@ -429,7 +429,7 @@ module Semantic
     # classification fetches it instead of fabricating one at the use site.
     sig { params(plans: PlanMap, program: AST::Program).void }
     def self.add_monomorphic_carrier_plans!(plans, program)
-      AST.each_locatable(T.cast(program, AST::Locatable), descend_functions: true) do |node|
+      AST.each_locatable(program, descend_functions: true) do |node|
         next unless node.is_a?(AST::FunctionDef)
 
         node.params.each do |p|
@@ -536,7 +536,7 @@ module Semantic
 
       sig { params(types: T::Hash[String, Type], program: AST::Program).void }
       def add_declaration_types!(types, program)
-        AST.each_locatable(T.cast(program, AST::Locatable), descend_functions: true) do |statement|
+        AST.each_locatable(program, descend_functions: true) do |statement|
           case statement
           when AST::StructDef, AST::ExternStructDecl
             statement.field_decls.each_value { |field| add_type!(types, field.type) }

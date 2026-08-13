@@ -203,9 +203,9 @@ class Scope
     local = @type_store[name]
     return local if local
 
-    cursor = @parent
+    cursor = T.let(@parent, T.nilable(Scope))
     until cursor.nil?
-      ancestor = T.must(cursor)
+      ancestor = cursor
       inherited = ancestor.types[name]
       return inherited if inherited
 
@@ -217,9 +217,9 @@ class Scope
   sig { returns(T::Hash[Symbol, ScopeTypeEntry]) }
   def visible_types
     visible = @types.dup
-    cursor = @parent
+    cursor = T.let(@parent, T.nilable(Scope))
     until cursor.nil?
-      ancestor = T.must(cursor)
+      ancestor = cursor
       ancestor.types.each do |name, entry|
         visible[name] = entry unless visible.key?(name)
       end
@@ -243,9 +243,9 @@ class Scope
     local = @bindings[name]
     return local if local
 
-    cursor = @parent
+    cursor = T.let(@parent, T.nilable(Scope))
     until cursor.nil?
-      ancestor = T.must(cursor)
+      ancestor = cursor
       inherited = ancestor.binding_entries[name]
       return inherited if inherited
 
@@ -320,7 +320,7 @@ class Scope
     count = T.let(0, Integer)
     cursor = T.let(self, T.nilable(Scope))
     until cursor.nil?
-      current = T.must(cursor)
+      current = cursor
       current.binding_entries.each_key do |name|
         next if seen.include?(name)
 
@@ -335,9 +335,9 @@ class Scope
   sig { returns(T::Hash[String, SymbolEntry]) }
   def visible_entries
     visible = @binding_entries.dup
-    cursor = @parent
+    cursor = T.let(@parent, T.nilable(Scope))
     until cursor.nil?
-      ancestor = T.must(cursor)
+      ancestor = cursor
       ancestor.binding_entries.each do |name, entry|
         visible[name] = entry unless visible.key?(name)
       end
@@ -454,7 +454,7 @@ class Scope
   sig { params(node: AST::Node).returns(T::Array[Symbol]) }
   def get_path_to_root(node)
     path = T.let([], T::Array[Symbol])
-    curr = node
+    curr = T.let(node, AST::Node)
     while true
       next_curr = T.let(nil, T.nilable(AST::Node))
       case curr

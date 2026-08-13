@@ -458,6 +458,7 @@ module MIRLoweringExpressions
 
   sig { params(node: AST::GetField).returns(String) }
   def dotted_type_value_zig_name(node)
+    T.bind(self, MIRLowering) rescue nil
     if node.target.is_a?(AST::Identifier)
       namespace = T.cast(node.target, AST::Identifier).name
       return type_value_zig_name(node.field.to_s) if namespace == "AST"
@@ -890,6 +891,7 @@ module MIRLoweringExpressions
     ).returns(T.nilable(Symbol))
   end
   def complex_pipeline_sink_alloc(mir_result, result_type, node)
+    T.bind(self, MIRLowering) rescue nil
     return if MIR::OwnershipEffect.borrowed_view_result?(mir_result)
     return :heap if result_type.observable?
     return unless ownership_tracked_transfer_type?(result_type)
@@ -2322,6 +2324,7 @@ module MIRLoweringExpressions
 
   sig { params(field: AST::Node).returns(T.nilable(Type)) }
   def struct_literal_field_actual_type(field)
+    T.bind(self, MIRLowering) rescue nil
     return unless field.is_a?(AST::Identifier)
 
     binding_type = function_state.binding_types[field.name.to_s]

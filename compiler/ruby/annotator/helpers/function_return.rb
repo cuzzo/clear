@@ -193,7 +193,7 @@ class FunctionReturn
     receiver = T.must(args.first)
     receiver_type = receiver.type_object
     raise "toList receiver: unresolved type info" unless receiver_type
-    receiver_type = T.must(receiver_type)
+    receiver_type = receiver_type
     raise "toList receiver: unresolved type info" if receiver_type.untyped?
     element_type = if receiver_type.dynamic_stream? || receiver_type.promise_list?
       receiver_type.tense_type.element_type

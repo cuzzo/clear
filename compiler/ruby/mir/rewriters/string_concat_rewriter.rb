@@ -42,11 +42,11 @@ class StringConcatRewriter
     if parts.length > 2
       return node unless node.is_a?(AST::BinaryOp)
 
-      binary = T.cast(node, AST::BinaryOp)
+      binary = node
       concat = AST::StringConcat.new(binary.token, parts)
       binary_type = binary.type_object
       raise "synthetic AST type: source BinaryOp has no type" unless binary_type
-      concrete_type = T.cast(binary_type, Type)
+      concrete_type = binary_type
       raise "synthetic AST type: source BinaryOp is untyped" if concrete_type.untyped?
       concat.type_object = concrete_type
       concat.storage_override = binary.storage_override
@@ -66,7 +66,7 @@ class StringConcatRewriter
   def rewrite_body!(body)
     index = 0
     while index < body.length
-      body[index] = rewrite_required_node!(body[index])
+      body[index] = rewrite_required_node!(body.fetch(index))
       index += 1
     end
   end
@@ -78,7 +78,7 @@ class StringConcatRewriter
       # Lower through a local body slot. Passing `&function_def.body` tries to
       # take a mutable borrow through the immutable pattern binding generated
       # by the type case, which CLEAR correctly rejects.
-      function_def = T.cast(node, AST::FunctionDef)
+      function_def = node
       body = function_def.body
       rewrite_body!(body)
       function_def.body = body

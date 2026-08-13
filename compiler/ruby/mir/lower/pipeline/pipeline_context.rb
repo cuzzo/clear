@@ -341,11 +341,11 @@ class PipelinePlaceholderRewriter
   sig { params(node: AST::AssignmentName).returns(AST::AssignmentName) }
   def substitute_assignment_target(node)
     if node.is_a?(AST::GetField)
-      rewritten = substitute(T.cast(node, AST::GetField))
+      rewritten = substitute(node)
       return T.cast(rewritten, AST::AssignmentName)
     end
     if node.is_a?(AST::GetIndex)
-      rewritten = substitute(T.cast(node, AST::GetIndex))
+      rewritten = substitute(node)
       return T.cast(rewritten, AST::AssignmentName)
     end
 
@@ -381,7 +381,7 @@ class PipelinePlaceholderRewriter
     when AST::ShareNode
       new_node = AST::ShareNode.new(node.token, new_value)
     end
-    new_node = T.must(new_node)
+    new_node = new_node
     copy_type_info(node, new_node)
     new_node
   end
@@ -570,7 +570,7 @@ class PipelinePlaceholderRewriter
   def soa_field_slice_type(field_node)
     field_type = field_node.type_object
     raise "SOA field slice: missing annotated type" unless field_type
-    concrete_type = T.cast(field_type, Type)
+    concrete_type = field_type
     raise "SOA field slice: unresolved annotated type" if concrete_type.untyped?
     Type.new(:"#{concrete_type.resolved}[]")
   end

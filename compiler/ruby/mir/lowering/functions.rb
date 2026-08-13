@@ -1860,7 +1860,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     callee_sig = fn_sig_for(node.name)
     callee_sig ||= matched_call_signature(node)
     call_plans = node.kept_edge_plans || {}
-    call_args = T.cast(node.args, T::Array[AST::Node])
+    call_args = node.args
     args_mir = with_kept_edge_call_frame do
       call_args.each_with_index.map do |a, idx|
         lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx, edge_plan: call_plans[idx]))
@@ -1966,7 +1966,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
       if node.object.is_a?(AST::Identifier) && node.object.symbol&.carrier_contract == :monomorphic
         recv = MIR::ComptimeCarrierPayload.new(recv)
       end
-      method_args = T.cast(node.args, T::Array[AST::Node])
+      method_args = node.args
       [recv] + method_args.each_with_index.map do |a, idx|
         lower_call_arg_from_facts(call_arg_facts(a, callee_sig, idx + 1))
       end
@@ -2360,7 +2360,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     receiver_type = intrinsic_receiver_type(node)
     stdlib_facts = stdlib_call_facts(node)
     ownership_facts = stdlib_facts.ownership
-    intrinsic_args = T.cast(node.args, T::Array[AST::Node])
+    intrinsic_args = node.args
 
     # Template-based intrinsics: lower args to MIR, apply ownership transforms, emit
     mir_args = if node.is_a?(AST::MethodCall)
@@ -2640,7 +2640,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     T.bind(self, MIRLowering) rescue nil
     sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     source = node.respond_to?(:extern_source) ? node.extern_source : nil
-    ast_args = T.cast(node.args, T::Array[AST::Node])
+    ast_args = node.args
     args = ast_args.each_with_index.map do |arg, index|
       param = sig&.params&.[](index)
       lowered = lower_c_abi_callback_arg(arg, param, source)
@@ -2671,7 +2671,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
   def lower_extern_direct_method(node)
     T.bind(self, MIRLowering) rescue nil
     obj = lower(node.object)
-    ast_args = T.cast(node.args, T::Array[AST::Node])
+    ast_args = node.args
     args = ast_args.map { |a| lower(a) }
     sig = FunctionSignature.unwrap(node.matched_signature) if node.respond_to?(:matched_signature)
     MIR::MethodCall.new(obj, node.name.to_s, args, false, callable_contract_for(sig, [node.object] + ast_args))
@@ -2701,15 +2701,15 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     mod_alias = T.unsafe(node).module_alias if node.respond_to?(:module_alias)
     source = node.respond_to?(:extern_source) ? node.extern_source : nil
     mod_alias = nil if source&.abi == :c
-    mod_alias = zig_module_alias(mod_alias) if mod_alias
+    mod_alias = T.let(mod_alias ? zig_module_alias(mod_alias) : nil, T.nilable(String))
 
     # Separate comptime type args (full_type == :Type) from runtime args.
     # Comptime args can't be struct fields; the emitter renders them directly
     # at the call site after MIRChecker has seen the expression children.
-    ast_args = T.cast(node.args, T::Array[AST::Node])
+    ast_args = node.args
     comptime_args, runtime_ast_args = ast_args.partition { |a| a.full_type! == :Type }
-    comptime_args = T.cast(comptime_args, T::Array[AST::Node])
-    runtime_ast_args = T.cast(runtime_ast_args, T::Array[AST::Node])
+    comptime_args = comptime_args
+    runtime_ast_args = runtime_ast_args
     comptime_mir = comptime_args.map { |a| lower_extern_arg(a) }
 
     sig = fn_sig_for(node.name)
@@ -2840,7 +2840,9 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     while node.is_a?(AST::BlockExpr) || node.is_a?(AST::Cast)
       node = node.is_a?(AST::BlockExpr) ? node.result : node.value
     end
-    node.is_a?(AST::BinaryOp) && node.smooth? == true
+    return false unless node.is_a?(AST::BinaryOp)
+
+    node.smooth? == true
   end
 
   sig { params(node: AST::LambdaLit).returns(MIR::LambdaExpr) }

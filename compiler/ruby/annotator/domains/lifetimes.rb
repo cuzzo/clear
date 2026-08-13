@@ -1302,7 +1302,7 @@ module Annotator
       end
       private :cleanup_source_value
 
-      sig { params(name: String, node: T.nilable(AST::Node), type_info: Type::TypeInput).returns(T.nilable(T::Set[String])) }
+      sig { params(name: String, node: T.nilable(T.any(AST::Node, AST::MatchCase)), type_info: Type::TypeInput).returns(T.nilable(T::Set[String])) }
       def og_declare(name, node, type_info)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 

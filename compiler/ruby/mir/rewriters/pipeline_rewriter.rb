@@ -600,7 +600,7 @@ class PipelineRewriter
       # promotes bindings through value-block results; without a symbol to
       # promote, an accumulator feeding a heap binding stayed frame-allocated
       # (OWNED_RESULT_ALLOC_MISMATCH).
-      sym = SymbolEntry.new(reg: decl, type: Type.new(decl.full_type!), mutable: true, storage: decl.storage)
+      sym = SymbolEntry.new(reg: decl, type: Type.new(decl.full_type!), mutable: true, storage: T.must(decl.storage))
       decl.symbol = sym
       @list_res_symbols[res_var] = sym
       decl.slot_size = Type.new(decl.full_type!).slot_size(T.unsafe(schema_lookup))

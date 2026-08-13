@@ -114,7 +114,7 @@ class ClearParser
     token = current
     matches_value = T.let(false, T::Boolean)
     if value
-      expected_value = T.must(value)
+      expected_value = value
       if token.value.is_a?(String)
         matches_value = token.text! == expected_value
       end
@@ -231,7 +231,7 @@ class ClearParser
     return false unless token.type == type
     return true if val.nil?
 
-    expected_value = T.must(val)
+    expected_value = val
     token.text! == expected_value
   end
 
@@ -268,7 +268,7 @@ class ClearParser
     return false unless tok.type == type
     return true if val.nil?
 
-    expected_value = T.must(val)
+    expected_value = val
     tok.text! == expected_value
   end
 

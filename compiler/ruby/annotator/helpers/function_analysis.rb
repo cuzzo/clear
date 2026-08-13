@@ -42,7 +42,7 @@ module FunctionAnalysis
     def explicit_mutable_argument?(index)
       method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
       if method_node && args.length == method_node.args.length + 1
-        concrete_method = T.must(method_node)
+        concrete_method = method_node
         return concrete_method.explicit_mutable_receiver? if index == 0
         return concrete_method.explicit_mutable_argument?(index - 1)
       end
@@ -58,7 +58,7 @@ module FunctionAnalysis
     def explicit_mutable_argument_token(index)
       method_node = T.cast(node, T.nilable(AST::MethodCall)) if node.is_a?(AST::MethodCall)
       if method_node && args.length == method_node.args.length + 1
-        concrete_method = T.must(method_node)
+        concrete_method = method_node
         return concrete_method.explicit_mutable_receiver_token_value if index == 0
         return concrete_method.explicit_mutable_argument_token(index - 1)
       end
@@ -1306,8 +1306,11 @@ module FunctionAnalysis
     end
     return true unless base_paths.include?(:wildcard) || base_paths.include?(param.name)
 
+    # FunctionSignature carries no name, so the diagnostic falls back to a
+    # generic label. (The former `respond_to?(:fn_name)` probe could never
+    # succeed here.)
     error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT,
-      name: param.name, arg: arg_node.name, callee: (signature.respond_to?(:fn_name) ? signature.fn_name : nil) || "the callee")
+      name: param.name, arg: arg_node.name, callee: "the callee")
   end
 
   # `node.return_lifetime` shapes:

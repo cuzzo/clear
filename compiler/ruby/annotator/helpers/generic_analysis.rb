@@ -139,6 +139,7 @@ module GenericAnalysis
 
   sig { params(type_obj: Type).returns(Type) }
   def type_annotation_inner(type_obj)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession)
     # Tense prefixes stack (`!?T`), so peel every layer -- a single unwrap
     # leaves `!?String[]@set` looking like a non-array to the shape checks.
     inner = type_obj

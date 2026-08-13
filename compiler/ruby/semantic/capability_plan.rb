@@ -338,7 +338,7 @@ module CapabilityPlan
   end
   def self.transition_from(request, target, borrowed_qualifier)
     capability = request.source.capability || request.capability
-    capability = T.cast(capability, Symbol)
+    capability = capability
     CapabilityTransition.new(
       request: request,
       target: target,
@@ -374,7 +374,7 @@ module CapabilityPlan
       plan = node.capability_plan
       next unless plan
 
-      concrete_plan = T.cast(plan, WithCapabilityPlan)
+      concrete_plan = plan
       node.capability_plan = concrete_plan.refresh_live_symbols(live_symbols)
     end
   end
@@ -384,7 +384,7 @@ module CapabilityPlan
     plan = node.capability_plan
     raise "Internal: WITH block reached consumer without a CapabilityPlan" unless plan
 
-    T.cast(plan, WithCapabilityPlan)
+    plan
   end
 end
 

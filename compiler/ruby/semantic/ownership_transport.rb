@@ -159,7 +159,7 @@ class OwnershipTransportFacts
       declaration: node,
       source: source,
       source_id: source_id,
-      destination_id: T.must(symbol).binding_id,
+      destination_id: symbol.binding_id,
       source_name: source_name,
       destination_name: destination_name,
       root_id: root_id,
@@ -169,7 +169,7 @@ class OwnershipTransportFacts
       whole_binding: source.is_a?(AST::Identifier),
     )
     @aliases << fact
-    @alias_roots[T.must(symbol).binding_id] = [root_id, root_name]
+    @alias_roots[symbol.binding_id] = [root_id, root_name]
   end
 
   sig { params(container: AST::Node, slot: T.any(Integer, String), source: AST::Identifier).void }
@@ -335,7 +335,7 @@ class OwnershipTransportFacts
     left.ancestors.each do |node|
       next unless node.is_a?(AST::IfStatement)
 
-      conditional = T.cast(node, AST::IfStatement)
+      conditional = node
       left_side = conditional_side(left, conditional)
       right_side = conditional_side(right, conditional)
       return true if left_side && right_side && left_side != right_side
@@ -364,7 +364,7 @@ class OwnershipTransportFacts
     while index < event.ancestors.length
       candidate = event.ancestors.fetch(index)
       if candidate.is_a?(AST::IfStatement)
-        narrowed = T.cast(candidate, AST::IfStatement)
+        narrowed = candidate
         return index if narrowed == conditional
       end
       index += 1

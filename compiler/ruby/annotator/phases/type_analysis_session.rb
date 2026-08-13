@@ -722,7 +722,7 @@ class Annotator::Phases::TypeAnalysisSession
 
   sig { params(program: AST::Program, facts: Semantic::LinearResourceFacts).void }
   def validate_copy_linear_resource_facts!(program, facts)
-    AST.each_locatable(T.cast(program, AST::Locatable), descend_functions: true) do |node|
+    AST.each_locatable(program, descend_functions: true) do |node|
       next unless node.is_a?(AST::CopyNode)
 
       type_info = node.value.full_type!(context: "post-annotation COPY resource validation")

@@ -3055,9 +3055,10 @@ module MIR
   # Used for: @boxed fields, heap struct literals, capability boxing.
   # alloc: Symbol (:heap, :frame) resolved via rt.
   HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(zig_type: String, init: T.untyped, alloc: Symbol, label: T.nilable(String)).void }
     def initialize(zig_type, init, alloc, label = nil)
       super(zig_type, init, alloc, label)
@@ -3078,9 +3079,10 @@ module MIR
   # Used for: string copies, HPT return dupes, BG captures.
   # alloc: Symbol (:heap, :frame) resolved via rt.
   DupeSlice = Struct.new(:source, :alloc) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(source: T.untyped, alloc: Symbol).void }
     def initialize(source, alloc)
       super(source, alloc)
@@ -3099,9 +3101,10 @@ module MIR
   # Used for: COPY list deep-copy buffer.
   # alloc: Symbol (:heap, :frame) resolved via rt.
   AllocSlice = Struct.new(:elem_type, :len, :alloc) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(elem_type: String, len: T.untyped, alloc: Symbol).void }
     def initialize(elem_type, len, alloc)
       super(elem_type, len, alloc)
@@ -3204,9 +3207,10 @@ module MIR
 
   DeepCopy = Struct.new(:source, :zig_type, :elem_type, :strategy,
                         :alloc, :copy_shape, :type_info) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig do
       params(
         source: T.untyped,
@@ -3254,9 +3258,10 @@ module MIR
   # alloc: symbol (:heap, :frame, nil) -- resolved to Zig by emitter.
   ContainerInit = Struct.new(:zig_type, :strategy, :alloc,
                              :capacity) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(zig_type: String, strategy: Symbol, alloc: T.nilable(Symbol), capacity: T.untyped).void }
     def initialize(zig_type, strategy, alloc, capacity)
       super(zig_type, strategy, alloc, capacity)
@@ -3285,6 +3290,7 @@ module MIR
                        :own_fn,    # "arcCreate", "rcCreate", nil
                        :alloc) do
     extend T::Sig
+    sig { returns(T::Boolean) }
     def materializes_value? = true
 
     include Expr
@@ -3433,9 +3439,10 @@ module MIR
   # Zig: try CheatLib.makeList(elem_type, alloc, &.{ items })
   # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
   MakeList = Struct.new(:elem_type, :items, :alloc, :minimum_capacity) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol, minimum_capacity: T.nilable(Integer)).void }
     def initialize(elem_type, items, alloc, minimum_capacity = nil)
       super(elem_type, items, alloc, minimum_capacity)
@@ -4264,9 +4271,10 @@ module MIR
   # Anonymous tuple literal.
   # Zig: .{ item1, item2, ... }
   TupleLiteral = Struct.new(:items) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { returns(T::Array[Emittable]) }
     def child_exprs
       values = T.let([], T::Array[Emittable::ChildExprValue])
@@ -4318,9 +4326,10 @@ module MIR
   # Struct initialization.
   # Zig: TypeName{ .a = x, .b = y }  or  .{ .a = x }
   StructInit = Struct.new(:zig_type, :fields) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     # zig_type: String or nil (nil -> anonymous .{})
     # fields: [MIR::StructInitField] (legacy hash fields are still readable)
     sig { returns(T::Array[Emittable]) }
@@ -4344,9 +4353,10 @@ module MIR
   # Fixed-size array initialization.
   # Zig: [N]T{ item1, item2, ... }
   ArrayInit = Struct.new(:elem_type, :count, :items) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([items])
     sig { returns(T::Array[Emittable]) }
@@ -4449,9 +4459,10 @@ module MIR
   # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
   # rt_expr: Zig expression for runtime (e.g. "rt") -- used for rt-dependent calls.
   ConcatStr = Struct.new(:parts, :alloc, :rt_expr) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(parts: T::Array[T.untyped], alloc: Symbol, rt_expr: T.nilable(String)).void }
     def initialize(parts, alloc, rt_expr)
       super(parts, alloc, rt_expr)
@@ -4939,9 +4950,10 @@ module MIR
   # Transfer an ArrayList-backed value into an owned slice.
   # Zig: try expr.toOwnedSlice(alloc)
   OwnedSlice = Struct.new(:expr, :alloc) do
-    def materializes_value? = true
     extend T::Sig
     include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
     sig { params(expr: Emittable, alloc: Symbol).void }
     def initialize(expr, alloc)
       super(expr, alloc)

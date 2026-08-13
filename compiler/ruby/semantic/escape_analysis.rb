@@ -135,15 +135,15 @@ module EscapeAnalysis
 
     sig { params(node: BasicObject).returns(T::Boolean) }
     def matches?(node)
-      case handler
-      when :apply_return_escape_sink! then node.is_a?(AST::ReturnNode)
-      when :apply_assignment_escape_sink! then node.is_a?(AST::Assignment)
-      when :apply_binding_escape_sink! then node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr)
-      when :apply_destructuring_escape_sink! then node.is_a?(AST::DestructuringAssignment)
-      when :apply_execution_boundary_escape_sink! then node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock)
-      when :apply_lambda_escape_sink! then node.is_a?(AST::LambdaLit)
-      when :apply_func_call_escape_sink! then node.is_a?(AST::FuncCall)
-      when :apply_method_call_escape_sink! then node.is_a?(AST::MethodCall)
+      case node
+      when AST::ReturnNode then handler == :apply_return_escape_sink!
+      when AST::Assignment then handler == :apply_assignment_escape_sink!
+      when AST::VarDecl, AST::BindExpr then handler == :apply_binding_escape_sink!
+      when AST::DestructuringAssignment then handler == :apply_destructuring_escape_sink!
+      when AST::BgBlock, AST::BgStreamBlock then handler == :apply_execution_boundary_escape_sink!
+      when AST::LambdaLit then handler == :apply_lambda_escape_sink!
+      when AST::FuncCall then handler == :apply_func_call_escape_sink!
+      when AST::MethodCall then handler == :apply_method_call_escape_sink!
       else false
       end
     end

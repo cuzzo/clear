@@ -195,7 +195,7 @@ class CHeaderImporter
               valid_params = false
               break
             end
-            params << T.must(param)
+            params << param
           end
         end
         next unless valid_params

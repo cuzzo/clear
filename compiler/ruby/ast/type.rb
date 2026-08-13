@@ -89,16 +89,13 @@ class Type
   # (source_signature included).
   sig { params(signature: FunctionType).returns(TypeExpressionKind) }
   def self.function_type_expression_for(signature)
-    T.cast(
-      FunctionTypeExpression.new(signature: FunctionSignatureExpression.new(
+    FunctionTypeExpression.new(signature: FunctionSignatureExpression.new(
         params: signature.params.map { |param| FunctionParamExpression.new(expression: param.type.shape.expression, mutable: param.mutable) },
         return_expression: signature.return_type.shape.expression,
         reentrant: signature.reentrant,
         abi: signature.abi,
         semantic_payload: signature,
-      )),
-      TypeExpressionKind,
-    )
+      ))
   end
 
   sig { params(expression: FunctionTypeExpression).returns(FunctionType) }
@@ -126,14 +123,14 @@ class Type
   def self.unwrap_fallible_kind(kind)
     return kind unless kind.is_a?(FallibleTypeExpression)
 
-    T.cast(kind, FallibleTypeExpression).inner.kind
+    kind.inner.kind
   end
 
   sig { params(kind: TypeExpressionKind).returns(TypeExpressionKind) }
   def self.unwrap_optional_kind(kind)
     return kind unless kind.is_a?(OptionalTypeExpression)
 
-    T.cast(kind, OptionalTypeExpression).inner.kind
+    kind.inner.kind
   end
 end
 
@@ -181,15 +178,9 @@ class TypeShape < T::Struct
     )
     if optional
       if wrapped_function_type_raw
-        parsed = TypeExpression.of(T.cast(
-          OptionalTypeExpression.new(inner: TypeExpression.of(Type.function_type_expression_for(wrapped_function_type_raw))),
-          TypeExpressionKind,
-        ))
+        parsed = TypeExpression.of(OptionalTypeExpression.new(inner: TypeExpression.of(Type.function_type_expression_for(wrapped_function_type_raw))))
       elsif wrapped_type_raw
-        parsed = TypeExpression.of(T.cast(
-          OptionalTypeExpression.new(inner: TypeExpressionParser.parse(wrapped_type_raw)),
-          TypeExpressionKind,
-        ))
+        parsed = TypeExpression.of(OptionalTypeExpression.new(inner: TypeExpressionParser.parse(wrapped_type_raw)))
       end
     end
     TypeShape.new(
@@ -258,7 +249,7 @@ class TypeShape < T::Struct
   def self.render_legacy_raw(current)
     current_kind = current.kind
     if current_kind.is_a?(FunctionTypeExpression)
-      return Type.function_type_for_expression(T.cast(current_kind, FunctionTypeExpression))
+      return Type.function_type_for_expression(current_kind)
     end
 
     root_caps = TypeExpressionTree.root_capabilities(current)
@@ -275,9 +266,9 @@ class TypeShape < T::Struct
   def resolved
     raw_value = raw
     return :Any if raw_value.is_a?(Type::FunctionType)
-    return T.cast(raw_value, Symbol) if raw_value.is_a?(Symbol)
+    return raw_value if raw_value.is_a?(Symbol)
 
-    T.cast(raw_value, String).to_sym
+    raw_value.to_sym
   end
 
   sig { returns(T::Boolean) }
@@ -299,12 +290,12 @@ class TypeShape < T::Struct
   def optional
     current = expression
     current_kind = current.kind
-    current = T.cast(current_kind, FallibleTypeExpression).inner if current_kind.is_a?(FallibleTypeExpression)
+    current = current_kind.inner if current_kind.is_a?(FallibleTypeExpression)
     kind = current.kind
     return true if kind.is_a?(OptionalTypeExpression)
     return false unless kind.is_a?(LinearTypeExpression)
 
-    T.cast(kind, LinearTypeExpression).item.kind.is_a?(OptionalTypeExpression)
+    kind.item.kind.is_a?(OptionalTypeExpression)
   end
 
   sig { returns(T::Boolean) }
@@ -324,7 +315,7 @@ class TypeShape < T::Struct
     return true if structural.is_a?(TupleTypeExpression)
     return false unless structural.is_a?(NamedTypeExpression)
 
-    !T.cast(structural, NamedTypeExpression).arguments.empty?
+    !structural.arguments.empty?
   end
 
   sig { returns(Type::ArrayCapacity) }
@@ -352,14 +343,14 @@ class TypeShape < T::Struct
     kind = expression.kind
     return nil unless kind.is_a?(FallibleTypeExpression)
 
-    TypeExpressionPrinter.legacy(T.cast(kind, FallibleTypeExpression).inner).to_sym
+    TypeExpressionPrinter.legacy(kind.inner).to_sym
   end
 
   sig { returns(T.nilable(Symbol)) }
   def wrapped_type_raw
     kind = expression.kind
     return nil unless kind.is_a?(OptionalTypeExpression)
-    optional_kind = T.cast(kind, OptionalTypeExpression)
+    optional_kind = kind
     return nil if optional_kind.inner.kind.is_a?(FunctionTypeExpression)
 
     TypeExpressionPrinter.legacy(optional_kind.inner).to_sym
@@ -370,10 +361,10 @@ class TypeShape < T::Struct
   def wrapped_function_type_raw
     kind = expression.kind
     return nil unless kind.is_a?(OptionalTypeExpression)
-    inner_kind = T.cast(kind, OptionalTypeExpression).inner.kind
+    inner_kind = kind.inner.kind
     return nil unless inner_kind.is_a?(FunctionTypeExpression)
 
-    Type.function_type_for_expression(T.cast(inner_kind, FunctionTypeExpression))
+    Type.function_type_for_expression(inner_kind)
   end
 
   sig { returns(T.nilable(Symbol)) }
@@ -383,7 +374,7 @@ class TypeShape < T::Struct
 
     item = linear.item
     item_kind = item.kind
-    item = T.cast(item_kind, OptionalTypeExpression).inner if item_kind.is_a?(OptionalTypeExpression)
+    item = item_kind.inner if item_kind.is_a?(OptionalTypeExpression)
     TypeExpressionPrinter.legacy(item).to_sym
   end
 
@@ -392,7 +383,7 @@ class TypeShape < T::Struct
     structural = structural_expression.kind
     return nil unless structural.is_a?(MapTypeExpression)
 
-    TypeExpressionPrinter.legacy(T.cast(structural, MapTypeExpression).key).to_sym
+    TypeExpressionPrinter.legacy(structural.key).to_sym
   end
 
   sig { returns(T.nilable(Symbol)) }
@@ -400,7 +391,7 @@ class TypeShape < T::Struct
     structural = structural_expression.kind
     return nil unless structural.is_a?(MapTypeExpression)
 
-    TypeExpressionPrinter.legacy(T.cast(structural, MapTypeExpression).value).to_sym
+    TypeExpressionPrinter.legacy(structural.value).to_sym
   end
 
   sig { returns(T.nilable(Symbol)) }
@@ -408,7 +399,7 @@ class TypeShape < T::Struct
     structural = structural_expression.kind
     return :Tuple if structural.is_a?(TupleTypeExpression)
     if structural.is_a?(NamedTypeExpression)
-      named = T.cast(structural, NamedTypeExpression)
+      named = structural
       return named.name unless named.arguments.empty?
     end
 
@@ -420,9 +411,9 @@ class TypeShape < T::Struct
     structural = structural_expression.kind
     items = T.let([], T::Array[TypeExpression])
     if structural.is_a?(TupleTypeExpression)
-      T.cast(structural, TupleTypeExpression).items.each { |item| items << item }
+      structural.items.each { |item| items << item }
     elsif structural.is_a?(NamedTypeExpression)
-      T.cast(structural, NamedTypeExpression).arguments.each { |item| items << item }
+      structural.arguments.each { |item| items << item }
     end
     items.map { |item| TypeExpressionPrinter.legacy(item).to_sym }
   end
@@ -431,20 +422,17 @@ class TypeShape < T::Struct
   def tense_type_raw
     kind = expression.kind
     if kind.is_a?(StreamTypeExpression)
-      stream_kind = T.cast(kind, StreamTypeExpression)
+      stream_kind = kind
       dimension = T.let(
         stream_kind.cardinality == :FINITE ? :LIST : stream_kind.cardinality,
         TypeExpression::Dimension
       )
-      linear = TypeExpression.of(T.cast(
-        LinearTypeExpression.new(kind: :array, dimensions: [dimension], item: stream_kind.item),
-        TypeExpressionKind,
-      ))
+      linear = TypeExpression.of(LinearTypeExpression.new(kind: :array, dimensions: [dimension], item: stream_kind.item))
       return TypeExpressionPrinter.legacy(linear).to_sym
     end
     return nil unless kind.is_a?(FutureTypeExpression)
 
-    TypeExpressionPrinter.legacy(T.cast(kind, FutureTypeExpression).inner).to_sym
+    TypeExpressionPrinter.legacy(kind.inner).to_sym
   end
 
   sig { returns(T::Boolean) }
@@ -457,7 +445,7 @@ class TypeShape < T::Struct
   sig { returns(T.nilable(LinearTypeExpression)) }
   def linear_expression
     structural = structural_expression.kind
-    return T.cast(structural, LinearTypeExpression) if structural.is_a?(LinearTypeExpression)
+    return structural if structural.is_a?(LinearTypeExpression)
 
     nil
   end
@@ -466,10 +454,10 @@ class TypeShape < T::Struct
   def structural_expression
     structural = T.let(expression, TypeExpression)
     fallible_kind = structural.kind
-    structural = T.cast(fallible_kind, FallibleTypeExpression).inner if fallible_kind.is_a?(FallibleTypeExpression)
+    structural = fallible_kind.inner if fallible_kind.is_a?(FallibleTypeExpression)
     optional_kind = structural.kind
     if optional_kind.is_a?(OptionalTypeExpression)
-      optional_expression = T.cast(optional_kind, OptionalTypeExpression)
+      optional_expression = optional_kind
       structural = optional_expression.inner unless optional_expression.inner.kind.is_a?(LinearTypeExpression)
     end
     structural
@@ -768,7 +756,7 @@ class Type
     kind = expression.kind
     return false unless kind.is_a?(LinearTypeExpression)
 
-    linear_kind = T.cast(kind, LinearTypeExpression)
+    linear_kind = kind
     (linear_kind.list? || linear_kind.set?) && !linear_kind.allocation_hint.nil?
   end
 
@@ -922,7 +910,7 @@ class Type
   def self.unsafe_inline_linear_migration?(node, type)
     kind = node.kind
     return false unless kind.is_a?(LinearTypeExpression)
-    return true if T.cast(kind, LinearTypeExpression).dimensions.include?(:INFERRED)
+    return true if kind.dimensions.include?(:INFERRED)
 
     bare_legacy_slice?(node, type)
   end
@@ -932,7 +920,7 @@ class Type
     kind = node.kind
     return false unless type.collection.nil? && kind.is_a?(LinearTypeExpression)
 
-    T.cast(kind, LinearTypeExpression).list? && node.capabilities.collection.nil?
+    kind.list? && node.capabilities.collection.nil?
   end
 
   sig { params(expression: TypeExpression, type: Type).returns(T.nilable(TypeExpression)) }
@@ -942,23 +930,17 @@ class Type
     kind = expression.kind
     cap = expression.capabilities
     if kind.is_a?(OptionalTypeExpression)
-      inner = project_inline_collection(T.cast(kind, OptionalTypeExpression).inner, type)
-      return inner.nil? ? nil : TypeExpression.of(T.cast(
-        OptionalTypeExpression.new(inner: inner),
-        TypeExpressionKind,
-      ))
+      inner = project_inline_collection(kind.inner, type)
+      return inner.nil? ? nil : TypeExpression.of(OptionalTypeExpression.new(inner: inner))
     end
     if kind.is_a?(FallibleTypeExpression)
-      fallible_kind = T.cast(kind, FallibleTypeExpression)
+      fallible_kind = kind
       inner = project_inline_collection(fallible_kind.inner, type)
-      return inner.nil? ? nil : TypeExpression.of(T.cast(
-        FallibleTypeExpression.new(inner: inner, error_set: fallible_kind.error_set),
-        TypeExpressionKind,
-      ))
+      return inner.nil? ? nil : TypeExpression.of(FallibleTypeExpression.new(inner: inner, error_set: fallible_kind.error_set))
     end
     return nil unless kind.is_a?(LinearTypeExpression)
 
-    linear_kind = T.cast(kind, LinearTypeExpression)
+    linear_kind = kind
     hint = linear_kind.allocation_hint
     if hint.nil? && type.pool?
       pool_dimension = linear_kind.dimensions.find { |dimension| dimension.is_a?(Integer) }
@@ -969,15 +951,12 @@ class Type
     return nil if type.pool? && hint.nil?
 
     TypeExpression.new(
-      kind: T.cast(
-        LinearTypeExpression.new(
+      kind: LinearTypeExpression.new(
           kind: collection,
           dimensions: linear_kind.dimensions,
           item: linear_kind.item,
           allocation_hint: hint,
         ),
-        TypeExpressionKind,
-      ),
       capabilities: cap,
     )
   end
@@ -1043,14 +1022,11 @@ class Type
     end
     Type.new(
       TypeExpression.new(
-        kind: T.cast(
-          LinearTypeExpression.new(
+        kind: LinearTypeExpression.new(
             kind: kind,
             dimensions: dimensions,
             item: item_expression,
           ),
-          TypeExpressionKind,
-        ),
         capabilities: collection_capabilities,
       )
     )
@@ -1064,10 +1040,7 @@ class Type
     list = array_of(element_type)
     Type.new(
       TypeExpression.new(
-        kind: T.cast(
-          FutureTypeExpression.new(inner: list.shape.expression),
-          TypeExpressionKind,
-        ),
+        kind: FutureTypeExpression.new(inner: list.shape.expression),
         capabilities: TypeCapabilities.new(ownership: :affine, collection: :list),
       )
     )
@@ -1082,15 +1055,12 @@ class Type
     )
     Type.new(
       TypeExpression.new(
-        kind: T.cast(
-          LinearTypeExpression.new(
+        kind: LinearTypeExpression.new(
             kind: :set,
             dimensions: [:SET],
             item: item_expression,
             allocation_hint: capacity,
           ),
-          TypeExpressionKind,
-        ),
         capabilities: TypeCapabilities.new(collection: :set),
       )
     )
@@ -1101,10 +1071,7 @@ class Type
     payload = Type.new(payload_type)
     return payload if payload.error_union?
 
-    t = Type.new(TypeExpression.of(T.cast(
-      FallibleTypeExpression.new(inner: payload.shape.expression),
-      TypeExpressionKind,
-    )))
+    t = Type.new(TypeExpression.of(FallibleTypeExpression.new(inner: payload.shape.expression)))
     t.merge_capabilities_from!(payload, include_affine_ownership: true)
     t.copy_placement_from!(payload, preserve_existing: false)
     t
@@ -1116,10 +1083,7 @@ class Type
     wrapped = Type.new(wrapped_type)
     return wrapped if wrapped.optional?
 
-    t = Type.new(TypeExpression.of(T.cast(
-      OptionalTypeExpression.new(inner: wrapped.shape.expression),
-      TypeExpressionKind,
-    )))
+    t = Type.new(TypeExpression.of(OptionalTypeExpression.new(inner: wrapped.shape.expression)))
     t.merge_capabilities_from!(wrapped, include_affine_ownership: true)
     t.copy_placement_from!(wrapped, preserve_existing: false)
     t
@@ -1128,10 +1092,7 @@ class Type
   sig { params(value_type: TypeInput).returns(Type) }
   def self.tense_of(value_type)
     value = Type.new(value_type)
-    t = Type.new(TypeExpression.of(T.cast(
-      FutureTypeExpression.new(inner: value.shape.expression),
-      TypeExpressionKind,
-    )))
+    t = Type.new(TypeExpression.of(FutureTypeExpression.new(inner: value.shape.expression)))
     t.merge_capabilities_from!(value, include_affine_ownership: true)
     t.copy_placement_from!(value, preserve_existing: false)
     t
@@ -1149,10 +1110,7 @@ class Type
       )
       index += 1
     end
-    Type.new(TypeExpression.of(T.cast(
-      NamedTypeExpression.new(name: base, arguments: arguments),
-      TypeExpressionKind,
-    )))
+    Type.new(TypeExpression.of(NamedTypeExpression.new(name: base, arguments: arguments)))
   end
 
   sig { params(item_type: TypeInput).returns(Type) }
@@ -2763,10 +2721,10 @@ class Type
   def rank?
     kind = Type.unwrap_fallible_kind(shape.expression.kind)
     if kind.is_a?(OptionalTypeExpression)
-      optional_inner = T.cast(kind, OptionalTypeExpression).inner.kind
+      optional_inner = kind.inner.kind
       kind = optional_inner if optional_inner.is_a?(LinearTypeExpression)
     end
-    kind.is_a?(LinearTypeExpression) && T.cast(kind, LinearTypeExpression).dimensions.length > 1
+    kind.is_a?(LinearTypeExpression) && kind.dimensions.length > 1
   end
 
   sig { returns(T::Array[TypeExpression::Dimension]) }
@@ -2930,14 +2888,14 @@ class Type
     return false unless optional?
 
     wrapped = wrapped_type
-    !wrapped.nil? && T.cast(wrapped, Type).node?
+    !wrapped.nil? && wrapped.node?
   end
 
   sig { returns(T.nilable(Type)) }
   def node_payload_type
     if optional?
       wrapped = wrapped_type
-      return T.cast(wrapped, Type).node_payload_type if !wrapped.nil? && T.cast(wrapped, Type).node?
+      return wrapped.node_payload_type if !wrapped.nil? && wrapped.node?
     end
     return self if node?
 
@@ -3145,7 +3103,7 @@ class Type
   sig { returns(Type) }
   def key_type
     kind = Type.unwrap_optional_kind(Type.unwrap_fallible_kind(shape.expression.kind))
-    return Type.from_child_expression(T.cast(kind, MapTypeExpression).key) if kind.is_a?(MapTypeExpression)
+    return Type.from_child_expression(kind.key) if kind.is_a?(MapTypeExpression)
 
     Type.new(:String)
   end
@@ -3548,7 +3506,7 @@ class Type
   sig { returns(Type) }
   def value_type
     kind = Type.unwrap_optional_kind(Type.unwrap_fallible_kind(shape.expression.kind))
-    return Type.from_child_expression(T.cast(kind, MapTypeExpression).value) if kind.is_a?(MapTypeExpression)
+    return Type.from_child_expression(kind.value) if kind.is_a?(MapTypeExpression)
 
     Type.new(:Any)
   end
@@ -3573,31 +3531,31 @@ class Type
     return true if projection? || generic_instance?
     if error_union?
       payload = payload_type
-      return !payload.nil? && T.cast(payload, Type).specialization_may_need_cleanup?
+      return !payload.nil? && payload.specialization_may_need_cleanup?
     end
 
     return false unless optional?
 
     wrapped = wrapped_type
-    !wrapped.nil? && T.cast(wrapped, Type).specialization_may_need_cleanup?
+    !wrapped.nil? && wrapped.specialization_may_need_cleanup?
   end
 
   sig { returns(T.nilable(Symbol)) }
   def projection_owner
     kind = shape.expression.kind
-    kind.is_a?(TypeProjectionExpression) ? T.cast(kind, TypeProjectionExpression).owner : nil
+    kind.is_a?(TypeProjectionExpression) ? kind.owner : nil
   end
 
   sig { returns(T.nilable(Symbol)) }
   def projection_member
     kind = shape.expression.kind
-    kind.is_a?(TypeProjectionExpression) ? T.cast(kind, TypeProjectionExpression).member : nil
+    kind.is_a?(TypeProjectionExpression) ? kind.member : nil
   end
 
   sig { returns(T.nilable(Symbol)) }
   def projection_protocol
     kind = shape.expression.kind
-    kind.is_a?(TypeProjectionExpression) ? T.cast(kind, TypeProjectionExpression).protocol : nil
+    kind.is_a?(TypeProjectionExpression) ? kind.protocol : nil
   end
 
   # The base type name of a generic instance: :"Pair<Number>" → :Pair
@@ -3646,9 +3604,9 @@ class Type
     kind = Type.unwrap_optional_kind(Type.unwrap_fallible_kind(shape.expression.kind))
     items = T.let([], T::Array[TypeExpression])
     if kind.is_a?(TupleTypeExpression)
-      T.cast(kind, TupleTypeExpression).items.each { |item| items << item }
+      kind.items.each { |item| items << item }
     elsif kind.is_a?(NamedTypeExpression)
-      T.cast(kind, NamedTypeExpression).arguments.each { |item| items << item }
+      kind.arguments.each { |item| items << item }
     end
     args = T.let([], T::Array[Type])
     index = T.let(0, Integer)
@@ -3686,7 +3644,7 @@ class Type
     kind = Type.unwrap_fallible_kind(shape.expression.kind)
     return nil unless kind.is_a?(OptionalTypeExpression)
 
-    inner = Type.from_child_expression(T.cast(kind, OptionalTypeExpression).inner)
+    inner = Type.from_child_expression(kind.inner)
     inner.merge_capabilities_from!(self)
     inner.copy_placement_from!(self)
     inner
@@ -3704,7 +3662,7 @@ class Type
     kind = shape.expression.kind
     return nil unless kind.is_a?(FallibleTypeExpression)
 
-    Type.from_child_expression(T.cast(kind, FallibleTypeExpression).inner)
+    Type.from_child_expression(kind.inner)
   end
 
   sig { returns(Type) }
@@ -3896,7 +3854,7 @@ class Type
         nil,
       )
     end
-    terminal_value = T.cast(terminal, Symbol)
+    terminal_value = terminal
     wrapper = Type.observable_wrapper_for_terminal(terminal_value, tense_type)
     if wrapper.nil?
       raise CompilerError.new(
@@ -3920,15 +3878,12 @@ class Type
   sig { returns(Type) }
   def tense_type
     kind = shape.expression.kind
-    return Type.from_child_expression(T.cast(kind, FutureTypeExpression).inner) if kind.is_a?(FutureTypeExpression)
+    return Type.from_child_expression(kind.inner) if kind.is_a?(FutureTypeExpression)
     if kind.is_a?(StreamTypeExpression)
-      stream_kind = T.cast(kind, StreamTypeExpression)
+      stream_kind = kind
       dimension = T.let(stream_kind.cardinality == :FINITE ? :LIST : stream_kind.cardinality, TypeExpression::Dimension)
       return Type.from_child_expression(
-        TypeExpression.of(T.cast(
-          LinearTypeExpression.new(kind: :array, dimensions: [dimension], item: stream_kind.item),
-          TypeExpressionKind,
-        ))
+        TypeExpression.of(LinearTypeExpression.new(kind: :array, dimensions: [dimension], item: stream_kind.item))
       )
     end
 
@@ -3951,7 +3906,7 @@ class Type
     payload = payload_type
     return false if payload.nil?
 
-    T.cast(payload, Type).canonical_stream?
+    payload.canonical_stream?
   end
 
   # Preserve all wrappers on the item (`?T`, `!T`, `!?T`) instead of
@@ -3961,13 +3916,13 @@ class Type
   def canonical_stream_item_type
     stream = error_union? ? payload_type : self
     return nil if stream.nil?
-    stream_type = T.cast(stream, Type)
+    stream_type = stream
     return nil unless stream_type.canonical_stream?
 
     kind = stream_type.shape.expression.kind
     return nil unless kind.is_a?(StreamTypeExpression)
 
-    Type.from_child_expression(T.cast(kind, StreamTypeExpression).item)
+    Type.from_child_expression(kind.item)
   end
 
   sig { returns(T::Boolean) }
@@ -3988,7 +3943,7 @@ class Type
   def dynamic_stream?
     kind = shape.expression.kind
     if kind.is_a?(StreamTypeExpression)
-      return true if T.cast(kind, StreamTypeExpression).cardinality == :FINITE
+      return true if kind.cardinality == :FINITE
     end
 
     !!(future? && tense_type.dynamic? && !tense_type.optional? &&
@@ -4014,7 +3969,7 @@ class Type
     return nil unless stream_shape.optional?
     wrapped = T.let(stream_shape.wrapped_type, T.nilable(Type))
     return nil if wrapped.nil?
-    wrapped_type = T.cast(wrapped, Type)
+    wrapped_type = wrapped
     return wrapped_type if wrapped_type.array?
 
     nil
@@ -4068,7 +4023,7 @@ class Type
 
     # Canonical cardinality-first spelling: [~]T @split.
     kind = shape.expression.kind
-    kind.is_a?(StreamTypeExpression) && T.cast(kind, StreamTypeExpression).cardinality == :FINITE
+    kind.is_a?(StreamTypeExpression) && kind.cardinality == :FINITE
   end
 
   # Bounded stream: ~T[N] or ~?T[N] — a fixed stream of N elements consumed via NEXT.
@@ -4077,7 +4032,7 @@ class Type
   def bounded_stream?
     kind = shape.expression.kind
     if kind.is_a?(StreamTypeExpression)
-      return true if T.cast(kind, StreamTypeExpression).cardinality.is_a?(Integer)
+      return true if kind.cardinality.is_a?(Integer)
     end
 
     # ~T[N] is a bounded stream of N elements. ~String is NOT a bounded stream
@@ -4130,7 +4085,7 @@ class Type
   def inf_stream?
     kind = shape.expression.kind
     if kind.is_a?(StreamTypeExpression)
-      return true if T.cast(kind, StreamTypeExpression).cardinality == :INF
+      return true if kind.cardinality == :INF
     end
 
     future? && tense_type.inf_stream_marker?
@@ -4176,12 +4131,12 @@ class Type
     return nil unless array?
     kind = Type.unwrap_fallible_kind(shape.expression.kind)
     if kind.is_a?(OptionalTypeExpression)
-      optional_inner = T.cast(kind, OptionalTypeExpression).inner.kind
+      optional_inner = kind.inner.kind
       kind = optional_inner if optional_inner.is_a?(LinearTypeExpression)
     end
     return nil unless kind.is_a?(LinearTypeExpression)
 
-    Type.from_child_expression(T.cast(kind, LinearTypeExpression).item)
+    Type.from_child_expression(kind.item)
   end
 
   sig { params(lookup_arg: T.nilable(SchemaResolver), lookup_block: T.nilable(SchemaLookup)).returns(Integer) }
@@ -4926,7 +4881,7 @@ class Type
       if current_storage.nil?
         return size > 128 ? :frame : :stack
       end
-      if T.cast(current_storage, Symbol) == :stack
+      if current_storage == :stack
         return size > 128 ? :frame : :stack
       end
     end
@@ -4934,7 +4889,7 @@ class Type
     # Default to current or stack.
     return :stack if current_storage.nil?
 
-    T.cast(current_storage, Symbol)
+    current_storage
   end
 
   private
@@ -5223,14 +5178,14 @@ class Type
       se = T.let(tense_type.element_type, T.nilable(Type))
       oe = T.let(other_type.tense_type.element_type, T.nilable(Type))
       unless se.nil? || oe.nil?
-        return T.cast(se, Type).accepts?(T.cast(oe, Type))
+        return se.accepts?(oe)
       end
     end
     if open_stream? && other_type.open_stream?
       se = T.let(open_stream_element_type, T.nilable(Type))
       oe = T.let(other_type.open_stream_element_type, T.nilable(Type))
       unless se.nil? || oe.nil?
-        return T.cast(se, Type).accepts?(T.cast(oe, Type))
+        return se.accepts?(oe)
       end
     end
     # ~T[INF] accepts ~?T[] and vice versa: BG STREAM infers open-stream syntax,
@@ -5249,7 +5204,7 @@ class Type
         oe = other_type.open_stream_element_type
       end
       unless se.nil? || oe.nil?
-        return T.cast(se, Type).accepts?(T.cast(oe, Type))
+        return se.accepts?(oe)
       end
     end
 
@@ -5583,7 +5538,7 @@ class Type
       protocol = projection_protocol
       facts = T.let("CheatLib.MapFacts", String)
       unless protocol.nil?
-        protocol_value = T.cast(protocol, Symbol)
+        protocol_value = protocol
         facts = "__clearProtocolFacts_#{protocol_value}" unless protocol_value == :Map
       end
       return "#{facts}(#{T.must(projection_owner)}).#{T.must(projection_member)}"
@@ -6075,7 +6030,20 @@ module Schemas
     StaticMethodsMap = T.type_alias { T::Hash[String, StaticMethodSpec] }
     MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
 
-    attr_reader :close_plan, :static_methods, :fields, :extern_module, :as_type, :visibility, :methods
+    sig { returns(Schemas::ResourceClosePlan) }
+    attr_reader :close_plan
+    sig { returns(Schemas::ResourceSchema::StaticMethodsMap) }
+    attr_reader :static_methods
+    sig { returns(T::Hash[String, AST::StructField]) }
+    attr_reader :fields
+    sig { returns(T.nilable(String)) }
+    attr_reader :extern_module
+    sig { returns(T.nilable(String)) }
+    attr_reader :as_type
+    sig { returns(Symbol) }
+    attr_reader :visibility
+    sig { returns(Schemas::ResourceSchema::MethodsMap) }
+    attr_reader :methods
     sig { returns(T::Array[Symbol]) }
     attr_reader :type_params
     sig { params(close_plan: Schemas::ResourceClosePlan, static_methods: Schemas::ResourceSchema::StaticMethodsMap, fields: FieldInputMap, type_params: T::Array[Symbol], extern_module: T.nilable(String), as_type: T.nilable(String), visibility: Symbol, methods: Schemas::ResourceSchema::MethodsMap).void }
@@ -6179,6 +6147,7 @@ module Schemas
     FieldMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
     FieldInputMap = T.type_alias { T::Hash[T.any(String, Symbol), Type::TypeInput] }
 
+    sig { returns(Schemas::InlineStructVariant::FieldMap) }
     attr_reader :fields
     sig { params(fields: FieldInputMap, deinit_entries: T::Array[Schemas::InlineStructDeinitEntry]).void }
     # ruby-to-clear: fallible
@@ -6248,7 +6217,10 @@ module Schemas
     VariantInput = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
     VariantInputMap = T.type_alias { T::Hash[T.any(String, Symbol), VariantInput] }
 
-    attr_reader :variants, :visibility
+    sig { returns(Schemas::UnionSchema::VariantMap) }
+    attr_reader :variants
+    sig { returns(Symbol) }
+    attr_reader :visibility
     sig { returns(T::Array[Symbol]) }
     attr_reader :type_params
     sig { params(variants: VariantInputMap, type_params: T::Array[Symbol], visibility: Symbol).void }
@@ -6313,7 +6285,16 @@ module Schemas
     FieldInputMap = T.type_alias { T::Hash[T.any(Symbol, String), FieldInput] }
     MethodsMap = T.type_alias { T::Hash[T.any(Symbol, String), FunctionSignature] }
 
-    attr_reader :fields, :methods, :visibility, :extern_module, :as_type
+    sig { returns(T::Hash[String, AST::StructField]) }
+    attr_reader :fields
+    sig { returns(MethodsMap) }
+    attr_reader :methods
+    sig { returns(Symbol) }
+    attr_reader :visibility
+    sig { returns(T.nilable(String)) }
+    attr_reader :extern_module
+    sig { returns(T.nilable(String)) }
+    attr_reader :as_type
     sig { returns(T::Array[Symbol]) }
     attr_reader :type_params
     sig { returns(T::Array[AST::GenericParamDecl]) }

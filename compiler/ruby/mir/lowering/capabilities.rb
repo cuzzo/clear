@@ -826,7 +826,7 @@ module MIRLoweringCapabilities
   def ast_contains_return?(node)
     T.bind(self, MIRLowering) rescue nil
     root = node.is_a?(Set) ? node.to_a : node
-    found = false
+    found = T.let(false, T::Boolean)
     AST.each_locatable(T.unsafe(root)) do |candidate|
       found = true if candidate.is_a?(AST::ReturnNode)
     end

@@ -1398,7 +1398,7 @@ module MIRHoistLowering
   def replace_mir_expr_in_value!(value, old_child, new_child)
     case value
     when Array
-      replaced = false
+      replaced = T.let(false, T::Boolean)
       value.each_with_index do |item, idx|
         if item.equal?(old_child)
           value[idx] = new_child
@@ -1414,7 +1414,7 @@ module MIRHoistLowering
       end
       return replaced
     when Hash
-      replaced = false
+      replaced = T.let(false, T::Boolean)
       value.each_key do |key|
         item = value[key]
         if item.equal?(old_child)

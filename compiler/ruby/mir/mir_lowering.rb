@@ -61,7 +61,7 @@ class MIRLowering
     # qualifier -- has to name the owner. Otherwise the same CLEAR type
     # reaches Zig as two distinct types.
     importer = program_state.importer
-    canonical = importer.respond_to?(:owning_package_name) ? importer.owning_package_name(name) : name
+    canonical = importer && importer.respond_to?(:owning_package_name) ? importer.owning_package_name(name) : name
     "__clear_module_#{canonical.gsub('.', '_')}"
   end
 
@@ -1199,7 +1199,7 @@ class MIRLowering
     end
     return false unless cleanup
 
-    mir.body.insert(break_index, *ownership_transfer_marks(owner, :block_result, move_guarded: true))
+    mir.body[break_index, 0] = ownership_transfer_marks(owner, :block_result, move_guarded: true)
     true
   end
 
@@ -1896,7 +1896,7 @@ class MIRLowering
     # both writes the guard too late and emits statements Zig rejects as
     # unreachable.
     if terminator_stmt?(node) && state.out.length > transfer_index
-      state.out.insert(node_index, *T.must(state.out.slice!(transfer_index..)))
+      state.out[node_index, 0] = T.must(state.out.slice!(transfer_index..))
     end
     nil
   end
@@ -3606,7 +3606,7 @@ class MIRLowering
       name
     end
     cleaned = Compiler::Entrypoint::ZIG_NAME if cleaned == Compiler::Entrypoint::NAME
-    cleaned = T.must(cleaned)
+    cleaned = cleaned
     ZigType.reserved_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
   end
 
@@ -3786,7 +3786,7 @@ class MIRLowering
 
   # Produce a MIR::Cast node for type coercion, or nil if no cast needed.
   # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
-  sig { params(mir_node: MIR::Node, from_type: Type, to_type: Type::TypeInput).returns(T.nilable(MIR::Cast)) }
+  sig { params(mir_node: MIR::Node, from_type: Type, to_type: Type::TypeInput).returns(T.nilable(MIR::Node)) }
   def mir_cast(mir_node, from_type, to_type)
     # A NoReturn value (`panic(...)`) coerces to every type in Zig; wrapping it
     # in `@as(T, ...)` only produces unreachable code at the use site.
@@ -4524,7 +4524,7 @@ class MIRLowering
       # import and the type aliases below must name it -- otherwise the same
       # CLEAR type reaches Zig as two distinct types.
       import_name = node.namespace || node.path
-      import_name = importer.owning_package_name(import_name) if importer.respond_to?(:owning_package_name)
+      import_name = importer.owning_package_name(import_name) if importer && importer.respond_to?(:owning_package_name)
       zig_import_name = zig_module_alias(import_name)
       # The same package can be required by the root and by an inlined local
       # module; both land in one Zig compilation unit, so emit each import

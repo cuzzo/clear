@@ -395,7 +395,7 @@ module MIRLoweringLiterals
   sig { params(node: AST::HashLit, plan: HashLiteralPlan, capability: HashLiteralCapabilityPlan).returns(MIR::BlockExpr) }
   def non_empty_hash_literal(node, plan, capability)
     T.bind(self, MIRLowering) rescue nil
-    items = T.let([], T::Array[MIR::Stmt])
+    items = T.let([], T::Array[MIR::Emittable])
     # Pairs now nest their own literals inside this block, so the label must be
     # unique per literal or an inner map collides with its enclosing one.
     literal_id = lowering_counters.next_block_expr_id
