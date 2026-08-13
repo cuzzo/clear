@@ -4285,16 +4285,22 @@ class MIRLowering
       copy_strategy = T.let(:bit_copy, Symbol)
       if fact.inline_struct
         inline = T.cast(data, Schemas::InlineStructVariant)
-        if inline.deinit_entries.any?
-          body << MIR::ExprStmt.new(
-            emit_builtin(:cleanup, [MIR::Ident.new(fact.zig_type), MIR::Ident.new("alloc"), MIR::Ident.new(payload)]),
-            false,
-          )
-        end
+        # `deinit_entries` covers a payload that closes a resource. It does not
+        # see a field that owns only through a capability -- an `@shared` field
+        # is an Arc whose refcount this drop has to release -- so the registry
+        # is what decides, exactly as it does for a non-inline variant.
+        drop_payload = T.let(inline.deinit_entries.any?, T::Boolean)
         inline.fields.each_value do |field|
           plan = lifecycle_registry.fetch(Type.from_input(field))
           copy_forbidden ||= plan.copy_strategy == :forbidden
           copy_strategy = :deep_clone if plan.copy_strategy != :bit_copy
+          drop_payload ||= plan.needs_drop?
+        end
+        if drop_payload
+          body << MIR::ExprStmt.new(
+            emit_builtin(:cleanup, [MIR::Ident.new(fact.zig_type), MIR::Ident.new("alloc"), MIR::Ident.new(payload)]),
+            false,
+          )
         end
       else
         variant_type = Type.from_variant_input(data)

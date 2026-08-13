@@ -1,0 +1,20 @@
+STRUCT Item { value: Int64 }
+
+UNION Holder { Wrapped { item: Item@shared }, Empty }
+
+# An inline-struct variant decided whether to drop its payload from the
+# variant's `deinit_entries`, not from the lifecycle registry, so a payload
+# that owns something only through a capability -- an Arc field -- got an empty
+# drop arm. Since `__clear_drop` now always exists and cleanup consults it
+# BEFORE representation-driven reflection, that empty arm was the whole
+# contract: the Arc was never released, and its control block and payload
+# leaked.
+FN main() RETURNS Void ->
+  MUTABLE seen = 0_i64;
+  holder: Holder = Holder.Wrapped{ item: Item{ value: 7 } @shared };
+  MATCH holder START
+    Holder.Wrapped AS w -> seen = w.item.value;,
+    Holder.Empty        -> seen = 0_i64;
+  END
+  ASSERT seen == 7_i64, "the shared payload is readable";
+END
