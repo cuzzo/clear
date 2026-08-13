@@ -57,21 +57,27 @@ module ClearBuildSupport
 
   # The per-program build caches live on a tmpfs that fills after a few dozen
   # large builds, and a full cache is reported as `DWARF TODO: 'NoSpaceLeft'`
-  # rather than as a disk error. Keep the most recent few and the one this
-  # build is about to use.
-  CACHE_ENTRIES_KEPT = 6
+  # rather than as a disk error. Drop the ones nobody has touched in a while.
+  #
+  # Age, not entry count, is the only safe criterion: parallel workers each
+  # build their own cache key, so a count-based rule deletes a directory
+  # another process is building into and that process then fails to symlink
+  # into its own cache.
+  CACHE_ENTRY_MAX_AGE_SECONDS = 3600
 
   sig { params(cache_root: String, keep: String).void }
   def self.prune_build_cache!(cache_root, keep:)
-    entries = Dir.glob(File.join(cache_root, '*')).select { |path| File.directory?(path) }
-    return if entries.length <= CACHE_ENTRIES_KEPT
-
     keep_real = File.expand_path(keep)
-    stale = entries
-      .reject { |path| File.expand_path(path) == keep_real }
-      .sort_by { |path| -File.mtime(path).to_f }
-      .drop(CACHE_ENTRIES_KEPT - 1)
-    stale.each { |path| FileUtils.rm_rf(path) }
+    # This build is using its directory now, whether or not it just created it.
+    FileUtils.touch(keep) if File.directory?(keep)
+    cutoff = Time.now - CACHE_ENTRY_MAX_AGE_SECONDS
+    Dir.glob(File.join(cache_root, '*')).each do |path|
+      next unless File.directory?(path)
+      next if File.expand_path(path) == keep_real
+      next if File.mtime(path) > cutoff
+
+      FileUtils.rm_rf(path)
+    end
   rescue StandardError
     # Pruning is opportunistic; a build must never fail because of it.
     nil
