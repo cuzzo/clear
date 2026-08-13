@@ -36,7 +36,8 @@ producers:
         work="$PWD/.giga/work/compiler-repository" &&
         rm -rf "$work" &&
         mkdir -p "$work" "$repo_root/.giga/coverage/compiler" "$repo_root/.giga/tmp/compiler" &&
-        git archive HEAD | tar -x -C "$work" &&
+        git clone --quiet --shared --no-checkout "$repo_root" "$work" &&
+        git -C "$work" checkout --quiet --detach "$(git -C "$repo_root" rev-parse HEAD)" &&
         cp -aL node_modules "$work/node_modules" &&
         cp -aL vendor "$work/vendor" &&
         cd "$work" &&
