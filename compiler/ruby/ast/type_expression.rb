@@ -825,8 +825,10 @@ class TypeExpressionPrinter
       when :INFERRED then "*"
       else dimension.to_s
       end
-    else
+    elsif dimension.is_a?(Integer)
       dimension.to_s
+    else
+      T.absurd(dimension)
     end
   end
 
@@ -864,7 +866,18 @@ class TypeExpressionPrinter
     when MapTypeExpression
       "HashMap<#{semantic(kind.key)},#{semantic(kind.value)}>"
     when StreamTypeExpression
-      suffix = kind.cardinality == :FINITE ? "[]" : "[#{kind.cardinality}]"
+      cardinality = kind.cardinality
+      # Narrow before interpolating: CLEAR has no string form for the
+      # Integer|Symbol union, only for each arm.
+      suffix = if cardinality == :FINITE
+        "[]"
+      elsif cardinality.is_a?(Integer)
+        "[#{cardinality}]"
+      elsif cardinality.is_a?(Symbol)
+        "[#{cardinality}]"
+      else
+        T.absurd(cardinality)
+      end
       "~#{semantic(kind.item)}#{suffix}"
     else
       raise "unknown type expression #{kind.class}"
