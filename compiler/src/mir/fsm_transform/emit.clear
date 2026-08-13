@@ -662,14 +662,14 @@ END
 PRIVATE FN emit__register_recursive_destroy_actions_mut(MUTABLE ctx: FsmEmitContext) RETURNS !Void ->
   MUTABLE id = ctx.id;
   ctx.destroy_actions = ( { MUTABLE rtoc_empty_list_34: []FsmDestroyAction = List[]; rtoc_empty_list_34 } );
-  ctx.captured.keys() |> EACH {
-  MUTABLE ignored_1: Type = (ctx.captured[_] OR_ELSE CAST(panic("missing hash key") AS Type));
-  MUTABLE close_plan: ?ResourceClosePlan = COPY ctx.capture_close_plans[_];
+  FOR rtoc_each_key IN ctx.captured.keys() DO
+  MUTABLE ignored_1: Type = COPY UNWRAP (ctx.captured[rtoc_each_key]);
+  MUTABLE close_plan: ?ResourceClosePlan = COPY ctx.capture_close_plans[rtoc_each_key];
   IF !(close_plan) THEN
       CONTINUE;
   END
-  (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :capture, name: COPY _, target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, _) }, cleanup_entry: cleanupEntry__build(:resource, :heap, FALSE, close_plan), guard: NIL, allocator: NIL } });
-  };
+  (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :capture, name: COPY rtoc_each_key, target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, rtoc_each_key) }, cleanup_entry: cleanupEntry__build(:resource, :heap, FALSE, close_plan), guard: NIL, allocator: NIL } });
+  END
   FOR _ IN ctx.fresh_heap_cleanup_names DO
   (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :fresh_heap, name: COPY _, target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, _) }, cleanup_entry: cleanupEntry__build(:uniform, :heap, TRUE), allocator: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, "alloc") }, guard: NIL } });
   END
@@ -1093,25 +1093,41 @@ FN rubyToClearVoid() RETURNS Void ->
 END
 FN ruby_array_concat_ContextFieldDecl(left: []ContextFieldDecl, right: []ContextFieldDecl) RETURNS []ContextFieldDecl ->
   MUTABLE result: []ContextFieldDecl = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END
 FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END
 FN ruby_array_concat_FsmBodyItem(left: []FsmBodyItem, right: []FsmBodyItem) RETURNS []FsmBodyItem ->
   MUTABLE result: []FsmBodyItem = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END
 FN ruby_array_concat_FsmSegmentSpec(left: []FsmSegmentSpec, right: []FsmSegmentSpec) RETURNS []FsmSegmentSpec ->
   MUTABLE result: []FsmSegmentSpec = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END

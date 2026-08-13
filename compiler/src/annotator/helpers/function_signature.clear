@@ -666,10 +666,10 @@ PUB FN functionSignature__copy_params_for_import(params: []Param) RETURNS ![]Par
 END
 PUB FN functionSignature__copy_requires_for_import(requires_value: {String}[Set]String@symbol) RETURNS !{String}[Set]String@symbol ->
   MUTABLE copied: {String}[Set]String@symbol = {};
-  requires_value.keys() |> EACH {
-  MUTABLE families: [Set]String@symbol = (requires_value[_] OR_ELSE CAST(panic("missing hash key") AS [Set]String@symbol));
-  copied[_] = COPY families;
-  };
+  FOR rtoc_each_key IN requires_value.keys() DO
+  MUTABLE families: [Set]String@symbol = COPY UNWRAP (requires_value[rtoc_each_key]);
+  copied[rtoc_each_key] = COPY families;
+  END
   RETURN copied;
 END
 PRIVATE FN functionSignature__coerce_return_type(self: FunctionSignature, val: ?TypeTypeInput) RETURNS !Type

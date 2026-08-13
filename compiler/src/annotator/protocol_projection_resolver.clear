@@ -101,10 +101,10 @@ PRIVATE FN protocolProjectionResolver__issue(self: ProtocolProjectionResolver, c
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE arguments: {String@symbol}String = {};
-    values.keys() |> EACH {
-    MUTABLE value: Any = (values[_] OR_ELSE panic("missing hash key"));
-    arguments[_] = COPY CAST(value AS String);
-    };
+    FOR rtoc_each_key IN values.keys() DO
+    MUTABLE value = COPY UNWRAP (values[rtoc_each_key]);
+    arguments[rtoc_each_key] = COPY CAST(value AS String);
+    END
     RETURN ProtocolProjectionIssue{ code: COPY code, arguments: COPY arguments };
 }
 END

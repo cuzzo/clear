@@ -68,17 +68,19 @@ FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@symb
     edges[key] = dependency_keys;
   END
   MUTABLE reverse_edges: {String}[]String = {};
-  edges.keys() |> EACH {
-  MUTABLE dependencies: []String = (edges[_] OR_ELSE CAST(panic("missing hash key") AS []String));
-  FOR _ IN dependencies DO
-  reverse_edges[_] = (reverse_edges[_] OR_ELSE List[]);
-  IF reverse_edges[_] EXISTS AS rtoc_map_slot_2 THEN
-      &rtoc_map_slot_2.append(COPY _);
+  FOR rtoc_each_key IN edges.keys() DO
+  MUTABLE dependencies: []String = COPY UNWRAP (edges[rtoc_each_key]);
+  FOR rtoc_inner_key IN dependencies DO
+  IF !(reverse_edges.contains?(rtoc_inner_key)) THEN
+    reverse_edges[rtoc_inner_key] = [];
+  END
+  IF reverse_edges[rtoc_inner_key] EXISTS AS rtoc_map_slot_2 THEN
+      &rtoc_map_slot_2.append(COPY rtoc_inner_key);
     ELSE
       panic("T.must: map slot is NIL");
     END
   END
-  };
+  END
   MUTABLE linear: {String}Bool = {};
   MUTABLE queue: []String = seeds.keys();
   MUTABLE cursor: Int64 = 0;
@@ -89,7 +91,11 @@ FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@symb
       CONTINUE;
     END
     linear[key] = TRUE;
-    FOR _ IN ((reverse_edges[key] OR_ELSE List[])) DO
+    MUTABLE dependents: []String = [];
+    IF reverse_edges[key] EXISTS AS dependent_keys THEN
+      dependents = COPY dependent_keys;
+    END
+    FOR _ IN dependents DO
     IF !(linear.contains?(_)) THEN
       &queue.append(COPY _);
     END
@@ -149,12 +155,12 @@ PRIVATE FN linearResourceFacts__resource_seed_and_dependencies(type_info: Type, 
   END
   MUTABLE dependencies: []Type = ( { MUTABLE rtoc_empty_list_3: []Type = List[]; rtoc_empty_list_3 } );
   IF schema? IS_A StructSchema AS struct_schema THEN
-    struct_schema.fields.keys() |> EACH {
-  MUTABLE field: StructField = (struct_schema.fields[_] OR_ELSE CAST(panic("missing hash key") AS StructField));
+    FOR rtoc_each_key IN struct_schema.fields.keys() DO
+  MUTABLE field: StructField = COPY UNWRAP (struct_schema.fields[rtoc_each_key]);
     IF !(structField__borrowed(field)) THEN
       &dependencies.append(CAST(TRY (lifecycleRegistry__concrete_schema_type(type_info, TypeTypeInput{ Type: COPY structField__type(field) }, struct_schema.type_params)) AS Type));
     END
-    };
+    END
   ELSE_IF schema? IS_A UnionSchema AS union_schema THEN
     FOR variant_slot IN union_schema.variants.values() DO
     IF variant_slot EXISTS AS variant_value THEN
@@ -201,7 +207,12 @@ FN lifecyclePlan__copyable?(self: LifecyclePlan) RETURNS Bool ->
   RETURN (self.copy_strategy != :forbidden);
 END
 FN lifecyclePlanner__plan(type_info: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, linear_resource_facts: ?LinearResourceFacts = NIL) RETURNS !LifecyclePlan ->
-  MUTABLE resource_facts = (linear_resource_facts OR_ELSE TRY (linearResourceFacts__build_types([type_info], schema_lookup)));
+  MUTABLE resource_facts: LinearResourceFacts@multiowned = linearResourceFacts__empty();
+  IF linear_resource_facts EXISTS AS given_facts THEN
+    resource_facts = COPY given_facts;
+  ELSE
+    resource_facts = TRY (linearResourceFacts__build_types([type_info], schema_lookup));
+  END
   MUTABLE type_key = type__lifecycle_type_key(type_info);
   IF ((type__symbol?(type_info) OR type__id_handle?(type_info)) OR TRY (type__c_array_view?(type_info))) THEN
     RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL };
@@ -260,7 +271,12 @@ PRIVATE FN lifecyclePlanner__generic_parameter?(type_info: Type, schema_lookup: 
     RETURN TRUE;
   END
   IF type__generic_instance?(type_info) THEN
-    RETURN (TRY (type__generic_args(type_info))) |> ANY lifecyclePlanner__generic_parameter?(_, schema_lookup);
+    FOR generic_arg IN (TRY (type__generic_args(type_info))) DO
+      IF lifecyclePlanner__generic_parameter?(generic_arg, schema_lookup) THEN
+        RETURN TRUE;
+      END
+    END
+    RETURN FALSE;
   END
   MUTABLE wrapped: ?Type = TRY (type__wrapped_type(type_info));
   IF wrapped EXISTS AS wrapped_value THEN
@@ -332,13 +348,23 @@ FN lifecycleRegistry__type_inventory(program: Program, schema_lookup: FN(String@
   RETURN types;
 END
 FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, binding_nodes: []SemanticLifecycleRegistryBindingNode, linear_resource_facts: ?LinearResourceFacts = NIL, inventory: ?{String}Type = NIL) RETURNS !LifecycleRegistry@multiowned ->
-  MUTABLE types = (inventory OR_ELSE TRY (lifecycleRegistry__type_inventory(program, schema_lookup)));
-  MUTABLE resource_facts = (linear_resource_facts OR_ELSE TRY (linearResourceFacts__build_types(types.values(), schema_lookup)));
+  MUTABLE types: {String}Type = {};
+  IF inventory EXISTS AS given_inventory THEN
+    types = COPY given_inventory;
+  ELSE
+    types = TRY (lifecycleRegistry__type_inventory(program, schema_lookup));
+  END
+  MUTABLE resource_facts: LinearResourceFacts@multiowned = linearResourceFacts__empty();
+  IF linear_resource_facts EXISTS AS given_facts THEN
+    resource_facts = COPY given_facts;
+  ELSE
+    resource_facts = TRY (linearResourceFacts__build_types(types.values(), schema_lookup));
+  END
   MUTABLE plans: {String}LifecyclePlan = {};
-  types.keys() |> EACH {
-  MUTABLE type_info: Any = (types[_] OR_ELSE panic("missing hash key"));
-  plans[_] = TRY (lifecyclePlanner__plan(type_info, schema_lookup, resource_facts));
-  };
+  FOR type_key IN types.keys() DO
+    MUTABLE type_info = COPY UNWRAP (types[type_key]);
+    plans[type_key] = TRY (lifecyclePlanner__plan(type_info, schema_lookup, resource_facts));
+  END
   lifecycleRegistry__add_monomorphic_carrier_plans_mut(&plans, program);
   MUTABLE binding_plans: {Int64}LifecyclePlan = {};
   MUTABLE inventoried_bindings: []SemanticLifecycleRegistryBindingNode = COPY binding_nodes;
@@ -392,13 +418,21 @@ FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -
     MUTABLE existing_close: ?[]String = NIL;
     IF existing EXISTS AS existing_plan THEN
       IF existing_plan.resource_close_plan EXISTS AS existing_close_plan THEN
-        existing_close = COPY existing_close_plan.actions |> SELECT "${_.name}|${_.field_path.join(",")}|${_.runtime_heap_alloc_args.toString()}";
+        MUTABLE existing_signatures: []String = [];
+        FOR action IN existing_close_plan.actions DO
+          &existing_signatures.append("${action.name}|${action.field_path.join(",")}|${action.runtime_heap_alloc_args.toString()}");
+        END
+        existing_close = COPY existing_signatures;
       END
     END
     MUTABLE planned_close: ?[]String = NIL;
-    IF plan.resource_close_plan?.actions != NIL THEN
-        planned_close = COPY ((plan.resource_close_plan?.actions)?) |> SELECT "${_.name}|${_.field_path.join(",")}|${_.runtime_heap_alloc_args.toString()}";
+    IF plan.resource_close_plan EXISTS AS planned_close_plan THEN
+      MUTABLE planned_signatures: []String = [];
+      FOR action IN planned_close_plan.actions DO
+        &planned_signatures.append("${action.name}|${action.field_path.join(",")}|${action.runtime_heap_alloc_args.toString()}");
       END
+      planned_close = COPY planned_signatures;
+    END
     MUTABLE same_contract = (((((existing != NIL) AND (existing.type_key == plan.type_key)) AND (existing.drop_strategy == plan.drop_strategy)) AND (existing.copy_strategy == plan.copy_strategy)) AND (existing_close == planned_close));
     IF ((existing != NIL) AND !(same_contract)) THEN
         panic("{}{}{}");
@@ -422,7 +456,11 @@ FN lifecycleRegistry__add_monomorphic_carrier_plans_mut(MUTABLE plans: {String}L
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_5.length() DO
       MUTABLE current_param: Param = COPY UNWRAP (rtoc_each_items_5[rtoc_idx]);
-      IF !(((current_param.takes OR_ELSE FALSE) AND (current_param.carrier_contract == :monomorphic))) THEN
+      MUTABLE param_takes = FALSE;
+      IF current_param.takes EXISTS AS takes_value THEN
+        param_takes = takes_value;
+      END
+      IF !((param_takes AND (current_param.carrier_contract == :monomorphic))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -447,19 +485,23 @@ FN lifecycleRegistry__fetch(self: LifecycleRegistry, type_info: Type) RETURNS !L
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE key = type__lifecycle_type_key(type_info);
-    RETURN COPY (rtoc_self_view.plans[key] OR_ELSE {
-    IF !(type__primitive?(type_info)) THEN
-        panic("missing annotation lifecycle plan for {} (non-primitive type absent from inventory; refusing to default to no-drop)");
+    IF rtoc_self_view.plans[key] EXISTS AS known_plan THEN
+      RETURN COPY known_plan;
     END
-    LifecyclePlan{ type_key: COPY key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL }
-    });
+    IF !(type__primitive?(type_info)) THEN
+      panic("missing annotation lifecycle plan for {} (non-primitive type absent from inventory; refusing to default to no-drop)");
+    END
+    RETURN LifecyclePlan{ type_key: COPY key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL };
 }
 END
 FN lifecycleRegistry__fetch_monomorphic(self: LifecycleRegistry, type_info: Type) RETURNS LifecyclePlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY (rtoc_self_view.plans[lifecyclePlanner__monomorphic_carrier_key(type_info)] OR_ELSE lifecyclePlanner__monomorphic_carrier_plan(type_info));
+    IF rtoc_self_view.plans[lifecyclePlanner__monomorphic_carrier_key(type_info)] EXISTS AS carrier_plan THEN
+      RETURN COPY carrier_plan;
+    END
+    RETURN lifecyclePlanner__monomorphic_carrier_plan(type_info);
 }
 END
 FN lifecycleRegistry__fetch_binding(self: LifecycleRegistry, node: Locatable, type_info: Type) RETURNS !LifecyclePlan
@@ -468,7 +510,10 @@ FN lifecycleRegistry__fetch_binding(self: LifecycleRegistry, node: Locatable, ty
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE place_id: ?Int64 = lifecycleRegistry__binding_place_id(rtoc_self_view, node);
     IF place_id EXISTS AS place_id_value THEN
-      RETURN COPY (rtoc_self_view.binding_plans[place_id_value] OR_ELSE panic("missing annotation binding lifecycle plan for place {}"));
+      IF rtoc_self_view.binding_plans[place_id_value] EXISTS AS binding_plan THEN
+        RETURN COPY binding_plan;
+      END
+      panic("missing annotation binding lifecycle plan for place {}");
     ELSE
       # Ruby falls back to `fetch(type_info)`; the translation turned that into
       # an unwrap of a one-element list literal.
@@ -581,7 +626,12 @@ PRIVATE FN lifecycleRegistry__expand_schema_fields_mut(MUTABLE types: {String}Ty
     MUTABLE before = types.count();
     TRY (lifecycleRegistry__add_type_mut(&types, concrete));
     IF (types.count() > before) THEN
-      grown = ruby_array_concat_Type(grown, CAST(types.values() |> SKIP before AS []Type));
+      MUTABLE all_types = COPY types.values();
+      MUTABLE grow_idx: Int64 = before;
+      WHILE (grow_idx < all_types.length()) DO
+        &grown.append(COPY UNWRAP (all_types[grow_idx]));
+        grow_idx = (grow_idx + 1);
+      END
     END
   END
   RETURN COPY grown;
@@ -629,7 +679,11 @@ PRIVATE FN lifecycleRegistry__substitute_schema_type(raw_type: TypeTypeInput, su
           projected = TRY (type__value_type(concrete));
         END
       END
-      replacement_branch_value = (projected OR_ELSE TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY symbol(UNWRAP (type__projection_member(type_info))), protocol: COPY type__projection_protocol(type_info) } }) })));
+      IF projected EXISTS AS projected_value THEN
+        replacement_branch_value = COPY projected_value;
+      ELSE
+        replacement_branch_value = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY symbol(UNWRAP (type__projection_member(type_info))), protocol: COPY type__projection_protocol(type_info) } }) }));
+      END
     ELSE
       replacement_branch_value = COPY type_info;
     END
@@ -654,7 +708,12 @@ PRIVATE FN lifecycleRegistry__substitute_schema_type(raw_type: TypeTypeInput, su
   ELSE_IF type__tense?(type_info) THEN
     replacement_branch_value = TRY (type__tense_of(TypeTypeInput{ Type: COPY TRY (lifecycleRegistry__substitute_schema_type(TypeTypeInput{ Type: COPY TRY (type__tense_type(type_info)) }, subst)) }));
   ELSE
-    replacement_branch_value = (subst[type__resolved(type_info)] OR_ELSE COPY type_info);
+    MUTABLE substituted: ?Type = COPY subst[type__resolved(type_info)];
+    IF substituted EXISTS AS substituted_value THEN
+      replacement_branch_value = COPY substituted_value;
+    ELSE
+      replacement_branch_value = COPY type_info;
+    END
   END
   MUTABLE replacement: Type = replacement_branch_value?;
   TRY (type__merge_capabilities_from_mut(&replacement, type_info));
@@ -690,7 +749,11 @@ FN rubyToClearVoid() RETURNS Void ->
 END
 FN ruby_array_concat_Type(left: []Type, right: []Type) RETURNS []Type ->
   MUTABLE result: []Type = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END

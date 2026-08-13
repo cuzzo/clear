@@ -1387,12 +1387,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
         END
       ELSE_IF node IS_A StructLit AS struct_lit THEN
-        struct_lit.fields.keys() |> EACH {
-    MUTABLE value: Any = (struct_lit.fields[_] OR_ELSE panic("missing hash key"));
+        FOR rtoc_each_key IN struct_lit.fields.keys() DO
+    MUTABLE value = COPY UNWRAP (struct_lit.fields[rtoc_each_key]);
         IF (value IS_A Identifier AND (value.ownership_pending_transfer() == TRUE)) THEN
-          ownershipTransportFacts__record_transfer(&facts_value_mutable, Locatable{ StructLit: COPY struct_lit }, _, value);
+          ownershipTransportFacts__record_transfer(&facts_value_mutable, Locatable{ StructLit: COPY struct_lit }, rtoc_each_key, value);
         END
-        };
+        END
       END
     ELSE
       RETURN;
@@ -8813,7 +8813,9 @@ PRIVATE FN typeAnalysisSession__effect_call_site_arg_families_for(self: TypeAnal
 WITH POLYMORPHIC self AS rtoc_self_view {
     typeAnalysisSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] = (typeAnalysisSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] OR_ELSE {});
     MUTABLE caller_families = COPY UNWRAP (typeAnalysisSession__effect_call_site_arg_families(rtoc_self_view)[caller_name]);
-    caller_families[callee_name] = (caller_families[callee_name] OR_ELSE List[]);
+    IF !(caller_families.contains?(callee_name)) THEN
+      caller_families[callee_name] = [];
+    END
     RETURN caller_families[callee_name];
 }
 END
@@ -9159,13 +9161,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE param_names = ((fn_node.params |> SELECT _.name) |> WHERE _ != NIL) |> DISTINCT _;
-    fn_node.requires_clauses.keys() |> EACH {
-    MUTABLE ignored_kind: Any = (fn_node.requires_clauses[_] OR_ELSE panic("missing hash key"));
-    IF param_names.contains?(_) THEN
+    FOR rtoc_each_key IN fn_node.requires_clauses.keys() DO
+    MUTABLE ignored_kind = COPY UNWRAP (fn_node.requires_clauses[rtoc_each_key]);
+    IF param_names.contains?(rtoc_each_key) THEN
       CONTINUE;
     END
-    typeAnalysisSession__error_mut(rtoc_self_view, fn_node, TypeAnalysisCodeOrMessage{ SymbolValue: :REQUIRES_NON_REENTRANT_NOT_PARAM }, [], {:fn: fn_node.name, :name: _});
-    };
+    typeAnalysisSession__error_mut(rtoc_self_view, fn_node, TypeAnalysisCodeOrMessage{ SymbolValue: :REQUIRES_NON_REENTRANT_NOT_PARAM }, [], {:fn: fn_node.name, :name: rtoc_each_key});
+    END
 }
 END
 PRIVATE FN typeAnalysisSession__effects_clause_edits(self: TypeAnalysisSession, fn_node: FunctionDef, replacement: String) RETURNS ![]Edit
@@ -9734,13 +9736,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE target_type = var_node.target().resolved_type();
       MUTABLE schema = typeAnalysisSession__lookup_type_schema(rtoc_self_view, target_type);
       MUTABLE fields = schema.fields();
-      fields.keys() |> EACH {
-    MUTABLE ignored_1: Any = (fields[_] OR_ELSE panic("missing hash key"));
-    MUTABLE field_node = GetField{ token: COPY var_node.token(), target: COPY var_node.target(), field: _, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, is_assignment_lhs: NIL, indirect_field: NIL, safe_nav_chain: NIL, tuple_position: NIL };
+      FOR rtoc_each_key IN fields.keys() DO
+    MUTABLE ignored_1 = COPY UNWRAP (fields[rtoc_each_key]);
     (TRY (typeAnalysisSession__visit(&rtoc_self_view, Locatable{ GetField: COPY field_node })) OR_ELSE NIL);
     MUTABLE expanded_cap = ASTCapability{ capability: COPY aSTCapability__capability(cap), var_node: Locatable{ GetField: COPY field_node }, old_scope: COPY aSTCapability__old_scope(cap), resolved_type: CAST(COPY &field_node.full_type_mut("WITH wildcard field") AS Type), alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
     withCapabilityPlan__add(expanded, typeAnalysisSession__with_capability_fact(rtoc_self_view, expanded_cap));
-      };
+      END
       MUTABLE base_t = var_node.target().full_type_mut({:context: "WITH wildcard base"});
       IF !(TRUE) THEN
         base_t = TRY (type__new(castTypeToTypeConstructionInput(base_t)));
@@ -10853,17 +10854,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_INLINE_VARIANT_MISSING_FIELD }, [], {:union: node.union_name, :variant: node.variant_name, :field: _});
     END
     END
-    node.fields.keys() |> EACH {
-    MUTABLE val_node: Any = (node.fields[_] OR_ELSE panic("missing hash key"));
+    FOR rtoc_each_key IN node.fields.keys() DO
+    MUTABLE val_node = COPY UNWRAP (node.fields[rtoc_each_key]);
     TRY (typeAnalysisSession__visit(&rtoc_self_view, val_node));
-    typeAnalysisSession__reject_borrowed_value_mut(rtoc_self_view, &val_node, "${node.union_name}.${node.variant_name}.${_}");
-    MUTABLE owned: ?Locatable = typeAnalysisSession__ensure_owned_value_mut(rtoc_self_view, &val_node, castOptionalTypeToOptionalTypeTypeInput(expected_fields[_]), "${node.union_name}.${node.variant_name}.${_}");
+    typeAnalysisSession__reject_borrowed_value_mut(rtoc_self_view, &val_node, "${node.union_name}.${node.variant_name}.${rtoc_each_key}");
+    MUTABLE owned: ?Locatable = typeAnalysisSession__ensure_owned_value_mut(rtoc_self_view, &val_node, castOptionalTypeToOptionalTypeTypeInput(expected_fields[rtoc_each_key]), "${node.union_name}.${node.variant_name}.${rtoc_each_key}");
     IF owned EXISTS AS owned_value THEN
         MUTABLE owned_value_mutable = COPY owned_value;
-        node.fields[_] = owned_value_mutable;
+        node.fields[rtoc_each_key] = owned_value_mutable;
         MUTABLE val_node = owned_value_mutable;
     END
-    MUTABLE ef: ?Type = COPY expected_fields[_];
+    MUTABLE ef: ?Type = COPY expected_fields[rtoc_each_key];
     IF ((ef != NIL) AND type__indirect?(ef)) THEN
         val_node.needs_heap_create = TRUE;
         IF typeAnalysisSession__current_fn_ctx(rtoc_self_view) != NIL THEN
@@ -10872,17 +10873,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         typeAnalysisSession__record_effect(rtoc_self_view, symbol("HEAP"));
     END
-    MUTABLE expected_type: ?Type = COPY expected_fields[_];
+    MUTABLE expected_type: ?Type = COPY expected_fields[rtoc_each_key];
     MUTABLE actual = &val_node.full_type_mut({:context: "union variant field"});
     IF !(TRY (type__accepts?(UNWRAP (expected_type), actual))) THEN
-        typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_INLINE_VARIANT_TYPE_MISMATCH }, [], {:union: node.union_name, :variant: node.variant_name, :field: _, :expected: type__resolved(UNWRAP (expected_type)), :got: (IF actual != NIL THEN
+        typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_INLINE_VARIANT_TYPE_MISMATCH }, [], {:union: node.union_name, :variant: node.variant_name, :field: rtoc_each_key, :expected: type__resolved(UNWRAP (expected_type)), :got: (IF actual != NIL THEN
           actual.resolved()
         ELSE
           NIL
         END)});
     END
     typeAnalysisSession__move_if_not_copyable_mut(rtoc_self_view, &val_node);
-    };
+    END
 }
 END
 PRIVATE FN typeAnalysisSession__record_lock_type_rank_mut(self: TypeAnalysisSession, type_sym: String@symbol, rank: Int64, node: CapabilityWrap) RETURNS ?Int64
@@ -12576,10 +12577,10 @@ PRIVATE FN typeAnalysisSession__resolve_inherent_static_call_mut(MUTABLE self: T
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE call = FuncCall{ token: COPY node.token, name: ImplementationRegistration.function_name(CAST(owner AS String), node.method_name), args: COPY node.args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
-    node.explicit_mutable_argument_tokens.keys() |> EACH {
-    MUTABLE token: Token@multiowned = (node.explicit_mutable_argument_tokens[_] OR_ELSE CAST(panic("missing hash key") AS Token@multiowned));
-    &call.mark_explicit_mutable_argument_mut(_, CAST(COPY token AS Token));
-    };
+    FOR rtoc_each_key IN node.explicit_mutable_argument_tokens.keys() DO
+    MUTABLE token: Token@multiowned = COPY UNWRAP (node.explicit_mutable_argument_tokens[rtoc_each_key]);
+    &call.mark_explicit_mutable_argument_mut(rtoc_each_key, CAST(COPY token AS Token));
+    END
     typeAnalysisSession__resolve_call(&rtoc_self_view, FunctionCallNode{ FuncCall: COPY call }, node.args);
     MUTABLE resolved_return = &call.full_type_mut("inherent static call");
     aST__copy_pipeline_rewrite_metadata_mut(PipelineRewriteNode{ FuncCall: COPY call }, PipelineRewriteNode{ StaticCall: COPY node }, TRUE);
@@ -16237,21 +16238,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END) THEN
       MUTABLE expected_key = TRY (type__key_type(expected_map));
       MUTABLE expected_value = TRY (type__value_type(expected_map));
-      node.pairs.keys() |> EACH {
-    MUTABLE value: Locatable = (node.pairs[_] OR_ELSE CAST(panic("missing hash key") AS Locatable));
-    _.coerced_type = expected_key;
+      FOR rtoc_each_key IN node.pairs.keys() DO
+    MUTABLE value: Locatable = COPY UNWRAP (node.pairs[rtoc_each_key]);
+    rtoc_each_key.coerced_type = expected_key;
     value.coerced_type = expected_value;
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_each_key));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, value));
-    MUTABLE actual_key = &_.full_type_mut("hash literal key");
+    MUTABLE actual_key = &rtoc_each_key.full_type_mut("hash literal key");
     MUTABLE actual_value = &value.full_type_mut("hash literal value");
     IF !(((type__any?(expected_key) OR TRY (type__accepts?(expected_key, actual_key))) OR typeAnalysisSession__is_safe_autocast?(rtoc_self_view, actual_key, castTypeToTypeTypeInput(expected_key)))) THEN
-          typeAnalysisSession__error_mut(rtoc_self_view, _, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_ASSIGN }, [], {:got: actual_key.resolved(), :expected: expected_key});
+          typeAnalysisSession__error_mut(rtoc_self_view, rtoc_each_key, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_ASSIGN }, [], {:got: actual_key.resolved(), :expected: expected_key});
     END
     IF !(((type__any?(expected_value) OR TRY (type__accepts?(expected_value, actual_value))) OR typeAnalysisSession__is_safe_autocast?(rtoc_self_view, actual_value, castTypeToTypeTypeInput(expected_value)))) THEN
           typeAnalysisSession__error_mut(rtoc_self_view, value, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_ASSIGN }, [], {:got: actual_value.resolved(), :expected: expected_value});
     END
-      };
+      END
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ HashLit: COPY node }, expected_map));
       node.storage = :stack;
       RETURN;
@@ -16261,11 +16262,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.storage = :stack;
       RETURN;
     END
-    node.pairs.keys() |> EACH {
-    MUTABLE v: Locatable = (node.pairs[_] OR_ELSE CAST(panic("missing hash key") AS Locatable));
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
+    FOR rtoc_inner_key IN node.pairs.keys() DO
+    MUTABLE v: Locatable = COPY UNWRAP (node.pairs[rtoc_inner_key]);
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_inner_key));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, v));
-    };
+    END
     MUTABLE values = node.pairs.values();
     IF values |> ALL TRY (type__string?((TRY (type__new(_.resolved_type()))))) THEN
       MUTABLE value_type = IF values |> ALL { MUTABLE rtoc_mutable_block_param_403 = COPY _;
@@ -16373,8 +16374,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE type_subst = typeAnalysisSession__literal_type_substitution_mut(rtoc_self_view, node, schema);
-    node.fields.keys() |> EACH {
-    MUTABLE val_node: Any = (node.fields[_] OR_ELSE panic("missing hash key"));
+    FOR rtoc_each_key IN node.fields.keys() DO
+    MUTABLE val_node = COPY UNWRAP (node.fields[rtoc_each_key]);
     TRY (typeAnalysisSession__visit(&rtoc_self_view, val_node));
     IF val_node? IS_A IfStatement AS if_statement THEN
         MUTABLE if_statement_mutable = COPY if_statement;
@@ -16384,36 +16385,36 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE match_statement_mutable = COPY match_statement;
         typeAnalysisSession__promote_to_expr_match_mut(rtoc_self_view, Locatable{ StructLit: COPY node }, &match_statement_mutable);
     END
-    MUTABLE raw_expected: ?Any@multiowned = (IF schema.fields()[_] != NIL THEN
-        (schema.fields()[_]).type()
+    MUTABLE raw_expected: ?Any@multiowned = (IF schema.fields()[rtoc_each_key] != NIL THEN
+        (schema.fields()[rtoc_each_key]).type()
       ELSE
         NIL
       END);
     IF (raw_expected == NIL) THEN
-        MUTABLE valid_fields = schema.fields().keys() |> WHERE !((CAST(_ AS String)).startsWith?("_"));
-        MUTABLE name_tok: ?Token = COPY node.field_tokens[_];
+        MUTABLE valid_fields = schema.fields().keys() |> WHERE !((CAST(rtoc_each_key AS String)).startsWith?("rtoc_each_key"));
+        MUTABLE name_tok: ?Token = COPY node.field_tokens[rtoc_each_key];
         IF name_tok EXISTS AS name_tok_value THEN
-          typeAnalysisSession__emit_typo_suggestion_mut(rtoc_self_view, TypoToken{ TokenMultiowned: COPY name_tok_value }, _, valid_fields, "Struct '${node.name}' has no field '${_}'", "field of ${node.name}", :type, TRUE);
+          typeAnalysisSession__emit_typo_suggestion_mut(rtoc_self_view, TypoToken{ TokenMultiowned: COPY name_tok_value }, rtoc_each_key, valid_fields, "Struct '${node.name}' has no field '${rtoc_each_key}'", "field of ${node.name}", :type, TRUE);
         ELSE
-          typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STRUCT_FIELD_UNRESOLVABLE }, [], {:struct: node.name, :field: _});
+          typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STRUCT_FIELD_UNRESOLVABLE }, [], {:struct: node.name, :field: rtoc_each_key});
         END
     END
     MUTABLE raw_expected_value: Any@multiowned = raw_expected?;
     MUTABLE field_is_borrowed = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_406 = CAST(schema AS StructSchema);
-    TRY (structSchema__borrowed_fields(rtoc_local_receiver_406)) }).contains?(_);
+    TRY (structSchema__borrowed_fields(rtoc_local_receiver_406)) }).contains?(rtoc_each_key);
     MUTABLE expected_type: Type = CAST(typeAnalysisSession__apply_type_subst(rtoc_self_view, raw_expected_value, type_subst) AS Type);
-    MUTABLE kept_param_store = typeAnalysisSession__keep_param_identity_mut(rtoc_self_view, UNWRAP (val_node), expected_type, "${node.name}.${_}");
+    MUTABLE kept_param_store = typeAnalysisSession__keep_param_identity_mut(rtoc_self_view, UNWRAP (val_node), expected_type, "${node.name}.${rtoc_each_key}");
     IF !((field_is_borrowed OR kept_param_store)) THEN
-        typeAnalysisSession__reject_borrowed_value_mut(rtoc_self_view, UNWRAP (val_node), "${node.name}.${_}");
+        typeAnalysisSession__reject_borrowed_value_mut(rtoc_self_view, UNWRAP (val_node), "${node.name}.${rtoc_each_key}");
     END
     MUTABLE is_call_arg = typeAnalysisSession__struct_literal_call_argument_context?(rtoc_self_view);
     MUTABLE owned: ?Locatable = IF !(((field_is_borrowed OR is_call_arg) OR kept_param_store)) THEN
-        typeAnalysisSession__ensure_owned_value_mut(rtoc_self_view, UNWRAP (val_node), castTypeToOptionalTypeTypeInput(expected_type), "${node.name}.${_}")
+        typeAnalysisSession__ensure_owned_value_mut(rtoc_self_view, UNWRAP (val_node), castTypeToOptionalTypeTypeInput(expected_type), "${node.name}.${rtoc_each_key}")
       ELSE
         NIL
       END;
     IF owned EXISTS AS owned_value THEN
-        node.fields[_] = owned_value;
+        node.fields[rtoc_each_key] = owned_value;
         MUTABLE val_node = owned_value;
     END
     MUTABLE actual_type = &val_node.full_type_mut("struct field value");
@@ -16441,7 +16442,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE node_coercion = ((TRY (type__node_reference?(expected_type)) AND !(TRY (type__node_reference?(actual_type)))) AND TRY (type__accepts?(expected_type, actual_type)));
     IF ((actual_type != expected_type) OR node_coercion) THEN
         IF !((typeAnalysisSession__is_safe_autocast?(rtoc_self_view, actual_type, castTypeToTypeTypeInput(expected_type)) OR ((TRY (type__node_reference?(expected_type)) AND TRY (type__accepts?(expected_type, actual_type)))))) THEN
-          typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :FIELD_TYPE_MISMATCH }, [], {:field: _, :expected: expected_type, :got: actual_type});
+          typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :FIELD_TYPE_MISMATCH }, [], {:field: rtoc_each_key, :expected: expected_type, :got: actual_type});
         END
         IF !((indirect_construction OR ((nil_value AND type__indirect?(expected_type))))) THEN
           val_node.coerced_type = expected_type;
@@ -16454,7 +16455,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((field_is_borrowed OR pending_owned_transfer)) THEN
         typeAnalysisSession__move_if_not_copyable_mut(rtoc_self_view, UNWRAP (val_node));
     END
-    };
+    END
     node.borrowed_field_names = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_408 = CAST(schema AS StructSchema);
     TRY (structSchema__borrowed_fields(rtoc_local_receiver_408)) };
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ StructLit: COPY node }, typeAnalysisSession__literal_instance_type(rtoc_self_view, node)));
@@ -22829,20 +22830,32 @@ FN rubyToClearVoid() RETURNS Void ->
 END
 FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END
 FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
   MUTABLE result: []Edit = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END
 FN ruby_array_concat_SymbolEntry_multiowned(left: []SymbolEntry@multiowned, right: []SymbolEntry@multiowned) RETURNS []SymbolEntry@multiowned ->
   MUTABLE result: []SymbolEntry@multiowned = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END
 FN ruby_set_intersection<T>(left: [Set]T, right: [Set]T) RETURNS [Set]T ->

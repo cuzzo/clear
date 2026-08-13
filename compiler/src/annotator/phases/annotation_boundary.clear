@@ -20,15 +20,15 @@ PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: Annota
     &program.full_type_mut("annotation boundary program");
     MUTABLE rtoc_local_receiver_1 = (TRY (annotationTypeInventory__scan(program)));
     TRY (annotationTypeInventory__verify_resolved_mut(rtoc_local_receiver_1));
-    typed_program_value_mutable.resolution.function_registry.nodes.keys() |> EACH {
-  MUTABLE fn_value: FunctionDef@multiowned = (typed_program_value_mutable.resolution.function_registry.nodes[_] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
-  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY &fn_value.full_type_mut("annotation boundary function ${_}") });
+    FOR rtoc_each_key IN typed_program_value_mutable.resolution.function_registry.nodes.keys() DO
+  MUTABLE fn_value: FunctionDef@multiowned = COPY UNWRAP (typed_program_value_mutable.resolution.function_registry.nodes[rtoc_each_key]);
+  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY &fn_value.full_type_mut("annotation boundary function ${rtoc_each_key}") });
   IF !(signature) THEN
         panic("annotation boundary missing function signature for {}");
   END
   MUTABLE derived: ?DerivedFunctionFacts = NIL;
   IF (KEEP products.capability_audit?.derived_program)?.functions != NIL THEN
-        derived = COPY (((KEEP products.capability_audit?.derived_program)?.functions)?[_] OR_ELSE NIL);
+        derived = COPY (((KEEP products.capability_audit?.derived_program)?.functions)?[rtoc_each_key] OR_ELSE NIL);
       END
   IF !(derived) THEN
         panic("annotation boundary missing derived function facts for {}");
@@ -36,7 +36,7 @@ PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: Annota
   IF !((derived.return_type_key == type__semantic_type_key(functionSignature__return_type(signature)))) THEN
         panic("annotation boundary derived return contract mismatch for {}");
   END
-    };
+    END
     MUTABLE rtoc_mutable_receiver_2 = mIRPassState__for_mut(program);
     TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_2, :annotated));
   ELSE

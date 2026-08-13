@@ -59,7 +59,10 @@ FN placement__binding_alloc(storage: ?String@symbol, cleanup_alloc: ?String@symb
   RETURN placement__alloc(cleanup_alloc, default_value);
 END
 FN placement__zig_allocator(value: ?String@symbol, rt_name: ?String) RETURNS String ->
-  MUTABLE rt = (rt_name OR_ELSE "rt");
+  MUTABLE rt: String = "rt";
+  IF rt_name EXISTS AS given_rt THEN
+    rt = COPY given_rt;
+  END
   IF (placement__alloc(value, :heap) == :heap) THEN
     RETURN "${rt}.heapAlloc()";
   ELSE

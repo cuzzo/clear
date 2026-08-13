@@ -7,8 +7,8 @@ REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
 # Ruby module BgCaptureClassifier
 PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?Any = NIL) RETURNS !{String}CaptureAnalysis ->
   MUTABLE analyses: {String}CaptureAnalysis = {};
-  fn_nodes.keys() |> EACH {
-  MUTABLE fn_value: FunctionDef = (fn_nodes[_] OR_ELSE CAST(panic("missing hash key") AS FunctionDef));
+  FOR rtoc_each_key IN fn_nodes.keys() DO
+  MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_each_key]);
   IF !((IF fn_value != NIL THEN
       fn_value.body
     ELSE
@@ -22,28 +22,28 @@ PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, sche
     analyses["${fn_value.name}:${a.object_id()}"] = a;
     rubyToClearVoid()
   }));
-  };
+  END
   RETURN analyses;
 END
 PUB FN bgCaptureClassifier__classify_one_mut(MUTABLE a: CaptureAnalysis, live_param_syms: {String}SymbolEntry, schema_lookup: ?Any = NIL) RETURNS !{String}Strategy ->
-  a.capture_symbols.keys() |> EACH {
-  MUTABLE ignored_entry: SymbolEntry@multiowned = (a.capture_symbols[_] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
-  MUTABLE live: ?SymbolEntry = COPY live_param_syms[_];
+  FOR rtoc_inner_key IN a.capture_symbols.keys() DO
+  MUTABLE ignored_entry: SymbolEntry@multiowned = COPY UNWRAP (a.capture_symbols[rtoc_inner_key]);
+  MUTABLE live: ?SymbolEntry = COPY live_param_syms[rtoc_inner_key];
   IF live EXISTS AS live_value THEN
-      a.capture_symbols[_] = KEEP live_value;
+      a.capture_symbols[rtoc_inner_key] = KEEP live_value;
   END
-  };
+  END
   MUTABLE site_info = CaptureSiteInfo{ copied_names: COPY a.site_copied, moved_names: COPY a.site_moved };
   MUTABLE strategies: {String}Strategy = {};
-  a.captures.keys() |> EACH {
-  MUTABLE type_obj: Type = (a.captures[_] OR_ELSE CAST(panic("missing hash key") AS Type));
-  MUTABLE sym: ?SymbolEntry@multiowned = COPY a.capture_symbols[_];
+  FOR rtoc_inner_key IN a.captures.keys() DO
+  MUTABLE type_obj: Type = COPY UNWRAP (a.captures[rtoc_inner_key]);
+  MUTABLE sym: ?SymbolEntry@multiowned = COPY a.capture_symbols[rtoc_inner_key];
   MUTABLE t: ?Type@multiowned = TRY (bgCaptureClassifier__resolve_capture_type(type_obj, sym));
   IF !(t) THEN
       CONTINUE;
   END
-  strategies[_] = TRY (captureStrategy__classify(_, CAST(t AS Type), site_info, a.resource_captures.contains?(_), schema_lookup));
-  };
+  strategies[rtoc_inner_key] = TRY (captureStrategy__classify(rtoc_inner_key, CAST(t AS Type), site_info, a.resource_captures.contains?(rtoc_inner_key), schema_lookup));
+  END
   a.strategies = strategies;
   a.move_mark_names = strategies.each_with_object(Set[], %(tuple_param_0, set: Tuple<String,Strategy>) -> {
   MUTABLE n = tuple_param_0._0;

@@ -2263,7 +2263,9 @@ PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(self: Capab
 WITH POLYMORPHIC self AS rtoc_self_view {
     capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] = (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] OR_ELSE {});
     MUTABLE caller_families = UNWRAP (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name]);
-    caller_families[callee_name] = (caller_families[callee_name] OR_ELSE List[]);
+    IF !(caller_families.contains?(callee_name)) THEN
+      caller_families[callee_name] = [];
+    END
     RETURN caller_families[callee_name];
 }
 END

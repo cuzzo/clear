@@ -44,17 +44,17 @@ FN lightweightSnapshot__move_action_for_place(self: LightweightSnapshot, place: 
   RETURN COPY self.move_actions[place];
 END
 FN lightweightSnapshot__each_state(self: LightweightSnapshot, block: FN(String, String@symbol) -> Void) RETURNS Void ->
-  self.states.keys() |> EACH {
-  MUTABLE state: String@symbol = (self.states[_] OR_ELSE CAST(panic("missing hash key") AS String@symbol));
-  block(_.path, state);
-  };
+  FOR rtoc_each_key IN self.states.keys() DO
+  MUTABLE state: String@symbol = COPY UNWRAP (self.states[rtoc_each_key]);
+  block(rtoc_each_key.path, state);
+  END
   RETURN NIL;
 END
 FN lightweightSnapshot__each_place_state(self: LightweightSnapshot, block: FN(PlaceId, String@symbol) -> Void) RETURNS Void ->
-  self.states.keys() |> EACH {
-  MUTABLE state: String@symbol = (self.states[_] OR_ELSE CAST(panic("missing hash key") AS String@symbol));
-  block(_, state);
-  };
+  FOR rtoc_inner_key IN self.states.keys() DO
+  MUTABLE state: String@symbol = COPY UNWRAP (self.states[rtoc_inner_key]);
+  block(rtoc_inner_key, state);
+  END
   RETURN NIL;
 END
 PUB STRUCT OwnershipNode {
@@ -140,14 +140,14 @@ FN ownershipGraph__nodes(self: OwnershipGraph) RETURNS !{String}OwnershipNode
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: {String}OwnershipNode = {};
-    rtoc_self_view.completed_nodes.keys() |> EACH {
-    MUTABLE node: OwnershipNode = (rtoc_self_view.completed_nodes[_] OR_ELSE CAST(panic("missing hash key") AS OwnershipNode));
-    out[_.path] = COPY node;
-    };
-    rtoc_self_view.nodes.keys() |> EACH {
-    MUTABLE node: OwnershipNode = (rtoc_self_view.nodes[_] OR_ELSE CAST(panic("missing hash key") AS OwnershipNode));
-    out[_.path] = COPY node;
-    };
+    FOR rtoc_each_key IN rtoc_self_view.completed_nodes.keys() DO
+    MUTABLE node: OwnershipNode = COPY UNWRAP (rtoc_self_view.completed_nodes[rtoc_each_key]);
+    out[rtoc_each_key.path] = COPY node;
+    END
+    FOR rtoc_inner_key IN rtoc_self_view.nodes.keys() DO
+    MUTABLE node: OwnershipNode = COPY UNWRAP (rtoc_self_view.nodes[rtoc_inner_key]);
+    out[rtoc_inner_key.path] = COPY node;
+    END
     RETURN out;
 }
 END
@@ -339,12 +339,12 @@ FN ownershipGraph__prune_scope_mut(MUTABLE self: OwnershipGraph, scope_depth: In
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE places: []PlaceId = ( { MUTABLE rtoc_empty_list_8: []PlaceId = List[]; rtoc_empty_list_8 } );
-    rtoc_self_view.nodes.keys() |> EACH {
-    MUTABLE node: OwnershipNode = (rtoc_self_view.nodes[_] OR_ELSE CAST(panic("missing hash key") AS OwnershipNode));
+    FOR rtoc_each_key IN rtoc_self_view.nodes.keys() DO
+    MUTABLE node: OwnershipNode = COPY UNWRAP (rtoc_self_view.nodes[rtoc_each_key]);
     IF (node.scope_depth >= scope_depth) THEN
-      &places.append(COPY _);
+      &places.append(COPY rtoc_each_key);
     END
-    };
+    END
     IF (places.length() == 0) THEN
       RETURN 0;
     END
@@ -436,22 +436,22 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE move_lines: {PlaceId}Int64 = {};
     MUTABLE move_cols: {PlaceId}Int64 = {};
     MUTABLE move_actions: {PlaceId}String@symbol = {};
-    rtoc_self_view.nodes.keys() |> EACH {
-    MUTABLE v: OwnershipNode = (rtoc_self_view.nodes[_] OR_ELSE CAST(panic("missing hash key") AS OwnershipNode));
-    states[_] = v.state;
+    FOR rtoc_each_key IN rtoc_self_view.nodes.keys() DO
+    MUTABLE v: OwnershipNode = COPY UNWRAP (rtoc_self_view.nodes[rtoc_each_key]);
+    states[rtoc_each_key] = v.state;
     MUTABLE move_line: ?Int64 = v.move_line;
     MUTABLE move_col: ?Int64 = v.move_col;
     MUTABLE move_action: ?String@symbol = v.move_action;
     IF move_line EXISTS AS move_line_value THEN
-        move_lines[_] = move_line_value;
+        move_lines[rtoc_each_key] = move_line_value;
     END
     IF move_col EXISTS AS move_col_value THEN
-        move_cols[_] = move_col_value;
+        move_cols[rtoc_each_key] = move_col_value;
     END
     IF move_action EXISTS AS move_action_value THEN
-        move_actions[_] = move_action_value;
+        move_actions[rtoc_each_key] = move_action_value;
     END
-    };
+    END
     RETURN LightweightSnapshot{ states: COPY states, move_lines: COPY move_lines, move_cols: COPY move_cols, move_actions: COPY move_actions, edge_count: rtoc_self_view.edges.length() };
 }
 END

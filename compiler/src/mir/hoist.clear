@@ -660,8 +660,12 @@ FN rubyToClearVoid() RETURNS Void ->
 END
 FN ruby_array_concat_VarDecl(left: []VarDecl, right: []VarDecl) RETURNS []VarDecl ->
   MUTABLE result: []VarDecl = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END
 FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->

@@ -11750,7 +11750,9 @@ END
 FN ownershipEffect__owned_result_type?(type_info: Type) RETURNS !Bool ->
   MUTABLE ti = TRY (type__success_type(type_info));
   IF type__optional?(ti) THEN
-    ti = (TRY (type__wrapped_type(ti)) OR_ELSE ti);
+    IF (TRY (type__wrapped_type(ti))) EXISTS AS wrapped THEN
+      ti = COPY wrapped;
+    END
   END
   RETURN TRY (type__ownership_bearing?(ti));
 END
@@ -11894,7 +11896,12 @@ FN ownershipEffect__alloc_of(node: ?Emittable) RETURNS ?String@symbol ->
   RETURN ownershipEffect__of(node).alloc;
 END
 FN ownershipEffect__from_effects(effects_value: []OwnershipEffect) RETURNS OwnershipEffect ->
-  MUTABLE owned = effects_value |> WHERE _.produces_owned;
+  MUTABLE owned: []OwnershipEffect = [];
+  FOR effect IN effects_value DO
+    IF effect.produces_owned THEN
+      &owned.append(COPY effect);
+    END
+  END
   RETURN ownershipEffect__effect_when(!((owned.length() == 0)), ownershipEffect__owned(ownershipEffect__converged_effect_alloc(owned), :uniform));
 END
 FN ownershipEffect__from_children(children: []Emittable) RETURNS OwnershipEffect ->
@@ -12035,7 +12042,9 @@ PRIVATE FN ownershipEffect__transferred_break_ident_effect(stmts: []Emittable, v
   END
   MUTABLE cleanup_kind: String@symbol = :uniform;
   IF init_effect.produces_owned THEN
-    cleanup_kind = (COPY init_effect.cleanup_kind OR_ELSE :uniform);
+    IF init_effect.cleanup_kind EXISTS AS init_cleanup_kind THEN
+      cleanup_kind = COPY init_cleanup_kind;
+    END
   END
   MUTABLE active = ((!((name.length() == 0)) AND has_mark) AND has_transfer);
   RETURN ownershipEffect__effect_when(active, ownershipEffect__owned(mark_alloc, cleanup_kind, TRUE, name));
@@ -12257,10 +12266,10 @@ FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, S
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    rtoc_self_view.slots.keys() |> EACH {
-    MUTABLE alloc: String@symbol = (rtoc_self_view.slots[_] OR_ELSE CAST(panic("missing hash key") AS String@symbol));
-    blk(symbol(_), alloc);
-    };
+    FOR rtoc_each_key IN rtoc_self_view.slots.keys() DO
+    MUTABLE alloc: String@symbol = COPY UNWRAP (rtoc_self_view.slots[rtoc_each_key]);
+    blk(symbol(rtoc_each_key), alloc);
+    END
     NIL;
 }
 END
@@ -12329,7 +12338,12 @@ FN inlineAllocMetadata__single_alloc(self: InlineAllocMetadata) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE uniq = CAST(((TRY (inlineAllocMetadata__values(rtoc_self_view))) |> DISTINCT _) AS []String@symbol);
+    MUTABLE uniq: []String@symbol = [];
+    FOR alloc_value IN (TRY (inlineAllocMetadata__values(rtoc_self_view))) DO
+      IF !(uniq.contains?(alloc_value)) THEN
+        &uniq.append(COPY alloc_value);
+      END
+    END
     IF (uniq.length() == 1) THEN
       RETURN uniq.first();
     ELSE
@@ -12356,10 +12370,10 @@ FN inlineAllocMetadata__with_all(self: InlineAllocMetadata, alloc: String@symbol
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE updated: {String@symbol}String@symbol = {};
-    rtoc_self_view.slots.keys() |> EACH {
-    MUTABLE ignored_slot_alloc: String@symbol = (rtoc_self_view.slots[_] OR_ELSE CAST(panic("missing hash key") AS String@symbol));
-    updated[_] = COPY alloc;
-    };
+    FOR rtoc_each_key IN rtoc_self_view.slots.keys() DO
+    MUTABLE ignored_slot_alloc: String@symbol = COPY UNWRAP (rtoc_self_view.slots[rtoc_each_key]);
+    updated[rtoc_each_key] = COPY alloc;
+    END
     RETURN inlineAllocMetadata__new(updated[:alloc], updated[:key_alloc], updated[:val_alloc], updated[:shard_alloc]);
 }
 END
@@ -12863,7 +12877,11 @@ STRUCT FsmDestroyCleanup {
 }
 
 FN fsmDestroyCleanup__destroy_order_bucket(self: FsmDestroyCleanup) RETURNS Int64 ->
-  RETURN ((CAST({:capture: 1, :fresh_heap: 1, :body: 2, :owned_result: 2} AS {String@symbol}Int64))[self.source_kind] OR_ELSE 2);
+  MUTABLE ranks: {String@symbol}Int64 = {:capture: 1, :fresh_heap: 1, :body: 2, :owned_result: 2};
+  IF ranks[self.source_kind] EXISTS AS rank THEN
+    RETURN rank;
+  END
+  RETURN 0;
 END
 FN fsmDestroyCleanup__destroy_order_index(self: FsmDestroyCleanup, index_value: Int64) RETURNS Int64 ->
   RETURN COPY index_value;
@@ -12914,7 +12932,11 @@ STRUCT FsmDestroyStmt {
 }
 
 FN fsmDestroyStmt__destroy_order_bucket(self: FsmDestroyStmt) RETURNS Int64 ->
-  RETURN ((CAST({:capture: 1, :fresh_heap: 1, :body: 2, :owned_result: 2} AS {String@symbol}Int64))[self.source_kind] OR_ELSE 2);
+  MUTABLE ranks: {String@symbol}Int64 = {:capture: 1, :fresh_heap: 1, :body: 2, :owned_result: 2};
+  IF ranks[self.source_kind] EXISTS AS rank THEN
+    RETURN rank;
+  END
+  RETURN 2;
 END
 FN fsmDestroyStmt__destroy_order_index(self: FsmDestroyStmt, index_value: Int64) RETURNS Int64 ->
   RETURN COPY index_value;
@@ -13318,7 +13340,19 @@ FN ownershipTransferPlan__marks(self: OwnershipTransferPlan) RETURNS ![]Emittabl
   RETURN out;
 END
 FN mIR__kept_edge_transfer_boundary(names: []String) RETURNS ![]Emittable ->
-  RETURN (CAST((names |> DISTINCT _) AS []String)) |> UNNEST TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY _, target: :owned_sink, target_alloc: :heap, move_guarded: TRUE })));
+  MUTABLE unique_names: []String = [];
+  FOR transfer_name IN names DO
+    IF !(unique_names.contains?(transfer_name)) THEN
+      &unique_names.append(COPY transfer_name);
+    END
+  END
+  MUTABLE marks: []Emittable = [];
+  FOR transfer_name IN unique_names DO
+    FOR mark IN (TRY (ownershipTransferPlan__marks(OwnershipTransferPlan{ name: COPY transfer_name, target: :owned_sink, target_alloc: :heap, move_guarded: TRUE }))) DO
+      &marks.append(COPY mark);
+    END
+  END
+  RETURN marks;
 END
 FN mIR__ownership_transfer_marks(name: String, target: String@symbol, target_alloc: ?String@symbol = NIL, move_guarded: Bool = FALSE) RETURNS ![]Emittable ->
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: COPY target, target_alloc: COPY target_alloc, move_guarded: COPY move_guarded })));
@@ -14107,8 +14141,12 @@ FN rubyToClearVoid() RETURNS Void ->
 END
 FN ruby_array_concat_MIRBodySlot(left: []MIRBodySlot, right: []MIRBodySlot) RETURNS []MIRBodySlot ->
   MUTABLE result: []MIRBodySlot = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR slot IN left DO
+    &result.append(COPY slot);
+  END
+  FOR slot IN right DO
+    &result.append(COPY slot);
+  END
   RETURN result;
 END
 FN ruby_wrap_optional_String_symbol_MIRReturnValue(value: ?String@symbol) RETURNS ?MIRReturnValue ->

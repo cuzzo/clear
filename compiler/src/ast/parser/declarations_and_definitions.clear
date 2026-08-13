@@ -757,13 +757,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE effects_span: ?EffectSpan = COPY parsed_effects.span;
     MUTABLE requires_clauses = TRY (clearParser__parse_requires_clauses(&rtoc_self_view, name));
     IF !((early_requires_clauses.length() == 0)) THEN
-      early_requires_clauses.keys() |> EACH {
-    MUTABLE v: String@symbol = (early_requires_clauses[_] OR_ELSE panic("missing hash key"));
-    IF requires_clauses.contains?(_) THEN
-          clearParser__error_mut(rtoc_self_view, fn_token, CodeOrMessage{ SymbolValue: :DUPLICATE_REQUIRES_CLAUSE }, [], {:fn: "${name}", :name: "${_}"});
+      FOR rtoc_each_key IN early_requires_clauses.keys() DO
+    MUTABLE v: String@symbol = (early_requires_clauses[rtoc_each_key] OR_ELSE panic("missing hash key"));
+    IF requires_clauses.contains?(rtoc_each_key) THEN
+          clearParser__error_mut(rtoc_self_view, fn_token, CodeOrMessage{ SymbolValue: :DUPLICATE_REQUIRES_CLAUSE }, [], {:fn: "${name}", :name: "${rtoc_each_key}"});
     END
-    requires_clauses[_] = COPY v;
-      };
+    requires_clauses[rtoc_each_key] = COPY v;
+      END
     END
     MUTABLE pre_clauses: []{String@symbol}ContractClauseValue = List[];
     WHILE castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :KEYWORD, "PRE")) DO

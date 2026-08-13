@@ -1185,8 +1185,12 @@ FN castTransformValueToHashMapStringTypeMultiowned(value: TransformValue) RETURN
 END
 FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END
 FN ruby_union_scalar_equal_SegmentSlot_String_symbol(value: SegmentSlot, expected: String@symbol) RETURNS Bool ->

@@ -74,18 +74,18 @@ PUB FN mIRLoweringSchemas__merge_mut(MUTABLE self: MIRLoweringSchemas, struct_sc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    struct_schemas.keys() |> EACH {
-    MUTABLE schema: StructSchema = (struct_schemas[_] OR_ELSE CAST(panic("missing hash key") AS StructSchema));
-    rtoc_self_view.struct_schemas[_] = schema;
-    };
-    enum_schemas.keys() |> EACH {
-    MUTABLE variants: []MIRLoweringSchemasEnumVariantsItem = (enum_schemas[_] OR_ELSE CAST(panic("missing hash key") AS []MIRLoweringSchemasEnumVariantsItem));
-    rtoc_self_view.enum_schemas[_] = COPY variants;
-    };
-    union_schemas.keys() |> EACH {
-    MUTABLE schema: UnionSchema = (union_schemas[_] OR_ELSE CAST(panic("missing hash key") AS UnionSchema));
-    rtoc_self_view.union_schemas[_] = schema;
-    };
+    FOR rtoc_each_key IN struct_schemas.keys() DO
+    MUTABLE schema: StructSchema = COPY UNWRAP (struct_schemas[rtoc_each_key]);
+    rtoc_self_view.struct_schemas[rtoc_each_key] = schema;
+    END
+    FOR rtoc_inner_key IN enum_schemas.keys() DO
+    MUTABLE variants: []MIRLoweringSchemasEnumVariantsItem = COPY UNWRAP (enum_schemas[rtoc_inner_key]);
+    rtoc_self_view.enum_schemas[rtoc_inner_key] = COPY variants;
+    END
+    FOR rtoc_inner_key IN union_schemas.keys() DO
+    MUTABLE schema: UnionSchema = COPY UNWRAP (union_schemas[rtoc_inner_key]);
+    rtoc_self_view.union_schemas[rtoc_inner_key] = schema;
+    END
 }
 END
 PRIVATE FN mIRLoweringSchemas__schema_key(self: MIRLoweringSchemas, name: MIRLoweringSchemasSchemaName) RETURNS String@symbol

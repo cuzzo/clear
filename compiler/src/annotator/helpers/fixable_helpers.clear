@@ -1352,7 +1352,11 @@ FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeCo
 END
 FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
   MUTABLE result: []Edit = [];
-  left |> EACH { &result.append(COPY _); };
-  right |> EACH { &result.append(COPY _); };
+  FOR rtoc_left_item IN left DO
+    &result.append(COPY rtoc_left_item);
+  END
+  FOR rtoc_right_item IN right DO
+    &result.append(COPY rtoc_right_item);
+  END
   RETURN result;
 END

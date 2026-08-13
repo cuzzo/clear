@@ -83,12 +83,12 @@ PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImpor
   END
   MUTABLE fn_sigs = TRY (functionSignature__lowering_signatures(ast, TRY (semanticAnnotator__semantic_root_scope(annotator))));
   MUTABLE moved_guard_info: {String}{String}Bool = {};
-  fn_nodes.keys() |> EACH {
-  MUTABLE fn_value: FunctionDef = (fn_nodes[_] OR_ELSE CAST(panic("missing hash key") AS FunctionDef));
+  FOR rtoc_each_key IN fn_nodes.keys() DO
+  MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_each_key]);
   IF fn_value.moved_guard_info THEN
-    moved_guard_info[_] = fn_value.moved_guard_info;
+    moved_guard_info[rtoc_each_key] = fn_value.moved_guard_info;
   END
-  };
+  END
   RETURN CompilerFrontendResult{ ast: ast, annotator: annotator, lifecycle_registry: lifecycle_registry, derived_program: derived_program, program_mir_facts: KEEP mir_pass.program_facts, fn_nodes: fn_nodes, fn_sigs: fn_sigs, struct_schemas: struct_schemas, enum_schemas: COPY enum_schemas, union_schemas: union_schemas, moved_guard_info: COPY moved_guard_info };
 END
 PUB FN compilerFrontend__synthesize_test_body_wrappers_mut(ast: Program, MUTABLE fn_nodes: {String}FunctionDef) RETURNS ![]FunctionDef ->

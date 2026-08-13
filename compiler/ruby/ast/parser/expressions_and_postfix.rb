@@ -393,7 +393,9 @@ class ClearParser
   # UNWRAP makes an optional-to-definite conversion visible at the binding
   # site. Unlike TRY, it deliberately uses the existing explicit optional
   # unwrap semantics rather than adding an error channel to the function.
-  sig { returns(AST::OptionalUnwrap) }
+  # A suffix after the parens applies to the UNWRAPPED value, so the result is
+  # not always the OptionalUnwrap itself.
+  sig { returns(AST::Node) }
   def parse_unwrap_expression
     token = consume(:KEYWORD, 'UNWRAP')
     # `UNWRAP (expr).method()` unwraps the PARENTHESIZED expression, then calls

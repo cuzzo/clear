@@ -35,18 +35,18 @@ PUB STRUCT FrozenCleanupFacts {
 
 PUB FN frozenCleanupFacts__from_bindings(bindings: {String}CleanupEntry) RETURNS FrozenCleanupFacts ->
   MUTABLE entries: {PlaceId}CleanupEntry@multiowned = {};
-  bindings.keys() |> EACH {
-  MUTABLE entry: CleanupEntry = (bindings[_] OR_ELSE CAST(panic("missing hash key") AS CleanupEntry));
-  entries[placeId__from_path(Path{ StringValue: COPY _ })] = COPY entry;
-  };
+  FOR rtoc_each_key IN bindings.keys() DO
+  MUTABLE entry: CleanupEntry = COPY UNWRAP (bindings[rtoc_each_key]);
+  entries[placeId__from_path(Path{ StringValue: COPY rtoc_each_key })] = COPY entry;
+  END
   RETURN frozenCleanupFacts__build(entries);
 END
 PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String}CleanupEntry, entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
   MUTABLE _ = COPY fn_node;
-  bindings.keys() |> EACH {
-  MUTABLE entry: CleanupEntry = (bindings[_] OR_ELSE CAST(panic("missing hash key") AS CleanupEntry));
-  entries[placeId__from_path(_)] = (entries[placeId__from_path(_)] OR_ELSE entry);
-  };
+  FOR rtoc_inner_key IN bindings.keys() DO
+  MUTABLE entry: CleanupEntry = COPY UNWRAP (bindings[rtoc_inner_key]);
+  entries[placeId__from_path(rtoc_inner_key)] = (entries[placeId__from_path(rtoc_inner_key)] OR_ELSE entry);
+  END
   RETURN frozenCleanupFacts__build(entries);
 END
 PUB FN frozenCleanupFacts__build(entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
@@ -117,10 +117,10 @@ PUB FN frozenCleanupFacts__bindings(self: FrozenCleanupFacts) RETURNS !{String}C
   });
 END
 PUB FN frozenCleanupFacts__each_entry(self: FrozenCleanupFacts, block: FN(PlaceId, CleanupEntry) -> Void) RETURNS Void ->
-  self.entries_by_place.keys() |> EACH {
-  MUTABLE entry: CleanupEntry@multiowned = (self.entries_by_place[_] OR_ELSE CAST(panic("missing hash key") AS CleanupEntry@multiowned));
-  block(_, entry);
-  };
+  FOR rtoc_each_key IN self.entries_by_place.keys() DO
+  MUTABLE entry: CleanupEntry@multiowned = COPY UNWRAP (self.entries_by_place[rtoc_each_key]);
+  block(rtoc_each_key, entry);
+  END
   NIL;
 END
 PUB STRUCT CleanupClassificationPlan {

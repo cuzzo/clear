@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_73656d616e7469632f706173735f73746174652e636c656172"
 REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172"
 REQUIRE "pkg:rtoc_6173742f7374727563745f6669656c642e636c656172"
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
@@ -27,7 +28,7 @@ PUB UNION CallName { StringValue: String, Locatable: Locatable }
 PUB UNION IsARight { Type: Type, Locatable: Locatable }
 PUB UNION AssertMessage { StringValue: String, SymbolValue: String@symbol }
 PUB UNION StubValue { StringValue: String, Locatable: Locatable }
-PUB UNION PassStateValue { Unset: Bool }
+PUB UNION PassStateValue { Unset: Bool, MIRPassState: MIRPassState@multiowned }
 PUB UNION TensePlanValue { Unset: Bool }
 PUB UNION AssignmentName { StringValue: String, Identifier: Identifier, GetField: GetField, GetIndex: GetIndex }
 PUB UNION PipelineRewriteNode { Identifier: Identifier, FuncCall: FuncCall, MethodCall: MethodCall, BinaryOp: BinaryOp, GetField: GetField, GetIndex: GetIndex, BindExpr: BindExpr, Assignment: Assignment, UnaryOp: UnaryOp, CopyNode: CopyNode, MoveNode: MoveNode, KeepNode: KeepNode, ShareNode: ShareNode, WithBlock: WithBlock, StructLit: StructLit, HashLit: HashLit, ListLit: ListLit, BlockExpr: BlockExpr, Assert: Assert, IfStatement: IfStatement, StaticCall: StaticCall }

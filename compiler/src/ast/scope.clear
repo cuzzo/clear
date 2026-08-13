@@ -85,10 +85,10 @@ FN scopeBindings__each(self: ScopeBindings, block: FN(String, SymbolEntry) -> Vo
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    rtoc_self_view.entries.keys() |> EACH {
-    MUTABLE entry: SymbolEntry@multiowned = (rtoc_self_view.entries[_] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
-    block(_, entry);
-    };
+    FOR rtoc_each_key IN rtoc_self_view.entries.keys() DO
+    MUTABLE entry: SymbolEntry@multiowned = COPY UNWRAP (rtoc_self_view.entries[rtoc_each_key]);
+    block(rtoc_each_key, entry);
+    END
     NIL;
 }
 END
@@ -251,12 +251,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE cursor: ?Scope@multiowned = COPY rtoc_self_view.parent;
     WHILE !((cursor == NIL)) DO
       MUTABLE ancestor = cursor?;
-      ancestor.types.keys() |> EACH {
-    MUTABLE entry: ScopeTypeEntry = (ancestor.types[_] OR_ELSE CAST(panic("missing hash key") AS ScopeTypeEntry));
-      IF !(visible.contains?(_)) THEN
-        visible[_] = COPY entry;
+      FOR rtoc_each_key IN ancestor.types.keys() DO
+    MUTABLE entry: ScopeTypeEntry = COPY UNWRAP (ancestor.types[rtoc_each_key]);
+      IF !(visible.contains?(rtoc_each_key)) THEN
+        visible[rtoc_each_key] = COPY entry;
       END
-      };
+      END
       cursor = COPY KEEP ancestor.parent;
     END
     RETURN visible;
@@ -406,12 +406,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE cursor: ?Scope@multiowned = COPY rtoc_self_view.parent;
     WHILE !((cursor == NIL)) DO
       MUTABLE ancestor = cursor?;
-      ancestor.binding_entries.keys() |> EACH {
-    MUTABLE entry: SymbolEntry@multiowned = (ancestor.binding_entries[_] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
-      IF !(visible.contains?(_)) THEN
-        visible[_] = COPY entry;
+      FOR rtoc_each_key IN ancestor.binding_entries.keys() DO
+    MUTABLE entry: SymbolEntry@multiowned = COPY UNWRAP (ancestor.binding_entries[rtoc_each_key]);
+      IF !(visible.contains?(rtoc_each_key)) THEN
+        visible[rtoc_each_key] = COPY entry;
       END
-      };
+      END
       cursor = COPY KEEP ancestor.parent;
     END
     RETURN visible;

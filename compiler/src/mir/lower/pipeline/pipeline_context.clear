@@ -581,10 +581,10 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_hash_lit(MUTABLE self: Pipeli
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE pairs: {Locatable}Locatable = COPY node.pairs;
     MUTABLE new_pairs: {Locatable}Locatable = {};
-    pairs.keys() |> EACH {
-    MUTABLE value: Locatable = (pairs[_] OR_ELSE CAST(panic("missing hash key") AS Locatable));
-    new_pairs[_] = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, value));
-    };
+    FOR rtoc_each_key IN pairs.keys() DO
+    MUTABLE value: Locatable = COPY UNWRAP (pairs[rtoc_each_key]);
+    new_pairs[rtoc_each_key] = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, value));
+    END
     IF (new_pairs == pairs) THEN
       RETURN COPY Locatable{ HashLit: COPY node };
     END
