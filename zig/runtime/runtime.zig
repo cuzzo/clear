@@ -454,8 +454,9 @@ pub const Runtime = struct {
         if (arena_free_check and buf.len > 0 and !self.overflow_arena.owns(buf.ptr)) {
             std.debug.print(
                 "\n[CLEAR] frame free of memory this arena never allocated: ptr={x} len={d}\n" ++
-                    "        A frame cleanup was emitted for a value the frame does not own.\n",
-                .{ @intFromPtr(buf.ptr), buf.len },
+                    "        A frame cleanup was emitted for a value the frame does not own.\n" ++
+                    "        bytes: \"{s}\"\n",
+                .{ @intFromPtr(buf.ptr), buf.len, buf[0..@min(buf.len, 64)] },
             );
             std.debug.dumpCurrentStackTrace(.{});
             @panic("frame allocator asked to free foreign memory");
