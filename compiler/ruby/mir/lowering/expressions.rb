@@ -2703,6 +2703,13 @@ module MIRLoweringExpressions
     helper, extra_args = pick_equality_helper(left, right)
     return nil unless helper
 
+    # expectEqualStrings takes []const u8, so a Symbol operand crosses a String
+    # coercion boundary here exactly as it does at a call or a cast.
+    if helper == "expectEqualStrings"
+      left_mir = widen_symbol_to_bytes(left_mir, left)
+      right_mir = widen_symbol_to_bytes(right_mir, right)
+    end
+
     # Argument order matches the Zig stdlib convention: expected
     # first, actual second. CLEAR doesn't distinguish, so we use
     # left=expected, right=actual.

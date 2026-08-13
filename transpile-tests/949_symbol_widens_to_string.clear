@@ -48,4 +48,10 @@ FN main() RETURNS Void ->
   ASSERT kept == :beta, "symbol fallback into a symbol merge stays a handle";
   MUTABLE narrowed: String@symbol = (none OR_ELSE "gamma");
   ASSERT narrowed == symbol("gamma"), "a literal fallback narrows into a symbol merge";
+
+  # A message-less ASSERT lowers to Zig's expectEqualStrings instead of
+  # CheatLib.assert, and that helper takes []const u8 -- one more String
+  # coercion boundary the handle has to widen at.
+  ASSERT tag == :alpha;
+  ASSERT echo(tag) == "alpha";
 END
