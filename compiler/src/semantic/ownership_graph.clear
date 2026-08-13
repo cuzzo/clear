@@ -584,7 +584,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN ownershipGraph__collect_descendants(self: OwnershipGraph, path: String, MUTABLE result: []String) RETURNS ![]String
+PRIVATE FN ownershipGraph__collect_descendants(self: OwnershipGraph, path: String, MUTABLE result: []String) RETURNS ![Set]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

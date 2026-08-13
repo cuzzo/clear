@@ -984,6 +984,11 @@ class Type
     end
     if t.array?
       element = T.cast(t.element_type, Type)
+      # A Set is array-shaped, so without this it prints as `[]T` -- and a
+      # genuine Set/list mismatch reads as "expected '[]String', but returned
+      # '[]String'", which sends the reader looking for a bug in the checker.
+      return "[Set]#{surface_name_type(element)}" if t.set_collection?
+
       return "#{array_capacity_suffix(t.capacity)}#{surface_name_type(element)}"
     end
     if t.map?
