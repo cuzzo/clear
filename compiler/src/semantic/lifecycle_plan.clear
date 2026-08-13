@@ -155,13 +155,27 @@ PRIVATE FN linearResourceFacts__resource_seed_and_dependencies(type_info: Type, 
     END
     };
   ELSE_IF schema? IS_A UnionSchema AS union_schema THEN
-    FOR _ IN union_schema.variants.values() DO
-    IF _ IS_A InlineStructVariant@multiowned THEN
-      FOR _ IN _.fields().values() DO
+    FOR variant_slot IN union_schema.variants.values() DO
+    IF variant_slot EXISTS AS variant_value THEN
+    IF variant_value IS_A InlineStructVariant AS inline_variant THEN
+      FOR _ IN inline_variant.fields.values() DO
       &dependencies.append(CAST(TRY (lifecycleRegistry__concrete_schema_type(type_info, _, union_schema.type_params)) AS Type));
       END
-    ELSE_IF _ THEN
-      &dependencies.append(CAST(TRY (lifecycleRegistry__concrete_schema_type(type_info, _, union_schema.type_params)) AS Type));
+    ELSE
+      # The variant slot is the union the schema stores; concrete_schema_type
+      # takes a TypeTypeInput, so map the arms that carry one.
+      MUTABLE variant_input: ?TypeTypeInput = NIL;
+      IF variant_value IS_A Type AS variant_type THEN
+        variant_input = TypeTypeInput{ Type: COPY variant_type };
+      ELSE_IF variant_value IS_A FunctionType AS variant_fn THEN
+        variant_input = TypeTypeInput{ FunctionType: COPY variant_fn };
+      ELSE_IF variant_value IS_A String@symbol AS variant_symbol THEN
+        variant_input = TypeTypeInput{ SymbolValue: COPY variant_symbol };
+      END
+      IF variant_input EXISTS AS variant_input_value THEN
+        &dependencies.append(CAST(TRY (lifecycleRegistry__concrete_schema_type(type_info, variant_input_value, union_schema.type_params)) AS Type));
+      END
+    END
     END
     END
   END
