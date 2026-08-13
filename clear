@@ -1540,7 +1540,11 @@ when 'test'
       merged = ZigCoverageSupport.merge!('examples-benchmarks')
       puts "Merged Zig coverage: #{merged}" if merged
     end
-    exit(failed_names.any? ? 1 : 0)
+    # A detected memory leak is a failure, not a warning: the run prints
+    # "MEMORY LEAKS: N" but must also exit non-zero, or `clear test <dir>`
+    # reports success on a leak and any caller (CI, an agent, a human checking
+    # $?) is silently told the suite is clean.
+    exit((failed_names.any? || leak_tests.any?) ? 1 : 0)
   else
     source = File.expand_path(source)
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
@@ -1613,8 +1617,15 @@ when 'test'
     # filter narrows the run; without tags we keep filename filtering
     # as the default.
     cmd_parts = [ZIG, 'test']
-    cmd_parts += ['--cache-dir', File.join(build_dir, '.zig-cache')]
-    cmd_parts += ['--global-cache-dir', File.join(build_dir, '.zig-global-cache')]
+    # The Zig cache is content-addressed and safe to share, so point it at a
+    # stable location instead of inside the per-process build dir, which is
+    # deleted on exit. Every test program imports the same runtime/ and lib/
+    # modules, so a shared cache means only the generated root is analysed
+    # per run: 4.96s cold, 1.84s for every later program, same or not.
+    shared_zig_cache = File.join(ZIG_DIR, '.clear-cache', 'test-zig-cache')
+    FileUtils.mkdir_p(shared_zig_cache)
+    cmd_parts += ['--cache-dir', File.join(shared_zig_cache, 'local')]
+    cmd_parts += ['--global-cache-dir', File.join(shared_zig_cache, 'global')]
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc']
     # `--safe` / `--optimized` route through LLVM rather than the self-hosted
