@@ -11407,8 +11407,13 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
 
       clear, = transpile_with_ir(source)
-      expect(clear).to match(/IF value != NIL THEN\n\s+MUTABLE rtoc_mutable_receiver_1 = \(value\?\);.*value__mark_mut\(&rtoc_mutable_receiver_1\);\n\s+END/m)
+      # The guard narrows `value`, so it is already a mutable storage path and
+      # needs no receiver temp. It used to be unwrapped to `(value?)`, which is
+      # not a storage path -- hence the temp -- and which the frontend now
+      # rejects as an unwrap of an already-narrowed value.
+      expect(clear).to match(/IF value != NIL THEN\n\s+value__mark_mut\(&value\);\n\s*END/m)
       expect(clear).not_to include("(IF value != NIL")
+      expect(clear).not_to include("value?")
     end
 
     it "normalizes static operator reduce forms without reconstructing a block" do
