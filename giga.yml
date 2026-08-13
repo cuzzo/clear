@@ -116,6 +116,9 @@ producers:
         evidence_scope:
           selection: zig-production
           test_set: zig-unit
+      - kind: auxiliary
+        format: coverage-inventory
+        path: .giga/evidence/zig-coverage-inventory.json
 
   compiler-facts:
     executor: gigasail
