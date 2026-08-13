@@ -348,7 +348,7 @@ FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -
   IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
       RETURN;
   END
-  IF !(node.typed?()) THEN
+  IF type__untyped?(TRY (aST__full_type_mut(node))) THEN
       RETURN;
   END
   &inventoried_bindings.append(castLocatableToSemanticLifecycleRegistryBindingNode(COPY node));
@@ -358,7 +358,7 @@ FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -
   WHILE rtoc_idx < inventoried_bindings.length() DO
     MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
       IF TRUE THEN
-        symbol_branch_value = (MATCH inventoried_bindings[rtoc_idx]? START SemanticLifecycleRegistryBindingNode.VarDecl AS item -> item.symbol, SemanticLifecycleRegistryBindingNode.BindExpr AS item -> item.symbol, SemanticLifecycleRegistryBindingNode.DestructureTarget AS item -> item.symbol END);
+        MATCH inventoried_bindings[rtoc_idx]? START SemanticLifecycleRegistryBindingNode.VarDecl AS item -> symbol_branch_value = item.symbol;, SemanticLifecycleRegistryBindingNode.BindExpr AS item -> symbol_branch_value = item.symbol;, SemanticLifecycleRegistryBindingNode.DestructureTarget AS item -> symbol_branch_value = item.symbol; END
       ELSE
         symbol_branch_value = NIL;
       END
@@ -377,7 +377,7 @@ FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    IF !(inventoried_bindings[rtoc_idx]?.typed?()) THEN
+    IF type__untyped?(TRY (aST__full_type_mut(castSemanticLifecycleRegistryBindingNodeToLocatable(UNWRAP (inventoried_bindings[rtoc_idx]))))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -386,29 +386,23 @@ FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE plan = TRY (lifecyclePlanner__plan_binding(inventoried_bindings[rtoc_idx]?.full_type_mut("binding lifecycle inventory"), castSemanticLifecycleRegistryBindingNodeToLocatable(inventoried_bindings[rtoc_idx]?), schema_lookup, resource_facts));
+    MUTABLE plan = TRY (lifecyclePlanner__plan_binding(TRY (aST__full_type_mut(castSemanticLifecycleRegistryBindingNodeToLocatable(UNWRAP (inventoried_bindings[rtoc_idx])))), castSemanticLifecycleRegistryBindingNodeToLocatable(inventoried_bindings[rtoc_idx]?), schema_lookup, resource_facts));
     MUTABLE existing: ?LifecyclePlan = COPY binding_plans[UNWRAP (place_id)];
-    MUTABLE existing_close: ?[List, List]Any = NIL;
-    IF (IF existing != NIL THEN
-        ((existing?).resource_close_plan).actions
-      ELSE
-        NIL
-      END) != NIL THEN
-        existing_close = COPY (((IF existing != NIL THEN
-        ((existing?).resource_close_plan).actions
-      ELSE
-        NIL
-      END))?) |> SELECT [_.call_kind().serialize(), _.name(), _.field_path(), _.runtime_heap_alloc_args()];
+    MUTABLE existing_close: ?[]String = NIL;
+    IF existing EXISTS AS existing_plan THEN
+      IF existing_plan.resource_close_plan EXISTS AS existing_close_plan THEN
+        existing_close = COPY existing_close_plan.actions |> SELECT "${_.name}|${_.field_path.join(",")}|${_.runtime_heap_alloc_args.toString()}";
       END
-    MUTABLE planned_close: ?[List, List]Any = NIL;
+    END
+    MUTABLE planned_close: ?[]String = NIL;
     IF plan.resource_close_plan?.actions != NIL THEN
-        planned_close = COPY ((plan.resource_close_plan?.actions)?) |> SELECT [_.call_kind.serialize(), _.name, _.field_path, _.runtime_heap_alloc_args];
+        planned_close = COPY ((plan.resource_close_plan?.actions)?) |> SELECT "${_.name}|${_.field_path.join(",")}|${_.runtime_heap_alloc_args.toString()}";
       END
     MUTABLE same_contract = (((((existing != NIL) AND (existing.type_key == plan.type_key)) AND (existing.drop_strategy == plan.drop_strategy)) AND (existing.copy_strategy == plan.copy_strategy)) AND (existing_close == planned_close));
     IF ((existing != NIL) AND !(same_contract)) THEN
         panic("{}{}{}");
     END
-    binding_plans[place_id] = plan;
+    binding_plans[UNWRAP (place_id)] = plan;
   rtoc_idx = rtoc_idx + 1;
   END
   RETURN lifecycleRegistry__new(plans, binding_plans);
