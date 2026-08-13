@@ -286,7 +286,7 @@ PRIVATE FN lifecyclePlanner__mutable_owned_string_binding?(type_info: Type, node
   END
   MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
   RETURN !((IF symbol != NIL THEN
-    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_4 = (symbol?);
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_4 = (symbol);
   symbolEntry__borrow_provenance?(rtoc_local_receiver_4) }
   ELSE
     NIL
@@ -303,12 +303,16 @@ FN lifecycleRegistry__empty() RETURNS LifecycleRegistry@multiowned ->
 END
 FN lifecycleRegistry__concrete_schema_type(owner: Type, raw_type: TypeTypeInput, type_params: []String@symbol) RETURNS !Type ->
   MUTABLE subst: {String@symbol}Type = {};
-  (type_params.zip(TRY (type__generic_args(owner)))).keys() |> EACH {
-  MUTABLE argument: Any = ((type_params.zip(TRY (type__generic_args(owner))))[_] OR_ELSE panic("missing hash key"));
-  IF (_ AND argument) THEN
-    subst[type__to_sym(_)] = TRY (type__new(argument));
+  # Ruby zips the parameter names with the concrete arguments; CLEAR has no
+  # zip, so walk the shorter of the two by index.
+  MUTABLE generic_args = TRY (type__generic_args(owner));
+  MUTABLE pair_index: Int64 = 0;
+  WHILE ((pair_index < type_params.length()) AND (pair_index < generic_args.length())) DO
+    MUTABLE param_name = COPY UNWRAP (type_params[pair_index]);
+    MUTABLE argument = COPY UNWRAP (generic_args[pair_index]);
+    subst[param_name] = TRY (type__new(TypeConstructionInput{ Type: COPY argument }));
+    pair_index = pair_index + 1;
   END
-  };
   RETURN CAST(TRY (lifecycleRegistry__substitute_schema_type(raw_type, subst)) AS Type);
 END
 FN lifecycleRegistry__type_inventory(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !{String}Type ->
