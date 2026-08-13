@@ -673,7 +673,10 @@ module CleanupClassifier
     end
     if Schemas.union?(schema)
       has_heap = union_variants_need_cleanup?(schema, schema_lookup)
-      return has_heap ? entry(:takes_union) : nil
+      # Heap variants pin the allocator, exactly as classify_non_copy_union
+      # does for a local of the same type: the payload is already on the heap,
+      # so a consuming site must not rebase the recipe onto its own placement.
+      return has_heap ? entry(:takes_union, fixed_alloc: true) : nil
     end
 
     opt = classify_optional(ti, schema_lookup)

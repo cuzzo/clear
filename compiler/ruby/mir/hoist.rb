@@ -804,8 +804,22 @@ module MIRHoistLowering
     MIR::OwnedCompositeMaterialization.new(
       type_info: type_info,
       lifecycle_plan: lifecycle_plan,
-      alloc: sink_alloc,
+      alloc: composite_materialization_alloc(type_info, sink_alloc),
     )
+  end
+
+  # INV-14: the materialized owner inherits the type's cleanup recipe rather
+  # than synthesizing one from where the value is going. A type whose recipe
+  # fixes its allocator (a union with heap variants, say) already allocated its
+  # children there, so rebasing onto the sink's placement would free heap
+  # memory through the frame arena.
+  sig { params(type_info: Type, sink_alloc: Symbol).returns(Symbol) }
+  def composite_materialization_alloc(type_info, sink_alloc)
+    T.bind(self, MIRLowering) rescue nil
+    inherited = CleanupClassifier.owned_value_entry(type_info, T.unsafe(mir_schema_lookup))
+    return sink_alloc unless inherited && inherited[:fixed_alloc]
+
+    inherited.alloc
   end
 
   sig { params(mir: MIR::Node, ast_node: T.nilable(AST::Node), context: String).returns(Type) }

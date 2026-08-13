@@ -1,0 +1,20 @@
+# A fresh union with a heap-bearing variant, passed to a BORROWING param, is
+# materialized caller-side so it outlives the call. In statement position the
+# materialization used to synthesize its cleanup from the SINK's placement
+# (frame) even though the payload was already on the heap -- the two union
+# classifiers disagreed about whether heap variants pin the allocator. At
+# runtime it aborted with "frame free of memory this arena never allocated".
+UNION Payload { StringValue: String, BoolValue: Bool }
+
+FN describe(p: Payload) RETURNS Int64 ->
+  PARTIAL MATCH p START
+    Payload.StringValue AS s -> RETURN s.length();
+  END
+  RETURN 0;
+END
+
+FN main() RETURNS Void ->
+  print(describe(Payload{ StringValue: "abc" }).toString());
+  ASSERT describe(Payload{ StringValue: "abc" }) == 3_i64, "borrowed union argument reads its payload";
+  ASSERT describe(Payload{ BoolValue: TRUE }) == 0_i64, "non-heap variant still matches";
+END
