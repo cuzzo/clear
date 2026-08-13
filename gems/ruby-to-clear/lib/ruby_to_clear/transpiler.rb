@@ -2790,7 +2790,7 @@ end
       return nil unless args.first.is_a?(Prism::SymbolNode)
 
       field_name = args.first.value.to_s
-      type = convert_sorbet_type(args[1])
+      type = declaration_field_type(node, field_name) || convert_sorbet_type(args[1])
       if declaration_comment?(node, "ruby-to-clear: aliasable") || declaration_comment?(node, "@aliasable")
         type = apply_multiowned_sigil(type)
       end
@@ -5366,6 +5366,15 @@ end
       code.match?(/\A[A-Za-z_]\w*\z/) ? "#{code}?" : "(#{code})?"
     end
     public :optional_unwrap_code
+
+    # Inside an `IF <code> != NIL THEN` guard CLEAR has already narrowed the
+    # value, in expression position as well as statement position, and rejects
+    # a further `?` as UNWRAP_NON_OPTIONAL. Safe navigation lowers to exactly
+    # that guard, so its body reads the receiver directly.
+    def guarded_receiver_code(code)
+      code.match?(/\A[A-Za-z_][\w.]*\z/) ? code : "(#{code})"
+    end
+    public :guarded_receiver_code
     private
 
     def visit_block_parameter_node(node)
@@ -7094,6 +7103,29 @@ end
       else
         ""
       end
+    end
+
+    # `# ruby-to-clear: field-type <name>=<type>` on a T::Struct const/prop.
+    # Struct.new and attr_* classes already honour the directive through the
+    # class-body scan in instance_field_types; a T::Struct's fields come from
+    # its `const`/`prop` calls, which that scan never sees, so the directive
+    # was silently ignored on exactly the declarations whose Ruby type is
+    # deliberately loose (T.nilable(BasicObject) to dodge a load cycle).
+    def declaration_field_type(node, field_name)
+      return nil unless node&.location
+
+      lines = @current_metadata_source_lines || @source.lines
+      cursor = node.location.start_line - 2
+      while cursor >= 0
+        line = lines.fetch(cursor, "").to_s.strip
+        break unless line.start_with?("#")
+
+        match = line.match(/#\s*ruby-to-clear:\s*field-type\s+([A-Za-z_]\w*)\s*=\s*([^\s#]+)/)
+        return match[2] if match && match[1] == field_name
+
+        cursor -= 1
+      end
+      nil
     end
 
     def declaration_comment?(node, marker)

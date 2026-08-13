@@ -677,7 +677,7 @@ module RubyToClear
           nested_call = node.receiver
           base = visit(nested_call.receiver)
           @lowering_safe_navigation << nested_call.object_id
-          nested_value = with_node_code_override(nested_call.receiver, optional_unwrap_code(base)) do
+          nested_value = with_node_code_override(nested_call.receiver, guarded_receiver_code(base)) do
             visit_call_node(nested_call)
           end
           @lowering_safe_navigation.delete(nested_call.object_id)
@@ -692,7 +692,7 @@ module RubyToClear
         end
 
         receiver = visit(node.receiver)
-        unwrapped = optional_unwrap_code(receiver)
+        unwrapped = guarded_receiver_code(receiver)
         @lowering_safe_navigation << node.object_id
         inner = with_node_code_override(node.receiver, unwrapped) { visit_call_node(node) }
         @lowering_safe_navigation.delete(node.object_id)
@@ -1040,6 +1040,13 @@ module RubyToClear
         arg_nodes = node.arguments ? node.arguments.arguments : []
         return unsupported_expression(node, "fetch requires an index or key") if arg_nodes.empty?
         if node.block
+          # `&block` is a BlockArgumentNode, not a BlockNode: it forwards a
+          # block someone else wrote, so there is no literal body to inline as
+          # a fallback and no parameter list to inspect.
+          unless node.block.is_a?(Prism::BlockNode)
+            return unsupported_expression(node, "fetch with a forwarded block argument has no inlinable fallback")
+          end
+
           parameters = node.block.parameters&.parameters
           has_parameters = parameters && parameters.child_nodes.compact.any?
           unless !has_parameters && arg_nodes.length == 1

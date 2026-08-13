@@ -200,7 +200,7 @@ module RubyToClear
             @source_excludes.any? { |pattern| File.fnmatch?(pattern, rel, File::FNM_PATHNAME) }
           end
         end
-        files.select! { |path| @only.match?(relative(path)) } if @only
+        files = expand_source_closure(files, @only) if @only
         units = files.map do |source|
           source_relative = Pathname.new(source).relative_path_from(Pathname.new(@source_root)).to_s
           generated_relative = source_relative.sub(/\.rb\z/, ".clear")
@@ -227,6 +227,34 @@ module RubyToClear
         @units_by_generated = units.to_h { |unit| [unit.fetch("generated_relative"), unit] }
         @units_by_source = units.to_h { |unit| [unit.fetch("source"), unit] }
         units
+      end
+
+      # `--only` selects roots, but a root that is not dependency-closed cannot
+      # reach G3: its generated REQUIREs name units this run never produced, and
+      # every one of them is reported as a missing generated dependency rather
+      # than as whatever the root's own code does wrong. Pull in the
+      # require_relative closure of the matched roots so a scoped run measures
+      # the same thing a full run does, only over fewer roots.
+      def expand_source_closure(files, pattern)
+        in_corpus = files.to_h { |path| [File.expand_path(path), true] }
+        selected = files.select { |path| pattern.match?(relative(path)) }
+        queue = selected.dup
+        seen = selected.to_h { |path| [File.expand_path(path), true] }
+        until queue.empty?
+          source = queue.shift
+          source_dependency_paths(source).each do |dep|
+            expanded = File.expand_path(dep, root)
+            next unless in_corpus[expanded]
+            next if seen[expanded]
+
+            seen[expanded] = true
+            queue << expanded
+          end
+        end
+        closure = files.select { |path| seen[File.expand_path(path)] }
+        extra = closure.length - selected.length
+        say "--only matched #{selected.length} root(s); added #{extra} require_relative dependenc(ies) to close them" if extra.positive?
+        closure
       end
 
       def selected_g3_units(units)
@@ -879,11 +907,14 @@ module RubyToClear
         @package_groups = {}
         @group_runs = {}
         by_rel = units.to_h { |unit| [unit.fetch("generated_relative"), unit] }
-        graph = {}
-        units.each do |unit|
-          rel = unit.fetch("generated_relative")
-          graph[rel] = unit.fetch("generated_dependencies").select { |dep| by_rel.key?(dep) && dep != rel }
-        end
+        # The graph spans every generated file, not only the selected units. A
+        # cycle can run through a file this run did not select -- under --only
+        # the imported dependencies come from the checked-in tree -- and a
+        # graph restricted to units cannot see it. The compiler then receives
+        # those files as separate packages and rejects the import cycle, so a
+        # scoped run reports CircularDependencyError for its whole corpus and
+        # hides every real diagnostic behind it.
+        graph = generated_dependency_graph(@raw_generated_root, by_rel)
 
         tarjan_sccs(graph).each do |scc|
           next unless scc.length > 1
@@ -891,8 +922,35 @@ module RubyToClear
           members = scc.sort
           group_name = "scc_#{File.basename(members.fetch(0), ".clear")}_#{members.length}"
           @package_groups[group_name] = members
-          members.each { |rel| by_rel.fetch(rel)["package_group"] = group_name }
+          members.each { |rel| by_rel[rel]&.[]=("package_group", group_name) }
         end
+      end
+
+      # Relative path => generated REQUIRE targets, over the whole generated
+      # tree. Unit dependencies are already indexed; anything else is read off
+      # disk, which is what makes cycles through non-selected files visible.
+      def generated_dependency_graph(generated_root, by_rel)
+        graph = {}
+        Dir[File.join(generated_root, "**/*.clear")].sort.each do |path|
+          rel = relative_to(path, generated_root)
+          unit = by_rel[rel]
+          deps = unit ? unit.fetch("generated_dependencies") : generated_requires(path)
+          graph[rel] = deps.select { |dep| dep != rel && File.file?(File.join(generated_root, dep)) }
+        end
+        graph
+      end
+
+      def generated_requires(path)
+        File.foreach(path).filter_map do |line|
+          spec = line[/\AREQUIRE\s+"([^"]+)"/, 1]
+          next unless spec
+
+          if spec.start_with?("pkg:rtoc_")
+            generated_relative_from_package(spec.delete_prefix("pkg:"))
+          elsif !spec.start_with?("pkg:")
+            File.expand_path(spec, File.dirname(path)).delete_prefix("#{File.expand_path(@raw_generated_root)}/")
+          end
+        end.compact
       end
 
       # Iterative Tarjan (the corpus graph is deep enough to blow Ruby's
@@ -1012,7 +1070,9 @@ module RubyToClear
           members.any? { |relative_path| selected_relatives[relative_path] }
         end
         parallel_map!(groups) do |(name, members)|
-          member_units = members.map { |rel| by_rel.fetch(rel) }
+          # A group can contain files this run did not select as units; they
+          # carry no gates of their own and only have to be present on disk.
+          member_units = members.filter_map { |rel| by_rel[rel] }
           if phase == "frontend"
             next unless member_units.all? { |u| u.dig("gates", "g2") == "pass" }
           else

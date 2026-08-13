@@ -78,6 +78,12 @@ class Type
     const :params, T::Array[FunctionTypeParam]
     const :return_type, Type
     const :reentrant, T::Boolean, default: false
+    # Typed BasicObject only to keep type.rb free of a load cycle back to
+    # FunctionSignature; every reader casts it straight back. The generated
+    # record has no such constraint, so name the real type there -- otherwise
+    # the field is guessed twice, differently, at its declaration and at each
+    # read.
+    # ruby-to-clear: field-type source_signature=?FunctionSignature
     const :source_signature, T.nilable(BasicObject), default: nil
     const :abi, Symbol, default: :clear
   end
