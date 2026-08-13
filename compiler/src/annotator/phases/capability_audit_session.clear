@@ -3891,7 +3891,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN LockGraph{ nodes: COPY nodes, adj: COPY adj, edges: COPY live };
 }
 END
-PRIVATE FN capabilityAuditSession__tarjan_scc(self: CapabilityAuditSession, nodes: [Set]String@symbol, adj: {String@symbol}[Set]String@symbol) RETURNS ![List, List]String@symbol
+PRIVATE FN capabilityAuditSession__tarjan_scc(self: CapabilityAuditSession, nodes: [Set]String@symbol, adj: {String@symbol}[Set]String@symbol) RETURNS ![][]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3940,7 +3940,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE assigned: [Set]String@symbol = Set[];
-    MUTABLE sccs: [List, List]String@symbol = ( { MUTABLE rtoc_empty_list_33: [List, List]String@symbol = List[]; rtoc_empty_list_33 } );
+    MUTABLE sccs: [][]String@symbol = ( { MUTABLE rtoc_empty_list_33: [][]String@symbol = List[]; rtoc_empty_list_33 } );
     MUTABLE rtoc_reverse_items_34: []String@symbol = finish_order;
     MUTABLE rtoc_reverse_i_35 = rtoc_reverse_items_34.length() - 1;
     WHILE rtoc_reverse_i_35 >= 0 DO

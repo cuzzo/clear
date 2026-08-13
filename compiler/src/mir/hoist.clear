@@ -91,13 +91,13 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, counter: HoistCounte
   END
   NIL;
 END
-PUB FN hoist__child_bodies(stmt: Locatable) RETURNS ![List, List]Node ->
+PUB FN hoist__child_bodies(stmt: Locatable) RETURNS ![][]Node ->
   IF (stmt IS_A ForRange) OR (stmt IS_A ForEach) OR (stmt IS_A WithBlock) OR (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
-    RETURN CAST([stmt.body()] AS [List, List]Node);
+    RETURN CAST([stmt.body()] AS [][]Node);
   ELSE_IF stmt IS_A WhileLoop AS while_loop THEN
-    RETURN CAST([while_loop.do_branch] AS [List, List]Node);
+    RETURN CAST([while_loop.do_branch] AS [][]Node);
   ELSE_IF stmt IS_A WhileBindLoop AS while_bind_loop THEN
-    RETURN CAST([while_bind_loop.do_branch] AS [List, List]Node);
+    RETURN CAST([while_bind_loop.do_branch] AS [][]Node);
   ELSE_IF stmt IS_A IfStatement AS if_statement THEN
     RETURN (CAST(Tuple{if_statement.then_branch, if_statement.else_branch} AS Tuple<[]Locatable, ?[]Locatable>));
   ELSE_IF stmt IS_A IfBind AS if_bind THEN
@@ -107,7 +107,7 @@ PUB FN hoist__child_bodies(stmt: Locatable) RETURNS ![List, List]Node ->
   ELSE_IF (stmt IS_A DoBlock) THEN
     RETURN stmt.branches() |> SELECT _.body();
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_5: [List, List]Node = List[]; rtoc_empty_list_5 } ) AS [List, List]Node);
+    RETURN CAST(( { MUTABLE rtoc_empty_list_5: [][]Node = List[]; rtoc_empty_list_5 } ) AS [][]Node);
   END
 END
 PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoists: []VarDecl, counter: HoistCounter, schema_lookup: ?Any, return_type: ?TypeTypeInput = NIL) RETURNS !Void ->

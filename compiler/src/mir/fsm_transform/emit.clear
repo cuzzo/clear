@@ -443,7 +443,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   })(segment_nodes);
   MUTABLE owned_result_guards = TRY (emit__fsm_owned_result_guards(segment_nodes, lowering));
   MUTABLE seg_result_facts: {Int64}[]FsmResultTransferFact = {};
-  MUTABLE seg_mir_codes: [List, List]Emittable = ( { MUTABLE rtoc_empty_list_14: [List, List]Emittable = List[]; rtoc_empty_list_14 } );
+  MUTABLE seg_mir_codes: [][]Emittable = ( { MUTABLE rtoc_empty_list_14: [][]Emittable = List[]; rtoc_empty_list_14 } );
   MUTABLE rtoc_indexed_result_15 = {
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_16: []Segment = segment_nodes;
@@ -838,7 +838,7 @@ PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []Fsm
   rtoc_idx = rtoc_idx + 1;
   END
 END
-PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [List, List]Emittable, segments: []Segment, liveness: Result, captured: {String}Type@multiowned, conservative_promoted: []String) RETURNS !Void ->
+PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segments: []Segment, liveness: Result, captured: {String}Type@multiowned, conservative_promoted: []String) RETURNS !Void ->
   MUTABLE forbidden = COPY liveness.cross_segment_vars.keys();
   &forbidden.concat((captured).keys());
   &forbidden.concat(conservative_promoted);

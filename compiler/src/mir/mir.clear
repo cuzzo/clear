@@ -4038,7 +4038,7 @@ FN capabilityLockAddress__expr?(self: CapabilityLockAddress) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT SortedLockAcquire {
-  entries: Emittable,
+  entries: []SortedLockAcquireEntry,
   action: Emittable,
   matched_types: Any@multiowned,
   bubble_types: Any@multiowned,
@@ -4056,12 +4056,17 @@ FN sortedLockAcquire__stmt?(self: SortedLockAcquire) RETURNS Bool ->
   RETURN TRUE;
 END
 FN sortedLockAcquire__child_exprs(self: SortedLockAcquire) RETURNS ![]Emittable ->
-  MUTABLE entry_exprs = (self.entries) |> UNNEST [_.lock_expr(), _.address_expr()];
-  RETURN sortedLockAcquire__compact_child_exprs(self, [CAST(entry_exprs AS Any), CAST(self.action AS Any)]);
+  MUTABLE entry_exprs: []Emittable = List[];
+  FOR entry IN self.entries DO
+    &entry_exprs.append(COPY entry.lock_expr);
+    &entry_exprs.append(COPY entry.address_expr);
+  END
+  &entry_exprs.append(COPY self.action);
+  RETURN sortedLockAcquire__compact_child_exprs(self, entry_exprs);
 END
 FN sortedLockAcquire__body_slots(self: SortedLockAcquire) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.action THEN
-    RETURN self.action.body_slots();
+    RETURN TRY (emittable__body_slots(self.action));
   ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_65: []MIRBodySlot = List[]; rtoc_empty_list_65 } ) AS []MIRBodySlot);
   END
@@ -4134,7 +4139,7 @@ FN fallibleLockBinding__child_exprs(self: FallibleLockBinding) RETURNS ![]Emitta
   RETURN fallibleLockBinding__compact_child_exprs(self, values);
 END
 FN fallibleLockBinding__body_slots(self: FallibleLockBinding) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN self.action.body_slots();
+  RETURN TRY (emittable__body_slots(self.action));
 END
 FN fallibleLockBinding__mir?(self: FallibleLockBinding) RETURNS Bool ->
   RETURN TRUE;
@@ -4183,7 +4188,7 @@ END
 STRUCT CatchWrapper {
   inner_call: Emittable,
   error_reassigns: Any@multiowned,
-  clauses: Emittable,
+  clauses: []MIRCatchClause,
   default_body: Any@multiowned,
   default_action: Any@multiowned,
   snapshot_type: Any@multiowned,
@@ -4195,17 +4200,23 @@ STRUCT CatchWrapper {
 }
 
 FN catchWrapper__child_exprs(self: CatchWrapper) RETURNS ![]Emittable ->
-  RETURN catchWrapper__compact_child_exprs(self, (CAST([CAST(self.inner_call AS Any)] AS []Any) + (self.clauses) |> UNNEST _.filter_message_exprs()));
+  MUTABLE exprs: []Emittable = [COPY self.inner_call];
+  FOR clause IN self.clauses DO
+    FOR filter_message IN clause.meta.filter_messages DO
+      &exprs.append(COPY filter_message);
+    END
+  END
+  RETURN catchWrapper__compact_child_exprs(self, exprs);
 END
-FN catchWrapper__clause_bodies(self: CatchWrapper) RETURNS ![List, List]Emittable ->
-  MUTABLE bodies: [List, List]Emittable = (self.clauses) |> SELECT _.body();
+FN catchWrapper__clause_bodies(self: CatchWrapper) RETURNS ![][]Emittable ->
+  MUTABLE bodies: [][]Emittable = (self.clauses) |> SELECT COPY _.body;
   IF catchWrapper__has_default(self) THEN
-    &bodies.append(self.default_body);
+    &bodies.append(COPY self.default_body);
   END
   RETURN bodies;
 END
 FN catchWrapper__clause_meta(self: CatchWrapper) RETURNS ![]CatchClauseMeta ->
-  RETURN (self.clauses) |> SELECT _.meta();
+  RETURN (self.clauses) |> SELECT COPY _.meta;
 END
 FN catchWrapper__has_default(self: CatchWrapper) RETURNS Bool ->
   RETURN (self.default_action == CatchDefaultAction.Body);
@@ -4279,7 +4290,7 @@ FN catchWrapper__stmt?(self: CatchWrapper) RETURNS Bool ->
 END
 PUB STRUCT MIRDoBlock {
   code: DoBlockPlan,
-  branch_bodies: [List, List]Emittable,
+  branch_bodies: [][]Emittable,
   boundary_facts: []ExecutionBoundaryFact,
   lowered_node_id: Any@multiowned,
   ownership_consumption: Any@multiowned,
@@ -4290,7 +4301,7 @@ PUB STRUCT MIRDoBlock {
 PUB FN mIRDoBlock__code(self: MIRDoBlock) RETURNS DoBlockPlan ->
   self.code;
 END
-PUB FN mIRDoBlock__branch_bodies(self: MIRDoBlock) RETURNS [List, List]Emittable ->
+PUB FN mIRDoBlock__branch_bodies(self: MIRDoBlock) RETURNS [][]Emittable ->
   self.branch_bodies;
 END
 PUB FN mIRDoBlock__boundary_facts(self: MIRDoBlock) RETURNS []ExecutionBoundaryFact ->
@@ -4309,7 +4320,7 @@ PUB FN mIRDoBlock__source_line(self: MIRDoBlock) RETURNS Any@multiowned ->
   KEEP self.source_line;
 END
 
-FN doBlock__initialize(MUTABLE self: MIRDoBlock, code: DoBlockPlan, branch_bodies: [List, List]Emittable) RETURNS Void ->
+FN doBlock__initialize(MUTABLE self: MIRDoBlock, code: DoBlockPlan, branch_bodies: [][]Emittable) RETURNS Void ->
   self.boundary_facts = List[];
 END
 FN doBlock__boundary_facts(self: MIRDoBlock) RETURNS ![]ExecutionBoundaryFact ->
@@ -5896,7 +5907,7 @@ FN weakUpgrade__expr?(self: WeakUpgrade) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT AllocatorRef {
-  kind: Any@multiowned,
+  kind: String@symbol,
   lowered_node_id: Any@multiowned,
   ownership_consumption: Any@multiowned
 }
@@ -6371,7 +6382,7 @@ FN snapshotTransaction__body_slots(MUTABLE self: SnapshotTransaction) RETURNS ![
   rubyToClearVoid()
   })];
   IF self.conflict_action THEN
-    slots = ruby_array_concat_MIRBodySlot(slots, CAST(self.conflict_action.body_slots() AS []MIRBodySlot));
+    slots = ruby_array_concat_MIRBodySlot(slots, TRY (emittable__body_slots(self.conflict_action)));
   END
   RETURN slots;
 END
@@ -6453,7 +6464,7 @@ FN snapshotMultiTxn__body_slots(MUTABLE self: SnapshotMultiTxn) RETURNS ![]MIRBo
   rubyToClearVoid()
   })];
   IF self.conflict_action THEN
-    slots = ruby_array_concat_MIRBodySlot(slots, CAST(self.conflict_action.body_slots() AS []MIRBodySlot));
+    slots = ruby_array_concat_MIRBodySlot(slots, TRY (emittable__body_slots(self.conflict_action)));
   END
   RETURN slots;
 END
@@ -6723,7 +6734,7 @@ STRUCT WithMatchDispatch {
   alias_name: Any@multiowned,
   snapshot_mode: Any@multiowned,
   rt_name: Any@multiowned,
-  arms: Any@multiowned,
+  arms: []MIRWithMatchArm,
   lowered_node_id: Any@multiowned,
   ownership_consumption: Any@multiowned,
   source_column: Any@multiowned,
@@ -7557,7 +7568,7 @@ FN call__child_exprs(self: Call) RETURNS ![]Emittable ->
 END
 FN call__explicit_ownership_contract(self: Call) RETURNS ?OwnershipContract@multiowned ->
   IF self.callable_contract != NIL THEN
-  RETURN ((self.callable_contract)?).ownership_contract;
+  RETURN COPY ((self.callable_contract)?).ownership_contract @multiowned;
   ELSE
   RETURN NIL;
   END
@@ -7567,7 +7578,7 @@ FN call__without_try(MUTABLE self: Call) RETURNS !Call ->
   out.never_success = self.never_success;
   IF self.result_type EXISTS AS result_type_value THEN
     MUTABLE result_type_value_mutable = COPY result_type_value;
-    out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (result_type_value_mutable) }));
+    out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY result_type_value_mutable }));
   END
   IF self.ownership_consumption THEN
     out.ownership_consumption = self.ownership_consumption;
@@ -7578,12 +7589,12 @@ FN call__ownership_effect(self: Call) RETURNS OwnershipEffect ->
   IF !(call__owned_return?(self)) THEN
     RETURN ownershipEffect__none();
   END
-  MUTABLE alloc_arg: ?Emittable = self.args |> WHERE _ IS_A AllocatorRef |> SELECT (COPY CAST(_ AS AllocatorRef)) |> FIND TRUE;
-  MUTABLE alloc = IF ((alloc_arg != NIL) AND (alloc_arg IS_A AllocatorRef)) THEN
-    alloc_arg.kind()
-  ELSE
-    :heap
-  END;
+  MUTABLE alloc: String@symbol = :heap;
+  FOR arg IN self.args DO
+    IF arg IS_A AllocatorRef AS allocator_ref THEN
+      alloc = COPY allocator_ref.kind;
+    END
+  END
   RETURN ownershipEffect__owned(alloc);
 END
 FN call__mir?(self: Call) RETURNS Bool ->
@@ -7651,12 +7662,12 @@ FN runtimeCall__ownership_effect(self: RuntimeCall) RETURNS OwnershipEffect ->
   IF !(runtimeCall__owned_return?(self)) THEN
     RETURN ownershipEffect__none();
   END
-  MUTABLE alloc_arg: ?Emittable = self.args |> WHERE _ IS_A AllocatorRef |> SELECT (COPY CAST(_ AS AllocatorRef)) |> FIND TRUE;
-  MUTABLE alloc = IF ((alloc_arg != NIL) AND (alloc_arg IS_A AllocatorRef)) THEN
-    alloc_arg.kind()
-  ELSE
-    :heap
-  END;
+  MUTABLE alloc: String@symbol = :heap;
+  FOR arg IN self.args DO
+    IF arg IS_A AllocatorRef AS allocator_ref THEN
+      alloc = COPY allocator_ref.kind;
+    END
+  END
   RETURN ownershipEffect__owned(alloc);
 END
 FN runtimeCall__mir?(self: RuntimeCall) RETURNS Bool ->
@@ -7719,7 +7730,7 @@ FN tailCall__child_exprs(self: TailCall) RETURNS ![]Emittable ->
 END
 FN tailCall__explicit_ownership_contract(self: TailCall) RETURNS ?OwnershipContract@multiowned ->
   IF self.callable_contract != NIL THEN
-  RETURN ((self.callable_contract)?).ownership_contract;
+  RETURN COPY ((self.callable_contract)?).ownership_contract @multiowned;
   ELSE
   RETURN NIL;
   END
@@ -7829,7 +7840,7 @@ FN methodCall__child_exprs(self: MIRMethodCall) RETURNS ![]Emittable ->
 END
 FN methodCall__explicit_ownership_contract(self: MIRMethodCall) RETURNS ?OwnershipContract@multiowned ->
   IF self.callable_contract != NIL THEN
-  RETURN ((self.callable_contract)?).ownership_contract;
+  RETURN COPY ((self.callable_contract)?).ownership_contract @multiowned;
   ELSE
   RETURN NIL;
   END
@@ -7838,7 +7849,7 @@ FN methodCall__without_try(MUTABLE self: MIRMethodCall) RETURNS !MIRMethodCall -
   MUTABLE out = MIRMethodCall{ receiver: COPY self.receiver, method: COPY self.method, args: COPY self.args, try_wrap: FALSE, callable_contract: COPY self.callable_contract, owned_result_alloc: COPY self.owned_result_alloc, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
   IF self.result_type EXISTS AS result_type_value THEN
     MUTABLE result_type_value_mutable = COPY result_type_value;
-    out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (result_type_value_mutable) }));
+    out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY result_type_value_mutable }));
   END
   RETURN out;
 END
@@ -11447,8 +11458,9 @@ FN shardedMapPut__explicit_ownership_contract(self: ShardedMapPut) RETURNS !Owne
   RETURN TRY (ownershipContract__empty());
 END
 FN shardedMapPut__ownership_effect(self: ShardedMapPut) RETURNS !OwnershipEffect ->
-  MUTABLE heap_return = (TRY (functionSignature__heap_return_alloc?(&self.stdlib_def)) == TRUE);
-  RETURN ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&self.stdlib_def)) == TRUE), &heap_return, !(!((((TRY (functionSignature__fixed_return?(self.stdlib_def)) AND type__void?(functionSignature__return_type(self.stdlib_def))) AND !(shardedMapPut__has_alloc_metadata?(self)))))), (shardedMapPut__mutating_receiver_allocator_op?(self) AND !(heap_return)), NIL, CAST(functionSignature__return_type(self.stdlib_def) AS ?Type), IF heap_return THEN
+  MUTABLE rtoc_sig = COPY self.stdlib_def;
+  MUTABLE heap_return = (TRY (functionSignature__heap_return_alloc?(&rtoc_sig)) == TRUE);
+  RETURN ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&rtoc_sig)) == TRUE), &heap_return, !(!((((TRY (functionSignature__fixed_return?(self.stdlib_def)) AND type__void?(functionSignature__return_type(self.stdlib_def))) AND !(shardedMapPut__has_alloc_metadata?(self)))))), (shardedMapPut__mutating_receiver_allocator_op?(self) AND !(heap_return)), NIL, CAST(functionSignature__return_type(self.stdlib_def) AS ?Type), IF heap_return THEN
     :heap
   ELSE
     TRY (inlineAllocMetadata__single_alloc(self.resolved_allocs))
@@ -11576,7 +11588,10 @@ FN mIR__const_u8_literal_cast?(node: ?Emittable) RETURNS Bool ->
   END
 END
 FN mIR__expr_wrapper?(node: ?Emittable) RETURNS Bool ->
-  RETURN (respondsTo?(node, "expr") AND (((((node != NIL) AND (node IS_A MIRCast)) OR ((node != NIL) AND (node IS_A TryExpr))) OR ((node != NIL) AND (node IS_A TryCatch)))));
+  IF node EXISTS AS node_value THEN
+    RETURN ((node_value IS_A MIRCast OR node_value IS_A TryExpr) OR node_value IS_A TryCatch);
+  END
+  RETURN FALSE;
 END
 PUB STRUCT OwnershipOperandFact {
   kind: String@symbol,
@@ -11617,7 +11632,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 FN ownershipContract__empty() RETURNS !OwnershipContract@multiowned ->
-  RETURN TRY (ownershipContract__new());
+  MUTABLE no_operands: []OwnershipOperandFact = [];
+  MUTABLE no_produces: []String = [];
+  MUTABLE no_borrows: []String = [];
+  RETURN TRY (ownershipContract__new(no_operands, no_produces, no_borrows));
 END
 FN ownershipContract__consume_operands(operands: []OwnershipOperandFact) RETURNS !OwnershipContract@multiowned ->
   RETURN TRY (ownershipContract__new(operands, ( { MUTABLE rtoc_empty_list_186: []String = List[]; rtoc_empty_list_186 } ), ( { MUTABLE rtoc_empty_list_187: []String = List[]; rtoc_empty_list_187 } ), TRUE));
@@ -11684,10 +11702,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 FN callableContract__no_ownership(checked_arg_count: Int64) RETURNS !CallableContract@multiowned ->
   MUTABLE params: []Param = ( { MUTABLE rtoc_empty_list_189: []Param = List[]; rtoc_empty_list_189 } );
-  checked_arg_count.times(%(idx) USE(MUTABLE params) -> {
-  &params.append(Param{ name: "__arg${idx}", type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, mutable: NIL, takes: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: :polymorphic });
-  rubyToClearVoid()
-  });
+  MUTABLE idx: Int64 = 0;
+  WHILE (idx < checked_arg_count) DO
+  &params.append(Param{ name: "__arg${idx.toString()}", type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, mutable: NIL, takes: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: :polymorphic });
+    idx = (idx + 1);
+  END
   RETURN callableContract__new(TRY (functionSignature__new(params, TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_190: []String@symbol = List[]; rtoc_empty_list_190 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_191: []String@symbol = List[]; rtoc_empty_list_191 } ), NIL, ( { MUTABLE rtoc_empty_list_192: []String@symbol = List[]; rtoc_empty_list_192 } ))), TRY (ownershipContract__new(( { MUTABLE rtoc_empty_list_193: []OwnershipOperandFact = List[]; rtoc_empty_list_193 } ), ( { MUTABLE rtoc_empty_list_194: []String = List[]; rtoc_empty_list_194 } ), ( { MUTABLE rtoc_empty_list_195: []String = List[]; rtoc_empty_list_195 } ), TRUE)), checked_arg_count);
 END
 FN callableContract__new(signature: FunctionSignature, ownership_contract: OwnershipContract, checked_arg_count: Int64) RETURNS CallableContract@multiowned ->
@@ -11712,7 +11731,12 @@ END
 FN ownershipEffect__from_callable_facts(emits_allocating: Bool, MUTABLE heap_return_alloc: Bool, fixed_void_without_alloc_metadata: Bool, mutates_receiver_without_heap_return: Bool, result_owns: ?Bool, result_type: ?Type, alloc: ?String@symbol, target_var: ?String) RETURNS OwnershipEffect ->
   MUTABLE active = (emits_allocating OR heap_return_alloc);
   MUTABLE explicitly_not_owned = (heap_return_alloc AND (result_owns == FALSE));
-  MUTABLE unknown_owned_result = (((heap_return_alloc AND (result_owns == NIL)) AND (result_type != NIL)) AND !(ownershipEffect__owned_result_type?(UNWRAP (result_type))));
+  MUTABLE unknown_owned_result = FALSE;
+  IF (heap_return_alloc AND (result_owns == NIL)) THEN
+    IF result_type EXISTS AS result_type_value THEN
+      unknown_owned_result = !(ownershipEffect__owned_result_type?(result_type_value));
+    END
+  END
   MUTABLE missing_allocator = ((alloc == NIL) AND !(heap_return_alloc));
   MUTABLE blocked = ((((fixed_void_without_alloc_metadata OR mutates_receiver_without_heap_return) OR explicitly_not_owned) OR unknown_owned_result) OR missing_allocator);
   IF !(active) THEN
@@ -11772,7 +11796,17 @@ PUB STRUCT OwnershipConsumptionFact {
 }
 
 FN ownershipConsumptionFact__names(self: OwnershipConsumptionFact) RETURNS ![]String ->
-  RETURN CAST(((self.operands |> SELECT:? _.name |> WHERE _ != NIL) |> SELECT _.toString() |> WHERE !(_.empty?()) |> DISTINCT _) AS []String);
+  MUTABLE names: []String = [];
+  FOR operand IN self.operands DO
+    IF operand.name EXISTS AS operand_name THEN
+      IF !(operand_name.empty?()) THEN
+        IF !(names.contains?(operand_name)) THEN
+          &names.append(COPY operand_name);
+        END
+      END
+    END
+  END
+  RETURN names;
 END
 STRUCT MIRBodySlot {
   body: []Emittable,
@@ -11794,7 +11828,8 @@ FN bodySlot__replace(MUTABLE self: MIRBodySlot, body: []Emittable) RETURNS Void
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.body = COPY body;
-    rtoc_self_view.writer(body);
+    MUTABLE rtoc_writer = COPY rtoc_self_view.writer;
+    rtoc_writer(body);
 }
 END
 FN bodySlot__new(name: String@symbol, body: []Emittable, writer: FN(Emittable[]) -> Void) RETURNS MIRBodySlot@multiowned ->
@@ -11810,13 +11845,14 @@ FN loweredNodeId__equals?<T>(self: LoweredNodeId, other: T) RETURNS Bool EFFECTS
   COMPTIME IF !(T IS_A LoweredNodeId) THEN
     RETURN FALSE;
   END
-  RETURN (other.value() == self.value);
+  MUTABLE other_id: LoweredNodeId = CAST(other AS LoweredNodeId);
+  RETURN (other_id.value == self.value);
 END
 FN loweredNodeId__eql?(self: LoweredNodeId, other: Any) RETURNS Bool ->
   RETURN (self == other);
 END
 FN loweredNodeId__hash(self: LoweredNodeId) RETURNS Int64 EFFECTS REENTRANT ->
-  RETURN self.value.hash();
+  RETURN self.value;
 END
 STRUCT LoweredBodyId {
   node_ids: []LoweredNodeId
@@ -11826,13 +11862,18 @@ FN loweredBodyId__equals?<T>(self: LoweredBodyId, other: T) RETURNS Bool EFFECTS
   COMPTIME IF !(T IS_A LoweredBodyId) THEN
     RETURN FALSE;
   END
-  RETURN (other.node_ids() == self.node_ids);
+  MUTABLE other_body: LoweredBodyId = CAST(other AS LoweredBodyId);
+  RETURN (other_body.node_ids == self.node_ids);
 END
 FN loweredBodyId__eql?(self: LoweredBodyId, other: Any) RETURNS Bool ->
   RETURN (self == other);
 END
 FN loweredBodyId__hash(self: LoweredBodyId) RETURNS Int64 EFFECTS REENTRANT ->
-  RETURN loweredNodeId__hash(self.node_ids);
+  MUTABLE combined: Int64 = 0;
+  FOR node_id IN self.node_ids DO
+    combined = ((combined * 31) + loweredNodeId__hash(node_id));
+  END
+  RETURN combined;
 END
 # Ruby module MIR::Emittable
 # End Ruby module MIR::Emittable
@@ -11840,12 +11881,10 @@ END
 # Ruby module MIR::Stmt
 # Ruby module MIR::Expr
 FN ownershipEffect__of(node: ?Emittable) RETURNS OwnershipEffect ->
-  MUTABLE mir_node = ([node]).grep(emittable).first();
-  RETURN ((IF mir_node != NIL THEN
-    (mir_node?).ownership_effect()
-  ELSE
-    NIL
-  END) OR_ELSE ownershipEffect__none());
+  IF node EXISTS AS node_value THEN
+    RETURN emittable__ownership_effect(node_value);
+  END
+  RETURN ownershipEffect__none();
 END
 FN ownershipEffect__hoistable_owned_result?(node: ?Emittable) RETURNS Bool ->
   MUTABLE effect = ownershipEffect__of(node);
@@ -11856,22 +11895,22 @@ FN ownershipEffect__alloc_of(node: ?Emittable) RETURNS ?String@symbol ->
 END
 FN ownershipEffect__from_effects(effects_value: []OwnershipEffect) RETURNS OwnershipEffect ->
   MUTABLE owned = effects_value |> WHERE _.produces_owned;
-  RETURN effect_when(!((owned.length() == 0)), ownershipEffect__owned(converged_effect_alloc(owned), :uniform));
+  RETURN ownershipEffect__effect_when(!((owned.length() == 0)), ownershipEffect__owned(ownershipEffect__converged_effect_alloc(owned), :uniform));
 END
 FN ownershipEffect__from_children(children: []Emittable) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__from_effects(children |> SELECT _.ownership_effect());
 END
 FN ownershipEffect__from_try_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type, fallback_is_literal: Bool, left_never_success: Bool) RETURNS OwnershipEffect ->
-  RETURN first_active_effect([[same_owned_alloc?(left, right), left], [owned_cleanup_result?(left, result_type), left], [(left.produces_owned AND fallback_is_literal), left], [(right.produces_owned AND left_never_success), right]]);
+  RETURN ownershipEffect__first_active_effect([[ownershipEffect__same_owned_alloc?(left, right), left], [owned_cleanup_result?(left, result_type), left], [(left.produces_owned AND fallback_is_literal), left], [(right.produces_owned AND left_never_success), right]]);
 END
 FN ownershipEffect__from_optional_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type) RETURNS OwnershipEffect ->
-  RETURN first_active_effect([[same_owned_alloc?(left, right), left], [owned_cleanup_result?(left, result_type), left], [owned_cleanup_result?(right, result_type), right]]);
+  RETURN ownershipEffect__first_active_effect([[ownershipEffect__same_owned_alloc?(left, right), left], [owned_cleanup_result?(left, result_type), left], [owned_cleanup_result?(right, result_type), right]]);
 END
 FN ownershipEffect__from_required_branch_pair(left: OwnershipEffect, right: OwnershipEffect) RETURNS OwnershipEffect ->
-  RETURN effect_when(same_owned_alloc?(left, right), left);
+  RETURN ownershipEffect__effect_when(ownershipEffect__same_owned_alloc?(left, right), left);
 END
 FN ownershipEffect__from_pipeline(sink_alloc: ?String@symbol, inner: ?Emittable) RETURNS OwnershipEffect ->
-  RETURN first_active_effect(CAST(Tuple{[!((sink_alloc == NIL)), ownershipEffect__owned(sink_alloc)], CAST(Tuple{TRUE, ownershipEffect__of(inner)} AS Tuple<Bool, OwnershipEffect>)} AS Tuple<[]OwnershipEffect, Tuple<Bool, OwnershipEffect>>));
+  RETURN ownershipEffect__first_active_effect(CAST(Tuple{[!((sink_alloc == NIL)), ownershipEffect__owned(sink_alloc)], CAST(Tuple{TRUE, ownershipEffect__of(inner)} AS Tuple<Bool, OwnershipEffect>)} AS Tuple<[]OwnershipEffect, Tuple<Bool, OwnershipEffect>>));
 END
 FN ownershipEffect__from_block_body(body: []Emittable, result_type: ?Type, borrowed_view: Bool = FALSE) RETURNS OwnershipEffect ->
   MUTABLE stmts = COPY body;
@@ -11881,7 +11920,7 @@ FN ownershipEffect__from_block_body(body: []Emittable, result_type: ?Type, borro
   ELSE
     NIL
   END);
-  RETURN first_active_effect(CAST(Tuple{[TRUE, transferred_break_ident_effect(stmts, value)], CAST(Tuple{TRUE, ownershipEffect__of(value)} AS Tuple<Bool, OwnershipEffect>), [TRUE, block_result_transfer_effect(stmts, value)], [(cleanup_result_type?(result_type) AND !(((borrowed_view OR borrowed_break_value?(value))))), ownershipEffect__owned(NIL, :uniform)]} AS Tuple<[]Bool, Tuple<Bool, OwnershipEffect>, []Bool, []OwnershipEffect>));
+  RETURN ownershipEffect__first_active_effect(CAST(Tuple{[TRUE, transferred_break_ident_effect(stmts, value)], CAST(Tuple{TRUE, ownershipEffect__of(value)} AS Tuple<Bool, OwnershipEffect>), [TRUE, block_result_transfer_effect(stmts, value)], [(cleanup_result_type?(result_type) AND !(((borrowed_view OR borrowed_break_value?(value))))), ownershipEffect__owned(NIL, :uniform)]} AS Tuple<[]Bool, Tuple<Bool, OwnershipEffect>, []Bool, []OwnershipEffect>));
 END
 PRIVATE FN ownershipEffect__borrowed_break_value?(value: ?Emittable) RETURNS Bool ->
   RETURN ((value != NIL) AND (value IS_A SliceExpr));
@@ -11902,7 +11941,7 @@ FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS Bool ->
   RETURN borrowed_break_value?(value);
 END
 PRIVATE FN ownershipEffect__effect_when(active: Bool, effect: OwnershipEffect) RETURNS OwnershipEffect ->
-  RETURN first_active_effect([CAST(Tuple{active, effect} AS Tuple<Bool, OwnershipEffect>)]);
+  RETURN ownershipEffect__first_active_effect([CAST(Tuple{active, effect} AS Tuple<Bool, OwnershipEffect>)]);
 END
 PRIVATE FN ownershipEffect__first_active_effect(candidates: []Tuple<Bool, OwnershipEffect>) RETURNS OwnershipEffect ->
   RETURN (((IF candidates |> FIND (TRUE AND _._1.produces_owned()) != NIL THEN
@@ -11913,7 +11952,7 @@ PRIVATE FN ownershipEffect__first_active_effect(candidates: []Tuple<Bool, Owners
 END
 PRIVATE FN ownershipEffect__converged_effect_alloc(effects_value: []OwnershipEffect) RETURNS ?String@symbol ->
   MUTABLE allocs = ((effects_value |> SELECT _.alloc) |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
-  RETURN unique_symbol_or_nil(allocs);
+  RETURN ownershipEffect__unique_symbol_or_nil(allocs);
 END
 PRIVATE FN ownershipEffect__unique_symbol_or_nil(symbols: []String@symbol) RETURNS ?String@symbol ->
   RETURN COPY ({1: symbols.first()})[(CAST((symbols |> DISTINCT _) AS []String@symbol)).length()];
@@ -11948,7 +11987,7 @@ PRIVATE FN ownershipEffect__transferred_break_ident_effect(stmts: []Emittable, v
   END));
   MUTABLE cleanup_kind = (({TRUE: (init_effect.cleanup_kind OR_ELSE :uniform), FALSE: :uniform})[init_effect.produces_owned] OR :uniform);
   MUTABLE active = ((!((name.length() == 0)) AND !((mark == NIL))) AND !((transfer == NIL)));
-  RETURN effect_when(active, ownershipEffect__owned((IF mark != NIL THEN
+  RETURN ownershipEffect__effect_when(active, ownershipEffect__owned((IF mark != NIL THEN
     (mark?).alloc()
   ELSE
     NIL
@@ -11960,7 +11999,7 @@ PRIVATE FN ownershipEffect__block_result_transfer_effect(stmts: []Emittable, val
     RETURN ownershipEffect__none();
   END
   MUTABLE transferred_allocs = (stmts.grep(TransferMark) |> WHERE (([:block_result, :owned_sink]).contains?(_.target()) AND result_names.contains?(CAST(_.name() AS String)))) |> SELECT:? _.target_alloc() |> WHERE _ != NIL;
-  RETURN effect_when(!(transferred_allocs.empty?()), ownershipEffect__owned(unique_symbol_or_nil(transferred_allocs), :uniform));
+  RETURN ownershipEffect__effect_when(!(transferred_allocs.empty?()), ownershipEffect__owned(ownershipEffect__unique_symbol_or_nil(transferred_allocs), :uniform));
 END
 PRIVATE FN ownershipEffect__ident_names_in_expr(value: ?Emittable) RETURNS ![]String EFFECTS REENTRANT ->
   IF value IS_A Ident AS ident THEN
@@ -14175,4 +14214,1182 @@ FN emittable__explicit_ownership_contract(value: Emittable) RETURNS ?OwnershipCo
     Emittable.ShardedMapGet AS payload -> RETURN shardedMapGet__explicit_ownership_contract(payload);,
   END
   RETURN NIL;
+END
+
+
+FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  IF value IS_A FnDef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fnDef__body_slots(&receiver));
+  END
+  IF value IS_A ProtocolAdapterDef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (protocolAdapterDef__body_slots(&receiver));
+  END
+  IF value IS_A FieldDef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fieldDef__body_slots(&receiver));
+  END
+  IF value IS_A UnionTypeDef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (unionTypeDef__body_slots(&receiver));
+  END
+  IF value IS_A Import AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (import__body_slots(&receiver));
+  END
+  IF value IS_A TypeAlias AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (typeAlias__body_slots(&receiver));
+  END
+  IF value IS_A CExternFnDecl AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (cExternFnDecl__body_slots(&receiver));
+  END
+  IF value IS_A CExternStructDef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (cExternStructDef__body_slots(&receiver));
+  END
+  IF value IS_A ModuleNamespace AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (moduleNamespace__body_slots(&receiver));
+  END
+  IF value IS_A TestDef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (testDef__body_slots(&receiver));
+  END
+  IF value IS_A Let AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (let__body_slots(&receiver));
+  END
+  IF value IS_A Set AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (set__body_slots(&receiver));
+  END
+  IF value IS_A DestructureSet AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (destructureSet__body_slots(&receiver));
+  END
+  IF value IS_A ReassignWithCleanup AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (reassignWithCleanup__body_slots(&receiver));
+  END
+  IF value IS_A ResourceClose AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (resourceClose__body_slots(&receiver));
+  END
+  IF value IS_A IfStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ifStmt__body_slots(&receiver));
+  END
+  IF value IS_A IfBindStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ifBindStmt__body_slots(&receiver));
+  END
+  IF value IS_A WhileStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (whileStmt__body_slots(&receiver));
+  END
+  IF value IS_A ForStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (forStmt__body_slots(&receiver));
+  END
+  IF value IS_A ScopeBlock AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (scopeBlock__body_slots(&receiver));
+  END
+  IF value IS_A SwitchStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (switchStmt__body_slots(&receiver));
+  END
+  IF value IS_A UnionMatchStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (unionMatchStmt__body_slots(&receiver));
+  END
+  IF value IS_A IfChain AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ifChain__body_slots(&receiver));
+  END
+  IF value IS_A ReturnStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (returnStmt__body_slots(&receiver));
+  END
+  IF value IS_A BreakStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (breakStmt__body_slots(&receiver));
+  END
+  IF value IS_A BreakExpr AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (breakExpr__body_slots(&receiver));
+  END
+  IF value IS_A ContinueStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (continueStmt__body_slots(&receiver));
+  END
+  IF value IS_A Panic AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (panic__body_slots(&receiver));
+  END
+  IF value IS_A AssertStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (assertStmt__body_slots(&receiver));
+  END
+  IF value IS_A AssertRaisesCheck AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (assertRaisesCheck__body_slots(&receiver));
+  END
+  IF value IS_A TestPreamble AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (testPreamble__body_slots(&receiver));
+  END
+  IF value IS_A DebugOnly AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (debugOnly__body_slots(&receiver));
+  END
+  IF value IS_A Sort AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (sort__body_slots(&receiver));
+  END
+  IF value IS_A SoaFieldAccess AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (soaFieldAccess__body_slots(&receiver));
+  END
+  IF value IS_A TryOrPanic AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (tryOrPanic__body_slots(&receiver));
+  END
+  IF value IS_A IndexInsert AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (indexInsert__body_slots(&receiver));
+  END
+  IF value IS_A BatchWindowPush AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (batchWindowPush__body_slots(&receiver));
+  END
+  IF value IS_A BatchWindowFlush AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (batchWindowFlush__body_slots(&receiver));
+  END
+  IF value IS_A ErrDeferStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (errDeferStmt__body_slots(&receiver));
+  END
+  IF value IS_A ExprStmt AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (exprStmt__body_slots(&receiver));
+  END
+  IF value IS_A DiscardOwned AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (discardOwned__body_slots(&receiver));
+  END
+  IF value IS_A ThunkTrampoline AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (thunkTrampoline__body_slots(&receiver));
+  END
+  IF value IS_A MutualThunkTrampoline AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (mutualThunkTrampoline__body_slots(&receiver));
+  END
+  IF value IS_A StreamSpawn AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (streamSpawn__body_slots(&receiver));
+  END
+  IF value IS_A FsmStructure AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fsmStructure__body_slots(&receiver));
+  END
+  IF value IS_A DirectTenseMap AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (directTenseMap__body_slots(&receiver));
+  END
+  IF value IS_A AsyncPayloadTake AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (asyncPayloadTake__body_slots(&receiver));
+  END
+  IF value IS_A FsmIoBody AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fsmIoBody__body_slots(&receiver));
+  END
+  IF value IS_A StreamYield AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (streamYield__body_slots(&receiver));
+  END
+  IF value IS_A FsmB1Body AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fsmB1Body__body_slots(&receiver));
+  END
+  IF value IS_A FsmGenericBody AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fsmGenericBody__body_slots(&receiver));
+  END
+  IF value IS_A FailureAction AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (failureAction__body_slots(&receiver));
+  END
+  IF value IS_A CapabilityLockTarget AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (capabilityLockTarget__body_slots(&receiver));
+  END
+  IF value IS_A CapabilityLockAddress AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (capabilityLockAddress__body_slots(&receiver));
+  END
+  IF value IS_A SortedLockAcquire AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (sortedLockAcquire__body_slots(&receiver));
+  END
+  IF value IS_A FallibleLockBinding AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fallibleLockBinding__body_slots(&receiver));
+  END
+  IF value IS_A CatchWrapper AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (catchWrapper__body_slots(&receiver));
+  END
+  IF value IS_A Noop AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (noop__body_slots(&receiver));
+  END
+  IF value IS_A Comment AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (comment__body_slots(&receiver));
+  END
+  IF value IS_A Suppress AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (suppress__body_slots(&receiver));
+  END
+  IF value IS_A PubConst AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (pubConst__body_slots(&receiver));
+  END
+  IF value IS_A ModuleVar AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (moduleVar__body_slots(&receiver));
+  END
+  IF value IS_A ModuleConstFree AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (moduleConstFree__body_slots(&receiver));
+  END
+  IF value IS_A HeapCreate AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (heapCreate__body_slots(&receiver));
+  END
+  IF value IS_A DupeSlice AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (dupeSlice__body_slots(&receiver));
+  END
+  IF value IS_A AllocSlice AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (allocSlice__body_slots(&receiver));
+  END
+  IF value IS_A FreeSlice AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (freeSlice__body_slots(&receiver));
+  END
+  IF value IS_A DestroyPtr AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (destroyPtr__body_slots(&receiver));
+  END
+  IF value IS_A Cleanup AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (cleanup__body_slots(&receiver));
+  END
+  IF value IS_A ErrCleanup AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (errCleanup__body_slots(&receiver));
+  END
+  IF value IS_A MoveMark AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (moveMark__body_slots(&receiver));
+  END
+  IF value IS_A DeepCopy AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (deepCopy__body_slots(&receiver));
+  END
+  IF value IS_A ContainerInit AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (containerInit__body_slots(&receiver));
+  END
+  IF value IS_A CapWrap AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (capWrap__body_slots(&receiver));
+  END
+  IF value IS_A SharePromote AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (sharePromote__body_slots(&receiver));
+  END
+  IF value IS_A RcRetain AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (rcRetain__body_slots(&receiver));
+  END
+  IF value IS_A ComptimeCarrierPayload AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (comptimeCarrierPayload__body_slots(&receiver));
+  END
+  IF value IS_A MonomorphicKeep AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (monomorphicKeep__body_slots(&receiver));
+  END
+  IF value IS_A RcRelease AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (rcRelease__body_slots(&receiver));
+  END
+  IF value IS_A RcDowngrade AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (rcDowngrade__body_slots(&receiver));
+  END
+  IF value IS_A WeakUpgrade AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (weakUpgrade__body_slots(&receiver));
+  END
+  IF value IS_A AllocatorRef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (allocatorRef__body_slots(&receiver));
+  END
+  IF value IS_A FreezeExpr AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (freezeExpr__body_slots(&receiver));
+  END
+  IF value IS_A MakeList AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (makeList__body_slots(&receiver));
+  END
+  IF value IS_A FrameSave AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (frameSave__body_slots(&receiver));
+  END
+  IF value IS_A FrameRestore AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (frameRestore__body_slots(&receiver));
+  END
+  IF value IS_A CapabilityUnwrap AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (capabilityUnwrap__body_slots(&receiver));
+  END
+  IF value IS_A SnapshotRead AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (snapshotRead__body_slots(&receiver));
+  END
+  IF value IS_A SnapshotTransaction AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (snapshotTransaction__body_slots(&receiver));
+  END
+  IF value IS_A SnapshotMultiTxn AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (snapshotMultiTxn__body_slots(&receiver));
+  END
+  IF value IS_A PolymorphicMutate AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (polymorphicMutate__body_slots(&receiver));
+  END
+  IF value IS_A PolymorphicMutateFlow AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (polymorphicMutateFlow__body_slots(&receiver));
+  END
+  IF value IS_A PolymorphicFlowSignal AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (polymorphicFlowSignal__body_slots(&receiver));
+  END
+  IF value IS_A WithMatchDispatch AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (withMatchDispatch__body_slots(&receiver));
+  END
+  IF value IS_A AllocMark AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (allocMark__body_slots(&receiver));
+  END
+  IF value IS_A OwnedCreate AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ownedCreate__body_slots(&receiver));
+  END
+  IF value IS_A OwnedDestroy AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ownedDestroy__body_slots(&receiver));
+  END
+  IF value IS_A OwnedTransfer AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ownedTransfer__body_slots(&receiver));
+  END
+  IF value IS_A OwnedBorrow AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ownedBorrow__body_slots(&receiver));
+  END
+  IF value IS_A OwnedStore AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ownedStore__body_slots(&receiver));
+  END
+  IF value IS_A OwnedReturn AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ownedReturn__body_slots(&receiver));
+  END
+  IF value IS_A ReturnMark AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (returnMark__body_slots(&receiver));
+  END
+  IF value IS_A TransferMark AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (transferMark__body_slots(&receiver));
+  END
+  IF value IS_A ReassignMark AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (reassignMark__body_slots(&receiver));
+  END
+  IF value IS_A FieldCleanupMark AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fieldCleanupMark__body_slots(&receiver));
+  END
+  IF value IS_A Call AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (call__body_slots(&receiver));
+  END
+  IF value IS_A RuntimeCall AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (runtimeCall__body_slots(&receiver));
+  END
+  IF value IS_A TailCall AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (tailCall__body_slots(&receiver));
+  END
+  IF value IS_A FieldGet AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fieldGet__body_slots(&receiver));
+  END
+  IF value IS_A UnionPayloadGet AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (unionPayloadGet__body_slots(&receiver));
+  END
+  IF value IS_A IndexGet AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (indexGet__body_slots(&receiver));
+  END
+  IF value IS_A ProtocolCall AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (protocolCall__body_slots(&receiver));
+  END
+  IF value IS_A FallibleOk AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fallibleOk__body_slots(&receiver));
+  END
+  IF value IS_A FutureReady AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (futureReady__body_slots(&receiver));
+  END
+  IF value IS_A Lit AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (lit__body_slots(&receiver));
+  END
+  IF value IS_A SymbolLit AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (symbolLit__body_slots(&receiver));
+  END
+  IF value IS_A VoidLiteral AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (voidLiteral__body_slots(&receiver));
+  END
+  IF value IS_A DefaultValue AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (defaultValue__body_slots(&receiver));
+  END
+  IF value IS_A EnumTag AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (enumTag__body_slots(&receiver));
+  END
+  IF value IS_A EnumOrdinal AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (enumOrdinal__body_slots(&receiver));
+  END
+  IF value IS_A Ident AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ident__body_slots(&receiver));
+  END
+  IF value IS_A TupleLiteral AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (tupleLiteral__body_slots(&receiver));
+  END
+  IF value IS_A FnRef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (fnRef__body_slots(&receiver));
+  END
+  IF value IS_A LockAcquire AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (lockAcquire__body_slots(&receiver));
+  END
+  IF value IS_A TypeOf AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (typeOf__body_slots(&receiver));
+  END
+  IF value IS_A TypeEq AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (typeEq__body_slots(&receiver));
+  END
+  IF value IS_A StructInit AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (structInit__body_slots(&receiver));
+  END
+  IF value IS_A ArrayInit AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (arrayInit__body_slots(&receiver));
+  END
+  IF value IS_A ArrayDefaultInit AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (arrayDefaultInit__body_slots(&receiver));
+  END
+  IF value IS_A SliceExpr AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (sliceExpr__body_slots(&receiver));
+  END
+  IF value IS_A ConcatStr AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (concatStr__body_slots(&receiver));
+  END
+  IF value IS_A TryExpr AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (tryExpr__body_slots(&receiver));
+  END
+  IF value IS_A TryCatch AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (tryCatch__body_slots(&receiver));
+  END
+  IF value IS_A Orelse AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (orelse__body_slots(&receiver));
+  END
+  IF value IS_A Conditional AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (conditional__body_slots(&receiver));
+  END
+  IF value IS_A IfOptional AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ifOptional__body_slots(&receiver));
+  END
+  IF value IS_A Comptime AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (comptime__body_slots(&receiver));
+  END
+  IF value IS_A UnionVariantGet AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (unionVariantGet__body_slots(&receiver));
+  END
+  IF value IS_A ListItems AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (listItems__body_slots(&receiver));
+  END
+  IF value IS_A ListLength AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (listLength__body_slots(&receiver));
+  END
+  IF value IS_A AddressOf AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (addressOf__body_slots(&receiver));
+  END
+  IF value IS_A Deref AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (deref__body_slots(&receiver));
+  END
+  IF value IS_A PointerCast AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (pointerCast__body_slots(&receiver));
+  END
+  IF value IS_A ConstCast AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (constCast__body_slots(&receiver));
+  END
+  IF value IS_A DefaultStreamCapacity AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (defaultStreamCapacity__body_slots(&receiver));
+  END
+  IF value IS_A NextPromiseList AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (nextPromiseList__body_slots(&receiver));
+  END
+  IF value IS_A Undef AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (undef__body_slots(&receiver));
+  END
+  IF value IS_A TypeSentinel AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (typeSentinel__body_slots(&receiver));
+  END
+  IF value IS_A IterRange AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (iterRange__body_slots(&receiver));
+  END
+  IF value IS_A TryOptional AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (tryOptional__body_slots(&receiver));
+  END
+  IF value IS_A ForeignOwnedUnwrap AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (foreignOwnedUnwrap__body_slots(&receiver));
+  END
+  IF value IS_A ForeignSliceView AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (foreignSliceView__body_slots(&receiver));
+  END
+  IF value IS_A HasField AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (hasField__body_slots(&receiver));
+  END
+  IF value IS_A ItemsAccess AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (itemsAccess__body_slots(&receiver));
+  END
+  IF value IS_A OwnedSlice AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (ownedSlice__body_slots(&receiver));
+  END
+  IF value IS_A LambdaExpr AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (lambdaExpr__body_slots(&receiver));
+  END
+  IF value IS_A Pipeline AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (pipeline__body_slots(&receiver));
+  END
+  IF value IS_A RegistryCall AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (registryCall__body_slots(&receiver));
+  END
+  IF value IS_A IndexedStore AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (indexedStore__body_slots(&receiver));
+  END
+  IF value IS_A CFunctionAdapter AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (cFunctionAdapter__body_slots(&receiver));
+  END
+  IF value IS_A ExternTrampoline AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (externTrampoline__body_slots(&receiver));
+  END
+  IF value IS_A ObservableConsumerSpawn AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (observableConsumerSpawn__body_slots(&receiver));
+  END
+  IF value IS_A ShardConcurrentEach AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (shardConcurrentEach__body_slots(&receiver));
+  END
+  IF value IS_A InlineBc AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (inlineBc__body_slots(&receiver));
+  END
+  IF value IS_A OrElseExitBcRewrite AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (orElseExitBcRewrite__body_slots(&receiver));
+  END
+  IF value IS_A ShardedMapPut AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (shardedMapPut__body_slots(&receiver));
+  END
+  IF value IS_A ShardedMapGet AS payload THEN
+    MUTABLE receiver = COPY payload;
+    RETURN TRY (shardedMapGet__body_slots(&receiver));
+  END
+  RETURN empty_body_slots;
+END
+
+FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect ->
+  IF value IS_A FnDef AS payload THEN
+    RETURN fnDef__ownership_effect(payload);
+  END
+  IF value IS_A ProtocolAdapterDef AS payload THEN
+    RETURN protocolAdapterDef__ownership_effect(payload);
+  END
+  IF value IS_A FieldDef AS payload THEN
+    RETURN fieldDef__ownership_effect(payload);
+  END
+  IF value IS_A UnionTypeDef AS payload THEN
+    RETURN unionTypeDef__ownership_effect(payload);
+  END
+  IF value IS_A Import AS payload THEN
+    RETURN import__ownership_effect(payload);
+  END
+  IF value IS_A TypeAlias AS payload THEN
+    RETURN typeAlias__ownership_effect(payload);
+  END
+  IF value IS_A CExternFnDecl AS payload THEN
+    RETURN cExternFnDecl__ownership_effect(payload);
+  END
+  IF value IS_A CExternStructDef AS payload THEN
+    RETURN cExternStructDef__ownership_effect(payload);
+  END
+  IF value IS_A ModuleNamespace AS payload THEN
+    RETURN moduleNamespace__ownership_effect(payload);
+  END
+  IF value IS_A TestDef AS payload THEN
+    RETURN testDef__ownership_effect(payload);
+  END
+  IF value IS_A Let AS payload THEN
+    RETURN let__ownership_effect(payload);
+  END
+  IF value IS_A Set AS payload THEN
+    RETURN set__ownership_effect(payload);
+  END
+  IF value IS_A DestructureSet AS payload THEN
+    RETURN destructureSet__ownership_effect(payload);
+  END
+  IF value IS_A ReassignWithCleanup AS payload THEN
+    RETURN reassignWithCleanup__ownership_effect(payload);
+  END
+  IF value IS_A ResourceClose AS payload THEN
+    RETURN resourceClose__ownership_effect(payload);
+  END
+  IF value IS_A IfStmt AS payload THEN
+    RETURN ifStmt__ownership_effect(payload);
+  END
+  IF value IS_A IfBindStmt AS payload THEN
+    RETURN ifBindStmt__ownership_effect(payload);
+  END
+  IF value IS_A WhileStmt AS payload THEN
+    RETURN whileStmt__ownership_effect(payload);
+  END
+  IF value IS_A ForStmt AS payload THEN
+    RETURN forStmt__ownership_effect(payload);
+  END
+  IF value IS_A ScopeBlock AS payload THEN
+    RETURN scopeBlock__ownership_effect(payload);
+  END
+  IF value IS_A SwitchStmt AS payload THEN
+    RETURN switchStmt__ownership_effect(payload);
+  END
+  IF value IS_A UnionMatchStmt AS payload THEN
+    RETURN unionMatchStmt__ownership_effect(payload);
+  END
+  IF value IS_A IfChain AS payload THEN
+    RETURN ifChain__ownership_effect(payload);
+  END
+  IF value IS_A ReturnStmt AS payload THEN
+    RETURN returnStmt__ownership_effect(payload);
+  END
+  IF value IS_A BreakStmt AS payload THEN
+    RETURN breakStmt__ownership_effect(payload);
+  END
+  IF value IS_A BreakExpr AS payload THEN
+    RETURN breakExpr__ownership_effect(payload);
+  END
+  IF value IS_A ContinueStmt AS payload THEN
+    RETURN continueStmt__ownership_effect(payload);
+  END
+  IF value IS_A Panic AS payload THEN
+    RETURN panic__ownership_effect(payload);
+  END
+  IF value IS_A AssertStmt AS payload THEN
+    RETURN assertStmt__ownership_effect(payload);
+  END
+  IF value IS_A AssertRaisesCheck AS payload THEN
+    RETURN assertRaisesCheck__ownership_effect(payload);
+  END
+  IF value IS_A TestPreamble AS payload THEN
+    RETURN testPreamble__ownership_effect(payload);
+  END
+  IF value IS_A DebugOnly AS payload THEN
+    RETURN debugOnly__ownership_effect(payload);
+  END
+  IF value IS_A Sort AS payload THEN
+    RETURN sort__ownership_effect(payload);
+  END
+  IF value IS_A SoaFieldAccess AS payload THEN
+    RETURN soaFieldAccess__ownership_effect(payload);
+  END
+  IF value IS_A TryOrPanic AS payload THEN
+    RETURN tryOrPanic__ownership_effect(payload);
+  END
+  IF value IS_A IndexInsert AS payload THEN
+    RETURN indexInsert__ownership_effect(payload);
+  END
+  IF value IS_A BatchWindowPush AS payload THEN
+    RETURN batchWindowPush__ownership_effect(payload);
+  END
+  IF value IS_A BatchWindowFlush AS payload THEN
+    RETURN batchWindowFlush__ownership_effect(payload);
+  END
+  IF value IS_A ErrDeferStmt AS payload THEN
+    RETURN errDeferStmt__ownership_effect(payload);
+  END
+  IF value IS_A ExprStmt AS payload THEN
+    RETURN exprStmt__ownership_effect(payload);
+  END
+  IF value IS_A DiscardOwned AS payload THEN
+    RETURN discardOwned__ownership_effect(payload);
+  END
+  IF value IS_A ThunkTrampoline AS payload THEN
+    RETURN thunkTrampoline__ownership_effect(payload);
+  END
+  IF value IS_A MutualThunkTrampoline AS payload THEN
+    RETURN mutualThunkTrampoline__ownership_effect(payload);
+  END
+  IF value IS_A StreamSpawn AS payload THEN
+    RETURN streamSpawn__ownership_effect(payload);
+  END
+  IF value IS_A FsmStructure AS payload THEN
+    RETURN fsmStructure__ownership_effect(payload);
+  END
+  IF value IS_A DirectTenseMap AS payload THEN
+    RETURN directTenseMap__ownership_effect(payload);
+  END
+  IF value IS_A AsyncPayloadTake AS payload THEN
+    RETURN asyncPayloadTake__ownership_effect(payload);
+  END
+  IF value IS_A FsmIoBody AS payload THEN
+    RETURN fsmIoBody__ownership_effect(payload);
+  END
+  IF value IS_A StreamYield AS payload THEN
+    RETURN streamYield__ownership_effect(payload);
+  END
+  IF value IS_A FsmB1Body AS payload THEN
+    RETURN fsmB1Body__ownership_effect(payload);
+  END
+  IF value IS_A FsmGenericBody AS payload THEN
+    RETURN fsmGenericBody__ownership_effect(payload);
+  END
+  IF value IS_A FailureAction AS payload THEN
+    RETURN failureAction__ownership_effect(payload);
+  END
+  IF value IS_A CapabilityLockTarget AS payload THEN
+    RETURN capabilityLockTarget__ownership_effect(payload);
+  END
+  IF value IS_A CapabilityLockAddress AS payload THEN
+    RETURN capabilityLockAddress__ownership_effect(payload);
+  END
+  IF value IS_A SortedLockAcquire AS payload THEN
+    RETURN sortedLockAcquire__ownership_effect(payload);
+  END
+  IF value IS_A FallibleLockBinding AS payload THEN
+    RETURN fallibleLockBinding__ownership_effect(payload);
+  END
+  IF value IS_A CatchWrapper AS payload THEN
+    RETURN catchWrapper__ownership_effect(payload);
+  END
+  IF value IS_A Noop AS payload THEN
+    RETURN noop__ownership_effect(payload);
+  END
+  IF value IS_A Comment AS payload THEN
+    RETURN comment__ownership_effect(payload);
+  END
+  IF value IS_A Suppress AS payload THEN
+    RETURN suppress__ownership_effect(payload);
+  END
+  IF value IS_A PubConst AS payload THEN
+    RETURN pubConst__ownership_effect(payload);
+  END
+  IF value IS_A ModuleVar AS payload THEN
+    RETURN moduleVar__ownership_effect(payload);
+  END
+  IF value IS_A ModuleConstFree AS payload THEN
+    RETURN moduleConstFree__ownership_effect(payload);
+  END
+  IF value IS_A HeapCreate AS payload THEN
+    RETURN heapCreate__ownership_effect(payload);
+  END
+  IF value IS_A DupeSlice AS payload THEN
+    RETURN dupeSlice__ownership_effect(payload);
+  END
+  IF value IS_A AllocSlice AS payload THEN
+    RETURN allocSlice__ownership_effect(payload);
+  END
+  IF value IS_A FreeSlice AS payload THEN
+    RETURN freeSlice__ownership_effect(payload);
+  END
+  IF value IS_A DestroyPtr AS payload THEN
+    RETURN destroyPtr__ownership_effect(payload);
+  END
+  IF value IS_A Cleanup AS payload THEN
+    RETURN cleanup__ownership_effect(payload);
+  END
+  IF value IS_A ErrCleanup AS payload THEN
+    RETURN errCleanup__ownership_effect(payload);
+  END
+  IF value IS_A MoveMark AS payload THEN
+    RETURN moveMark__ownership_effect(payload);
+  END
+  IF value IS_A DeepCopy AS payload THEN
+    RETURN deepCopy__ownership_effect(payload);
+  END
+  IF value IS_A ContainerInit AS payload THEN
+    RETURN containerInit__ownership_effect(payload);
+  END
+  IF value IS_A CapWrap AS payload THEN
+    RETURN capWrap__ownership_effect(payload);
+  END
+  IF value IS_A SharePromote AS payload THEN
+    RETURN sharePromote__ownership_effect(payload);
+  END
+  IF value IS_A RcRetain AS payload THEN
+    RETURN rcRetain__ownership_effect(payload);
+  END
+  IF value IS_A ComptimeCarrierPayload AS payload THEN
+    RETURN comptimeCarrierPayload__ownership_effect(payload);
+  END
+  IF value IS_A MonomorphicKeep AS payload THEN
+    RETURN monomorphicKeep__ownership_effect(payload);
+  END
+  IF value IS_A RcRelease AS payload THEN
+    RETURN rcRelease__ownership_effect(payload);
+  END
+  IF value IS_A RcDowngrade AS payload THEN
+    RETURN rcDowngrade__ownership_effect(payload);
+  END
+  IF value IS_A WeakUpgrade AS payload THEN
+    RETURN weakUpgrade__ownership_effect(payload);
+  END
+  IF value IS_A AllocatorRef AS payload THEN
+    RETURN allocatorRef__ownership_effect(payload);
+  END
+  IF value IS_A FreezeExpr AS payload THEN
+    RETURN freezeExpr__ownership_effect(payload);
+  END
+  IF value IS_A MakeList AS payload THEN
+    RETURN makeList__ownership_effect(payload);
+  END
+  IF value IS_A FrameSave AS payload THEN
+    RETURN frameSave__ownership_effect(payload);
+  END
+  IF value IS_A FrameRestore AS payload THEN
+    RETURN frameRestore__ownership_effect(payload);
+  END
+  IF value IS_A CapabilityUnwrap AS payload THEN
+    RETURN capabilityUnwrap__ownership_effect(payload);
+  END
+  IF value IS_A SnapshotRead AS payload THEN
+    RETURN snapshotRead__ownership_effect(payload);
+  END
+  IF value IS_A SnapshotTransaction AS payload THEN
+    RETURN snapshotTransaction__ownership_effect(payload);
+  END
+  IF value IS_A SnapshotMultiTxn AS payload THEN
+    RETURN snapshotMultiTxn__ownership_effect(payload);
+  END
+  IF value IS_A PolymorphicMutate AS payload THEN
+    RETURN polymorphicMutate__ownership_effect(payload);
+  END
+  IF value IS_A PolymorphicMutateFlow AS payload THEN
+    RETURN polymorphicMutateFlow__ownership_effect(payload);
+  END
+  IF value IS_A PolymorphicFlowSignal AS payload THEN
+    RETURN polymorphicFlowSignal__ownership_effect(payload);
+  END
+  IF value IS_A WithMatchDispatch AS payload THEN
+    RETURN withMatchDispatch__ownership_effect(payload);
+  END
+  IF value IS_A AllocMark AS payload THEN
+    RETURN allocMark__ownership_effect(payload);
+  END
+  IF value IS_A OwnedCreate AS payload THEN
+    RETURN ownedCreate__ownership_effect(payload);
+  END
+  IF value IS_A OwnedDestroy AS payload THEN
+    RETURN ownedDestroy__ownership_effect(payload);
+  END
+  IF value IS_A OwnedTransfer AS payload THEN
+    RETURN ownedTransfer__ownership_effect(payload);
+  END
+  IF value IS_A OwnedBorrow AS payload THEN
+    RETURN ownedBorrow__ownership_effect(payload);
+  END
+  IF value IS_A OwnedStore AS payload THEN
+    RETURN ownedStore__ownership_effect(payload);
+  END
+  IF value IS_A OwnedReturn AS payload THEN
+    RETURN ownedReturn__ownership_effect(payload);
+  END
+  IF value IS_A ReturnMark AS payload THEN
+    RETURN returnMark__ownership_effect(payload);
+  END
+  IF value IS_A TransferMark AS payload THEN
+    RETURN transferMark__ownership_effect(payload);
+  END
+  IF value IS_A ReassignMark AS payload THEN
+    RETURN reassignMark__ownership_effect(payload);
+  END
+  IF value IS_A FieldCleanupMark AS payload THEN
+    RETURN fieldCleanupMark__ownership_effect(payload);
+  END
+  IF value IS_A Call AS payload THEN
+    RETURN call__ownership_effect(payload);
+  END
+  IF value IS_A RuntimeCall AS payload THEN
+    RETURN runtimeCall__ownership_effect(payload);
+  END
+  IF value IS_A TailCall AS payload THEN
+    RETURN tailCall__ownership_effect(payload);
+  END
+  IF value IS_A FieldGet AS payload THEN
+    RETURN fieldGet__ownership_effect(payload);
+  END
+  IF value IS_A UnionPayloadGet AS payload THEN
+    RETURN unionPayloadGet__ownership_effect(payload);
+  END
+  IF value IS_A IndexGet AS payload THEN
+    RETURN indexGet__ownership_effect(payload);
+  END
+  IF value IS_A ProtocolCall AS payload THEN
+    RETURN protocolCall__ownership_effect(payload);
+  END
+  IF value IS_A FallibleOk AS payload THEN
+    RETURN fallibleOk__ownership_effect(payload);
+  END
+  IF value IS_A FutureReady AS payload THEN
+    RETURN futureReady__ownership_effect(payload);
+  END
+  IF value IS_A Lit AS payload THEN
+    RETURN lit__ownership_effect(payload);
+  END
+  IF value IS_A SymbolLit AS payload THEN
+    RETURN symbolLit__ownership_effect(payload);
+  END
+  IF value IS_A VoidLiteral AS payload THEN
+    RETURN voidLiteral__ownership_effect(payload);
+  END
+  IF value IS_A DefaultValue AS payload THEN
+    RETURN defaultValue__ownership_effect(payload);
+  END
+  IF value IS_A EnumTag AS payload THEN
+    RETURN enumTag__ownership_effect(payload);
+  END
+  IF value IS_A EnumOrdinal AS payload THEN
+    RETURN enumOrdinal__ownership_effect(payload);
+  END
+  IF value IS_A Ident AS payload THEN
+    RETURN ident__ownership_effect(payload);
+  END
+  IF value IS_A TupleLiteral AS payload THEN
+    RETURN tupleLiteral__ownership_effect(payload);
+  END
+  IF value IS_A FnRef AS payload THEN
+    RETURN fnRef__ownership_effect(payload);
+  END
+  IF value IS_A LockAcquire AS payload THEN
+    RETURN lockAcquire__ownership_effect(payload);
+  END
+  IF value IS_A TypeOf AS payload THEN
+    RETURN typeOf__ownership_effect(payload);
+  END
+  IF value IS_A TypeEq AS payload THEN
+    RETURN typeEq__ownership_effect(payload);
+  END
+  IF value IS_A StructInit AS payload THEN
+    RETURN structInit__ownership_effect(payload);
+  END
+  IF value IS_A ArrayInit AS payload THEN
+    RETURN arrayInit__ownership_effect(payload);
+  END
+  IF value IS_A ArrayDefaultInit AS payload THEN
+    RETURN arrayDefaultInit__ownership_effect(payload);
+  END
+  IF value IS_A SliceExpr AS payload THEN
+    RETURN sliceExpr__ownership_effect(payload);
+  END
+  IF value IS_A ConcatStr AS payload THEN
+    RETURN concatStr__ownership_effect(payload);
+  END
+  IF value IS_A TryExpr AS payload THEN
+    RETURN tryExpr__ownership_effect(payload);
+  END
+  IF value IS_A TryCatch AS payload THEN
+    RETURN tryCatch__ownership_effect(payload);
+  END
+  IF value IS_A Orelse AS payload THEN
+    RETURN orelse__ownership_effect(payload);
+  END
+  IF value IS_A Conditional AS payload THEN
+    RETURN conditional__ownership_effect(payload);
+  END
+  IF value IS_A IfOptional AS payload THEN
+    RETURN ifOptional__ownership_effect(payload);
+  END
+  IF value IS_A Comptime AS payload THEN
+    RETURN comptime__ownership_effect(payload);
+  END
+  IF value IS_A UnionVariantGet AS payload THEN
+    RETURN unionVariantGet__ownership_effect(payload);
+  END
+  IF value IS_A ListItems AS payload THEN
+    RETURN listItems__ownership_effect(payload);
+  END
+  IF value IS_A ListLength AS payload THEN
+    RETURN listLength__ownership_effect(payload);
+  END
+  IF value IS_A AddressOf AS payload THEN
+    RETURN addressOf__ownership_effect(payload);
+  END
+  IF value IS_A Deref AS payload THEN
+    RETURN deref__ownership_effect(payload);
+  END
+  IF value IS_A PointerCast AS payload THEN
+    RETURN pointerCast__ownership_effect(payload);
+  END
+  IF value IS_A ConstCast AS payload THEN
+    RETURN constCast__ownership_effect(payload);
+  END
+  IF value IS_A DefaultStreamCapacity AS payload THEN
+    RETURN defaultStreamCapacity__ownership_effect(payload);
+  END
+  IF value IS_A NextPromiseList AS payload THEN
+    RETURN nextPromiseList__ownership_effect(payload);
+  END
+  IF value IS_A Undef AS payload THEN
+    RETURN undef__ownership_effect(payload);
+  END
+  IF value IS_A TypeSentinel AS payload THEN
+    RETURN typeSentinel__ownership_effect(payload);
+  END
+  IF value IS_A IterRange AS payload THEN
+    RETURN iterRange__ownership_effect(payload);
+  END
+  IF value IS_A TryOptional AS payload THEN
+    RETURN tryOptional__ownership_effect(payload);
+  END
+  IF value IS_A ForeignOwnedUnwrap AS payload THEN
+    RETURN foreignOwnedUnwrap__ownership_effect(payload);
+  END
+  IF value IS_A ForeignSliceView AS payload THEN
+    RETURN foreignSliceView__ownership_effect(payload);
+  END
+  IF value IS_A HasField AS payload THEN
+    RETURN hasField__ownership_effect(payload);
+  END
+  IF value IS_A ItemsAccess AS payload THEN
+    RETURN itemsAccess__ownership_effect(payload);
+  END
+  IF value IS_A OwnedSlice AS payload THEN
+    RETURN ownedSlice__ownership_effect(payload);
+  END
+  IF value IS_A LambdaExpr AS payload THEN
+    RETURN lambdaExpr__ownership_effect(payload);
+  END
+  IF value IS_A Pipeline AS payload THEN
+    RETURN pipeline__ownership_effect(payload);
+  END
+  IF value IS_A RegistryCall AS payload THEN
+    RETURN registryCall__ownership_effect(payload);
+  END
+  IF value IS_A IndexedStore AS payload THEN
+    RETURN indexedStore__ownership_effect(payload);
+  END
+  IF value IS_A CFunctionAdapter AS payload THEN
+    RETURN cFunctionAdapter__ownership_effect(payload);
+  END
+  IF value IS_A ExternTrampoline AS payload THEN
+    RETURN externTrampoline__ownership_effect(payload);
+  END
+  IF value IS_A ObservableConsumerSpawn AS payload THEN
+    RETURN observableConsumerSpawn__ownership_effect(payload);
+  END
+  IF value IS_A ShardConcurrentEach AS payload THEN
+    RETURN shardConcurrentEach__ownership_effect(payload);
+  END
+  IF value IS_A InlineBc AS payload THEN
+    RETURN inlineBc__ownership_effect(payload);
+  END
+  IF value IS_A OrElseExitBcRewrite AS payload THEN
+    RETURN orElseExitBcRewrite__ownership_effect(payload);
+  END
+  IF value IS_A ShardedMapPut AS payload THEN
+    RETURN shardedMapPut__ownership_effect(payload);
+  END
+  IF value IS_A ShardedMapGet AS payload THEN
+    RETURN shardedMapGet__ownership_effect(payload);
+  END
+  RETURN ownershipEffect__none();
 END
