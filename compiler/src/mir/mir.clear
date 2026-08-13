@@ -7904,7 +7904,7 @@ FN methodCall__expr?(self: MIRMethodCall) RETURNS Bool ->
 END
 PUB STRUCT FieldGet {
   object: Emittable,
-  field: Any@multiowned,
+  field: String,
   lowered_node_id: Any@multiowned,
   ownership_consumption: Any@multiowned
 }
@@ -8648,7 +8648,7 @@ FN enumOrdinal__expr?(self: EnumOrdinal) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT Ident {
-  name: Any@multiowned,
+  name: String,
   lowered_node_id: Any@multiowned,
   ownership_consumption: Any@multiowned
 }
@@ -11784,7 +11784,7 @@ STRUCT FsmResultTransferFact {
   move_guarded: Bool
 }
 
-FN fsmResultTransferFact__marks(self: FsmResultTransferFact) RETURNS ![]Stmt EFFECTS REENTRANT ->
+FN fsmResultTransferFact__marks(self: FsmResultTransferFact) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY self.name, target: :owned_sink, target_alloc: COPY self.target_alloc, move_guarded: self.move_guarded })));
 END
 PUB STRUCT OwnershipConsumptionFact {
@@ -12045,7 +12045,18 @@ PRIVATE FN ownershipEffect__block_result_transfer_effect(stmts: []Emittable, val
   IF result_names.empty?() THEN
     RETURN ownershipEffect__none();
   END
-  MUTABLE transferred_allocs = (stmts.grep(TransferMark) |> WHERE (([:block_result, :owned_sink]).contains?(_.target()) AND result_names.contains?(CAST(_.name() AS String)))) |> SELECT:? _.target_alloc() |> WHERE _ != NIL;
+  MUTABLE transferred_allocs: []String@symbol = [];
+  FOR stmt IN stmts DO
+    IF stmt IS_A TransferMark AS transfer_mark THEN
+      IF ((transfer_mark.target == :block_result) OR (transfer_mark.target == :owned_sink)) THEN
+        IF result_names.contains?(transfer_mark.name) THEN
+          IF transfer_mark.target_alloc EXISTS AS transfer_alloc THEN
+            &transferred_allocs.append(COPY transfer_alloc);
+          END
+        END
+      END
+    END
+  END
   RETURN ownershipEffect__effect_when(!(transferred_allocs.empty?()), ownershipEffect__owned(ownershipEffect__unique_symbol_or_nil(transferred_allocs), :uniform));
 END
 PRIVATE FN ownershipEffect__ident_names_in_expr(value: ?Emittable) RETURNS ![]String EFFECTS REENTRANT ->
@@ -12083,7 +12094,7 @@ FN structInitField__get_index(self: StructInitField, key: String@symbol) RETURNS
   END
 END
 FN mIR__named_field(name: String@symbol, value: Emittable) RETURNS StructInitField ->
-  RETURN StructInitField{ name: castNameToStringSymbol(COPY name), value: COPY value, alloc: NIL };
+  RETURN StructInitField{ name: COPY name, value: COPY value, alloc: NIL };
 END
 FN mIR__if_binding(expr: Emittable, capture: MirCapture) RETURNS !{String@symbol}NamedMirFieldValue ->
   MUTABLE binding: {String@symbol}NamedMirFieldValue = {};
@@ -12119,10 +12130,10 @@ FN mIR__struct_init_field_alloc(field: StructInitFieldInput) RETURNS ?String@sym
   RETURN NIL;
 END
 FN mIR__each_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS Void ->
-  mIR__each_node_inner(UNWRAP (root), FALSE, blk);
+  mIR__each_node_inner(root, FALSE, NIL, blk);
 END
 FN mIR__each_node_until(root: ?NodeRoot, stop: FN(Emittable) -> Bool, blk: FN(Emittable) -> Void) RETURNS Void ->
-  mIR__each_node_inner(UNWRAP (root), FALSE, stop, blk);
+  mIR__each_node_inner(root, FALSE, stop, blk);
 END
 FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_197: []Emittable = List[]; rtoc_empty_list_197 } );
@@ -12151,24 +12162,30 @@ FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emi
       END
       RETURN;
     END
-    blk(root_value);
+    MUTABLE node: ?Emittable = NIL;
+    IF root_value IS_A Emittable AS root_node THEN
+      node = COPY root_node;
+    END
+    IF node == NIL THEN
+      RETURN;
+    END
+    MUTABLE node_value = COPY UNWRAP (node);
+    blk(node_value);
     IF stop_at_block_expr THEN
-    IF root_value IS_A MIRBlockExpr THEN
+    IF node_value IS_A MIRBlockExpr THEN
       RETURN;
     END
     END
-    IF (IF stop != NIL THEN
-      (stop?)(root_value)
-    ELSE
-      NIL
-    END) THEN
-      RETURN;
+    IF stop EXISTS AS stop_fn THEN
+      IF stop_fn(node_value) THEN
+        RETURN;
+      END
     END
-    FOR _ IN root_value.child_exprs() DO
-    mIR__each_node_inner(_, stop_at_block_expr, stop, blk);
+    FOR _ IN TRY (emittable__child_exprs(node_value)) DO
+    mIR__each_node_inner(NodeRoot{ Emittable: COPY _ }, stop_at_block_expr, stop, blk);
     END
-    FOR _ IN root_value.body_slots() DO
-    mIR__each_node_inner(_.body(), stop_at_block_expr, stop, blk);
+    FOR _ IN TRY (emittable__body_slots(node_value)) DO
+    mIR__each_node_inner(NodeRoot{ ArrayValue: COPY _.body }, stop_at_block_expr, stop, blk);
     END
     NIL;
   ELSE
@@ -12183,12 +12200,20 @@ FN mIR__each_surface_node_inner(root: ?NodeRoot, blk: FN(Emittable) -> Void) RET
       END
       RETURN;
     END
-    blk(root_value);
-    IF root_value IS_A MIRBlockExpr THEN
+    MUTABLE node: ?Emittable = NIL;
+    IF root_value IS_A Emittable AS root_node THEN
+      node = COPY root_node;
+    END
+    IF node == NIL THEN
       RETURN;
     END
-    FOR _ IN root_value.child_exprs() DO
-    mIR__each_surface_node_inner(_, blk);
+    MUTABLE node_value = COPY UNWRAP (node);
+    blk(node_value);
+    IF node_value IS_A MIRBlockExpr THEN
+      RETURN;
+    END
+    FOR _ IN TRY (emittable__child_exprs(node_value)) DO
+    mIR__each_surface_node_inner(NodeRoot{ Emittable: COPY _ }, blk);
     END
     NIL;
   ELSE
@@ -12234,7 +12259,7 @@ FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, S
 WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_self_view.slots.keys() |> EACH {
     MUTABLE alloc: String@symbol = (rtoc_self_view.slots[_] OR_ELSE CAST(panic("missing hash key") AS String@symbol));
-    blk(_, alloc);
+    blk(symbol(_), alloc);
     };
     NIL;
 }
@@ -12305,7 +12330,7 @@ FN inlineAllocMetadata__single_alloc(self: InlineAllocMetadata) RETURNS !?String
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE uniq = CAST(((TRY (inlineAllocMetadata__values(rtoc_self_view))) |> DISTINCT _) AS []String@symbol);
-    IF uniq.one?() THEN
+    IF (uniq.length() == 1) THEN
       RETURN uniq.first();
     ELSE
       RETURN NIL;
@@ -12661,7 +12686,7 @@ FN mutualThunkArm__fetch(self: MutualThunkArm, key: String@symbol) RETURNS !Mutu
   ELSE_IF (key == :target_variant) THEN
     RETURN COPY MutualThunkArmReturnValue{ StringValue: COPY self.target_variant };
   ELSE_IF (key == :target_arg_inits) THEN
-    RETURN COPY MutualThunkArmReturnValue{ ArrayValue: COPY self.target_arg_inits };
+    RETURN COPY MutualThunkArmReturnValue{ ArrayValue2: COPY self.target_arg_inits };
   ELSE
     panic("key not found: {}");
   END
@@ -12803,11 +12828,12 @@ FN mutualThunkTrampoline__stmt?(self: MutualThunkTrampoline) RETURNS Bool ->
   RETURN TRUE;
 END
 FN mIR__validate_defer_body_mut(body: DeferBodyInput, label: String) RETURNS !Void ->
-  MUTABLE valid =   IF body IS_A []Emittable THEN
-    body |> ALL _ IS_A Emittable
-  ELSE
-    body IS_A Emittable
-  END;
+  MUTABLE valid = FALSE;
+  IF body IS_A []Emittable THEN
+    valid = TRUE;
+  ELSE_IF body IS_A Emittable THEN
+    valid = TRUE;
+  END
   IF valid THEN
     RETURN;
   END
@@ -13284,17 +13310,17 @@ STRUCT OwnershipTransferPlan {
   move_guarded: Bool
 }
 
-FN ownershipTransferPlan__marks(self: OwnershipTransferPlan) RETURNS ![]Stmt ->
-  MUTABLE out: []Stmt = [TransferMark{ name: COPY self.name, target: COPY self.target, target_alloc: COPY self.target_alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }];
+FN ownershipTransferPlan__marks(self: OwnershipTransferPlan) RETURNS ![]Emittable ->
+  MUTABLE out: []Emittable = [Emittable{ TransferMark: COPY TransferMark{ name: COPY self.name, target: COPY self.target, target_alloc: COPY self.target_alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
   IF self.move_guarded THEN
-    &out.append(MoveMark{ name: COPY self.name, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+    &out.append(Emittable{ MoveMark: COPY MoveMark{ name: COPY self.name, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
   END
   RETURN out;
 END
-FN mIR__kept_edge_transfer_boundary(names: []String) RETURNS ![]Stmt ->
+FN mIR__kept_edge_transfer_boundary(names: []String) RETURNS ![]Emittable ->
   RETURN (CAST((names |> DISTINCT _) AS []String)) |> UNNEST TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY _, target: :owned_sink, target_alloc: :heap, move_guarded: TRUE })));
 END
-FN mIR__ownership_transfer_marks(name: String, target: String@symbol, target_alloc: ?String@symbol = NIL, move_guarded: Bool = FALSE) RETURNS ![]Stmt ->
+FN mIR__ownership_transfer_marks(name: String, target: String@symbol, target_alloc: ?String@symbol = NIL, move_guarded: Bool = FALSE) RETURNS ![]Emittable ->
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: COPY target, target_alloc: COPY target_alloc, move_guarded: COPY move_guarded })));
 END
 STRUCT RuntimeCallSpec {
@@ -14035,10 +14061,10 @@ END
 FN shardConcurrentEach__stmt?(self: ShardConcurrentEach) RETURNS Bool ->
   RETURN TRUE;
 END
-# Ruby module MIR::StdlibDefFsCoercion
-FOR _ IN ([InlineBc, ShardedMapPut, ShardedMapGet]) DO
-_.prepend(StdlibDefFsCoercion);
-END
+# Ruby module MIR::StdlibDefFsCoercion prepends a coercing setter so an
+# untyped registry hash becomes a FunctionSignature on assignment. These
+# carriers declare the field as FunctionSignature, so there is nothing to
+# coerce.
 # End Ruby module MIR
 FN castCaptureToNamedMirFieldValue(value: MirCapture) RETURNS NamedMirFieldValue ->
   PARTIAL MATCH value START
@@ -14279,35 +14305,35 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A ProtocolAdapterDef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (protocolAdapterDef__body_slots(&receiver));
+    RETURN TRY (protocolAdapterDef__body_slots(receiver));
   END
   IF value IS_A FieldDef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fieldDef__body_slots(&receiver));
+    RETURN TRY (fieldDef__body_slots(receiver));
   END
   IF value IS_A UnionTypeDef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (unionTypeDef__body_slots(&receiver));
+    RETURN TRY (unionTypeDef__body_slots(receiver));
   END
   IF value IS_A Import AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (import__body_slots(&receiver));
+    RETURN TRY (import__body_slots(receiver));
   END
   IF value IS_A TypeAlias AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (typeAlias__body_slots(&receiver));
+    RETURN TRY (typeAlias__body_slots(receiver));
   END
   IF value IS_A CExternFnDecl AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (cExternFnDecl__body_slots(&receiver));
+    RETURN TRY (cExternFnDecl__body_slots(receiver));
   END
   IF value IS_A CExternStructDef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (cExternStructDef__body_slots(&receiver));
+    RETURN TRY (cExternStructDef__body_slots(receiver));
   END
   IF value IS_A ModuleNamespace AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (moduleNamespace__body_slots(&receiver));
+    RETURN TRY (moduleNamespace__body_slots(receiver));
   END
   IF value IS_A TestDef AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14315,23 +14341,23 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A Let AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (let__body_slots(&receiver));
+    RETURN TRY (let__body_slots(receiver));
   END
   IF value IS_A Set AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (set__body_slots(&receiver));
+    RETURN TRY (set__body_slots(receiver));
   END
   IF value IS_A DestructureSet AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (destructureSet__body_slots(&receiver));
+    RETURN TRY (destructureSet__body_slots(receiver));
   END
   IF value IS_A ReassignWithCleanup AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (reassignWithCleanup__body_slots(&receiver));
+    RETURN TRY (reassignWithCleanup__body_slots(receiver));
   END
   IF value IS_A ResourceClose AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (resourceClose__body_slots(&receiver));
+    RETURN TRY (resourceClose__body_slots(receiver));
   END
   IF value IS_A IfStmt AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14367,35 +14393,35 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A ReturnStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (returnStmt__body_slots(&receiver));
+    RETURN TRY (returnStmt__body_slots(receiver));
   END
   IF value IS_A BreakStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (breakStmt__body_slots(&receiver));
+    RETURN TRY (breakStmt__body_slots(receiver));
   END
   IF value IS_A BreakExpr AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (breakExpr__body_slots(&receiver));
+    RETURN TRY (breakExpr__body_slots(receiver));
   END
   IF value IS_A ContinueStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (continueStmt__body_slots(&receiver));
+    RETURN TRY (continueStmt__body_slots(receiver));
   END
   IF value IS_A Panic AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (panic__body_slots(&receiver));
+    RETURN TRY (panic__body_slots(receiver));
   END
   IF value IS_A AssertStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (assertStmt__body_slots(&receiver));
+    RETURN TRY (assertStmt__body_slots(receiver));
   END
   IF value IS_A AssertRaisesCheck AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (assertRaisesCheck__body_slots(&receiver));
+    RETURN TRY (assertRaisesCheck__body_slots(receiver));
   END
   IF value IS_A TestPreamble AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (testPreamble__body_slots(&receiver));
+    RETURN TRY (testPreamble__body_slots(receiver));
   END
   IF value IS_A DebugOnly AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14403,27 +14429,27 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A Sort AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (sort__body_slots(&receiver));
+    RETURN TRY (sort__body_slots(receiver));
   END
   IF value IS_A SoaFieldAccess AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (soaFieldAccess__body_slots(&receiver));
+    RETURN TRY (soaFieldAccess__body_slots(receiver));
   END
   IF value IS_A TryOrPanic AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (tryOrPanic__body_slots(&receiver));
+    RETURN TRY (tryOrPanic__body_slots(receiver));
   END
   IF value IS_A IndexInsert AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (indexInsert__body_slots(&receiver));
+    RETURN TRY (indexInsert__body_slots(receiver));
   END
   IF value IS_A BatchWindowPush AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (batchWindowPush__body_slots(&receiver));
+    RETURN TRY (batchWindowPush__body_slots(receiver));
   END
   IF value IS_A BatchWindowFlush AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (batchWindowFlush__body_slots(&receiver));
+    RETURN TRY (batchWindowFlush__body_slots(receiver));
   END
   IF value IS_A ErrDeferStmt AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14431,19 +14457,19 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A ExprStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (exprStmt__body_slots(&receiver));
+    RETURN TRY (exprStmt__body_slots(receiver));
   END
   IF value IS_A DiscardOwned AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (discardOwned__body_slots(&receiver));
+    RETURN TRY (discardOwned__body_slots(receiver));
   END
   IF value IS_A ThunkTrampoline AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (thunkTrampoline__body_slots(&receiver));
+    RETURN TRY (thunkTrampoline__body_slots(receiver));
   END
   IF value IS_A MutualThunkTrampoline AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (mutualThunkTrampoline__body_slots(&receiver));
+    RETURN TRY (mutualThunkTrampoline__body_slots(receiver));
   END
   IF value IS_A StreamSpawn AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14451,31 +14477,31 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A FsmStructure AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fsmStructure__body_slots(&receiver));
+    RETURN TRY (fsmStructure__body_slots(receiver));
   END
   IF value IS_A DirectTenseMap AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (directTenseMap__body_slots(&receiver));
+    RETURN TRY (directTenseMap__body_slots(receiver));
   END
   IF value IS_A AsyncPayloadTake AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (asyncPayloadTake__body_slots(&receiver));
+    RETURN TRY (asyncPayloadTake__body_slots(receiver));
   END
   IF value IS_A FsmIoBody AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fsmIoBody__body_slots(&receiver));
+    RETURN TRY (fsmIoBody__body_slots(receiver));
   END
   IF value IS_A StreamYield AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (streamYield__body_slots(&receiver));
+    RETURN TRY (streamYield__body_slots(receiver));
   END
   IF value IS_A FsmB1Body AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fsmB1Body__body_slots(&receiver));
+    RETURN TRY (fsmB1Body__body_slots(receiver));
   END
   IF value IS_A FsmGenericBody AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fsmGenericBody__body_slots(&receiver));
+    RETURN TRY (fsmGenericBody__body_slots(receiver));
   END
   IF value IS_A FailureAction AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14483,19 +14509,19 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A CapabilityLockTarget AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (capabilityLockTarget__body_slots(&receiver));
+    RETURN TRY (capabilityLockTarget__body_slots(receiver));
   END
   IF value IS_A CapabilityLockAddress AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (capabilityLockAddress__body_slots(&receiver));
+    RETURN TRY (capabilityLockAddress__body_slots(receiver));
   END
   IF value IS_A SortedLockAcquire AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (sortedLockAcquire__body_slots(&receiver));
+    RETURN TRY (sortedLockAcquire__body_slots(receiver));
   END
   IF value IS_A FallibleLockBinding AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fallibleLockBinding__body_slots(&receiver));
+    RETURN TRY (fallibleLockBinding__body_slots(receiver));
   END
   IF value IS_A CatchWrapper AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14503,123 +14529,123 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A Noop AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (noop__body_slots(&receiver));
+    RETURN TRY (noop__body_slots(receiver));
   END
   IF value IS_A Comment AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (comment__body_slots(&receiver));
+    RETURN TRY (comment__body_slots(receiver));
   END
   IF value IS_A Suppress AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (suppress__body_slots(&receiver));
+    RETURN TRY (suppress__body_slots(receiver));
   END
   IF value IS_A PubConst AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (pubConst__body_slots(&receiver));
+    RETURN TRY (pubConst__body_slots(receiver));
   END
   IF value IS_A ModuleVar AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (moduleVar__body_slots(&receiver));
+    RETURN TRY (moduleVar__body_slots(receiver));
   END
   IF value IS_A ModuleConstFree AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (moduleConstFree__body_slots(&receiver));
+    RETURN TRY (moduleConstFree__body_slots(receiver));
   END
   IF value IS_A HeapCreate AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (heapCreate__body_slots(&receiver));
+    RETURN TRY (heapCreate__body_slots(receiver));
   END
   IF value IS_A DupeSlice AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (dupeSlice__body_slots(&receiver));
+    RETURN TRY (dupeSlice__body_slots(receiver));
   END
   IF value IS_A AllocSlice AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (allocSlice__body_slots(&receiver));
+    RETURN TRY (allocSlice__body_slots(receiver));
   END
   IF value IS_A FreeSlice AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (freeSlice__body_slots(&receiver));
+    RETURN TRY (freeSlice__body_slots(receiver));
   END
   IF value IS_A DestroyPtr AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (destroyPtr__body_slots(&receiver));
+    RETURN TRY (destroyPtr__body_slots(receiver));
   END
   IF value IS_A Cleanup AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (cleanup__body_slots(&receiver));
+    RETURN TRY (cleanup__body_slots(receiver));
   END
   IF value IS_A ErrCleanup AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (errCleanup__body_slots(&receiver));
+    RETURN TRY (errCleanup__body_slots(receiver));
   END
   IF value IS_A MoveMark AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (moveMark__body_slots(&receiver));
+    RETURN TRY (moveMark__body_slots(receiver));
   END
   IF value IS_A DeepCopy AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (deepCopy__body_slots(&receiver));
+    RETURN TRY (deepCopy__body_slots(receiver));
   END
   IF value IS_A ContainerInit AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (containerInit__body_slots(&receiver));
+    RETURN TRY (containerInit__body_slots(receiver));
   END
   IF value IS_A CapWrap AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (capWrap__body_slots(&receiver));
+    RETURN TRY (capWrap__body_slots(receiver));
   END
   IF value IS_A SharePromote AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (sharePromote__body_slots(&receiver));
+    RETURN TRY (sharePromote__body_slots(receiver));
   END
   IF value IS_A RcRetain AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (rcRetain__body_slots(&receiver));
+    RETURN TRY (rcRetain__body_slots(receiver));
   END
   IF value IS_A ComptimeCarrierPayload AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (comptimeCarrierPayload__body_slots(&receiver));
+    RETURN TRY (comptimeCarrierPayload__body_slots(receiver));
   END
   IF value IS_A MonomorphicKeep AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (monomorphicKeep__body_slots(&receiver));
+    RETURN TRY (monomorphicKeep__body_slots(receiver));
   END
   IF value IS_A RcRelease AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (rcRelease__body_slots(&receiver));
+    RETURN TRY (rcRelease__body_slots(receiver));
   END
   IF value IS_A RcDowngrade AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (rcDowngrade__body_slots(&receiver));
+    RETURN TRY (rcDowngrade__body_slots(receiver));
   END
   IF value IS_A WeakUpgrade AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (weakUpgrade__body_slots(&receiver));
+    RETURN TRY (weakUpgrade__body_slots(receiver));
   END
   IF value IS_A AllocatorRef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (allocatorRef__body_slots(&receiver));
+    RETURN TRY (allocatorRef__body_slots(receiver));
   END
   IF value IS_A FreezeExpr AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (freezeExpr__body_slots(&receiver));
+    RETURN TRY (freezeExpr__body_slots(receiver));
   END
   IF value IS_A MakeList AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (makeList__body_slots(&receiver));
+    RETURN TRY (makeList__body_slots(receiver));
   END
   IF value IS_A FrameSave AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (frameSave__body_slots(&receiver));
+    RETURN TRY (frameSave__body_slots(receiver));
   END
   IF value IS_A FrameRestore AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (frameRestore__body_slots(&receiver));
+    RETURN TRY (frameRestore__body_slots(receiver));
   END
   IF value IS_A CapabilityUnwrap AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (capabilityUnwrap__body_slots(&receiver));
+    RETURN TRY (capabilityUnwrap__body_slots(receiver));
   END
   IF value IS_A SnapshotRead AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14643,279 +14669,279 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A PolymorphicFlowSignal AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (polymorphicFlowSignal__body_slots(&receiver));
+    RETURN TRY (polymorphicFlowSignal__body_slots(receiver));
   END
   IF value IS_A WithMatchDispatch AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (withMatchDispatch__body_slots(&receiver));
+    RETURN TRY (withMatchDispatch__body_slots(receiver));
   END
   IF value IS_A AllocMark AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (allocMark__body_slots(&receiver));
+    RETURN TRY (allocMark__body_slots(receiver));
   END
   IF value IS_A OwnedCreate AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ownedCreate__body_slots(&receiver));
+    RETURN TRY (ownedCreate__body_slots(receiver));
   END
   IF value IS_A OwnedDestroy AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ownedDestroy__body_slots(&receiver));
+    RETURN TRY (ownedDestroy__body_slots(receiver));
   END
   IF value IS_A OwnedTransfer AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ownedTransfer__body_slots(&receiver));
+    RETURN TRY (ownedTransfer__body_slots(receiver));
   END
   IF value IS_A OwnedBorrow AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ownedBorrow__body_slots(&receiver));
+    RETURN TRY (ownedBorrow__body_slots(receiver));
   END
   IF value IS_A OwnedStore AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ownedStore__body_slots(&receiver));
+    RETURN TRY (ownedStore__body_slots(receiver));
   END
   IF value IS_A OwnedReturn AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ownedReturn__body_slots(&receiver));
+    RETURN TRY (ownedReturn__body_slots(receiver));
   END
   IF value IS_A ReturnMark AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (returnMark__body_slots(&receiver));
+    RETURN TRY (returnMark__body_slots(receiver));
   END
   IF value IS_A TransferMark AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (transferMark__body_slots(&receiver));
+    RETURN TRY (transferMark__body_slots(receiver));
   END
   IF value IS_A ReassignMark AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (reassignMark__body_slots(&receiver));
+    RETURN TRY (reassignMark__body_slots(receiver));
   END
   IF value IS_A FieldCleanupMark AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fieldCleanupMark__body_slots(&receiver));
+    RETURN TRY (fieldCleanupMark__body_slots(receiver));
   END
   IF value IS_A Call AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (call__body_slots(&receiver));
+    RETURN TRY (call__body_slots(receiver));
   END
   IF value IS_A RuntimeCall AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (runtimeCall__body_slots(&receiver));
+    RETURN TRY (runtimeCall__body_slots(receiver));
   END
   IF value IS_A TailCall AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (tailCall__body_slots(&receiver));
+    RETURN TRY (tailCall__body_slots(receiver));
   END
   IF value IS_A FieldGet AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fieldGet__body_slots(&receiver));
+    RETURN TRY (fieldGet__body_slots(receiver));
   END
   IF value IS_A UnionPayloadGet AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (unionPayloadGet__body_slots(&receiver));
+    RETURN TRY (unionPayloadGet__body_slots(receiver));
   END
   IF value IS_A IndexGet AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (indexGet__body_slots(&receiver));
+    RETURN TRY (indexGet__body_slots(receiver));
   END
   IF value IS_A ProtocolCall AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (protocolCall__body_slots(&receiver));
+    RETURN TRY (protocolCall__body_slots(receiver));
   END
   IF value IS_A FallibleOk AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fallibleOk__body_slots(&receiver));
+    RETURN TRY (fallibleOk__body_slots(receiver));
   END
   IF value IS_A FutureReady AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (futureReady__body_slots(&receiver));
+    RETURN TRY (futureReady__body_slots(receiver));
   END
   IF value IS_A Lit AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (lit__body_slots(&receiver));
+    RETURN TRY (lit__body_slots(receiver));
   END
   IF value IS_A SymbolLit AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (symbolLit__body_slots(&receiver));
+    RETURN TRY (symbolLit__body_slots(receiver));
   END
   IF value IS_A VoidLiteral AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (voidLiteral__body_slots(&receiver));
+    RETURN TRY (voidLiteral__body_slots(receiver));
   END
   IF value IS_A DefaultValue AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (defaultValue__body_slots(&receiver));
+    RETURN TRY (defaultValue__body_slots(receiver));
   END
   IF value IS_A EnumTag AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (enumTag__body_slots(&receiver));
+    RETURN TRY (enumTag__body_slots(receiver));
   END
   IF value IS_A EnumOrdinal AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (enumOrdinal__body_slots(&receiver));
+    RETURN TRY (enumOrdinal__body_slots(receiver));
   END
   IF value IS_A Ident AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ident__body_slots(&receiver));
+    RETURN TRY (ident__body_slots(receiver));
   END
   IF value IS_A TupleLiteral AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (tupleLiteral__body_slots(&receiver));
+    RETURN TRY (tupleLiteral__body_slots(receiver));
   END
   IF value IS_A FnRef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fnRef__body_slots(&receiver));
+    RETURN TRY (fnRef__body_slots(receiver));
   END
   IF value IS_A LockAcquire AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (lockAcquire__body_slots(&receiver));
+    RETURN TRY (lockAcquire__body_slots(receiver));
   END
   IF value IS_A TypeOf AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (typeOf__body_slots(&receiver));
+    RETURN TRY (typeOf__body_slots(receiver));
   END
   IF value IS_A TypeEq AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (typeEq__body_slots(&receiver));
+    RETURN TRY (typeEq__body_slots(receiver));
   END
   IF value IS_A StructInit AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (structInit__body_slots(&receiver));
+    RETURN TRY (structInit__body_slots(receiver));
   END
   IF value IS_A ArrayInit AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (arrayInit__body_slots(&receiver));
+    RETURN TRY (arrayInit__body_slots(receiver));
   END
   IF value IS_A ArrayDefaultInit AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (arrayDefaultInit__body_slots(&receiver));
+    RETURN TRY (arrayDefaultInit__body_slots(receiver));
   END
   IF value IS_A SliceExpr AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (sliceExpr__body_slots(&receiver));
+    RETURN TRY (sliceExpr__body_slots(receiver));
   END
   IF value IS_A ConcatStr AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (concatStr__body_slots(&receiver));
+    RETURN TRY (concatStr__body_slots(receiver));
   END
   IF value IS_A TryExpr AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (tryExpr__body_slots(&receiver));
+    RETURN TRY (tryExpr__body_slots(receiver));
   END
   IF value IS_A TryCatch AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (tryCatch__body_slots(&receiver));
+    RETURN TRY (tryCatch__body_slots(receiver));
   END
   IF value IS_A Orelse AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (orelse__body_slots(&receiver));
+    RETURN TRY (orelse__body_slots(receiver));
   END
   IF value IS_A Conditional AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (conditional__body_slots(&receiver));
+    RETURN TRY (conditional__body_slots(receiver));
   END
   IF value IS_A IfOptional AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ifOptional__body_slots(&receiver));
+    RETURN TRY (ifOptional__body_slots(receiver));
   END
   IF value IS_A Comptime AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (comptime__body_slots(&receiver));
+    RETURN TRY (comptime__body_slots(receiver));
   END
   IF value IS_A UnionVariantGet AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (unionVariantGet__body_slots(&receiver));
+    RETURN TRY (unionVariantGet__body_slots(receiver));
   END
   IF value IS_A ListItems AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (listItems__body_slots(&receiver));
+    RETURN TRY (listItems__body_slots(receiver));
   END
   IF value IS_A ListLength AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (listLength__body_slots(&receiver));
+    RETURN TRY (listLength__body_slots(receiver));
   END
   IF value IS_A AddressOf AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (addressOf__body_slots(&receiver));
+    RETURN TRY (addressOf__body_slots(receiver));
   END
   IF value IS_A Deref AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (deref__body_slots(&receiver));
+    RETURN TRY (deref__body_slots(receiver));
   END
   IF value IS_A PointerCast AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (pointerCast__body_slots(&receiver));
+    RETURN TRY (pointerCast__body_slots(receiver));
   END
   IF value IS_A ConstCast AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (constCast__body_slots(&receiver));
+    RETURN TRY (constCast__body_slots(receiver));
   END
   IF value IS_A DefaultStreamCapacity AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (defaultStreamCapacity__body_slots(&receiver));
+    RETURN TRY (defaultStreamCapacity__body_slots(receiver));
   END
   IF value IS_A NextPromiseList AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (nextPromiseList__body_slots(&receiver));
+    RETURN TRY (nextPromiseList__body_slots(receiver));
   END
   IF value IS_A Undef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (undef__body_slots(&receiver));
+    RETURN TRY (undef__body_slots(receiver));
   END
   IF value IS_A TypeSentinel AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (typeSentinel__body_slots(&receiver));
+    RETURN TRY (typeSentinel__body_slots(receiver));
   END
   IF value IS_A IterRange AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (iterRange__body_slots(&receiver));
+    RETURN TRY (iterRange__body_slots(receiver));
   END
   IF value IS_A TryOptional AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (tryOptional__body_slots(&receiver));
+    RETURN TRY (tryOptional__body_slots(receiver));
   END
   IF value IS_A ForeignOwnedUnwrap AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (foreignOwnedUnwrap__body_slots(&receiver));
+    RETURN TRY (foreignOwnedUnwrap__body_slots(receiver));
   END
   IF value IS_A ForeignSliceView AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (foreignSliceView__body_slots(&receiver));
+    RETURN TRY (foreignSliceView__body_slots(receiver));
   END
   IF value IS_A HasField AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (hasField__body_slots(&receiver));
+    RETURN TRY (hasField__body_slots(receiver));
   END
   IF value IS_A ItemsAccess AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (itemsAccess__body_slots(&receiver));
+    RETURN TRY (itemsAccess__body_slots(receiver));
   END
   IF value IS_A OwnedSlice AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ownedSlice__body_slots(&receiver));
+    RETURN TRY (ownedSlice__body_slots(receiver));
   END
   IF value IS_A LambdaExpr AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (lambdaExpr__body_slots(&receiver));
+    RETURN TRY (lambdaExpr__body_slots(receiver));
   END
   IF value IS_A Pipeline AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (pipeline__body_slots(&receiver));
+    RETURN TRY (pipeline__body_slots(receiver));
   END
   IF value IS_A RegistryCall AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (registryCall__body_slots(&receiver));
+    RETURN TRY (registryCall__body_slots(receiver));
   END
   IF value IS_A IndexedStore AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (indexedStore__body_slots(&receiver));
+    RETURN TRY (indexedStore__body_slots(receiver));
   END
   IF value IS_A CFunctionAdapter AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (cFunctionAdapter__body_slots(&receiver));
+    RETURN TRY (cFunctionAdapter__body_slots(receiver));
   END
   IF value IS_A ExternTrampoline AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (externTrampoline__body_slots(&receiver));
+    RETURN TRY (externTrampoline__body_slots(receiver));
   END
   IF value IS_A ObservableConsumerSpawn AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14927,19 +14953,19 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   END
   IF value IS_A InlineBc AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (inlineBc__body_slots(&receiver));
+    RETURN TRY (inlineBc__body_slots(receiver));
   END
   IF value IS_A OrElseExitBcRewrite AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (orElseExitBcRewrite__body_slots(&receiver));
+    RETURN TRY (orElseExitBcRewrite__body_slots(receiver));
   END
   IF value IS_A ShardedMapPut AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (shardedMapPut__body_slots(&receiver));
+    RETURN TRY (shardedMapPut__body_slots(receiver));
   END
   IF value IS_A ShardedMapGet AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (shardedMapGet__body_slots(&receiver));
+    RETURN TRY (shardedMapGet__body_slots(receiver));
   END
   RETURN empty_body_slots;
 END
@@ -15342,16 +15368,19 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect ->
     RETURN tryExpr__ownership_effect(payload);
   END
   IF value IS_A TryCatch AS payload THEN
-    RETURN tryCatch__ownership_effect(payload);
+    MUTABLE receiver = COPY payload;
+    RETURN tryCatch__ownership_effect(&receiver);
   END
   IF value IS_A Orelse AS payload THEN
-    RETURN orelse__ownership_effect(payload);
+    MUTABLE receiver = COPY payload;
+    RETURN orelse__ownership_effect(&receiver);
   END
   IF value IS_A Conditional AS payload THEN
     RETURN conditional__ownership_effect(payload);
   END
   IF value IS_A IfOptional AS payload THEN
-    RETURN ifOptional__ownership_effect(payload);
+    MUTABLE receiver = COPY payload;
+    RETURN ifOptional__ownership_effect(&receiver);
   END
   IF value IS_A Comptime AS payload THEN
     RETURN comptime__ownership_effect(payload);
@@ -15451,505 +15480,505 @@ END
 
 FN emittable__child_exprs(value: Emittable) RETURNS ![]Emittable ->
   IF value IS_A FnDef AS payload THEN
-    RETURN fnDef__child_exprs(payload);
+    RETURN TRY (fnDef__child_exprs(payload));
   END
   IF value IS_A ProtocolAdapterDef AS payload THEN
-    RETURN protocolAdapterDef__child_exprs(payload);
+    RETURN TRY (protocolAdapterDef__child_exprs(payload));
   END
   IF value IS_A FieldDef AS payload THEN
-    RETURN fieldDef__child_exprs(payload);
+    RETURN TRY (fieldDef__child_exprs(payload));
   END
   IF value IS_A UnionTypeDef AS payload THEN
-    RETURN unionTypeDef__child_exprs(payload);
+    RETURN TRY (unionTypeDef__child_exprs(payload));
   END
   IF value IS_A Import AS payload THEN
-    RETURN import__child_exprs(payload);
+    RETURN TRY (import__child_exprs(payload));
   END
   IF value IS_A TypeAlias AS payload THEN
-    RETURN typeAlias__child_exprs(payload);
+    RETURN TRY (typeAlias__child_exprs(payload));
   END
   IF value IS_A CExternFnDecl AS payload THEN
-    RETURN cExternFnDecl__child_exprs(payload);
+    RETURN TRY (cExternFnDecl__child_exprs(payload));
   END
   IF value IS_A CExternStructDef AS payload THEN
-    RETURN cExternStructDef__child_exprs(payload);
+    RETURN TRY (cExternStructDef__child_exprs(payload));
   END
   IF value IS_A ModuleNamespace AS payload THEN
-    RETURN moduleNamespace__child_exprs(payload);
+    RETURN TRY (moduleNamespace__child_exprs(payload));
   END
   IF value IS_A TestDef AS payload THEN
-    RETURN testDef__child_exprs(payload);
+    RETURN TRY (testDef__child_exprs(payload));
   END
   IF value IS_A Let AS payload THEN
-    RETURN let__child_exprs(payload);
+    RETURN TRY (let__child_exprs(payload));
   END
   IF value IS_A Set AS payload THEN
-    RETURN set__child_exprs(payload);
+    RETURN TRY (set__child_exprs(payload));
   END
   IF value IS_A DestructureSet AS payload THEN
-    RETURN destructureSet__child_exprs(payload);
+    RETURN TRY (destructureSet__child_exprs(payload));
   END
   IF value IS_A ReassignWithCleanup AS payload THEN
-    RETURN reassignWithCleanup__child_exprs(payload);
+    RETURN TRY (reassignWithCleanup__child_exprs(payload));
   END
   IF value IS_A ResourceClose AS payload THEN
-    RETURN resourceClose__child_exprs(payload);
+    RETURN TRY (resourceClose__child_exprs(payload));
   END
   IF value IS_A IfStmt AS payload THEN
-    RETURN ifStmt__child_exprs(payload);
+    RETURN TRY (ifStmt__child_exprs(payload));
   END
   IF value IS_A IfBindStmt AS payload THEN
-    RETURN ifBindStmt__child_exprs(payload);
+    RETURN TRY (ifBindStmt__child_exprs(payload));
   END
   IF value IS_A WhileStmt AS payload THEN
-    RETURN whileStmt__child_exprs(payload);
+    RETURN TRY (whileStmt__child_exprs(payload));
   END
   IF value IS_A ForStmt AS payload THEN
-    RETURN forStmt__child_exprs(payload);
+    RETURN TRY (forStmt__child_exprs(payload));
   END
   IF value IS_A ScopeBlock AS payload THEN
-    RETURN scopeBlock__child_exprs(payload);
+    RETURN TRY (scopeBlock__child_exprs(payload));
   END
   IF value IS_A SwitchStmt AS payload THEN
-    RETURN switchStmt__child_exprs(payload);
+    RETURN TRY (switchStmt__child_exprs(payload));
   END
   IF value IS_A UnionMatchStmt AS payload THEN
-    RETURN unionMatchStmt__child_exprs(payload);
+    RETURN TRY (unionMatchStmt__child_exprs(payload));
   END
   IF value IS_A IfChain AS payload THEN
-    RETURN ifChain__child_exprs(payload);
+    RETURN TRY (ifChain__child_exprs(payload));
   END
   IF value IS_A ReturnStmt AS payload THEN
-    RETURN returnStmt__child_exprs(payload);
+    RETURN TRY (returnStmt__child_exprs(payload));
   END
   IF value IS_A BreakStmt AS payload THEN
-    RETURN breakStmt__child_exprs(payload);
+    RETURN TRY (breakStmt__child_exprs(payload));
   END
   IF value IS_A BreakExpr AS payload THEN
-    RETURN breakExpr__child_exprs(payload);
+    RETURN TRY (breakExpr__child_exprs(payload));
   END
   IF value IS_A ContinueStmt AS payload THEN
-    RETURN continueStmt__child_exprs(payload);
+    RETURN TRY (continueStmt__child_exprs(payload));
   END
   IF value IS_A Panic AS payload THEN
-    RETURN panic__child_exprs(payload);
+    RETURN TRY (panic__child_exprs(payload));
   END
   IF value IS_A AssertStmt AS payload THEN
-    RETURN assertStmt__child_exprs(payload);
+    RETURN TRY (assertStmt__child_exprs(payload));
   END
   IF value IS_A AssertRaisesCheck AS payload THEN
-    RETURN assertRaisesCheck__child_exprs(payload);
+    RETURN TRY (assertRaisesCheck__child_exprs(payload));
   END
   IF value IS_A TestPreamble AS payload THEN
-    RETURN testPreamble__child_exprs(payload);
+    RETURN TRY (testPreamble__child_exprs(payload));
   END
   IF value IS_A DebugOnly AS payload THEN
-    RETURN debugOnly__child_exprs(payload);
+    RETURN TRY (debugOnly__child_exprs(payload));
   END
   IF value IS_A Sort AS payload THEN
-    RETURN sort__child_exprs(payload);
+    RETURN TRY (sort__child_exprs(payload));
   END
   IF value IS_A SoaFieldAccess AS payload THEN
-    RETURN soaFieldAccess__child_exprs(payload);
+    RETURN TRY (soaFieldAccess__child_exprs(payload));
   END
   IF value IS_A TryOrPanic AS payload THEN
-    RETURN tryOrPanic__child_exprs(payload);
+    RETURN TRY (tryOrPanic__child_exprs(payload));
   END
   IF value IS_A IndexInsert AS payload THEN
-    RETURN indexInsert__child_exprs(payload);
+    RETURN TRY (indexInsert__child_exprs(payload));
   END
   IF value IS_A BatchWindowPush AS payload THEN
-    RETURN batchWindowPush__child_exprs(payload);
+    RETURN TRY (batchWindowPush__child_exprs(payload));
   END
   IF value IS_A BatchWindowFlush AS payload THEN
-    RETURN batchWindowFlush__child_exprs(payload);
+    RETURN TRY (batchWindowFlush__child_exprs(payload));
   END
   IF value IS_A ErrDeferStmt AS payload THEN
-    RETURN errDeferStmt__child_exprs(payload);
+    RETURN TRY (errDeferStmt__child_exprs(payload));
   END
   IF value IS_A ExprStmt AS payload THEN
-    RETURN exprStmt__child_exprs(payload);
+    RETURN TRY (exprStmt__child_exprs(payload));
   END
   IF value IS_A DiscardOwned AS payload THEN
-    RETURN discardOwned__child_exprs(payload);
+    RETURN TRY (discardOwned__child_exprs(payload));
   END
   IF value IS_A ThunkTrampoline AS payload THEN
-    RETURN thunkTrampoline__child_exprs(payload);
+    RETURN TRY (thunkTrampoline__child_exprs(payload));
   END
   IF value IS_A MutualThunkTrampoline AS payload THEN
-    RETURN mutualThunkTrampoline__child_exprs(payload);
+    RETURN TRY (mutualThunkTrampoline__child_exprs(payload));
   END
   IF value IS_A StreamSpawn AS payload THEN
-    RETURN streamSpawn__child_exprs(payload);
+    RETURN TRY (streamSpawn__child_exprs(payload));
   END
   IF value IS_A FsmStructure AS payload THEN
-    RETURN fsmStructure__child_exprs(payload);
+    RETURN TRY (fsmStructure__child_exprs(payload));
   END
   IF value IS_A DirectTenseMap AS payload THEN
-    RETURN directTenseMap__child_exprs(payload);
+    RETURN TRY (directTenseMap__child_exprs(payload));
   END
   IF value IS_A AsyncPayloadTake AS payload THEN
-    RETURN asyncPayloadTake__child_exprs(payload);
+    RETURN TRY (asyncPayloadTake__child_exprs(payload));
   END
   IF value IS_A FsmIoBody AS payload THEN
-    RETURN fsmIoBody__child_exprs(payload);
+    RETURN TRY (fsmIoBody__child_exprs(payload));
   END
   IF value IS_A StreamYield AS payload THEN
-    RETURN streamYield__child_exprs(payload);
+    RETURN TRY (streamYield__child_exprs(payload));
   END
   IF value IS_A FsmB1Body AS payload THEN
-    RETURN fsmB1Body__child_exprs(payload);
+    RETURN TRY (fsmB1Body__child_exprs(payload));
   END
   IF value IS_A FsmGenericBody AS payload THEN
-    RETURN fsmGenericBody__child_exprs(payload);
+    RETURN TRY (fsmGenericBody__child_exprs(payload));
   END
   IF value IS_A FailureAction AS payload THEN
-    RETURN failureAction__child_exprs(payload);
+    RETURN TRY (failureAction__child_exprs(payload));
   END
   IF value IS_A CapabilityLockTarget AS payload THEN
-    RETURN capabilityLockTarget__child_exprs(payload);
+    RETURN TRY (capabilityLockTarget__child_exprs(payload));
   END
   IF value IS_A CapabilityLockAddress AS payload THEN
-    RETURN capabilityLockAddress__child_exprs(payload);
+    RETURN TRY (capabilityLockAddress__child_exprs(payload));
   END
   IF value IS_A SortedLockAcquire AS payload THEN
-    RETURN sortedLockAcquire__child_exprs(payload);
+    RETURN TRY (sortedLockAcquire__child_exprs(payload));
   END
   IF value IS_A FallibleLockBinding AS payload THEN
-    RETURN fallibleLockBinding__child_exprs(payload);
+    RETURN TRY (fallibleLockBinding__child_exprs(payload));
   END
   IF value IS_A CatchWrapper AS payload THEN
-    RETURN catchWrapper__child_exprs(payload);
+    RETURN TRY (catchWrapper__child_exprs(payload));
   END
   IF value IS_A Noop AS payload THEN
-    RETURN noop__child_exprs(payload);
+    RETURN TRY (noop__child_exprs(payload));
   END
   IF value IS_A Comment AS payload THEN
-    RETURN comment__child_exprs(payload);
+    RETURN TRY (comment__child_exprs(payload));
   END
   IF value IS_A Suppress AS payload THEN
-    RETURN suppress__child_exprs(payload);
+    RETURN TRY (suppress__child_exprs(payload));
   END
   IF value IS_A PubConst AS payload THEN
-    RETURN pubConst__child_exprs(payload);
+    RETURN TRY (pubConst__child_exprs(payload));
   END
   IF value IS_A ModuleVar AS payload THEN
-    RETURN moduleVar__child_exprs(payload);
+    RETURN TRY (moduleVar__child_exprs(payload));
   END
   IF value IS_A ModuleConstFree AS payload THEN
-    RETURN moduleConstFree__child_exprs(payload);
+    RETURN TRY (moduleConstFree__child_exprs(payload));
   END
   IF value IS_A HeapCreate AS payload THEN
-    RETURN heapCreate__child_exprs(payload);
+    RETURN TRY (heapCreate__child_exprs(payload));
   END
   IF value IS_A DupeSlice AS payload THEN
-    RETURN dupeSlice__child_exprs(payload);
+    RETURN TRY (dupeSlice__child_exprs(payload));
   END
   IF value IS_A AllocSlice AS payload THEN
-    RETURN allocSlice__child_exprs(payload);
+    RETURN TRY (allocSlice__child_exprs(payload));
   END
   IF value IS_A FreeSlice AS payload THEN
-    RETURN freeSlice__child_exprs(payload);
+    RETURN TRY (freeSlice__child_exprs(payload));
   END
   IF value IS_A DestroyPtr AS payload THEN
-    RETURN destroyPtr__child_exprs(payload);
+    RETURN TRY (destroyPtr__child_exprs(payload));
   END
   IF value IS_A Cleanup AS payload THEN
-    RETURN cleanup__child_exprs(payload);
+    RETURN TRY (cleanup__child_exprs(payload));
   END
   IF value IS_A ErrCleanup AS payload THEN
-    RETURN errCleanup__child_exprs(payload);
+    RETURN TRY (errCleanup__child_exprs(payload));
   END
   IF value IS_A MoveMark AS payload THEN
-    RETURN moveMark__child_exprs(payload);
+    RETURN TRY (moveMark__child_exprs(payload));
   END
   IF value IS_A DeepCopy AS payload THEN
-    RETURN deepCopy__child_exprs(payload);
+    RETURN TRY (deepCopy__child_exprs(payload));
   END
   IF value IS_A ContainerInit AS payload THEN
-    RETURN containerInit__child_exprs(payload);
+    RETURN TRY (containerInit__child_exprs(payload));
   END
   IF value IS_A CapWrap AS payload THEN
-    RETURN capWrap__child_exprs(payload);
+    RETURN TRY (capWrap__child_exprs(payload));
   END
   IF value IS_A SharePromote AS payload THEN
-    RETURN sharePromote__child_exprs(payload);
+    RETURN TRY (sharePromote__child_exprs(payload));
   END
   IF value IS_A RcRetain AS payload THEN
-    RETURN rcRetain__child_exprs(payload);
+    RETURN TRY (rcRetain__child_exprs(payload));
   END
   IF value IS_A ComptimeCarrierPayload AS payload THEN
-    RETURN comptimeCarrierPayload__child_exprs(payload);
+    RETURN TRY (comptimeCarrierPayload__child_exprs(payload));
   END
   IF value IS_A MonomorphicKeep AS payload THEN
-    RETURN monomorphicKeep__child_exprs(payload);
+    RETURN TRY (monomorphicKeep__child_exprs(payload));
   END
   IF value IS_A RcRelease AS payload THEN
-    RETURN rcRelease__child_exprs(payload);
+    RETURN TRY (rcRelease__child_exprs(payload));
   END
   IF value IS_A RcDowngrade AS payload THEN
-    RETURN rcDowngrade__child_exprs(payload);
+    RETURN TRY (rcDowngrade__child_exprs(payload));
   END
   IF value IS_A WeakUpgrade AS payload THEN
-    RETURN weakUpgrade__child_exprs(payload);
+    RETURN TRY (weakUpgrade__child_exprs(payload));
   END
   IF value IS_A AllocatorRef AS payload THEN
-    RETURN allocatorRef__child_exprs(payload);
+    RETURN TRY (allocatorRef__child_exprs(payload));
   END
   IF value IS_A FreezeExpr AS payload THEN
-    RETURN freezeExpr__child_exprs(payload);
+    RETURN TRY (freezeExpr__child_exprs(payload));
   END
   IF value IS_A MakeList AS payload THEN
-    RETURN makeList__child_exprs(payload);
+    RETURN TRY (makeList__child_exprs(payload));
   END
   IF value IS_A FrameSave AS payload THEN
-    RETURN frameSave__child_exprs(payload);
+    RETURN TRY (frameSave__child_exprs(payload));
   END
   IF value IS_A FrameRestore AS payload THEN
-    RETURN frameRestore__child_exprs(payload);
+    RETURN TRY (frameRestore__child_exprs(payload));
   END
   IF value IS_A CapabilityUnwrap AS payload THEN
-    RETURN capabilityUnwrap__child_exprs(payload);
+    RETURN TRY (capabilityUnwrap__child_exprs(payload));
   END
   IF value IS_A SnapshotRead AS payload THEN
-    RETURN snapshotRead__child_exprs(payload);
+    RETURN TRY (snapshotRead__child_exprs(payload));
   END
   IF value IS_A SnapshotTransaction AS payload THEN
-    RETURN snapshotTransaction__child_exprs(payload);
+    RETURN TRY (snapshotTransaction__child_exprs(payload));
   END
   IF value IS_A SnapshotMultiTxn AS payload THEN
-    RETURN snapshotMultiTxn__child_exprs(payload);
+    RETURN TRY (snapshotMultiTxn__child_exprs(payload));
   END
   IF value IS_A PolymorphicMutate AS payload THEN
-    RETURN polymorphicMutate__child_exprs(payload);
+    RETURN TRY (polymorphicMutate__child_exprs(payload));
   END
   IF value IS_A PolymorphicMutateFlow AS payload THEN
-    RETURN polymorphicMutateFlow__child_exprs(payload);
+    RETURN TRY (polymorphicMutateFlow__child_exprs(payload));
   END
   IF value IS_A PolymorphicFlowSignal AS payload THEN
-    RETURN polymorphicFlowSignal__child_exprs(payload);
+    RETURN TRY (polymorphicFlowSignal__child_exprs(payload));
   END
   IF value IS_A WithMatchDispatch AS payload THEN
-    RETURN withMatchDispatch__child_exprs(payload);
+    RETURN TRY (withMatchDispatch__child_exprs(payload));
   END
   IF value IS_A AllocMark AS payload THEN
-    RETURN allocMark__child_exprs(payload);
+    RETURN TRY (allocMark__child_exprs(payload));
   END
   IF value IS_A OwnedCreate AS payload THEN
-    RETURN ownedCreate__child_exprs(payload);
+    RETURN TRY (ownedCreate__child_exprs(payload));
   END
   IF value IS_A OwnedDestroy AS payload THEN
-    RETURN ownedDestroy__child_exprs(payload);
+    RETURN TRY (ownedDestroy__child_exprs(payload));
   END
   IF value IS_A OwnedTransfer AS payload THEN
-    RETURN ownedTransfer__child_exprs(payload);
+    RETURN TRY (ownedTransfer__child_exprs(payload));
   END
   IF value IS_A OwnedBorrow AS payload THEN
-    RETURN ownedBorrow__child_exprs(payload);
+    RETURN TRY (ownedBorrow__child_exprs(payload));
   END
   IF value IS_A OwnedStore AS payload THEN
-    RETURN ownedStore__child_exprs(payload);
+    RETURN TRY (ownedStore__child_exprs(payload));
   END
   IF value IS_A OwnedReturn AS payload THEN
-    RETURN ownedReturn__child_exprs(payload);
+    RETURN TRY (ownedReturn__child_exprs(payload));
   END
   IF value IS_A ReturnMark AS payload THEN
-    RETURN returnMark__child_exprs(payload);
+    RETURN TRY (returnMark__child_exprs(payload));
   END
   IF value IS_A TransferMark AS payload THEN
-    RETURN transferMark__child_exprs(payload);
+    RETURN TRY (transferMark__child_exprs(payload));
   END
   IF value IS_A ReassignMark AS payload THEN
-    RETURN reassignMark__child_exprs(payload);
+    RETURN TRY (reassignMark__child_exprs(payload));
   END
   IF value IS_A FieldCleanupMark AS payload THEN
-    RETURN fieldCleanupMark__child_exprs(payload);
+    RETURN TRY (fieldCleanupMark__child_exprs(payload));
   END
   IF value IS_A Call AS payload THEN
-    RETURN call__child_exprs(payload);
+    RETURN TRY (call__child_exprs(payload));
   END
   IF value IS_A RuntimeCall AS payload THEN
-    RETURN runtimeCall__child_exprs(payload);
+    RETURN TRY (runtimeCall__child_exprs(payload));
   END
   IF value IS_A TailCall AS payload THEN
-    RETURN tailCall__child_exprs(payload);
+    RETURN TRY (tailCall__child_exprs(payload));
   END
   IF value IS_A FieldGet AS payload THEN
-    RETURN fieldGet__child_exprs(payload);
+    RETURN TRY (fieldGet__child_exprs(payload));
   END
   IF value IS_A UnionPayloadGet AS payload THEN
-    RETURN unionPayloadGet__child_exprs(payload);
+    RETURN TRY (unionPayloadGet__child_exprs(payload));
   END
   IF value IS_A IndexGet AS payload THEN
-    RETURN indexGet__child_exprs(payload);
+    RETURN TRY (indexGet__child_exprs(payload));
   END
   IF value IS_A ProtocolCall AS payload THEN
-    RETURN protocolCall__child_exprs(payload);
+    RETURN TRY (protocolCall__child_exprs(payload));
   END
   IF value IS_A FallibleOk AS payload THEN
-    RETURN fallibleOk__child_exprs(payload);
+    RETURN TRY (fallibleOk__child_exprs(payload));
   END
   IF value IS_A FutureReady AS payload THEN
-    RETURN futureReady__child_exprs(payload);
+    RETURN TRY (futureReady__child_exprs(payload));
   END
   IF value IS_A Lit AS payload THEN
-    RETURN lit__child_exprs(payload);
+    RETURN TRY (lit__child_exprs(payload));
   END
   IF value IS_A SymbolLit AS payload THEN
-    RETURN symbolLit__child_exprs(payload);
+    RETURN TRY (symbolLit__child_exprs(payload));
   END
   IF value IS_A VoidLiteral AS payload THEN
-    RETURN voidLiteral__child_exprs(payload);
+    RETURN TRY (voidLiteral__child_exprs(payload));
   END
   IF value IS_A DefaultValue AS payload THEN
-    RETURN defaultValue__child_exprs(payload);
+    RETURN TRY (defaultValue__child_exprs(payload));
   END
   IF value IS_A EnumTag AS payload THEN
-    RETURN enumTag__child_exprs(payload);
+    RETURN TRY (enumTag__child_exprs(payload));
   END
   IF value IS_A EnumOrdinal AS payload THEN
-    RETURN enumOrdinal__child_exprs(payload);
+    RETURN TRY (enumOrdinal__child_exprs(payload));
   END
   IF value IS_A Ident AS payload THEN
-    RETURN ident__child_exprs(payload);
+    RETURN TRY (ident__child_exprs(payload));
   END
   IF value IS_A TupleLiteral AS payload THEN
-    RETURN tupleLiteral__child_exprs(payload);
+    RETURN TRY (tupleLiteral__child_exprs(payload));
   END
   IF value IS_A FnRef AS payload THEN
-    RETURN fnRef__child_exprs(payload);
+    RETURN TRY (fnRef__child_exprs(payload));
   END
   IF value IS_A LockAcquire AS payload THEN
-    RETURN lockAcquire__child_exprs(payload);
+    RETURN TRY (lockAcquire__child_exprs(payload));
   END
   IF value IS_A TypeOf AS payload THEN
-    RETURN typeOf__child_exprs(payload);
+    RETURN TRY (typeOf__child_exprs(payload));
   END
   IF value IS_A TypeEq AS payload THEN
-    RETURN typeEq__child_exprs(payload);
+    RETURN TRY (typeEq__child_exprs(payload));
   END
   IF value IS_A StructInit AS payload THEN
-    RETURN structInit__child_exprs(payload);
+    RETURN TRY (structInit__child_exprs(payload));
   END
   IF value IS_A ArrayInit AS payload THEN
-    RETURN arrayInit__child_exprs(payload);
+    RETURN TRY (arrayInit__child_exprs(payload));
   END
   IF value IS_A ArrayDefaultInit AS payload THEN
-    RETURN arrayDefaultInit__child_exprs(payload);
+    RETURN TRY (arrayDefaultInit__child_exprs(payload));
   END
   IF value IS_A SliceExpr AS payload THEN
-    RETURN sliceExpr__child_exprs(payload);
+    RETURN TRY (sliceExpr__child_exprs(payload));
   END
   IF value IS_A ConcatStr AS payload THEN
-    RETURN concatStr__child_exprs(payload);
+    RETURN TRY (concatStr__child_exprs(payload));
   END
   IF value IS_A TryExpr AS payload THEN
-    RETURN tryExpr__child_exprs(payload);
+    RETURN TRY (tryExpr__child_exprs(payload));
   END
   IF value IS_A TryCatch AS payload THEN
-    RETURN tryCatch__child_exprs(payload);
+    RETURN TRY (tryCatch__child_exprs(payload));
   END
   IF value IS_A Orelse AS payload THEN
-    RETURN orelse__child_exprs(payload);
+    RETURN TRY (orelse__child_exprs(payload));
   END
   IF value IS_A Conditional AS payload THEN
-    RETURN conditional__child_exprs(payload);
+    RETURN TRY (conditional__child_exprs(payload));
   END
   IF value IS_A IfOptional AS payload THEN
-    RETURN ifOptional__child_exprs(payload);
+    RETURN TRY (ifOptional__child_exprs(payload));
   END
   IF value IS_A Comptime AS payload THEN
-    RETURN comptime__child_exprs(payload);
+    RETURN TRY (comptime__child_exprs(payload));
   END
   IF value IS_A UnionVariantGet AS payload THEN
-    RETURN unionVariantGet__child_exprs(payload);
+    RETURN TRY (unionVariantGet__child_exprs(payload));
   END
   IF value IS_A ListItems AS payload THEN
-    RETURN listItems__child_exprs(payload);
+    RETURN TRY (listItems__child_exprs(payload));
   END
   IF value IS_A ListLength AS payload THEN
-    RETURN listLength__child_exprs(payload);
+    RETURN TRY (listLength__child_exprs(payload));
   END
   IF value IS_A AddressOf AS payload THEN
-    RETURN addressOf__child_exprs(payload);
+    RETURN TRY (addressOf__child_exprs(payload));
   END
   IF value IS_A Deref AS payload THEN
-    RETURN deref__child_exprs(payload);
+    RETURN TRY (deref__child_exprs(payload));
   END
   IF value IS_A PointerCast AS payload THEN
-    RETURN pointerCast__child_exprs(payload);
+    RETURN TRY (pointerCast__child_exprs(payload));
   END
   IF value IS_A ConstCast AS payload THEN
-    RETURN constCast__child_exprs(payload);
+    RETURN TRY (constCast__child_exprs(payload));
   END
   IF value IS_A DefaultStreamCapacity AS payload THEN
-    RETURN defaultStreamCapacity__child_exprs(payload);
+    RETURN TRY (defaultStreamCapacity__child_exprs(payload));
   END
   IF value IS_A NextPromiseList AS payload THEN
-    RETURN nextPromiseList__child_exprs(payload);
+    RETURN TRY (nextPromiseList__child_exprs(payload));
   END
   IF value IS_A Undef AS payload THEN
-    RETURN undef__child_exprs(payload);
+    RETURN TRY (undef__child_exprs(payload));
   END
   IF value IS_A TypeSentinel AS payload THEN
-    RETURN typeSentinel__child_exprs(payload);
+    RETURN TRY (typeSentinel__child_exprs(payload));
   END
   IF value IS_A IterRange AS payload THEN
-    RETURN iterRange__child_exprs(payload);
+    RETURN TRY (iterRange__child_exprs(payload));
   END
   IF value IS_A TryOptional AS payload THEN
-    RETURN tryOptional__child_exprs(payload);
+    RETURN TRY (tryOptional__child_exprs(payload));
   END
   IF value IS_A ForeignOwnedUnwrap AS payload THEN
-    RETURN foreignOwnedUnwrap__child_exprs(payload);
+    RETURN TRY (foreignOwnedUnwrap__child_exprs(payload));
   END
   IF value IS_A ForeignSliceView AS payload THEN
-    RETURN foreignSliceView__child_exprs(payload);
+    RETURN TRY (foreignSliceView__child_exprs(payload));
   END
   IF value IS_A HasField AS payload THEN
-    RETURN hasField__child_exprs(payload);
+    RETURN TRY (hasField__child_exprs(payload));
   END
   IF value IS_A ItemsAccess AS payload THEN
-    RETURN itemsAccess__child_exprs(payload);
+    RETURN TRY (itemsAccess__child_exprs(payload));
   END
   IF value IS_A OwnedSlice AS payload THEN
-    RETURN ownedSlice__child_exprs(payload);
+    RETURN TRY (ownedSlice__child_exprs(payload));
   END
   IF value IS_A LambdaExpr AS payload THEN
-    RETURN lambdaExpr__child_exprs(payload);
+    RETURN TRY (lambdaExpr__child_exprs(payload));
   END
   IF value IS_A Pipeline AS payload THEN
-    RETURN pipeline__child_exprs(payload);
+    RETURN TRY (pipeline__child_exprs(payload));
   END
   IF value IS_A RegistryCall AS payload THEN
-    RETURN registryCall__child_exprs(payload);
+    RETURN TRY (registryCall__child_exprs(payload));
   END
   IF value IS_A IndexedStore AS payload THEN
-    RETURN indexedStore__child_exprs(payload);
+    RETURN TRY (indexedStore__child_exprs(payload));
   END
   IF value IS_A CFunctionAdapter AS payload THEN
-    RETURN cFunctionAdapter__child_exprs(payload);
+    RETURN TRY (cFunctionAdapter__child_exprs(payload));
   END
   IF value IS_A ExternTrampoline AS payload THEN
-    RETURN externTrampoline__child_exprs(payload);
+    RETURN TRY (externTrampoline__child_exprs(payload));
   END
   IF value IS_A ObservableConsumerSpawn AS payload THEN
-    RETURN observableConsumerSpawn__child_exprs(payload);
+    RETURN TRY (observableConsumerSpawn__child_exprs(payload));
   END
   IF value IS_A ShardConcurrentEach AS payload THEN
-    RETURN shardConcurrentEach__child_exprs(payload);
+    RETURN TRY (shardConcurrentEach__child_exprs(payload));
   END
   IF value IS_A InlineBc AS payload THEN
-    RETURN inlineBc__child_exprs(payload);
+    RETURN TRY (inlineBc__child_exprs(payload));
   END
   IF value IS_A OrElseExitBcRewrite AS payload THEN
-    RETURN orElseExitBcRewrite__child_exprs(payload);
+    RETURN TRY (orElseExitBcRewrite__child_exprs(payload));
   END
   IF value IS_A ShardedMapPut AS payload THEN
-    RETURN shardedMapPut__child_exprs(payload);
+    RETURN TRY (shardedMapPut__child_exprs(payload));
   END
   IF value IS_A ShardedMapGet AS payload THEN
-    RETURN shardedMapGet__child_exprs(payload);
+    RETURN TRY (shardedMapGet__child_exprs(payload));
   END
   RETURN empty_child_exprs;
 END
