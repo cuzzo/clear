@@ -1,0 +1,6 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+# Ruby module Annotator::Phases::BuiltinEnvironment
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

@@ -1,0 +1,48 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f626f64795f616e616c797369732e636c656172" AS body_analysis
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+# Ruby module Annotator
+PUB STRUCT FunctionRegistry {
+  nodes: {String}FunctionDef,
+  synthetic_definitions: []FunctionDef,
+  body_summaries: {String}FunctionBodySummary
+}
+
+PUB FN functionRegistry__register_mut(MUTABLE self: FunctionRegistry, node: FunctionDef) RETURNS !FunctionDef ->
+  IF self.nodes.contains?(node.name) THEN
+    panic("duplicate function node '{}'");
+  END
+  self.nodes[node.name] = COPY node;
+  RETURN COPY node;
+END
+PUB FN functionRegistry__fetch(self: FunctionRegistry, name: ?String) RETURNS ?FunctionDef ->
+  IF name EXISTS AS name_value THEN
+    RETURN COPY self.nodes[name_value];
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN functionRegistry__key?(self: FunctionRegistry, name: String) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN self.nodes.contains?(name);
+END
+PUB FN functionRegistry__names(self: FunctionRegistry) RETURNS ![]String ->
+  RETURN self.nodes.keys();
+END
+PUB FN functionRegistry__each_node(self: FunctionRegistry, blk: FN(FunctionDef) -> Void) RETURNS Void ->
+  FOR rtoc_each_val IN self.nodes.values() DO
+  blk(rtoc_each_val);
+  END
+END
+PUB FN functionRegistry__add_synthetic_definition_mut(MUTABLE self: FunctionRegistry, node: FunctionDef) RETURNS FunctionDef ->
+  &self.synthetic_definitions.append(COPY node);
+  RETURN COPY node;
+END
+PUB FN functionRegistry__clear_synthetic_definitions_mut(MUTABLE self: FunctionRegistry) RETURNS Void ->
+  &self.synthetic_definitions.clear();
+END
+PUB FN functionRegistry__record_body_summary_mut(MUTABLE self: FunctionRegistry, summary: FunctionBodySummary) RETURNS FunctionBodySummary ->
+  self.body_summaries[summary.name] = COPY summary;
+  RETURN COPY summary;
+END
+# End Ruby module Annotator

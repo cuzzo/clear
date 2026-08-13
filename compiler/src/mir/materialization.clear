@@ -1,0 +1,85 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
+# Ruby module MIR
+PUB STRUCT OwnedCompositeMaterialization {
+  type_info: Type,
+  lifecycle_plan: LifecyclePlan,
+  alloc: String@symbol
+}
+
+PUB FN ownedCompositeMaterialization__cleanup_entry(self: OwnedCompositeMaterialization) RETURNS !CleanupEntry@multiowned ->
+  RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_1 = (cleanupEntry__build(:uniform, self.alloc, FALSE, {:zig_type: TRY (type__zig_type(self.type_info))}));
+  cleanupEntry__set_lifecycle_plan_mut(&rtoc_mutable_receiver_1, self.lifecycle_plan) };
+END
+PUB STRUCT MaterializationPacket {
+  alloc_mark: ?AllocMark,
+  value_stmt: ?Stmt,
+  cleanup_stmt: ?Stmt
+}
+
+PUB FN materializationPacket__value_only(value_stmt: Stmt) RETURNS MaterializationPacket ->
+  RETURN MaterializationPacket{ alloc_mark: NIL, value_stmt: COPY value_stmt, cleanup_stmt: NIL };
+END
+PUB FN materializationPacket__markers(alloc_mark: AllocMark, cleanup_stmt: ?Stmt = NIL) RETURNS MaterializationPacket ->
+  RETURN MaterializationPacket{ alloc_mark: COPY alloc_mark, value_stmt: NIL, cleanup_stmt: COPY cleanup_stmt };
+END
+PUB FN materializationPacket__owned(alloc_mark: AllocMark, value_stmt: Stmt, cleanup_stmt: ?Stmt = NIL) RETURNS MaterializationPacket ->
+  RETURN MaterializationPacket{ alloc_mark: COPY alloc_mark, value_stmt: COPY value_stmt, cleanup_stmt: COPY cleanup_stmt };
+END
+PUB FN materializationPacket__statements(self: MaterializationPacket) RETURNS ![]Stmt ->
+  MUTABLE out: []Stmt = ( { MUTABLE rtoc_empty_list_2: []Stmt = List[]; rtoc_empty_list_2 } );
+  IF self.alloc_mark EXISTS AS alloc_mark_value THEN
+    &out.append(COPY alloc_mark_value);
+  END
+  IF self.value_stmt EXISTS AS value_stmt_value THEN
+    &out.append(COPY value_stmt_value);
+  END
+  IF self.cleanup_stmt EXISTS AS cleanup_stmt_value THEN
+    &out.append(COPY cleanup_stmt_value);
+  END
+  RETURN out;
+END
+PUB STRUCT BindingMaterialization {
+  name: String,
+  expr: Emittable,
+  alloc: String@symbol,
+  type_info: Type,
+  mutable: Bool,
+  annotation: ?Type,
+  suppression: ?String,
+  cleanup_entry: ?CleanupEntry@multiowned,
+  cleanup_mode: String@symbol,
+  scope: ?String@symbol,
+  ownership_tracked: Bool
+}
+
+PUB FN bindingMaterialization__alloc_mark(self: BindingMaterialization) RETURNS AllocMark ->
+  RETURN AllocMark{ name: COPY self.name, alloc: COPY self.alloc, type_info: COPY self.type_info, scope: ( { MUTABLE rtoc_optional_or_source_3: ?String@symbol = self.scope; MUTABLE rtoc_optional_or_result_4: ?String@symbol = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = placement__alloc_scope(self.alloc); END rtoc_optional_or_result_4 } ), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+END
+PUB FN bindingMaterialization__let_node(self: BindingMaterialization) RETURNS Let ->
+  RETURN Let{ name: Name{ StringValue: COPY self.name }, init: COPY self.expr, mutable: self.mutable, annotation: COPY self.annotation, suppression: COPY self.suppression, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
+END
+PUB FN bindingMaterialization__cleanup_stmt(self: BindingMaterialization) RETURNS ?Stmt ->
+  MUTABLE entry: ?CleanupEntry@multiowned = COPY KEEP self.cleanup_entry;
+  IF entry EXISTS AS entry_value THEN
+    IF (self.cleanup_mode == :err) THEN
+      RETURN ErrCleanup{ name: COPY self.name, cleanup_entry: entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    ELSE
+      RETURN Cleanup{ name: COPY self.name, cleanup_entry: entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN bindingMaterialization__packet(self: BindingMaterialization) RETURNS MaterializationPacket ->
+  IF !(self.ownership_tracked) THEN
+    RETURN materializationPacket__value_only(bindingMaterialization__let_node(self));
+  END
+  RETURN materializationPacket__owned(bindingMaterialization__alloc_mark(self), bindingMaterialization__let_node(self), bindingMaterialization__cleanup_stmt(self));
+END
+PUB FN bindingMaterialization__statements(self: BindingMaterialization) RETURNS ![]Stmt EFFECTS REENTRANT ->
+  RETURN TRY (materializationPacket__statements(bindingMaterialization__packet(self)));
+END
+# End Ruby module MIR

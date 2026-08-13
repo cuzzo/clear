@@ -1,0 +1,93 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB UNION TypeDeclaration { StructDef: StructDef, ExternStructDecl: ExternStructDecl, EnumDef: EnumDef, UnionDef: UnionDef, ProtocolDef: ProtocolDef }
+PUB STRUCT ErrorTypeRegistration {
+  kind: String@symbol,
+  type_name: String,
+  token: Token
+}
+PUB STRUCT DeclarationIndex {
+  imports: []RequireNode,
+  type_declarations: []TypeDeclaration,
+  function_declarations: []FunctionDef,
+  extern_function_declarations: []ExternFnDecl,
+  implementation_declarations: []ImplementationDef,
+  conformance_declarations: []ConformanceDef,
+  union_method_declarations: []UnionDef,
+  body_statements: []Locatable,
+  error_type_registrations: []ErrorTypeRegistration
+}
+PUB FN declarationIndexer__index(program: Program) RETURNS !DeclarationIndex ->
+  MUTABLE imports: []RequireNode = ( { MUTABLE rtoc_empty_list_1: []RequireNode = List[]; rtoc_empty_list_1 } );
+  MUTABLE type_declarations: []TypeDeclaration = ( { MUTABLE rtoc_empty_list_2: []TypeDeclaration = List[]; rtoc_empty_list_2 } );
+  MUTABLE function_declarations: []FunctionDef = ( { MUTABLE rtoc_empty_list_3: []FunctionDef = List[]; rtoc_empty_list_3 } );
+  MUTABLE extern_function_declarations: []ExternFnDecl = ( { MUTABLE rtoc_empty_list_4: []ExternFnDecl = List[]; rtoc_empty_list_4 } );
+  MUTABLE implementation_declarations: []ImplementationDef = ( { MUTABLE rtoc_empty_list_5: []ImplementationDef = List[]; rtoc_empty_list_5 } );
+  MUTABLE conformance_declarations: []ConformanceDef = ( { MUTABLE rtoc_empty_list_6: []ConformanceDef = List[]; rtoc_empty_list_6 } );
+  MUTABLE union_method_declarations: []UnionDef = ( { MUTABLE rtoc_empty_list_7: []UnionDef = List[]; rtoc_empty_list_7 } );
+  MUTABLE body_statements: []Locatable = ( { MUTABLE rtoc_empty_list_8: []Locatable = List[]; rtoc_empty_list_8 } );
+  MUTABLE error_type_registrations = TRY (declarationIndexer__collect_error_type_registrations(program));
+  FOR _ IN program.statements DO
+  IF _ IS_A RequireNode AS require_node THEN
+    &imports.append(COPY require_node);
+  ELSE_IF _ IS_A StructDef AS struct_def THEN
+    &type_declarations.append(TypeDeclaration{ StructDef: COPY struct_def });
+  ELSE_IF _ IS_A ExternStructDecl AS extern_struct_decl THEN
+    &type_declarations.append(TypeDeclaration{ ExternStructDecl: COPY extern_struct_decl });
+  ELSE_IF _ IS_A EnumDef AS enum_def THEN
+    &type_declarations.append(TypeDeclaration{ EnumDef: COPY enum_def });
+  ELSE_IF _ IS_A ProtocolDef AS protocol_def THEN
+    &type_declarations.append(TypeDeclaration{ ProtocolDef: COPY protocol_def });
+  ELSE_IF _ IS_A UnionDef AS union_def THEN
+    &type_declarations.append(TypeDeclaration{ UnionDef: COPY union_def });
+    IF declarationIndexer__union_methods?(union_def) THEN
+      &union_method_declarations.append(COPY union_def);
+    END
+  ELSE_IF _ IS_A FunctionDef AS function_def THEN
+    &function_declarations.append(COPY function_def);
+    &body_statements.append(Locatable{ FunctionDef: COPY function_def });
+  ELSE_IF _ IS_A ExternFnDecl AS extern_fn_decl THEN
+    &extern_function_declarations.append(COPY extern_fn_decl);
+  ELSE_IF _ IS_A ImplementationDef AS implementation_def THEN
+    &implementation_declarations.append(COPY implementation_def);
+  ELSE_IF _ IS_A ConformanceDef AS conformance_def THEN
+    &conformance_declarations.append(COPY conformance_def);
+  ELSE
+    &body_statements.append(COPY _);
+  END
+  END
+  RETURN DeclarationIndex{ imports: COPY imports, type_declarations: COPY type_declarations, function_declarations: function_declarations, extern_function_declarations: COPY extern_function_declarations, implementation_declarations: COPY implementation_declarations, conformance_declarations: COPY conformance_declarations, union_method_declarations: COPY union_method_declarations, body_statements: COPY body_statements, error_type_registrations: COPY error_type_registrations };
+END
+PRIVATE FN declarationIndexer__union_methods?(node: UnionDef) RETURNS Bool ->
+  MUTABLE methods = COPY node.methods;
+  RETURN (!(FALSE) AND !(methods.empty?()));
+END
+PRIVATE FN declarationIndexer__collect_error_type_registrations(program: Program) RETURNS ![]ErrorTypeRegistration ->
+  MUTABLE registrations: []ErrorTypeRegistration = ( { MUTABLE rtoc_empty_list_9: []ErrorTypeRegistration = List[]; rtoc_empty_list_9 } );
+  aST__each_locatable(program, TRUE, %(node: Locatable) USE(MUTABLE registrations) -> {
+  IF node IS_A Raise AS raise THEN
+      MUTABLE kind = raise.kind;
+      MUTABLE type_name = raise.error_name;
+      IF ((kind == NIL) OR (type_name == NIL)) THEN
+        RETURN;
+      END
+      &registrations.append(ErrorTypeRegistration{ kind: COPY kind, type_name: COPY type_name, token: raise.token });
+  ELSE_IF node IS_A OrElseExit AS or_else_exit THEN
+      MUTABLE kind = or_else_exit.kind;
+      MUTABLE type_name = or_else_exit.error_name;
+      IF ((kind == NIL) OR (type_name == NIL)) THEN
+        RETURN;
+      END
+      &registrations.append(ErrorTypeRegistration{ kind: COPY kind, type_name: COPY type_name, token: or_else_exit.token });
+  END
+  rubyToClearVoid()
+  });
+  RETURN registrations;
+END
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

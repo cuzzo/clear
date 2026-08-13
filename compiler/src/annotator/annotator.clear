@@ -1,0 +1,100 @@
+REQUIRE "pkg:fs"
+REQUIRE "pkg:path"
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_73656d616e7469632f73656d616e7469635f6964732e636c656172" AS semantic_ids
+REQUIRE "pkg:rtoc_73656d616e7469632f73656d616e7469635f696e6465782e636c656172" AS semantic_index
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f626f756e646172792e636c656172" AS annotation_boundary
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f706970656c696e652e636c656172" AS annotation_pipeline
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f747970655f616e616c797369735f73657373696f6e2e636c656172" AS type_analysis_session
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f70726f64756374732e636c656172" AS annotation_products
+REQUIRE "pkg:rtoc_636f6d70696c65722f6d6f64756c655f696d706f727465722e636c656172" AS module_importer
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
+REQUIRE "pkg:rtoc_6173742f6572726f725f72656769737472792e636c656172" AS error_registry
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+PUB STRUCT SemanticAnnotator {
+  annotation_products: AnnotationProducts@multiowned,
+  config: SemanticAnnotatorConfig,
+  semantic_index: ?SemanticIndex
+}
+
+PUB STRUCT SemanticAnnotatorConfig {
+  importer: ?ModuleImporter@multiowned,
+  source_dir: String,
+  strict_test: Bool,
+  source_code: ?String
+}
+PUB FN semanticAnnotator__initialize(MUTABLE self: SemanticAnnotator, importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.config = SemanticAnnotatorConfig{ importer: ( { MUTABLE rtoc_optional_or_source_1: ?ModuleImporter@multiowned = importer; MUTABLE rtoc_optional_or_result_2: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_1 != NIL THEN rtoc_optional_or_result_2 = COPY rtoc_optional_or_source_1; ELSE rtoc_optional_or_result_2 = COPY compiler; END rtoc_optional_or_result_2 } ), source_dir: COPY IF source_dir != NIL THEN
+      expand(source_dir)
+    ELSE
+      TRY (pwd())
+    END, strict_test: COPY strict_test, source_code: COPY source_code };
+    rtoc_self_view.annotation_products = annotationProducts__new();
+    rtoc_self_view.semantic_index = NIL;
+}
+END
+PUB FN semanticAnnotator__annotate_mut(MUTABLE self: SemanticAnnotator, MUTABLE program: Program) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    aST__reset_user_types_mut();
+    rtoc_self_view.semantic_index = NIL;
+    MUTABLE pipeline = annotationPipeline__new(KEEP rtoc_self_view.config.importer, rtoc_self_view.config.source_dir, rtoc_self_view.config.source_code, rtoc_self_view.config.strict_test);
+    DEFER rtoc_self_view.annotation_products = COPY KEEP pipeline.products;
+    annotationPipeline__run(&pipeline, program);
+    IF !(annotationProducts__complete?(rtoc_self_view.annotation_products)) THEN
+      panic("annotation pipeline did not publish complete products");
+    END
+    rtoc_self_view.semantic_index = TRY (semanticIndex__from_products(rtoc_self_view.annotation_products, semanticAnnotator__semantic_id_index(rtoc_self_view)));
+    TRY (annotationBoundary__verify_mut(&program, rtoc_self_view.annotation_products));
+}
+END
+PUB FN semanticAnnotator__semantic_root_scope(self: SemanticAnnotator) RETURNS !Scope@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE index: ?SemanticIndex = COPY rtoc_self_view.semantic_index;
+    IF index EXISTS AS index_value THEN
+      RETURN KEEP index_value.root_scope;
+    END
+    MUTABLE resolution: ?ResolutionFacts = COPY rtoc_self_view.annotation_products.resolution;
+    IF resolution EXISTS AS resolution_value THEN
+      RETURN KEEP resolution_value.root_scope;
+    ELSE
+      panic("semantic root scope is unavailable before resolution");
+    END
+}
+END
+PUB FN semanticAnnotator__lookup_type_schema(self: SemanticAnnotator, name: String@symbol) RETURNS !Any@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE base_name = symbol((compilerRegexReplaceFirst((CAST(name AS String)), compilerRegexCompile("<.*>$"), "")));
+    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = (TRY (semanticAnnotator__semantic_root_scope(rtoc_self_view)));
+    scope__resolve_type_definition(rtoc_local_receiver_3, base_name) };
+}
+END
+PRIVATE FN semanticAnnotator__semantic_id_index(self: SemanticAnnotator) RETURNS SemanticIdIndex
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE typed_program = COPY UNWRAP (rtoc_self_view.annotation_products.typed_program);
+    MUTABLE summaries = COPY typed_program.body_summaries;
+    RETURN SemanticIdIndex{ definitions: COPY ( { MUTABLE rtoc_transform_values_result_4: {String}Any = {}; FOR rtoc_key IN summaries.keys() DO rtoc_transform_values_result_4[rtoc_key] = (summaries[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS FunctionBodySummary)).definition_id; END rtoc_transform_values_result_4 } ), bodies: COPY ( { MUTABLE rtoc_transform_values_result_5: {String}Any = {}; FOR rtoc_key IN summaries.keys() DO rtoc_transform_values_result_5[rtoc_key] = (summaries[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS FunctionBodySummary)).body_id; END rtoc_transform_values_result_5 } ) };
+}
+END
+PUB FN semanticAnnotator__new(importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS SemanticAnnotator@multiowned ->
+  MUTABLE self = SemanticAnnotator{ annotation_products: annotationProducts__new(), config: SemanticAnnotatorConfig{ importer: ( { MUTABLE rtoc_optional_or_source_6: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_7: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_6 != NIL THEN rtoc_optional_or_result_7 = COPY rtoc_optional_or_source_6; ELSE rtoc_optional_or_result_7 = COPY compiler; END rtoc_optional_or_result_7 } ), source_dir: COPY IF COPY source_dir != NIL THEN
+  expand(COPY source_dir)
+ELSE
+  TRY (pwd())
+END, strict_test: COPY strict_test, source_code: COPY source_code }, semantic_index: NIL };
+  semanticAnnotator__initialize(&self, importer, compiler, source_dir, strict_test, source_code);
+  RETURN self @multiowned;
+END

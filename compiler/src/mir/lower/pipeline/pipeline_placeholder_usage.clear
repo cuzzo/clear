@@ -1,0 +1,221 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+PUB FN pipelinePlaceholderUsage__statements_use_placeholder?(stmts: []Locatable) RETURNS Bool ->
+  RETURN stmts |> ANY pipelinePlaceholderUsage__contains_placeholder?(_, FALSE);
+END
+PUB FN pipelinePlaceholderUsage__node_uses_placeholder?(node: ?Locatable) RETURNS Bool ->
+  IF node EXISTS AS node_value THEN
+    RETURN pipelinePlaceholderUsage__contains_placeholder?(node_value, FALSE);
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN pipelinePlaceholderUsage__node_uses_bare_placeholder?(node: ?Locatable) RETURNS Bool ->
+  IF node EXISTS AS node_value THEN
+    RETURN pipelinePlaceholderUsage__contains_placeholder?(node_value, TRUE);
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN pipelinePlaceholderUsage__identity_placeholder?(node: ?Locatable) RETURNS Bool ->
+  IF node EXISTS AS node_value THEN
+    RETURN (IF node_value IS_A Identifier AS identifier THEN pipelinePlaceholderUsage__placeholder_identifier?(Locatable{ Identifier: COPY identifier }) ELSE FALSE END);
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN pipelinePlaceholderUsage__placeholder_projection?(node: ?Locatable) RETURNS Bool EFFECTS REENTRANT ->
+  IF node EXISTS AS node_value THEN
+    IF node_value IS_A GetField AS get_field THEN
+      MUTABLE target: ?Locatable = castLocatableToOptionalLocatable(get_field.target);
+      RETURN (((IF target? IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END)) OR pipelinePlaceholderUsage__placeholder_projection?(target));
+    ELSE_IF node_value IS_A GetIndex AS get_index THEN
+      MUTABLE target: ?Locatable = castLocatableToOptionalLocatable(get_index.target);
+      RETURN (((IF target? IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END)) OR pipelinePlaceholderUsage__placeholder_projection?(target));
+    ELSE
+      RETURN FALSE;
+    END
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN pipelinePlaceholderUsage__moved_placeholder?(node: ?Locatable) RETURNS Bool EFFECTS REENTRANT ->
+  IF node EXISTS AS node_value THEN
+    IF pipelinePlaceholderUsage__placeholder_identifier?(node_value) THEN
+      RETURN aST__moved?(node_value);
+    END
+    IF node_value IS_A MoveNode AS move_node THEN
+      RETURN pipelinePlaceholderUsage__contains_placeholder?(Locatable{ MoveNode: COPY move_node }, FALSE);
+    END
+    MUTABLE found: Bool = FALSE;
+    aST__each_child_node(node_value, %(child: Locatable) -> {
+  IF pipelinePlaceholderUsage__moved_placeholder?(child) THEN
+        found = TRUE;
+  END
+  rubyToClearVoid()
+    });
+    RETURN found;
+  ELSE
+    RETURN FALSE;
+  END
+END
+PRIVATE FN pipelinePlaceholderUsage__contains_placeholder?(node: ?Locatable, bare: Bool) RETURNS Bool EFFECTS REENTRANT ->
+  IF node EXISTS AS node_value THEN
+    IF (bare AND aST__soa_placeholder_field?(node_value)) THEN
+      RETURN FALSE;
+    END
+    IF pipelinePlaceholderUsage__placeholder_identifier?(node_value) THEN
+      RETURN TRUE;
+    END
+    MUTABLE found: Bool = FALSE;
+    aST__each_child_node(node_value, %(child: Locatable) USE(bare) -> {
+  IF pipelinePlaceholderUsage__contains_placeholder?(child, bare) THEN
+        found = TRUE;
+  END
+  rubyToClearVoid()
+    });
+    RETURN found;
+  ELSE
+    RETURN FALSE;
+  END
+END
+PRIVATE FN pipelinePlaceholderUsage__placeholder_identifier?(node: Locatable) RETURNS Bool ->
+  RETURN (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END);
+END
+FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    Locatable.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    Locatable.StructDef AS cast_payload -> RETURN Locatable{ StructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    Locatable.DestructureTarget AS cast_payload -> RETURN Locatable{ DestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    Locatable.UnaryOp AS cast_payload -> RETURN Locatable{ UnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    Locatable.MethodCall AS cast_payload -> RETURN Locatable{ MethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    Locatable.Cast AS cast_payload -> RETURN Locatable{ Cast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    Locatable.DeferStmt AS cast_payload -> RETURN Locatable{ DeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    Locatable.OptionalUnwrap AS cast_payload -> RETURN Locatable{ OptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    Locatable.BlockExpr AS cast_payload -> RETURN Locatable{ BlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    Locatable.RangeLit AS cast_payload -> RETURN Locatable{ RangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    Locatable.EnumDef AS cast_payload -> RETURN Locatable{ EnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    Locatable.DoBlock AS cast_payload -> RETURN Locatable{ DoBlock: COPY cast_payload };,
+    Locatable.BgBlock AS cast_payload -> RETURN Locatable{ BgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?Locatable");
+  END
+  panic("Invalid cast to ?Locatable");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

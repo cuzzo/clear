@@ -1,0 +1,150 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f747970655f65787072657373696f6e2e636c656172" AS type_expression
+UNION Values { SymbolValue: String@symbol, StringValue: String }
+# Ruby module Annotator
+PUB STRUCT ProtocolProjectionIssue {
+  code: String@symbol,
+  arguments: {String@symbol}String
+}
+PUB STRUCT ProtocolProjectionResult {
+  expression: TypeExpression,
+  issues: []ProtocolProjectionIssue
+}
+# Ruby module Annotator::ProtocolProjectionIssueEmission
+PUB STRUCT ProtocolProjectionResolver {
+  protocols: {String}ProtocolDef
+}
+
+PUB FN protocolProjectionResolver__initialize(MUTABLE self: ProtocolProjectionResolver, protocols: {String}ProtocolDef) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.protocols = COPY protocols;
+}
+END
+PUB FN protocolProjectionResolver__resolve(self: ProtocolProjectionResolver, expression: TypeExpression, parameters: []GenericParamDecl) RETURNS !ProtocolProjectionResult
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE issues: []ProtocolProjectionIssue = ( { MUTABLE rtoc_empty_list_1: []ProtocolProjectionIssue = List[]; rtoc_empty_list_1 } );
+    MUTABLE parameter_map: {String}GenericParamDecl = {};
+    FOR _ IN parameters DO
+    parameter_map[_.name] = COPY _;
+    END
+    MUTABLE resolved = typeExpressionTree__transform(expression, %(candidate: TypeExpression) USE(MUTABLE issues, parameter_map, rtoc_self_view) -> {
+    MUTABLE kind = candidate.kind;
+    IF !(kind IS_A TypeProjectionExpression) THEN
+        RETURN candidate;
+    END
+    MUTABLE projection = kind;
+    IF projection.protocol() THEN
+        RETURN candidate;
+    END
+    MUTABLE protocol: ?String = TRY (protocolProjectionResolver__projection_protocol(rtoc_self_view, projection, parameter_map, &issues));
+    IF !(protocol) THEN
+        RETURN candidate;
+    END
+    MUTABLE protocol_value: ?String = protocol;
+    MUTABLE projection_kind = TypeProjectionExpression{ owner: COPY projection.owner(), member: COPY projection.member(), protocol: COPY symbol(protocol_value) };
+    TypeExpression{ kind: COPY projection_kind, capabilities: COPY candidate.capabilities }
+    });
+    RETURN ProtocolProjectionResult{ expression: COPY resolved, issues: COPY issues };
+}
+END
+PRIVATE FN protocolProjectionResolver__projection_protocol(self: ProtocolProjectionResolver, projection: TypeProjectionExpression, parameters: {String}GenericParamDecl, MUTABLE issues: []ProtocolProjectionIssue) RETURNS !?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE parameter: ?GenericParamDecl = COPY parameters[CAST(projection.owner AS String)];
+    IF parameter EXISTS AS parameter_value THEN
+      MUTABLE bounds = parameter_value.bounds |> SELECT protocolProjectionResolver__protocol_base_name(rtoc_self_view, _.type);
+      IF (bounds.length() == 0) THEN
+        MUTABLE suggestions = (TRY (protocolProjectionResolver__all_protocol_names(rtoc_self_view))) |> WHERE (TRY (protocolProjectionResolver__associated_types(rtoc_self_view, _))).contains?(projection.member);
+        MUTABLE suggested: String = "";
+        IF (suggestions.length() == 1) THEN
+          suggested = COPY UNWRAP (suggestions.first());
+        ELSE
+          suggested = "a protocol declaring ${projection.member}";
+        END
+        &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_PROJECTION_NEEDS_PROTOCOL, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocol: Values{ StringValue: COPY suggested }}));
+        RETURN NIL;
+      END
+      MUTABLE matching = bounds |> WHERE (TRY (protocolProjectionResolver__associated_types(rtoc_self_view, _))).contains?(projection.member);
+      IF (matching.length() == 0) THEN
+        MUTABLE available = (bounds |> UNNEST TRY (protocolProjectionResolver__associated_types(rtoc_self_view, _))) |> DISTINCT _ |> SELECT COPY _;
+        &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_UNKNOWN_ASSOCIATED_TYPE, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocol: bounds.join(" & "), :available: Values{ StringValue: COPY IF available.empty?() THEN
+          "none"
+        ELSE
+          available.join(", ")
+        END }}));
+        RETURN NIL;
+      END
+      IF (matching.length() > 1) THEN
+        &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocols: matching.join(", ")}));
+        RETURN NIL;
+      END
+      MUTABLE result: ?String = COPY matching.first();
+      IF result EXISTS AS result_value THEN
+        RETURN COPY result_value;
+      ELSE
+        RETURN NIL;
+      END
+    ELSE
+      &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_PROJECTION_UNKNOWN_OWNER, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }}));
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN protocolProjectionResolver__issue(self: ProtocolProjectionResolver, code: String@symbol, values: {String@symbol}Values = {}) RETURNS ProtocolProjectionIssue
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE arguments: {String@symbol}String = {};
+    values.keys() |> EACH {
+    MUTABLE value: Any = (values[_] OR_ELSE panic("missing hash key"));
+    arguments[_] = COPY CAST(value AS String);
+    };
+    RETURN ProtocolProjectionIssue{ code: COPY code, arguments: COPY arguments };
+}
+END
+PRIVATE FN protocolProjectionResolver__all_protocol_names(self: ProtocolProjectionResolver) RETURNS ![]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (["Map"] + rtoc_self_view.protocols.keys());
+}
+END
+PRIVATE FN protocolProjectionResolver__associated_types(self: ProtocolProjectionResolver, name: String) RETURNS ![]String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (name == "Map") THEN
+      RETURN CAST([:Key, :Value] AS []String@symbol);
+    END
+    MUTABLE protocol: ?ProtocolDef = COPY rtoc_self_view.protocols[name];
+    IF protocol EXISTS AS protocol_value THEN
+      RETURN protocol_value.associated_types |> SELECT symbol(_.name);
+    ELSE
+      RETURN CAST(( { MUTABLE rtoc_empty_list_2: []String@symbol = List[]; rtoc_empty_list_2 } ) AS []String@symbol);
+    END
+}
+END
+PRIVATE FN protocolProjectionResolver__protocol_base_name(self: ProtocolProjectionResolver, type: Type) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY CAST((IF type__generic_instance?(type) THEN
+      type__generic_base(type)
+    ELSE
+      type__resolved(type)
+    END) AS String);
+}
+END
+PUB FN protocolProjectionResolver__new(protocols: {String}ProtocolDef) RETURNS ProtocolProjectionResolver@multiowned ->
+  MUTABLE self = ProtocolProjectionResolver{ protocols: COPY protocols };
+  protocolProjectionResolver__initialize(&self, protocols);
+  RETURN self @multiowned;
+END
+# End Ruby module Annotator

@@ -1,0 +1,1197 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f636f6e746578742e636c656172" AS context
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f7365676d656e74732e636c656172" AS segments
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2e636c656172" AS fsm_transform
+REQUIRE "pkg:rtoc_6d69722f66736d5f6c6f776572696e672e636c656172" AS fsm_lowering
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f6c6f776572696e675f70726f746f636f6c2e636c656172" AS lowering_protocol
+UNION Stmts { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Emittable: Emittable, ArrayValue: []SegmentStmt, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB UNION WhileStmt { WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop }
+# Ruby module FsmTransform
+# Ruby module FsmTransform::RecursiveSplitter
+PUB UNION SegmentStmt { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Emittable: Emittable, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB UNION SegmentSlot { Segment: Segment, SymbolValue: String@symbol }
+PUB STRUCT SegmentList {
+  segments: []Segment,
+  synthetic_fields: []ContextFieldDecl,
+  alias_overrides_by_index: {Int64}{String}String
+}
+
+PUB FN segmentList__alias_overrides_for(self: SegmentList, index_value: Int64) RETURNS !?{String}String ->
+  RETURN COPY self.alias_overrides_by_index[index_value];
+END
+PUB STRUCT Builder {
+  alias_overrides_for: {Int64}{String}String,
+  current_alias_overrides: ?{String}String,
+  next_lock_index: Int64,
+  segments: []SegmentSlot,
+  synthetic_fields: []ContextFieldDecl
+}
+
+PUB STRUCT Finalized {
+  segments: []Segment,
+  alias_overrides_by_index: {Int64}{String}String
+}
+PUB FN builder__initialize(MUTABLE self: Builder) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.segments = List[];
+    rtoc_self_view.synthetic_fields = List[];
+    rtoc_self_view.alias_overrides_for = {};
+    rtoc_self_view.current_alias_overrides = NIL;
+    rtoc_self_view.next_lock_index = 0;
+}
+END
+PUB FN builder__with_alias_overrides<U>(MUTABLE self: Builder, overrides: {String}String, blk: FN() -> U) RETURNS U
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+  MUTABLE prev: ?{String}String = COPY rtoc_self_view.current_alias_overrides;
+  DEFER rtoc_self_view.current_alias_overrides = prev;
+  rtoc_self_view.current_alias_overrides = ((prev OR_ELSE {})).merge(overrides);
+  RETURN blk();
+}
+END
+PUB FN builder__stamp_overrides(MUTABLE self: Builder, idx: Int64) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF rtoc_self_view.current_alias_overrides EXISTS AS current_alias_overrides_value THEN
+      IF (current_alias_overrides_value.count() == 0) THEN
+        RETURN;
+      ELSE
+        rtoc_self_view.alias_overrides_for[idx] = UNWRAP (COPY current_alias_overrides_value);
+      END
+    ELSE
+      RETURN;
+    END
+}
+END
+PUB FN builder__add_synthetic_field(MUTABLE self: Builder, decl: ContextFieldDecl) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF !(rtoc_self_view.synthetic_fields |> ANY (_.name == decl.name)) THEN
+      &rtoc_self_view.synthetic_fields.append(COPY decl);
+    END
+    NIL;
+}
+END
+PUB FN builder__reserve_index(MUTABLE self: Builder) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE idx = rtoc_self_view.segments.length();
+    &rtoc_self_view.segments.append(SegmentSlot{ SymbolValue: :placeholder });
+    RETURN idx;
+}
+END
+PUB FN builder__reserve_lock_index(MUTABLE self: Builder) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE idx = rtoc_self_view.next_lock_index;
+    rtoc_self_view.next_lock_index = (rtoc_self_view.next_lock_index + 1);
+    RETURN idx;
+}
+END
+PUB FN builder__fill(MUTABLE self: Builder, idx: Int64, stmts: []SegmentStmt, tail: SegmentTail) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.segments[idx] = Segment{ index: COPY idx, stmts: COPY stmts, tail: COPY tail };
+    builder__stamp_overrides(&rtoc_self_view, idx);
+    RETURN COPY idx;
+}
+END
+PUB FN builder__push(MUTABLE self: Builder, stmts: []SegmentStmt, tail: SegmentTail) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE idx = builder__reserve_index(&rtoc_self_view);
+    builder__fill(&rtoc_self_view, idx, stmts, tail);
+    RETURN idx;
+}
+END
+PUB FN builder__finalize(self: Builder) RETURNS !Finalized
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE unfilled = {
+    MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE rtoc_indexed_items_1: []SegmentSlot = rtoc_self_view.segments;
+    MUTABLE rtoc_indexed_output_3 = [];
+    MUTABLE rtoc_indexed_i_2 = 0;
+    WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length() DO
+      IF ruby_union_scalar_equal_SegmentSlot_String_symbol(rtoc_indexed_items_1[rtoc_indexed_i_2], :placeholder) THEN
+        &rtoc_indexed_output_3.append(COPY rtoc_indexed_items_1[rtoc_indexed_i_2]);
+      END
+      rtoc_indexed_i_2 = rtoc_indexed_i_2 + 1;
+    END
+    rtoc_indexed_output_3
+    };
+    IF type__any?(unfilled) THEN
+      panic("RecursiveSplitter: unfilled segments at indices {}");
+    END
+    RETURN Finalized{ segments: COPY CAST(rtoc_self_view.segments AS []Segment), alias_overrides_by_index: COPY rtoc_self_view.alias_overrides_for };
+}
+END
+PUB FN builder__new() RETURNS Builder@multiowned ->
+  MUTABLE self = Builder{ alias_overrides_for: {}, current_alias_overrides: NIL, next_lock_index: 0, segments: List[], synthetic_fields: List[] };
+  builder__initialize(&self);
+  RETURN self @multiowned;
+END
+PUB FN recursiveSplitter__split(body: []Locatable, lowering: LoweringProtocol, ctx: ?{String@symbol}?TransformValue = NIL) RETURNS !?SegmentList ->
+  IF TRY (recursiveSplitter__contains_unsupported?(Body{ ArrayValue: COPY body })) THEN
+    RETURN NIL;
+  END
+  MUTABLE builder = builder__new();
+  MUTABLE done_idx = builder__reserve_index(&builder);
+  MUTABLE entry: ?Int64 = TRY (recursiveSplitter__emit_stmts_or_nil(body, done_idx, builder, lowering, (ctx OR_ELSE {})));
+  IF entry EXISTS AS entry_value THEN
+    MUTABLE entry_value_mutable = COPY entry_value;
+    builder__fill(&builder, done_idx, ( { MUTABLE rtoc_empty_list_4: []SegmentStmt = List[]; rtoc_empty_list_4 } ), SegmentTail{ Done: COPY Done{ _: NIL } });
+    MUTABLE finalized = TRY (builder__finalize(builder));
+    MUTABLE pre_renumber_overrides = COPY finalized.alias_overrides_by_index;
+    MUTABLE segments, mapping = recursiveSplitter__renumber_with_entry(finalized.segments, entry_value_mutable);
+    MUTABLE synth = COPY builder.synthetic_fields;
+    MUTABLE alias_table = pre_renumber_overrides.each_with_object({}, %(tuple_param_0, h: Tuple<Int64,{String}String>) USE(mapping) -> {
+  MUTABLE orig = tuple_param_0._0;
+  MUTABLE ov = tuple_param_0._1;
+  MUTABLE new_idx = mapping[orig]?;
+  h[new_idx] = ov;
+  NIL
+    });
+    RETURN SegmentList{ segments: COPY segments, synthetic_fields: COPY synth, alias_overrides_by_index: COPY alias_table };
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN recursiveSplitter__emit_stmts_or_nil(body: []Locatable, after_idx: Int64, MUTABLE builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !?Int64 ->
+  RETURN TRY (recursiveSplitter__emit_stmts(body, after_idx, &builder, lowering, ctx));
+CATCH UnsupportedShape
+  RETURN NIL;
+END
+PRIVATE FN recursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 EFFECTS REENTRANT ->
+  IF (FALSE OR (stmts.length() == 0)) THEN
+    RETURN COPY after_idx;
+  END
+  MUTABLE pivot_idx = stmts.indexOf();
+  IF (pivot_idx == NIL) THEN
+    RETURN builder__push(&builder, stmts, SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
+  END
+  MUTABLE pre = COPY UNWRAP (stmts.substr(0, (pivot_idx - 0)));
+  MUTABLE pivot: ?SegmentStmt = COPY stmts[pivot_idx];
+  MUTABLE rest = (stmts.substr(((pivot_idx + 1)), (stmts.length() - ((pivot_idx + 1)))) OR_ELSE List[]);
+  MUTABLE rest_entry = TRY (recursiveSplitter__emit_stmts(rest, after_idx, &builder, lowering, ctx));
+  MUTABLE pivot_ast_branch_value: ?SegmentStmt = NIL;
+  IF pivot? IS_A Locatable AS locatable THEN
+    pivot_ast_branch_value = castLocatableToOptionalSegmentStmt(locatable);
+  ELSE
+    pivot_ast_branch_value = NIL;
+  END
+  MUTABLE pivot_ast: ?SegmentStmt = pivot_ast_branch_value;
+  MUTABLE sus = IF pivot_ast != NIL THEN
+    Segments.classify_suspend(castSegmentStmtToLocatable(pivot_ast))
+  ELSE
+    NIL
+  END;
+  IF sus THEN
+    RETURN TRY (recursiveSplitter__emit_suspend_with_pre(sus, pre, rest_entry, &builder));
+  ELSE
+    MUTABLE pivot_entry = TRY (recursiveSplitter__emit_pivot(UNWRAP (pivot), rest_entry, builder, lowering, ctx));
+    IF pre.empty?() THEN
+      RETURN pivot_entry;
+    ELSE
+      RETURN builder__push(&builder, pre, SegmentTail{ Goto: COPY Goto{ target_index: pivot_entry } });
+    END
+  END
+END
+PRIVATE FN recursiveSplitter__emit_suspend_with_pre(susp_tail: SuspendTail, pre_value: []SegmentStmt, after_idx: Int64, MUTABLE builder: Builder) RETURNS !Int64 ->
+  MUTABLE idx = builder__reserve_index(&builder);
+  IF !(Segments.suspend_tail?(castSuspendTailToOptionalSegmentTail(susp_tail))) THEN
+    panic("Unhandled suspend kind {}");
+  END
+  MUTABLE tail = susp_tail.with_next_index(after_idx);
+  builder__fill(&builder, idx, pre_value, tail);
+  RETURN idx;
+END
+PRIVATE FN recursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETURNS !Bool ->
+  IF stmt EXISTS AS stmt_value THEN
+    IF (IF stmt_value IS_A Locatable AS locatable THEN Segments.classify_suspend(locatable) ELSE FALSE END) THEN
+      RETURN TRUE;
+    END
+    IF stmt_value IS_A WithBlock@multiowned AS with_block_multiowned THEN
+      RETURN (TRY (recursiveSplitter__with_lock_suspend?(CAST(COPY with_block_multiowned AS WithBlock))) OR (TRY (recursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: with_block_multiowned.body |> SELECT castLocatableToSegmentStmt(_) }))));
+    ELSE
+      IF !(stmt_value IS_A Struct) THEN
+        RETURN FALSE;
+      END
+      RETURN (TRY (aST__child_bodies(castSegmentStmtToLocatable(stmt_value)))) |> ANY TRY (recursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt(_) }));
+    END
+  ELSE
+    RETURN FALSE;
+  END
+END
+PRIVATE FN recursiveSplitter__contains_suspend_anywhere?(stmts: ?Stmts) RETURNS !Bool EFFECTS REENTRANT ->
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < stmts.length() DO
+    IF (stmts[rtoc_idx] IS_A Locatable AND Segments.classify_suspend(stmts[rtoc_idx])) THEN
+        RETURN TRUE;
+    END
+    IF (stmts[rtoc_idx] IS_A WithBlock) THEN
+        IF (TRY (recursiveSplitter__with_lock_suspend?(stmts[rtoc_idx])) OR TRY (recursiveSplitter__contains_suspend_anywhere?(stmts[rtoc_idx].body()))) THEN
+          RETURN TRUE;
+        END
+    ELSE
+        IF !(stmts[rtoc_idx] IS_A Struct) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+        END
+        IF (TRY (aST__child_bodies(stmts[rtoc_idx]))) |> ANY TRY (recursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt(_) })) THEN
+          RETURN TRUE;
+        END
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN FALSE;
+END
+PRIVATE FN recursiveSplitter__with_lock_suspend?(with_node: WithBlock) RETURNS !Bool ->
+  RETURN (TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_node)))))) |> ANY _;
+END
+PRIVATE FN recursiveSplitter__contains_unsupported?(body: ?Body) RETURNS !Bool EFFECTS REENTRANT ->
+  RETURN body |> ANY PARTIAL MATCH _ START
+    AST.WithBlock -> TRY (recursiveSplitter__with_unsupported?(_)),
+    AST.CatchBlock -> TRUE,
+    AST.WhileLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch())),
+    AST.WhileBindLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch())),
+    AST.ForRange -> TRY (recursiveSplitter__contains_unsupported?(_.body())),
+    AST.ForEach -> TRY (recursiveSplitter__contains_unsupported?(_.body())),
+    AST.IfStatement -> (TRY (recursiveSplitter__contains_unsupported?(_.then_branch())) OR TRY (recursiveSplitter__contains_unsupported?((_.else_branch() OR List[])))),
+    DEFAULT -> TRY (recursiveSplitter__stmt_unsupported_suspend?(_))
+  END;
+END
+PRIVATE FN recursiveSplitter__with_unsupported?(with_node: WithBlock) RETURNS !Bool ->
+  IF TRY (recursiveSplitter__with_lock_suspend?(with_node)) THEN
+    MUTABLE with_plan = TRY (capabilityPlan__require_for(with_node));
+    IF !((with_plan.all.length() == (TRY (withCapabilityPlan__locks(with_plan))).length())) THEN
+      RETURN TRUE;
+    END
+  END
+  RETURN TRY (recursiveSplitter__contains_unsupported?(Body{ ArrayValue: COPY with_node.body }));
+END
+PRIVATE FN recursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) RETURNS !Bool ->
+  MUTABLE sus = IF ((stmt != NIL) AND (stmt IS_A Locatable)) THEN
+    Segments.classify_suspend(castOptionalSegmentStmtToLocatable(stmt))
+  ELSE
+    NIL
+  END;
+  IF !(sus IS_A NextSuspend) THEN
+    RETURN FALSE;
+  END
+  MUTABLE pt = TRY (type__from_node_mut(sus.promise_ast(), "FSM suspend promise"));
+  IF !(type__future?(pt)) THEN
+    RETURN TRUE;
+  END
+  IF (TRUE AND TRY (type__stream?(pt))) THEN
+    RETURN TRUE;
+  END
+  IF (TRUE AND type__promise_list?(pt)) THEN
+    RETURN TRUE;
+  END
+  RETURN FALSE;
+END
+PRIVATE FN recursiveSplitter__emit_pivot(stmt: SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE sus = IF stmt IS_A Locatable THEN
+    Segments.classify_suspend(castSegmentStmtToLocatable(stmt))
+  ELSE
+    NIL
+  END;
+  IF sus THEN
+    RETURN TRY (recursiveSplitter__emit_suspend(CAST(sus AS SuspendTail), after_idx, &builder));
+  END
+  RETURN PARTIAL MATCH stmt START
+    SegmentStmt.WhileLoop AS while_loop -> TRY (recursiveSplitter__emit_while_fragment(WhileStmt{ WhileLoop: COPY while_loop }, after_idx, builder, lowering, ctx)),
+    SegmentStmt.WhileBindLoop AS while_bind_loop -> TRY (recursiveSplitter__emit_while_fragment(WhileStmt{ WhileBindLoop: COPY while_bind_loop }, after_idx, builder, lowering, ctx)),
+    SegmentStmt.ForRange AS for_range -> TRY (recursiveSplitter__emit_for_range_fragment(for_range, after_idx, builder, lowering, ctx)),
+    SegmentStmt.ForEach AS for_each -> TRY (recursiveSplitter__emit_for_each_fragment(for_each, after_idx, builder, lowering, ctx)),
+    SegmentStmt.IfStatement AS if_statement -> TRY (recursiveSplitter__emit_if_fragment(if_statement, after_idx, builder, lowering, ctx)),
+    SegmentStmt.WithBlockMultiowned AS with_block_multiowned -> TRY (recursiveSplitter__emit_with_fragment(CAST(COPY with_block_multiowned AS WithBlock), after_idx, &builder, lowering, ctx)),
+    DEFAULT -> panic("Unhandled pivot kind {}")
+  END;
+END
+PRIVATE FN recursiveSplitter__emit_suspend(susp_tail: SuspendTail, after_idx: Int64, MUTABLE builder: Builder) RETURNS !Int64 ->
+  MUTABLE idx = builder__reserve_index(&builder);
+  IF !(Segments.suspend_tail?(castSuspendTailToOptionalSegmentTail(susp_tail))) THEN
+    panic("Unhandled suspend kind {}");
+  END
+  MUTABLE tail = susp_tail.with_next_index(after_idx);
+  builder__fill(&builder, idx, ( { MUTABLE rtoc_empty_list_5: []SegmentStmt = List[]; rtoc_empty_list_5 } ), tail);
+  RETURN idx;
+END
+PRIVATE FN recursiveSplitter__emit_while_fragment(while_stmt: WhileStmt, after_idx: Int64, builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE _: Tuple<WhileStmt, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue> = CAST(Tuple{while_stmt, after_idx, builder, lowering, ctx} AS Tuple<WhileStmt, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue>);
+  panic("WhileLoop recursive FSM lowering requires structural MIR conditions");
+END
+PRIVATE FN recursiveSplitter__emit_for_range_fragment(for_stmt: ForRange, after_idx: Int64, builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE _: Tuple<ForRange, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue> = CAST(Tuple{for_stmt, after_idx, builder, lowering, ctx} AS Tuple<ForRange, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue>);
+  panic("ForRange recursive FSM lowering requires structural MIR loop state");
+END
+PRIVATE FN recursiveSplitter__emit_for_each_fragment(for_stmt: ForEach, after_idx: Int64, builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE _: Tuple<ForEach, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue> = CAST(Tuple{for_stmt, after_idx, builder, lowering, ctx} AS Tuple<ForEach, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue>);
+  panic("ForEach recursive FSM lowering requires structural MIR iterator state");
+END
+PRIVATE FN recursiveSplitter__emit_if_fragment(if_stmt: IfStatement, after_idx: Int64, builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE _: Tuple<IfStatement, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue> = CAST(Tuple{if_stmt, after_idx, builder, lowering, ctx} AS Tuple<IfStatement, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue>);
+  panic("IfStatement recursive FSM lowering requires structural MIR conditions");
+END
+PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx: Int64, MUTABLE builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE caps = TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_stmt)))));
+  IF (caps.length() == 0) THEN
+    panic("WITH with no capabilities");
+  END
+  MUTABLE ctx_id_raw: ?TransformValue = COPY ctx[:id];
+  IF ctx_id_raw? IS_A Int64 AS int64 THEN
+    MUTABLE int64_mutable = COPY int64;
+    MUTABLE ctx_id: Int64 = CAST(int64_mutable AS Int64);
+    MUTABLE captured: {String}Type@multiowned = castTransformValueToHashMapStringTypeMultiowned((ctx[:captured] OR_ELSE {}));
+    MUTABLE bg_rt_raw: ?TransformValue = COPY ctx[:bg_rt];
+    IF bg_rt_raw? IS_A String AS string THEN
+      MUTABLE string_mutable = COPY string;
+      MUTABLE bg_rt: String = CAST(string_mutable AS String);
+      MUTABLE caps_meta: []{String@symbol}FsmCapMetadataValue = ( { MUTABLE rtoc_empty_list_6: []{String@symbol}FsmCapMetadataValue = List[]; rtoc_empty_list_6 } );
+      FOR _ IN caps DO
+  MUTABLE m = lowering.fsm_cap_metadata(_, with_stmt, ctx_id, captured);
+  IF (m == NIL) THEN
+          panic("fsm_cap_metadata failed");
+  END
+  &caps_meta.append(CAST(m AS {String@symbol}FsmCapMetadataValue));
+      END
+      MUTABLE cap_indices = caps |> SELECT builder__reserve_index(&builder);
+      MUTABLE lock_indices = caps |> SELECT builder__reserve_lock_index(&builder);
+      MUTABLE release_idx = builder__reserve_index(&builder);
+      MUTABLE body_stmts = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_8: ?[]Locatable = NIL;
+      IF with_stmt.body IS_A []Any THEN
+        rtoc_ternary_value_8 = with_stmt.body;
+      ELSE
+        rtoc_ternary_value_8 = [with_stmt.body];
+      END
+      rtoc_ternary_value_8? };
+      MUTABLE alias_overrides: {String}String = {};
+      FOR _ IN caps_meta DO
+      alias_overrides[CAST(_[:alias_name]? AS String)] = COPY CAST(_[:alias_data_ref]? AS String);
+      END
+      MUTABLE cs_entry: Int64 = CAST(builder__with_alias_overrides(&builder, alias_overrides, %() USE(alias_overrides, bg_rt, body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
+  rtoc_lambda_result_14 = lowering.with_fiber_capture_map(alias_overrides, {:rt_override: bg_rt}, %() USE(body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
+  rtoc_lambda_result_13 = TRY (recursiveSplitter__emit_stmts(body_stmts, release_idx, &builder, lowering, ctx));
+  rtoc_lambda_result_13
+      });
+  rtoc_lambda_result_14
+      }) AS Int64);
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < caps.length() DO
+    MUTABLE post_acquire: Int64 = 0_i64;
+          IF (((rtoc_idx + 1) < caps.length())) THEN
+            post_acquire = COPY UNWRAP (cap_indices[(rtoc_idx + 1)]);
+          ELSE
+            post_acquire = cs_entry;
+          END
+    MUTABLE prior = COPY UNWRAP (caps.substr(0, (rtoc_idx - 0)));
+    builder__fill(&builder, UNWRAP (cap_indices[rtoc_idx]), ( { MUTABLE rtoc_empty_list_15: []SegmentStmt = List[]; rtoc_empty_list_15 } ), SegmentTail{ LockSuspend: COPY LockSuspend{ with_node: with_stmt, cap: LockCap{ CapabilityTransition: COPY caps[rtoc_idx]? }, prior_caps: COPY prior, post_acquire_idx: post_acquire, next_index: COPY after_idx, lock_index: COPY UNWRAP (lock_indices[rtoc_idx]), prior_lock_indices: COPY (lock_indices.substr(0, (rtoc_idx - 0)) OR_ELSE List[]) } });
+  rtoc_idx = rtoc_idx + 1;
+      END
+      MUTABLE release_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } );
+      ({
+  MUTABLE rtoc_value_block_marker = 0;
+  MUTABLE rtoc_indexed_items_17: []{String@symbol}FsmCapMetadataValue = caps_meta;
+  MUTABLE rtoc_indexed_output_19 = [];
+  MUTABLE rtoc_indexed_i_18 = 0;
+  WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
+    &rtoc_indexed_output_19.append(Tuple{COPY rtoc_indexed_items_17[rtoc_indexed_i_18], rtoc_indexed_i_18});
+    rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
+  END
+  rtoc_indexed_output_19
+      }).reverse().keys() |> EACH {
+  MUTABLE i: Any = (({
+    MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE rtoc_indexed_items_17: []{String@symbol}FsmCapMetadataValue = caps_meta;
+    MUTABLE rtoc_indexed_output_19 = [];
+    MUTABLE rtoc_indexed_i_18 = 0;
+    WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
+      &rtoc_indexed_output_19.append(Tuple{COPY rtoc_indexed_items_17[rtoc_indexed_i_18], rtoc_indexed_i_18});
+      rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
+    END
+    rtoc_indexed_output_19
+  }).reverse()[_] OR_ELSE panic("missing hash key"));
+      ruby_array_concat_Emittable(release_stmts, TRY (recursiveSplitter__lock_release_stmts(ctx_id, UNWRAP (lock_indices[i]), CAST((UNWRAP (_[:lock_field_ref])) AS String), CAST((UNWRAP (_[:unlock_method])) AS String))));
+      };
+      builder__fill(&builder, release_idx, release_stmts, SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
+      RETURN UNWRAP (cap_indices.first());
+    ELSE
+      panic("WITH split without runtime");
+    END
+  ELSE
+    panic("WITH split without ctx");
+  END
+END
+PRIVATE FN recursiveSplitter__lock_release_stmts(ctx_id: Int64, lock_index: Int64, lock_field_ref: String, unlock_method: String) RETURNS ![]Emittable ->
+  RETURN CAST([Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${lock_index.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: COPY lock_field_ref, lowered_node_id: NIL, ownership_consumption: NIL }, method: COPY unlock_method, args: ( { MUTABLE rtoc_empty_list_21: []Any = List[]; rtoc_empty_list_21 } ), try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
+END
+PRIVATE FN recursiveSplitter__renumber_with_entry(segments: []Segment, entry: Int64) RETURNS Tuple<[]Segment, {Int64}Int64> ->
+  MUTABLE mapping = {entry: 0};
+  MUTABLE next_id = 1;
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < segments.length() DO
+    IF (rtoc_idx == entry) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    mapping[rtoc_idx] = next_id;
+    next_id = (next_id + 1);
+  rtoc_idx = rtoc_idx + 1;
+  END
+  MUTABLE remapped = (segments |> SELECT {
+  MUTABLE new_idx: ?Any = COPY mapping[_.index];
+  MUTABLE new_tail = recursiveSplitter__remap_tail(_.tail, mapping);
+  Segment{ index: COPY new_idx, stmts: COPY _.stmts, tail: COPY new_tail }
+  }) |> ORDER_BY _.index;
+  RETURN CAST(Tuple{remapped, mapping} AS Tuple<[]Segment, {Int64}Int64>);
+END
+PRIVATE FN recursiveSplitter__remap_tail(tail: SegmentTail, mapping: {Int64}Int64) RETURNS SegmentTail ->
+  IF tail IS_A Goto AS goto THEN
+    RETURN SegmentTail{ Goto: COPY Goto{ target_index: mapping[goto.target_index]? } };
+  ELSE_IF tail IS_A LoopBack AS loop_back THEN
+    RETURN SegmentTail{ LoopBack: COPY LoopBack{ target_index: mapping[loop_back.target_index]? } };
+  ELSE_IF tail IS_A CondBranch AS cond_branch THEN
+    RETURN SegmentTail{ CondBranch: COPY CondBranch{ cond_ast: cond_branch.cond_ast, then_index: mapping[cond_branch.then_index]?, else_index: mapping[cond_branch.else_index]? } };
+  ELSE_IF tail IS_A IoSuspend AS io_suspend THEN
+    RETURN ioSuspend__with_next_index(io_suspend, IF io_suspend.next_index THEN
+      mapping[io_suspend.next_index]?
+    ELSE
+      NIL
+    END);
+  ELSE_IF tail IS_A NextSuspend AS next_suspend THEN
+    RETURN nextSuspend__with_next_index(next_suspend, IF next_suspend.next_index THEN
+      mapping[next_suspend.next_index]?
+    ELSE
+      NIL
+    END);
+  ELSE_IF tail IS_A LockSuspend AS lock_suspend THEN
+    RETURN SegmentTail{ LockSuspend: COPY LockSuspend{ with_node: KEEP lock_suspend.with_node, cap: COPY lock_suspend.cap, prior_caps: COPY lock_suspend.prior_caps, post_acquire_idx: IF lock_suspend.post_acquire_idx THEN
+      mapping[lock_suspend.post_acquire_idx]?
+    ELSE
+      NIL
+    END, next_index: IF lock_suspend.next_index THEN
+      mapping[lock_suspend.next_index]?
+    ELSE
+      NIL
+    END, lock_index: lock_suspend.lock_index, prior_lock_indices: COPY lock_suspend.prior_lock_indices } };
+  ELSE
+    RETURN COPY tail;
+  END
+END
+# End Ruby module FsmTransform::RecursiveSplitter
+# End Ruby module FsmTransform
+FN castLocatableToOptionalSegmentStmt(value: Locatable) RETURNS ?SegmentStmt ->
+  PARTIAL MATCH value START
+    Locatable.MIRProgram AS cast_payload -> RETURN SegmentStmt{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN SegmentStmt{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN SegmentStmt{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN SegmentStmt{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN SegmentStmt{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN SegmentStmt{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN SegmentStmt{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN SegmentStmt{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN SegmentStmt{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN SegmentStmt{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN SegmentStmt{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN SegmentStmt{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN SegmentStmt{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN SegmentStmt{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN SegmentStmt{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN SegmentStmt{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN SegmentStmt{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN SegmentStmt{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN SegmentStmt{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN SegmentStmt{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN SegmentStmt{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN SegmentStmt{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN SegmentStmt{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN SegmentStmt{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN SegmentStmt{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN SegmentStmt{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN SegmentStmt{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN SegmentStmt{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN SegmentStmt{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN SegmentStmt{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN SegmentStmt{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN SegmentStmt{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN SegmentStmt{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN SegmentStmt{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN SegmentStmt{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN SegmentStmt{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN SegmentStmt{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN SegmentStmt{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN SegmentStmt{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN SegmentStmt{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN SegmentStmt{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN SegmentStmt{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN SegmentStmt{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN SegmentStmt{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN SegmentStmt{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN SegmentStmt{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN SegmentStmt{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN SegmentStmt{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN SegmentStmt{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN SegmentStmt{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN SegmentStmt{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN SegmentStmt{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN SegmentStmt{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN SegmentStmt{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN SegmentStmt{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN SegmentStmt{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN SegmentStmt{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN SegmentStmt{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN SegmentStmt{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN SegmentStmt{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN SegmentStmt{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN SegmentStmt{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN SegmentStmt{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN SegmentStmt{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN SegmentStmt{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN SegmentStmt{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN SegmentStmt{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN SegmentStmt{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN SegmentStmt{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN SegmentStmt{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN SegmentStmt{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN SegmentStmt{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN SegmentStmt{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN SegmentStmt{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN SegmentStmt{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN SegmentStmt{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN SegmentStmt{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN SegmentStmt{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN SegmentStmt{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN SegmentStmt{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN SegmentStmt{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN SegmentStmt{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN SegmentStmt{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN SegmentStmt{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN SegmentStmt{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN SegmentStmt{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN SegmentStmt{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN SegmentStmt{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN SegmentStmt{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN SegmentStmt{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN SegmentStmt{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN SegmentStmt{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN SegmentStmt{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN SegmentStmt{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN SegmentStmt{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN SegmentStmt{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN SegmentStmt{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN SegmentStmt{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN SegmentStmt{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN SegmentStmt{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN SegmentStmt{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN SegmentStmt{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN SegmentStmt{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN SegmentStmt{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN SegmentStmt{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN SegmentStmt{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN SegmentStmt{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN SegmentStmt{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN SegmentStmt{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN SegmentStmt{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN SegmentStmt{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN SegmentStmt{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN SegmentStmt{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN SegmentStmt{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN SegmentStmt{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN SegmentStmt{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN SegmentStmt{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN SegmentStmt{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN SegmentStmt{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN SegmentStmt{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN SegmentStmt{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN SegmentStmt{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN SegmentStmt{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN SegmentStmt{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN SegmentStmt{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN SegmentStmt{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN SegmentStmt{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN SegmentStmt{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?SegmentStmt");
+  END
+  panic("Invalid cast to ?SegmentStmt");
+END
+FN castLocatableToSegmentStmt(value: Locatable) RETURNS SegmentStmt ->
+  PARTIAL MATCH value START
+    Locatable.MIRProgram AS cast_payload -> RETURN SegmentStmt{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN SegmentStmt{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN SegmentStmt{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN SegmentStmt{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN SegmentStmt{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN SegmentStmt{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN SegmentStmt{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN SegmentStmt{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN SegmentStmt{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN SegmentStmt{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN SegmentStmt{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN SegmentStmt{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN SegmentStmt{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN SegmentStmt{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN SegmentStmt{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN SegmentStmt{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN SegmentStmt{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN SegmentStmt{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN SegmentStmt{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN SegmentStmt{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN SegmentStmt{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN SegmentStmt{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN SegmentStmt{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN SegmentStmt{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN SegmentStmt{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN SegmentStmt{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN SegmentStmt{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN SegmentStmt{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN SegmentStmt{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN SegmentStmt{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN SegmentStmt{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN SegmentStmt{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN SegmentStmt{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN SegmentStmt{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN SegmentStmt{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN SegmentStmt{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN SegmentStmt{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN SegmentStmt{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN SegmentStmt{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN SegmentStmt{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN SegmentStmt{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN SegmentStmt{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN SegmentStmt{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN SegmentStmt{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN SegmentStmt{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN SegmentStmt{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN SegmentStmt{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN SegmentStmt{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN SegmentStmt{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN SegmentStmt{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN SegmentStmt{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN SegmentStmt{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN SegmentStmt{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN SegmentStmt{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN SegmentStmt{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN SegmentStmt{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN SegmentStmt{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN SegmentStmt{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN SegmentStmt{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN SegmentStmt{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN SegmentStmt{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN SegmentStmt{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN SegmentStmt{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN SegmentStmt{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN SegmentStmt{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN SegmentStmt{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN SegmentStmt{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN SegmentStmt{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN SegmentStmt{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN SegmentStmt{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN SegmentStmt{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN SegmentStmt{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN SegmentStmt{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN SegmentStmt{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN SegmentStmt{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN SegmentStmt{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN SegmentStmt{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN SegmentStmt{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN SegmentStmt{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN SegmentStmt{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN SegmentStmt{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN SegmentStmt{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN SegmentStmt{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN SegmentStmt{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN SegmentStmt{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN SegmentStmt{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN SegmentStmt{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN SegmentStmt{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN SegmentStmt{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN SegmentStmt{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN SegmentStmt{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN SegmentStmt{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN SegmentStmt{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN SegmentStmt{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN SegmentStmt{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN SegmentStmt{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN SegmentStmt{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN SegmentStmt{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN SegmentStmt{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN SegmentStmt{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN SegmentStmt{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN SegmentStmt{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN SegmentStmt{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN SegmentStmt{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN SegmentStmt{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN SegmentStmt{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN SegmentStmt{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN SegmentStmt{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN SegmentStmt{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN SegmentStmt{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN SegmentStmt{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN SegmentStmt{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN SegmentStmt{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN SegmentStmt{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN SegmentStmt{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN SegmentStmt{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN SegmentStmt{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN SegmentStmt{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN SegmentStmt{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN SegmentStmt{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN SegmentStmt{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN SegmentStmt{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN SegmentStmt{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN SegmentStmt{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN SegmentStmt{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN SegmentStmt{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN SegmentStmt{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN SegmentStmt{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to SegmentStmt");
+  END
+  panic("Invalid cast to SegmentStmt");
+END
+FN castNodeToSegmentStmt(value: Node) RETURNS SegmentStmt ->
+  PARTIAL MATCH value START
+    Node.MIRProgram AS cast_payload -> RETURN SegmentStmt{ MIRProgram: COPY cast_payload };,
+    Node.RequireNode AS cast_payload -> RETURN SegmentStmt{ RequireNode: COPY cast_payload };,
+    Node.ProtocolRequirement AS cast_payload -> RETURN SegmentStmt{ ProtocolRequirement: COPY cast_payload };,
+    Node.ProtocolDef AS cast_payload -> RETURN SegmentStmt{ ProtocolDef: COPY cast_payload };,
+    Node.FunctionDef AS cast_payload -> RETURN SegmentStmt{ FunctionDef: COPY cast_payload };,
+    Node.ImplementationDef AS cast_payload -> RETURN SegmentStmt{ ImplementationDef: COPY cast_payload };,
+    Node.ConformanceDef AS cast_payload -> RETURN SegmentStmt{ ConformanceDef: COPY cast_payload };,
+    Node.MIRStructDef AS cast_payload -> RETURN SegmentStmt{ MIRStructDef: COPY cast_payload };,
+    Node.VarDecl AS cast_payload -> RETURN SegmentStmt{ VarDecl: COPY cast_payload };,
+    Node.Assignment AS cast_payload -> RETURN SegmentStmt{ Assignment: COPY cast_payload };,
+    Node.MIRDestructureTarget AS cast_payload -> RETURN SegmentStmt{ MIRDestructureTarget: COPY cast_payload };,
+    Node.DestructuringAssignment AS cast_payload -> RETURN SegmentStmt{ DestructuringAssignment: COPY cast_payload };,
+    Node.BindExpr AS cast_payload -> RETURN SegmentStmt{ BindExpr: COPY cast_payload };,
+    Node.BinaryOp AS cast_payload -> RETURN SegmentStmt{ BinaryOp: COPY cast_payload };,
+    Node.IsA AS cast_payload -> RETURN SegmentStmt{ IsA: COPY cast_payload };,
+    Node.MIRUnaryOp AS cast_payload -> RETURN SegmentStmt{ MIRUnaryOp: COPY cast_payload };,
+    Node.CallSiteOverride AS cast_payload -> RETURN SegmentStmt{ CallSiteOverride: COPY cast_payload };,
+    Node.Identifier AS cast_payload -> RETURN SegmentStmt{ Identifier: COPY cast_payload };,
+    Node.Literal AS cast_payload -> RETURN SegmentStmt{ Literal: COPY cast_payload };,
+    Node.ListLit AS cast_payload -> RETURN SegmentStmt{ ListLit: COPY cast_payload };,
+    Node.TupleLit AS cast_payload -> RETURN SegmentStmt{ TupleLit: COPY cast_payload };,
+    Node.DefaultArrayLit AS cast_payload -> RETURN SegmentStmt{ DefaultArrayLit: COPY cast_payload };,
+    Node.HashLit AS cast_payload -> RETURN SegmentStmt{ HashLit: COPY cast_payload };,
+    Node.DefaultLit AS cast_payload -> RETURN SegmentStmt{ DefaultLit: COPY cast_payload };,
+    Node.StructLit AS cast_payload -> RETURN SegmentStmt{ StructLit: COPY cast_payload };,
+    Node.LambdaLit AS cast_payload -> RETURN SegmentStmt{ LambdaLit: COPY cast_payload };,
+    Node.IfStatement AS cast_payload -> RETURN SegmentStmt{ IfStatement: COPY cast_payload };,
+    Node.IfBind AS cast_payload -> RETURN SegmentStmt{ IfBind: COPY cast_payload };,
+    Node.WhileLoop AS cast_payload -> RETURN SegmentStmt{ WhileLoop: COPY cast_payload };,
+    Node.WhileBindLoop AS cast_payload -> RETURN SegmentStmt{ WhileBindLoop: COPY cast_payload };,
+    Node.BreakNode AS cast_payload -> RETURN SegmentStmt{ BreakNode: COPY cast_payload };,
+    Node.ContinueNode AS cast_payload -> RETURN SegmentStmt{ ContinueNode: COPY cast_payload };,
+    Node.FuncCall AS cast_payload -> RETURN SegmentStmt{ FuncCall: COPY cast_payload };,
+    Node.MIRMethodCall AS cast_payload -> RETURN SegmentStmt{ MIRMethodCall: COPY cast_payload };,
+    Node.GetField AS cast_payload -> RETURN SegmentStmt{ GetField: COPY cast_payload };,
+    Node.GetIndex AS cast_payload -> RETURN SegmentStmt{ GetIndex: COPY cast_payload };,
+    Node.MIRCast AS cast_payload -> RETURN SegmentStmt{ MIRCast: COPY cast_payload };,
+    Node.ReturnNode AS cast_payload -> RETURN SegmentStmt{ ReturnNode: COPY cast_payload };,
+    Node.Assert AS cast_payload -> RETURN SegmentStmt{ Assert: COPY cast_payload };,
+    Node.Raise AS cast_payload -> RETURN SegmentStmt{ Raise: COPY cast_payload };,
+    Node.ThrowNode AS cast_payload -> RETURN SegmentStmt{ ThrowNode: COPY cast_payload };,
+    Node.DieNode AS cast_payload -> RETURN SegmentStmt{ DieNode: COPY cast_payload };,
+    Node.Slice AS cast_payload -> RETURN SegmentStmt{ Slice: COPY cast_payload };,
+    Node.Require AS cast_payload -> RETURN SegmentStmt{ Require: COPY cast_payload };,
+    Node.MIRDeferStmt AS cast_payload -> RETURN SegmentStmt{ MIRDeferStmt: COPY cast_payload };,
+    Node.WithBlock AS cast_payload -> RETURN SegmentStmt{ WithBlock: COPY cast_payload };,
+    Node.SyncPolicyDecl AS cast_payload -> RETURN SegmentStmt{ SyncPolicyDecl: COPY cast_payload };,
+    Node.SelectOp AS cast_payload -> RETURN SegmentStmt{ SelectOp: COPY cast_payload };,
+    Node.WhereOp AS cast_payload -> RETURN SegmentStmt{ WhereOp: COPY cast_payload };,
+    Node.IndexOp AS cast_payload -> RETURN SegmentStmt{ IndexOp: COPY cast_payload };,
+    Node.ReduceOp AS cast_payload -> RETURN SegmentStmt{ ReduceOp: COPY cast_payload };,
+    Node.OrderByOp AS cast_payload -> RETURN SegmentStmt{ OrderByOp: COPY cast_payload };,
+    Node.LimitOp AS cast_payload -> RETURN SegmentStmt{ LimitOp: COPY cast_payload };,
+    Node.UnnestOp AS cast_payload -> RETURN SegmentStmt{ UnnestOp: COPY cast_payload };,
+    Node.DistinctOp AS cast_payload -> RETURN SegmentStmt{ DistinctOp: COPY cast_payload };,
+    Node.EachOp AS cast_payload -> RETURN SegmentStmt{ EachOp: COPY cast_payload };,
+    Node.TapOp AS cast_payload -> RETURN SegmentStmt{ TapOp: COPY cast_payload };,
+    Node.SkipOp AS cast_payload -> RETURN SegmentStmt{ SkipOp: COPY cast_payload };,
+    Node.CollectOp AS cast_payload -> RETURN SegmentStmt{ CollectOp: COPY cast_payload };,
+    Node.TakeWhileOp AS cast_payload -> RETURN SegmentStmt{ TakeWhileOp: COPY cast_payload };,
+    Node.WindowOp AS cast_payload -> RETURN SegmentStmt{ WindowOp: COPY cast_payload };,
+    Node.BatchWindowOp AS cast_payload -> RETURN SegmentStmt{ BatchWindowOp: COPY cast_payload };,
+    Node.JoinOp AS cast_payload -> RETURN SegmentStmt{ JoinOp: COPY cast_payload };,
+    Node.FindOp AS cast_payload -> RETURN SegmentStmt{ FindOp: COPY cast_payload };,
+    Node.AnyOp AS cast_payload -> RETURN SegmentStmt{ AnyOp: COPY cast_payload };,
+    Node.AllOp AS cast_payload -> RETURN SegmentStmt{ AllOp: COPY cast_payload };,
+    Node.CountOp AS cast_payload -> RETURN SegmentStmt{ CountOp: COPY cast_payload };,
+    Node.SumOp AS cast_payload -> RETURN SegmentStmt{ SumOp: COPY cast_payload };,
+    Node.AverageOp AS cast_payload -> RETURN SegmentStmt{ AverageOp: COPY cast_payload };,
+    Node.MinOp AS cast_payload -> RETURN SegmentStmt{ MinOp: COPY cast_payload };,
+    Node.MaxOp AS cast_payload -> RETURN SegmentStmt{ MaxOp: COPY cast_payload };,
+    Node.ShardOp AS cast_payload -> RETURN SegmentStmt{ ShardOp: COPY cast_payload };,
+    Node.ConcurrentOp AS cast_payload -> RETURN SegmentStmt{ ConcurrentOp: COPY cast_payload };,
+    Node.Placeholder AS cast_payload -> RETURN SegmentStmt{ Placeholder: COPY cast_payload };,
+    Node.Copy AS cast_payload -> RETURN SegmentStmt{ Copy: COPY cast_payload };,
+    Node.MIROptionalUnwrap AS cast_payload -> RETURN SegmentStmt{ MIROptionalUnwrap: COPY cast_payload };,
+    Node.TenseNavigation AS cast_payload -> RETURN SegmentStmt{ TenseNavigation: COPY cast_payload };,
+    Node.MutableBorrow AS cast_payload -> RETURN SegmentStmt{ MutableBorrow: COPY cast_payload };,
+    Node.OrElseRaise AS cast_payload -> RETURN SegmentStmt{ OrElseRaise: COPY cast_payload };,
+    Node.OrElseExit AS cast_payload -> RETURN SegmentStmt{ OrElseExit: COPY cast_payload };,
+    Node.OrElsePass AS cast_payload -> RETURN SegmentStmt{ OrElsePass: COPY cast_payload };,
+    Node.OrElsePrune AS cast_payload -> RETURN SegmentStmt{ OrElsePrune: COPY cast_payload };,
+    Node.OrElseBreak AS cast_payload -> RETURN SegmentStmt{ OrElseBreak: COPY cast_payload };,
+    Node.CatchBlock AS cast_payload -> RETURN SegmentStmt{ CatchBlock: COPY cast_payload };,
+    Node.RecoverOp AS cast_payload -> RETURN SegmentStmt{ RecoverOp: COPY cast_payload };,
+    Node.MIRBlockExpr AS cast_payload -> RETURN SegmentStmt{ MIRBlockExpr: COPY cast_payload };,
+    Node.StringConcat AS cast_payload -> RETURN SegmentStmt{ StringConcat: COPY cast_payload };,
+    Node.CapabilityWrap AS cast_payload -> RETURN SegmentStmt{ CapabilityWrap: COPY cast_payload };,
+    Node.MoveNode AS cast_payload -> RETURN SegmentStmt{ MoveNode: COPY cast_payload };,
+    Node.CopyNode AS cast_payload -> RETURN SegmentStmt{ CopyNode: COPY cast_payload };,
+    Node.KeepNode AS cast_payload -> RETURN SegmentStmt{ KeepNode: COPY cast_payload };,
+    Node.ShareNode AS cast_payload -> RETURN SegmentStmt{ ShareNode: COPY cast_payload };,
+    Node.LinkNode AS cast_payload -> RETURN SegmentStmt{ LinkNode: COPY cast_payload };,
+    Node.ResolveNode AS cast_payload -> RETURN SegmentStmt{ ResolveNode: COPY cast_payload };,
+    Node.FreezeNode AS cast_payload -> RETURN SegmentStmt{ FreezeNode: COPY cast_payload };,
+    Node.PassStmt AS cast_payload -> RETURN SegmentStmt{ PassStmt: COPY cast_payload };,
+    Node.StructPattern AS cast_payload -> RETURN SegmentStmt{ StructPattern: COPY cast_payload };,
+    Node.MIRRangeLit AS cast_payload -> RETURN SegmentStmt{ MIRRangeLit: COPY cast_payload };,
+    Node.ExternFnDecl AS cast_payload -> RETURN SegmentStmt{ ExternFnDecl: COPY cast_payload };,
+    Node.ExternStructDecl AS cast_payload -> RETURN SegmentStmt{ ExternStructDecl: COPY cast_payload };,
+    Node.MIREnumDef AS cast_payload -> RETURN SegmentStmt{ MIREnumDef: COPY cast_payload };,
+    Node.UnionDef AS cast_payload -> RETURN SegmentStmt{ UnionDef: COPY cast_payload };,
+    Node.UnionVariantLit AS cast_payload -> RETURN SegmentStmt{ UnionVariantLit: COPY cast_payload };,
+    Node.StaticCall AS cast_payload -> RETURN SegmentStmt{ StaticCall: COPY cast_payload };,
+    Node.MIRDoBlock AS cast_payload -> RETURN SegmentStmt{ MIRDoBlock: COPY cast_payload };,
+    Node.MIRBgBlock AS cast_payload -> RETURN SegmentStmt{ MIRBgBlock: COPY cast_payload };,
+    Node.ThenChain AS cast_payload -> RETURN SegmentStmt{ ThenChain: COPY cast_payload };,
+    Node.BgStreamBlock AS cast_payload -> RETURN SegmentStmt{ BgStreamBlock: COPY cast_payload };,
+    Node.YieldExpr AS cast_payload -> RETURN SegmentStmt{ YieldExpr: COPY cast_payload };,
+    Node.CloseStream AS cast_payload -> RETURN SegmentStmt{ CloseStream: COPY cast_payload };,
+    Node.NextExpr AS cast_payload -> RETURN SegmentStmt{ NextExpr: COPY cast_payload };,
+    Node.MatchStatement AS cast_payload -> RETURN SegmentStmt{ MatchStatement: COPY cast_payload };,
+    Node.ForRange AS cast_payload -> RETURN SegmentStmt{ ForRange: COPY cast_payload };,
+    Node.ForEach AS cast_payload -> RETURN SegmentStmt{ ForEach: COPY cast_payload };,
+    Node.TestBlock AS cast_payload -> RETURN SegmentStmt{ TestBlock: COPY cast_payload };,
+    Node.WhenBlock AS cast_payload -> RETURN SegmentStmt{ WhenBlock: COPY cast_payload };,
+    Node.LetBinding AS cast_payload -> RETURN SegmentStmt{ LetBinding: COPY cast_payload };,
+    Node.TestThat AS cast_payload -> RETURN SegmentStmt{ TestThat: COPY cast_payload };,
+    Node.AssertRaises AS cast_payload -> RETURN SegmentStmt{ AssertRaises: COPY cast_payload };,
+    Node.BenchmarkStmt AS cast_payload -> RETURN SegmentStmt{ BenchmarkStmt: COPY cast_payload };,
+    Node.SmashStmt AS cast_payload -> RETURN SegmentStmt{ SmashStmt: COPY cast_payload };,
+    Node.ProfileStmt AS cast_payload -> RETURN SegmentStmt{ ProfileStmt: COPY cast_payload };,
+    Node.StubDecl AS cast_payload -> RETURN SegmentStmt{ StubDecl: COPY cast_payload };,
+    Node.Drop AS cast_payload -> RETURN SegmentStmt{ Drop: COPY cast_payload };,
+    Node.SuppressCleanup AS cast_payload -> RETURN SegmentStmt{ SuppressCleanup: COPY cast_payload };,
+    Node.Return AS cast_payload -> RETURN SegmentStmt{ Return: COPY cast_payload };,
+    Node.ReassignCleanup AS cast_payload -> RETURN SegmentStmt{ ReassignCleanup: COPY cast_payload };,
+    Node.FieldCleanup AS cast_payload -> RETURN SegmentStmt{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to SegmentStmt");
+  END
+  panic("Invalid cast to SegmentStmt");
+END
+FN castOptionalSegmentStmtToLocatable(value: ?SegmentStmt) RETURNS Locatable ->
+  IF value == NIL THEN
+    panic("Invalid cast to Locatable");
+  END
+  PARTIAL MATCH value? START
+    SegmentStmt.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    SegmentStmt.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    SegmentStmt.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    SegmentStmt.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    SegmentStmt.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    SegmentStmt.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    SegmentStmt.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    SegmentStmt.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    SegmentStmt.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    SegmentStmt.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    SegmentStmt.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    SegmentStmt.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    SegmentStmt.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    SegmentStmt.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    SegmentStmt.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    SegmentStmt.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    SegmentStmt.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    SegmentStmt.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    SegmentStmt.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    SegmentStmt.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    SegmentStmt.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    SegmentStmt.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    SegmentStmt.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    SegmentStmt.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    SegmentStmt.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    SegmentStmt.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    SegmentStmt.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    SegmentStmt.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    SegmentStmt.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    SegmentStmt.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    SegmentStmt.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    SegmentStmt.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    SegmentStmt.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    SegmentStmt.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    SegmentStmt.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    SegmentStmt.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    SegmentStmt.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    SegmentStmt.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    SegmentStmt.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    SegmentStmt.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    SegmentStmt.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    SegmentStmt.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    SegmentStmt.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    SegmentStmt.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    SegmentStmt.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    SegmentStmt.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    SegmentStmt.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    SegmentStmt.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    SegmentStmt.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    SegmentStmt.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    SegmentStmt.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    SegmentStmt.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    SegmentStmt.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    SegmentStmt.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    SegmentStmt.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    SegmentStmt.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    SegmentStmt.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    SegmentStmt.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    SegmentStmt.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    SegmentStmt.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    SegmentStmt.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    SegmentStmt.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    SegmentStmt.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    SegmentStmt.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    SegmentStmt.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    SegmentStmt.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    SegmentStmt.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    SegmentStmt.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    SegmentStmt.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    SegmentStmt.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    SegmentStmt.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    SegmentStmt.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    SegmentStmt.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    SegmentStmt.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    SegmentStmt.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    SegmentStmt.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    SegmentStmt.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    SegmentStmt.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    SegmentStmt.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    SegmentStmt.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    SegmentStmt.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    SegmentStmt.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    SegmentStmt.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    SegmentStmt.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    SegmentStmt.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    SegmentStmt.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    SegmentStmt.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    SegmentStmt.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    SegmentStmt.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    SegmentStmt.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    SegmentStmt.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    SegmentStmt.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    SegmentStmt.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    SegmentStmt.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    SegmentStmt.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    SegmentStmt.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    SegmentStmt.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    SegmentStmt.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    SegmentStmt.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    SegmentStmt.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    SegmentStmt.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    SegmentStmt.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    SegmentStmt.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    SegmentStmt.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    SegmentStmt.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    SegmentStmt.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    SegmentStmt.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    SegmentStmt.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    SegmentStmt.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    SegmentStmt.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    SegmentStmt.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    SegmentStmt.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    SegmentStmt.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    SegmentStmt.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    SegmentStmt.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    SegmentStmt.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    SegmentStmt.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    SegmentStmt.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    SegmentStmt.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    SegmentStmt.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    SegmentStmt.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    SegmentStmt.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    SegmentStmt.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    SegmentStmt.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    SegmentStmt.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    SegmentStmt.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    SegmentStmt.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    SegmentStmt.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castSegmentStmtToLocatable(value: SegmentStmt) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    SegmentStmt.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    SegmentStmt.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    SegmentStmt.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    SegmentStmt.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    SegmentStmt.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    SegmentStmt.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    SegmentStmt.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    SegmentStmt.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    SegmentStmt.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    SegmentStmt.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    SegmentStmt.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    SegmentStmt.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    SegmentStmt.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    SegmentStmt.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    SegmentStmt.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    SegmentStmt.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    SegmentStmt.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    SegmentStmt.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    SegmentStmt.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    SegmentStmt.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    SegmentStmt.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    SegmentStmt.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    SegmentStmt.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    SegmentStmt.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    SegmentStmt.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    SegmentStmt.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    SegmentStmt.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    SegmentStmt.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    SegmentStmt.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    SegmentStmt.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    SegmentStmt.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    SegmentStmt.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    SegmentStmt.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    SegmentStmt.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    SegmentStmt.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    SegmentStmt.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    SegmentStmt.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    SegmentStmt.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    SegmentStmt.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    SegmentStmt.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    SegmentStmt.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    SegmentStmt.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    SegmentStmt.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    SegmentStmt.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    SegmentStmt.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    SegmentStmt.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    SegmentStmt.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    SegmentStmt.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    SegmentStmt.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    SegmentStmt.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    SegmentStmt.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    SegmentStmt.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    SegmentStmt.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    SegmentStmt.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    SegmentStmt.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    SegmentStmt.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    SegmentStmt.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    SegmentStmt.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    SegmentStmt.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    SegmentStmt.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    SegmentStmt.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    SegmentStmt.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    SegmentStmt.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    SegmentStmt.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    SegmentStmt.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    SegmentStmt.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    SegmentStmt.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    SegmentStmt.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    SegmentStmt.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    SegmentStmt.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    SegmentStmt.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    SegmentStmt.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    SegmentStmt.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    SegmentStmt.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    SegmentStmt.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    SegmentStmt.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    SegmentStmt.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    SegmentStmt.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    SegmentStmt.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    SegmentStmt.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    SegmentStmt.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    SegmentStmt.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    SegmentStmt.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    SegmentStmt.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    SegmentStmt.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    SegmentStmt.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    SegmentStmt.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    SegmentStmt.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    SegmentStmt.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    SegmentStmt.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    SegmentStmt.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    SegmentStmt.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    SegmentStmt.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    SegmentStmt.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    SegmentStmt.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    SegmentStmt.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    SegmentStmt.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    SegmentStmt.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    SegmentStmt.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    SegmentStmt.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    SegmentStmt.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    SegmentStmt.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    SegmentStmt.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    SegmentStmt.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    SegmentStmt.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    SegmentStmt.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    SegmentStmt.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    SegmentStmt.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    SegmentStmt.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    SegmentStmt.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    SegmentStmt.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    SegmentStmt.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    SegmentStmt.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    SegmentStmt.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    SegmentStmt.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    SegmentStmt.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    SegmentStmt.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    SegmentStmt.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    SegmentStmt.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    SegmentStmt.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    SegmentStmt.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    SegmentStmt.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    SegmentStmt.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    SegmentStmt.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    SegmentStmt.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    SegmentStmt.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    SegmentStmt.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    SegmentStmt.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castSuspendTailToOptionalSegmentTail(value: SuspendTail) RETURNS ?SegmentTail ->
+  PARTIAL MATCH value START
+    SuspendTail.IoSuspend AS cast_payload -> RETURN SegmentTail{ IoSuspend: COPY cast_payload };,
+    SuspendTail.NextSuspend AS cast_payload -> RETURN SegmentTail{ NextSuspend: COPY cast_payload };,
+    SuspendTail.LockSuspend AS cast_payload -> RETURN SegmentTail{ LockSuspend: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?SegmentTail");
+  END
+  panic("Invalid cast to ?SegmentTail");
+END
+FN castTransformValueToHashMapStringTypeMultiowned(value: TransformValue) RETURNS {String}Type@multiowned ->
+  IF value IS_A {String}Type@multiowned AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN {};
+END
+FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+  MUTABLE result: []Emittable = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END
+FN ruby_union_scalar_equal_SegmentSlot_String_symbol(value: SegmentSlot, expected: String@symbol) RETURNS Bool ->
+  IF value IS_A String@symbol AS equality_payload THEN
+    RETURN equality_payload == expected;
+  END
+  FALSE;
+END

@@ -1,0 +1,914 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
+PUB UNION Field { SymbolValue: String@symbol, StringValue: String }
+PUB UNION PipelineSoaFieldSetItem { SymbolValue: String@symbol, StringValue: String }
+PUB STRUCT PipelineContextState {
+  placeholder_name: ?String,
+  acc_placeholder: ?String,
+  join_param_map: ?{String}String,
+  named_bindings: {String}String,
+  soa_each_mode: Bool,
+  soa_rewrite_active: Bool,
+  soa_needed_fields: [Set]PipelineSoaFieldSetItem
+}
+
+PUB FN pipelineContextState__empty() RETURNS PipelineContextState ->
+  RETURN PipelineContextState{ placeholder_name: NIL, acc_placeholder: NIL, join_param_map: NIL, named_bindings: {}, soa_each_mode: FALSE, soa_rewrite_active: FALSE, soa_needed_fields: COPY Set[] };
+END
+PUB FN pipelineContextState__with_pipeline_values(self: PipelineContextState, placeholder: ?String, acc: ?String) RETURNS PipelineContextState ->
+  RETURN PipelineContextState{ placeholder_name: COPY placeholder, acc_placeholder: COPY acc, join_param_map: COPY self.join_param_map, named_bindings: COPY self.named_bindings, soa_each_mode: self.soa_each_mode, soa_rewrite_active: self.soa_rewrite_active, soa_needed_fields: COPY self.soa_needed_fields };
+END
+PUB FN pipelineContextState__with_named_binding(self: PipelineContextState, clear_name: String, zig_var: String) RETURNS PipelineContextState ->
+  RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY self.join_param_map, named_bindings: COPY {clear_name: zig_var}.keys() |> REDUCE(COPY self.named_bindings) { acc[_] = COPY ({clear_name: zig_var}[_] OR_ELSE panic("missing hash key")); acc }, soa_each_mode: self.soa_each_mode, soa_rewrite_active: self.soa_rewrite_active, soa_needed_fields: COPY self.soa_needed_fields };
+END
+PUB FN pipelineContextState__with_join_params(self: PipelineContextState, join_params: ?{String}String) RETURNS PipelineContextState ->
+  RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY join_params, named_bindings: COPY self.named_bindings, soa_each_mode: self.soa_each_mode, soa_rewrite_active: self.soa_rewrite_active, soa_needed_fields: COPY self.soa_needed_fields };
+END
+PUB FN pipelineContextState__with_soa_rewrite(self: PipelineContextState, each_mode: Bool, fields: [Set]PipelineSoaFieldSetItem) RETURNS PipelineContextState ->
+  RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY self.join_param_map, named_bindings: COPY self.named_bindings, soa_each_mode: COPY each_mode, soa_rewrite_active: TRUE, soa_needed_fields: COPY fields };
+END
+PUB FN pipelineContextState__active?(self: PipelineContextState) RETURNS Bool ->
+  IF !((self.placeholder_name == NIL)) THEN
+    RETURN TRUE;
+  END
+  IF !((self.acc_placeholder == NIL)) THEN
+    RETURN TRUE;
+  END
+  IF !((self.join_param_map == NIL)) THEN
+    RETURN TRUE;
+  END
+  IF self.soa_each_mode THEN
+    RETURN TRUE;
+  END
+  IF self.soa_rewrite_active THEN
+    RETURN TRUE;
+  END
+  RETURN !((self.named_bindings.count() == 0));
+END
+PUB FN pipelineContextState__replacement_for_identifier(self: PipelineContextState, name: String) RETURNS ?String ->
+  IF ((name == "_") AND (self.placeholder_name != NIL)) THEN
+    RETURN COPY (self.placeholder_name)?;
+  END
+  IF ((name == "acc") AND (self.acc_placeholder != NIL)) THEN
+    RETURN COPY (self.acc_placeholder)?;
+  END
+  MUTABLE map: ?{String}String = COPY self.join_param_map;
+  IF map EXISTS AS map_value THEN
+    MUTABLE joined: ?String = COPY map_value[name];
+    IF joined EXISTS AS joined_value THEN
+      RETURN COPY joined_value;
+    END
+  END
+  RETURN COPY self.named_bindings[name];
+END
+PUB FN pipelineContextState__soa_each_field_node?(self: PipelineContextState, node: Locatable) RETURNS Bool ->
+  IF !(self.soa_each_mode) THEN
+    RETURN FALSE;
+  END
+  RETURN PARTIAL MATCH node START
+    Locatable.GetField AS get_field -> pipelineContextState__placeholder_identifier?(self, get_field.target),
+    DEFAULT -> FALSE
+  END;
+END
+PUB FN pipelineContextState__soa_rewrite_field_node?(self: PipelineContextState, node: GetField) RETURNS Bool ->
+  RETURN (self.soa_rewrite_active AND pipelineContextState__placeholder_identifier?(self, node.target));
+END
+PUB FN pipelineContextState__placeholder_identifier?(self: PipelineContextState, node: Locatable) RETURNS Bool ->
+  RETURN PARTIAL MATCH node START
+    Locatable.Identifier AS identifier -> (identifier__name(identifier) == "_"),
+    DEFAULT -> FALSE
+  END;
+END
+PUB FN pipelineContextState__record_soa_field(MUTABLE self: PipelineContextState, field: Field) RETURNS Void ->
+  &self.soa_needed_fields.insert(castFieldToPipelineSoaFieldSetItem(COPY field));
+END
+PUB STRUCT PipelinePlaceholderRewriter {
+  context: PipelineContextState
+}
+
+PUB FN pipelinePlaceholderRewriter__initialize(MUTABLE self: PipelinePlaceholderRewriter, context: PipelineContextState) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.context = COPY context;
+}
+END
+PUB FN pipelinePlaceholderRewriter__substitute(MUTABLE self: PipelinePlaceholderRewriter, MUTABLE node: Locatable) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF !(pipelineContextState__active?(rtoc_self_view.context)) THEN
+      RETURN COPY node;
+    END
+    IF pipelinePlaceholderRewriter__soa_each_field?(rtoc_self_view, node) THEN
+      RETURN Locatable{ Identifier: COPY pipelinePlaceholderRewriter__soa_each_field(&rtoc_self_view, castLocatableToGetField(node)) };
+    END
+    IF node IS_A Identifier AS identifier THEN
+      RETURN pipelinePlaceholderRewriter__substitute_identifier(rtoc_self_view, identifier);
+    ELSE_IF node IS_A FuncCall AS func_call THEN
+      MUTABLE func_call_mutable = COPY func_call;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_func_call(&rtoc_self_view, func_call_mutable));
+    ELSE_IF (node IS_A MethodCall) THEN
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_method_call(&rtoc_self_view, node));
+    ELSE_IF node IS_A BinaryOp AS binary_op THEN
+      MUTABLE binary_op_mutable = COPY binary_op;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_binary_op(&rtoc_self_view, binary_op_mutable));
+    ELSE_IF node IS_A GetField AS get_field THEN
+      MUTABLE get_field_mutable = COPY get_field;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_get_field(&rtoc_self_view, get_field_mutable));
+    ELSE_IF node IS_A GetIndex AS get_index THEN
+      MUTABLE get_index_mutable = COPY get_index;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_get_index(&rtoc_self_view, get_index_mutable));
+    ELSE_IF node IS_A VarDecl AS var_decl THEN
+      MUTABLE var_decl_mutable = COPY var_decl;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_var_decl(&rtoc_self_view, &var_decl_mutable));
+    ELSE_IF node IS_A BindExpr AS bind_expr THEN
+      MUTABLE bind_expr_mutable = COPY bind_expr;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_bind_expr(&rtoc_self_view, bind_expr_mutable));
+    ELSE_IF node IS_A Assignment AS assignment THEN
+      MUTABLE assignment_mutable = COPY assignment;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_assignment(&rtoc_self_view, assignment_mutable));
+    ELSE_IF (node IS_A UnaryOp) THEN
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_unary_op(&rtoc_self_view, node));
+    ELSE_IF (node IS_A OptionalUnwrap) THEN
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_optional_unwrap(&rtoc_self_view, node));
+    ELSE_IF node IS_A IsA AS is_a THEN
+      MUTABLE is_a_mutable = COPY is_a;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_is_a(&rtoc_self_view, &is_a_mutable));
+    ELSE_IF node IS_A CopyNode AS copy_node THEN
+      MUTABLE copy_node_mutable = COPY copy_node;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_value_wrapper(&rtoc_self_view, Node{ CopyNode: COPY copy_node_mutable }));
+    ELSE_IF node IS_A MoveNode AS move_node THEN
+      MUTABLE move_node_mutable = COPY move_node;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_value_wrapper(&rtoc_self_view, Node{ MoveNode: COPY move_node_mutable }));
+    ELSE_IF node IS_A KeepNode AS keep_node THEN
+      MUTABLE keep_node_mutable = COPY keep_node;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_value_wrapper(&rtoc_self_view, Node{ KeepNode: COPY keep_node_mutable }));
+    ELSE_IF node IS_A ShareNode AS share_node THEN
+      MUTABLE share_node_mutable = COPY share_node;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_value_wrapper(&rtoc_self_view, Node{ ShareNode: COPY share_node_mutable }));
+    ELSE_IF node IS_A WithBlock AS with_block THEN
+      MUTABLE with_block_mutable = COPY with_block;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_with_block(&rtoc_self_view, with_block_mutable));
+    ELSE_IF node IS_A StructLit AS struct_lit THEN
+      MUTABLE struct_lit_mutable = COPY struct_lit;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_struct_lit(&rtoc_self_view, struct_lit_mutable));
+    ELSE_IF node IS_A HashLit AS hash_lit THEN
+      MUTABLE hash_lit_mutable = COPY hash_lit;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_hash_lit(&rtoc_self_view, hash_lit_mutable));
+    ELSE_IF node IS_A ListLit AS list_lit THEN
+      MUTABLE list_lit_mutable = COPY list_lit;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_list_lit(&rtoc_self_view, list_lit_mutable));
+    ELSE_IF node IS_A TupleLit AS tuple_lit THEN
+      MUTABLE tuple_lit_mutable = COPY tuple_lit;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_tuple_lit(&rtoc_self_view, tuple_lit_mutable));
+    ELSE_IF (node IS_A Cast) THEN
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_cast(&rtoc_self_view, node));
+    ELSE_IF (node IS_A BlockExpr) THEN
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_block_expr(&rtoc_self_view, node));
+    ELSE_IF node IS_A Assert AS assert THEN
+      MUTABLE assert_mutable = COPY assert;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_assert(&rtoc_self_view, assert_mutable));
+    ELSE_IF node IS_A IfStatement AS if_statement THEN
+      MUTABLE if_statement_mutable = COPY if_statement;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_if_statement(&rtoc_self_view, if_statement_mutable));
+    ELSE
+      RETURN COPY node;
+    END
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__soa_each_field?(self: PipelinePlaceholderRewriter, node: Locatable) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN pipelineContextState__soa_each_field_node?(rtoc_self_view.context, node);
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__soa_each_field(MUTABLE self: PipelinePlaceholderRewriter, node: GetField) RETURNS Identifier
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    pipelineContextState__record_soa_field(&rtoc_self_view.context, node.field);
+    MUTABLE new_id = Identifier{ token: COPY node.token, name: "__soa_${node.field}[__soa_i]", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ GetField: COPY node }, PipelineRewriteNode{ Identifier: COPY new_id });
+    RETURN new_id;
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_identifier(self: PipelinePlaceholderRewriter, node: Identifier) RETURNS Locatable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE replacement: ?String = pipelineContextState__replacement_for_identifier(rtoc_self_view.context, node.name);
+    IF replacement EXISTS AS replacement_value THEN
+      MUTABLE replacement_value_mutable = COPY replacement_value;
+      MUTABLE new_id = Identifier{ token: COPY node.token, name: COPY replacement_value_mutable, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
+      pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ Identifier: COPY node }, PipelineRewriteNode{ Identifier: COPY new_id });
+      RETURN Locatable{ Identifier: COPY new_id };
+    ELSE
+      RETURN COPY Locatable{ Identifier: COPY node };
+    END
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_func_call(MUTABLE self: PipelinePlaceholderRewriter, node: FuncCall) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_args = node.args |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
+    IF (new_args == node.args) THEN
+      RETURN COPY Locatable{ FuncCall: COPY node };
+    END
+    MUTABLE new_call = FuncCall{ token: COPY node.token, name: node.name, args: COPY new_args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ FuncCall: COPY node }, PipelineRewriteNode{ FuncCall: COPY new_call });
+    pipelinePlaceholderRewriter__copy_call_metadata(rtoc_self_view, PipelineRewriteNode{ FuncCall: COPY node }, PipelineRewriteNode{ FuncCall: COPY new_call });
+    RETURN Locatable{ FuncCall: COPY new_call };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_method_call(MUTABLE self: PipelinePlaceholderRewriter, node: MethodCall) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.object));
+    MUTABLE new_args = node.args |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
+    IF ((new_target == node.object) AND (new_args == node.args)) THEN
+      RETURN COPY node;
+    END
+    MUTABLE new_mc = MethodCall{ token: COPY node.token, object: COPY new_target, name: COPY node.name, args: COPY new_args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, node, &new_mc);
+    pipelinePlaceholderRewriter__copy_call_metadata(rtoc_self_view, node, &new_mc);
+    RETURN new_mc;
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_binary_op(MUTABLE self: PipelinePlaceholderRewriter, node: BinaryOp) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.left));
+    MUTABLE new_right = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.right));
+    IF ((new_left == node.left) AND (new_right == node.right)) THEN
+      RETURN COPY Locatable{ BinaryOp: COPY node };
+    END
+    MUTABLE new_bin = BinaryOp{ token: COPY node.token, left: COPY new_left, op: COPY node.op, right: COPY new_right, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ BinaryOp: COPY node }, PipelineRewriteNode{ BinaryOp: COPY new_bin });
+    IF (node.string_concat == TRUE) THEN
+      new_bin.string_concat = TRUE;
+    END
+    RETURN Locatable{ BinaryOp: COPY new_bin };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_get_field(MUTABLE self: PipelinePlaceholderRewriter, node: GetField) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF pipelineContextState__soa_rewrite_field_node?(rtoc_self_view.context, node) THEN
+      pipelineContextState__record_soa_field(&rtoc_self_view.context, node.field);
+      MUTABLE soa_field = Identifier{ token: COPY node.token, name: "__soa_${node.field}", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
+      soa_field.type_object = CAST(TRY (pipelinePlaceholderRewriter__soa_field_slice_type(rtoc_self_view, node)) AS ?Type);
+      MUTABLE soa_idx = Identifier{ token: COPY node.token, name: "__soa_i", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
+      soa_idx.type_object = TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 }));
+      MUTABLE new_gi = GetIndex{ token: COPY node.token, target: Locatable{ Identifier: COPY soa_field }, index: Locatable{ Identifier: COPY soa_idx }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, safe_nav_chain: NIL, protocol_operation: NIL };
+      pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ GetField: COPY node }, PipelineRewriteNode{ GetIndex: COPY new_gi });
+      RETURN Locatable{ GetIndex: COPY new_gi };
+    END
+    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.target));
+    IF (new_target == node.target) THEN
+      RETURN COPY Locatable{ GetField: COPY node };
+    END
+    MUTABLE new_gf = GetField{ token: COPY node.token, target: COPY new_target, field: node.field, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, is_assignment_lhs: NIL, indirect_field: NIL, safe_nav_chain: NIL, tuple_position: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ GetField: COPY node }, PipelineRewriteNode{ GetField: COPY new_gf });
+    RETURN Locatable{ GetField: COPY new_gf };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_get_index(MUTABLE self: PipelinePlaceholderRewriter, node: GetIndex) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.target));
+    MUTABLE new_index = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.index));
+    IF ((new_target == node.target) AND (new_index == node.index)) THEN
+      RETURN COPY Locatable{ GetIndex: COPY node };
+    END
+    MUTABLE new_ia = GetIndex{ token: COPY node.token, target: COPY new_target, index: COPY new_index, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, safe_nav_chain: NIL, protocol_operation: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ GetIndex: COPY node }, PipelineRewriteNode{ GetIndex: COPY new_ia });
+    RETURN Locatable{ GetIndex: COPY new_ia };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_is_a(MUTABLE self: PipelinePlaceholderRewriter, MUTABLE node: IsA) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.left));
+    IF !(new_left.equal?(node.left)) THEN
+      node.left = new_left;
+    END
+    RETURN COPY Locatable{ IsA: COPY node };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_optional_unwrap(MUTABLE self: PipelinePlaceholderRewriter, node: OptionalUnwrap) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.target));
+    IF new_target.equal?(node.target) THEN
+      RETURN COPY node;
+    END
+    MUTABLE new_unwrap = OptionalUnwrap{ token: COPY node.token, target: COPY new_target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, error_union_type: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, node, &new_unwrap);
+    RETURN new_unwrap;
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_var_decl(MUTABLE self: PipelinePlaceholderRewriter, MUTABLE node: VarDecl) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.value));
+    IF !(new_value.equal?(node.value)) THEN
+      node.value = new_value;
+    END
+    RETURN COPY Locatable{ VarDecl: COPY node };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_bind_expr(MUTABLE self: PipelinePlaceholderRewriter, node: BindExpr) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, node.name));
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.value));
+    IF ((new_name == node.name) AND (new_value == node.value)) THEN
+      RETURN COPY Locatable{ BindExpr: COPY node };
+    END
+    MUTABLE new_bind = BindExpr{ token: COPY node.token, name: new_name, type: COPY node.type, value: new_value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL };
+    new_bind.mode = node.mode;
+    new_bind.reassign_cleanup = node.reassign_cleanup;
+    IF (TRUE AND TRUE) THEN
+      new_bind.symbol = COPY node.symbol;
+    END
+    IF (TRUE AND TRUE) THEN
+      new_bind.mir_binding_entry = node.mir_binding_entry;
+    END
+    IF (TRUE AND TRUE) THEN
+      new_bind.compound_op = node.compound_op;
+    END
+    IF (TRUE AND TRUE) THEN
+      new_bind.auto_atomic_op = node.auto_atomic_op;
+    END
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ BindExpr: COPY node }, PipelineRewriteNode{ BindExpr: COPY new_bind });
+    RETURN Locatable{ BindExpr: COPY new_bind };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_assignment(MUTABLE self: PipelinePlaceholderRewriter, node: Assignment) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, node.name));
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.value));
+    IF ((new_name == node.name) AND (new_value == node.value)) THEN
+      RETURN COPY Locatable{ Assignment: COPY node };
+    END
+    MUTABLE new_assign = Assignment{ token: COPY node.token, name: COPY new_name, value: COPY new_value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
+    new_assign.auto_lock = node.auto_lock;
+    new_assign.field_pre_cleanup = node.field_pre_cleanup;
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ Assignment: COPY node }, PipelineRewriteNode{ Assignment: COPY new_assign });
+    RETURN Locatable{ Assignment: COPY new_assign };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_assignment_target(MUTABLE self: PipelinePlaceholderRewriter, node: AssignmentName) RETURNS !AssignmentName
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF node IS_A GetField AS get_field THEN
+      MUTABLE get_field_mutable = COPY get_field;
+      MUTABLE rewritten = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, Locatable{ GetField: COPY get_field_mutable }));
+      RETURN castLocatableToAssignmentName(rewritten);
+    END
+    IF node IS_A GetIndex AS get_index THEN
+      MUTABLE get_index_mutable = COPY get_index;
+      MUTABLE rewritten = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, Locatable{ GetIndex: COPY get_index_mutable }));
+      RETURN castLocatableToAssignmentName(rewritten);
+    END
+    RETURN COPY node;
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_value_wrapper(MUTABLE self: PipelinePlaceholderRewriter, node: Node) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE value: ?Locatable = NIL;
+    IF node IS_A CopyNode AS copy_node THEN
+      value = copy_node.value;
+    ELSE_IF node IS_A MoveNode AS move_node THEN
+      value = move_node.value;
+    ELSE_IF node IS_A KeepNode AS keep_node THEN
+      value = keep_node.value;
+    ELSE_IF node IS_A ShareNode AS share_node THEN
+      value = share_node.value;
+    END
+    MUTABLE value_value: Locatable = value?;
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, value_value));
+    IF (new_value == value_value) THEN
+      RETURN COPY castNodeToLocatable(node);
+    END
+    MUTABLE new_node: ?PipelineRewriteNode = NIL;
+    IF node IS_A CopyNode AS copy_node THEN
+      new_node = PipelineRewriteNode{ CopyNode: COPY CopyNode{ token: COPY copy_node.token, value: COPY new_value, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL } };
+    ELSE_IF node IS_A MoveNode AS move_node THEN
+      new_node = PipelineRewriteNode{ MoveNode: COPY MoveNode{ token: COPY move_node.token, value: COPY new_value, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
+    ELSE_IF node IS_A KeepNode AS keep_node THEN
+      new_node = PipelineRewriteNode{ KeepNode: COPY KeepNode{ token: COPY keep_node.token, value: COPY new_value, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, carrier_op: NIL } };
+    ELSE_IF node IS_A ShareNode AS share_node THEN
+      new_node = PipelineRewriteNode{ ShareNode: COPY ShareNode{ token: COPY share_node.token, value: COPY new_value, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
+    END
+    new_node = COPY new_node;
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, castNodeToPipelineRewriteNode(node), UNWRAP (new_node));
+    RETURN castOptionalPipelineRewriteNodeToLocatable(new_node);
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_unary_op(MUTABLE self: PipelinePlaceholderRewriter, node: UnaryOp) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_operand = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.right));
+    IF (new_operand == node.right) THEN
+      RETURN COPY node;
+    END
+    MUTABLE new_uo = UnaryOp{ token: COPY node.token, op: node.op, right: new_operand, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, node, &new_uo);
+    RETURN new_uo;
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_with_block(MUTABLE self: PipelinePlaceholderRewriter, node: WithBlock) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_body = TRY (pipelinePlaceholderRewriter__substitute_body(&rtoc_self_view, node.body));
+    MUTABLE arms: ?[]WithMatchArm = COPY node.arms;
+    MUTABLE new_arms: ?[]WithMatchArm = NIL;
+    IF arms EXISTS AS arms_value THEN
+      MUTABLE arms_value_mutable = COPY arms_value;
+      MUTABLE rewritten_arms: []WithMatchArm = ( { MUTABLE rtoc_empty_list_1: []WithMatchArm = List[]; rtoc_empty_list_1 } );
+      MUTABLE arm_index = 0;
+      WHILE (arm_index < arms_value_mutable.length()) DO
+        MUTABLE arm = UNWRAP (arms_value_mutable[arm_index]);
+        MUTABLE arm_body: []Locatable = TRY (withMatchArm__body_nodes(arm));
+        MUTABLE new_arm_body = TRY (pipelinePlaceholderRewriter__substitute_body(&rtoc_self_view, arm_body));
+        MUTABLE rewritten_arm_branch_value: ?WithMatchArm = NIL;
+        IF (new_arm_body == arm_body) THEN
+          rewritten_arm_branch_value = arm;
+        ELSE
+          rewritten_arm_branch_value = WithMatchArm{ family: COPY withMatchArm__family_value(arm), body: COPY new_arm_body, lock_error_clauses: COPY TRY (withMatchArm__lock_error_clauses_value(arm)), token: withMatchArm__token_value(arm) };
+        END
+        MUTABLE rewritten_arm: WithMatchArm = rewritten_arm_branch_value?;
+        &rewritten_arms.append(rewritten_arm);
+        arm_index = (arm_index + 1);
+      END
+      new_arms = rewritten_arms;
+    END
+    IF ((new_body == node.body) AND (new_arms == node.arms)) THEN
+      RETURN COPY Locatable{ WithBlock: COPY node };
+    END
+    MUTABLE new_with = WithBlock{ token: COPY node.token, capabilities: COPY node.capabilities, body: COPY new_body, deferred_drops: COPY node.deferred_drops, capability_plan: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, lock_error_clause: NIL, deadlock_escape: NIL, view_kind: NIL, snapshot_mode: NIL, polymorphic: NIL, universal_poly: NIL, arms: NIL };
+    new_with.lock_error_clause = node.lock_error_clause;
+    new_with.deadlock_escape = node.deadlock_escape;
+    new_with.arms = new_arms;
+    new_with.view_kind = node.view_kind;
+    new_with.snapshot_mode = node.snapshot_mode;
+    new_with.polymorphic = node.polymorphic;
+    new_with.universal_poly = node.universal_poly;
+    IF node.capability_plan THEN
+      new_with.capability_plan = TRY (capabilityPlan__require_for(node));
+    END
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ WithBlock: COPY node }, PipelineRewriteNode{ WithBlock: COPY new_with });
+    RETURN Locatable{ WithBlock: COPY new_with };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_body(MUTABLE self: PipelinePlaceholderRewriter, body: []Locatable) RETURNS ![]Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE result: []Locatable = ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } );
+    MUTABLE index = 0;
+    WHILE (index < body.length()) DO
+      &result.append(TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, UNWRAP (body[index]))));
+      index = (index + 1);
+    END
+    RETURN result;
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_struct_lit(MUTABLE self: PipelinePlaceholderRewriter, node: StructLit) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE fields: {String}Locatable = COPY node.fields;
+    MUTABLE new_fields: {String}Locatable = {};
+    MUTABLE keys = fields.keys();
+    MUTABLE index = 0;
+    WHILE (index < keys.length()) DO
+      MUTABLE key = COPY UNWRAP (keys[index]);
+      new_fields[key] = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, fields[key]?));
+      index = (index + 1);
+    END
+    IF (new_fields == fields) THEN
+      RETURN COPY Locatable{ StructLit: COPY node };
+    END
+    MUTABLE new_sl = StructLit{ token: COPY node.token, name: COPY node.name, fields: COPY new_fields, storage: COPY node.storage, type_args: COPY node.type_args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, borrowed_field_names: NIL, field_tokens: {} };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ StructLit: COPY node }, PipelineRewriteNode{ StructLit: COPY new_sl });
+    RETURN Locatable{ StructLit: COPY new_sl };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_list_lit(MUTABLE self: PipelinePlaceholderRewriter, node: ListLit) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
+    IF (new_items == node.items) THEN
+      RETURN COPY Locatable{ ListLit: COPY node };
+    END
+    MUTABLE new_ll = ListLit{ token: COPY node.token, items: COPY new_items, storage: COPY node.storage, constructor_options: COPY node.constructor_options, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ ListLit: COPY node }, PipelineRewriteNode{ ListLit: COPY new_ll });
+    RETURN Locatable{ ListLit: COPY new_ll };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_tuple_lit(MUTABLE self: PipelinePlaceholderRewriter, node: TupleLit) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
+    IF (new_items == node.items) THEN
+      RETURN COPY Locatable{ TupleLit: COPY node };
+    END
+    MUTABLE new_tl = TupleLit{ token: COPY node.token, items: COPY new_items, storage: COPY node.storage, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ TupleLit: COPY node }, PipelineRewriteNode{ TupleLit: COPY new_tl });
+    RETURN Locatable{ TupleLit: COPY new_tl };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_cast(MUTABLE self: PipelinePlaceholderRewriter, node: Cast) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.value));
+    IF new_value.equal?(node.value) THEN
+      RETURN COPY node;
+    END
+    MUTABLE new_cast = Cast{ token: COPY node.token, value: new_value, target: node.target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, node, &new_cast);
+    RETURN new_cast;
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_hash_lit(MUTABLE self: PipelinePlaceholderRewriter, node: HashLit) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE pairs: {Locatable}Locatable = COPY node.pairs;
+    MUTABLE new_pairs: {Locatable}Locatable = {};
+    pairs.keys() |> EACH {
+    MUTABLE value: Locatable = (pairs[_] OR_ELSE CAST(panic("missing hash key") AS Locatable));
+    new_pairs[_] = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, value));
+    };
+    IF (new_pairs == pairs) THEN
+      RETURN COPY Locatable{ HashLit: COPY node };
+    END
+    MUTABLE new_hl = HashLit{ token: COPY node.token, pairs: COPY new_pairs, storage: COPY node.storage, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ HashLit: COPY node }, PipelineRewriteNode{ HashLit: COPY new_hl });
+    RETURN Locatable{ HashLit: COPY new_hl };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_block_expr(MUTABLE self: PipelinePlaceholderRewriter, node: BlockExpr) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE body: []Locatable = COPY node.body;
+    MUTABLE new_body: []Locatable = ( { MUTABLE rtoc_empty_list_3: []Locatable = List[]; rtoc_empty_list_3 } );
+    MUTABLE index = 0;
+    WHILE (index < body.length()) DO
+      &new_body.append(TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, UNWRAP (body[index]))));
+      index = (index + 1);
+    END
+    MUTABLE result: ?Locatable = COPY node.result;
+    MUTABLE new_result_branch_value: ?Locatable = NIL;
+    IF result EXISTS AS result_value THEN
+      new_result_branch_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, result_value));
+    ELSE
+      new_result_branch_value = NIL;
+    END
+    MUTABLE new_result: ?Locatable = new_result_branch_value;
+    IF ((new_body == node.body) AND (new_result == node.result)) THEN
+      RETURN COPY node;
+    END
+    MUTABLE new_block = BlockExpr{ token: COPY node.token, body: COPY new_body, result: COPY new_result, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, node, &new_block);
+    RETURN new_block;
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_assert(MUTABLE self: PipelinePlaceholderRewriter, node: Assert) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_cond = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.condition));
+    IF (new_cond == node.condition) THEN
+      RETURN COPY Locatable{ Assert: COPY node };
+    END
+    MUTABLE new_assert = Assert{ token: COPY node.token, condition: new_cond, message: node.message, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ Assert: COPY node }, PipelineRewriteNode{ Assert: COPY new_assert });
+    RETURN Locatable{ Assert: COPY new_assert };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__substitute_if_statement(MUTABLE self: PipelinePlaceholderRewriter, node: IfStatement) RETURNS !Locatable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE new_cond = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.condition));
+    MUTABLE new_then = node.then_branch |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
+    MUTABLE new_else: ?[]Locatable = NIL;
+    IF node.else_branch != NIL THEN
+      new_else = COPY ((node.else_branch)?) |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
+    END
+    IF (((new_cond == node.condition) AND (new_then == node.then_branch)) AND (new_else == node.else_branch)) THEN
+      RETURN COPY Locatable{ IfStatement: COPY node };
+    END
+    MUTABLE new_if = IfStatement{ token: COPY node.token, condition: COPY new_cond, then_branch: COPY new_then, else_branch: COPY new_else, then_drops: node.then_drops, else_drops: node.else_drops, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
+    new_if.expr_mode = node.expr_mode;
+    new_if.then_result_type = node.then_result_type;
+    new_if.else_result_type = node.else_result_type;
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ IfStatement: COPY node }, PipelineRewriteNode{ IfStatement: COPY new_if });
+    RETURN Locatable{ IfStatement: COPY new_if };
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__copy_type_info(self: PipelinePlaceholderRewriter, src: PipelineRewriteNode, MUTABLE dst: PipelineRewriteNode) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    aST__copy_pipeline_rewrite_metadata_mut(&dst, src);
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__copy_call_metadata(self: PipelinePlaceholderRewriter, src: PipelineRewriteNode, MUTABLE dst: PipelineRewriteNode) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    aST__copy_pipeline_rewrite_metadata_mut(&dst, src, TRUE);
+}
+END
+PRIVATE FN pipelinePlaceholderRewriter__soa_field_slice_type(self: PipelinePlaceholderRewriter, field_node: GetField) RETURNS !Type
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE field_type: ?Type@multiowned = COPY field_node.type_object;
+    IF field_type EXISTS AS field_type_value THEN
+      MUTABLE concrete_type = field_type_value;
+      IF type__untyped?(concrete_type) THEN
+        panic("SOA field slice: unresolved annotated type");
+      END
+      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(concrete_type)}[]") }));
+    ELSE
+      panic("SOA field slice: missing annotated type");
+    END
+}
+END
+PUB FN pipelinePlaceholderRewriter__new(context: PipelineContextState) RETURNS PipelinePlaceholderRewriter@multiowned ->
+  MUTABLE self = PipelinePlaceholderRewriter{ context: COPY context };
+  pipelinePlaceholderRewriter__initialize(&self, context);
+  RETURN self @multiowned;
+END
+FN castFieldToPipelineSoaFieldSetItem(value: Field) RETURNS PipelineSoaFieldSetItem ->
+  PARTIAL MATCH value START
+    Field.SymbolValue AS cast_payload -> RETURN PipelineSoaFieldSetItem{ SymbolValue: COPY cast_payload };,
+    Field.StringValue AS cast_payload -> RETURN PipelineSoaFieldSetItem{ StringValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to PipelineSoaFieldSetItem");
+  END
+  panic("Invalid cast to PipelineSoaFieldSetItem");
+END
+FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
+  PARTIAL MATCH value START
+    Locatable.Identifier AS cast_payload -> RETURN AssignmentName{ Identifier: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN AssignmentName{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN AssignmentName{ GetIndex: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to AssignmentName");
+  END
+  panic("Invalid cast to AssignmentName");
+END
+FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+  IF value IS_A GetField AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to GetField");
+END
+FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    Node.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    Node.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    Node.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    Node.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    Node.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    Node.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Node.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    Node.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    Node.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Node.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    Node.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    Node.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    Node.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    Node.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Node.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    Node.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    Node.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    Node.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    Node.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    Node.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    Node.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    Node.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    Node.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    Node.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    Node.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    Node.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    Node.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    Node.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    Node.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    Node.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    Node.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    Node.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Node.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    Node.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    Node.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Node.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    Node.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    Node.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    Node.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    Node.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    Node.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    Node.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    Node.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Node.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    Node.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    Node.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    Node.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    Node.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    Node.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    Node.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    Node.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    Node.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    Node.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    Node.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    Node.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    Node.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    Node.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    Node.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    Node.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    Node.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    Node.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    Node.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    Node.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    Node.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    Node.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    Node.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    Node.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    Node.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    Node.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    Node.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    Node.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    Node.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    Node.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    Node.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Node.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    Node.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    Node.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    Node.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    Node.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    Node.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    Node.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    Node.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    Node.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    Node.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Node.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    Node.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    Node.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    Node.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    Node.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    Node.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    Node.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    Node.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    Node.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    Node.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    Node.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    Node.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    Node.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    Node.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    Node.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Node.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    Node.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    Node.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    Node.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Node.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Node.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    Node.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    Node.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    Node.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    Node.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    Node.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    Node.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    Node.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    Node.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    Node.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    Node.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    Node.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    Node.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    Node.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    Node.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    Node.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    Node.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    Node.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    Node.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    Node.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    Node.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    Node.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castNodeToPipelineRewriteNode(value: Node) RETURNS PipelineRewriteNode ->
+  PARTIAL MATCH value START
+    Node.Assignment AS cast_payload -> RETURN PipelineRewriteNode{ Assignment: COPY cast_payload };,
+    Node.BindExpr AS cast_payload -> RETURN PipelineRewriteNode{ BindExpr: COPY cast_payload };,
+    Node.BinaryOp AS cast_payload -> RETURN PipelineRewriteNode{ BinaryOp: COPY cast_payload };,
+    Node.MIRUnaryOp AS cast_payload -> RETURN PipelineRewriteNode{ MIRUnaryOp: COPY cast_payload };,
+    Node.Identifier AS cast_payload -> RETURN PipelineRewriteNode{ Identifier: COPY cast_payload };,
+    Node.ListLit AS cast_payload -> RETURN PipelineRewriteNode{ ListLit: COPY cast_payload };,
+    Node.TupleLit AS cast_payload -> RETURN PipelineRewriteNode{ TupleLit: COPY cast_payload };,
+    Node.HashLit AS cast_payload -> RETURN PipelineRewriteNode{ HashLit: COPY cast_payload };,
+    Node.StructLit AS cast_payload -> RETURN PipelineRewriteNode{ StructLit: COPY cast_payload };,
+    Node.IfStatement AS cast_payload -> RETURN PipelineRewriteNode{ IfStatement: COPY cast_payload };,
+    Node.FuncCall AS cast_payload -> RETURN PipelineRewriteNode{ FuncCall: COPY cast_payload };,
+    Node.MIRMethodCall AS cast_payload -> RETURN PipelineRewriteNode{ MIRMethodCall: COPY cast_payload };,
+    Node.GetField AS cast_payload -> RETURN PipelineRewriteNode{ GetField: COPY cast_payload };,
+    Node.GetIndex AS cast_payload -> RETURN PipelineRewriteNode{ GetIndex: COPY cast_payload };,
+    Node.MIRCast AS cast_payload -> RETURN PipelineRewriteNode{ MIRCast: COPY cast_payload };,
+    Node.Assert AS cast_payload -> RETURN PipelineRewriteNode{ Assert: COPY cast_payload };,
+    Node.WithBlock AS cast_payload -> RETURN PipelineRewriteNode{ WithBlock: COPY cast_payload };,
+    Node.MIROptionalUnwrap AS cast_payload -> RETURN PipelineRewriteNode{ MIROptionalUnwrap: COPY cast_payload };,
+    Node.MIRBlockExpr AS cast_payload -> RETURN PipelineRewriteNode{ MIRBlockExpr: COPY cast_payload };,
+    Node.MoveNode AS cast_payload -> RETURN PipelineRewriteNode{ MoveNode: COPY cast_payload };,
+    Node.CopyNode AS cast_payload -> RETURN PipelineRewriteNode{ CopyNode: COPY cast_payload };,
+    Node.KeepNode AS cast_payload -> RETURN PipelineRewriteNode{ KeepNode: COPY cast_payload };,
+    Node.ShareNode AS cast_payload -> RETURN PipelineRewriteNode{ ShareNode: COPY cast_payload };,
+    Node.StaticCall AS cast_payload -> RETURN PipelineRewriteNode{ StaticCall: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to PipelineRewriteNode");
+  END
+  panic("Invalid cast to PipelineRewriteNode");
+END
+FN castOptionalPipelineRewriteNodeToLocatable(value: ?PipelineRewriteNode) RETURNS Locatable ->
+  IF value == NIL THEN
+    panic("Invalid cast to Locatable");
+  END
+  PARTIAL MATCH value? START
+    PipelineRewriteNode.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    PipelineRewriteNode.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    PipelineRewriteNode.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    PipelineRewriteNode.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    PipelineRewriteNode.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    PipelineRewriteNode.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    PipelineRewriteNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    PipelineRewriteNode.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    PipelineRewriteNode.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    PipelineRewriteNode.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    PipelineRewriteNode.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    PipelineRewriteNode.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    PipelineRewriteNode.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    PipelineRewriteNode.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    PipelineRewriteNode.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    PipelineRewriteNode.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    PipelineRewriteNode.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    PipelineRewriteNode.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    PipelineRewriteNode.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    PipelineRewriteNode.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    PipelineRewriteNode.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    PipelineRewriteNode.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    PipelineRewriteNode.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    PipelineRewriteNode.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END

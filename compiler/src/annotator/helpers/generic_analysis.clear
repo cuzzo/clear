@@ -1,0 +1,29 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f70726f746f636f6c5f70726f6a656374696f6e5f7265736f6c7665722e636c656172" AS protocol_projection_resolver
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172" AS lexer
+REQUIRE "pkg:rtoc_6173742f66756e6374696f6e5f7369676e61747572655f666f72776172642e636c656172" AS function_signature_forward
+REQUIRE "pkg:rtoc_6173742f747970655f65787072657373696f6e2e636c656172" AS type_expression
+# Ruby module GenericAnalysis
+builtin_types = [:Number, :Bool, :Byte, :Int8, :Int16, :Int32, :Int64, :UInt8, :UInt16, :UInt32, :UInt64, :Float32, :Float64, :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong, :TargetULongLong, :String, :Any, :Void, :Range, :Map];
+PUB UNION DeclarationNode { VarDecl: VarDecl, BindExpr: BindExpr }
+PUB UNION AnnotationTypeShape { TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Type: Type }
+PUB UNION GenericSchema { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
+PUB UNION GenericCallNode { FuncCall: FuncCall, MethodCall: MethodCall }
+PUB UNION AnnotationNode { Program: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, StructDef: StructDef, VarDecl: VarDecl, Assignment: Assignment, DestructureTarget: DestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, UnaryOp: UnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MethodCall: MethodCall, GetField: GetField, GetIndex: GetIndex, Cast: Cast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, DeferStmt: DeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, OptionalUnwrap: OptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, BlockExpr: BlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, RangeLit: RangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, EnumDef: EnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, DoBlock: DoBlock, BgBlock: BgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Struct: Struct, FunctionDef: FunctionDef, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB UNION GenericDeclarationNode { FunctionDefMultiowned: FunctionDef@multiowned, StructDef: StructDef, UnionDef: UnionDef, FunctionDef: FunctionDef }
+PUB UNION GenericBinding { TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, Type: Type }
+PUB STRUCT SharedGenericArg {
+  name: String,
+  type: Type
+}
+PUB STRUCT TypeAnnotationFacts {
+  node: AnnotationNode,
+  type_obj: Type,
+  is_param: Bool,
+  inner: Type,
+  inner_array: Bool,
+  fn_type_params: []String@symbol
+}
+structural_capabilities = [:link];
+# End Ruby module GenericAnalysis

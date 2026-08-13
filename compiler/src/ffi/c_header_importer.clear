@@ -1,0 +1,613 @@
+REQUIRE "pkg:fs"
+REQUIRE "pkg:path"
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172" AS param
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN STRUCT CompilerRegexScanner {} CLOSE "deinit" FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS ?CompilerRegexScanner EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexScanner(source: String) RETURNS CompilerRegexScanner EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexScan(scanner: CompilerRegexScanner, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexGetch(scanner: CompilerRegexScanner) RETURNS scanner:?String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexEos(scanner: CompilerRegexScanner) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerZigTranslateC(zig: String, source_dir: String, header_path: String) RETURNS !String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerZigExecutable() RETURNS String@symbol EFFECTS :safe FROM "compiler_regex";
+PUB STRUCT CHeaderImporterParam {
+  name: String,
+  type: String,
+  mutable: Any@multiowned
+}
+
+PUB FN cHeaderImporterParam__name(self: CHeaderImporterParam) RETURNS String ->
+  self.name;
+END
+PUB FN cHeaderImporterParam__type(self: CHeaderImporterParam) RETURNS String ->
+  self.type;
+END
+PUB FN cHeaderImporterParam__mutable(self: CHeaderImporterParam) RETURNS Any@multiowned ->
+  KEEP self.mutable;
+END
+PUB FN cHeaderImporter__expand(source: String, source_dir: String) RETURNS !String ->
+  RETURN {
+  MUTABLE rtoc_value_block_marker = 0;
+  rtoc_gsub_scanner_1 = compilerRegexScanner(source);
+  MUTABLE rtoc_gsub_output_2 = "";
+  WHILE !(compilerRegexEos(rtoc_gsub_scanner_1)) DO
+    IF compilerRegexScan(rtoc_gsub_scanner_1, compilerRegexCompile("EXTERN\\s+FROM\\s+HEADER\\s+\"([^\"]+)\"\\s+LINK\\s+\"([^\"]+)\"\\s+ABI\\s+C\\s*;")) THEN
+      rtoc_gsub_output_2 = (rtoc_gsub_output_2 $+ {
+  MUTABLE header = COPY compilerRegexCapture(rtoc_gsub_scanner_1, 1);
+  MUTABLE library = COPY compilerRegexCapture(rtoc_gsub_scanner_1, 2);
+  TRY (cHeaderImporter__import(header, library, source_dir))
+  });
+    ELSE
+      IF compilerRegexGetch(rtoc_gsub_scanner_1) EXISTS AS rtoc_gsub_char_3 THEN
+        rtoc_gsub_output_2 = (rtoc_gsub_output_2 $+ COPY rtoc_gsub_char_3);
+      END
+    END
+  END
+  rtoc_gsub_output_2
+  };
+END
+PUB FN cHeaderImporter__import(header_value: String, library: String, source_dir: String) RETURNS !String ->
+  MUTABLE header_path = expand(header_value, source_dir);
+  IF !(file?(header_path)) THEN
+    RAISE Input, Error, "C header not found: {}";
+  END
+  MUTABLE zig = compilerZigExecutable();
+  MUTABLE stdout = TRY (compilerZigTranslateC(zig, source_dir, header_path));
+  MUTABLE header_source = TRY (read(header_path));
+  RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_4 = (translator__new(stdout, header_value, library, TRY (cHeaderImporter__declaration_names(header_source))));
+  TRY (translator__declarations(&rtoc_mutable_receiver_4)) };
+CATCH ENOENT
+  RAISE Input, Error, "Zig is required to import C headers";
+END
+PUB FN cHeaderImporter__declaration_names(header_source: String) RETURNS ![Set]String ->
+  MUTABLE clean = compilerRegexReplaceAll((compilerRegexReplaceAll(header_source, compilerRegexCompile("/\\*.*?\\*/"), " ")), compilerRegexCompile("//[^\\n]*"), " ");
+  MUTABLE names: [Set]String = Set[];
+  {
+  MUTABLE rtoc_value_block_marker = 0;
+  rtoc_scan_scanner_5 = compilerRegexScanner(clean);
+  WHILE !(compilerRegexEos(rtoc_scan_scanner_5)) DO
+    IF compilerRegexScan(rtoc_scan_scanner_5, compilerRegexCompile("\\btypedef\\s+struct\\b.*?\\}\\s*([A-Za-z_]\\w*)\\s*;")) THEN
+      &names.insert(COPY ([COPY compilerRegexCapture(rtoc_scan_scanner_5, 1)])[0]);
+    ELSE
+      compilerRegexGetch(rtoc_scan_scanner_5);
+    END
+  END
+  NIL
+  };
+  {
+  MUTABLE rtoc_value_block_marker = 0;
+  rtoc_scan_scanner_6 = compilerRegexScanner(clean);
+  WHILE !(compilerRegexEos(rtoc_scan_scanner_6)) DO
+    IF compilerRegexScan(rtoc_scan_scanner_6, compilerRegexCompile("\\btypedef\\s+struct\\s+[A-Za-z_]\\w*\\s+([A-Za-z_]\\w*)\\s*;")) THEN
+      &names.insert(COPY ([COPY compilerRegexCapture(rtoc_scan_scanner_6, 1)])[0]);
+    ELSE
+      compilerRegexGetch(rtoc_scan_scanner_6);
+    END
+  END
+  NIL
+  };
+  {
+  MUTABLE rtoc_value_block_marker = 0;
+  rtoc_scan_scanner_7 = compilerRegexScanner(clean);
+  WHILE !(compilerRegexEos(rtoc_scan_scanner_7)) DO
+    IF compilerRegexScan(rtoc_scan_scanner_7, compilerRegexCompile("\\btypedef\\b.*?\\(\\s*\\*\\s*([A-Za-z_]\\w*)\\s*\\).*?;")) THEN
+      &names.insert(COPY ([COPY compilerRegexCapture(rtoc_scan_scanner_7, 1)])[0]);
+    ELSE
+      compilerRegexGetch(rtoc_scan_scanner_7);
+    END
+  END
+  NIL
+  };
+  {
+  MUTABLE rtoc_value_block_marker = 0;
+  rtoc_scan_scanner_8 = compilerRegexScanner(clean);
+  WHILE !(compilerRegexEos(rtoc_scan_scanner_8)) DO
+    IF compilerRegexScan(rtoc_scan_scanner_8, compilerRegexCompile("\\b([A-Za-z_]\\w*)\\s*\\([^;{}]*\\)\\s*;")) THEN
+      &names.insert(COPY ([COPY compilerRegexCapture(rtoc_scan_scanner_8, 1)])[0]);
+    ELSE
+      compilerRegexGetch(rtoc_scan_scanner_8);
+    END
+  END
+  NIL
+  };
+  RETURN names;
+END
+PUB STRUCT Translator {
+  aliases: {String}String,
+  allowed_names: [Set]String,
+  header: String,
+  library: String,
+  type_names: {String}String,
+  zig_source: String
+}
+
+PUB FN translator__initialize(MUTABLE self: Translator, zig_source: String, header_value: String, library: String, allowed_names: [Set]String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.zig_source = COPY zig_source;
+    rtoc_self_view.header = COPY header_value;
+    rtoc_self_view.library = COPY library;
+    rtoc_self_view.aliases = {};
+    rtoc_self_view.type_names = {};
+    rtoc_self_view.allowed_names = COPY allowed_names;
+}
+END
+PUB FN translator__declarations(MUTABLE self: Translator) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    translator__collect_aliases_mut(&rtoc_self_view);
+    MUTABLE structs = TRY (translator__translate_structs(&rtoc_self_view));
+    MUTABLE functions = TRY (translator__translate_functions(&rtoc_self_view));
+    MUTABLE declarations = (structs + functions);
+    IF (declarations.length() == 0) THEN
+      RAISE Input, Error, "C header {} contains no ABI declarations CLEAR can import";
+    END
+    RETURN ((declarations + [""])).join("\n");
+}
+END
+PRIVATE FN translator__collect_aliases_mut(MUTABLE self: Translator) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE rtoc_each_items_9 = rtoc_self_view.zig_source.split("\n");
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < rtoc_each_items_9.length() DO
+      MUTABLE match: ?CompilerRegexScanner = compilerRegexMatchData(rtoc_each_items_9[rtoc_idx]?, compilerRegexCompile("^pub const ([A-Za-z_]\\w*) = (.+);$"));
+      IF !(match) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE name = COPY compilerRegexCapture(match?, 1);
+      MUTABLE rhs = compilerRegexCapture(match?, 2).trim();
+      rtoc_self_view.aliases[name] = rhs;
+    rtoc_idx = rtoc_idx + 1;
+    END
+}
+END
+PRIVATE FN translator__translate_structs(MUTABLE self: Translator) RETURNS ![]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE output: []String = ( { MUTABLE rtoc_empty_list_10: []String = List[]; rtoc_empty_list_10 } );
+    {
+    MUTABLE rtoc_value_block_marker = 0;
+    rtoc_scan_scanner_11 = compilerRegexScanner(rtoc_self_view.zig_source);
+    WHILE !(compilerRegexEos(rtoc_scan_scanner_11)) DO
+      IF compilerRegexScan(rtoc_scan_scanner_11, compilerRegexCompile("^pub const ([A-Za-z_]\\w*) = extern struct \\{\\n(.*?)^\\};$")) THEN
+          MUTABLE c_name: String = COPY CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 1) AS String);
+          IF !(rtoc_self_view.allowed_names.contains?(c_name)) THEN
+              CONTINUE;
+          END
+          MUTABLE clear_name = translator__clear_type_name(&rtoc_self_view, c_name);
+          MUTABLE fields: []String = ( { MUTABLE rtoc_empty_list_12: []String = List[]; rtoc_empty_list_12 } );
+          MUTABLE rtoc_each_items_13 = (CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).split("\n");
+          MUTABLE rtoc_idx = 0;
+          WHILE rtoc_idx < rtoc_each_items_13.length() DO
+              MUTABLE match: ?CompilerRegexScanner = compilerRegexMatchData(rtoc_each_items_13[rtoc_idx]?, compilerRegexCompile("^\\s*([A-Za-z_]\\w*):\\s*(.+?)(?:\\s*=\\s*.+)?,$"));
+              IF !(match) THEN
+                  rtoc_idx = rtoc_idx + 1;
+            CONTINUE;
+              END
+              MUTABLE field_type: ?String = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match?, 2), :field));
+              IF !(field_type) THEN
+                  rtoc_idx = rtoc_idx + 1;
+            CONTINUE;
+              END
+              &fields.append("${compilerRegexCapture(match?, 1)}: ${field_type}");
+            rtoc_idx = rtoc_idx + 1;
+          END
+          IF ((fields.length() == 0) AND !(((CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).trim().length() == 0))) THEN
+              CONTINUE;
+          END
+          &output.append("EXTERN STRUCT ${clear_name} { ${fields.join(", ")} } AS \"${c_name}\" FROM \"${rtoc_self_view.library}\" ABI C HEADER \"${rtoc_self_view.header}\";");
+      ELSE
+        compilerRegexGetch(rtoc_scan_scanner_11);
+      END
+    END
+    NIL
+    };
+    MUTABLE alias_names = rtoc_self_view.aliases.keys();
+    MUTABLE alias_index: Int64 = 0;
+    WHILE (alias_index < alias_names.length()) DO
+      MUTABLE name = COPY UNWRAP (alias_names[alias_index]);
+      MUTABLE rhs = COPY rtoc_self_view.aliases[name]?;
+      IF ((rtoc_self_view.allowed_names.contains?(name) AND rhs.startsWith?("struct_")) AND compilerRegexMatch(rtoc_self_view.zig_source, compilerRegexCompile("^pub const ${compilerRegexEscape(rhs)} = opaque \\{"))) THEN
+        &output.append("EXTERN STRUCT ${translator__clear_type_name(&rtoc_self_view, name)} {} AS \"${name}\" FROM \"${rtoc_self_view.library}\" ABI C HEADER \"${rtoc_self_view.header}\";");
+      END
+      alias_index = (alias_index + 1);
+    END
+    RETURN CAST((output |> DISTINCT _) AS []String);
+}
+END
+PRIVATE FN translator__translate_functions(MUTABLE self: Translator) RETURNS ![]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE output: []String = ( { MUTABLE rtoc_empty_list_14: []String = List[]; rtoc_empty_list_14 } );
+    MUTABLE rtoc_each_items_15 = rtoc_self_view.zig_source.split("\n");
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < rtoc_each_items_15.length() DO
+      MUTABLE parsed: ?Tuple<String, String, String> = translator__parse_function_line(rtoc_self_view, rtoc_each_items_15[rtoc_idx]?);
+      IF !(parsed) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE name, raw_params, raw_return = parsed;
+      IF !(rtoc_self_view.allowed_names.contains?(name)) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE return_type: ?String = TRY (translator__map_type(&rtoc_self_view, raw_return, :return));
+      IF !(return_type) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE raw_param_parts = TRY (translator__split_top_level(rtoc_self_view, raw_params));
+      MUTABLE params: []CHeaderImporterParam = ( { MUTABLE rtoc_empty_list_16: []CHeaderImporterParam = List[]; rtoc_empty_list_16 } );
+      MUTABLE valid_params: Bool = TRUE;
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < raw_param_parts.length() DO
+        IF (raw_param_parts[rtoc_idx]?.trim() == "...") THEN
+            valid_params = FALSE;
+            BREAK;
+        ELSE
+            MUTABLE param_match: ?CompilerRegexScanner = compilerRegexMatchData(raw_param_parts[rtoc_idx]?, compilerRegexCompile("^([A-Za-z_]\\w*):\\s*(.+)$"));
+            MUTABLE param_name: String = "arg${rtoc_idx}";
+            MUTABLE raw_type: String = COPY raw_param_parts[rtoc_idx]?;
+            IF param_match EXISTS AS param_match_value THEN
+              param_name = COPY compilerRegexCapture(param_match_value, 1);
+              raw_type = COPY compilerRegexCapture(param_match_value, 2);
+            END
+            MUTABLE param: ?CHeaderImporterParam = TRY (translator__map_param(&rtoc_self_view, param_name, raw_type));
+            IF param EXISTS AS param_value THEN
+              &params.append(param_value);
+            ELSE
+              valid_params = FALSE;
+              BREAK;
+            END
+        END
+        rtoc_idx = rtoc_idx + 1;
+      END
+      IF !(valid_params) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE rendered_params = params |> SELECT {
+        MUTABLE prefix: String = "";
+          IF _.mutable THEN
+            prefix = "MUTABLE ";
+          ELSE
+            prefix = "";
+          END
+        "${prefix}${_.name}: ${_.type}"
+      };
+      &output.append("EXTERN FN ${name}(${rendered_params.join(", ")}) RETURNS ${return_type} AS \"${name}\" FROM \"${rtoc_self_view.library}\" ABI C HEADER \"${rtoc_self_view.header}\";");
+    rtoc_idx = rtoc_idx + 1;
+    END
+    RETURN output;
+}
+END
+PRIVATE FN translator__parse_function_line(self: Translator, line: String) RETURNS ?Tuple<String, String, String>
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE prefix = "pub extern fn ";
+    IF !(line.startsWith?(prefix)) THEN
+      RETURN NIL;
+    END
+    MUTABLE open_index: ?Int64 = line.indexOf("(", prefix.codepointCount());
+    IF open_index EXISTS AS open_index_value THEN
+      MUTABLE name = line.substr(prefix.codepointCount(), (open_index_value - prefix.codepointCount()));
+      MUTABLE depth = 0;
+      MUTABLE close_index: ?Int64 = NIL;
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < line.length() DO
+      IF (rtoc_idx < open_index_value) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      IF (line.substr(rtoc_idx, 1) == "(") THEN
+            depth = (depth + 1);
+      END
+      IF (line.substr(rtoc_idx, 1) == ")") THEN
+            depth = (depth - 1);
+      END
+      IF depth.zero?() THEN
+            close_index = rtoc_idx;
+            BREAK;
+      END
+    rtoc_idx = rtoc_idx + 1;
+      END
+      IF close_index EXISTS AS close_index_value THEN
+        MUTABLE params = line.substr(((open_index_value + 1)), (close_index_value - ((open_index_value + 1))));
+        MUTABLE result = (line.substr(((close_index_value + 1)), (line.length() - ((close_index_value + 1))))).trim();
+        IF !(result.endsWith?(";")) THEN
+          RETURN NIL;
+        END
+        RETURN [name, params, result.substr(0, ((result.length() - 1) - 0))];
+      ELSE
+        RETURN NIL;
+      END
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN translator__map_param(MUTABLE self: Translator, name: String, raw_type: String) RETURNS !?CHeaderImporterParam
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE inner: ?String = NIL;
+    MUTABLE match: ?CompilerRegexScanner = NIL;
+    MUTABLE raw = TRY (translator__resolve_alias(rtoc_self_view, raw_type.trim()));
+    IF translator__c_callback_type?(rtoc_self_view, raw) THEN
+      MUTABLE callback: ?String = TRY (translator__map_callback(&rtoc_self_view, raw));
+      IF callback EXISTS AS callback_value THEN
+        RETURN CHeaderImporterParam{ name: COPY name, type: COPY callback_value, mutable: FALSE };
+      ELSE
+        RETURN NIL;
+      END
+    END
+    match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]\\?\\*(.+)$"));
+    IF match EXISTS AS match_value THEN
+      MUTABLE match_value_mutable = COPY match_value;
+      inner = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 1), :param));
+      IF inner EXISTS AS inner_value THEN
+        RETURN CHeaderImporterParam{ name: COPY name, type: "?${inner_value}", mutable: TRUE };
+      ELSE
+        RETURN NIL;
+      END
+    END
+    match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\](?!const\\s)(.+)$"));
+    IF match EXISTS AS match_value THEN
+      MUTABLE match_value_mutable = COPY match_value;
+      inner = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 1), :param));
+      IF inner EXISTS AS inner_value THEN
+        RETURN CHeaderImporterParam{ name: COPY name, type: COPY inner_value, mutable: TRUE };
+      ELSE
+        RETURN NIL;
+      END
+    END
+    IF (raw == "[*c]const u8") THEN
+      RETURN CHeaderImporterParam{ name: COPY name, type: "String@c", mutable: FALSE };
+    END
+    match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]const\\s+(.+)$"));
+    IF match EXISTS AS match_value THEN
+      MUTABLE match_value_mutable = COPY match_value;
+      inner = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 1), :param));
+      IF inner EXISTS AS inner_value THEN
+        RETURN CHeaderImporterParam{ name: COPY name, type: "[]@c ${inner_value}", mutable: FALSE };
+      ELSE
+        RETURN NIL;
+      END
+    END
+    match = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*(.+)$"));
+    IF match EXISTS AS match_value THEN
+      MUTABLE match_value_mutable = COPY match_value;
+      inner = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 1), :param));
+      IF inner EXISTS AS inner_value THEN
+        RETURN CHeaderImporterParam{ name: COPY name, type: COPY inner_value, mutable: FALSE };
+      ELSE
+        RETURN NIL;
+      END
+    END
+    MUTABLE mapped: ?String = TRY (translator__map_type(&rtoc_self_view, raw, :param));
+    IF mapped EXISTS AS mapped_value THEN
+      RETURN CHeaderImporterParam{ name: COPY name, type: COPY mapped_value, mutable: FALSE };
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN translator__map_type(MUTABLE self: Translator, raw_type: String, position: String@symbol) RETURNS !?String
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE item: ?String = NIL;
+    MUTABLE match: ?CompilerRegexScanner = NIL;
+    MUTABLE original = raw_type.trim();
+    IF TRY (translator__opaque_alias?(rtoc_self_view, original)) THEN
+      RETURN translator__clear_type_name(&rtoc_self_view, original);
+    END
+    MUTABLE raw = TRY (translator__resolve_alias(rtoc_self_view, original));
+    IF (CAST({"void": "Void", "bool": "Bool", "u8": "UInt8", "u16": "UInt16", "u32": "UInt32", "u64": "UInt64", "i8": "Int8", "i16": "Int16", "i32": "Int32", "i64": "Int64", "f32": "Float32", "f64": "Float64", "c_char": "Int8", "c_schar": "Int8", "c_uchar": "UInt8", "c_short": "Int16", "c_ushort": "UInt16", "c_int": "TargetInt", "c_uint": "TargetUInt", "c_long": "TargetLong", "c_ulong": "TargetULong", "c_longlong": "TargetLongLong", "c_ulonglong": "TargetULongLong", "usize": "TargetUInt@size", "isize": "TargetInt@size"} AS {String}String)).contains?(raw) THEN
+      RETURN COPY (CAST({"void": "Void", "bool": "Bool", "u8": "UInt8", "u16": "UInt16", "u32": "UInt32", "u64": "UInt64", "i8": "Int8", "i16": "Int16", "i32": "Int32", "i64": "Int64", "f32": "Float32", "f64": "Float64", "c_char": "Int8", "c_schar": "Int8", "c_uchar": "UInt8", "c_short": "Int16", "c_ushort": "UInt16", "c_int": "TargetInt", "c_uint": "TargetUInt", "c_long": "TargetLong", "c_ulong": "TargetULong", "c_longlong": "TargetLongLong", "c_ulonglong": "TargetULongLong", "usize": "TargetUInt@size", "isize": "TargetInt@size"} AS {String}String))[raw];
+    END
+    IF translator__c_callback_type?(rtoc_self_view, raw) THEN
+      RETURN TRY (translator__map_callback(&rtoc_self_view, raw));
+    END
+    match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[(\\d+)\\](.+)$"));
+    IF match EXISTS AS match_value THEN
+      MUTABLE match_value_mutable = COPY match_value;
+      item = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 2), :field));
+      IF item EXISTS AS item_value THEN
+        RETURN "[${compilerRegexCapture(match_value_mutable, 1)}]${item_value}";
+      ELSE
+        RETURN NIL;
+      END
+    END
+    IF (raw == "[*c]const u8") THEN
+      IF (position == :return) THEN
+        RETURN "?String@c";
+      ELSE
+        RETURN "String@c";
+      END
+    END
+    match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]const\\s+(.+)$"));
+    IF match EXISTS AS match_value THEN
+      MUTABLE match_value_mutable = COPY match_value;
+      item = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 1), :field));
+      IF item EXISTS AS item_value THEN
+        RETURN "?[]@c ${item_value}";
+      ELSE
+        RETURN NIL;
+      END
+    END
+    match = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*(.+)$"));
+    IF match EXISTS AS match_value THEN
+      MUTABLE match_value_mutable = COPY match_value;
+      item = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 1), :field));
+      IF item EXISTS AS item_value THEN
+        RETURN "?${item_value}";
+      ELSE
+        RETURN NIL;
+      END
+    END
+    IF translator__c_named_type?(rtoc_self_view, raw) THEN
+      RETURN translator__clear_type_name(&rtoc_self_view, raw);
+    END
+    RETURN NIL;
+}
+END
+PRIVATE FN translator__opaque_alias?(self: Translator, raw: String) RETURNS !Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (TRY (translator__alias_chain(rtoc_self_view, raw))) |> ANY _.startsWith?("opaque {");
+}
+END
+PRIVATE FN translator__map_callback(MUTABLE self: Translator, raw: String) RETURNS !?String
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE match: ?CompilerRegexScanner = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*const fn \\((.*)\\) callconv\\(\\.c\\) (.+)$"));
+    IF match EXISTS AS match_value THEN
+      MUTABLE match_value_mutable = COPY match_value;
+      MUTABLE raw_params = TRY (translator__split_top_level(rtoc_self_view, compilerRegexCapture(match_value_mutable, 1)));
+      MUTABLE params: []String = ( { MUTABLE rtoc_empty_list_17: []String = List[]; rtoc_empty_list_17 } );
+      FOR _ IN raw_params DO
+    MUTABLE type = compilerRegexReplaceFirst(_, compilerRegexCompile("^[A-Za-z_]\\w*:\\s*"), "");
+    MUTABLE mapped: ?String = TRY (translator__map_type(&rtoc_self_view, type, :param));
+    IF mapped EXISTS AS mapped_value THEN
+          &params.append(mapped_value);
+    END
+      END
+      IF !((params.length() == raw_params.length())) THEN
+        RETURN NIL;
+      END
+      MUTABLE result: ?String = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 2), :return));
+      IF result EXISTS AS result_value THEN
+        RETURN "FN(${params.join(", ")}) -> ${result_value} CALLCONV C";
+      ELSE
+        RETURN NIL;
+      END
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN translator__resolve_alias(self: Translator, raw: String) RETURNS !String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (TRY (translator__alias_chain(rtoc_self_view, raw))).last() != NIL THEN
+    RETURN COPY ((TRY (translator__alias_chain(rtoc_self_view, raw))).last())?;
+    ELSE
+    RETURN COPY raw;
+    END
+}
+END
+PRIVATE FN translator__alias_chain(self: Translator, raw: String) RETURNS ![]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE seen: {String}Bool = {};
+    MUTABLE current = COPY raw;
+    MUTABLE chain: []String = ( { MUTABLE rtoc_empty_list_18: []String = List[]; rtoc_empty_list_18 } );
+    WHILE (rtoc_self_view.aliases.contains?(current) AND !(seen[current])) DO
+      seen[current] = TRUE;
+      current = COPY UNWRAP (rtoc_self_view.aliases[current]);
+      &chain.append(current);
+    END
+    RETURN chain;
+}
+END
+PRIVATE FN translator__c_callback_type?(self: Translator, raw: String) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (raw.contains?("callconv(.c)") AND raw.contains?("fn ("));
+}
+END
+PRIVATE FN translator__c_named_type?(self: Translator, raw: String) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF rtoc_self_view.type_names.contains?(raw) THEN
+      RETURN TRUE;
+    END
+    RETURN ((rtoc_self_view.aliases.contains?(raw) OR raw.startsWith?("struct_")) OR compilerRegexMatch(raw, compilerRegexCompile("\\A[A-Za-z_]\\w*\\z")));
+}
+END
+PRIVATE FN translator__clear_type_name(MUTABLE self: Translator, c_name: String) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE existing: ?String = COPY rtoc_self_view.type_names[c_name];
+    IF existing EXISTS AS existing_value THEN
+      RETURN COPY existing_value;
+    END
+    MUTABLE words: []String = ( { MUTABLE rtoc_empty_list_19: []String = List[]; rtoc_empty_list_19 } );
+    MUTABLE rtoc_each_items_20 = (compilerRegexReplaceFirst(c_name, compilerRegexCompile("^struct_"), "")).split("_");
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < rtoc_each_items_20.length() DO
+      IF (rtoc_each_items_20[rtoc_idx]?.length() == 0) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE first = (rtoc_each_items_20[rtoc_idx]?.substr(0, 1)).upcase();
+      MUTABLE rest = (rtoc_each_items_20[rtoc_idx]?.substr(1, (rtoc_each_items_20[rtoc_idx]?.length() - 1))).downcase();
+      &words.append(((first + rest)));
+    rtoc_idx = rtoc_idx + 1;
+    END
+    MUTABLE clear_name = words.join("");
+    rtoc_self_view.type_names[c_name] = clear_name;
+    RETURN clear_name;
+}
+END
+PRIVATE FN translator__split_top_level(self: Translator, text: String) RETURNS ![]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF ((text.trim().length() == 0) OR (text.trim() == "void")) THEN
+      RETURN CAST(( { MUTABLE rtoc_empty_list_21: []String = List[]; rtoc_empty_list_21 } ) AS []String);
+    END
+    MUTABLE depth = 0;
+    MUTABLE start = 0;
+    MUTABLE parts: []String = ( { MUTABLE rtoc_empty_list_22: []String = List[]; rtoc_empty_list_22 } );
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < text.length() DO
+      IF (["(", "[", "{"]).contains?(text.substr(rtoc_idx, 1)) THEN
+          depth = (depth + 1);
+      END
+      IF ([")", "]", "}"]).contains?(text.substr(rtoc_idx, 1)) THEN
+          depth = (depth - 1);
+      END
+      IF !(((text.substr(rtoc_idx, 1) == ",") AND depth.zero?())) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      &parts.append((text.substr(start, (rtoc_idx - start))).trim());
+      start = (rtoc_idx + 1);
+    rtoc_idx = rtoc_idx + 1;
+    END
+    &parts.append((text.substr(start, (text.length() - start))).trim());
+    RETURN parts;
+}
+END
+PUB FN translator__new(zig_source: String, header: String, library: String, allowed_names: [Set]String) RETURNS Translator@multiowned ->
+  MUTABLE self = Translator{ aliases: {}, allowed_names: COPY allowed_names, header: COPY header, library: COPY library, type_names: {}, zig_source: COPY zig_source };
+  translator__initialize(&self, zig_source, header, library, allowed_names);
+  RETURN self @multiowned;
+END

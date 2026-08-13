@@ -1,0 +1,9 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f6175746f5f696e666572656e63652e636c656172" AS auto_inference
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+# Ruby module Annotator::Phases::AutoFinalization
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

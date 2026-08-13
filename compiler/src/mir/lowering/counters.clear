@@ -1,0 +1,184 @@
+PUB ENUM MIRLoweringCounterKind { Tmp, BlockExpr, SafeNav, Extern, Lambda, StreamLiteral, DoBlock, BackgroundBlock, StreamGenerator, LoopMark, ForLoop }
+PUB STRUCT MIRLoweringGeneratedId {
+  kind: MIRLoweringCounterKind,
+  value: Int64
+}
+
+PUB FN mIRLoweringGeneratedId__to_s(self: MIRLoweringGeneratedId) RETURNS String EFFECTS REENTRANT ->
+  RETURN COPY self.value.toString();
+END
+PUB STRUCT MIRLoweringCounterSnapshot {
+  values: {String}Int64
+}
+PUB STRUCT MIRLoweringCounters {
+  values: {String}Int64
+}
+
+counter_kinds: [11]MIRLoweringCounterKind = [MIRLoweringCounterKind.Tmp, MIRLoweringCounterKind.BlockExpr, MIRLoweringCounterKind.SafeNav, MIRLoweringCounterKind.Extern, MIRLoweringCounterKind.Lambda, MIRLoweringCounterKind.StreamLiteral, MIRLoweringCounterKind.DoBlock, MIRLoweringCounterKind.BackgroundBlock, MIRLoweringCounterKind.StreamGenerator, MIRLoweringCounterKind.LoopMark, MIRLoweringCounterKind.ForLoop];
+PUB FN mIRLoweringCounters__initialize(MUTABLE self: MIRLoweringCounters) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.values = {};
+    FOR _ IN counter_kinds DO
+    rtoc_self_view.values[mIRLoweringCounters__counter_key(rtoc_self_view, _)] = 0;
+    END
+}
+END
+PUB FN mIRLoweringCounters__next_tmp_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_one_based(&rtoc_self_view, MIRLoweringCounterKind.Tmp);
+}
+END
+PUB FN mIRLoweringCounters__next_block_expr_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_one_based(&rtoc_self_view, MIRLoweringCounterKind.BlockExpr);
+}
+END
+PUB FN mIRLoweringCounters__next_safe_nav_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_one_based(&rtoc_self_view, MIRLoweringCounterKind.SafeNav);
+}
+END
+PUB FN mIRLoweringCounters__next_extern_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_one_based(&rtoc_self_view, MIRLoweringCounterKind.Extern);
+}
+END
+PUB FN mIRLoweringCounters__next_lambda_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_one_based(&rtoc_self_view, MIRLoweringCounterKind.Lambda);
+}
+END
+PUB FN mIRLoweringCounters__next_stream_literal_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_zero_based(&rtoc_self_view, MIRLoweringCounterKind.StreamLiteral);
+}
+END
+PUB FN mIRLoweringCounters__next_do_block_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_zero_based(&rtoc_self_view, MIRLoweringCounterKind.DoBlock);
+}
+END
+PUB FN mIRLoweringCounters__next_background_block_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_zero_based(&rtoc_self_view, MIRLoweringCounterKind.BackgroundBlock);
+}
+END
+PUB FN mIRLoweringCounters__next_stream_generator_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_zero_based(&rtoc_self_view, MIRLoweringCounterKind.StreamGenerator);
+}
+END
+PUB FN mIRLoweringCounters__next_loop_mark_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_one_based(&rtoc_self_view, MIRLoweringCounterKind.LoopMark);
+}
+END
+PUB FN mIRLoweringCounters__next_for_loop_id(MUTABLE self: MIRLoweringCounters) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_one_based(&rtoc_self_view, MIRLoweringCounterKind.ForLoop);
+}
+END
+PUB FN mIRLoweringCounters__snapshot(self: MIRLoweringCounters) RETURNS MIRLoweringCounterSnapshot
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN MIRLoweringCounterSnapshot{ values: COPY rtoc_self_view.values };
+}
+END
+PUB FN mIRLoweringCounters__restore_mut(MUTABLE self: MIRLoweringCounters, snapshot_value: MIRLoweringCounterSnapshot) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.values = COPY snapshot_value.values;
+}
+END
+PRIVATE FN mIRLoweringCounters__next_one_based(MUTABLE self: MIRLoweringCounters, kind: MIRLoweringCounterKind) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_id(&rtoc_self_view, kind, 1);
+}
+END
+PRIVATE FN mIRLoweringCounters__next_zero_based(MUTABLE self: MIRLoweringCounters, kind: MIRLoweringCounterKind) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLoweringCounters__next_id(&rtoc_self_view, kind, 0);
+}
+END
+PRIVATE FN mIRLoweringCounters__next_id(MUTABLE self: MIRLoweringCounters, kind: MIRLoweringCounterKind, offset: Int64) RETURNS MIRLoweringGeneratedId
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE key = mIRLoweringCounters__counter_key(rtoc_self_view, kind);
+    MUTABLE value = rtoc_self_view.values[key]?;
+    rtoc_self_view.values[key] = (value + 1);
+    RETURN MIRLoweringGeneratedId{ kind: COPY kind, value: (value + offset) };
+}
+END
+PRIVATE FN mIRLoweringCounters__counter_key(self: MIRLoweringCounters, kind: MIRLoweringCounterKind) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (kind == MIRLoweringCounterKind.Tmp) THEN
+      RETURN "tmp";
+    END
+    IF (kind == MIRLoweringCounterKind.BlockExpr) THEN
+      RETURN "block_expr";
+    END
+    IF (kind == MIRLoweringCounterKind.SafeNav) THEN
+      RETURN "safe_nav";
+    END
+    IF (kind == MIRLoweringCounterKind.Extern) THEN
+      RETURN "extern";
+    END
+    IF (kind == MIRLoweringCounterKind.Lambda) THEN
+      RETURN "lambda";
+    END
+    IF (kind == MIRLoweringCounterKind.StreamLiteral) THEN
+      RETURN "stream_literal";
+    END
+    IF (kind == MIRLoweringCounterKind.DoBlock) THEN
+      RETURN "do_block";
+    END
+    IF (kind == MIRLoweringCounterKind.BackgroundBlock) THEN
+      RETURN "background_block";
+    END
+    IF (kind == MIRLoweringCounterKind.StreamGenerator) THEN
+      RETURN "stream_generator";
+    END
+    IF (kind == MIRLoweringCounterKind.LoopMark) THEN
+      RETURN "loop_mark";
+    END
+    RETURN "for_loop";
+}
+END
+PUB FN mIRLoweringCounters__new() RETURNS MIRLoweringCounters@multiowned ->
+  MUTABLE self = MIRLoweringCounters{ values: {} };
+  mIRLoweringCounters__initialize(&self);
+  RETURN self @multiowned;
+END

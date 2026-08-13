@@ -1,0 +1,298 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f62696e64696e675f636861696e5f6c6f77657265722e636c656172" AS pipeline_binding_chain_lowerer
+REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f72616e67655f6c6f77657265722e636c656172" AS pipeline_range_lowerer
+REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f7265636f7264732e636c656172" AS pipeline_records
+PUB ENUM PipelineSourceKind { Soa, RangeChain, BindingChain, Materialized }
+PUB ENUM PipelineTerminalKind { ScalarFold, RangeFold, RangeReduce, BindingChain, ListMaterialization, Distinct, BatchWindow, Index, Each, Concurrent }
+PUB ENUM PipelineExecutionKind { SoaScalarFold, FusedRangeFold, FusedRangeReduce, BindingChain, MaterializedScalar, MaterializedList, SetDistinct, BatchWindow, SetIndex, Each, Concurrent }
+PUB STRUCT PipelineSourcePlan {
+  kind: PipelineSourceKind,
+  node: Locatable,
+  range_chain: ?PipelineRangeChain,
+  binding_chain: ?PipelineBindingUnnestChain
+}
+PUB STRUCT PipelineTerminalPlan {
+  kind: PipelineTerminalKind,
+  node: Locatable
+}
+PUB STRUCT PipelineSemanticFacts {
+  bc_target: Bool,
+  source_kind: PipelineSourceKind,
+  terminal_kind: PipelineTerminalKind
+}
+
+PUB FN pipelineSemanticFacts__range_fused(self: PipelineSemanticFacts) RETURNS Bool ->
+  RETURN (self.source_kind == PipelineSourceKind.RangeChain);
+END
+PUB FN pipelineSemanticFacts__binding_fused(self: PipelineSemanticFacts) RETURNS Bool ->
+  RETURN (self.source_kind == PipelineSourceKind.BindingChain);
+END
+PUB FN pipelineSemanticFacts__concurrent(self: PipelineSemanticFacts) RETURNS Bool ->
+  RETURN (self.terminal_kind == PipelineTerminalKind.Concurrent);
+END
+PUB FN pipelineSemanticFacts__side_effecting(self: PipelineSemanticFacts) RETURNS Bool ->
+  RETURN (self.terminal_kind == PipelineTerminalKind.Each);
+END
+PUB STRUCT PipelineOperationPlan {
+  execution: PipelineExecutionKind,
+  site: PipelineSite,
+  rhs: Locatable,
+  source: PipelineSourcePlan,
+  terminal: PipelineTerminalPlan,
+  facts: PipelineSemanticFacts
+}
+PUB STRUCT PipelinePlanBuilder {
+  lowering_target: FN() -> String@symbol,
+  range_chain: FN(Locatable) -> ?PipelineRangeChain,
+  binding_chain: FN(BinaryOp) -> ?PipelineBindingUnnestChain
+}
+
+PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RETURNS !?PipelineOperationPlan ->
+  MUTABLE range_chain: ?PipelineRangeChain = NIL;
+  MUTABLE lhs: Locatable = COPY castLocatableToLocatable(node.left);
+  MUTABLE rhs: Locatable = COPY castLocatableToLocatable(node.right);
+  MUTABLE site = PipelineSite{ list: COPY lhs, options: COPY node };
+  MUTABLE bc_target = (self.lowering_target() == :bc);
+  IF pipelinePlanBuilder__soa_scalar_fold?(self, &lhs, rhs) THEN
+    RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.SoaScalarFold, site, rhs, PipelineTerminalKind.ScalarFold, bc_target, PipelineSourceKind.Soa);
+  END
+  IF aST__pipeline_range_fold?(rhs) THEN
+    range_chain = self.range_chain(lhs);
+    IF range_chain EXISTS AS range_chain_value THEN
+      RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.FusedRangeFold, site, rhs, PipelineTerminalKind.RangeFold, bc_target, PipelineSourceKind.RangeChain, range_chain_value);
+    END
+  END
+  IF rhs IS_A ReduceOp AS reduce_op THEN
+    range_chain = self.range_chain(lhs);
+    IF range_chain EXISTS AS range_chain_value THEN
+      RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.FusedRangeReduce, site, Locatable{ ReduceOp: COPY reduce_op }, PipelineTerminalKind.RangeReduce, bc_target, PipelineSourceKind.RangeChain, range_chain_value);
+    END
+  END
+  MUTABLE binding_chain: ?PipelineBindingUnnestChain = self.binding_chain(node);
+  IF binding_chain EXISTS AS binding_chain_value THEN
+    RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.BindingChain, site, rhs, PipelineTerminalKind.BindingChain, bc_target, PipelineSourceKind.BindingChain, NIL, binding_chain_value);
+  END
+  MUTABLE terminal: ?PipelineTerminalKind = pipelinePlanBuilder__terminal_kind(self, rhs);
+  IF terminal EXISTS AS terminal_value THEN
+    RETURN pipelinePlanBuilder__operation(self, TRY (pipelinePlanBuilder__execution_for(self, terminal_value)), site, rhs, terminal_value, bc_target);
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN pipelinePlanBuilder__soa_scalar_fold?(self: PipelinePlanBuilder, MUTABLE lhs: Locatable, rhs: Locatable) RETURNS Bool ->
+  MUTABLE lhs_type = &lhs.full_type_mut();
+  RETURN ((type__soa_linear_collection?(lhs_type) AND aST__pipeline_range_fold?(rhs)) AND (self.lowering_target() != :bc));
+END
+PRIVATE FN pipelinePlanBuilder__operation(self: PipelinePlanBuilder, execution: PipelineExecutionKind, site: PipelineSite, rhs: Locatable, terminal_kind: PipelineTerminalKind, bc_target: Bool, source_kind: PipelineSourceKind = PipelineSourceKind.Materialized, range_chain: ?PipelineRangeChain = NIL, binding_chain: ?PipelineBindingUnnestChain = NIL) RETURNS PipelineOperationPlan ->
+  MUTABLE source = PipelineSourcePlan{ kind: COPY source_kind, node: COPY site.list, range_chain: COPY range_chain, binding_chain: COPY binding_chain };
+  MUTABLE terminal = PipelineTerminalPlan{ kind: COPY terminal_kind, node: COPY rhs };
+  MUTABLE facts = PipelineSemanticFacts{ bc_target: COPY bc_target, source_kind: COPY source_kind, terminal_kind: COPY terminal_kind };
+  RETURN PipelineOperationPlan{ execution: COPY execution, site: COPY site, rhs: COPY rhs, source: COPY source, terminal: COPY terminal, facts: COPY facts };
+END
+PRIVATE FN pipelinePlanBuilder__terminal_kind(self: PipelinePlanBuilder, rhs: Locatable) RETURNS ?PipelineTerminalKind ->
+  IF rhs IS_A CountOp AS count_op THEN
+    RETURN PipelineTerminalKind.ScalarFold;
+  ELSE_IF rhs IS_A SumOp AS sum_op THEN
+    RETURN PipelineTerminalKind.ScalarFold;
+  ELSE_IF rhs IS_A AverageOp AS average_op THEN
+    RETURN PipelineTerminalKind.ScalarFold;
+  ELSE_IF rhs IS_A MinOp AS min_op THEN
+    RETURN PipelineTerminalKind.ScalarFold;
+  ELSE_IF rhs IS_A MaxOp AS max_op THEN
+    RETURN PipelineTerminalKind.ScalarFold;
+  ELSE_IF rhs IS_A AnyOp AS any_op THEN
+    RETURN PipelineTerminalKind.ScalarFold;
+  ELSE_IF rhs IS_A AllOp AS all_op THEN
+    RETURN PipelineTerminalKind.ScalarFold;
+  ELSE_IF rhs IS_A FindOp AS find_op THEN
+    RETURN PipelineTerminalKind.ScalarFold;
+  ELSE_IF rhs IS_A WhereOp AS where_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A SelectOp AS select_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A LimitOp AS limit_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A TakeWhileOp AS take_while_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A SkipOp AS skip_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A UnnestOp AS unnest_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A ReduceOp AS reduce_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A WindowOp AS window_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A OrderByOp AS order_by_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A JoinOp AS join_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A TapOp AS tap_op THEN
+    RETURN PipelineTerminalKind.ListMaterialization;
+  ELSE_IF rhs IS_A DistinctOp AS distinct_op THEN
+    RETURN PipelineTerminalKind.Distinct;
+  ELSE_IF rhs IS_A BatchWindowOp AS batch_window_op THEN
+    RETURN PipelineTerminalKind.BatchWindow;
+  ELSE_IF rhs IS_A IndexOp AS index_op THEN
+    RETURN PipelineTerminalKind.Index;
+  ELSE_IF rhs IS_A EachOp AS each_op THEN
+    RETURN PipelineTerminalKind.Each;
+  ELSE_IF rhs IS_A ConcurrentOp AS concurrent_op THEN
+    RETURN PipelineTerminalKind.Concurrent;
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN pipelinePlanBuilder__execution_for(self: PipelinePlanBuilder, terminal: PipelineTerminalKind) RETURNS !PipelineExecutionKind ->
+  IF (terminal == PipelineTerminalKind.ScalarFold) THEN
+    RETURN PipelineExecutionKind.MaterializedScalar;
+  ELSE_IF (terminal == PipelineTerminalKind.ListMaterialization) THEN
+    RETURN PipelineExecutionKind.MaterializedList;
+  ELSE_IF (terminal == PipelineTerminalKind.Distinct) THEN
+    RETURN PipelineExecutionKind.SetDistinct;
+  ELSE_IF (terminal == PipelineTerminalKind.BatchWindow) THEN
+    RETURN PipelineExecutionKind.BatchWindow;
+  ELSE_IF (terminal == PipelineTerminalKind.Index) THEN
+    RETURN PipelineExecutionKind.SetIndex;
+  ELSE_IF (terminal == PipelineTerminalKind.Each) THEN
+    RETURN PipelineExecutionKind.Each;
+  ELSE_IF (terminal == PipelineTerminalKind.Concurrent) THEN
+    RETURN PipelineExecutionKind.Concurrent;
+  ELSE
+    panic("unsupported pipeline terminal: {}");
+  END
+END
+FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    Locatable.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END

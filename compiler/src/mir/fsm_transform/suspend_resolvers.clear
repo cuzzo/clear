@@ -1,0 +1,198 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f636f6e746578742e636c656172" AS context
+REQUIRE "pkg:rtoc_6d69722f66736d5f6f70732e636c656172" AS fsm_ops
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f7365676d656e74732e636c656172" AS segments
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2e636c656172" AS fsm_transform
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f656d69742e636c656172" AS emit
+REQUIRE "pkg:rtoc_6d69722f6d69725f6c6f776572696e672e636c656172" AS mir_lowering
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f6c6f776572696e675f70726f746f636f6c2e636c656172" AS lowering_protocol
+# Ruby module FsmTransform
+# Ruby module FsmTransform::SuspendResolvers
+PUB FN suspendResolvers__resolve(seg: Segment, ctx: FsmEmitContext, lowering: Any, susp_idx: ?Int64 = NIL) RETURNS !SuspendDescriptor ->
+  IF (seg.tail IS_A IoSuspend) THEN
+    RETURN TRY (suspendResolvers__resolve_io(seg.tail, ctx, lowering));
+  ELSE_IF (seg.tail IS_A NextSuspend) THEN
+    RETURN TRY (suspendResolvers__resolve_next(seg.tail, ctx, lowering, (susp_idx OR_ELSE ((seg.index + 1)))));
+  ELSE
+    panic("{}Add a resolve_<kind> branch when introducing a new suspend kind.");
+  END
+END
+PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext, lowering: LoweringProtocol) RETURNS !SuspendDescriptor ->
+  MUTABLE stdlib_def = io_tail.stdlib_def;
+  IF !(stdlib_def) THEN
+    panic("IoSuspend missing stdlib_def");
+  END
+  MUTABLE id = ctx.id;
+  MUTABLE em = stdlib_def.emit();
+  MUTABLE setup_ops: []Any = List[];
+  IF em != NIL THEN
+    setup_ops = COPY em.fsm_setup();
+  END
+  MUTABLE finish_block: []Any = List[];
+  IF em != NIL THEN
+    finish_block = COPY em.fsm_finish_block();
+  END
+  MUTABLE finish_value = (IF em != NIL THEN
+    em.fsm_finish_value()
+  ELSE
+    NIL
+  END);
+  MUTABLE state_decls: []Any = List[];
+  IF em != NIL THEN
+    state_decls = COPY em.fsm_state_decls();
+  END
+  MUTABLE state_finalize: []Any = List[];
+  IF em != NIL THEN
+    state_finalize = COPY em.fsm_state_finalize();
+  END
+  MUTABLE arg_mirs = io_tail.call_node.args() |> SELECT lowering.lower(_);
+  MUTABLE lowerer = lowerer__new(id, arg_mirs);
+  MUTABLE setup_mir = TRY (lowerer__lower_stmts(lowerer, setup_ops));
+  MUTABLE state_finalize_m = TRY (lowerer__lower_stmts(lowerer, state_finalize));
+  MUTABLE finish_block_mir = TRY (lowerer__lower_stmts(lowerer, finish_block));
+  MUTABLE finish_value_mir_branch_value: ?Emittable = NIL;
+  IF finish_value THEN
+    finish_value_mir_branch_value = TRY (lowerer__lower_expr(lowerer, finish_value));
+  ELSE
+    finish_value_mir_branch_value = NIL;
+  END
+  MUTABLE finish_value_mir: ?Emittable = finish_value_mir_branch_value;
+  MUTABLE finish_value_template_owned = TRY (fsmOps__finish_value_aliases_finalized_state?(finish_value, state_finalize));
+  MUTABLE bind_stmts = List[];
+  bind_stmts = ruby_array_concat_Any(bind_stmts, CAST(state_finalize_m AS []Any));
+  bind_stmts = ruby_array_concat_Any(bind_stmts, CAST(finish_block_mir AS []Any));
+  MUTABLE result_var = io_tail.result_var;
+  MUTABLE result_zig_type = NIL;
+  MUTABLE result_needs_cleanup = FALSE;
+  MUTABLE ctx_field_decls = state_decls |> SELECT suspendResolvers__state_field_decl(_);
+  IF (((finish_value_mir != NIL) AND result_var) AND (result_var != "_")) THEN
+    MUTABLE ft = TRY (type__from_node_mut(io_tail.call_node, "FSM IO tail result"));
+    result_zig_type = IF ft THEN
+      TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput(ft))))))
+    ELSE
+      NIL
+    END;
+    IF !(result_zig_type) THEN
+      panic("FSM IO result {} missing Zig type");
+    END
+    MUTABLE ctx_ident = Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
+    &ctx_field_decls.append(suspendResolvers__ctx_field_decl(result_var, result_zig_type, Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }));
+    &bind_stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY result_var, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY finish_value_mir, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+    result_needs_cleanup = (suspendResolvers__ownership_bearing_result_type?(ft, lowering) AND !(finish_value_template_owned));
+  ELSE_IF finish_value_mir THEN
+    &bind_stmts.append(ExprStmt{ expr: UNWRAP (COPY finish_value_mir), discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+  END
+  IF ((result_var AND TRUE) AND result_needs_cleanup) THEN
+    MUTABLE ctx_ident = Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
+    &ctx_field_decls.append(suspendResolvers__fsm_owned_guard_decl(result_var));
+    &bind_stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY suspendResolvers__fsm_owned_guard_name(result_var), lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+  END
+  RETURN SuspendDescriptor{ setup_stmts: setup_mir, bind_stmts: bind_stmts, tail: COPY FsmTailYield{ next_step: NIL, yield_reason: "WaitForLock" }, ctx_field_decls: ctx_field_decls, result_var: result_var, result_zig_type: result_zig_type, result_needs_cleanup: result_needs_cleanup };
+END
+PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitContext, lowering: LoweringProtocol, susp_idx: Int64) RETURNS !SuspendDescriptor ->
+  MUTABLE id = ctx.id;
+  MUTABLE sp_field = "sp_${susp_idx.toString()}";
+  MUTABLE promise_expr_mir = lowering.lower(next_tail.promise_ast);
+  MUTABLE ctx_ident = Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
+  MUTABLE setup_stmts = [Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY promise_expr_mir, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }];
+  MUTABLE captured_promise_guard_name: ?String = NIL;
+  MUTABLE captured_names = ctx.captured.keys() |> SELECT _.toString();
+  MUTABLE promise_root = (aST__root_identifier(next_tail.promise_ast) OR_ELSE NIL);
+  IF (promise_root AND captured_names.contains?(CAST(promise_root.name() AS String))) THEN
+    captured_promise_guard_name = "${promise_root.name()}_moved";
+    &setup_stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: UNWRAP (COPY captured_promise_guard_name), lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+  END
+  MUTABLE register_expr = MIRMethodCall{ receiver: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "wg", lowered_node_id: NIL, ownership_consumption: NIL }, method: "registerFsmWaiter", args: [CAST(FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: "task", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+  MUTABLE tail = FsmTailRegisterYield{ next_step: NIL, register_expr: register_expr, yield_reason: "WaitForLock" };
+  MUTABLE result_var = next_tail.result_var;
+  MUTABLE promise_ft = TRY (type__from_node_mut(next_tail.promise_ast, "FSM NEXT tail promise"));
+  MUTABLE sp_zig = TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput(promise_ft))))));
+  MUTABLE inner_type_info: ?Type = NIL;
+  MUTABLE promise_type = TRY (type__new(castTypeToTypeConstructionInput(promise_ft)));
+  MUTABLE inner_zig: ?String =   IF (type__future?(promise_type) AND TRY (type__tense_type(promise_type))) THEN
+    {
+  MUTABLE rtoc_value_block_marker = 0;
+  inner_type_info = TRY (type__new(castTypeToTypeConstructionInput(TRY (type__tense_type(promise_type)))));
+  TRY (type__zig_type(inner_type_info))
+  }
+  ELSE
+    NIL
+  END;
+  MUTABLE result_needs_cleanup = suspendResolvers__ownership_bearing_result_type?(inner_type_info, lowering);
+  MUTABLE finish_call = MIRMethodCall{ receiver: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL }, method: "finishFsmNext", args: ( { MUTABLE rtoc_empty_list_1: []Any = List[]; rtoc_empty_list_1 } ), try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+  MUTABLE err_name = "__err_${susp_idx.toString()}";
+  MUTABLE finish_expr = TryCatch{ expr: Emittable{ MIRMethodCall: COPY finish_call }, catch_body: Emittable{ ScopeBlock: COPY ScopeBlock{ body: Body{ ArrayValue: [ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: COPY err_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] |> SELECT SegmentStmt{ Emittable: Emittable{ ReturnStmt: COPY _ } } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, capture: err_name, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+  IF inner_type_info EXISTS AS inner_type_info_value THEN
+    MUTABLE inner_type_info_value_mutable = COPY inner_type_info_value;
+    finish_expr.result_type = inner_type_info_value_mutable;
+  END
+  MUTABLE bind_stmts =   IF result_var THEN
+    {
+  MUTABLE rtoc_value_block_marker = 0;
+  res_name = "__res_${susp_idx.toString()}";
+  stmts = CAST(Tuple{Let{ name: Name{ StringValue: COPY res_name }, init: Emittable{ TryCatch: COPY finish_expr }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY UNWRAP (inner_zig) })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY result_var, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: COPY res_name, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Set>);
+  IF result_needs_cleanup THEN
+    &stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY suspendResolvers__fsm_owned_guard_name(result_var), lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+  END
+  stmts
+  }
+  ELSE
+    [ExprStmt{ expr: Emittable{ TryCatch: COPY finish_expr }, discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]
+  END;
+  MUTABLE ctx_field_decls = [suspendResolvers__ctx_field_decl(sp_field, sp_zig, Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } })];
+  IF captured_promise_guard_name EXISTS AS captured_promise_guard_name_value THEN
+    &ctx_field_decls.append(suspendResolvers__ctx_field_decl(captured_promise_guard_name_value, "bool", Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }));
+  END
+  IF (result_var AND (inner_zig != NIL)) THEN
+    &ctx_field_decls.append(suspendResolvers__ctx_field_decl(result_var, inner_zig, Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }));
+    IF result_needs_cleanup THEN
+      &ctx_field_decls.append(suspendResolvers__fsm_owned_guard_decl(result_var));
+    END
+  END
+  RETURN SuspendDescriptor{ setup_stmts: setup_stmts, bind_stmts: bind_stmts, tail: COPY tail, ctx_field_decls: ctx_field_decls, result_var: result_var, result_zig_type: inner_zig, result_needs_cleanup: result_needs_cleanup };
+END
+PUB FN suspendResolvers__fsm_owned_guard_name(name: String) RETURNS String ->
+  RETURN "__owned_${name}_init";
+END
+PUB FN suspendResolvers__fsm_owned_guard_decl(name: String) RETURNS ContextFieldDecl ->
+  RETURN suspendResolvers__ctx_field_decl(suspendResolvers__fsm_owned_guard_name(name), "bool", Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } });
+END
+PRIVATE FN suspendResolvers__ctx_field_decl(name: String, type_zig: String, default_value: ?Emittable) RETURNS ContextFieldDecl ->
+  RETURN ContextFieldDecl{ name: COPY name, type_zig: COPY type_zig, default_value: COPY default_value };
+END
+PRIVATE FN suspendResolvers__state_field_decl(decl: StateFieldDecl) RETURNS ContextFieldDecl ->
+  RETURN suspendResolvers__ctx_field_decl(decl.name, decl.zig_type, decl.default_value);
+END
+PUB FN suspendResolvers__ownership_bearing_result_type?(type_info: ?Type, lowering: Any) RETURNS !Bool ->
+  IF type_info EXISTS AS type_info_value THEN
+    MUTABLE schema_lookup = IF respondsTo?(lowering, "mir_schema_lookup") THEN
+      lowering.mir_schema_lookup()
+    ELSE
+      NIL
+    END;
+    RETURN (((TRY (type__string?(type_info_value)) OR TRY (type__heap_ptr?(type_info_value))) OR TRY (type__collection_value?(type_info_value))) OR TRY (type__recursive_cleanup_shape?(type_info_value, schema_lookup)));
+  ELSE
+    RETURN FALSE;
+  END
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+# End Ruby module FsmTransform::SuspendResolvers
+# End Ruby module FsmTransform
+FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
+    Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
+    Type.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
+  END
+  panic("Invalid cast to TypeConstructionInput");
+END
+FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+  MUTABLE result: []Any = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END

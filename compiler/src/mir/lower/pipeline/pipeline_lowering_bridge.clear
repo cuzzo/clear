@@ -1,0 +1,354 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f736368656d615f72656769737472792e636c656172" AS schema_registry
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6261636b656e64732f6d69725f656d69747465722e636c656172" AS mir_emitter
+REQUIRE "pkg:rtoc_6d69722f6d69725f6c6f776572696e672e636c656172" AS mir_lowering
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f73746174652e636c656172" AS state
+PUB STRUCT PipelineLowerHeadResult {
+  value: Emittable,
+  pending: []Emittable
+}
+PUB STRUCT PipelineBridgeAllocationFact {
+  alloc: String@symbol,
+  mark: AllocMark,
+  cleanup_entry: ?CleanupEntry@multiowned
+}
+PUB STRUCT PipelineLoweringBridge {
+  lowering: MIRLowering@multiowned
+}
+
+PUB FN pipelineLoweringBridge__initialize(MUTABLE self: PipelineLoweringBridge, lowering: MIRLowering, emitter: MIREmitter) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.lowering = COPY lowering;
+    MUTABLE rtoc_writer_receiver_1: MIRLoweringRuntimeState = mIRLowering__runtime_state(rtoc_self_view.lowering);
+    rtoc_writer_receiver_1.emitter = emitter;
+}
+END
+PUB FN pipelineLoweringBridge__fn_sigs(self: PipelineLoweringBridge) RETURNS !{String@symbol}FunctionSignature@multiowned
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (mIRLowering__fn_sigs(rtoc_self_view.lowering));
+}
+END
+PUB FN pipelineLoweringBridge__lowering_target(self: PipelineLoweringBridge) RETURNS String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__lowering_target(rtoc_self_view.lowering);
+}
+END
+PUB FN pipelineLoweringBridge__bc_target?(self: PipelineLoweringBridge) RETURNS Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__bc_target?(rtoc_self_view.lowering);
+}
+END
+PUB FN pipelineLoweringBridge__pipeline_result_alloc(self: PipelineLoweringBridge) RETURNS String@symbol
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__pipeline_result_alloc(rtoc_self_view.lowering);
+}
+END
+PUB FN pipelineLoweringBridge__mir_schema_lookup(self: PipelineLoweringBridge) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__mir_schema_lookup(rtoc_self_view.lowering);
+}
+END
+PUB FN pipelineLoweringBridge__next_pipeline_observable_id(self: PipelineLoweringBridge) RETURNS Int64
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__next_pipeline_observable_id(rtoc_self_view.lowering);
+}
+END
+PUB FN pipelineLoweringBridge__task_config_variant(self: PipelineLoweringBridge, size_name: ?String@symbol) RETURNS String
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__task_config_variant(rtoc_self_view.lowering, size_name, NIL);
+}
+END
+PUB FN pipelineLoweringBridge__guarded_cleanup_name?(self: PipelineLoweringBridge, name: String) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__pipeline_guarded_cleanup_name?(rtoc_self_view.lowering, name);
+}
+END
+PUB FN pipelineLoweringBridge__lower_node(MUTABLE self: PipelineLoweringBridge, node: Locatable) RETURNS !Emittable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN CAST(TRY (mIRLowering__lower(&rtoc_self_view.lowering, castLocatableToMIRLoweringLowerableStmt(node))) AS Emittable);
+}
+END
+PUB FN pipelineLoweringBridge__lower_node_with_decl_alloc(MUTABLE self: PipelineLoweringBridge, node: Locatable, alloc: String@symbol) RETURNS !Emittable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN TRY (mIRLowering__pipeline_lower_node_with_decl_alloc(&rtoc_self_view.lowering, node, alloc));
+}
+END
+PUB FN pipelineLoweringBridge__lower_body(MUTABLE self: PipelineLoweringBridge, nodes: []Locatable) RETURNS ![]Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN TRY (mIRLowering__lower_body(&rtoc_self_view.lowering, nodes));
+}
+END
+PUB FN pipelineLoweringBridge__emit_mir(self: PipelineLoweringBridge, node: Emittable) RETURNS !?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_3 = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_2 = mIRLowering__runtime_state(rtoc_self_view.lowering);
+    mIRLoweringRuntimeState__emitter_mut(&rtoc_mutable_receiver_2) });
+    TRY (mIREmitter__emit(&rtoc_mutable_receiver_3, node)) };
+}
+END
+PUB FN pipelineLoweringBridge__emit_builtin(self: PipelineLoweringBridge, name: String@symbol, args: []Emittable) RETURNS !Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN castMIRLoweringReturnValueToEmittable(TRY (mIRLowering__emit_builtin(rtoc_self_view.lowering, name, args)));
+}
+END
+PUB FN pipelineLoweringBridge__lower_head(self: PipelineLoweringBridge, blk: FN() -> Emittable) RETURNS PipelineLowerHeadResult
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE value, pending = rtoc_self_view.lowering.lower_head(%() USE(blk) -> blk());
+    MUTABLE typed_pending: []Emittable = COPY pending;
+    RETURN PipelineLowerHeadResult{ value: COPY CAST(value AS Emittable), pending: COPY typed_pending };
+}
+END
+PUB FN pipelineLoweringBridge__append_ownership_transfers_for_mir_body(self: PipelineLoweringBridge, body: []Emittable) RETURNS ![]Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view.lowering, body));
+}
+END
+PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(self: PipelineLoweringBridge, value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS ?PipelineBridgeAllocationFact
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE fact: ?PipelineAllocMarkFact = mIRLowering__pipeline_alloc_mark_fact(rtoc_self_view.lowering, value, name, fallback_alloc, type_info, ast_node, context, known_allocating, accept_owned_call, include_cleanup);
+    IF fact EXISTS AS fact_value THEN
+      RETURN PipelineBridgeAllocationFact{ alloc: COPY fact_value.alloc, mark: COPY fact_value.mark, cleanup_entry: KEEP fact_value.cleanup_entry };
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PUB FN pipelineLoweringBridge__pipeline_owned_cleanup_entry(self: PipelineLoweringBridge, value: Emittable, ast_node: ?Locatable) RETURNS ?CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__pipeline_owned_cleanup_entry(rtoc_self_view.lowering, value, ast_node);
+}
+END
+PUB FN pipelineLoweringBridge__pipeline_iteration_loop_marks(self: PipelineLoweringBridge) RETURNS ![]Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (mIRLowering__pipeline_iteration_loop_marks(rtoc_self_view.lowering));
+}
+END
+PUB FN pipelineLoweringBridge__with_pipeline_decl_alloc<U>(self: PipelineLoweringBridge, alloc: String@symbol, blk: FN() -> U) RETURNS U
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__pipeline_with_decl_alloc(rtoc_self_view.lowering, alloc, blk);
+}
+END
+PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(self: PipelineLoweringBridge, insert: IndexInsert, value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (mIRLowering__pipeline_index_insert_with_ownership(rtoc_self_view.lowering, insert, value, value_owns, target_alloc));
+}
+END
+PUB FN pipelineLoweringBridge__with_runtime_binding_name<U>(self: PipelineLoweringBridge, rt_name: String, blk: FN() -> U) RETURNS U
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__with_runtime_binding_name(rtoc_self_view.lowering, rt_name, blk);
+}
+END
+PUB FN pipelineLoweringBridge__with_fiber_capture_map<U>(self: PipelineLoweringBridge, new_entries: {String}String, capture_symbols: {String}SymbolEntry, rt_override: String, blk: FN() -> U) RETURNS U
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__with_fiber_capture_map(rtoc_self_view.lowering, new_entries, capture_symbols, rt_override, blk);
+}
+END
+PUB FN pipelineLoweringBridge__execution_boundary_fact(self: PipelineLoweringBridge, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS ExecutionBoundaryFact
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mIRLowering__pipeline_execution_boundary_fact(rtoc_self_view.lowering, kind, dispatch, analysis);
+}
+END
+PUB FN pipelineLoweringBridge__with_shard_context<U>(MUTABLE self: PipelineLoweringBridge, context: ?{String@symbol}String, blk: FN() -> U) RETURNS !U
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+  MUTABLE previous: ?{String@symbol}String = TRY (mIRLowering__shard_context(rtoc_self_view.lowering));
+  DEFER TRY (mIRLowering__set_shard_context(rtoc_self_view.lowering, previous));
+  TRY (mIRLowering__set_shard_context(rtoc_self_view.lowering, context));
+  RETURN blk();
+}
+END
+PUB FN pipelineLoweringBridge__new(lowering: MIRLowering, emitter: MIREmitter) RETURNS PipelineLoweringBridge@multiowned ->
+  MUTABLE self = PipelineLoweringBridge{ lowering: COPY lowering };
+  pipelineLoweringBridge__initialize(&self, lowering, emitter);
+  RETURN self @multiowned;
+END
+FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
+  PARTIAL MATCH value START
+    Locatable.MIRProgram AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ProtocolDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN MIRLoweringLowerableStmt{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN MIRLoweringLowerableStmt{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN MIRLoweringLowerableStmt{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN MIRLoweringLowerableStmt{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN MIRLoweringLowerableStmt{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN MIRLoweringLowerableStmt{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN MIRLoweringLowerableStmt{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN MIRLoweringLowerableStmt{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN MIRLoweringLowerableStmt{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN MIRLoweringLowerableStmt{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN MIRLoweringLowerableStmt{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN MIRLoweringLowerableStmt{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Assert: COPY cast_payload };,
+    Locatable.TenseRecoveryRaise AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TenseRecoveryRaise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN MIRLoweringLowerableStmt{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN MIRLoweringLowerableStmt{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ LimitOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ CollectOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ JoinOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MutableBorrow: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseRaise AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseExit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePass AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePrune AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseBreak AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN MIRLoweringLowerableStmt{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN MIRLoweringLowerableStmt{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN MIRLoweringLowerableStmt{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN MIRLoweringLowerableStmt{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN MIRLoweringLowerableStmt{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN MIRLoweringLowerableStmt{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN MIRLoweringLowerableStmt{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN MIRLoweringLowerableStmt{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN MIRLoweringLowerableStmt{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN MIRLoweringLowerableStmt{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN MIRLoweringLowerableStmt{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN MIRLoweringLowerableStmt{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN MIRLoweringLowerableStmt{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN MIRLoweringLowerableStmt{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN MIRLoweringLowerableStmt{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN MIRLoweringLowerableStmt{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN MIRLoweringLowerableStmt{ TestThat: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN MIRLoweringLowerableStmt{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN MIRLoweringLowerableStmt{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN MIRLoweringLowerableStmt{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN MIRLoweringLowerableStmt{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to MIRLoweringLowerableStmt");
+  END
+  panic("Invalid cast to MIRLoweringLowerableStmt");
+END
+FN castMIRLoweringReturnValueToEmittable(value: MIRLoweringReturnValue) RETURNS Emittable ->
+  PARTIAL MATCH value START
+    MIRLoweringReturnValue.Cleanup AS cast_payload -> RETURN Emittable{ Cleanup: COPY cast_payload };,
+    MIRLoweringReturnValue.ErrCleanup AS cast_payload -> RETURN Emittable{ ErrCleanup: COPY cast_payload };,
+    MIRLoweringReturnValue.InlineBc AS cast_payload -> RETURN Emittable{ InlineBc: COPY cast_payload };,
+    MIRLoweringReturnValue.RegistryCall AS cast_payload -> RETURN Emittable{ RegistryCall: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Emittable");
+  END
+  panic("Invalid cast to Emittable");
+END

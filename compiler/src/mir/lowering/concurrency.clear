@@ -1,0 +1,122 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f6d69725f636865636b65722e636c656172" AS mir_checker
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f66696265725f6374785f6275696c6465722e636c656172" AS fiber_ctx_builder
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2e636c656172" AS fsm_transform
+REQUIRE "pkg:rtoc_6173742f6173796e635f726573756c745f73686170652e636c656172" AS async_result_shape
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f6361706162696c69746965732e636c656172" AS capabilities
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f636f756e746572732e636c656172" AS counters
+REQUIRE "pkg:rtoc_6d69722f6d69725f6c6f776572696e672e636c656172" AS mir_lowering
+REQUIRE "pkg:rtoc_73656d616e7469632f74656e73655f6f7065726174696f6e5f706c616e2e636c656172" AS tense_operation_plan
+# Ruby module MIRLoweringConcurrency
+PUB UNION BgTransformValue { BgBlock: BgBlock, StringValue: String, Int64Value: Int64, SymbolValue: String@symbol, BoolValue: Bool, AsyncResultShape: AsyncResultShape, HashMapValue: {String}Type@multiowned, HashMapValue2: {String}ResourceClosePlan, ArrayValue: [Set]String, ArrayValue2: []ContextFieldDecl, ArrayValue3: []StructInitField, ArrayValue4: []String, ArrayValue5: []CaptureCleanupAction, ArrayValue6: []Emittable, HashMapValue3: {String}Type }
+PUB STRUCT NextExprPlan {
+  source_kind: String@symbol,
+  promise_type: Type,
+  async_result_shape: ?AsyncResultShape,
+  result_type: Type,
+  result_alloc: ?String@symbol,
+  inner: Emittable
+}
+
+PUB FN nextExprPlan__promise_list?(self: NextExprPlan) RETURNS Bool ->
+  RETURN (self.source_kind == :promise_list);
+END
+PUB FN nextExprPlan__observable_list?(self: NextExprPlan) RETURNS Bool ->
+  RETURN (self.source_kind == :observable_list);
+END
+PUB FN nextExprPlan__observable_string?(self: NextExprPlan) RETURNS Bool ->
+  RETURN (self.source_kind == :observable_string);
+END
+PUB STRUCT BgLoweringNames {
+  id: Int64,
+  ctx_type: String,
+  alloc_var: String,
+  promise_var: String,
+  ctx_var: String,
+  blk_label: String,
+  bg_rt: String
+}
+PUB STRUCT BgTypePlan {
+  async_shape: AsyncResultShape,
+  inner_type: Type,
+  inner_zig: String,
+  promise_zig: String,
+  is_void: Bool
+}
+PUB STRUCT BgBodyMaterialization {
+  run_body: []Emittable,
+  emit_body: []Emittable
+}
+PUB STRUCT BgBodyStep {
+  expr: Locatable,
+  binding: ?String
+}
+PUB STRUCT BgCaptureMaterialization {
+  caps: FiberCtxBuilderResult,
+  capture_fields: []ContextFieldDecl,
+  capture_inits: []StructInitField,
+  fresh_heap_cleanup_names: []String,
+  capture_frees: []CaptureCleanupAction,
+  capture_finalizers: []Emittable,
+  promoted_decls: []Emittable
+}
+PUB STRUCT BgSchedulerPlan {
+  pin_mode: ?Any@multiowned,
+  site_id: Int64,
+  site_line: Int64,
+  site_col: Int64,
+  dispatch: Any@multiowned,
+  profiled_task_cfg: TaskConfigPlan,
+  spawn_call: FiberSpawnCall,
+  profile_site: ProfileTaskSite,
+  arena_init: ?Emittable
+}
+PUB STRUCT BgFsmTransformContext {
+  node: BgBlock,
+  names: BgLoweringNames,
+  types: BgTypePlan,
+  capture: BgCaptureMaterialization,
+  body: BgBodyMaterialization,
+  scheduler: BgSchedulerPlan,
+  captured: {String}Type,
+  capture_close_plans: {String}ResourceClosePlan,
+  pointer_captures: [Set]String,
+  rt_name: String
+}
+
+PUB FN bgFsmTransformContext__to_transform_hash(self: BgFsmTransformContext) RETURNS !{String@symbol}?BgTransformValue ->
+  MUTABLE result: {String@symbol}?BgTransformValue = {};
+  result[:node] = BgTransformValue{ BgBlock: COPY self.node };
+  result[:blk_label] = BgTransformValue{ StringValue: COPY self.names.blk_label };
+  result[:ctx_type] = BgTransformValue{ StringValue: COPY self.names.ctx_type };
+  result[:promise_zig] = BgTransformValue{ StringValue: COPY self.types.promise_zig };
+  result[:async_result_shape] = BgTransformValue{ AsyncResultShape: COPY self.types.async_shape };
+  result[:id] = BgTransformValue{ Int64Value: self.names.id };
+  result[:bg_rt] = BgTransformValue{ StringValue: COPY self.names.bg_rt };
+  result[:capture_fields] = BgTransformValue{ ArrayValue: COPY self.capture.capture_fields };
+  result[:captured] = BgTransformValue{ HashMapValue: COPY self.captured };
+  result[:capture_close_plans] = BgTransformValue{ HashMapValue: COPY self.capture_close_plans };
+  result[:pointer_captures] = BgTransformValue{ ArrayValue: COPY self.pointer_captures };
+  result[:capture_frees] = BgTransformValue{ ArrayValue: COPY self.capture.capture_frees };
+  result[:capture_finalizers] = BgTransformValue{ ArrayValue: COPY self.capture.capture_finalizers };
+  result[:fresh_heap_cleanup_names] = BgTransformValue{ ArrayValue: COPY self.capture.fresh_heap_cleanup_names };
+  result[:is_void] = BgTransformValue{ BoolValue: self.types.is_void };
+  result[:alloc_var] = BgTransformValue{ StringValue: COPY self.names.alloc_var };
+  result[:promise_var] = BgTransformValue{ StringValue: COPY self.names.promise_var };
+  result[:ctx_var] = BgTransformValue{ StringValue: COPY self.names.ctx_var };
+  result[:promoted_decls] = BgTransformValue{ ArrayValue: COPY self.capture.promoted_decls };
+  result[:capture_inits] = BgTransformValue{ ArrayValue: COPY self.capture.capture_inits };
+  result[:rt_name] = BgTransformValue{ StringValue: COPY self.rt_name };
+  result[:pin_mode] = COPY KEEP self.scheduler.pin_mode;
+  result[:parallel] = (self.node.parallel == TRUE);
+  result[:profile_site_id] = BgTransformValue{ Int64Value: self.scheduler.site_id };
+  result[:profile_line] = BgTransformValue{ Int64Value: self.scheduler.site_line };
+  result[:profile_column] = BgTransformValue{ Int64Value: self.scheduler.site_col };
+  result[:inner_zig] = BgTransformValue{ StringValue: COPY self.types.inner_zig };
+  result[:arena_init_flag] = (self.node.arena_mode == TRUE);
+  RETURN result;
+END
+# End Ruby module MIRLoweringConcurrency

@@ -1,0 +1,48 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_73656d616e7469632f706173735f73746174652e636c656172" AS pass_state
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f70726f64756374732e636c656172" AS annotation_products
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f747970655f616e616c797369735f70686173652e636c656172" AS type_analysis_phase
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f66756e6374696f6e5f72656769737472792e636c656172" AS function_registry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f646572697665645f70726f6772616d5f66616374732e636c656172" AS derived_program_facts
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+# Ruby module Annotator::Phases::AnnotationBoundary
+PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: AnnotationProducts) RETURNS !Void ->
+  MUTABLE typed_program: ?TypedProgramFacts = COPY products.typed_program;
+  IF typed_program EXISTS AS typed_program_value THEN
+    MUTABLE typed_program_value_mutable = COPY typed_program_value;
+    IF !(typedProgramFacts__program(typed_program_value_mutable).equal?(program)) THEN
+      panic("annotation boundary received a different program");
+    END
+    &program.full_type_mut("annotation boundary program");
+    MUTABLE rtoc_local_receiver_1 = (TRY (annotationTypeInventory__scan(program)));
+    TRY (annotationTypeInventory__verify_resolved_mut(rtoc_local_receiver_1));
+    typed_program_value_mutable.resolution.function_registry.nodes.keys() |> EACH {
+  MUTABLE fn_value: FunctionDef@multiowned = (typed_program_value_mutable.resolution.function_registry.nodes[_] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
+  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY &fn_value.full_type_mut("annotation boundary function ${_}") });
+  IF !(signature) THEN
+        panic("annotation boundary missing function signature for {}");
+  END
+  MUTABLE derived: ?DerivedFunctionFacts = NIL;
+  IF (KEEP products.capability_audit?.derived_program)?.functions != NIL THEN
+        derived = COPY (((KEEP products.capability_audit?.derived_program)?.functions)?[_] OR_ELSE NIL);
+      END
+  IF !(derived) THEN
+        panic("annotation boundary missing derived function facts for {}");
+  END
+  IF !((derived.return_type_key == type__semantic_type_key(functionSignature__return_type(signature)))) THEN
+        panic("annotation boundary derived return contract mismatch for {}");
+  END
+    };
+    MUTABLE rtoc_mutable_receiver_2 = mIRPassState__for_mut(program);
+    TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_2, :annotated));
+  ELSE
+    panic("annotation boundary requires typed program facts");
+  END
+END
+# End Ruby module Annotator::Phases::AnnotationBoundary
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

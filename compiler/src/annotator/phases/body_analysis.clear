@@ -1,0 +1,111 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_73656d616e7469632f73656d616e7469635f6964732e636c656172" AS semantic_ids
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f6465636c61726174696f6e5f696e6465782e636c656172" AS declaration_index
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB UNION AssignmentNode { Assignment: Assignment, BindExpr: BindExpr, DestructuringAssignment: DestructuringAssignment }
+PUB UNION AsyncBodyNode { BgBlock: BgBlock, BgStreamBlock: BgStreamBlock, DoBranch: DoBranch }
+PUB UNION AsyncValidationNode { BgBlock: BgBlock, BgStreamBlock: BgStreamBlock, DoBlock: DoBlock }
+PUB STRUCT BodyScanSummary {
+  definition_id: DefId,
+  body_id: BodyId,
+  callees: [Set]String,
+  propagating_callees: [Set]String,
+  has_fnptr_call: Bool,
+  raises_directly: Bool,
+  call_site_facts: []CallSiteFact,
+  local_facts: []LocalFact,
+  return_nodes: []ReturnNode,
+  binding_nodes: []BindingNode,
+  assignment_nodes: []AssignmentNode,
+  escape_nodes: []Locatable,
+  with_scope_nodes: {Int64}[]Locatable,
+  lambda_body_identifier_refs: {Int64}[]Identifier,
+  with_blocks: []WithBlock,
+  suspend_points: []SuspendPointFact,
+  pipe_input_types: [Set]String,
+  references_snapshot: Bool
+}
+PUB STRUCT BodyFactContext {
+  record_call_sites: Bool,
+  failure_absorbed: Bool,
+  track_with_scope_stack: Bool,
+  with_scope_stack: []WithBlock,
+  lambda_body_stack: []LambdaLit
+}
+PUB STRUCT BodyFactFrame {
+  summary: BodyScanSummary,
+  record_call_sites: Bool,
+  failure_absorbed: Bool,
+  track_with_scope_stack: Bool,
+  with_scope_stack: []WithBlock,
+  lambda_body_stack: []LambdaLit,
+  next_local_ordinal: Int64,
+  next_place_ordinal: Int64,
+  next_call_site_ordinal: Int64
+}
+
+PUB FN bodyFactFrame__for_identity(identity: BodyIdentity) RETURNS BodyFactFrame ->
+  RETURN BodyFactFrame{ summary: COPY BodyScanSummary{ definition_id: COPY identity.definition_id, body_id: COPY identity.body_id, callees: COPY Set[], propagating_callees: COPY Set[], has_fnptr_call: FALSE, raises_directly: FALSE, call_site_facts: List[], local_facts: List[], return_nodes: List[], binding_nodes: List[], assignment_nodes: List[], escape_nodes: List[], with_scope_nodes: {}, lambda_body_identifier_refs: {}, with_blocks: List[], suspend_points: List[], pipe_input_types: Set[], references_snapshot: FALSE }, record_call_sites: TRUE, failure_absorbed: FALSE, track_with_scope_stack: TRUE, with_scope_stack: List[], lambda_body_stack: List[], next_local_ordinal: 0, next_place_ordinal: 0, next_call_site_ordinal: 0 };
+END
+PUB FN bodyFactFrame__to_summary(self: BodyFactFrame) RETURNS BodyScanSummary ->
+  RETURN COPY self.summary;
+END
+PUB FN bodyFactFrame__context(self: BodyFactFrame) RETURNS BodyFactContext ->
+  RETURN BodyFactContext{ record_call_sites: self.record_call_sites, failure_absorbed: self.failure_absorbed, track_with_scope_stack: self.track_with_scope_stack, with_scope_stack: COPY self.with_scope_stack, lambda_body_stack: COPY self.lambda_body_stack };
+END
+PUB FN bodyFactFrame__restore_context(MUTABLE self: BodyFactFrame, context: BodyFactContext) RETURNS Void ->
+  self.record_call_sites = context.record_call_sites;
+  self.failure_absorbed = context.failure_absorbed;
+  self.track_with_scope_stack = context.track_with_scope_stack;
+  self.with_scope_stack = COPY context.with_scope_stack;
+  self.lambda_body_stack = COPY context.lambda_body_stack;
+END
+PUB STRUCT BgSpawnDecision {
+  spawn_form: String@symbol,
+  reason: ?String@symbol
+}
+PUB STRUCT AsyncBodyFact {
+  node: AsyncBodyNode,
+  summary: BodyScanSummary,
+  validation_node: AsyncValidationNode
+}
+PUB STRUCT FunctionBodySummary {
+  name: String,
+  definition_id: DefId,
+  body_id: BodyId,
+  callees: [Set]String,
+  propagating_callees: [Set]String,
+  has_fnptr_call: Bool,
+  raises_directly: Bool,
+  call_site_facts: []CallSiteFact,
+  local_facts: []LocalFact,
+  return_nodes: []ReturnNode,
+  binding_nodes: []BindingNode,
+  assignment_nodes: []AssignmentNode,
+  escape_nodes: []Locatable,
+  with_scope_nodes: {Int64}[]Locatable,
+  lambda_body_identifier_refs: {Int64}[]Identifier,
+  with_blocks: []WithBlock,
+  suspend_points: []SuspendPointFact
+}
+PUB STRUCT LocalFunctionFacts {
+  name: String,
+  definition_id: Int64,
+  body_id: Int64,
+  callees: []String,
+  propagating_callees: []String,
+  has_function_pointer_call: Bool,
+  raises_directly: Bool,
+  local_count: Int64,
+  call_site_count: Int64,
+  suspend_kinds: []String
+}
+
+PUB FN localFunctionFacts__from_summary(summary: FunctionBodySummary) RETURNS LocalFunctionFacts ->
+  RETURN LocalFunctionFacts{ name: COPY summary.name, definition_id: summary.definition_id.value, body_id: summary.body_id.value, callees: COPY (summary.callees |> SELECT COPY _) |> ORDER_BY _, propagating_callees: COPY (summary.propagating_callees |> SELECT COPY _) |> ORDER_BY _, has_function_pointer_call: summary.has_fnptr_call, raises_directly: summary.raises_directly, local_count: summary.local_facts.length(), call_site_count: summary.call_site_facts.length(), suspend_kinds: COPY (summary.suspend_points |> SELECT CAST(_.kind AS String)) |> ORDER_BY _ };
+END
+# Ruby module Annotator::Phases::BodyAnalysis
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

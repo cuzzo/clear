@@ -1,0 +1,57 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB STRUCT SnapshotTxnViolation {
+  effect: String@symbol,
+  fn: String
+}
+PUB STRUCT HeldLockEntry {
+  token: ?Token
+}
+PUB STRUCT HeldLockTypeEntry {
+  type: String@symbol,
+  opted_out: Bool
+}
+PUB STRUCT SnapshotTxnFrame {
+  violations: []SnapshotTxnViolation
+}
+PUB STRUCT DeferredRecoveryValidation {
+  node: BinaryOp,
+  left: FuncCall,
+  callee_name: String,
+  value_type: Type
+}
+PUB STRUCT DeferredGiveValidation {
+  arg_node: Locatable,
+  callee_name: String,
+  param_index: Int64,
+  param_name: String
+}
+PUB STRUCT DeferredCopyRetainedValidation {
+  arg_node: Locatable,
+  name: String,
+  carrier: String,
+  callee_name: String,
+  param_index: Int64
+}
+PUB STRUCT CapabilityAuditInputs {
+  held_locks: {String}HeldLockEntry,
+  held_lock_types: []HeldLockTypeEntry,
+  current_predicate_context: ?PredicateContext,
+  deferred_with_validations: []DeferredWithValidation,
+  deferred_recovery_validations: []DeferredRecoveryValidation,
+  deferred_give_validations: []DeferredGiveValidation,
+  deferred_copy_retained_validations: []DeferredCopyRetainedValidation,
+  predicate_call_sites: []PredicateCallSite,
+  async_body_facts: []AsyncBodyFact,
+  capability_audit: BindingAuditStore,
+  capture_stack: []CaptureContext,
+  capture_move_suppression_depth: Int64,
+  snapshot_txn_frames: []SnapshotTxnFrame,
+  effect_state: ?EffectState,
+  lock_analysis: LockAnalysisState,
+  ownership_graph: OwnershipGraph@multiowned,
+  ownership_transport_frames: []OwnershipTransportFacts
+}
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

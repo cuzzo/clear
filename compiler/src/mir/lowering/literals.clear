@@ -1,0 +1,58 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+# Ruby module MIRLoweringLiterals
+PUB STRUCT ListLiteralPlan {
+  type_info: Type,
+  alloc: String@symbol,
+  element_type: ?Type,
+  element_zig: String,
+  element_needs_owned_storage: Bool
+}
+
+PUB FN listLiteralPlan__bounded_stream?(self: ListLiteralPlan) RETURNS !Bool EFFECTS REENTRANT ->
+  RETURN TRY (type__bounded_stream?(self.type_info));
+END
+PUB FN listLiteralPlan__fixed_stack_or_frame?(self: ListLiteralPlan, node: ListLit) RETURNS Bool ->
+  RETURN (((type__fixed?(self.type_info) AND node.stack_or_frame_storage?())) == TRUE);
+END
+PUB FN listLiteralPlan__list_collection?(self: ListLiteralPlan) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN type__list_collection?(self.type_info);
+END
+PUB STRUCT HashLiteralPlan {
+  type_info: Type,
+  alloc: String@symbol,
+  zig_type: String,
+  arc_wrapped: Bool,
+  rc_wrapped: Bool
+}
+
+PUB FN hashLiteralPlan__capability_wrapped?(self: HashLiteralPlan) RETURNS Bool ->
+  RETURN (self.arc_wrapped OR self.rc_wrapped);
+END
+PUB FN hashLiteralPlan__allocator_method(self: HashLiteralPlan) RETURNS String ->
+  IF placement__explicit_heap?(self.alloc) THEN
+    RETURN "heapAlloc";
+  ELSE
+    RETURN "frameAlloc";
+  END
+END
+PUB STRUCT HashLiteralCapabilityPlan {
+  zig_type: String,
+  init_value: ?StructInit,
+  empty_result: ?Emittable,
+  result_wrap: ?String@symbol,
+  result_wrap_fn: ?String
+}
+
+PUB FN hashLiteralCapabilityPlan__wraps_result?(self: HashLiteralCapabilityPlan) RETURNS Bool ->
+  RETURN !((self.result_wrap == NIL));
+END
+PUB FN hashLiteralCapabilityPlan__striped_result?(self: HashLiteralCapabilityPlan) RETURNS Bool ->
+  RETURN (self.result_wrap == :striped);
+END
+PUB FN hashLiteralCapabilityPlan__composed_result?(self: HashLiteralCapabilityPlan) RETURNS Bool ->
+  RETURN (self.result_wrap == :composed);
+END
+# End Ruby module MIRLoweringLiterals

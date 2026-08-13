@@ -1,0 +1,254 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172" AS lexer
+REQUIRE "pkg:rtoc_6173742f7061727365722e636c656172" AS parser
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_6d69722f7265777269746572732f706970656c696e655f72657772697465722e636c656172" AS pipeline_rewriter
+REQUIRE "pkg:rtoc_6d69722f7265777269746572732f737472696e675f636f6e6361745f72657772697465722e636c656172" AS string_concat_rewriter
+REQUIRE "pkg:rtoc_6d69722f686f6973742e636c656172" AS hoist
+REQUIRE "pkg:rtoc_73656d616e7469632f706173735f73746174652e636c656172" AS pass_state
+REQUIRE "pkg:rtoc_6d69722f636f6e74726f6c5f666c6f772e636c656172" AS control_flow
+REQUIRE "pkg:rtoc_6d69722f7072655f6d69725f747970655f636865636b2e636c656172" AS pre_mir_type_check
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f736368656d615f72656769737472792e636c656172" AS schema_registry
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f73746174652e636c656172" AS state
+REQUIRE "pkg:rtoc_6666692f635f6865616465725f696d706f727465722e636c656172" AS c_header_importer
+REQUIRE "pkg:rtoc_636f6d70696c65722f6d6f64756c655f696d706f727465722e636c656172" AS module_importer
+REQUIRE "pkg:rtoc_6173742f66726f6e74656e645f7265736f757263655f6275646765742e636c656172" AS frontend_resource_budget
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f70726f64756374732e636c656172" AS annotation_products
+REQUIRE "pkg:rtoc_6d69722f6d69725f706173732e636c656172" AS mir_pass
+REQUIRE "pkg:rtoc_73656d616e7469632f73656d616e7469635f696e6465782e636c656172" AS semantic_index
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+PUB STRUCT CompilerFrontendResult {
+  ast: Program,
+  annotator: SemanticAnnotator@multiowned,
+  lifecycle_registry: LifecycleRegistry@multiowned,
+  derived_program: DerivedProgramFacts@multiowned,
+  program_mir_facts: ProgramMIRFacts@multiowned,
+  fn_nodes: {String}FunctionDef,
+  fn_sigs: {String}FunctionSignature@multiowned,
+  struct_schemas: {String@symbol}StructSchema@multiowned,
+  enum_schemas: {String@symbol}[]MIRLoweringSchemasEnumVariantsItem,
+  union_schemas: {String@symbol}UnionSchema@multiowned,
+  moved_guard_info: {String}{String}Bool
+}
+PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImporter, source_dir: String, strict_test: Bool = FALSE, ownership_mode: String@symbol = :default) RETURNS !?CompilerFrontendResult ->
+  MUTABLE cheat_code = COPY cheat_code_input;
+  cheat_code = TRY (cHeaderImporter__expand(cheat_code, source_dir));
+  MUTABLE budget = frontendResourceBudget__new();
+  MUTABLE tokens = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_1 = (TRY (lexer__new(cheat_code, 0, NIL, 1, 1, 0, budget)));
+  TRY (lexer__tokenize(&rtoc_mutable_receiver_1)) };
+  MUTABLE ast = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (TRY (clearParser__new(tokens, cheat_code, (ownership_mode == :easy), budget)));
+  TRY (clearParser__parse(rtoc_local_receiver_2)) };
+  program__set_language_mode(&ast, ownership_mode);
+  MUTABLE annotator = semanticAnnotator__new(importer, NIL, source_dir, strict_test, cheat_code);
+  TRY (semanticAnnotator__annotate_mut(&annotator, &ast));
+  MUTABLE rtoc_mutable_receiver_3 = pipelineRewriter__new(annotator);
+  TRY (pipelineRewriter__rewrite_mut(&rtoc_mutable_receiver_3, castProgramToLocatable(ast)));
+  MUTABLE rtoc_mutable_receiver_4 = mIRPassState__for_mut(ast);
+  TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_4, :pipeline_rewritten));
+  MUTABLE rtoc_local_receiver_5 = stringConcatRewriter__new();
+  TRY (stringConcatRewriter__rewrite_mut(rtoc_local_receiver_5, &ast));
+  MUTABLE rtoc_mutable_receiver_6 = mIRPassState__for_mut(ast);
+  TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_6, :string_concat_rewritten));
+  MUTABLE schema_lookup = %(name) USE(annotator) -> {
+  rtoc_lambda_result_7 = TRY (semanticAnnotator__lookup_type_schema(annotator, name));
+  rtoc_lambda_result_7
+  };
+  MUTABLE hoist_result = TRY (hoist__apply_mut(ast, schema_lookup));
+  MUTABLE fn_nodes: {String}FunctionDef = {};
+  FOR _ IN ast.statements DO
+  IF _ IS_A FunctionDef AS function_def THEN
+    fn_nodes[function_def.name] = COPY function_def;
+  END
+  END
+  TRY (compilerFrontend__synthesize_test_body_wrappers_mut(ast, &fn_nodes));
+  TRY (preMirTypeCheck__verify_mut(ast));
+  MUTABLE lifecycle_registry = COPY KEEP (UNWRAP ((KEEP annotator.annotation_products).typed_program)).lifecycle_registry;
+  MUTABLE derived_program = COPY KEEP (UNWRAP ((KEEP annotator.annotation_products).capability_audit)).derived_program;
+  MUTABLE mir_pass = mIRPass__new(fn_nodes, schema_lookup, lifecycle_registry, TRY (semanticIndex__body_summaries(UNWRAP (annotator.semantic_index))), hoist_result.bindings_by_function());
+  TRY (mIRPass__transform_mut(&mir_pass, ast));
+  MUTABLE struct_schemas: {String@symbol}StructSchema@multiowned = {};
+  MUTABLE enum_schemas: {String@symbol}[]MIRLoweringSchemasEnumVariantsItem = {};
+  MUTABLE union_schemas: {String@symbol}UnionSchema@multiowned = {};
+  FOR _ IN ast.statements DO
+  IF (_ IS_A StructDef) THEN
+    struct_schemas[type__to_sym(_.name())] = TRY (structSchema__new(_.field_decls(), ( { MUTABLE rtoc_empty_list_10: []String@symbol = List[]; rtoc_empty_list_10 } ), ( { MUTABLE rtoc_empty_list_11: []GenericParamDecl = List[]; rtoc_empty_list_11 } ), {}, {}));
+  ELSE_IF (_ IS_A EnumDef) THEN
+    enum_schemas[type__to_sym(_.name())] = _.variants();
+  ELSE_IF _ IS_A UnionDef AS union_def THEN
+    union_schemas[type__to_sym(union_def.name)] = TRY (unionSchema__new(union_def.variants, unionDef__type_params(union_def) |> SELECT symbol(_), (functionSignature__visibility(union_def) OR :package)));
+  END
+  END
+  MUTABLE fn_sigs = TRY (functionSignature__lowering_signatures(ast, TRY (semanticAnnotator__semantic_root_scope(annotator))));
+  MUTABLE moved_guard_info: {String}{String}Bool = {};
+  fn_nodes.keys() |> EACH {
+  MUTABLE fn_value: FunctionDef = (fn_nodes[_] OR_ELSE CAST(panic("missing hash key") AS FunctionDef));
+  IF fn_value.moved_guard_info THEN
+    moved_guard_info[_] = fn_value.moved_guard_info;
+  END
+  };
+  RETURN CompilerFrontendResult{ ast: ast, annotator: annotator, lifecycle_registry: lifecycle_registry, derived_program: derived_program, program_mir_facts: KEEP mir_pass.program_facts, fn_nodes: fn_nodes, fn_sigs: fn_sigs, struct_schemas: struct_schemas, enum_schemas: COPY enum_schemas, union_schemas: union_schemas, moved_guard_info: COPY moved_guard_info };
+END
+PUB FN compilerFrontend__synthesize_test_body_wrappers_mut(ast: Program, MUTABLE fn_nodes: {String}FunctionDef) RETURNS ![]FunctionDef ->
+  MUTABLE wrappers: []FunctionDef = ( { MUTABLE rtoc_empty_list_12: []FunctionDef = List[]; rtoc_empty_list_12 } );
+  MUTABLE counter = 0;
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < ast.statements.length() DO
+    IF !(ast.statements[rtoc_idx] IS_A TestBlock) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF ast.statements[rtoc_idx].whens() != NIL THEN
+          FOR _ IN (ast.statements[rtoc_idx].whens()) DO
+          IF _.tests() != NIL THEN
+              FOR _ IN (_.tests()) DO
+              counter = (counter + 1);
+              MUTABLE synth_name = "__test_body_${counter.toString()}";
+              MUTABLE synth_fn = FunctionDef{ token: COPY _.token(), name: synth_name, params: ( { MUTABLE rtoc_empty_list_13: []Param = List[]; rtoc_empty_list_13 } ), captures: NIL, return_type: Type{ SymbolValue: :Void }, return_lifetime: NIL, body: COPY _.body(), catch_clauses: List[], default_catch: NIL, visibility: :pub, deferred_drops: NIL, uses_frame: FALSE, explicit_return_type: NIL, type_params: NIL, tail_call: NIL, requires: NIL, arrow_token: NIL, name_token: NIL, effects_decl: NIL, effects_span: NIL, max_depth_n: NIL, tight_reentrance: NIL, requires_clauses: NIL, return_type_token: NIL, pre_clauses: NIL, post_clauses: NIL, is_method: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, effect_set: NIL, inferred_effects: NIL, reentrance_kind: NIL, thunk_plan: NIL, mutual_thunk_plan: NIL, needs_rt: NIL, fn_value_ref: NIL, alloc_fault: NIL, error_fallible: NIL, uses_heap: NIL, uses_alloc: NIL, uses_rt: NIL, effects: NIL, snapshot_types: NIL, stack_tier: NIL, stack_vars_bytes: NIL, moved_guard_info: NIL, cleanup_bindings: NIL, heap_carry_return: NIL, heap_carry_return_vars: NIL, fsm_eligible: NIL, fsm_ineligible_reason: NIL, fsm_suspend_points: NIL, conformance_protocol: NIL, generic_params: List[], implementation_owner: NIL, semantic_with_blocks: List[], source_name: "" };
+              fn_nodes[synth_name] = synth_fn;
+              &wrappers.append(synth_fn);
+              _.synthetic_fn = synth_fn;
+              END
+          END
+          END
+      END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN wrappers;
+END
+FN castProgramToLocatable(value: Program) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    Program.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Program.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    Program.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    Program.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    Program.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    Program.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    Program.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    Program.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Program.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    Program.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    Program.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Program.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    Program.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    Program.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    Program.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    Program.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Program.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    Program.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    Program.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    Program.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    Program.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    Program.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    Program.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    Program.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    Program.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    Program.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    Program.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    Program.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    Program.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    Program.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    Program.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    Program.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    Program.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    Program.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Program.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    Program.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    Program.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Program.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    Program.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    Program.TenseRecoveryRaise AS cast_payload -> RETURN Locatable{ TenseRecoveryRaise: COPY cast_payload };,
+    Program.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    Program.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    Program.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    Program.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    Program.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Program.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    Program.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    Program.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    Program.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    Program.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    Program.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    Program.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    Program.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    Program.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    Program.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    Program.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    Program.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    Program.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    Program.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    Program.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    Program.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    Program.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    Program.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    Program.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    Program.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    Program.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    Program.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    Program.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    Program.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    Program.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    Program.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    Program.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    Program.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    Program.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    Program.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    Program.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Program.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    Program.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    Program.TenseOperationKindOrElseRaise AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    Program.TenseOperationKindOrElseExit AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    Program.TenseOperationKindOrElsePass AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    Program.TenseOperationKindOrElsePrune AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    Program.TenseOperationKindOrElseBreak AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    Program.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    Program.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    Program.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Program.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    Program.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    Program.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    Program.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    Program.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    Program.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    Program.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    Program.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    Program.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    Program.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    Program.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    Program.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    Program.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    Program.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    Program.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Program.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    Program.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    Program.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    Program.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Program.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Program.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    Program.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    Program.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    Program.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    Program.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    Program.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    Program.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    Program.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    Program.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    Program.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    Program.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    Program.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    Program.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    Program.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    Program.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    Program.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    Program.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    Program.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    Program.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    Program.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    Program.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    Program.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END

@@ -1,0 +1,310 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f6361706162696c69746965732e636c656172" AS capabilities
+REQUIRE "pkg:rtoc_73656d616e7469632f636170747572655f73747261746567792e636c656172" AS capture_strategy
+# Ruby module FiberCtxBuilder
+PUB ENUM CaptureCleanupKind { None, CapturedValue, UniformValue, RcRelease }
+PUB ENUM CaptureRcKind { Rc, Arc, AtomicPtr }
+PUB STRUCT CaptureCleanupPlan {
+  kind: CaptureCleanupKind,
+  mirror_type: ?Type,
+  rc_kind: ?CaptureRcKind,
+  rc_payload_type_zig: ?String
+}
+
+PUB FN captureCleanupPlan__none() RETURNS CaptureCleanupPlan ->
+  RETURN CaptureCleanupPlan{ kind: COPY CaptureCleanupKind.None, mirror_type: NIL, rc_kind: NIL, rc_payload_type_zig: NIL };
+END
+PUB FN captureCleanupPlan__none?(self: CaptureCleanupPlan) RETURNS Bool ->
+  RETURN (self.kind == CaptureCleanupKind.None);
+END
+PUB FN captureCleanupPlan__guarded?(self: CaptureCleanupPlan) RETURNS Bool ->
+  RETURN (captureCleanupPlan__captured_value?(self) OR captureCleanupPlan__uniform_value?(self));
+END
+PUB FN captureCleanupPlan__captured_value?(self: CaptureCleanupPlan) RETURNS Bool ->
+  RETURN (self.kind == CaptureCleanupKind.CapturedValue);
+END
+PRIVATE FN captureCleanupPlan__uniform_value?(self: CaptureCleanupPlan) RETURNS Bool ->
+  RETURN (self.kind == CaptureCleanupKind.UniformValue);
+END
+PUB FN captureCleanupPlan__rc_release?(self: CaptureCleanupPlan) RETURNS Bool ->
+  RETURN (self.kind == CaptureCleanupKind.RcRelease);
+END
+PUB FN captureCleanupPlan__emits_cleanup?(self: CaptureCleanupPlan) RETURNS Bool ->
+  RETURN (self.kind != CaptureCleanupKind.None);
+END
+PUB STRUCT CaptureSpec {
+  name: String,
+  field_type_zig: String,
+  init_value_mir: Emittable,
+  setup_mir: []Emittable,
+  cleanup_plan: CaptureCleanupPlan
+}
+
+PUB FN captureSpec__cleanup_mir_for(self: CaptureSpec, receiver: String) RETURNS !?MIRDeferStmt ->
+  IF !(captureCleanupPlan__emits_cleanup?(self.cleanup_plan)) THEN
+    RETURN NIL;
+  END
+  MUTABLE receiver_expr = Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL };
+  MUTABLE captured_field = FieldGet{ object: Emittable{ Ident: COPY receiver_expr }, field: COPY self.name, lowered_node_id: NIL, ownership_consumption: NIL };
+  MUTABLE moved_guard = FieldGet{ object: Emittable{ Ident: COPY receiver_expr }, field: "${self.name}_moved", lowered_node_id: NIL, ownership_consumption: NIL };
+  IF ((self.cleanup_plan.kind == CaptureCleanupKind.CapturedValue) OR (self.cleanup_plan.kind == CaptureCleanupKind.UniformValue)) THEN
+    MUTABLE cleanup_call = Call{ callee: "CheatLib.cleanup", args: [Emittable{ TypeOf: COPY TypeOf{ expr: Emittable{ FieldGet: COPY captured_field }, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY receiver_expr }, field: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ FieldGet: COPY captured_field }, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
+    RETURN MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: Emittable{ FieldGet: COPY moved_guard }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [ExprStmt{ expr: castCallToEmittable(COPY cleanup_call), discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+  END
+  IF !(captureCleanupPlan__rc_release?(self.cleanup_plan)) THEN
+    RETURN NIL;
+  END
+  MUTABLE rc_kind = COPY UNWRAP (self.cleanup_plan.rc_kind);
+  MUTABLE payload_type_zig = COPY UNWRAP (self.cleanup_plan.rc_payload_type_zig);
+  RETURN MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY RcRelease{ source: Emittable{ FieldGet: COPY captured_field }, zig_base: payload_type_zig, func: captureRcKind__release_func(rc_kind), alloc: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY receiver_expr }, field: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+END
+PUB FN captureSpec__finalizer_mir_for(self: CaptureSpec, receiver: String) RETURNS ?Emittable ->
+  IF !(captureCleanupPlan__rc_release?(self.cleanup_plan)) THEN
+    RETURN NIL;
+  END
+  MUTABLE receiver_expr = Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL };
+  MUTABLE captured_field = FieldGet{ object: Emittable{ Ident: COPY receiver_expr }, field: COPY self.name, lowered_node_id: NIL, ownership_consumption: NIL };
+  MUTABLE rc_kind = COPY UNWRAP (self.cleanup_plan.rc_kind);
+  MUTABLE payload_type_zig = COPY UNWRAP (self.cleanup_plan.rc_payload_type_zig);
+  RETURN Emittable{ RcRelease: COPY RcRelease{ source: Emittable{ FieldGet: COPY captured_field }, zig_base: payload_type_zig, func: captureRcKind__release_func(rc_kind), alloc: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY receiver_expr }, field: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
+END
+PUB FN captureSpec__requires_setup?(self: CaptureSpec) RETURNS Bool ->
+  RETURN !((self.setup_mir.length() == 0));
+END
+PUB FN captureSpec__needs_moved_guard?(self: CaptureSpec) RETURNS Bool ->
+  RETURN captureCleanupPlan__guarded?(self.cleanup_plan);
+END
+PUB FN captureSpec__cleanup_mirror_type(self: CaptureSpec) RETURNS ?Type ->
+  RETURN COPY self.cleanup_plan.mirror_type;
+END
+PUB STRUCT FiberCtxBuilderResult {
+  specs: []CaptureSpec,
+  capture_map: {String}String,
+  capture_symbols: {String}SymbolEntry@multiowned
+}
+
+PUB FN result__has_fresh_heap_copy?(self: FiberCtxBuilderResult) RETURNS Bool ->
+  RETURN self.specs |> ANY (captureCleanupPlan__captured_value?(_.cleanup_plan) AND captureSpec__requires_setup?(_));
+END
+PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: String, promoted_names: {String}String, fresh_heap_alloc: ?String = NIL, fresh_heap_id: Int64 = 0, source_overrides: {String}String, schema_lookup: ?Any = NIL) RETURNS !FiberCtxBuilderResult ->
+  MUTABLE captured: {Any}Any = {};
+  IF analysis != NIL THEN
+    captured = COPY analysis.captures;
+  END
+  MUTABLE strategies: {Any}Any = {};
+  IF analysis != NIL THEN
+    strategies = COPY analysis.strategies;
+  END
+  MUTABLE pointer_captures: [Set]Any = Set[];
+  IF analysis != NIL THEN
+    pointer_captures = COPY analysis.pointer_captures;
+  END
+  MUTABLE specs = captured.keys() |> SELECT {
+  MUTABLE strat: ?Any = COPY strategies[_];
+  (  IF promoted_names[_] THEN
+      CaptureSpec{ name: COPY _, field_type_zig: "[]const u8", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY promoted_names[_], lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+    ELSE_IF (((strat != NIL) AND (strat IS_A FreshHeapCopy)) AND (fresh_heap_alloc != NIL)) THEN
+      {
+    MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE dupe_var = "__fc_${fresh_heap_id.toString()}_${_}";
+    MUTABLE source_ref = (source_overrides[_] OR_ELSE _);
+    MUTABLE source_mir = Ident{ name: source_ref, lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE capture_symbol = analysis?.capture_symbols[_];
+    MUTABLE needs_cleanup = TRY (fiberCtxBuilder__needs_fresh_heap_capture_cleanup?((captured[_] OR_ELSE panic("missing hash key")), schema_lookup, capture_symbol));
+    MUTABLE setup_mir: []Emittable = [Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY dupe_var }, init: castCallToEmittable(COPY Call{ callee: "CheatLib.dupeCaptured", args: [Emittable{ TypeOf: COPY TypeOf{ expr: Emittable{ Ident: COPY source_mir }, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY source_mir }, Emittable{ Ident: COPY Ident{ name: COPY fresh_heap_alloc, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: TRUE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL }), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
+    IF needs_cleanup THEN
+      &setup_mir.append(Emittable{ ErrDeferStmt: COPY ErrDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY Call{ callee: "CheatLib.cleanup", args: [Emittable{ TypeOf: COPY TypeOf{ expr: Emittable{ Ident: COPY Ident{ name: dupe_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: COPY fresh_heap_alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: dupe_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+  END
+    MUTABLE cleanup_plan_branch_value: ?CaptureCleanupPlan = NIL;
+    IF needs_cleanup THEN
+      cleanup_plan_branch_value = CaptureCleanupPlan{ kind: COPY CaptureCleanupKind.CapturedValue, mirror_type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :CapturedValue }, NIL, NIL, NIL, :heap)), rc_kind: NIL, rc_payload_type_zig: NIL };
+    ELSE
+      cleanup_plan_branch_value = captureCleanupPlan__none();
+    END
+  MUTABLE cleanup_plan: CaptureCleanupPlan = cleanup_plan_branch_value?;
+    CaptureSpec{ name: COPY _, field_type_zig: "CheatLib.CapturedValue(@TypeOf(${source_ref}))", init_value_mir: Emittable{ Ident: COPY Ident{ name: dupe_var, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: COPY setup_mir, cleanup_plan: COPY cleanup_plan }
+  }
+    ELSE_IF ((strat != NIL) AND (strat IS_A RcClone)) THEN
+      {
+    MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE retain_var = "__fc_${fresh_heap_id.toString()}_${_}_retain";
+    source_ref = (source_overrides[_] OR_ELSE _);
+    MUTABLE ti_branch_value: ?Type = NIL;
+    IF (captured[_] OR_ELSE panic("missing hash key")) IS_A Type THEN
+      ti_branch_value = (captured[_] OR_ELSE panic("missing hash key"));
+    ELSE
+      ti_branch_value = TRY (type__new((captured[_] OR_ELSE panic("missing hash key"))));
+    END
+  MUTABLE ti: Type = ti_branch_value?;
+    MUTABLE sym = analysis?.capture_symbols[_];
+    MUTABLE atomic_ptr_capture = type__atomic_ptr?(ti);
+    MUTABLE shared_capture = ((atomic_ptr_capture OR type__shared?(ti)) OR ((sym != NIL) AND (sym.storage() == :shared)));
+    MUTABLE rc_kind =   IF atomic_ptr_capture THEN
+      CaptureRcKind.AtomicPtr
+    ELSE_IF shared_capture THEN
+      CaptureRcKind.Arc
+    ELSE
+      CaptureRcKind.Rc
+    END;
+    MUTABLE payload_type_zig = TRY (fiberCtxBuilder__rc_payload_zig_type(ti));
+    MUTABLE retain_setup_mir: []Emittable = [Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY retain_var }, init: castCallToEmittable(COPY Call{ callee: "CheatLib.${captureRcKind__retain_func(rc_kind)}", args: [Emittable{ Ident: COPY Ident{ name: payload_type_zig, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(2)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL }), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
+    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: retain_var, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: COPY retain_setup_mir, cleanup_plan: COPY CaptureCleanupPlan{ kind: COPY CaptureCleanupKind.RcRelease, mirror_type: COPY (TRY (type__new(castTypeToTypeConstructionInput(ti)))).tap(%(t) USE(shared_capture) -> {
+    rtoc_lambda_result_9 = TRY (type__apply_reference_ownership_mut(&t, IF shared_capture THEN
+      :shared
+    ELSE
+      :multiowned
+    END));
+    rtoc_lambda_result_9
+  }), rc_kind: COPY rc_kind, rc_payload_type_zig: COPY payload_type_zig } }
+  }
+    ELSE_IF ((strat != NIL) AND (strat IS_A MoveInto)) THEN
+      {
+    MUTABLE rtoc_value_block_marker = 0;
+    source_ref = (source_overrides[_] OR_ELSE _);
+      IF TRY (fiberCtxBuilder__needs_move_capture_cleanup?((captured[_] OR_ELSE panic("missing hash key")), schema_lookup)) THEN
+      cleanup_plan = CaptureCleanupPlan{ kind: COPY CaptureCleanupKind.UniformValue, mirror_type: COPY TRY (type__new(castTypeToTypeConstructionInput({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_10: ?Type = NIL;
+      IF (captured[_] OR_ELSE panic("missing hash key")) IS_A Type THEN
+        rtoc_ternary_value_10 = (captured[_] OR_ELSE panic("missing hash key"));
+      ELSE
+        rtoc_ternary_value_10 = TRY (type__new((captured[_] OR_ELSE panic("missing hash key"))));
+      END
+      rtoc_ternary_value_10? }))), rc_kind: NIL, rc_payload_type_zig: NIL };
+    ELSE
+      cleanup_plan = captureCleanupPlan__none();
+    END
+    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_11: []Emittable = List[]; rtoc_empty_list_11 } ), cleanup_plan: COPY cleanup_plan }
+  }
+    ELSE_IF pointer_captures.contains?(_) THEN
+      {
+    MUTABLE rtoc_value_block_marker = 0;
+    source_ref = (source_overrides[_] OR_ELSE _);
+    sym = analysis?.capture_symbols[_];
+    (IF (IF sym != NIL THEN
+      symbolEntry__is_param(sym)
+    ELSE
+      NIL
+    END) THEN
+      CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_14: []Emittable = List[]; rtoc_empty_list_14 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+    ELSE
+      CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(&${source_ref})", init_value_mir: Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_15: []Emittable = List[]; rtoc_empty_list_15 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+    END)
+  }
+    ELSE
+      {
+    MUTABLE rtoc_value_block_marker = 0;
+    source_ref = (source_overrides[_] OR_ELSE _);
+    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+  }
+    END)
+  };
+  MUTABLE map = captured.keys().to_h(%(n) USE(body_access_prefix) -> [n, "${body_access_prefix}.${n}"]);
+  RETURN FiberCtxBuilderResult{ specs: COPY specs, capture_map: COPY map, capture_symbols: (analysis?.capture_symbols OR_ELSE {}) };
+END
+PUB FN fiberCtxBuilder__needs_move_capture_cleanup?(type_obj: Any, schema_lookup: ?Any = NIL) RETURNS !Bool ->
+  MUTABLE ti_branch_value: ?Type = NIL;
+  IF type_obj IS_A Type THEN
+    ti_branch_value = COPY type_obj;
+  ELSE
+    ti_branch_value = TRY (type__new(type_obj));
+  END
+  MUTABLE ti: Type = ti_branch_value?;
+  IF ((((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) OR type__rodata?(ti)) OR type__borrowed_reference?(ti)) THEN
+    RETURN FALSE;
+  END
+  RETURN (((TRY (type__string?(ti)) OR TRY (type__heap_ptr?(ti))) OR TRY (type__collection_value?(ti))) OR TRY (type__recursive_cleanup_shape?(ti, schema_lookup)));
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN fiberCtxBuilder__needs_fresh_heap_capture_cleanup?(type_obj: Type, schema_lookup: ?Any = NIL, capture_symbol: ?SymbolEntry = NIL) RETURNS !Bool ->
+  MUTABLE ti_branch_value: ?Type = NIL;
+  IF TRUE THEN
+    ti_branch_value = TRY (type__new(castTypeToTypeConstructionInput(type_obj)));
+  ELSE
+    ti_branch_value = TRY (type__new(castTypeToTypeConstructionInput(type_obj)));
+  END
+  MUTABLE ti: Type = ti_branch_value?;
+  IF ((type__any_sync?(ti) OR TRY (type__any_rc?(ti))) OR fiberCtxBuilder__symbol_capture_value_needs_cleanup?(capture_symbol)) THEN
+    RETURN TRUE;
+  END
+  IF ((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) THEN
+    RETURN FALSE;
+  END
+  IF (((TRY (type__string?(ti)) OR TRY (type__heap_ptr?(ti))) OR TRY (type__collection_value?(ti))) OR TRY (type__recursive_cleanup_shape?(ti, schema_lookup))) THEN
+    RETURN TRUE;
+  END
+  RETURN !(!((((type__ownership(ti) != NIL) AND (type__ownership(ti) != :affine)))));
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN fiberCtxBuilder__needs_capture_value_cleanup?(type_obj: Any, schema_lookup: ?Any = NIL, capture_symbol: ?SymbolEntry = NIL) RETURNS !Bool ->
+  MUTABLE ti_branch_value: ?Type = NIL;
+  IF type_obj IS_A Type THEN
+    ti_branch_value = COPY type_obj;
+  ELSE
+    ti_branch_value = TRY (type__new(type_obj));
+  END
+  MUTABLE ti: Type = ti_branch_value?;
+  IF (((type__void?(ti) OR type__any?(ti)) OR type__rodata?(ti)) OR type__borrowed_reference?(ti)) THEN
+    RETURN FALSE;
+  END
+  RETURN ((((TRY (fiberCtxBuilder__needs_move_capture_cleanup?(ti, schema_lookup)) OR type__any_sync?(ti)) OR TRY (type__any_rc?(ti))) OR fiberCtxBuilder__symbol_capture_value_needs_cleanup?(capture_symbol)) OR !(!((((type__ownership(ti) != NIL) AND (type__ownership(ti) != :affine))))));
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN fiberCtxBuilder__symbol_capture_value_needs_cleanup?(capture_symbol: ?SymbolEntry) RETURNS Bool ->
+  IF capture_symbol EXISTS AS capture_symbol_value THEN
+    RETURN symbolEntry__atomic?(capture_symbol_value);
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN fiberCtxBuilder__rc_payload_zig_type(ti: Type) RETURNS !String ->
+  MUTABLE payload = TRY (type__new(castTypeToTypeConstructionInput(ti)));
+  TRY (type__apply_reference_ownership_mut(&payload, :affine));
+  type__mark_stack_value_mut(&payload);
+  type__clear_zig_type_cache_mut(payload);
+  IF (type__any_sync?(payload) AND !(((type__map?(payload) AND type__striped?(payload))))) THEN
+    MUTABLE inner = TRY (type__zig_type((TRY (type__bare_data_type(payload)))));
+    IF type__locked?(payload) THEN
+      inner = "CheatLib.Locked(${inner})";
+    END
+    IF type__write_locked?(payload) THEN
+      inner = "CheatLib.RwLocked(${inner})";
+    END
+    IF (type__sync(payload) == :always_mutable) THEN
+      inner = "CheatLib.RefCell(${inner})";
+    END
+    IF type__versioned?(payload) THEN
+      inner = "CheatLib.Versioned(${inner})";
+    END
+    IF type__atomic?(payload) THEN
+      IF type__indirect?(payload) THEN
+        inner = "CheatLib.AtomicPtr(${inner})";
+      ELSE
+        inner = "CheatLib.Atomic(${inner})";
+      END
+    END
+    RETURN inner;
+  END
+  RETURN TRY (type__zig_type(payload));
+END
+# End Ruby module FiberCtxBuilder
+FN castCallToEmittable(value: Call) RETURNS Emittable ->
+  PARTIAL MATCH value START
+    Call.FuncCall AS cast_payload -> RETURN Emittable{ FuncCall: COPY cast_payload };,
+    Call.MethodCall AS cast_payload -> RETURN Emittable{ MethodCall: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Emittable");
+  END
+  panic("Invalid cast to Emittable");
+END
+FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
+    Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
+    Type.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
+  END
+  panic("Invalid cast to TypeConstructionInput");
+END

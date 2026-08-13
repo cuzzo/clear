@@ -1,0 +1,53 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f70726f64756374732e636c656172" AS annotation_products
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f7265736f6c7574696f6e5f70686173652e636c656172" AS resolution_phase
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f747970655f616e616c797369735f70686173652e636c656172" AS type_analysis_phase
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f747970655f616e616c797369735f73657373696f6e2e636c656172" AS type_analysis_session
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f6361706162696c6974795f61756469745f70686173652e636c656172" AS capability_audit_phase
+REQUIRE "pkg:rtoc_636f6d70696c65722f6d6f64756c655f696d706f727465722e636c656172" AS module_importer
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f70686173655f68616e646f6666732e636c656172" AS phase_handoffs
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB STRUCT AnnotationPipeline {
+  config: AnnotatorPhasesAnnotationPipelineConfig,
+  products: AnnotationProducts@multiowned
+}
+
+PUB STRUCT AnnotatorPhasesAnnotationPipelineConfig {
+  importer: ?ModuleImporter@multiowned,
+  source_dir: String,
+  source_code: ?String,
+  strict_test: Bool
+}
+PUB FN annotationPipeline__initialize(MUTABLE self: AnnotationPipeline, importer: ?ModuleImporter, source_dir: String, source_code: ?String, strict_test: Bool) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.config = AnnotatorPhasesAnnotationPipelineConfig{ importer: importer, source_dir: COPY source_dir, source_code: COPY source_code, strict_test: COPY strict_test };
+    rtoc_self_view.products = annotationProducts__new();
+}
+END
+PUB FN annotationPipeline__run(MUTABLE self: AnnotationPipeline, program: Program) RETURNS !AnnotationProducts@multiowned
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE resolution = resolutionPhase__run(program, KEEP rtoc_self_view.config.importer, rtoc_self_view.config.source_dir, rtoc_self_view.config.source_code);
+    rtoc_self_view.products = TRY (annotationProducts__publish_resolution(rtoc_self_view.products, resolution));
+    MUTABLE type_session = typeAnalysisSession__new(KEEP rtoc_self_view.config.importer, NIL, rtoc_self_view.config.source_dir, rtoc_self_view.config.strict_test, rtoc_self_view.config.source_code);
+    MUTABLE handoff = typeAnalysisPhase__run(resolution, &type_session);
+    MUTABLE typed_program = COPY handoff.typed_program;
+    rtoc_self_view.products = TRY (annotationProducts__publish_typed_program(rtoc_self_view.products, typed_program));
+    MUTABLE audit = TRY (capabilityAuditPhase__run(typed_program, handoff.audit_request));
+    rtoc_self_view.products = TRY (annotationProducts__publish_capability_audit(rtoc_self_view.products, audit));
+    RETURN TRY (annotationProducts__publish_capability_audit(rtoc_self_view.products, audit));
+}
+END
+PUB FN annotationPipeline__new(importer: ?ModuleImporter, source_dir: String, source_code: ?String, strict_test: Bool) RETURNS AnnotationPipeline@multiowned ->
+  MUTABLE self = AnnotationPipeline{ config: AnnotatorPhasesAnnotationPipelineConfig{ importer: importer, source_dir: COPY source_dir, source_code: COPY source_code, strict_test: COPY strict_test }, products: annotationProducts__new() };
+  annotationPipeline__initialize(&self, importer, source_dir, source_code, strict_test);
+  RETURN self @multiowned;
+END
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

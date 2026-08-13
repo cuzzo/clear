@@ -1,0 +1,21 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f70726f64756374732e636c656172" AS annotation_products
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f6361706162696c6974795f61756469745f73657373696f6e2e636c656172" AS capability_audit_session
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f70686173655f68616e646f6666732e636c656172" AS phase_handoffs
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f6361706162696c6974795f65766964656e63652e636c656172" AS capability_evidence
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f66756e6374696f6e5f72656769737472792e636c656172" AS function_registry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f646572697665645f70726f6772616d5f66616374732e636c656172" AS derived_program_facts
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB FN capabilityAuditPhase__run(typed_program: TypedProgramFacts, request: CapabilityAuditRequest) RETURNS !CapabilityAuditReport@multiowned ->
+  MUTABLE session = capabilityAuditSession__new(typed_program, request.inputs, request.source_code, request.language_mode, request.strict_test);
+  capabilityAuditSession__audit_mut(session);
+  IF !((request.inputs.deferred_with_validations.length() == 0)) THEN
+    panic("capability audit left deferred validations pending");
+  END
+  MUTABLE summaries = COPY typed_program.body_summaries;
+  MUTABLE derived_program = TRY (derivedProgramFacts__capture(typed_program.resolution.function_registry.nodes));
+  RETURN capabilityAuditReport__new(typed_program, derived_program, summaries.keys(), summaries.values() |> SUM scopeBindings__length(_.call_site_facts()), summaries.values() |> SUM scopeBindings__length(_.with_blocks()), 0);
+END
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

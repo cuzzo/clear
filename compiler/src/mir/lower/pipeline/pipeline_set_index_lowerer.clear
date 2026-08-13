@@ -1,0 +1,292 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f72616e67655f6c6f77657265722e636c656172" AS pipeline_range_lowerer
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatchGroup(subject: String, regex: CompilerRegex, index: Int64) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
+PUB UNION PipelineSetIndexTypeInput { TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Type: Type }
+PUB ENUM PipelineIndexValueOwnership { Owned, Borrowed }
+PUB STRUCT PipelineIndexAllocationFact {
+  alloc: String@symbol,
+  mark: AllocMark,
+  cleanup_entry: ?CleanupEntry@multiowned
+}
+PUB STRUCT PipelineIndexPreparedValue {
+  value: Emittable,
+  setup_stmts: []Emittable,
+  owns_heap: Bool
+}
+PUB STRUCT PipelineSetIndexLowerer {
+  bc_target: FN() -> Bool,
+  visit_mir: FN(Locatable) -> Emittable,
+  visit_mir_with_placeholder: FN(Locatable, String) -> Emittable,
+  pipeline_block: FN(Locatable, FN(String, String) -> !Emittable[]) -> MIRBlockExpr,
+  transpile_type: FN(PipelineSetIndexTypeInput) -> String,
+  pipeline_alloc: FN(BinaryOp) -> String@symbol,
+  next_label: FN() -> String,
+  typed_block_expr: FN(String, Emittable[], Type) -> MIRBlockExpr,
+  range_chain: FN(Locatable) -> ?PipelineRangeChain,
+  lazy_range_prefix: FN(Locatable, Locatable[], ?(FN(String) -> !Emittable[]), Bool) -> PipelineLazyRangePrefix,
+  range_fold_observable_distinct: FN(PipelineLazyRangePrefix, DistinctOp, BinaryOp, String, Locatable) -> MIRBlockExpr,
+  cleanup_bearing_type: FN(Type) -> Bool,
+  pipeline_alloc_mark_fact: FN(Emittable, String, String@symbol, ?Locatable, String, Bool) -> ?PipelineIndexAllocationFact,
+  pipeline_owned_cleanup_entry: FN(Emittable, ?Locatable) -> ?CleanupEntry@multiowned,
+  pipeline_index_insert_with_ownership: FN(IndexInsert, Emittable, Bool, String@symbol) -> IndexInsert,
+  index_temp_name: FN() -> String
+}
+
+PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, list_node: Locatable, MUTABLE smooth_node: BinaryOp, distinct_node: DistinctOp) RETURNS !MIRBlockExpr ->
+  IF smooth_node.observable_dest THEN
+    MUTABLE observable: ?MIRBlockExpr = pipelineSetIndexLowerer__lower_observable_distinct(self, list_node, smooth_node, distinct_node);
+    IF observable EXISTS AS observable_value THEN
+      RETURN COPY observable_value;
+    END
+  END
+  MUTABLE elem_type = UNWRAP (TRY (type__element_type((&smooth_node.full_type_mut()))));
+  MUTABLE elem_zig = self.transpile_type(CAST(type__resolved(elem_type) AS String));
+  MUTABLE set_zig = "CheatLib.Set(${elem_zig})";
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  MUTABLE expr_mir = self.visit_mir_with_placeholder(distinct_node.expression, "it");
+  MUTABLE range_chain: ?PipelineRangeChain = self.range_chain(list_node);
+  IF range_chain EXISTS AS range_chain_value THEN
+    MUTABLE range_chain_value_mutable = COPY range_chain_value;
+    RETURN TRY (pipelineSetIndexLowerer__lower_range_distinct(self, range_chain_value_mutable, &smooth_node, distinct_node, set_zig, alloc));
+  END
+  MUTABLE insert_body = TRY (pipelineSetIndexLowerer__distinct_insert_body(self, expr_mir, distinct_node.expression, elem_type, elem_zig, alloc, TRUE));
+  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, insert_body, set_zig, MUTABLE smooth_node, self) -> {
+  rtoc_lambda_result_1 = (TRY (pipelineSetIndexLowerer__distinct_set_alloc_stmts(self, &smooth_node, set_zig, alloc)) + [ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: Body{ ArrayValue: insert_body |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + TRY (pipelineSetIndexLowerer__distinct_set_transfer_marks(self, alloc)) + [BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]);
+  rtoc_lambda_result_1
+  });
+END
+PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTABLE list_node: Locatable, smooth_node: BinaryOp, expr_node: Locatable) RETURNS !MIRBlockExpr ->
+  MUTABLE elem_zig: String = "";
+  MUTABLE lhs_type = &list_node.full_type_mut();
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  MUTABLE range_chain: ?PipelineRangeChain = self.range_chain(list_node);
+  IF range_chain EXISTS AS range_chain_value THEN
+    MUTABLE range_chain_value_mutable = COPY range_chain_value;
+    MUTABLE elem_type = pipelineSetIndexLowerer__index_stream_element_type(self, &list_node, lhs_type, &range_chain_value_mutable.source);
+    elem_zig = self.transpile_type(type__to_s(elem_type));
+    MUTABLE map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(${elem_zig}))";
+    RETURN TRY (pipelineSetIndexLowerer__lower_stream_index(self, range_chain_value_mutable, expr_node, elem_zig, CAST(elem_type AS Type), alloc, map_type, TRY (type__from_node_mut(smooth_node, "INDEX result"))));
+  END
+  MUTABLE elem_type = TRY (type__element_type((&list_node.full_type_mut())));
+  elem_zig = self.transpile_type(CAST(type__resolved(elem_type) AS String));
+  MUTABLE expr_mir = self.visit_mir_with_placeholder(expr_node, "it");
+  MUTABLE map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(${elem_zig}))";
+  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, elem_type, expr_mir, expr_node, map_type, self) -> {
+  rtoc_lambda_result_2 = CAST(Tuple{TRY (pipelineSetIndexLowerer__index_result_let(self, map_type, alloc)), ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: Body{ ArrayValue: TRY (pipelineSetIndexLowerer__build_index_gop_body(self, expr_mir, alloc, "it", expr_node, CAST(elem_type AS ?Type), PipelineIndexValueOwnership.Borrowed)) |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt, BreakStmt>);
+  rtoc_lambda_result_2
+  });
+END
+PRIVATE FN pipelineSetIndexLowerer__lower_observable_distinct(self: PipelineSetIndexLowerer, list_node: Locatable, smooth_node: BinaryOp, distinct_node: DistinctOp) RETURNS ?MIRBlockExpr ->
+  MUTABLE range_chain: ?PipelineRangeChain = self.range_chain(list_node);
+  IF range_chain EXISTS AS range_chain_value THEN
+    MUTABLE prefix = self.lazy_range_prefix(range_chain_value.source, range_chain_value.stages, NIL, TRUE);
+    RETURN self.range_fold_observable_distinct(prefix, distinct_node, smooth_node, self.next_label(), range_chain_value.source);
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN pipelineSetIndexLowerer__lower_range_distinct(self: PipelineSetIndexLowerer, range_chain: PipelineRangeChain, MUTABLE smooth_node: BinaryOp, distinct_node: DistinctOp, set_zig: String, alloc: String@symbol) RETURNS !MIRBlockExpr ->
+  MUTABLE prefix = self.lazy_range_prefix(range_chain.source, range_chain.stages, NIL, FALSE);
+  MUTABLE item_var = COPY prefix.item_var;
+  MUTABLE key_expr_mir = self.visit_mir_with_placeholder(distinct_node.expression, item_var);
+  MUTABLE label = self.next_label();
+  MUTABLE source_type = &range_chain.source.full_type_mut();
+  MUTABLE defer_deinit_branch_value: ?MIRDeferStmt = NIL;
+  IF TRY (type__bounded_stream?(source_type)) THEN
+    defer_deinit_branch_value = TRY (pipelineLazyRangePrefix__deinit_stmt(prefix));
+  ELSE
+    defer_deinit_branch_value = NIL;
+  END
+  MUTABLE defer_deinit: ?MIRDeferStmt = defer_deinit_branch_value;
+  MUTABLE elem_type: ?Type = TRY (type__element_type((&smooth_node.full_type_mut())));
+  MUTABLE elem_zig = COPY ((compilerRegexMatchGroup(set_zig, compilerRegexCompile("CheatLib\\.Set\\((.*)\\)"), 1)) OR_ELSE "");
+  MUTABLE insert_body =   IF elem_type THEN
+    TRY (pipelineSetIndexLowerer__distinct_insert_body(self, key_expr_mir, distinct_node.expression, UNWRAP (elem_type), elem_zig, alloc, TRUE))
+  ELSE
+    CAST(Tuple{Let{ name: Name{ StringValue: COPY "dist_key" }, init: COPY key_expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, Emittable{ Ident: COPY Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL } }, TRUE))} AS Tuple<Let, ExprStmt>)
+  END;
+  IF ((self.bc_target() AND range_chain.source IS_A Identifier) AND TRY (type__runtime_stream?(source_type))) THEN
+    RETURN MIRBlockExpr{ label: label, body: COPY (TRY (pipelineLazyRangePrefix__outer_setup_stmts(prefix)) + [Let{ name: Name{ StringValue: COPY "dist_set" }, init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: COPY set_zig, strategy: :set_empty, alloc: NIL, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, TRY (pipelineLazyRangePrefix__loop_stmt(prefix, self.visit_mir(range_chain.source), [Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY "dist_key" }, init: COPY key_expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ExprStmt: COPY TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, Emittable{ Ident: COPY Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL } }, FALSE)) }])), BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+  END
+  RETURN MIRBlockExpr{ label: label, body: COPY (TRY (pipelineLazyRangePrefix__setup_stmts(prefix)) + TRY (pipelineSetIndexLowerer__distinct_set_alloc_stmts(self, &smooth_node, set_zig, alloc)) + (([defer_deinit])) + [TRY (pipelineLazyRangePrefix__loop_stmt(prefix, NIL, insert_body))] + TRY (pipelineSetIndexLowerer__distinct_set_transfer_marks(self, alloc)) + [BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+END
+PRIVATE FN pipelineSetIndexLowerer__distinct_insert_body(self: PipelineSetIndexLowerer, expr_mir: Emittable, expr_node: Locatable, elem_type: Type, elem_zig: String, alloc: String@symbol, uses_allocator: Bool) RETURNS ![]Emittable ->
+  MUTABLE key_let = Let{ name: Name{ StringValue: COPY "dist_key" }, init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
+  IF !(self.cleanup_bearing_type(elem_type)) THEN
+    RETURN CAST([Emittable{ Let: COPY key_let }, Emittable{ ExprStmt: COPY TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, Emittable{ Ident: COPY Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL } }, uses_allocator)) }] AS []Emittable);
+  END
+  MUTABLE key_owned = !(((KEEP self.pipeline_owned_cleanup_entry)(expr_mir, expr_node) == NIL));
+  MUTABLE owned_value =   IF key_owned THEN
+    Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL }
+  ELSE
+    DeepCopy{ source: COPY Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL }, zig_type: COPY elem_zig, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL }
+  END;
+  MUTABLE temp_name = self.index_temp_name();
+  MUTABLE fact: ?PipelineIndexAllocationFact = self.pipeline_alloc_mark_fact(owned_value, temp_name, alloc, expr_node, "DISTINCT owned key", TRUE);
+  IF fact EXISTS AS fact_value THEN
+    fact_value.mark.scope = IF placement__heap?(fact_value.alloc) THEN
+      :heap
+    ELSE
+      :function
+    END;
+    MUTABLE entry: ?CleanupEntry@multiowned = COPY KEEP fact_value.cleanup_entry;
+    MUTABLE stmts: []Emittable = [Emittable{ Let: COPY key_let }, Emittable{ AllocMark: COPY fact_value.mark }, Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY temp_name }, init: COPY owned_value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
+    IF entry EXISTS AS entry_value THEN
+      &stmts.append(Emittable{ ErrCleanup: COPY ErrCleanup{ name: temp_name, cleanup_entry: cleanupEntry__with_moved_guard(entry_value), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+    END
+    &stmts.append(Emittable{ ExprStmt: COPY TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, Emittable{ Ident: COPY Ident{ name: COPY temp_name, lowered_node_id: NIL, ownership_consumption: NIL } }, uses_allocator, ownershipOperandFact__owned_binding(temp_name, elem_type, "DISTINCT insert transfers the key to the set", alloc))) });
+    ruby_array_concat_Emittable(stmts, CAST(TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY temp_name, target: :owned_sink, target_alloc: COPY alloc, move_guarded: !((entry == NIL)) }))) AS []Emittable));
+    RETURN stmts;
+  ELSE
+    RETURN CAST([Emittable{ Let: COPY key_let }, Emittable{ ExprStmt: COPY TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, owned_value, uses_allocator)) }] AS []Emittable);
+  END
+END
+PRIVATE FN pipelineSetIndexLowerer__distinct_set_alloc_stmts(self: PipelineSetIndexLowerer, MUTABLE smooth_node: BinaryOp, set_zig: String, alloc: String@symbol) RETURNS ![]Emittable ->
+  RETURN CAST([Emittable{ AllocMark: COPY AllocMark{ name: "dist_set", alloc: COPY alloc, type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() })), scope: COPY placement__alloc_scope(alloc), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY "dist_set" }, init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: COPY set_zig, strategy: :set_empty, alloc: NIL, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
+END
+PRIVATE FN pipelineSetIndexLowerer__distinct_set_transfer_marks(self: PipelineSetIndexLowerer, alloc: String@symbol) RETURNS ![]Emittable ->
+  RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: "dist_set", target: :block_result, target_alloc: COPY alloc, move_guarded: FALSE })));
+END
+PRIVATE FN pipelineSetIndexLowerer__distinct_insert_stmt(self: PipelineSetIndexLowerer, alloc: String@symbol, insert_value: Emittable, uses_allocator: Bool, consumes: ?OwnershipOperandFact = NIL) RETURNS !ExprStmt ->
+  MUTABLE args =   IF uses_allocator THEN
+    CAST(Tuple{AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL }, insert_value} AS Tuple<AllocatorRef, Emittable>)
+  ELSE
+    [insert_value]
+  END;
+  MUTABLE contract_branch_value: ?CallableContract = NIL;
+  IF consumes EXISTS AS consumes_value THEN
+    contract_branch_value = callableContract__new((TRY (callableContract__no_ownership(args.length()))).signature, TRY (ownershipContract__consume_operands([consumes_value])), args.length());
+  ELSE
+    contract_branch_value = TRY (callableContract__no_ownership(args.length()));
+  END
+  MUTABLE contract: CallableContract = contract_branch_value?;
+  RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL }, method: "insert", args: COPY args, try_wrap: TRUE, callable_contract: COPY contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+END
+PRIVATE FN pipelineSetIndexLowerer__index_stream_element_type(self: PipelineSetIndexLowerer, MUTABLE list_node: Locatable, lhs_type: Type, MUTABLE range_source: Locatable) RETURNS !Type ->
+  RETURN ((TRY (type__runtime_stream_storage_element_type(lhs_type)) OR_ELSE TRY (type__runtime_stream_storage_element_type((&range_source.full_type_mut())))) OR TRY (type__element_type((&list_node.full_type_mut()))));
+END
+PRIVATE FN pipelineSetIndexLowerer__lower_stream_index(self: PipelineSetIndexLowerer, range_chain: PipelineRangeChain, expr_node: Locatable, elem_zig: String, elem_type: Type, alloc: String@symbol, map_type: String, result_type: Type) RETURNS !MIRBlockExpr ->
+  MUTABLE on_skip: FN(String) -> ![]Emittable = %(var) USE(elem_zig) -> {
+  rtoc_lambda_result_3 = [ExprStmt{ expr: Emittable{ Call: COPY Call{ callee: "CheatLib.cleanup", args: [Emittable{ Ident: COPY Ident{ name: COPY elem_zig, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }];
+  rtoc_lambda_result_3
+  };
+  MUTABLE prefix = self.lazy_range_prefix(range_chain.source, range_chain.stages, on_skip, FALSE);
+  MUTABLE item_var = COPY prefix.item_var;
+  MUTABLE expr_mir = self.visit_mir_with_placeholder(expr_node, item_var);
+  MUTABLE label = self.next_label();
+  MUTABLE source_type = &range_chain.source.full_type_mut();
+  MUTABLE defer_deinit_branch_value: ?MIRDeferStmt = NIL;
+  IF TRY (type__bounded_stream?(source_type)) THEN
+    defer_deinit_branch_value = TRY (pipelineLazyRangePrefix__deinit_stmt(prefix));
+  ELSE
+    defer_deinit_branch_value = NIL;
+  END
+  MUTABLE defer_deinit: ?MIRDeferStmt = defer_deinit_branch_value;
+  IF self.bc_target() THEN
+    MUTABLE iter: ?Emittable = pipelineSetIndexLowerer__bc_index_iter(self, range_chain.source);
+    IF iter EXISTS AS iter_value THEN
+      RETURN self.typed_block_expr(label, (TRY (pipelineLazyRangePrefix__outer_setup_stmts(prefix)) + [TRY (pipelineSetIndexLowerer__index_result_let(self, map_type, :heap)), TRY (pipelineLazyRangePrefix__loop_stmt(prefix, iter_value, TRY (pipelineSetIndexLowerer__build_index_gop_body(self, expr_mir, :heap, item_var, expr_node, elem_type, PipelineIndexValueOwnership.Owned)))), BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), result_type);
+    END
+  END
+  RETURN self.typed_block_expr(label, (TRY (pipelineLazyRangePrefix__setup_stmts(prefix)) + [TRY (pipelineSetIndexLowerer__index_result_let(self, map_type, :heap))] + (([defer_deinit])) + [TRY (pipelineLazyRangePrefix__loop_stmt(prefix, NIL, TRY (pipelineSetIndexLowerer__build_index_gop_body(self, expr_mir, :heap, item_var, expr_node, elem_type, PipelineIndexValueOwnership.Owned)))), BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), result_type);
+END
+PRIVATE FN pipelineSetIndexLowerer__bc_index_iter(self: PipelineSetIndexLowerer, range_source: Locatable) RETURNS ?Emittable ->
+  IF range_source IS_A RangeLit THEN
+    MUTABLE start_mir = self.visit_mir(range_source.start());
+    MUTABLE end_mir = self.visit_mir(range_source.finish());
+    MUTABLE end_expr_branch_value: ?BinOp = NIL;
+    IF range_source.inclusive() THEN
+      end_expr_branch_value = BinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
+    ELSE
+      end_expr_branch_value = end_mir;
+    END
+    MUTABLE end_expr: BinOp = end_expr_branch_value?;
+    RETURN Emittable{ IterRange: COPY IterRange{ start: start_mir, end_val: end_expr, capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL } };
+  END
+  IF range_source IS_A Identifier AS identifier THEN
+    RETURN self.visit_mir(identifier);
+  END
+  RETURN NIL;
+END
+PRIVATE FN pipelineSetIndexLowerer__index_result_let(self: PipelineSetIndexLowerer, map_type: String, alloc: String@symbol) RETURNS !Let ->
+  RETURN Let{ name: Name{ StringValue: COPY "idx_result" }, init: Emittable{ StructInit: COPY StructInit{ zig_type: NIL, fields: [CAST(StructInitField{ name: symbol("alloc"), value: Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL } AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY map_type })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
+END
+PRIVATE FN pipelineSetIndexLowerer__build_index_gop_body(self: PipelineSetIndexLowerer, expr_mir: Emittable, alloc: String@symbol, item_var: String, expr_node: ?Locatable, item_type: ?Type, value_ownership: PipelineIndexValueOwnership) RETURNS ![]Emittable ->
+  MUTABLE elem_zig_type = "@TypeOf(${item_var})";
+  MUTABLE prepared = TRY (pipelineSetIndexLowerer__index_prepared_value(self, item_var, elem_zig_type, alloc, item_type, value_ownership));
+  MUTABLE insert = IndexInsert{ map: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, key_expr: Emittable{ Ident: COPY Ident{ name: "idx_key", lowered_node_id: NIL, ownership_consumption: NIL } }, value_expr: COPY prepared.value, key_zig_type: "u8", elem_zig_type: elem_zig_type, alloc: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+  MUTABLE owned_insert = self.pipeline_index_insert_with_ownership(insert, prepared.value, prepared.owns_heap, alloc);
+  MUTABLE body: []Emittable = (CAST([Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY "idx_key" }, init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable) + COPY prepared.setup_stmts + CAST([Emittable{ IndexInsert: COPY owned_insert }] AS []Emittable));
+  MUTABLE entry: ?CleanupEntry@multiowned = (KEEP self.pipeline_owned_cleanup_entry)(expr_mir, expr_node);
+  IF entry EXISTS AS entry_value THEN
+    &body.append(Emittable{ Cleanup: COPY Cleanup{ name: "idx_key", cleanup_entry: entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+  END
+  RETURN body;
+END
+PRIVATE FN pipelineSetIndexLowerer__index_prepared_value(self: PipelineSetIndexLowerer, item_var: String, elem_zig_type: String, alloc: String@symbol, item_type: ?Type, value_ownership: PipelineIndexValueOwnership) RETURNS !PipelineIndexPreparedValue ->
+  MUTABLE item_owns = IF item_type != NIL THEN
+    self.cleanup_bearing_type(item_type)
+  ELSE
+    TRUE
+  END;
+  MUTABLE item_value = pipelineSetIndexLowerer__index_item_value(self, item_var, elem_zig_type, alloc, value_ownership);
+  IF pipelineSetIndexLowerer__preserve_owned_index_item?(self, item_owns, value_ownership) THEN
+    RETURN PipelineIndexPreparedValue{ value: COPY item_value, setup_stmts: [Emittable{ AllocMark: COPY AllocMark{ name: COPY item_var, alloc: COPY alloc, type_info: COPY (item_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }))), scope: COPY placement__alloc_scope(alloc), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], owns_heap: item_owns };
+  END
+  RETURN pipelineSetIndexLowerer__copied_index_value(self, item_value, alloc, item_owns);
+END
+PRIVATE FN pipelineSetIndexLowerer__preserve_owned_index_item?(self: PipelineSetIndexLowerer, item_owns: Bool, value_ownership: PipelineIndexValueOwnership) RETURNS Bool ->
+  RETURN (item_owns AND (value_ownership == PipelineIndexValueOwnership.Owned));
+END
+PRIVATE FN pipelineSetIndexLowerer__copied_index_value(self: PipelineSetIndexLowerer, item_value: Emittable, alloc: String@symbol, item_owns: Bool) RETURNS PipelineIndexPreparedValue ->
+  MUTABLE fact: ?PipelineIndexAllocationFact = self.pipeline_alloc_mark_fact(item_value, self.index_temp_name(), alloc, NIL, "INDEX bucket item", TRUE);
+  IF fact EXISTS AS fact_value THEN
+    MUTABLE value_name = COPY fact_value.mark.name;
+    MUTABLE setup_stmts: []Emittable = [Emittable{ AllocMark: COPY fact_value.mark }, Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY value_name }, init: COPY item_value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
+    MUTABLE entry: ?CleanupEntry@multiowned = COPY KEEP fact_value.cleanup_entry;
+    IF entry EXISTS AS entry_value THEN
+      &setup_stmts.append(Emittable{ ErrCleanup: COPY ErrCleanup{ name: value_name, cleanup_entry: cleanupEntry__with_moved_guard(entry_value), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+    END
+    RETURN PipelineIndexPreparedValue{ value: Emittable{ Ident: COPY Ident{ name: COPY value_name, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_stmts: COPY setup_stmts, owns_heap: COPY item_owns };
+  ELSE
+    RETURN PipelineIndexPreparedValue{ value: COPY item_value, setup_stmts: ( { MUTABLE rtoc_empty_list_4: []Emittable = List[]; rtoc_empty_list_4 } ), owns_heap: COPY item_owns };
+  END
+END
+PRIVATE FN pipelineSetIndexLowerer__index_item_value(self: PipelineSetIndexLowerer, item_var: String, elem_zig_type: String, alloc: String@symbol, value_ownership: PipelineIndexValueOwnership) RETURNS Emittable ->
+  IF (value_ownership == PipelineIndexValueOwnership.Borrowed) THEN
+    RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY Ident{ name: COPY item_var, lowered_node_id: NIL, ownership_consumption: NIL }, zig_type: COPY elem_zig_type, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE
+    RETURN Emittable{ Ident: COPY Ident{ name: COPY item_var, lowered_node_id: NIL, ownership_consumption: NIL } };
+  END
+END
+FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    Emittable.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Emittable.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Emittable.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Emittable.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Emittable.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Emittable.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Emittable.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Emittable.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Emittable.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Emittable.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Emittable.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Emittable.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Emittable.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+  MUTABLE result: []Emittable = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END

@@ -1,0 +1,73 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172" AS param
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB FN signatureRegistry__function_signature(node: FunctionDef, return_lifetime: ?String) RETURNS !FunctionSignature@multiowned ->
+  RETURN TRY (functionSignature__new(node.params |> SELECT signatureRegistry__function_param(_), functionDef__annotation_return_type(node), ruby_wrap_optional_String_FunctionSignatureLifetimeInput(return_lifetime), node.visibility, node.type_params |> SELECT symbol(_), TRY (signatureRegistry__generic_bounds(node.generic_params)), ((node.reentrance_kind == :reentrant) OR (node.effects_decl == :reentrant)), FALSE, NIL, NIL, NIL, node.type_params |> SELECT symbol(_), NIL, ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } ), FALSE, NIL, NIL, NIL, NIL, NIL, NIL, NIL, node.requires));
+END
+PRIVATE FN signatureRegistry__generic_bounds(params: []GenericParamDecl) RETURNS !{String@symbol}[]Type@multiowned ->
+  MUTABLE rtoc_tuple_return_2 = params |> REDUCE({}) {
+  acc[symbol(_.name)] = ( { MUTABLE rtoc_map_results = CAST([] AS []Type); _.bounds |> EACH { &rtoc_map_results.append(COPY _.type); }; rtoc_map_results } );
+  acc
+  };
+  RETURN rtoc_tuple_return_2;
+END
+PUB FN signatureRegistry__extern_function_signature(node: ExternFnDecl) RETURNS !FunctionSignature@multiowned ->
+  MUTABLE params = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_4: ?[]Any = NIL;
+  IF (node.params == NIL) THEN
+    rtoc_ternary_value_4 = List[];
+  ELSE
+    rtoc_ternary_value_4 = node.params;
+  END
+  rtoc_ternary_value_4? };
+  RETURN TRY (functionSignature__new(params |> SELECT signatureRegistry__extern_param(_), externFnDecl__annotation_return_type(node), FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (signatureRegistry__extern_lifetime_paths(node)) }, :pub, COPY node.fn_type_params, {}, FALSE, TRUE, node.from_module, TRY (signatureRegistry__extern_effects(node)), node.extern_source, COPY node.fn_type_params, node.owner_type, COPY node.owner_type_params));
+END
+PRIVATE FN signatureRegistry__extern_lifetime_paths(node: ExternFnDecl) RETURNS ![]FunctionSignatureLifetimeSource ->
+  MUTABLE lifetime = node.return_lifetime;
+  IF (lifetime == NIL) THEN
+    RETURN CAST(( { MUTABLE rtoc_empty_list_5: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_5 } ) AS []FunctionSignatureLifetimeSource);
+  END
+  IF (lifetime == :wildcard) THEN
+    RETURN CAST([FunctionSignatureLifetimeSource{ SymbolValue: :wildcard }] AS []FunctionSignatureLifetimeSource);
+  END
+  MUTABLE paths: []FunctionSignatureLifetimeSource = ( { MUTABLE rtoc_empty_list_6: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_6 } );
+  MUTABLE rtoc_each_items_7 = (CAST(lifetime AS []Locatable));
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < rtoc_each_items_7.length() DO
+    IF !(rtoc_each_items_7[rtoc_idx]? IS_A Identifier) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE identifier = COPY rtoc_each_items_7[rtoc_idx]?;
+    &paths.append(FunctionSignatureLifetimeSource{ StringValue: COPY CAST(identifier.name() AS String) });
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN paths;
+END
+PRIVATE FN signatureRegistry__function_param(param: Param) RETURNS Param ->
+  RETURN Param{ name: COPY param.name, type: COPY param.type, required: (param.default == NIL), default: param.default, mutable: param.mutable, takes: ( { MUTABLE rtoc_optional_or_source_8: ?Bool = param.takes; MUTABLE rtoc_optional_or_result_9: ?Bool = NIL; IF rtoc_optional_or_source_8 != NIL THEN rtoc_optional_or_result_9 = COPY rtoc_optional_or_source_8; ELSE rtoc_optional_or_result_9 = FALSE; END rtoc_optional_or_result_9 } ), sync: IF type__any_sync?(param.type) THEN
+    type__sync(param.type)
+  ELSE
+    NIL
+  END, comptime: NIL, name_token: NIL, symbol: NIL, carrier_contract: NIL };
+END
+PRIVATE FN signatureRegistry__extern_param(param: Param) RETURNS Param ->
+  RETURN Param{ name: COPY param.name, type: COPY param.type, required: (param.default == NIL), mutable: ( { MUTABLE rtoc_optional_or_source_10: ?Bool = param.mutable; MUTABLE rtoc_optional_or_result_11: ?Bool = NIL; IF rtoc_optional_or_source_10 != NIL THEN rtoc_optional_or_result_11 = COPY rtoc_optional_or_source_10; ELSE rtoc_optional_or_result_11 = FALSE; END rtoc_optional_or_result_11 } ), comptime: ( { MUTABLE rtoc_optional_or_source_12: ?Bool = param.comptime; MUTABLE rtoc_optional_or_result_13: ?Bool = NIL; IF rtoc_optional_or_source_12 != NIL THEN rtoc_optional_or_result_13 = COPY rtoc_optional_or_source_12; ELSE rtoc_optional_or_result_13 = FALSE; END rtoc_optional_or_result_13 } ), default: NIL, takes: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL };
+END
+PRIVATE FN signatureRegistry__extern_effects(node: ExternFnDecl) RETURNS !{String@symbol}ExternEffectValue ->
+  IF node.effects != NIL THEN
+  RETURN COPY (node.effects)?;
+  ELSE
+  RETURN {};
+  END
+END
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator
+FN ruby_wrap_optional_String_FunctionSignatureLifetimeInput(value: ?String) RETURNS ?FunctionSignatureLifetimeInput ->
+  IF value EXISTS AS optional_payload THEN
+    RETURN FunctionSignatureLifetimeInput{ StringValue: COPY optional_payload };
+  END
+  NIL;
+END

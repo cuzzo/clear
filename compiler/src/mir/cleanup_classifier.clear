@@ -1,0 +1,2211 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6f63616c5f62696e64696e675f66616374732e636c656172" AS local_binding_facts
+REQUIRE "pkg:rtoc_73656d616e7469632f6f776e6572736869705f6964656e746974792e636c656172" AS ownership_identity
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6966656379636c655f706c616e2e636c656172" AS lifecycle_plan
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172" AS param
+REQUIRE "pkg:rtoc_6173742f7374727563745f6669656c642e636c656172" AS struct_field
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+PUB UNION Field { StructField: StructField, FunctionType: FunctionType, Type: Type, SymbolValue: String@symbol, StringValue: String }
+PUB UNION NamesItem { StringValue: String, SymbolValue: String@symbol, PlaceId: PlaceId }
+PUB UNION UnionLookup { StringValue: String, SymbolValue: String@symbol }
+PUB UNION VariantName { StringValue: String, SymbolValue: String@symbol }
+# Ruby module CleanupClassifier
+PUB UNION AstBodyNode { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Struct: Struct, FunctionDef: FunctionDef, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB UNION SchemaShape { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
+PUB UNION CaptureBindingBlockParam3 { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Binding: Binding, FunctionDef: FunctionDef, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB UNION CleanupExtraValue { StringValue: String, SymbolValue: String@symbol, BoolValue: Bool, TypeMultiowned: Type@multiowned, ResourceClosePlan: ResourceClosePlan, ArrayValue: []{String@symbol}Any@multiowned, Type: Type }
+PUB STRUCT BindingCleanupFacts {
+  container_borrow: Bool,
+  heap_storage: Bool,
+  borrow_provenance: Bool,
+  rodata_provenance: Bool,
+  empty_initializer: Bool,
+  mutable_binding_mutated: Bool,
+  resource_close_plan: ?ResourceClosePlan,
+  sync: ?String@symbol
+}
+PUB STRUCT FrozenCleanupFacts {
+  entries_by_place: {PlaceId}CleanupEntry@multiowned
+}
+
+PUB FN frozenCleanupFacts__from_bindings(bindings: {String}CleanupEntry) RETURNS FrozenCleanupFacts ->
+  MUTABLE entries: {PlaceId}CleanupEntry@multiowned = {};
+  bindings.keys() |> EACH {
+  MUTABLE entry: CleanupEntry = (bindings[_] OR_ELSE CAST(panic("missing hash key") AS CleanupEntry));
+  entries[placeId__from_path(Path{ StringValue: COPY _ })] = COPY entry;
+  };
+  RETURN frozenCleanupFacts__build(entries);
+END
+PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String}CleanupEntry, entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
+  MUTABLE _ = COPY fn_node;
+  bindings.keys() |> EACH {
+  MUTABLE entry: CleanupEntry = (bindings[_] OR_ELSE CAST(panic("missing hash key") AS CleanupEntry));
+  entries[placeId__from_path(_)] = (entries[placeId__from_path(_)] OR_ELSE entry);
+  };
+  RETURN frozenCleanupFacts__build(entries);
+END
+PUB FN frozenCleanupFacts__build(entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
+  RETURN FrozenCleanupFacts{ entries_by_place: entries };
+END
+PUB FN frozenCleanupFacts__empty?(self: FrozenCleanupFacts) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN (self.entries_by_place.count() == 0);
+END
+PUB FN frozenCleanupFacts__entry_for(self: FrozenCleanupFacts, name: Name) RETURNS CleanupEntry@multiowned ->
+  MUTABLE place = placeId__from_path(castNameToPath(name));
+  IF (IF self.entries_by_place[place] != NIL THEN self.entries_by_place[place] ELSE self.entries_by_place[placeId__from_path(Path{ StringValue: COPY place.path })] END) != NIL THEN
+  RETURN ((IF self.entries_by_place[place] != NIL THEN self.entries_by_place[place] ELSE self.entries_by_place[placeId__from_path(Path{ StringValue: COPY place.path })] END))?;
+  ELSE
+  RETURN new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
+  END
+END
+PUB FN frozenCleanupFacts__entry_for_node(self: FrozenCleanupFacts, name: Name, node: Locatable) RETURNS CleanupEntry@multiowned ->
+  MUTABLE place = cleanupClassifier__place_for_binding_node(CAST(name AS String), node);
+  IF (IF self.entries_by_place[place] != NIL THEN self.entries_by_place[place] ELSE self.entries_by_place[placeId__from_path(Path{ StringValue: COPY place.path })] END) != NIL THEN
+  RETURN ((IF self.entries_by_place[place] != NIL THEN self.entries_by_place[place] ELSE self.entries_by_place[placeId__from_path(Path{ StringValue: COPY place.path })] END))?;
+  ELSE
+  RETURN new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
+  END
+END
+PUB FN frozenCleanupFacts__live_entry_for(self: FrozenCleanupFacts, name: Name) RETURNS CleanupEntry@multiowned ->
+  MUTABLE entry = frozenCleanupFacts__entry_for(self, name);
+  IF cleanupEntry__needs_cleanup?(entry) THEN
+    RETURN entry;
+  ELSE
+    RETURN new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
+  END
+END
+PUB FN frozenCleanupFacts__live_entry_for_node(self: FrozenCleanupFacts, name: Name, node: Locatable) RETURNS CleanupEntry@multiowned ->
+  MUTABLE entry = frozenCleanupFacts__entry_for_node(self, name, node);
+  IF cleanupEntry__needs_cleanup?(entry) THEN
+    RETURN entry;
+  ELSE
+    RETURN new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
+  END
+END
+PUB FN frozenCleanupFacts__with_live_entry_for(self: FrozenCleanupFacts, name: Name, block: FN(CleanupEntry) -> Void) RETURNS Bool ->
+  MUTABLE entry = frozenCleanupFacts__live_entry_for(self, name);
+  IF !(cleanupEntry__present?(entry)) THEN
+    RETURN FALSE;
+  END
+  block(entry);
+  RETURN TRUE;
+END
+PUB FN frozenCleanupFacts__with_live_entry_for_node(self: FrozenCleanupFacts, name: Name, node: Locatable, block: FN(CleanupEntry) -> Void) RETURNS Bool ->
+  MUTABLE entry = frozenCleanupFacts__live_entry_for_node(self, name, node);
+  IF !(cleanupEntry__present?(entry)) THEN
+    RETURN FALSE;
+  END
+  block(entry);
+  RETURN TRUE;
+END
+PUB FN frozenCleanupFacts__without_names(self: FrozenCleanupFacts, names: []NamesItem) RETURNS FrozenCleanupFacts ->
+  MUTABLE removed_paths: [Set]String = (names |> SELECT (placeId__from_path(castNamesItemToPath(_))).path) |> DISTINCT _;
+  MUTABLE kept = self.entries_by_place |> WHERE !(removed_paths.contains?(_._0.path));
+  RETURN frozenCleanupFacts__build(kept);
+END
+PUB FN frozenCleanupFacts__bindings(self: FrozenCleanupFacts) RETURNS !{String}CleanupEntry@multiowned ->
+  RETURN self.entries_by_place.each_with_object({}, %(tuple_param_0, out: Tuple<PlaceId,CleanupEntry@multiowned>) -> {
+  MUTABLE place = tuple_param_0._0;
+  MUTABLE entry = tuple_param_0._1;
+  out[place.path()] = entry;
+  NIL
+  });
+END
+PUB FN frozenCleanupFacts__each_entry(self: FrozenCleanupFacts, block: FN(PlaceId, CleanupEntry) -> Void) RETURNS Void ->
+  self.entries_by_place.keys() |> EACH {
+  MUTABLE entry: CleanupEntry@multiowned = (self.entries_by_place[_] OR_ELSE CAST(panic("missing hash key") AS CleanupEntry@multiowned));
+  block(_, entry);
+  };
+  NIL;
+END
+PUB STRUCT CleanupClassificationPlan {
+  function_name: String,
+  facts: FrozenCleanupFacts
+}
+
+PUB FN cleanupClassificationPlan__from_bindings(function_name: String, bindings: {String}CleanupEntry) RETURNS CleanupClassificationPlan EFFECTS REENTRANT ->
+  RETURN CleanupClassificationPlan{ function_name: COPY function_name, facts: COPY frozenCleanupFacts__from_bindings(bindings) };
+END
+PUB FN cleanupClassificationPlan__from_function(fn_node: FunctionDef, bindings: {String}CleanupEntry, entries: {PlaceId}CleanupEntry) RETURNS CleanupClassificationPlan EFFECTS REENTRANT ->
+  RETURN CleanupClassificationPlan{ function_name: COPY CAST(fn_node.name AS String), facts: COPY frozenCleanupFacts__from_function(fn_node, bindings, entries) };
+END
+PUB FN cleanupClassificationPlan__empty?(self: CleanupClassificationPlan) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN frozenCleanupFacts__empty?(self.facts);
+END
+PUB FN cleanupClassificationPlan__bindings(self: CleanupClassificationPlan) RETURNS !{String}CleanupEntry@multiowned EFFECTS REENTRANT ->
+  RETURN TRY (frozenCleanupFacts__bindings(self.facts));
+END
+PUB FN cleanupClassifier__classify(fn_node: FunctionDef, schema_lookup: Any) RETURNS !{String}CleanupEntry@multiowned ->
+  RETURN TRY (cleanupClassificationPlan__bindings((TRY (cleanupClassifier__classify_plan(fn_node, schema_lookup)))));
+END
+PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !CleanupClassificationPlan ->
+  IF !(fn_node.body) THEN
+    RETURN cleanupClassificationPlan__from_bindings(CAST(fn_node.name AS String), {});
+  END
+  MUTABLE bindings: {String}CleanupEntry@multiowned = {};
+  MUTABLE entries_by_place: {PlaceId}CleanupEntry@multiowned = {};
+  TRY (walk_bindings(fn_node.body, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+  TRY (walk_takes_params(fn_node, schema_lookup, lifecycle_registry, &bindings));
+  walk_moved_source_guards(fn_node.body, bindings);
+  TRY (walk_match_as_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
+  TRY (walk_capture_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
+  TRY (stamp_cleanup_scopes_mut(fn_node.body, bindings));
+  RETURN cleanupClassificationPlan__from_function(fn_node, bindings, entries_by_place);
+END
+PUB FN cleanupClassifier__place_for_binding_node(name: String, node: Locatable) RETURNS PlaceId ->
+  MUTABLE sym = IF respondsTo?(node, "symbol") THEN
+    node.symbol()
+  ELSE
+    NIL
+  END;
+  MUTABLE symbol = IF sym IS_A SymbolEntry THEN
+    sym
+  ELSE
+    NIL
+  END;
+  RETURN placeId__from_symbol(Path{ StringValue: COPY name }, symbol);
+END
+PUB FN cleanupClassifier__walk_moved_source_guards(body: []Locatable, bindings: {String}CleanupEntry) RETURNS Void ->
+  FOR _ IN body DO
+  mark_moved_source_guards_in_node(_, bindings);
+  END
+END
+PUB FN cleanupClassifier__mark_moved_source_guards_in_node(node: Locatable, bindings: {String}CleanupEntry) RETURNS Void EFFECTS REENTRANT ->
+  IF (IF node IS_A Identifier AS identifier THEN aST__moved?(Locatable{ Identifier: COPY identifier }) ELSE FALSE END) THEN
+    (IF bindings[CAST(node.name() AS String)] != NIL THEN
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_1 = (bindings[CAST(node.name() AS String)]);
+    cleanupEntry__mark_moved_guard_mut(&rtoc_mutable_receiver_1) }
+    ELSE
+      NIL
+    END);
+  END
+  IF node IS_A FunctionDef AS function_def THEN
+    RETURN;
+  END
+  aST__each_child_node(node, %(child: Locatable) USE(bindings) -> {
+  mark_moved_source_guards_in_node(child, bindings);
+  rubyToClearVoid()
+  });
+END
+PUB FN cleanupClassifier__stamp_cleanup_scopes_mut(body: []AstBodyNode, bindings: {String}CleanupEntry) RETURNS !Void ->
+  TRY (stamp_default_scopes_mut(body, 0));
+  TRY (stamp_extended_loop_lifetimes_mut(body, bindings));
+END
+PUB FN cleanupClassifier__stamp_default_scopes_mut(body: []AstBodyNode, loop_depth: Int64) RETURNS !Void EFFECTS REENTRANT ->
+  FOR _ IN body DO
+  stamp_binding_default_scope_mut(_, loop_depth);
+  MUTABLE child_depth = IF aST__loop_node?(castAstBodyNodeToLocatable(_)) THEN
+      (loop_depth + 1)
+    ELSE
+      loop_depth
+    END;
+  FOR _ IN (TRY (aST__child_bodies(castAstBodyNodeToLocatable(_)))) DO
+  TRY (stamp_default_scopes_mut(_, child_depth));
+  END
+  END
+END
+PUB FN cleanupClassifier__stamp_binding_default_scope_mut(node: AstBodyNode, loop_depth: Int64) RETURNS Void ->
+  IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
+    RETURN;
+  END
+  IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
+    RETURN;
+  END
+  MUTABLE entry = IF respondsTo?(node, "mir_binding_entry") THEN
+    node.mir_binding_entry()
+  ELSE
+    NIL
+  END;
+  IF !(entry) THEN
+    RETURN;
+  END
+  IF entry.none?() THEN
+    RETURN;
+  END
+  MUTABLE scope =   IF entry.heap?() THEN
+    :heap
+  ELSE_IF loop_depth.positive?() THEN
+    :iteration
+  ELSE
+    :function
+  END;
+  &entry.set_cleanup_scope_mut(scope);
+END
+PUB FN cleanupClassifier__stamp_extended_loop_lifetimes_mut(body: []AstBodyNode, bindings: {String}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+  FOR _ IN body DO
+  FOR _ IN (TRY (aST__child_bodies(castAstBodyNodeToLocatable(_)))) DO
+  IF aST__loop_node?(castAstBodyNodeToLocatable(_)) THEN
+      TRY (stamp_loop_extensions_mut(_, bindings));
+  END
+  TRY (stamp_extended_loop_lifetimes_mut(_, bindings));
+  END
+  END
+END
+PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []AstBodyNode, bindings: {String}CleanupEntry) RETURNS !Void ->
+  MUTABLE local_facts = TRY (localBindingAnalysis__direct_loop_body_facts(body));
+  MUTABLE local_names = COPY local_facts.names;
+  MUTABLE local_entries = COPY local_facts.entries;
+  TRY (localBindingAnalysis__each_direct_loop_node(body, %(node: Locatable) USE(bindings, local_entries, local_names) -> {
+  IF node IS_A BindExpr AS bind_expr THEN
+      MUTABLE bind_expr_mutable = COPY bind_expr;
+      IF !((bind_expr_mutable.mode == :assign)) THEN
+        RETURN;
+      END
+      IF local_names.contains?(CAST(bind_expr_mutable.name AS String)) THEN
+        RETURN;
+      END
+      MUTABLE entry: ?CleanupEntry = COPY bindings[CAST(bind_expr_mutable.name AS String)];
+      IF ((entry != NIL) AND TRY (value_extends_loop?(bind_expr_mutable.value))) THEN
+        TRY (promote_entry_to_heap_cleanup_mut(&entry, bind_expr_mutable.value));
+      END
+  ELSE_IF node IS_A Assignment AS assignment THEN
+      MUTABLE target: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable(assignment.name));
+      IF (((target != NIL) AND (target?).name) AND local_names.contains?(target.name)) THEN
+        RETURN;
+      END
+      mark_iteration_values_function_mut(assignment.value, local_entries);
+  ELSE_IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
+      IF destructuring_assignment.value IS_A Locatable THEN
+        mark_iteration_values_function_mut(destructuring_assignment.value, local_entries);
+      END
+  ELSE_IF node IS_A FuncCall AS func_call THEN
+      mark_call_lifetime_extensions_mut(func_call.args, params_for_call(func_call), local_entries, NIL);
+  ELSE_IF (node IS_A MethodCall) THEN
+      MUTABLE receiver: ?Identifier = aST__root_identifier(node.object());
+      MUTABLE receiver_nonlocal = !(!(((((receiver != NIL) AND (receiver?).name) AND !(local_names.contains?(receiver.name))))));
+      mark_call_lifetime_extensions_mut(node.args(), params_for_method_call(node) |> SKIP 1, local_entries, receiver_nonlocal);
+  END
+  rubyToClearVoid()
+  }));
+END
+PUB FN cleanupClassifier__value_extends_loop?(value: Locatable) RETURNS !Bool ->
+  RETURN TRY (type__heap_ptr?((TRY (type__from_node_mut(value, "cleanup lifetime extension")))));
+END
+PUB FN cleanupClassifier__promote_entry_to_heap_cleanup_mut(MUTABLE entry_obj: CleanupEntry, value: Locatable) RETURNS !Void ->
+  MUTABLE lifecycle: ?LifecyclePlan = cleanupEntry__lifecycle_plan(entry_obj);
+  IF ((lifecycle != NIL) AND !(lifecyclePlan__needs_drop?(lifecycle))) THEN
+    RETURN;
+  END
+  MUTABLE ti = TRY (type__from_node_mut(value, "cleanup lifetime promotion"));
+  IF (type__symbol?(ti) OR ((TRY (type__string?(ti)) AND type__rodata?(ti)))) THEN
+    RETURN;
+  END
+  cleanupEntry__promote_to_cleanup_mut(&entry_obj, IF TRY (type__string?(ti)) THEN
+    :heap_string
+  ELSE
+    :uniform
+  END, :heap, TRUE);
+END
+PUB FN cleanupClassifier__mark_call_lifetime_extensions_mut(args: []Locatable, params: []Param, local_entries: {String}CleanupEntry, receiver_nonlocal: ?Bool) RETURNS Void ->
+  IF receiver_nonlocal EXISTS AS receiver_nonlocal_value THEN
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < params.length() DO
+    IF !((params[rtoc_idx]?.takes OR params[rtoc_idx]?.mutable)) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE arg: ?Locatable = COPY args[rtoc_idx];
+    IF arg EXISTS AS arg_value THEN
+          mark_iteration_values_function_mut(arg_value, local_entries);
+    END
+  rtoc_idx = rtoc_idx + 1;
+    END
+  ELSE
+    RETURN;
+  END
+END
+PUB FN cleanupClassifier__mark_iteration_values_function_mut(expr: Locatable, local_entries: {String}CleanupEntry) RETURNS Void ->
+  MUTABLE ident: ?Identifier = aST__root_identifier(expr);
+  IF ident EXISTS AS ident_value THEN
+    MUTABLE ident_value_mutable = COPY ident_value;
+    MUTABLE entry: ?CleanupEntry = COPY local_entries[ident_value_mutable.name];
+    IF entry EXISTS AS entry_value THEN
+      MUTABLE entry_value_mutable = COPY entry_value;
+      IF (cleanupEntry__frame?(entry_value_mutable) AND (cleanupEntry__scope(entry_value_mutable) == :iteration)) THEN
+        cleanupEntry__set_cleanup_scope_mut(&entry_value_mutable, :function);
+      END
+    ELSE
+      RETURN;
+    END
+  ELSE
+    RETURN;
+  END
+END
+PUB FN cleanupClassifier__params_for_call(call: FuncCall) RETURNS ![]Param ->
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF TRUE THEN
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_signature));
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  IF sig EXISTS AS sig_value THEN
+    RETURN TRY (functionSignature__params(sig_value));
+  ELSE
+    RETURN CAST(( { MUTABLE rtoc_empty_list_2: []Param = List[]; rtoc_empty_list_2 } ) AS []Param);
+  END
+END
+PUB FN cleanupClassifier__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF TRUE THEN
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_signature));
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  IF sig EXISTS AS sig_value THEN
+    RETURN TRY (functionSignature__params(sig_value));
+  ELSE
+    RETURN CAST(( { MUTABLE rtoc_empty_list_3: []Param = List[]; rtoc_empty_list_3 } ) AS []Param);
+  END
+END
+PUB FN cleanupClassifier__stamp_field_pre_cleanups_mut(body: []Locatable, facts: FrozenCleanupFacts, schema_lookup: ?Any = NIL, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !Void ->
+  aST__each_locatable(body, FALSE, %(stmt: Locatable) USE(facts, lifecycle_registry, schema_lookup) -> {
+  IF !(stmt IS_A Assignment) THEN
+      RETURN;
+  END
+  IF !(stmt.name() IS_A GetField) THEN
+      RETURN;
+  END
+  MUTABLE target_node = stmt.name().target();
+  MUTABLE field_ti = TRY (type__from_node_mut(stmt.name(), "field pre-cleanup"));
+  MUTABLE lifecycle: ?LifecyclePlan = NIL;
+  IF lifecycle_registry != NIL THEN
+      lifecycle = COPY UNWRAP (lifecycle_registry?[field_ti]);
+    END
+  IF lifecycle EXISTS AS lifecycle_value THEN
+      stmt.field_lifecycle_plan = lifecycle_value;
+  END
+  IF (stmt.auto_lock() AND cleanup_owned_string_type?(field_ti)) THEN
+      stmt.field_pre_cleanup = :heap;
+      RETURN;
+  END
+  MUTABLE heap_field_alloc = heap_owned_field_pre_cleanup_alloc(field_ti, target_node, facts);
+  IF heap_field_alloc THEN
+      stmt.field_pre_cleanup = heap_field_alloc;
+      RETURN;
+  END
+  MUTABLE field_needs_cleanup =   IF lifecycle THEN
+      lifecyclePlan__needs_drop?(lifecycle)
+    ELSE
+      (TRY (type__needs_cleanup?(field_ti, schema_lookup)) OR TRY (type__recursive_cleanup_shape?(field_ti, schema_lookup)))
+    END;
+  IF !(field_needs_cleanup) THEN
+      RETURN;
+  END
+  stmt.field_pre_cleanup = field_owner_cleanup_alloc(target_node, facts);
+  rubyToClearVoid()
+  });
+END
+PUB FN cleanupClassifier__heap_owned_field_pre_cleanup_alloc(field_ti: Type, target_node: Locatable, facts: FrozenCleanupFacts) RETURNS ?String@symbol ->
+  IF !(cleanup_owned_string_type?(field_ti)) THEN
+    RETURN NIL;
+  END
+  IF (field_owner_cleanup_alloc(target_node, facts) == :heap) THEN
+    RETURN :heap;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN cleanupClassifier__field_owner_cleanup_alloc(target_node: Locatable, facts: FrozenCleanupFacts) RETURNS String@symbol ->
+  IF target_node IS_A Identifier AS identifier THEN
+    MUTABLE target_entry = frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY identifier__name(identifier) }, Locatable{ Identifier: COPY identifier });
+    IF target_entry.heap?() THEN
+      RETURN :heap;
+    ELSE
+      RETURN :frame;
+    END
+  ELSE
+    RETURN :frame;
+  END
+END
+PUB FN cleanupClassifier__walk_bindings(body: []AstBodyNode, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS ![]CleanupEntry@multiowned ->
+  TRY (classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+  RETURN bindings.values();
+END
+PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []AstBodyNode, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+  FOR _ IN body DO
+  MUTABLE rtoc_mutable_block_param_4 = COPY _;
+  IF (rtoc_mutable_block_param_4 IS_A VarDecl OR rtoc_mutable_block_param_4 IS_A BindExpr) THEN
+      TRY (classify_cleanup_binding_node(&rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+  END
+  TRY (classify_inline_bg_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+  FOR rtoc_mutable_block_param_4 IN (TRY (aST__child_bodies(castAstBodyNodeToLocatable(rtoc_mutable_block_param_4)))) DO
+  TRY (classify_cleanup_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+  END
+  END
+END
+PUB FN cleanupClassifier__classify_inline_bg_binding_body(node: AstBodyNode, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+  MUTABLE rtoc_each_items_5 = (TRY (aST__expression_children(castAstBodyNodeToLocatable(node))));
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < rtoc_each_items_5.length() DO
+    IF !(TRUE) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF (rtoc_each_items_5[rtoc_idx]? IS_A BgBlock OR rtoc_each_items_5[rtoc_idx]? IS_A BgStreamBlock) THEN
+        MUTABLE body = rtoc_each_items_5[rtoc_idx]?.body();
+        IF body THEN
+          TRY (classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+        END
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF rtoc_each_items_5[rtoc_idx]? IS_A BlockExpr THEN
+        IF rtoc_each_items_5[rtoc_idx]?.body() THEN
+          TRY (classify_cleanup_binding_body(rtoc_each_items_5[rtoc_idx]?.body(), schema_lookup, lifecycle_registry, bindings, entries_by_place));
+        END
+        IF rtoc_each_items_5[rtoc_idx]?.result() THEN
+          TRY (classify_inline_bg_binding_body(rtoc_each_items_5[rtoc_idx]?.result(), schema_lookup, lifecycle_registry, bindings, entries_by_place));
+        END
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    TRY (classify_inline_bg_binding_body(rtoc_each_items_5[rtoc_idx]?, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNode, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void ->
+  IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
+    RETURN;
+  END
+  MUTABLE var_name: String = "";
+  IF (MATCH node START BindingNode.VarDecl AS item -> item.name IS_A String, BindingNode.BindExpr AS item -> item.name IS_A String, BindingNode.MIRDestructureTarget AS item -> item.name IS_A String END) THEN
+    var_name = (MATCH node START BindingNode.VarDecl AS item -> item.name, BindingNode.BindExpr AS item -> item.name, BindingNode.MIRDestructureTarget AS item -> item.name END);
+  ELSE
+    var_name = COPY (MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String) END);
+  END
+  IF binding_container_borrow?(node) THEN
+    &bindings.delete(var_name);
+    &entries_by_place.delete(cleanupClassifier__place_for_binding_node(var_name, castBindingNodeToLocatable(node)));
+    IF respondsTo?(node, "mir_binding_entry=") THEN
+      node.mir_binding_entry = new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
+    END
+    RETURN;
+  END
+  MUTABLE value = node.value();
+  MUTABLE value_node_branch_value: ?Locatable = NIL;
+  IF value IS_A Locatable THEN
+    value_node_branch_value = value;
+  ELSE
+    value_node_branch_value = NIL;
+  END
+  MUTABLE value_node: ?Locatable = value_node_branch_value;
+  MUTABLE moved_alloc = TRY (moved_payload_alloc(value_node, bindings));
+  MUTABLE cleanup = TRY (classify_binding(&node.full_type_mut(), node, schema_lookup, lifecycle_registry));
+  IF moved_alloc THEN
+    cleanup = (cleanup OR TRY (transferred_payload_entry(&node.full_type_mut(), schema_lookup, lifecycle_registry)));
+  END
+  IF ((cleanup AND (lifecycle_registry != NIL)) AND (cleanup.lifecycle_plan() == NIL)) THEN
+    cleanupEntry__set_lifecycle_plan_mut(&cleanup, TRY (lifecycleRegistry__fetch_binding(lifecycle_registry, castBindingNodeToLocatable(node), &node.full_type_mut())));
+  END
+  IF !(cleanup) THEN
+    IF ((((lifecycle_registry == NIL) AND respondsTo?(node, "symbol")) AND ((node.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_6 = ((node.symbol())?);
+    symbolEntry__heap_storage?(rtoc_local_receiver_6) })) AND !(optional_empty_initializer?(value))) THEN
+      MUTABLE ti = &node.full_type_mut();
+      IF TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup)) THEN
+        cleanup = entry(:uniform, :heap);
+      END
+    END
+  END
+  IF cleanup THEN
+    IF moved_alloc THEN
+      cleanupEntry__set_alloc_mut(&cleanup, moved_alloc);
+    END
+  ELSE
+    cleanup = TRY (no_cleanup_alloc_entry(&node.full_type_mut(), schema_lookup));
+  END
+  IF ((cleanup AND (lifecycle_registry != NIL)) AND (cleanup.lifecycle_plan() == NIL)) THEN
+    cleanupEntry__set_lifecycle_plan_mut(&cleanup, TRY (lifecycleRegistry__fetch_binding(lifecycle_registry, castBindingNodeToLocatable(node), &node.full_type_mut())));
+  END
+  IF respondsTo?(node, "mir_binding_entry=") THEN
+    node.mir_binding_entry = (cleanup OR new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
+  END
+  IF cleanup THEN
+    bindings[var_name] = cleanup;
+    entries_by_place[cleanupClassifier__place_for_binding_node(var_name, castBindingNodeToLocatable(node))] = cleanup;
+  ELSE
+    &bindings.delete(var_name);
+    &entries_by_place.delete(cleanupClassifier__place_for_binding_node(var_name, castBindingNodeToLocatable(node)));
+  END
+END
+PUB FN cleanupClassifier__no_cleanup_alloc_entry(full_type: Any, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE ti_branch_value: ?Type = NIL;
+  IF full_type IS_A Type THEN
+    ti_branch_value = COPY full_type;
+  ELSE
+    ti_branch_value = TRY (type__new(full_type));
+  END
+  MUTABLE ti: Type = ti_branch_value?;
+  IF !((TRY (type__heap_ptr?(ti)) OR TRY (type__collection_value?(ti)))) THEN
+    RETURN NIL;
+  END
+  MUTABLE alloc = TRY (type__cleanup_allocator(ti, schema_lookup));
+  RETURN cleanupEntry__no_cleanup(alloc, IF placement__heap?(alloc) THEN
+    :heap
+  ELSE
+    :function
+  END);
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN NIL;
+END
+PUB FN cleanupClassifier__moved_payload_alloc(node: ?Locatable, bindings: {String}CleanupEntry) RETURNS !?String@symbol ->
+  IF !(TRY (ownership_transfer_payload?(node))) THEN
+    RETURN NIL;
+  END
+  MUTABLE payload = COPY UNWRAP (node);
+  MUTABLE names = List[];
+  TRY (collect_payload_binding_names(payload, &names));
+  MUTABLE allocs = names |> SELECT:? {
+  MUTABLE entry: ?CleanupEntry = COPY bindings[_];
+  (IF (IF entry != NIL THEN
+      cleanupEntry__needs_cleanup?(entry)
+    ELSE
+      NIL
+    END) THEN
+      cleanupEntry__alloc(entry)
+    ELSE
+      NIL
+    END)
+  } |> WHERE _ != NIL;
+  IF (allocs.length() == 0) THEN
+    RETURN NIL;
+  END
+  IF allocs.contains?(:heap) THEN
+    RETURN :heap;
+  ELSE
+    RETURN :frame;
+  END
+END
+PUB FN cleanupClassifier__ownership_transfer_payload?(node: ?Locatable) RETURNS !Bool EFFECTS REENTRANT ->
+  IF node EXISTS AS node_value THEN
+    IF node_value IS_A MoveNode AS move_node THEN
+      RETURN TRUE;
+    END
+    IF aST__moved?(node_value) THEN
+      RETURN TRUE;
+    END
+    RETURN (TRY (aST__wrapped_children(node_value))) |> ANY (TRUE AND TRY (ownership_transfer_payload?(_)));
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN cleanupClassifier__collect_payload_binding_names(node: Locatable, MUTABLE names: []String) RETURNS !Void EFFECTS REENTRANT ->
+  IF node IS_A Identifier AS identifier THEN
+    &names.append(COPY identifier__name(identifier));
+    RETURN;
+  END
+  FOR _ IN (TRY (aST__wrapped_children(node))) DO
+  TRY (collect_payload_binding_names(_, &names));
+  END
+END
+PUB FN cleanupClassifier__transferred_payload_entry(ti: Type, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry) RETURNS !?CleanupEntry@multiowned ->
+  RETURN TRY (takes_param_base_entry(ti, schema_lookup, lifecycle_registry));
+END
+PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+  MUTABLE rtoc_each_items_7 = (fn_node.params |> WHERE _.takes);
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < rtoc_each_items_7.length() DO
+    MUTABLE ti = COPY rtoc_each_items_7[rtoc_idx]?.type;
+    MUTABLE name = COPY (rtoc_each_items_7[rtoc_idx]?.name);
+    MUTABLE base = TRY (takes_param_base_entry(ti, schema_lookup, lifecycle_registry));
+    IF !(base) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF lifecycle_registry EXISTS AS lifecycle_registry_value THEN
+        MUTABLE lifecycle_registry_value_mutable = COPY lifecycle_registry_value;
+        cleanupEntry__set_lifecycle_plan_mut(&base, UNWRAP (lifecycle_registry_value_mutable[ti]));
+    END
+    cleanupEntry__mark_moved_guard_mut(&base);
+    cleanupEntry__set_alloc_mut(&base, :heap);
+    base[:source_kind] = (base[:source_kind] OR_ELSE :takes_param);
+    IF (TRUE AND type__needs_pointer_passing?(ti)) THEN
+        base[:via_pointer] = TRUE;
+    END
+    bindings[name] = base;
+  rtoc_idx = rtoc_idx + 1;
+  END
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < fn_node.params.length() DO
+    IF !((fn_node.params[rtoc_idx]?.takes AND (fn_node.params[rtoc_idx]?.carrier_contract == :monomorphic))) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF bindings.contains?((fn_node.params[rtoc_idx]?.name)) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE base = entry(:rc, :heap, TRUE, {:rc_alloc: :heap});
+    cleanupEntry__mark_moved_guard_mut(&base);
+    cleanupEntry__set_alloc_mut(&base, :heap);
+    base[:source_kind] = (base[:source_kind] OR_ELSE :takes_param);
+    MUTABLE plan_branch_value: ?LifecyclePlan = NIL;
+      IF lifecycle_registry EXISTS AS lifecycle_registry_value THEN
+        plan_branch_value = lifecycleRegistry__fetch_monomorphic(lifecycle_registry_value, fn_node.params[rtoc_idx]?.type);
+      ELSE
+        plan_branch_value = lifecyclePlanner__monomorphic_carrier_plan(fn_node.params[rtoc_idx]?.type);
+      END
+    MUTABLE plan: LifecyclePlan = plan_branch_value?;
+    cleanupEntry__set_lifecycle_plan_mut(&base, plan);
+    bindings[(fn_node.params[rtoc_idx]?.name)] = base;
+  rtoc_idx = rtoc_idx + 1;
+  END
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < fn_node.params.length() DO
+    IF fn_node.params[rtoc_idx]?.takes THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF !((IF fn_node.params[rtoc_idx]?.symbol != NIL THEN
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (fn_node.params[rtoc_idx]?.symbol);
+    symbolEntry__kept_identity(rtoc_local_receiver_8) }
+      ELSE
+        NIL
+      END)) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE base = entry(:rc, :heap, TRUE, {:rc_alloc: :heap});
+    cleanupEntry__mark_moved_guard_mut(&base);
+    cleanupEntry__set_alloc_mut(&base, :heap);
+    base[:source_kind] = (base[:source_kind] OR_ELSE :kept_param);
+    bindings[(fn_node.params[rtoc_idx]?.name)] = base;
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN cleanupClassifier__owned_value_entry(ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  RETURN TRY (takes_param_base_entry(ti, schema_lookup));
+END
+PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE lifecycle: ?LifecyclePlan = NIL;
+  IF lifecycle_registry != NIL THEN
+    lifecycle = COPY UNWRAP (lifecycle_registry?[ti]);
+  END
+  IF ((lifecycle != NIL) AND !(lifecyclePlan__needs_drop?(lifecycle))) THEN
+    RETURN NIL;
+  END
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
+  IF (schemas__resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
+    RETURN entry(:resource, :heap, TRUE, {:resource_close_plan: symbolEntry__close_plan(schema)});
+  END
+  IF schemas__union?(schema) THEN
+    MUTABLE has_heap = TRY (union_variants_need_cleanup?(schema, schema_lookup));
+    IF has_heap THEN
+      RETURN entry(:takes_union);
+    ELSE
+      RETURN NIL;
+    END
+  END
+  MUTABLE opt = TRY (classify_optional(ti, schema_lookup));
+  IF opt THEN
+    RETURN opt;
+  END
+  IF cleanup_owned_string_type?(ti) THEN
+    RETURN entry(:heap_string);
+  END
+  MUTABLE coll = TRY (classify_collection(ti, schema_lookup));
+  IF coll THEN
+    RETURN coll;
+  END
+  IF TRY (type__direct_indexable_collection?(ti)) THEN
+    MUTABLE elem_zig: String = "";
+    IF TRY (type__element_type(ti)) THEN
+      elem_zig = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (TRY (type__element_type(ti))) }))))) OR_ELSE type__to_s((TRY (type__element_type(ti))))));
+    ELSE
+      elem_zig = "UNKNOWN";
+    END
+    RETURN entry(:uniform, :heap, TRUE, {:elem_zig_type: elem_zig});
+  END
+  MUTABLE struct_entry = TRY (classify_struct_cleanup_fields(ti, NIL, schema_lookup));
+  IF struct_entry THEN
+    RETURN struct_entry;
+  END
+  MUTABLE structural_product = classify_structural_product(ti, schema_lookup);
+  IF structural_product THEN
+    RETURN structural_product;
+  END
+  IF lifecycle_registry EXISTS AS lifecycle_registry_value THEN
+    MUTABLE lifecycle_registry_value_mutable = COPY lifecycle_registry_value;
+    MUTABLE plan = COPY UNWRAP (lifecycle_registry_value_mutable[ti]);
+    IF lifecyclePlan__needs_drop?(plan) THEN
+      RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_10 = entry(:uniform, :heap, TRUE);
+      cleanupEntry__set_lifecycle_plan_mut(&rtoc_mutable_receiver_10, plan) };
+    END
+  END
+  RETURN NIL;
+END
+PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+  aST__walk_body(Body{ ArrayValue: COPY body }, %(node: Locatable) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
+  IF !(node IS_A MatchStatement) THEN
+      RETURN;
+  END
+  IF !(node.takes()) THEN
+      RETURN;
+  END
+  IF !((node.expr() IS_A Identifier AND node.expr().was_moved())) THEN
+      RETURN;
+  END
+  MUTABLE source_ti = node.expr().full_type_mut();
+  MUTABLE union_lookup = IF type__generic_instance?(source_ti) THEN
+      type__generic_base(source_ti)
+    ELSE
+      source_ti.resolved()
+    END;
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), union_lookup) OR_ELSE NIL);
+  IF !(schemas__union?(schema)) THEN
+      RETURN;
+  END
+  MUTABLE rtoc_each_items_11 = node.cases();
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < rtoc_each_items_11.length() DO
+      IF !(rtoc_each_items_11[rtoc_idx].binding()) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE case_value = rtoc_each_items_11[rtoc_idx].value();
+      MUTABLE variant_name = PARTIAL MATCH case_value START
+          AST.GetField -> case_value.field(),
+          AST.MethodCall -> case_value.name(),
+          DEFAULT -> NIL
+        END;
+      IF !(variant_name) THEN
+          RETURN;
+      END
+      MUTABLE variant_type = ((schema.variants() OR {}))[variant_name];
+      IF !(variant_type) THEN
+          RETURN;
+      END
+      MUTABLE e = TRY (match_as_entry_for(variant_type, union_lookup, variant_name));
+      MUTABLE expr = node.expr();
+      IF !(expr IS_A Identifier) THEN
+          RETURN;
+      END
+      IF (e AND (lifecycle_registry != NIL)) THEN
+          MUTABLE variant_plan_type = IF variant_type IS_A Type THEN
+            variant_type
+          ELSE
+            source_ti
+          END;
+          cleanupEntry__set_lifecycle_plan_mut(&e, UNWRAP (lifecycle_registry[variant_plan_type]));
+      END
+      MUTABLE src_entry: ?CleanupEntry = COPY bindings[CAST(expr.name() AS String)];
+      IF (e AND (src_entry != NIL)) THEN
+          cleanupEntry__set_alloc_mut(&e, cleanupEntry__alloc(src_entry));
+      END
+      IF e THEN
+          bindings[rtoc_each_items_11[rtoc_idx].binding()] = e;
+      END
+    rtoc_idx = rtoc_idx + 1;
+  END
+  rubyToClearVoid()
+  });
+END
+PUB FN cleanupClassifier__match_as_entry_for(variant_type: ?SchemasUnionSchemaVariantValue, union_lookup: UnionLookup, variant_name: VariantName) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE _ = COPY union_lookup;
+  _ = castVariantNameToUnionLookup(COPY variant_name);
+  IF variant_type? IS_A InlineStructVariant AS inline_struct_variant THEN
+    IF !(TRY (type__variant_has_heap?(SchemasUnionSchemaVariantValue{ InlineStructVariantMultiowned: COPY inline_struct_variant }))) THEN
+      RETURN NIL;
+    END
+    RETURN entry(:uniform, :heap, TRUE, {:match_as: TRUE});
+  END
+  IF variant_type? IS_A Type AS type THEN
+    IF type__indirect?(type) THEN
+      RETURN NIL;
+    END
+    IF (type__array?(type) AND !(TRY (type__string?(type)))) THEN
+      MUTABLE elem_zig: String = "";
+      IF TRY (type__element_type(type)) THEN
+        elem_zig = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (TRY (type__element_type(type))) }))))) OR_ELSE type__to_s((TRY (type__element_type(type))))));
+      ELSE
+        elem_zig = "UNKNOWN";
+      END
+      RETURN entry(:uniform, :heap, TRUE, {:match_as: TRUE, :elem_zig_type: elem_zig});
+    ELSE_IF type__map?(type) THEN
+      RETURN entry(:uniform, :heap, TRUE, {:match_as: TRUE});
+    END
+    RETURN NIL;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN cleanupClassifier__walk_capture_bindings(body: []Locatable, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+  each_capture_binding(body, %(name, expr, anchor_node) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
+  IF !(aST__capture_expr_owns_result?(expr)) THEN
+      RETURN NIL;
+  END
+  MUTABLE expr_ti = TRY (aST__capture_expr_source_type(expr));
+  MUTABLE inner_ti =   IF TRY (type__stream_step?(expr_ti)) THEN
+      TRY (type__stream_step_item_type(expr_ti))
+    ELSE_IF type__error_union?(expr_ti) THEN
+      TRY (type__success_type(expr_ti))
+    ELSE
+      TRY (type__wrapped_type(expr_ti))
+    END;
+  IF !(inner_ti) THEN
+      RETURN NIL;
+  END
+  MUTABLE classification_node = IF anchor_node IS_A Binding THEN
+      anchor_node.expr()
+    ELSE
+      anchor_node
+    END;
+  MUTABLE e = TRY (classify_binding(inner_ti, classification_node, schema_lookup, lifecycle_registry));
+  IF (lifecycle_registry == NIL) THEN
+      IF cleanup_owned_string_type?(inner_ti) THEN
+        e = (e OR entry(:heap_string, :heap, TRUE));
+      END
+      IF TRY (type__needs_explicit_cleanup?(inner_ti, :heap, schema_lookup)) THEN
+        e = (e OR entry(:uniform));
+      END
+  END
+  IF !(e) THEN
+      RETURN NIL;
+  END
+  MUTABLE capture_alloc = TRY (capture_expr_owned_alloc(expr, schema_lookup));
+  IF capture_alloc THEN
+      cleanupEntry__set_alloc_mut(&e, capture_alloc);
+  END
+  e[:zig_type] = (e[:zig_type] OR_ELSE ((TRY (type__zig_type((TRY (type__new(inner_ti.resolved()))))) OR_ELSE CAST(inner_ti.resolved() AS String))));
+  IF TRY (type__element_type(inner_ti)) THEN
+      e[:elem_zig_type] = (e[:elem_zig_type] OR_ELSE ((TRY (type__zig_type((TRY (type__new(TRY (type__element_type(inner_ti))))))) OR_ELSE "UNKNOWN")));
+  END
+  IF anchor_node IS_A Binding THEN
+      anchor_node.mir_binding_entry = e;
+  END
+  bindings[name] = e;
+  NIL
+  });
+END
+PUB FN cleanupClassifier__capture_expr_heap?(expr: Locatable, schema_lookup: Any) RETURNS !Bool ->
+  RETURN (TRY (capture_expr_owned_alloc(expr, schema_lookup)) == :heap);
+END
+PUB FN cleanupClassifier__capture_expr_owned_alloc(expr: Locatable, schema_lookup: Any) RETURNS !?String@symbol ->
+  IF expr IS_A NextExpr AS next_expr THEN
+    RETURN :heap;
+  ELSE_IF expr IS_A ResolveNode AS resolve_node THEN
+    RETURN :heap;
+  ELSE_IF expr IS_A FuncCall AS func_call THEN
+    IF call_has_return_lifetime?(func_call) THEN
+      RETURN NIL;
+    END
+    IF TRY (call_returns_heap_owned?(func_call, schema_lookup)) THEN
+      RETURN :heap;
+    END
+    IF call_returns_frame_owned?(func_call) THEN
+      RETURN :frame;
+    END
+    RETURN NIL;
+  ELSE_IF (expr IS_A MethodCall) THEN
+    IF call_has_return_lifetime?(expr) THEN
+      RETURN NIL;
+    END
+    IF TRY (call_returns_heap_owned?(expr, schema_lookup)) THEN
+      RETURN :heap;
+    END
+    IF call_returns_frame_owned?(expr) THEN
+      RETURN :frame;
+    END
+    IF call_returns_receiver_owned?(expr) THEN
+      RETURN receiver_storage_alloc(expr);
+    END
+    IF (respondsTo?(expr, "heap_storage?") AND expr.heap_storage?()) THEN
+      RETURN :heap;
+    END
+    MUTABLE receiver = expr.object();
+    IF (respondsTo?(receiver, "symbol") AND ((receiver.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12 = ((receiver.symbol())?);
+    symbolEntry__heap_storage?(rtoc_local_receiver_12) })) THEN
+      RETURN :heap;
+    END
+    RETURN NIL;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN cleanupClassifier__call_returns_heap_owned?(expr: Locatable, schema_lookup: Any) RETURNS !Bool ->
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF respondsTo?(expr, "matched_signature") THEN
+    sig_branch_value = functionSignature__unwrap(expr.matched_signature());
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  IF sig EXISTS AS sig_value THEN
+    MUTABLE sig_value_mutable = COPY sig_value;
+    IF (TRUE AND !(((TRY (functionSignature__return_lifetime(sig_value_mutable))).length() == 0))) THEN
+      RETURN FALSE;
+    END
+    IF (TRUE AND (functionSignature__heap_carry_return(sig_value_mutable) == TRUE)) THEN
+      RETURN TRUE;
+    END
+    IF TRY (functionSignature__heap_return_alloc?(&sig_value_mutable)) THEN
+      RETURN TRUE;
+    END
+    IF TRY (functionSignature__frame_return_alloc?(&sig_value_mutable)) THEN
+      RETURN FALSE;
+    END
+    IF !(TRUE) THEN
+      RETURN FALSE;
+    END
+    MUTABLE ret = TRY (type__new(TypeConstructionInput{ Type: COPY functionSignature__return_type(sig_value_mutable) }));
+    ret = TRY (type__success_type(ret));
+    RETURN (!(!(ret)) AND TRY (type__needs_explicit_cleanup?(ret, :heap, schema_lookup)));
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN cleanupClassifier__call_returns_frame_owned?(expr: Locatable) RETURNS !Bool ->
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF respondsTo?(expr, "matched_signature") THEN
+    sig_branch_value = functionSignature__unwrap(expr.matched_signature());
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  RETURN !(!((IF sig != NIL THEN
+    TRY (functionSignature__frame_return_alloc?(&sig))
+  ELSE
+    NIL
+  END)));
+END
+PUB FN cleanupClassifier__call_returns_receiver_owned?(expr: Locatable) RETURNS !Bool ->
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF respondsTo?(expr, "matched_signature") THEN
+    sig_branch_value = functionSignature__unwrap(expr.matched_signature());
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  RETURN ((sig != NIL) AND (TRY (functionSignature__return_alloc(&sig)) == :receiver_storage));
+END
+PUB FN cleanupClassifier__receiver_storage_alloc(expr: MethodCall) RETURNS ?String@symbol ->
+  MUTABLE receiver = COPY expr.object;
+  MUTABLE symbol = IF respondsTo?(receiver, "symbol") THEN
+    receiver.symbol()
+  ELSE
+    NIL
+  END;
+  MUTABLE storage: ?String@symbol = symbol.storage();
+  IF (storage == :heap) THEN
+    RETURN :heap;
+  END
+  IF (storage == :frame) THEN
+    RETURN :frame;
+  END
+  MUTABLE root = (aST__root_identifier(receiver) OR_ELSE NIL);
+  MUTABLE root_symbol = (IF root != NIL THEN
+    root.symbol()
+  ELSE
+    NIL
+  END);
+  MUTABLE root_storage = (IF root_symbol != NIL THEN
+    root_symbol.storage()
+  ELSE
+    NIL
+  END);
+  IF (root_storage == :heap) THEN
+    RETURN :heap;
+  END
+  IF (root_storage == :frame) THEN
+    RETURN :frame;
+  END
+  RETURN NIL;
+END
+PUB FN cleanupClassifier__call_has_return_lifetime?(expr: Locatable) RETURNS !Bool ->
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF respondsTo?(expr, "matched_signature") THEN
+    sig_branch_value = functionSignature__unwrap(expr.matched_signature());
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  RETURN (!(!(sig)) AND !(((TRY (functionSignature__return_lifetime(sig))).length() == 0)));
+END
+PUB FN cleanupClassifier__each_capture_binding(body: []Node, block: FN(String, Locatable, CaptureBindingBlockParam3) -> Void) RETURNS Void ->
+  aST__walk_body(Body{ ArrayValue: body |> SELECT castNodeToLocatable(_) }, %(node: Locatable) -> {
+  IF node IS_A WhileBindLoop AS while_bind_loop THEN
+      block(CAST(while_bind_loop.binding_name AS String), while_bind_loop.condition, while_bind_loop);
+  ELSE_IF node IS_A IfBind AS if_bind THEN
+      FOR _ IN if_bind.bindings DO
+      block(binding__name(_), binding__expr(_), _);
+      END
+  END
+  rubyToClearVoid()
+  });
+END
+PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
+  IF TRY (type__node_reference?(ti)) THEN
+    RETURN NIL;
+  END
+  MUTABLE facts = binding_cleanup_facts(node);
+  IF facts.container_borrow() THEN
+    RETURN NIL;
+  END
+  IF ((type__optional?(ti) AND facts.empty_initializer()) AND !(facts.mutable_binding_mutated())) THEN
+    RETURN NIL;
+  END
+  IF !(facts.heap_storage()) THEN
+    IF facts.borrow_provenance() THEN
+      RETURN NIL;
+    END
+    IF (TRY (type__string?(ti)) AND !(mutable_owning_slot?(ti, node, schema_lookup))) THEN
+      IF facts.rodata_provenance() THEN
+        RETURN NIL;
+      END
+    END
+    IF literal_only_list?(node) THEN
+      RETURN NIL;
+    END
+  END
+  MUTABLE lifecycle: ?LifecyclePlan = NIL;
+  IF lifecycle_registry != NIL THEN
+    lifecycle = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_13 = (lifecycle_registry?);
+  TRY (lifecycleRegistry__fetch_binding(rtoc_local_receiver_13, node, ti)) };
+  END
+  IF ((lifecycle != NIL) AND !(lifecyclePlan__needs_drop?(lifecycle))) THEN
+    RETURN NIL;
+  END
+  MUTABLE entry = NIL;
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
+  IF (schemas__resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
+    entry = entry(:resource, :heap, TRUE, {:resource_close_plan: symbolEntry__close_plan(schema)});
+  END
+  IF tuple_with_borrowed_element?(ti) THEN
+    entry = (entry OR classify_structural_product(ti, schema_lookup));
+  END
+  IF (TRY (type__tense_observable?(ti)) AND !(type__promise_list?(ti))) THEN
+    entry = (entry OR entry(:uniform, :heap, FALSE));
+  END
+  IF (!(entry) AND type__frozen?(ti)) THEN
+    entry = entry(:frozen, :heap, FALSE);
+    entry[:fixed_alloc] = TRUE;
+  END
+  IF stream_handle_type?(ti) THEN
+    entry = (entry OR entry(:uniform, :heap, TRUE));
+  END
+  IF (!(entry) AND cleanupEntry__resource_close_plan(facts)) THEN
+    entry = entry(:resource, :heap, TRUE, {:resource_close_plan: cleanupEntry__resource_close_plan(facts)});
+  END
+  entry = (entry OR classify_mutable_owning_slot(ti, node, schema_lookup));
+  entry = (entry OR TRY (classify_optional(ti, schema_lookup, node)));
+  IF ((!(entry) AND facts.heap_storage()) AND TRY (type__recursive_cleanup_shape?(ti, schema_lookup))) THEN
+    entry = entry(:uniform, :heap, FALSE);
+    entry[:fixed_alloc] = TRUE;
+  END
+  entry = (entry OR classify_owned_return_call(ti, node, schema_lookup));
+  entry = (entry OR TRY (classify_collection(ti, schema_lookup, node)));
+  IF ((!(entry) AND TRY (type__direct_indexable_collection?(ti))) AND TRY (elem_needs_cleanup?(ti, schema_lookup))) THEN
+    entry = entry(:uniform, :heap, TRUE);
+  END
+  IF ((!(type__optional?(ti)) AND ((TRY (type__heap_ptr?(ti)) OR type__indirect?(ti)))) AND ownership_bearing_type?(ti, schema_lookup)) THEN
+    entry = (entry OR entry(:uniform, :heap, TRUE));
+  END
+  entry = (entry OR TRY (classify_array_struct_strings(ti, node, schema_lookup)));
+  entry = (entry OR classify_rc_or_link(ti, schema_lookup));
+  IF (type__any_sync?(ti) OR symbolEntry__cleanup_sync?(facts.sync())) THEN
+    entry = (entry OR entry(:uniform, :heap, FALSE));
+  END
+  entry = (entry OR TRY (classify_owned_string(ti, node, schema_lookup)));
+  entry = (entry OR TRY (classify_heap_storage(ti, node, schema_lookup, facts.sync())));
+  entry = (entry OR TRY (classify_heap_composite(ti, node, schema_lookup, facts.sync())));
+  entry = (entry OR TRY (classify_struct_cleanup_fields(ti, node, schema_lookup)));
+  entry = (entry OR classify_structural_product(ti, schema_lookup));
+  entry = (entry OR TRY (classify_non_copy_union(ti, schema_lookup)));
+  IF lifecyclePlan__needs_drop?(lifecycle) THEN
+    entry = (entry OR entry(:uniform, :heap, TRUE));
+  END
+  MUTABLE finalized = finalize_alloc_from_storage_mut(&entry, node, ti, schema_lookup);
+  IF lifecycle EXISTS AS lifecycle_value THEN
+    MUTABLE lifecycle_value_mutable = COPY lifecycle_value;
+    (IF finalized != NIL THEN
+      cleanupEntry__set_lifecycle_plan_mut(&finalized, lifecycle_value_mutable)
+    ELSE
+      NIL
+    END);
+  END
+  RETURN finalized;
+END
+PUB FN cleanupClassifier__tuple_with_borrowed_element?(ti: Type) RETURNS !Bool ->
+  IF !(type__tuple?(ti)) THEN
+    RETURN FALSE;
+  END
+  RETURN (TRY (type__generic_args(ti))) |> ANY (type__symbol?(_) OR type__borrowed_reference?(_));
+END
+PUB FN cleanupClassifier__classify_structural_product(ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  IF !(type__tuple?(ti)) THEN
+    RETURN NIL;
+  END
+  MUTABLE fields: []{String@symbol}Any@multiowned = ( { MUTABLE rtoc_empty_list_14: []{String@symbol}Any@multiowned = List[]; rtoc_empty_list_14 } );
+  MUTABLE rtoc_each_items_15 = (TRY (type__generic_args(ti)));
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < rtoc_each_items_15.length() DO
+    IF (type__symbol?(rtoc_each_items_15[rtoc_idx]?) OR type__borrowed_reference?(rtoc_each_items_15[rtoc_idx]?)) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE close = TRY (type__resolve_resource_close(rtoc_each_items_15[rtoc_idx]?, schema_lookup));
+    IF (close.is_resource AND (KEEP close.close_plan != NIL)) THEN
+        &fields.append(CAST({:index: rtoc_idx, :close_plan: KEEP close.close_plan} AS {String@symbol}Any@multiowned));
+    ELSE_IF TRY (type__recursive_cleanup_shape?(rtoc_each_items_15[rtoc_idx]?, schema_lookup)) THEN
+        &fields.append(CAST({:index: rtoc_idx} AS {String@symbol}Any@multiowned));
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  IF (fields.length() == 0) THEN
+    RETURN NIL;
+  END
+  RETURN entry(:tuple, :heap, TRUE, {:tuple_cleanup_fields: fields});
+END
+PUB FN cleanupClassifier__binding_cleanup_facts(node: Locatable) RETURNS BindingCleanupFacts ->
+  MUTABLE symbol = node.symbol();
+  RETURN BindingCleanupFacts{ container_borrow: binding_container_borrow?(node), heap_storage: node.heap_storage?(), borrow_provenance: node.borrow_provenance?(), rodata_provenance: node.rodata_provenance?(), empty_initializer: optional_empty_initializer?(binding_value(node)), mutable_binding_mutated: ((IF node IS_A VarDecl AS var_decl THEN (var_decl.mutable == TRUE) ELSE FALSE END) AND (node.var_mutated() == TRUE)), resource_close_plan: COPY node.resource_close_plan(), sync: COPY (IF symbol != NIL THEN
+    symbol.sync()
+  ELSE
+    NIL
+  END) };
+END
+PUB FN cleanupClassifier__binding_value(node: Locatable) RETURNS ?Locatable ->
+  IF node IS_A VarDecl AS var_decl THEN
+    RETURN CAST(var_decl.value AS ?Locatable);
+  ELSE_IF node IS_A BindExpr AS bind_expr THEN
+    RETURN CAST(bind_expr.value AS ?Locatable);
+  ELSE_IF node IS_A WhileBindLoop AS while_bind_loop THEN
+    RETURN COPY castLocatableToOptionalLocatable(while_bind_loop.condition);
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN cleanupClassifier__binding_container_borrow?(node: Locatable) RETURNS Bool ->
+  RETURN (aST__container_borrow?(node) OR aST__container_borrow?(binding_value(node)));
+END
+PUB FN cleanupClassifier__finalize_alloc_from_storage_mut(MUTABLE entry: ?CleanupEntry, node: Locatable, ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  IF entry EXISTS AS entry_value THEN
+    MUTABLE entry_value_mutable = COPY entry_value;
+    IF !(respondsTo?(node, "symbol")) THEN
+      MUTABLE rtoc_owned_return_16: ?CleanupEntry@multiowned = entry_value_mutable;
+      RETURN rtoc_owned_return_16;
+    END
+    MUTABLE storage = storage_from_symbol(node.symbol(), node);
+    MUTABLE type_alloc = TRY (type__cleanup_allocator(ti, schema_lookup));
+    IF entry_value_mutable[:fixed_alloc] THEN
+      MUTABLE rtoc_owned_return_17: ?CleanupEntry@multiowned = entry_value_mutable;
+      RETURN rtoc_owned_return_17;
+    END
+    cleanupEntry__set_alloc_mut(&entry_value_mutable, IF (((type_alloc == :heap) OR (storage == :heap))) THEN
+      :heap
+    ELSE
+      :frame
+    END);
+    MUTABLE rtoc_owned_return_18: ?CleanupEntry@multiowned = entry_value_mutable;
+    RETURN rtoc_owned_return_18;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN cleanupClassifier__storage_from_symbol(sym: ?SymbolEntry, node: Any) RETURNS ?String@symbol ->
+  MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
+  IF (sym != NIL) THEN
+    symbol_branch_value = ((IF aST__declaration_symbol(sym) != NIL THEN aST__declaration_symbol(sym) ELSE sym END));
+  ELSE
+    symbol_branch_value = COPY sym;
+  END
+  MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
+  MUTABLE storage: ?String@symbol = (IF symbol != NIL THEN
+    symbolEntry__storage(symbol)
+  ELSE
+    NIL
+  END);
+  MUTABLE reflected = node;
+  IF storage != NIL THEN
+  RETURN storage;
+  ELSE
+  RETURN (IF respondsTo?(reflected, "storage") THEN
+      CAST(reflected.storage() AS ?String@symbol)
+    ELSE
+      NIL
+    END);
+  END
+END
+PUB FN cleanupClassifier__entry(kind: String@symbol, alloc: String@symbol = :heap, has_moved_guard: Bool = TRUE, extra: {String@symbol}?CleanupExtraValue = {}) RETURNS CleanupEntry@multiowned ->
+  RETURN cleanupEntry__build(kind, alloc, has_moved_guard, extra);
+END
+PUB FN cleanupClassifier__stream_handle_type?(ti: Type) RETURNS !Bool ->
+  RETURN (((((TRY (type__dynamic_stream?(ti)) OR TRY (type__bounded_stream?(ti))) OR TRY (type__open_stream?(ti))) OR TRY (type__inf_stream?(ti))) OR TRY (type__split_open_stream?(ti))) OR type__shared_promise?(ti));
+END
+PUB FN cleanupClassifier__mutable_owning_slot?(ti: Type, node: Locatable, schema_lookup: Any) RETURNS Bool ->
+  IF !((node.var_mutated() == TRUE)) THEN
+    RETURN FALSE;
+  END
+  RETURN ownership_bearing_type?(ti, schema_lookup);
+END
+PUB FN cleanupClassifier__ownership_bearing_type?(ti: Type, schema_lookup: Any) RETURNS !Bool ->
+  RETURN TRY (type__ownership_bearing?(ti, schema_lookup));
+END
+PUB FN cleanupClassifier__cleanup_owned_string_type?(ti: Type) RETURNS !Bool ->
+  RETURN ((TRY (type__string?(ti)) AND !(type__symbol?(ti))) AND !(type__raw?(ti)));
+END
+PUB FN cleanupClassifier__classify_mutable_owning_slot(ti: Type, node: Locatable, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  IF !(mutable_owning_slot?(ti, node, schema_lookup)) THEN
+    RETURN NIL;
+  END
+  MUTABLE kind = IF TRY (type__string?(ti)) THEN
+    :heap_string
+  ELSE
+    :uniform
+  END;
+  MUTABLE alloc = TRY (type__cleanup_allocator(ti, schema_lookup));
+  MUTABLE e = entry(kind, alloc, TRUE);
+  RETURN e;
+END
+PUB FN cleanupClassifier__classify_owned_return_call(ti: Type, node: Locatable, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE value = IF respondsTo?(node, "value") THEN
+    node.value()
+  ELSE
+    NIL
+  END;
+  IF !((TRUE AND contains_call?(value))) THEN
+    RETURN NIL;
+  END
+  MUTABLE sym = IF respondsTo?(node, "symbol") THEN
+    node.symbol()
+  ELSE
+    NIL
+  END;
+  IF !(((sym != NIL) AND (sym.storage() == :heap))) THEN
+    RETURN NIL;
+  END
+  MUTABLE ret = TRY (type__success_type(ti));
+  IF !((TRUE AND (((TRY (type__needs_explicit_cleanup?(ret, :heap, schema_lookup)) OR TRY (type__heap_ptr?(ret))) OR TRY (type__recursive_cleanup_shape?(ret, schema_lookup)))))) THEN
+    RETURN NIL;
+  END
+  MUTABLE kind = IF TRY (type__string?(ret)) THEN
+    :heap_string
+  ELSE
+    :uniform
+  END;
+  MUTABLE e = entry(kind, :heap, TRUE);
+  e[:fixed_alloc] = TRUE;
+  RETURN e;
+END
+PUB FN cleanupClassifier__contains_call?(node: Locatable) RETURNS Bool ->
+  MUTABLE found: Bool = FALSE;
+  aST__each_locatable(node, %(cur: Locatable) -> {
+  IF aST__call?(cur) THEN
+      found = TRUE;
+      BREAK;
+  END
+  rubyToClearVoid()
+  });
+  RETURN found;
+END
+PUB FN cleanupClassifier__classify_collection(ti: Type, schema_lookup: Any, node: ?Locatable = NIL) RETURNS !?CleanupEntry@multiowned ->
+  IF TRY (type__any_rc?(ti)) THEN
+    RETURN NIL;
+  END
+  IF type__fixed_soa?(ti) THEN
+    RETURN entry(:uniform, wrapper_alloc(ti), FALSE);
+  END
+  MUTABLE node_sym = IF respondsTo?(node, "symbol") THEN
+    node.symbol()
+  ELSE
+    NIL
+  END;
+  MUTABLE is_heap = !(!(node_sym.heap_storage?()));
+  IF ((type__list_collection?(ti) AND !(type__sharded?(ti))) AND !(is_heap)) THEN
+    MUTABLE has_heap_elems = TRY (elem_needs_cleanup?(ti, schema_lookup));
+    RETURN entry(:uniform, :frame, TRUE, {:elem_needs_cleanup: has_heap_elems});
+  END
+  IF type__list_collection?(ti) THEN
+    RETURN entry(:uniform, :heap, TRUE);
+  END
+  IF type__map?(ti) THEN
+    RETURN entry(:uniform);
+  END
+  IF type__pool?(ti) THEN
+    RETURN entry(:uniform, wrapper_alloc(ti), TRUE);
+  END
+  IF type__set_collection?(ti) THEN
+    RETURN entry(:uniform, wrapper_alloc(ti), TRUE);
+  END
+  RETURN NIL;
+END
+PUB FN cleanupClassifier__wrapper_alloc(ti: Type) RETURNS String@symbol ->
+  IF type__provenance_alloc(ti) != NIL THEN
+  RETURN (type__provenance_alloc(ti))?;
+  ELSE
+  RETURN :heap;
+  END
+END
+PUB FN cleanupClassifier__classify_array_struct_strings(ti: Type, node: Any, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE val = IF respondsTo?(node, "value") THEN
+    node.value()
+  ELSE
+    NIL
+  END;
+  IF !(((TRY (type__non_string_array?(ti)) AND !(type__collection?(ti))) AND ((val IS_A ListLit OR val IS_A DefaultArrayLit)))) THEN
+    RETURN NIL;
+  END
+  MUTABLE et: ?Type = TRY (type__element_type(ti));
+  IF et EXISTS AS et_value THEN
+    IF TRY (elem_type_needs_cleanup?(et_value, schema_lookup)) THEN
+      MUTABLE sym = IF respondsTo?(node, "symbol") THEN
+        node.symbol()
+      ELSE
+        NIL
+      END;
+      MUTABLE container_alloc = container_alloc_from(sym, node);
+      RETURN entry(:uniform, container_alloc, FALSE);
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN cleanupClassifier__literal_only_list?(node: Any) RETURNS Bool ->
+  MUTABLE val = IF respondsTo?(node, "value") THEN
+    node.value()
+  ELSE
+    NIL
+  END;
+  IF !(val IS_A ListLit) THEN
+    RETURN FALSE;
+  END
+  MUTABLE items = val.items();
+  IF ((items == NIL) OR items.empty?()) THEN
+    RETURN FALSE;
+  END
+  RETURN items |> ALL _ IS_A Literal;
+END
+PUB FN cleanupClassifier__container_alloc_from(sym: ?SymbolEntry, node: Any) RETURNS String@symbol ->
+  MUTABLE storage = storage_from_symbol(sym, node);
+  RETURN PARTIAL MATCH storage START
+    :frame -> :frame,
+    :stack -> :frame,
+    DEFAULT -> :heap
+  END;
+END
+PUB FN cleanupClassifier__classify_rc_or_link(ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  IF !((TRY (type__any_rc?(ti)) OR type__link?(ti))) THEN
+    RETURN NIL;
+  END
+  IF type__link?(ti) THEN
+    RETURN entry(:rc);
+  ELSE_IF type__optional?(ti) THEN
+    RETURN entry(:rc, :heap, TRUE, {:rc_alloc: wrapper_alloc(ti)});
+  ELSE
+    MUTABLE rc_alloc = wrapper_alloc(ti);
+    RETURN entry(:rc, :heap, TRUE, {:rc_alloc: rc_alloc});
+  END
+END
+PUB FN cleanupClassifier__classify_optional(ti: Type, schema_lookup: Any, node: Any = NIL) RETURNS !?CleanupEntry@multiowned ->
+  IF !(type__optional?(ti)) THEN
+    RETURN NIL;
+  END
+  MUTABLE inner: ?Type = TRY (type__wrapped_type(ti));
+  IF inner EXISTS AS inner_value THEN
+    MUTABLE inner_value_mutable = COPY inner_value;
+    IF !(TRY (optional_payload_needs_cleanup?(inner_value_mutable, schema_lookup))) THEN
+      RETURN NIL;
+    END
+    MUTABLE node_sym = IF respondsTo?(node, "symbol") THEN
+      node.symbol()
+    ELSE
+      NIL
+    END;
+    MUTABLE value = IF respondsTo?(node, "value") THEN
+      node.value()
+    ELSE
+      NIL
+    END;
+    IF optional_empty_initializer?(value) THEN
+      RETURN NIL;
+    END
+    MUTABLE is_rodata = !(!(node_sym.rodata_provenance?()));
+    MUTABLE is_borrow = !(!(node_sym.borrow_provenance?()));
+    IF (is_rodata OR is_borrow) THEN
+      RETURN NIL;
+    END
+    MUTABLE storage: ?String@symbol = node_sym.storage();
+    MUTABLE alloc = IF (storage == :heap) THEN
+      :heap
+    ELSE
+      :frame
+    END;
+    MUTABLE e = entry(:uniform, alloc);
+    IF value IS_A NextExpr THEN
+      cleanupEntry__set_alloc_mut(&e, :heap);
+      e[:fixed_alloc] = TRUE;
+    END
+    RETURN e;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN cleanupClassifier__optional_empty_initializer?(value: ?Locatable) RETURNS Bool ->
+  IF (IF value? IS_A Literal AS literal THEN (literal.type == symbol("NIL")) ELSE FALSE END) THEN
+    RETURN TRUE;
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN cleanupClassifier__optional_payload_needs_cleanup?(inner: Type, schema_lookup: Any) RETURNS !Bool ->
+  IF cleanup_owned_string_type?(inner) THEN
+    RETURN TRUE;
+  END
+  IF TRY (type__recursive_cleanup_shape?(inner, schema_lookup)) THEN
+    RETURN TRUE;
+  END
+  IF TRY (type__needs_cleanup?(inner, schema_lookup)) THEN
+    RETURN TRUE;
+  END
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(inner)) OR_ELSE NIL);
+  IF schemas__union?(schema) THEN
+    RETURN TRY (union_variants_need_cleanup?(schema, schema_lookup));
+  END
+  IF schemas__field_bearing?(schema) THEN
+    RETURN TRY (elem_has_string_fields?(schema));
+  END
+  RETURN FALSE;
+END
+PUB FN cleanupClassifier__classify_owned_string(ti: Type, node: Locatable, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  IF !(cleanup_owned_string_type?(ti)) THEN
+    RETURN NIL;
+  END
+  MUTABLE value = IF respondsTo?(node, "value") THEN
+    node.value()
+  ELSE
+    NIL
+  END;
+  MUTABLE node_sym = IF respondsTo?(node, "symbol") THEN
+    node.symbol()
+  ELSE
+    NIL
+  END;
+  IF (!(node_sym.heap_storage?()) AND ((node_sym.rodata_provenance?() OR_ELSE node_sym.borrow_provenance?()))) THEN
+    RETURN NIL;
+  END
+  MUTABLE fixed_heap = (value IS_A NextExpr OR TRY (capture_expr_heap?(value, schema_lookup)));
+  MUTABLE owns_heap = ((((value IS_A CopyNode OR fixed_heap) OR node_sym.heap_storage?()) OR value IS_A StringConcat) OR ((value IS_A BinaryOp AND value.string_concat())));
+  IF !(owns_heap) THEN
+    RETURN NIL;
+  END
+  MUTABLE e = entry(:heap_string, :heap, TRUE);
+  IF fixed_heap THEN
+    e[:fixed_alloc] = TRUE;
+  END
+  RETURN e;
+END
+PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schema_lookup: Any, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE node_sym = IF respondsTo?(node, "symbol") THEN
+    node.symbol()
+  ELSE
+    NIL
+  END;
+  MUTABLE is_heap = node_sym.heap_storage?();
+  IF !(is_heap) THEN
+    RETURN NIL;
+  END
+  IF ((TRY (type__any_rc?(ti)) OR type__link?(ti)) OR symbolEntry__cleanup_sync?(sync_value)) THEN
+    RETURN NIL;
+  END
+  IF TRY (type__implicitly_copyable?(ti, schema_lookup)) THEN
+    RETURN NIL;
+  END
+  IF type__collection?(ti) THEN
+    RETURN NIL;
+  END
+  IF (type__fixed?(ti) AND type__array?(ti)) THEN
+    MUTABLE elem: ?Type = TRY (type__element_type(ti));
+    IF ((elem != NIL) AND !(TRY (elem_type_needs_cleanup?(elem, schema_lookup)))) THEN
+      RETURN NIL;
+    END
+  END
+  IF cleanup_owned_string_type?(ti) THEN
+    RETURN entry(:heap_string);
+  END
+  IF (type__array?(ti) AND !(type__collection?(ti))) THEN
+    RETURN entry(:uniform);
+  END
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
+  IF schemas__union?(schema) THEN
+    MUTABLE has_heap = TRY (union_variants_need_cleanup?(schema, schema_lookup));
+    IF has_heap THEN
+      RETURN entry(:uniform);
+    END
+  END
+  IF schemas__field_bearing?(schema) THEN
+    MUTABLE has_escapable = TRY (elem_has_cleanup_fields?(schema, schema_lookup));
+    IF (has_escapable AND TRY (struct_lit_borrows_cleanup_fields?(node, schema, schema_lookup))) THEN
+      has_escapable = FALSE;
+    END
+    IF has_escapable THEN
+      RETURN entry(:uniform);
+    END
+    RETURN entry(:uniform);
+  END
+  RETURN NIL;
+END
+PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Any, schema_lookup: Any, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
+  IF !((respondsTo?(node, "heap_storage?") AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = CAST(node AS SymbolEntry);
+  symbolEntry__heap_storage?(rtoc_local_receiver_19) })) THEN
+    RETURN NIL;
+  END
+  IF ((TRY (type__any_rc?(ti)) OR type__link?(ti)) OR symbolEntry__cleanup_sync?(sync_value)) THEN
+    RETURN NIL;
+  END
+  IF TRY (type__implicitly_copyable?(ti, schema_lookup)) THEN
+    RETURN NIL;
+  END
+  IF type__primitive?(ti) THEN
+    RETURN NIL;
+  END
+  IF (type__fixed?(ti) AND type__array?(ti)) THEN
+    MUTABLE elem: ?Type = TRY (type__element_type(ti));
+    IF ((elem != NIL) AND !(TRY (elem_type_needs_cleanup?(elem, schema_lookup)))) THEN
+      RETURN NIL;
+    END
+  END
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
+  IF schemas__union?(schema) THEN
+    MUTABLE has_heap = TRY (union_variants_need_cleanup?(schema, schema_lookup));
+    IF has_heap THEN
+      RETURN entry(:uniform);
+    END
+  END
+  IF schemas__field_bearing?(schema) THEN
+    IF !(TRY (elem_has_cleanup_fields?(schema, schema_lookup))) THEN
+      RETURN NIL;
+    END
+    IF TRY (struct_lit_borrows_cleanup_fields?(node, schema, schema_lookup)) THEN
+      RETURN NIL;
+    END
+  END
+  RETURN entry(:uniform);
+END
+PUB FN cleanupClassifier__struct_lit_borrows_cleanup_fields?(node: Any, schema: FieldBearingSchema, schema_lookup: Any) RETURNS !Bool ->
+  MUTABLE value = IF respondsTo?(node, "value") THEN
+    node.value()
+  ELSE
+    NIL
+  END;
+  IF !(value IS_A StructLit) THEN
+    RETURN FALSE;
+  END
+  MUTABLE borrowed = borrowed_field_names(schema);
+  RETURN schema.fields() |> ALL { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanup_field_type(_._1)); (IF !(TRY (elem_type_needs_cleanup?(t, schema_lookup))) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fval = (value.fields()[CAST(_._0 AS String)] OR value.fields()[_._0]); (((cleanup_field_borrowed?(_._1) OR borrowed.contains?(CAST(_._0 AS String))) OR ((respondsTo?(fval, "symbol") AND ((fval.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_20 = ((fval.symbol())?);
+  symbolEntry__borrow_provenance?(rtoc_local_receiver_20) })))) OR ((fval AND type__borrowed_reference?((TRY (type__from_node_mut(fval, "struct literal borrowed field"))))))) } END) };
+END
+PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locatable, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
+  IF !(schemas__field_bearing?(schema)) THEN
+    RETURN NIL;
+  END
+  MUTABLE value = IF respondsTo?(node, "value") THEN
+    node.value()
+  ELSE
+    NIL
+  END;
+  MUTABLE struct_lit = IF value IS_A StructLit THEN
+    value
+  ELSE
+    NIL
+  END;
+  MUTABLE borrowed = borrowed_field_names(schema);
+  MUTABLE has_cleanup = schema.fields() |> ANY (IF borrowed.contains?(CAST(_._0 AS String)) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanup_field_type(_._1)); { MUTABLE rtoc_value_block_marker = 0; IF struct_lit THEN
+    MUTABLE fval = (struct_lit.fields()[CAST(_._0 AS String)] OR struct_lit.fields()[_._0]);
+    IF (respondsTo?(fval, "symbol") AND ((fval.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = ((fval.symbol())?);
+    symbolEntry__borrow_provenance?(rtoc_local_receiver_21) })) THEN
+      CONTINUE;
+    END
+    IF fval THEN
+      MUTABLE fval_ti = TRY (type__from_node_mut(fval, "struct cleanup field"));
+      IF (type__rodata?(fval_ti) OR type__borrowed_reference?(fval_ti)) THEN
+        CONTINUE;
+      END
+    END
+  END TRY (elem_type_needs_cleanup?(t, schema_lookup)) } } END);
+  IF !(has_cleanup) THEN
+    RETURN NIL;
+  END
+  MUTABLE alloc = IF placement__frame?(type__provenance_alloc(ti)) THEN
+    :frame
+  ELSE
+    :heap
+  END;
+  RETURN entry(:uniform, alloc);
+END
+PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
+  IF !(schemas__union?(schema)) THEN
+    RETURN NIL;
+  END
+  MUTABLE is_copy = (TRY (type__implicitly_copyable?(ti, %(t) USE(schema_lookup) -> (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), t) OR_ELSE NIL))) OR_ELSE TRUE);
+  IF is_copy THEN
+    RETURN NIL;
+  END
+  MUTABLE has_heap_variants = TRY (union_variants_need_cleanup?(schema, schema_lookup));
+  MUTABLE alloc = IF has_heap_variants THEN
+    :heap
+  ELSE
+    ((type__provenance_alloc(ti) OR_ELSE :frame))
+  END;
+  MUTABLE e = entry(:uniform, alloc);
+  IF has_heap_variants THEN
+    e[:fixed_alloc] = TRUE;
+  END
+  RETURN e;
+END
+PUB FN cleanupClassifier__elem_needs_cleanup?(ti: Type, schema_lookup: Any) RETURNS !Bool ->
+  MUTABLE et: ?Type = TRY (type__element_type(ti));
+  IF et EXISTS AS et_value THEN
+    RETURN TRY (elem_type_needs_cleanup?(et_value, schema_lookup));
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN cleanupClassifier__elem_type_needs_cleanup?(et: Type, schema_lookup: Any) RETURNS !Bool ->
+  IF type__borrowed_reference?(et) THEN
+    RETURN FALSE;
+  END
+  IF TRY (type__string?(et)) THEN
+    RETURN TRUE;
+  END
+  IF TRY (type__needs_cleanup?(et, schema_lookup)) THEN
+    RETURN TRUE;
+  END
+  MUTABLE elem_schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(et)) OR_ELSE NIL);
+  IF schemas__union?(elem_schema) THEN
+    RETURN TRY (union_variants_need_cleanup?(elem_schema, schema_lookup));
+  END
+  IF schemas__field_bearing?(elem_schema) THEN
+    RETURN TRY (elem_has_cleanup_fields?(elem_schema, schema_lookup));
+  END
+  RETURN FALSE;
+END
+PUB FN cleanupClassifier__union_variants_need_cleanup?(schema: ?UnionSchema, schema_lookup: Any) RETURNS !Bool ->
+  IF !(schemas__union?(ruby_wrap_optional_UnionSchema_SchemaValue(schema))) THEN
+    RETURN FALSE;
+  END
+  MUTABLE concrete_schema = COPY schema?;
+  RETURN (concrete_schema.variants) |> ANY TRY (variant_type_needs_cleanup?(_._1, schema_lookup));
+END
+PUB FN cleanupClassifier__variant_type_needs_cleanup?(vt: ?SchemasUnionSchemaVariantValue, schema_lookup: Any) RETURNS !Bool ->
+  IF vt? IS_A InlineStructVariant AS inline_struct_variant THEN
+    RETURN TRY (elem_has_cleanup_fields?(inline_struct_variant, schema_lookup));
+  END
+  IF vt? IS_A Type AS type THEN
+    RETURN TRY (elem_type_needs_cleanup?(type, schema_lookup));
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN cleanupClassifier__elem_has_string_fields?(schema: ?FieldBearingSchema) RETURNS !Bool ->
+  RETURN TRY (elem_has_cleanup_fields?(schema, NIL));
+END
+PUB FN cleanupClassifier__elem_has_cleanup_fields?(schema: ?FieldBearingSchema, schema_lookup: ?Any) RETURNS !Bool ->
+  IF !(((((schema != NIL) AND (schema IS_A InlineStructVariant)) OR ((schema != NIL) AND (schema IS_A StructSchema))) OR ((schema != NIL) AND (schema IS_A ResourceSchema)))) THEN
+    RETURN FALSE;
+  END
+  MUTABLE concrete_schema: ?FieldBearingSchema = COPY schema;
+  MUTABLE borrowed = borrowed_field_names(concrete_schema);
+  RETURN concrete_schema.fields() |> ANY (IF borrowed.contains?(CAST(_._0 AS String)) THEN FALSE ELSE (IF cleanup_field_borrowed?(_._1) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanup_field_type(_._1)); (((((((TRY (type__string?(t)) OR TRY (type__non_string_array?(t))) OR type__collection?(t)) OR t.indirect?()) OR TRY (type__any_rc?(t))) OR type__link?(t)) OR (((schema_lookup != NIL) AND TRY (type__recursive_cleanup_shape?(t, schema_lookup))))) OR (((schema_lookup != NIL) AND t.needs_cleanup?(schema_lookup)))) } END) END);
+END
+PUB FN cleanupClassifier__cleanup_field_borrowed?(field: Field) RETURNS Bool ->
+  IF field IS_A StructField AS struct_field THEN
+    RETURN (structField__borrowed(struct_field) == TRUE);
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN cleanupClassifier__cleanup_field_type(field: Field) RETURNS !Type ->
+  IF field IS_A StructField AS struct_field THEN
+    RETURN structField__type(struct_field);
+  ELSE
+    RETURN TRY (type__new(castFieldToTypeConstructionInput(field)));
+  END
+END
+PUB FN cleanupClassifier__borrowed_field_names(schema: FieldBearingSchema) RETURNS ![Set]String ->
+  IF schema IS_A StructSchema AS struct_schema THEN
+    RETURN TRY (structSchema__borrowed_fields(struct_schema));
+  END
+  RETURN Set[];
+END
+# End Ruby module CleanupClassifier
+FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    AssignmentName.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castAstBodyNodeToLocatable(value: AstBodyNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    AstBodyNode.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    AstBodyNode.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    AstBodyNode.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    AstBodyNode.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    AstBodyNode.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    AstBodyNode.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    AstBodyNode.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    AstBodyNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    AstBodyNode.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    AstBodyNode.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    AstBodyNode.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    AstBodyNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    AstBodyNode.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    AstBodyNode.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    AstBodyNode.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    AstBodyNode.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    AstBodyNode.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    AstBodyNode.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    AstBodyNode.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    AstBodyNode.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    AstBodyNode.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    AstBodyNode.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    AstBodyNode.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    AstBodyNode.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    AstBodyNode.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    AstBodyNode.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    AstBodyNode.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    AstBodyNode.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    AstBodyNode.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    AstBodyNode.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    AstBodyNode.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    AstBodyNode.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    AstBodyNode.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    AstBodyNode.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    AstBodyNode.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    AstBodyNode.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    AstBodyNode.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    AstBodyNode.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    AstBodyNode.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    AstBodyNode.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    AstBodyNode.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    AstBodyNode.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    AstBodyNode.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    AstBodyNode.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    AstBodyNode.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    AstBodyNode.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    AstBodyNode.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    AstBodyNode.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    AstBodyNode.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    AstBodyNode.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    AstBodyNode.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    AstBodyNode.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    AstBodyNode.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    AstBodyNode.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    AstBodyNode.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    AstBodyNode.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    AstBodyNode.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    AstBodyNode.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    AstBodyNode.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    AstBodyNode.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    AstBodyNode.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    AstBodyNode.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    AstBodyNode.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    AstBodyNode.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    AstBodyNode.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    AstBodyNode.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    AstBodyNode.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    AstBodyNode.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    AstBodyNode.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    AstBodyNode.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    AstBodyNode.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    AstBodyNode.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    AstBodyNode.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    AstBodyNode.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    AstBodyNode.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    AstBodyNode.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    AstBodyNode.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    AstBodyNode.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    AstBodyNode.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    AstBodyNode.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    AstBodyNode.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    AstBodyNode.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    AstBodyNode.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    AstBodyNode.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    AstBodyNode.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    AstBodyNode.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    AstBodyNode.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    AstBodyNode.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    AstBodyNode.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    AstBodyNode.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    AstBodyNode.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    AstBodyNode.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    AstBodyNode.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    AstBodyNode.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    AstBodyNode.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    AstBodyNode.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    AstBodyNode.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    AstBodyNode.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    AstBodyNode.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    AstBodyNode.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    AstBodyNode.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    AstBodyNode.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    AstBodyNode.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    AstBodyNode.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    AstBodyNode.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    AstBodyNode.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    AstBodyNode.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    AstBodyNode.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    AstBodyNode.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    AstBodyNode.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    AstBodyNode.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    AstBodyNode.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    AstBodyNode.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    AstBodyNode.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    AstBodyNode.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    AstBodyNode.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    AstBodyNode.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    AstBodyNode.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    AstBodyNode.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    AstBodyNode.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    AstBodyNode.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    AstBodyNode.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    AstBodyNode.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    AstBodyNode.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    AstBodyNode.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    AstBodyNode.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    AstBodyNode.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    AstBodyNode.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castBindingNodeToLocatable(value: BindingNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    BindingNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    BindingNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    BindingNode.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castFieldToTypeConstructionInput(value: Field) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    Field.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
+    Field.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
+    Field.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
+    Field.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
+  END
+  panic("Invalid cast to TypeConstructionInput");
+END
+FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    Locatable.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?Locatable");
+  END
+  panic("Invalid cast to ?Locatable");
+END
+FN castNameToPath(value: Name) RETURNS Path ->
+  PARTIAL MATCH value START
+    Name.StringValue AS cast_payload -> RETURN Path{ StringValue: COPY cast_payload };,
+    Name.SymbolValue AS cast_payload -> RETURN Path{ SymbolValue: COPY cast_payload };,
+    Name.PlaceId AS cast_payload -> RETURN Path{ PlaceId: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Path");
+  END
+  panic("Invalid cast to Path");
+END
+FN castNamesItemToPath(value: NamesItem) RETURNS Path ->
+  PARTIAL MATCH value START
+    NamesItem.StringValue AS cast_payload -> RETURN Path{ StringValue: COPY cast_payload };,
+    NamesItem.SymbolValue AS cast_payload -> RETURN Path{ SymbolValue: COPY cast_payload };,
+    NamesItem.PlaceId AS cast_payload -> RETURN Path{ PlaceId: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Path");
+  END
+  panic("Invalid cast to Path");
+END
+FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    Node.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    Node.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    Node.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    Node.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    Node.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    Node.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Node.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    Node.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    Node.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Node.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    Node.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    Node.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    Node.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    Node.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Node.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    Node.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    Node.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    Node.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    Node.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    Node.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    Node.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    Node.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    Node.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    Node.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    Node.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    Node.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    Node.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    Node.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    Node.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    Node.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    Node.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    Node.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Node.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    Node.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    Node.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Node.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    Node.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    Node.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    Node.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    Node.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    Node.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    Node.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    Node.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Node.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    Node.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    Node.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    Node.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    Node.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    Node.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    Node.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    Node.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    Node.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    Node.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    Node.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    Node.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    Node.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    Node.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    Node.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    Node.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    Node.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    Node.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    Node.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    Node.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    Node.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    Node.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    Node.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    Node.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    Node.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    Node.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    Node.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    Node.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    Node.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    Node.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    Node.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Node.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    Node.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    Node.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    Node.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    Node.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    Node.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    Node.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    Node.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    Node.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    Node.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Node.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    Node.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    Node.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    Node.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    Node.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    Node.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    Node.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    Node.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    Node.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    Node.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    Node.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    Node.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    Node.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    Node.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    Node.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Node.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    Node.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    Node.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    Node.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Node.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Node.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    Node.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    Node.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    Node.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    Node.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    Node.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    Node.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    Node.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    Node.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    Node.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    Node.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    Node.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    Node.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    Node.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    Node.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    Node.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    Node.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    Node.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    Node.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    Node.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    Node.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    Node.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castVariantNameToUnionLookup(value: VariantName) RETURNS UnionLookup ->
+  PARTIAL MATCH value START
+    VariantName.StringValue AS cast_payload -> RETURN UnionLookup{ StringValue: COPY cast_payload };,
+    VariantName.SymbolValue AS cast_payload -> RETURN UnionLookup{ SymbolValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to UnionLookup");
+  END
+  panic("Invalid cast to UnionLookup");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END
+FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+  IF value EXISTS AS optional_payload THEN
+    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
+  END
+  NIL;
+END
+FN ruby_wrap_optional_UnionSchema_SchemaValue(value: ?UnionSchema) RETURNS ?SchemaValue ->
+  IF value EXISTS AS optional_payload THEN
+    RETURN SchemaValue{ UnionSchemaMultiowned: COPY optional_payload };
+  END
+  NIL;
+END

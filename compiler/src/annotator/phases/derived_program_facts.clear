@@ -1,0 +1,87 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB STRUCT DerivedFunctionFacts {
+  name: String,
+  return_type_key: String,
+  needs_runtime: Bool,
+  can_fail: Bool,
+  allocation_fault: Bool,
+  error_fallible: Bool,
+  effects: []String,
+  return_strategy: ?String,
+  stack_tier: ?String,
+  requires: {String}[]String,
+  heap_carry_return: Bool,
+  reentrance_kind: ?String
+}
+
+PUB FN derivedFunctionFacts__to_h(self: DerivedFunctionFacts) RETURNS !{String}Any@multiowned ->
+  RETURN CAST({"name": self.name, "return_type_key": self.return_type_key, "needs_runtime": self.needs_runtime, "can_fail": self.can_fail, "allocation_fault": self.allocation_fault, "error_fallible": self.error_fallible, "effects": self.effects, "return_strategy": self.return_strategy, "stack_tier": self.stack_tier, "requires": self.requires, "heap_carry_return": self.heap_carry_return, "reentrance_kind": self.reentrance_kind} AS {String}Any@multiowned);
+END
+PUB FN derivedFunctionFacts__fingerprint(self: DerivedFunctionFacts) RETURNS !String ->
+  RETURN Digest.SHA256.hexdigest(generateJson(TRY (derivedFunctionFacts__to_h(self))));
+END
+PUB STRUCT DerivedProgramFacts {
+  functions: {String}DerivedFunctionFacts
+}
+
+PUB FN derivedProgramFacts__initialize(MUTABLE self: DerivedProgramFacts, functions: {String}DerivedFunctionFacts) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.functions = (functions |> ORDER_BY _).to_h();
+}
+END
+PUB FN derivedProgramFacts__empty() RETURNS DerivedProgramFacts@multiowned ->
+  RETURN derivedProgramFacts__new({});
+END
+PUB FN derivedProgramFacts__capture(nodes: {String}FunctionDef) RETURNS !DerivedProgramFacts@multiowned ->
+  MUTABLE functions: {String}DerivedFunctionFacts = {};
+  (nodes |> ORDER_BY _).keys() |> EACH {
+  MUTABLE node: Any = ((nodes |> ORDER_BY _)[_] OR_ELSE panic("missing hash key"));
+  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(&node.full_type_mut({:context: "derived function facts for ${_}"}));
+  IF !(signature) THEN
+      panic("missing finalized function signature for {}");
+  END
+  functions[_] = derivedProgramFacts__capture_function(_, node, UNWRAP (signature));
+  };
+  RETURN derivedProgramFacts__new(functions);
+END
+PUB FN derivedProgramFacts__to_h(self: DerivedProgramFacts) RETURNS !{String}Any@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN CAST({"functions": ( { MUTABLE rtoc_transform_values_result_2: {String}{String}Any@multiowned = {}; FOR rtoc_key IN rtoc_self_view.functions.keys() DO rtoc_transform_values_result_2[rtoc_key] = derivedFunctionFacts__to_h((rtoc_self_view.functions[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS DerivedFunctionFacts))); END rtoc_transform_values_result_2 } )} AS {String}Any@multiowned);
+}
+END
+PRIVATE FN derivedProgramFacts__capture_function(name: String, node: FunctionDef, signature: FunctionSignature) RETURNS !DerivedFunctionFacts ->
+  MUTABLE requires: {String}[]String = {};
+  ((TRY (functionSignature__requires(signature))) |> ORDER_BY _).keys() |> EACH {
+  MUTABLE capabilities: Any = (((TRY (functionSignature__requires(signature))) |> ORDER_BY _)[_] OR_ELSE panic("missing hash key"));
+  requires[_] = (capabilities |> SELECT _.toString()) |> ORDER_BY _;
+  };
+  RETURN DerivedFunctionFacts{ name: COPY name, return_type_key: COPY type__semantic_type_key(functionSignature__return_type(signature)), needs_runtime: (functionSignature__needs_rt(signature) == TRUE), can_fail: (functionSignature__can_fail(signature) == TRUE), allocation_fault: (functionSignature__alloc_fault(signature) == TRUE), error_fallible: (functionSignature__error_fallible(signature) == TRUE), effects: COPY ((TRY (functionSignature__effects(signature)) OR_ELSE Set[])) |> SELECT _.toString() |> ORDER_BY _, return_strategy: COPY (IF functionSignature__return_strategy(signature) != NIL THEN
+    CAST((functionSignature__return_strategy(signature)) AS String)
+  ELSE
+    NIL
+  END), stack_tier: COPY (IF functionSignature__stack_tier(signature) != NIL THEN
+    CAST((functionSignature__stack_tier(signature)) AS String)
+  ELSE
+    NIL
+  END), requires: COPY requires, heap_carry_return: (functionSignature__heap_carry_return(signature) == TRUE), reentrance_kind: COPY (IF node.reentrance_kind != NIL THEN
+    CAST(node.reentrance_kind AS String)
+  ELSE
+    NIL
+  END) };
+END
+PUB FN derivedProgramFacts__new(functions: {String}DerivedFunctionFacts) RETURNS DerivedProgramFacts@multiowned ->
+  MUTABLE self = DerivedProgramFacts{ functions: {} };
+  derivedProgramFacts__initialize(&self, functions);
+  RETURN self @multiowned;
+END
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

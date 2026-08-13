@@ -1,0 +1,18 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f70726f746f636f6c5f70726f6a656374696f6e5f7265736f6c7665722e636c656172" AS protocol_projection_resolver
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f6465636c61726174696f6e5f696e6465782e636c656172" AS declaration_index
+REQUIRE "pkg:rtoc_6173742f7374727563745f6669656c642e636c656172" AS struct_field
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+# Ruby module Annotator::Phases::TypeRegistration
+PUB STRUCT RecursiveFieldEdge {
+  owner: String@symbol,
+  target: String@symbol,
+  field_name: String,
+  type: Type
+}
+# End Ruby module Annotator::Phases::TypeRegistration
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

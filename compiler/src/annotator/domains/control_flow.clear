@@ -1,0 +1,36 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f646961676e6f737469635f72656769737472792e636c656172" AS diagnostic_registry
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_73656d616e7469632f6f776e6572736869705f67726170682e636c656172" AS ownership_graph
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f67656e657269635f616e616c797369732e636c656172" AS generic_analysis
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+# Ruby module Annotator
+# Ruby module Annotator::Domains
+# Ruby module Annotator::Domains::ControlFlow
+PUB UNION MatchSchema { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
+PUB UNION MatchPayload { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, InlineStructVariantMultiowned: InlineStructVariant@multiowned, Type: Type }
+PUB STRUCT BranchAnalysisResult {
+  drops: Any@multiowned,
+  snapshot: ?LightweightSnapshot,
+  terminated: Bool
+}
+PUB STRUCT MatchSubjectPlan {
+  expr_type: Type,
+  type_name: String@symbol,
+  schema: ?MatchSchema,
+  enum_subject: Bool,
+  union_subject: Bool,
+  union_subst: {String@symbol}String@symbol
+}
+
+PUB FN matchSubjectPlan__enum?(self: MatchSubjectPlan) RETURNS Bool ->
+  RETURN self.enum_subject;
+END
+PUB FN matchSubjectPlan__union?(self: MatchSubjectPlan) RETURNS Bool ->
+  RETURN self.union_subject;
+END
+# End Ruby module Annotator::Domains::ControlFlow
+# End Ruby module Annotator::Domains
+# End Ruby module Annotator

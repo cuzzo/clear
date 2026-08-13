@@ -1,0 +1,474 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6261636b656e64732f6d69725f656d69747465722e636c656172" AS mir_emitter
+REQUIRE "pkg:rtoc_6d69722f66736d5f6f70732e636c656172" AS fsm_ops
+EXTERN FN compilerRepeatString(value: String, count: Int64) RETURNS String EFFECTS :safe FROM "compiler_regex";
+# Ruby module FsmWrapperEmitter
+PUB UNION FsmTail { FsmTailDone: FsmTailDone, FsmTailYield: FsmTailYield, FsmTailRegisterYield: FsmTailRegisterYield, FsmTailJump: FsmTailJump, FsmTailCondJump: FsmTailCondJump, FsmTailLockTry: FsmTailLockTry, FsmTailWokenCheck: FsmTailWokenCheck, FsmTailRetryOrError: FsmTailRetryOrError }
+PUB FN fsmWrapperEmitter__render(body: FsmBody) RETURNS !String ->
+  IF body IS_A FsmIoBody AS fsm_io_body THEN
+    RETURN TRY (fsmWrapperEmitter__render_io_body(fsm_io_body));
+  ELSE_IF body IS_A FsmB1Body AS fsm_b1_body THEN
+    RETURN TRY (fsmWrapperEmitter__render_b1_body(fsm_b1_body));
+  ELSE_IF body IS_A FsmGenericBody AS fsm_generic_body THEN
+    RETURN TRY (fsmWrapperEmitter__render_generic_body(fsm_generic_body));
+  ELSE
+    panic("FsmWrapperEmitter expected an FsmBody node, got {}");
+  END
+END
+PRIVATE FN fsmWrapperEmitter__render_io_body(body: FsmIoBody) RETURNS !String ->
+  MUTABLE mir_emitter = mIREmitter__new();
+  MUTABLE parts = List[];
+  &parts.append("${body.blk_label}: {");
+  &parts.append(TRY (fsmWrapperEmitter__render_ctx_struct(body.ctx_struct, mir_emitter)));
+  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name()));
+  &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
+  &parts.append("}");
+  RETURN parts.join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_b1_body(body: FsmB1Body) RETURNS !String ->
+  MUTABLE mir_emitter = mIREmitter__new();
+  MUTABLE parts = List[];
+  &parts.append("${body.blk_label}: {");
+  &parts.append(TRY (fsmWrapperEmitter__render_b1_ctx_struct(body.ctx_struct, mir_emitter)));
+  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name()));
+  &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
+  &parts.append("}");
+  RETURN parts.join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, mir_emitter: MIREmitter) RETURNS !String ->
+  MUTABLE parts = List[];
+  &parts.append("    const ${s.type_name} = struct {");
+  &parts.append("        task: *CheatHeader.FsmTask,");
+  &parts.append("        rt: *Runtime,");
+  &parts.append("        inner: *${s.promise_zig}.Inner,");
+  &parts.append("        alloc: std.mem.Allocator,");
+  MUTABLE capture_fields = fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter);
+  IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
+    &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
+  END
+  &parts.append("");
+  &parts.append(TRY (fsmWrapperEmitter__render_run_body(s.run_body, mir_emitter)));
+  &parts.append("");
+  &parts.append(fsmWrapperEmitter__render_b1_resume_fn(s.run_body.ctx_id()));
+  &parts.append("");
+  &parts.append(fsmWrapperEmitter__render_destroy_task(s.run_body.ctx_id(), ( { MUTABLE rtoc_empty_list_1: []FsmDestroyAction = List[]; rtoc_empty_list_1 } ), mir_emitter));
+  &parts.append("    };");
+  RETURN parts.join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_run_body(step: FsmStep, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
+  MUTABLE rendered = fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
+  rtoc_lambda_result_2 = TRY (fsmWrapperEmitter__render_body_items((step.body_stmts OR List[]), mir_emitter));
+  rtoc_lambda_result_2
+  });
+  MUTABLE body = (rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12)).join("\n");
+  RETURN (["        fn runBody(__ctx_${step.ctx_id}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id}.rt;", (IF step.suppress_runtime_ref THEN
+    "            _ = &${step.bg_rt};"
+  ELSE
+    NIL
+  END), (IF !(body.empty?()) THEN
+    body
+  ELSE
+    NIL
+  END), "        }"]).join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_b1_resume_fn(ctx_id: Int64) RETURNS String ->
+  RETURN (("fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n    if (runBody(__ctx_${ctx_id.toString()})) |_| {} else |err| {\n        __ctx_${ctx_id.toString()}.inner.result = err;\n    }\n    __ctx_${ctx_id.toString()}.inner.wg.done();\n    return .{ .Done = {} };\n}\n".chomp()).split("\n") |> SELECT "        ${_}").join("").chomp();
+END
+PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions: []FsmDestroyAction, mir_emitter: MIREmitter) RETURNS String ->
+  MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, mir_emitter);
+  MUTABLE extra: String = "";
+  IF !(fsmWrapperEmitter__empty?(extra_zig)) THEN
+    extra = (((extra_zig.split("\n") |> SELECT "    ${_.chomp()}").join("\n")) + "\n");
+  ELSE
+    extra = "";
+  END
+  RETURN (("fn destroyTask(__fsm_task: *CheatHeader.FsmTask) void {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n${extra}    CheatHeader.freeFsmCtx(@This(), __fsm_task, __ctx_${ctx_id.toString()});\n}\n".chomp()).split("\n") |> SELECT "        ${_}").join("").chomp();
+END
+PUB FN fsmWrapperEmitter__render_ctx_size_gate(type_name: String) RETURNS String ->
+  RETURN (("comptime {\n    if (@sizeOf(${type_name}) > 256) {\n        @compileError(\"FSM context is larger than 256 bytes; use @stack on this BG block to force a compiler-sized stackful fiber.\");\n    }\n}\n".chomp()).split("\n") |> SELECT "    ${_}").join("").chomp();
+END
+PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, mir_emitter: MIREmitter) RETURNS !String ->
+  MUTABLE parts = List[];
+  &parts.append("    const ${s.type_name} = struct {");
+  &parts.append("        task: *CheatHeader.FsmTask,");
+  &parts.append("        rt: *Runtime,");
+  &parts.append("        inner: *${s.promise_zig}.Inner,");
+  &parts.append("        alloc: std.mem.Allocator,");
+  MUTABLE capture_fields = fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter);
+  IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
+    &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
+  END
+  &parts.append("        step: u8 = 0,");
+  MUTABLE state_fields = fsmWrapperEmitter__render_fsm_state_field_decls((s.state_decls OR List[]), mir_emitter);
+  IF !(fsmWrapperEmitter__empty?(state_fields)) THEN
+    &parts.append(fsmWrapperEmitter__indent_block(state_fields, 8));
+  END
+  FOR _ IN s.promoted_field_decls DO
+  &parts.append("        ${_}");
+  END
+  &parts.append("");
+  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step0, mir_emitter)));
+  &parts.append("");
+  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step1, mir_emitter)));
+  &parts.append("");
+  &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_dispatch(s.resume_fn)), 8));
+  &parts.append("");
+  &parts.append(fsmWrapperEmitter__render_destroy_task(s.resume_fn.ctx_id(), ( { MUTABLE rtoc_empty_list_3: []FsmDestroyAction = List[]; rtoc_empty_list_3 } ), mir_emitter));
+  &parts.append("    };");
+  RETURN parts.join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_step(step: FsmStep, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
+  MUTABLE rendered = fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
+  rtoc_lambda_result_4 = TRY (fsmWrapperEmitter__render_body_items((step.body_stmts OR List[]), mir_emitter));
+  rtoc_lambda_result_4
+  });
+  MUTABLE body = (rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12)).join("\n");
+  RETURN (["        fn runStep${step.index}(__ctx_${step.ctx_id}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id}.rt;", (IF step.suppress_runtime_ref THEN
+    "            _ = &${step.bg_rt};"
+  ELSE
+    NIL
+  END), (IF !(body.empty?()) THEN
+    body
+  ELSE
+    NIL
+  END), "        }"]).join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_resume_fn_cleanups(cleanups: []Emittable) RETURNS !String ->
+  IF (cleanups.length() == 0) THEN
+    RETURN "";
+  END
+  MUTABLE emitter = mIREmitter__new();
+  RETURN (cleanups |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE out: ?String = TRY (mIREmitter__emit(&emitter, _)); (IF ((out == NIL) OR ((out?).trim().length() == 0)) THEN NIL ELSE out END) } |> WHERE _ != NIL).join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_generic_body(body: FsmGenericBody) RETURNS !String ->
+  MUTABLE mir_emitter = mIREmitter__new();
+  MUTABLE parts = List[];
+  &parts.append("${body.blk_label}: {");
+  &parts.append(TRY (fsmWrapperEmitter__render_generic_ctx_struct(body.ctx_struct, mir_emitter)));
+  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name()));
+  &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
+  &parts.append("}");
+  RETURN parts.join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, mir_emitter: MIREmitter) RETURNS !String ->
+  MUTABLE parts = List[];
+  &parts.append("    const ${s.type_name} = struct {");
+  &parts.append("        task: *CheatHeader.FsmTask,");
+  &parts.append("        rt: *Runtime,");
+  &parts.append("        inner: *${s.promise_zig}.Inner,");
+  &parts.append("        alloc: std.mem.Allocator,");
+  MUTABLE capture_fields = fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter);
+  IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
+    &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
+  END
+  MUTABLE extra_fields = fsmWrapperEmitter__render_context_field_decls((s.extra_field_decls OR List[]), mir_emitter);
+  IF !(fsmWrapperEmitter__empty?(extra_fields)) THEN
+    &parts.append(fsmWrapperEmitter__indent_block(extra_fields, 8));
+  END
+  MUTABLE promoted_fields = fsmWrapperEmitter__render_context_field_decls((s.promoted_field_decls OR List[]), mir_emitter);
+  IF !(fsmWrapperEmitter__empty?(promoted_fields)) THEN
+    &parts.append(fsmWrapperEmitter__indent_block(promoted_fields, 8));
+  END
+  &parts.append("");
+  FOR _ IN ((s.member_fns OR List[])) DO
+  &parts.append(TRY (fsmWrapperEmitter__render_member_fn(_, mir_emitter)));
+  &parts.append("");
+  END
+  IF !(s.dispatch IS_A FsmDispatch) THEN
+    panic("generic FSM ctx requires MIR::FsmDispatch");
+  END
+  &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_dispatch(s.dispatch)), 8));
+  &parts.append("");
+  &parts.append(fsmWrapperEmitter__render_destroy_task(s.dispatch.ctx_id(), (s.destroy_actions OR List[]), mir_emitter));
+  &parts.append("    };");
+  RETURN parts.join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_dispatch(d: FsmDispatch) RETURNS !String ->
+  MUTABLE arms_zig = (d.arms |> SELECT TRY (fsmWrapperEmitter__render_dispatch_arm(_, d.ctx_id))).join("\n");
+  MUTABLE needs_loop_label = d.arms |> ANY fsmWrapperEmitter__arm_uses_continue?(_);
+  MUTABLE inner =   IF needs_loop_label THEN
+    (["__sw: while (true) {", "    switch (__ctx_${d.ctx_id}.step) {", arms_zig, "        else => unreachable,", "    }", "}"]).join("\n")
+  ELSE
+    (["switch (__ctx_${d.ctx_id}.step) {", arms_zig, "    else => unreachable,", "}"]).join("\n")
+  END;
+  RETURN (["fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {", "    const __ctx_${d.ctx_id}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));", fsmWrapperEmitter__indent_block(inner, 4), "}"]).join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int64) RETURNS !String ->
+  MUTABLE body_lines = List[];
+  MUTABLE pre_body_skip = arm.pre_body_skip;
+  IF pre_body_skip THEN
+    &body_lines.append("if (${TRY (fsmWrapperEmitter__render_fsm_expr(pre_body_skip.condition()))}) {");
+    &body_lines.append("    __ctx_${ctx_id.toString()}.step = ${pre_body_skip.skip_step()};");
+    &body_lines.append("    continue :__sw;");
+    &body_lines.append("}");
+  END
+  MUTABLE pre_body = TRY (fsmWrapperEmitter__render_stmt_array((arm.pre_body_stmts OR List[]), "rt"));
+  IF !((pre_body.length() == 0)) THEN
+    &body_lines.append(pre_body);
+  END
+  IF arm.body_fn_name THEN
+    MUTABLE tail_kind = IF respondsTo?(arm.tail, "kind") THEN
+      arm.tail.kind()
+    ELSE
+      NIL
+    END;
+    MUTABLE arm_cleanups = fsmWrapperEmitter__render_resume_fn_cleanups((arm.err_cleanups OR List[]));
+    MUTABLE err_action: []String = List[];
+    IF ((tail_kind == :done) AND fsmWrapperEmitter__empty?(arm_cleanups)) THEN
+      err_action = ["if (@This().${arm.body_fn_name}(__ctx_${ctx_id.toString()})) |_| {} else |err| {", "    __ctx_${ctx_id.toString()}.inner.result = err;", "}"];
+    ELSE
+      MUTABLE inner = List[];
+      IF !(fsmWrapperEmitter__empty?(arm_cleanups)) THEN
+        &inner.append(fsmWrapperEmitter__indent_block(arm_cleanups, 4));
+      END
+      &inner.append("    __ctx_${ctx_id.toString()}.inner.result = err;");
+      &inner.append("    __ctx_${ctx_id.toString()}.inner.wg.done();");
+      &inner.append("    return .{ .Done = {} };");
+      err_action = ((["if (@This().${arm.body_fn_name}(__ctx_${ctx_id.toString()})) |_| {} else |err| {"] + inner) + ["}"]);
+    END
+    body_lines = ruby_array_concat_Any(body_lines, CAST(err_action AS []Any));
+  END
+  &body_lines.append(TRY (fsmWrapperEmitter__render_tail(arm.tail, ctx_id)));
+  MUTABLE body = (body_lines |> WHERE _ != NIL) |> WHERE !(_.empty?()).join("\n");
+  RETURN (["    ${arm.index} => {", fsmWrapperEmitter__indent_block(body, 8), "    },"]).join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__arm_uses_continue?(arm: FsmStateArm) RETURNS Bool ->
+  IF arm.pre_body_skip THEN
+    RETURN TRUE;
+  END
+  RETURN PARTIAL MATCH arm.tail START
+    MIR.FsmTailJump -> TRUE,
+    MIR.FsmTailRegisterYield -> TRUE,
+    MIR.FsmTailCondJump -> TRUE,
+    MIR.FsmTailLockTry -> TRUE,
+    MIR.FsmTailWokenCheck -> TRUE,
+    MIR.FsmTailRetryOrError -> TRUE,
+    DEFAULT -> FALSE
+  END;
+END
+PRIVATE FN fsmWrapperEmitter__render_tail(t: FsmTail, ctx_id: Int64) RETURNS !String ->
+  IF t IS_A FsmTailDone AS fsm_tail_done THEN
+    RETURN (["__ctx_${ctx_id.toString()}.inner.wg.done();", "return .{ .Done = {} };"]).join("\n");
+  ELSE_IF t IS_A FsmTailYield AS fsm_tail_yield THEN
+    RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_yield.next_step};", "return .{ .${fsm_tail_yield.yield_reason} = {} };"]).join("\n");
+  ELSE_IF t IS_A FsmTailRegisterYield AS fsm_tail_register_yield THEN
+    RETURN (["if (${TRY (fsmWrapperEmitter__render_fsm_expr(fsm_tail_register_yield.register_expr))}) {", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_register_yield.next_step};", "    return .{ .${fsm_tail_register_yield.yield_reason} = {} };", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_register_yield.next_step};", "continue :__sw;"]).join("\n");
+  ELSE_IF t IS_A FsmTailJump AS fsm_tail_jump THEN
+    RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_jump.next_step};", "continue :__sw;"]).join("\n");
+  ELSE_IF t IS_A FsmTailCondJump AS fsm_tail_cond_jump THEN
+    RETURN (["if (${TRY (fsmWrapperEmitter__render_fsm_expr(fsm_tail_cond_jump.condition))}) {", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_cond_jump.then_step};", "    continue :__sw;", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_cond_jump.else_step};", "continue :__sw;"]).join("\n");
+  ELSE_IF t IS_A FsmTailLockTry AS fsm_tail_lock_try THEN
+    RETURN (["const __lock_r = ${fsm_tail_lock_try.lock_field_ref}.${fsm_tail_lock_try.try_method}(", "    __ctx_${ctx_id.toString()}.task,", "    &__ctx_${ctx_id.toString()}.lock_waiter,", "    __ctx_${ctx_id.toString()}.rt.getSched(),", ");", "switch (__lock_r) {", "    .Acquired => {", "        __ctx_${ctx_id.toString()}.step = ${fsm_tail_lock_try.ok_step};", "        continue :__sw;", "    },", "    .Registered => {", "        __ctx_${ctx_id.toString()}.step = ${fsm_tail_lock_try.wait_step};", "        return .{ .WaitForLock = {} };", "    },", "    .Error => {", "        __ctx_${ctx_id.toString()}.step = ${fsm_tail_lock_try.error_step};", "        continue :__sw;", "    },", "}"]).join("\n");
+  ELSE_IF t IS_A FsmTailWokenCheck AS fsm_tail_woken_check THEN
+    RETURN (["const __lerr = __ctx_${ctx_id.toString()}.task.lock_error;", "__ctx_${ctx_id.toString()}.task.lock_error = .None;", "if (__lerr == .None) {", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_woken_check.ok_step};", "    continue :__sw;", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_woken_check.error_step};", "continue :__sw;"]).join("\n");
+  ELSE_IF t IS_A FsmTailRetryOrError AS fsm_tail_retry_or_error THEN
+    IF (fsm_tail_retry_or_error.retries > 0) THEN
+      RETURN (["if (__ctx_${ctx_id.toString()}.retry_count < ${fsm_tail_retry_or_error.retries}) {", "    __ctx_${ctx_id.toString()}.retry_count += 1;", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_retry_or_error.retry_step};", "    continue :__sw;", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_retry_or_error.fail_step};", "continue :__sw;"]).join("\n");
+    ELSE
+      RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_retry_or_error.fail_step};", "continue :__sw;"]).join("\n");
+    END
+  ELSE
+    panic("render_tail: unknown tail {}");
+  END
+END
+PRIVATE FN fsmWrapperEmitter__render_member_fn(fn_value: FsmMemberFn, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
+  MUTABLE rendered = fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value, mir_emitter) -> {
+  rtoc_lambda_result_5 = TRY (fsmWrapperEmitter__render_body_items((fn_value.body_stmts OR List[]), mir_emitter));
+  rtoc_lambda_result_5
+  });
+  MUTABLE body = (rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12)).join("\n");
+  MUTABLE extra_prologue = fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value) -> {
+  rtoc_lambda_result_6 = TRY (fsmWrapperEmitter__render_stmt_array((fn_value.extra_prologue_stmts OR List[]), fn_value.bg_rt));
+  rtoc_lambda_result_6
+  });
+  RETURN (["        fn ${fn_value.fn_name}(__ctx_${fn_value.ctx_id}: *@This()) anyerror!void {", "            const ${fn_value.bg_rt} = __ctx_${fn_value.ctx_id}.rt;", (IF fn_value.suppress_runtime_ref THEN
+    "            _ = &${fn_value.bg_rt};"
+  ELSE
+    NIL
+  END), (IF !(extra_prologue.empty?()) THEN
+    fsmWrapperEmitter__indent_block(extra_prologue, 12)
+  ELSE
+    NIL
+  END), (IF !(body.empty?()) THEN
+    body
+  ELSE
+    NIL
+  END), "        }"]).join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: String) RETURNS !String ->
+  MUTABLE mir_emitter = mIREmitter__new();
+  MUTABLE parts = List[];
+  IF (TRUE AND s.profile_site) THEN
+    &parts.append("    ${mIREmitter__emit_profile_task_site(mir_emitter, s.profile_site)}");
+  END
+  MUTABLE alloc_expr: ?String = TRY (mIREmitter__emit(&mir_emitter, s.alloc_expr));
+  &parts.append("    const ${s.alloc_var} = ${alloc_expr};");
+  &parts.append("    const ${s.promise_var} = try ${s.promise_zig}.spawn(${s.alloc_var}, ${s.rt_name}.getSched());");
+  MUTABLE promoted_decls = ((((s.promoted_decls OR List[]))) |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE out: ?String = TRY (mIREmitter__emit(&mir_emitter, _)); (IF ((out == NIL) OR ((out?).trim().length() == 0)) THEN NIL ELSE out END) } |> WHERE _ != NIL).join("\n");
+  IF !(fsmWrapperEmitter__empty?(promoted_decls)) THEN
+    &parts.append(fsmWrapperEmitter__indent_block(promoted_decls, 4));
+  END
+  &parts.append("    const ${s.ctx_var}_task = try CheatHeader.allocFsmTask(${s.rt_name}, &${s.ctx_type}.resumeFn);");
+  &parts.append("    errdefer ${s.rt_name}.getSched().fsm_task_slab.destroy(${s.ctx_var}_task);");
+  &parts.append("    const ${s.ctx_var} = try CheatHeader.allocFsmCtx(${s.ctx_type}, ${s.rt_name}, ${s.ctx_var}_task);");
+  &parts.append("    errdefer CheatHeader.freeFsmCtx(${s.ctx_type}, ${s.ctx_var}_task, ${s.ctx_var});");
+  &parts.append("    ${s.ctx_var}_task.ctx = ${s.ctx_var};");
+  &parts.append("    ${s.ctx_var}_task.destroy_fn = &${s.ctx_type}.destroyTask;");
+  IF (TRUE AND s.profile_site_id) THEN
+    &parts.append("    ${s.ctx_var}_task.profile_site_id = ${s.profile_site_id};");
+    &parts.append("    ${s.ctx_var}_task.profile_dispatch = ${s.profile_dispatch_id};");
+  END
+  &parts.append("    ${s.ctx_var}.* = .{");
+  &parts.append(fsmWrapperEmitter__indent_block(fsmWrapperEmitter__render_struct_init_fields(s.ctx_init_fields, mir_emitter), 8));
+  &parts.append("    };");
+  &parts.append("    ${s.ctx_var}.task = ${s.ctx_var}_task;");
+  &parts.append("    ${s.ctx_var}.rt = try CheatHeader.allocFsmTaskRuntime(${s.ctx_var}_task, ${s.rt_name});");
+  &parts.append("    ${TRY (fsmWrapperEmitter__render_fsm_spawn_call(s.spawn_call))}");
+  &parts.append("    break :${blk_label} ${s.promise_var};");
+  RETURN parts.join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__empty?(s: ?String) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN ((s == NIL) OR ((s?).trim().length() == 0));
+END
+PUB FN fsmWrapperEmitter__render_stmt_array(stmts: []Emittable, rt_name: String) RETURNS !String ->
+  IF (stmts.length() == 0) THEN
+    RETURN "";
+  END
+  MUTABLE emitter = mIREmitter__new();
+  RETURN COPY CAST((fsmWrapperEmitter__with_rt_name(&emitter, rt_name, %() USE(emitter, stmts) -> {
+  rtoc_lambda_result_7 = (TRY (fsmWrapperEmitter__render_body_items(stmts, emitter))).join("\n");
+  rtoc_lambda_result_7
+  })) AS String);
+END
+PRIVATE FN fsmWrapperEmitter__render_body_items(stmts: []Emittable, mir_emitter: MIREmitter) RETURNS ![]String ->
+  FOR _ IN stmts DO
+  IF !(TRUE) THEN
+    panic("FSM body item must be structural MIR, got {}");
+  END
+  END
+  MUTABLE rendered = TRY (mIREmitter__emit_statements(&mir_emitter, stmts));
+  IF (rendered.length() == 0) THEN
+    RETURN CAST(( { MUTABLE rtoc_empty_list_8: []String = List[]; rtoc_empty_list_8 } ) AS []String);
+  ELSE
+    RETURN CAST([rendered] AS []String);
+  END
+END
+PUB FN fsmWrapperEmitter__render_fsm_expr(expr: Emittable) RETURNS !String ->
+  MUTABLE out: ?String = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_9 = mIREmitter__new();
+  TRY (mIREmitter__emit(&rtoc_mutable_receiver_9, expr)) };
+  IF out EXISTS AS out_value THEN
+    IF (out_value.trim().length() == 0) THEN
+      panic("FSM expression rendered empty");
+    ELSE
+      RETURN out_value;
+    END
+  ELSE
+    panic("FSM expression rendered empty");
+  END
+END
+PUB FN fsmWrapperEmitter__render_context_field_decls(fields: []ContextFieldDecl, mir_emitter: MIREmitter) RETURNS !String ->
+  RETURN (fields |> SELECT {
+  MUTABLE default: String = "";
+    IF _.default_value EXISTS AS default_value_value THEN
+      default = " = ${TRY (mIREmitter__emit(&mir_emitter, default_value_value))}";
+    ELSE
+      default = "";
+    END
+  "${_.name}: ${_.type_zig}${default},"
+  }).join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_fsm_state_field_decls(fields: []StateFieldDecl, mir_emitter: MIREmitter) RETURNS !String ->
+  RETURN (fields |> SELECT {
+  MUTABLE default: ?String = TRY (mIREmitter__emit(&mir_emitter, _.default_value));
+  "${_.name}: ${_.zig_type} = ${default},"
+  }).join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_struct_init_fields(fields: []StructInitField, mir_emitter: MIREmitter) RETURNS !String ->
+  RETURN (fields |> SELECT ".${_.name} = ${TRY (mIREmitter__emit(&mir_emitter, _.value))},").join("\n");
+END
+PRIVATE FN fsmWrapperEmitter__render_fsm_spawn_call(call: FsmSpawnCall) RETURNS !String ->
+  IF (call.target == :runtime_submit) THEN
+    MUTABLE runtime_name = (call.runtime_name OR_ELSE CAST(panic("FsmSpawnCall runtime_name required") AS String));
+    RETURN "try ${runtime_name}.getSched().submitFsmSpawn(${call.ctx_var}.task);";
+  ELSE_IF (call.target == :best) THEN
+    RETURN "try CheatHeader.spawnFsmBest(${call.ctx_var}.task);";
+  ELSE
+    panic("unknown FsmSpawnCall target {}");
+  END
+END
+PRIVATE FN fsmWrapperEmitter__render_destroy_actions(ctx_id: Int64, destroy_actions: []FsmDestroyAction, MUTABLE mir_emitter: MIREmitter) RETURNS String ->
+  IF (destroy_actions.length() == 0) THEN
+    RETURN "";
+  END
+  RETURN CAST(fsmWrapperEmitter__with_rt_name(&mir_emitter, "__ctx_${ctx_id.toString()}.rt", %() USE(ctx_id, destroy_actions, mir_emitter) -> ((destroy_actions |> SELECT PARTIAL MATCH _ START
+    FsmDestroyAction.FsmDestroyCleanup AS fsm_destroy_cleanup -> fsmWrapperEmitter__render_destroy_cleanup_action(fsm_destroy_cleanup, mir_emitter),
+    FsmDestroyAction.FsmDestroyStmt AS fsm_destroy_stmt -> fsmWrapperEmitter__render_destroy_stmt_action(fsm_destroy_stmt, mir_emitter),
+    FsmDestroyAction.FsmDestroyLockRelease AS fsm_destroy_lock_release -> fsmWrapperEmitter__render_destroy_lock_action(ctx_id, fsm_destroy_lock_release, mir_emitter),
+  END) |> WHERE _ != NIL).join("\n")) AS String);
+END
+PRIVATE FN fsmWrapperEmitter__render_destroy_cleanup_action(action: FsmDestroyCleanup, mir_emitter: MIREmitter) RETURNS !String ->
+  MUTABLE allocator: ?String = IF action.allocator != NIL THEN
+    TRY (mIREmitter__emit(&mir_emitter, (action.allocator)?))
+  ELSE
+    NIL
+  END;
+  MUTABLE cleanup = TRY (mIREmitter__emit_direct_cleanup(mir_emitter, UNWRAP (TRY (mIREmitter__emit(&mir_emitter, action.target))), KEEP action.cleanup_entry, allocator));
+  MUTABLE guard: ?String = IF action.guard != NIL THEN
+    TRY (mIREmitter__emit(&mir_emitter, (action.guard)?))
+  ELSE
+    NIL
+  END;
+  IF guard EXISTS AS guard_value THEN
+    IF (guard_value.trim().length() == 0) THEN
+      RETURN cleanup;
+    ELSE
+      IF cleanup.contains?("\n") THEN
+        RETURN "if (${guard_value}) {\n${fsmWrapperEmitter__indent_block(cleanup, 4)}\n}";
+      ELSE
+        RETURN "if (${guard_value}) ${cleanup}";
+      END
+    END
+  ELSE
+    RETURN cleanup;
+  END
+END
+PRIVATE FN fsmWrapperEmitter__render_destroy_stmt_action(action: FsmDestroyStmt, mir_emitter: MIREmitter) RETURNS !String ->
+  MUTABLE stmt = (UNWRAP (TRY (mIREmitter__emit(&mir_emitter, action.stmt)))).trim();
+  IF (stmt.endsWith?(";") OR stmt.endsWith?("}")) THEN
+    RETURN stmt;
+  ELSE
+    RETURN "${stmt};";
+  END
+END
+PRIVATE FN fsmWrapperEmitter__render_destroy_lock_action(ctx_id: Int64, action: FsmDestroyLockRelease, mir_emitter: MIREmitter) RETURNS !String ->
+  RETURN "if (__ctx_${ctx_id.toString()}.${fsmDestroyLockRelease__guard_field(action)}) ${TRY (mIREmitter__emit(&mir_emitter, action.lock_ref))}.${action.unlock_method}();";
+END
+PUB FN fsmWrapperEmitter__with_rt_name(MUTABLE mir_emitter: MIREmitter, rt_name: String, blk: FN() -> Any) RETURNS Any@multiowned ->
+MUTABLE previous: String = "rt";
+previous = COPY mir_emitter.rt_name;
+DEFER mir_emitter.rt_name = previous;
+mir_emitter.rt_name = COPY rt_name;
+RETURN blk();
+END
+PRIVATE FN fsmWrapperEmitter__indent_block(text: String, n: Int64) RETURNS String ->
+  IF fsmWrapperEmitter__empty?(text) THEN
+    RETURN "";
+  END
+  MUTABLE pad = compilerRepeatString(" ", n);
+  RETURN (text.split("\n") |> SELECT {
+  MUTABLE stripped = _.chomp("\n");
+  (IF stripped.trim().empty?() THEN
+      ""
+    ELSE
+      (pad + stripped)
+    END)
+  }).join("\n");
+END
+# End Ruby module FsmWrapperEmitter
+FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+  MUTABLE result: []Any = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END

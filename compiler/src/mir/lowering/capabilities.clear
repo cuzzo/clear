@@ -1,0 +1,76 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172" AS lexer
+REQUIRE "pkg:rtoc_6261636b656e64732f7a69675f747970652e636c656172" AS zig_type
+REQUIRE "pkg:rtoc_636f6d70696c65722f656e747279706f696e742e636c656172" AS entrypoint
+REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6d69722f6d69725f6c6f776572696e672e636c656172" AS mir_lowering
+# Ruby module MIRLoweringCapabilities
+PUB UNION CapabilityVarNode { Identifier: Identifier, GetField: GetField, GetIndex: GetIndex }
+PUB UNION FieldPathNode { Identifier: Identifier, GetField: GetField }
+PUB UNION AstReturnSearchNode { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, ArrayValue: []Node, TokenMultiowned: Token@multiowned, HashMapValue: {Any@multiowned}Any@multiowned, SymbolValue: String@symbol, StringValue: String, Int64Value: Int64, Float64Value: Float64, BoolValue: Bool, TypeMultiowned: Type@multiowned, ArrayValue2: [Set]Any@multiowned, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, Token: Token, Type: Type }
+PUB UNION WithBindingNode { StringValue: String, Emittable: Emittable, ArrayValue: []Emittable }
+PUB STRUCT FallibleClauseFact {
+  var_name: String,
+  alias_name: String,
+  action_kind: ErrorActionKind,
+  retries: ?Int64,
+  matched_types: []String@symbol,
+  bubble_types: []String@symbol,
+  action_mir: []Emittable,
+  exit_msg_mir: ?Emittable
+}
+PUB STRUCT WithCapabilityBindingContext {
+  node: WithBlock,
+  cap: CapabilityTransition,
+  var_node: CapabilityVarNode,
+  var_name: String,
+  alias_name: String,
+  resolved_type: ?Type,
+  var_sync: ?String@symbol,
+  var_storage: ?String@symbol,
+  zig_var: String,
+  clause: ?ErrorClause,
+  with_label: ?String,
+  needs_sort: Bool,
+  rt_name: String
+}
+PUB STRUCT WithBindingMaterialization {
+  bindings: []WithBindingNode,
+  fallible_clauses: []FallibleClauseFact
+}
+
+PUB FN withBindingMaterialization__add_binding(MUTABLE self: WithBindingMaterialization, binding: WithBindingNode) RETURNS Void ->
+  &self.bindings.append(COPY binding);
+END
+PUB FN withBindingMaterialization__add_fallible_clause(MUTABLE self: WithBindingMaterialization, clause: FallibleClauseFact) RETURNS Void ->
+  &self.fallible_clauses.append(COPY clause);
+END
+PUB STRUCT LockBindingPlan {
+  guard_var: String,
+  alias_name: String,
+  lock_expr: Emittable,
+  lock_sync: ?String@symbol,
+  clause: ?ErrorClause,
+  with_label: ?String,
+  with_node: WithBlock
+}
+PUB STRUCT MutableSnapshotCap {
+  var_node: CapabilityVarNode,
+  alias_name: String,
+  source: Emittable,
+  bare_type: Type,
+  conflict_error: String@symbol
+}
+PUB STRUCT MutableSnapshotPlan {
+  node: WithBlock,
+  with_label: ?String,
+  rt_name: String,
+  alloc: String@symbol,
+  body_mir: []Emittable,
+  retries: ?Int64,
+  capabilities: []MutableSnapshotCap
+}
+PUB UNION LockedUnwrapMapValue { StringValue: String, BoolValue: Bool }
+# End Ruby module MIRLoweringCapabilities

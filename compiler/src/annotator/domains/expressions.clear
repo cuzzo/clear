@@ -1,0 +1,11 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f646961676e6f737469635f72656769737472792e636c656172" AS diagnostic_registry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f756e696f6e2e636c656172" AS union
+REQUIRE "pkg:rtoc_73656d616e7469632f74656e73655f6f7065726174696f6e5f706c616e2e636c656172" AS tense_operation_plan
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+# Ruby module Annotator
+# Ruby module Annotator::Domains
+# Ruby module Annotator::Domains::Expressions
+# End Ruby module Annotator::Domains
+# End Ruby module Annotator

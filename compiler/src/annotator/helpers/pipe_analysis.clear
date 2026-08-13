@@ -1,0 +1,66 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_73656d616e7469632f74656e73655f6f7065726174696f6e5f706c616e2e636c656172" AS tense_operation_plan
+REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f706c616365686f6c6465725f75736167652e636c656172" AS pipeline_placeholder_usage
+REQUIRE "pkg:rtoc_6173742f747970655f65787072657373696f6e2e636c656172" AS type_expression
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+REQUIRE "pkg:rtoc_6173742f66756e6374696f6e5f7369676e61747572655f666f72776172642e636c656172" AS function_signature_forward
+# Ruby module PipeAnalysis
+PUB UNION ObservableTypeKwValue { SymbolValue: String@symbol, Int64Value: Int64, BoolValue: Bool }
+PUB UNION ShardScanNode { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, TenseBackendFormOptionalUnwrap: TenseBackendFormOptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, ASTCapability: ASTCapability, ArrayValue: []Node, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB STRUCT PipeArityPlan {
+  params: []Param,
+  min_args: Int64,
+  max_args: Int64,
+  given_args: Int64
+}
+
+PUB FN pipeArityPlan__mismatch?(self: PipeArityPlan) RETURNS Bool ->
+  RETURN ((self.given_args < self.min_args) OR (self.given_args > self.max_args));
+END
+PUB FN pipeArityPlan__exact?(self: PipeArityPlan) RETURNS Bool ->
+  RETURN (self.min_args == self.max_args);
+END
+PUB STRUCT PipelineSourceFact {
+  kind: String@symbol,
+  item_type: Type
+}
+
+PUB FN pipelineSourceFact__stream?(self: PipelineSourceFact) RETURNS Bool ->
+  RETURN (pipelineSourceFact__valid?(self) AND (self.kind != :collection));
+END
+PUB FN pipelineSourceFact__finite_stream?(self: PipelineSourceFact) RETURNS Bool ->
+  RETURN (pipelineSourceFact__stream?(self) AND (self.kind != :inf_stream));
+END
+PUB FN pipelineSourceFact__inf_stream?(self: PipelineSourceFact) RETURNS Bool ->
+  RETURN (self.kind == :inf_stream);
+END
+PUB FN pipelineSourceFact__valid?(self: PipelineSourceFact) RETURNS Bool ->
+  RETURN (self.kind != :invalid);
+END
+PUB STRUCT SelectorEffectFact {
+  plan: TenseSelectorPlan
+}
+
+PUB FN selectorEffectFact__value_type(self: SelectorEffectFact) RETURNS Type EFFECTS REENTRANT ->
+  RETURN COPY self.plan.value_type;
+END
+PUB FN selectorEffectFact__asynchronous(self: SelectorEffectFact) RETURNS Bool ->
+  RETURN tenseSelectorPlan__asynchronous?(self.plan);
+END
+PUB FN selectorEffectFact__required_mode(self: SelectorEffectFact) RETURNS ?String@symbol EFFECTS REENTRANT ->
+  RETURN tenseSelectorPlan__required_mode(self.plan);
+END
+PUB FN selectorEffectFact__required_order(self: SelectorEffectFact) RETURNS String EFFECTS REENTRANT ->
+  RETURN tenseSelectorPlan__required_order(self.plan);
+END
+PUB FN selectorEffectFact__leaf_type(self: SelectorEffectFact) RETURNS !Type EFFECTS REENTRANT ->
+  RETURN CAST(tenseSelectorPlan__leaf_type(self.plan) AS Type);
+END
+PUB FN selectorEffectFact__fallible?(self: SelectorEffectFact) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN tenseSelectorPlan__fallible?(self.plan);
+END
+observable_reducible_numeric = [:Int8, :Int16, :Int32, :Int64, :UInt8, :Byte, :UInt16, :UInt32, :UInt64, :Float32, :Float64];
+valid_concurrent_options = ["workers", "capacity", "batch", "parallel", "size"];
+valid_concurrent_sizes = ["MICRO", "STANDARD", "LARGE", "XL"];
+# End Ruby module PipeAnalysis

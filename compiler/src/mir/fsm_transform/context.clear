@@ -1,0 +1,46 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f6c6f776572696e675f70726f746f636f6c2e636c656172" AS lowering_protocol
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f6173796e635f726573756c745f73686170652e636c656172" AS async_result_shape
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2e636c656172" AS fsm_transform
+# Ruby module FsmTransform
+PUB UNION TransformValue { BgBlock: BgBlock, StringValue: String, Int64Value: Int64, SymbolValue: String@symbol, BoolValue: Bool, AsyncResultShape: AsyncResultShape, HashMapValue: {String}Type@multiowned, HashMapValue2: {String}ResourceClosePlan, ArrayValue: [Set]String, ArrayValue2: []ContextFieldDecl, ArrayValue3: []StructInitField, ArrayValue4: []String, ArrayValue5: []CaptureCleanupAction, ArrayValue6: []Emittable, HashMapValue3: {String}Type }
+PUB UNION BgBlockInput { BgBlock: BgBlock, Struct: Struct }
+# Ruby module FsmTransform::Emit
+PUB STRUCT FsmEmitContext {
+  id: Int64,
+  bg_rt: String,
+  blk_label: String,
+  ctx_type: String,
+  promise_zig: String,
+  async_result_shape: AsyncResultShape,
+  capture_fields: []ContextFieldDecl,
+  alloc_var: String,
+  promise_var: String,
+  ctx_var: String,
+  rt_name: String,
+  promoted_decls: []Emittable,
+  capture_inits: []StructInitField,
+  captured: {String}Type,
+  capture_close_plans: {String}ResourceClosePlan,
+  pointer_captures: [Set]String,
+  extra_ctx_fields: []ContextFieldDecl,
+  recursive_promoted_names: []String,
+  fresh_heap_cleanup_names: []String,
+  capture_finalizers: []Emittable,
+  arena_init_flag: Bool,
+  is_void: Bool,
+  pin_mode: ?Any@multiowned,
+  parallel: Bool,
+  profile_site_id: ?Int64,
+  profile_line: ?Int64,
+  profile_column: ?Int64,
+  destroy_actions: []FsmDestroyAction
+}
+
+PUB FN fsmEmitContext__with_extra_ctx_fields(self: FsmEmitContext, fields: []ContextFieldDecl) RETURNS FsmEmitContext ->
+  RETURN FsmEmitContext{ id: self.id, bg_rt: COPY self.bg_rt, blk_label: COPY self.blk_label, ctx_type: COPY self.ctx_type, promise_zig: COPY self.promise_zig, async_result_shape: COPY self.async_result_shape, capture_fields: COPY self.capture_fields, alloc_var: COPY self.alloc_var, promise_var: COPY self.promise_var, ctx_var: COPY self.ctx_var, rt_name: COPY self.rt_name, promoted_decls: COPY self.promoted_decls, capture_inits: COPY self.capture_inits, captured: COPY self.captured, capture_close_plans: COPY self.capture_close_plans, pointer_captures: COPY self.pointer_captures, extra_ctx_fields: COPY fields, recursive_promoted_names: COPY self.recursive_promoted_names, fresh_heap_cleanup_names: COPY self.fresh_heap_cleanup_names, capture_finalizers: COPY self.capture_finalizers, arena_init_flag: self.arena_init_flag, is_void: self.is_void, pin_mode: KEEP self.pin_mode, parallel: self.parallel, profile_site_id: self.profile_site_id, profile_line: self.profile_line, profile_column: self.profile_column, destroy_actions: COPY self.destroy_actions };
+END
+# End Ruby module FsmTransform::Emit
+# End Ruby module FsmTransform

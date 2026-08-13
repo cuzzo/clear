@@ -1,0 +1,5 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6261636b656e64732f7a69675f747970652e636c656172" AS zig_type
+# Ruby module ZigTypeMapper
+zig_primitives = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "void", "[]const u8"];
+# End Ruby module ZigTypeMapper

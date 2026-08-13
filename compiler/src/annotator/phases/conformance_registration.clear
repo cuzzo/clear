@@ -1,0 +1,20 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f6465636c61726174696f6e5f696e6465782e636c656172" AS declaration_index
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB STRUCT ConformanceResolution {
+  declaration: ConformanceDef,
+  protocol: ProtocolDef,
+  owner_name: String,
+  owner_generic_params: []GenericParamDecl,
+  associated_types: {String@symbol}Type,
+  members: {String}FunctionDef
+}
+PUB STRUCT ConformanceMatch {
+  resolution: ConformanceResolution,
+  substitutions: {String@symbol}Type
+}
+# Ruby module Annotator::Phases::ConformanceRegistration
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

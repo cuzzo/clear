@@ -1,0 +1,286 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f70726f64756374732e636c656172" AS annotation_products
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f747970655f616e616c797369735f73657373696f6e2e636c656172" AS type_analysis_session
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f70686173655f68616e646f6666732e636c656172" AS phase_handoffs
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB STRUCT AnnotationTypeInventory {
+  typed_node_count: Int64,
+  violations: []Violation
+}
+
+PUB STRUCT Violation {
+  class_name: String,
+  location: String,
+  type_name: String
+}
+PUB UNION AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata { SymbolValue: String@symbol, MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, ArrayValue: []AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB UNION AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem { SymbolValue: String@symbol, MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB FN annotationTypeInventory__initialize(MUTABLE self: AnnotationTypeInventory, typed_node_count: Int64, violations: []Violation) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.typed_node_count = COPY typed_node_count;
+    rtoc_self_view.violations = COPY violations;
+}
+END
+PUB FN annotationTypeInventory__unresolved_node_count(self: AnnotationTypeInventory) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.violations.length();
+}
+END
+PUB FN annotationTypeInventory__verify_resolved_mut(self: AnnotationTypeInventory) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (rtoc_self_view.violations.length() == 0) THEN
+      RETURN;
+    END
+    MUTABLE sample = (rtoc_self_view.violations.first(20) |> SELECT "  - ${_.class_name()} @ ${_.location()}: ${_.type_name()}").join("\n");
+    MUTABLE more: String = "";
+    IF (rtoc_self_view.violations.length() > 20) THEN
+      more = "\n  ... (+${(rtoc_self_view.violations.length() - 20)} more)";
+    ELSE
+      more = "";
+    END
+    panic("annotation boundary has unresolved AST type facts:\\n{}{}");
+}
+END
+PUB FN annotationTypeInventory__scan(program: Program) RETURNS !AnnotationTypeInventory@multiowned ->
+  MUTABLE ignored_node_ids = TRY (annotationTypeInventory__ignored_node_ids(program));
+  MUTABLE typed_node_count = 0;
+  MUTABLE violations: []Violation = ( { MUTABLE rtoc_empty_list_1: []Violation = List[]; rtoc_empty_list_1 } );
+  aST__each_locatable(program, TRUE, %(node: Locatable) USE(ignored_node_ids, MUTABLE violations) -> {
+  IF ignored_node_ids.contains?(node.object_id()) THEN
+      RETURN;
+  END
+  MUTABLE node_type = TRY (annotationTypeInventory__node_type(&node));
+  IF (type__untyped?(node_type) OR type__auto?(node_type)) THEN
+      &violations.append(Violation{ class_name: COPY annotationTypeInventory__class_name(node), location: COPY annotationTypeInventory__location(node), type_name: COPY type__to_s(node_type) });
+  ELSE
+      typed_node_count = (typed_node_count + 1);
+  END
+  rubyToClearVoid()
+  });
+  RETURN annotationTypeInventory__new(typed_node_count, violations);
+END
+PRIVATE FN annotationTypeInventory__ignored_node_ids(program: Program) RETURNS ![Set]Int64 ->
+  MUTABLE ignored: [Set]Int64 = Set[];
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < program.statements.length() DO
+    IF !((program.statements[rtoc_idx] IS_A FunctionDef OR program.statements[rtoc_idx] IS_A ExternFnDecl)) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    annotationTypeInventory__add_lifetime_metadata_node_ids_mut(&ignored, TRY (functionSignature__return_lifetime(program.statements[rtoc_idx])));
+  rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN ignored;
+END
+PRIVATE FN annotationTypeInventory__add_lifetime_metadata_node_ids_mut(MUTABLE ignored: [Set]Int64, value: ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata) RETURNS Void EFFECTS REENTRANT ->
+  IF (value IS_A Locatable) THEN
+    aST__each_locatable(value, TRUE, %(node: Locatable) USE(MUTABLE ignored) -> {
+  &ignored.insert(node.object_id());
+  rubyToClearVoid()
+    });
+  ELSE_IF value IS_A []AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem AS array THEN
+    MUTABLE array_mutable = COPY array;
+    FOR _ IN array_mutable DO
+    annotationTypeInventory__add_lifetime_metadata_node_ids_mut(&ignored, castAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItemToOptionalAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata(_));
+    END
+  END
+END
+PRIVATE FN annotationTypeInventory__node_type(MUTABLE node: Locatable) RETURNS !Type ->
+  IF !(node.typed?()) THEN
+    RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped }));
+  END
+  RETURN &node.full_type_mut("annotation type inventory");
+END
+PRIVATE FN annotationTypeInventory__class_name(node: Locatable) RETURNS String ->
+  RETURN (((node.class().name() OR CAST(node.class() AS String))).split("::").last() OR CAST(node.class() AS String));
+END
+PRIVATE FN annotationTypeInventory__location(node: Locatable) RETURNS String ->
+  MUTABLE token = node.token();
+  IF !(token) THEN
+    RETURN "?";
+  END
+  RETURN "${token.line()}:${token.column()}";
+END
+PUB FN annotationTypeInventory__new(typed_node_count: Int64, violations: []Violation) RETURNS AnnotationTypeInventory@multiowned ->
+  MUTABLE self = AnnotationTypeInventory{ typed_node_count: typed_node_count, violations: List[] };
+  annotationTypeInventory__initialize(&self, typed_node_count, violations);
+  RETURN self @multiowned;
+END
+PUB FN typeAnalysisPhase__run(resolution: ResolutionFacts, MUTABLE session: TypeAnalysisSession) RETURNS !TypeAnalysisHandoff ->
+  RETURN TRY (typeAnalysisSession__execute_type_analysis_mut(&session, resolution));
+END
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator
+FN castAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItemToOptionalAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata(value: AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem) RETURNS ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata ->
+  PARTIAL MATCH value START
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SymbolValue AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SymbolValue: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRProgram AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRProgram: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.RequireNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ RequireNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ProtocolRequirement AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ProtocolRequirement: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ProtocolDef AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ProtocolDef: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.FunctionDefMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ FunctionDefMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ImplementationDef AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ImplementationDef: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ConformanceDef AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ConformanceDef: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRStructDef AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRStructDef: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.VarDecl AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ VarDecl: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Assignment AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Assignment: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRDestructureTarget AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRDestructureTarget: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.DestructuringAssignment AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ DestructuringAssignment: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.BindExpr AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ BindExpr: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.BinaryOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ BinaryOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.IsA AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ IsA: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRUnaryOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRUnaryOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.CallSiteOverride AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ CallSiteOverride: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Identifier AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Identifier: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Literal AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Literal: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ListLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ListLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TupleLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TupleLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.DefaultArrayLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ DefaultArrayLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.HashLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ HashLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.DefaultLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ DefaultLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.StructLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ StructLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.LambdaLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ LambdaLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.IfStatement AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ IfStatement: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.IfBind AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ IfBind: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WhileLoop AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WhileLoop: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WhileBindLoop AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WhileBindLoop: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.BreakNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ BreakNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ContinueNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ContinueNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.FuncCall AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ FuncCall: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRMethodCall AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRMethodCall: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.GetField AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ GetField: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.GetIndex AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ GetIndex: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRCast AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRCast: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ReturnNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ReturnNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Assert AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Assert: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TenseRecoveryRaise AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TenseRecoveryRaise: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ThrowNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ThrowNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.DieNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ DieNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Slice AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Slice: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Require AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Require: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRDeferStmt AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRDeferStmt: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WithBlockMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WithBlockMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SyncPolicyDecl AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SyncPolicyDecl: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SelectOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SelectOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WhereOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WhereOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.IndexOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ IndexOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ReduceOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ReduceOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.OrderByOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ OrderByOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.LimitOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ LimitOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.UnnestOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ UnnestOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.DistinctOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ DistinctOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.EachOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ EachOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TapOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TapOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SkipOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SkipOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.CollectOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ CollectOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TakeWhileOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TakeWhileOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WindowOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WindowOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.BatchWindowOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ BatchWindowOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.JoinOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ JoinOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.FindOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ FindOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.AnyOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ AnyOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.AllOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ AllOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.CountOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ CountOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SumOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SumOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.AverageOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ AverageOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MinOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MinOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MaxOpMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MaxOpMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ShardOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ShardOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ConcurrentOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ConcurrentOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Placeholder AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Placeholder: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Copy AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Copy: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIROptionalUnwrap AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIROptionalUnwrap: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TenseNavigation AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TenseNavigation: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MutableBorrow AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MutableBorrow: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TenseOperationKindOrElseRaise AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TenseOperationKindOrElseExit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TenseOperationKindOrElsePass AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TenseOperationKindOrElsePrune AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TenseOperationKindOrElseBreak AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.CatchBlock AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ CatchBlock: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.RecoverOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ RecoverOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRBlockExpr AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRBlockExpr: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.StringConcat AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ StringConcat: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.CapabilityWrap AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ CapabilityWrap: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MoveNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MoveNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.CopyNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ CopyNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.KeepNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ KeepNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ShareNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ShareNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.LinkNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ LinkNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ResolveNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ResolveNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.FreezeNode AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ FreezeNode: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.PassStmt AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ PassStmt: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.StructPattern AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ StructPattern: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRRangeLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRRangeLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ExternFnDecl AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ExternFnDecl: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ExternStructDecl AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ExternStructDecl: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIREnumDef AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIREnumDef: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.UnionDef AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ UnionDef: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.UnionVariantLit AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ UnionVariantLit: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.StaticCall AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ StaticCall: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRDoBlock AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRDoBlock: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MIRBgBlock AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MIRBgBlock: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ThenChain AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ThenChain: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.BgStreamBlock AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ BgStreamBlock: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.YieldExpr AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ YieldExpr: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.CloseStream AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ CloseStream: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.NextExpr AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ NextExpr: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MatchStatement AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MatchStatement: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ForRange AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ForRange: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ForEach AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ForEach: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TestBlock AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TestBlock: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WhenBlock AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WhenBlock: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.LetBinding AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ LetBinding: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TestThat AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TestThat: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.AssertRaisesMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ AssertRaisesMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.BenchmarkStmtMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ BenchmarkStmtMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SmashStmtMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SmashStmtMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ProfileStmtMultiowned AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ProfileStmtMultiowned: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.StubDecl AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ StubDecl: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Drop AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Drop: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SuppressCleanup AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SuppressCleanup: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.Return AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ Return: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ReassignCleanup AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ReassignCleanup: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.FieldCleanup AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ FieldCleanup: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.FunctionDef AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ FunctionDef: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WithBlock AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WithBlock: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SelectOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SelectOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WhereOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WhereOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.IndexOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ IndexOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ReduceOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ReduceOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.OrderByOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ OrderByOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.UnnestOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ UnnestOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.DistinctOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ DistinctOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.TakeWhileOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ TakeWhileOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.WindowOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ WindowOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.BatchWindowOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ BatchWindowOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.FindOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ FindOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.AnyOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ AnyOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.AllOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ AllOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.CountOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ CountOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SumOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SumOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.AverageOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ AverageOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MinOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MinOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.MaxOp AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ MaxOp: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.AssertRaises AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ AssertRaises: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.BenchmarkStmt AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ BenchmarkStmt: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.SmashStmt AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SmashStmt: COPY cast_payload };,
+    AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem.ProfileStmt AS cast_payload -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ProfileStmt: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata");
+  END
+  panic("Invalid cast to ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

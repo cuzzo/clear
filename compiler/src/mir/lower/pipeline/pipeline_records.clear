@@ -1,0 +1,81 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+PUB UNION PipelineTypeInput { TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Type: Type }
+PUB UNION PipelineLoweringResult { MIRBgBlock: MIRBgBlock, MIRBlockExpr: MIRBlockExpr, ForStmt: ForStmt, ScopeBlock: ScopeBlock, ShardConcurrentEach: ShardConcurrentEach }
+PUB STRUCT PipelineSite {
+  list: Locatable,
+  options: BinaryOp
+}
+PUB STRUCT PipelineSourceShape {
+  type: Type,
+  bc_target: Bool,
+  named_source: Bool
+}
+
+PUB FN pipelineSourceShape__element_type(self: PipelineSourceShape) RETURNS !Type EFFECTS REENTRANT ->
+  MUTABLE elem_type: ?Type = (IF TRY (type__runtime_stream_storage_element_type(self.type)) != NIL THEN TRY (type__runtime_stream_storage_element_type(self.type)) ELSE TRY (type__element_type(self.type)) END);
+  IF elem_type EXISTS AS elem_type_value THEN
+    RETURN elem_type_value;
+  ELSE
+    panic("pipeline source shape: {} has no element type");
+  END
+END
+PRIVATE FN pipelineSourceShape__infinite_stream?(self: PipelineSourceShape) RETURNS !Bool ->
+  RETURN TRY (type__inf_stream?(self.type));
+END
+PUB FN pipelineSourceShape__bc_infinite_stream?(self: PipelineSourceShape) RETURNS Bool ->
+  RETURN (((self.bc_target AND pipelineSourceShape__infinite_stream?(self))) == TRUE);
+END
+PUB FN pipelineSourceShape__bc_named_infinite_stream?(self: PipelineSourceShape) RETURNS Bool ->
+  RETURN (((pipelineSourceShape__bc_infinite_stream?(self) AND !(FALSE))) == TRUE);
+END
+PUB STRUCT PipelineNamedBinding {
+  name: String,
+  zig: String
+}
+PUB STRUCT PipelineElementHead {
+  value: Emittable,
+  pending: []Emittable,
+  owned: Bool
+}
+PUB STRUCT PipelineLabelState {
+  counter: Int64,
+  current_label: ?String
+}
+
+PUB FN pipelineLabelState__initialize(MUTABLE self: PipelineLabelState) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.counter = 0;
+    rtoc_self_view.current_label = NIL;
+}
+END
+PUB FN pipelineLabelState__next_label(MUTABLE self: PipelineLabelState) RETURNS String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.counter = (rtoc_self_view.counter + 1);
+    RETURN "__pblk${rtoc_self_view.counter.toString()}";
+}
+END
+PUB FN pipelineLabelState__set_current_label(MUTABLE self: PipelineLabelState, label: String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.current_label = COPY label;
+}
+END
+PUB FN pipelineLabelState__current_label(self: PipelineLabelState) RETURNS ?String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY rtoc_self_view.current_label;
+}
+END
+PUB FN pipelineLabelState__new() RETURNS PipelineLabelState@multiowned ->
+  MUTABLE self = PipelineLabelState{ counter: 0, current_label: NIL };
+  pipelineLabelState__initialize(&self);
+  RETURN self @multiowned;
+END

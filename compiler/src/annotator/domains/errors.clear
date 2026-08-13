@@ -1,0 +1,17 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_636f6d70696c65722f656e747279706f696e742e636c656172" AS entrypoint
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f776974685f6d617463685f636865636b2e636c656172" AS with_match_check
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f756e696f6e2e636c656172" AS union
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172" AS lexer
+REQUIRE "pkg:rtoc_73656d616e7469632f74656e73655f6f7065726174696f6e5f706c616e2e636c656172" AS tense_operation_plan
+# Ruby module Annotator
+# Ruby module Annotator::Domains
+# Ruby module Annotator::Domains::Errors
+sync_policy_required_errors = [:LockTimeout, :MvccConflict, :AtomicConflict];
+sync_policy_inline_only_errors = [:Deadlock, :LockCycle];
+# End Ruby module Annotator::Domains::Errors
+# End Ruby module Annotator::Domains
+# End Ruby module Annotator

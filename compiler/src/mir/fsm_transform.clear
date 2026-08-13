@@ -1,0 +1,325 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f636f6e746578742e636c656172" AS context
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f7365676d656e74732e636c656172" AS segments
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f7265637572736976655f73706c69747465722e636c656172" AS recursive_splitter
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f6c6976656e6573732e636c656172" AS liveness
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f73757370656e645f7265736f6c766572732e636c656172" AS suspend_resolvers
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f656d69742e636c656172" AS emit
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6173742f6173796e635f726573756c745f73686170652e636c656172" AS async_result_shape
+REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f6c6f776572696e675f70726f746f636f6c2e636c656172" AS lowering_protocol
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f636f6e74726163742e636c656172" AS intrinsic_contract
+# Ruby module FsmTransform
+PUB STRUCT PromotedLocalFact {
+  name: String,
+  type_zig: String,
+  is_suspend_result: Bool
+}
+PUB UNION ContextFieldListItem { ContextFieldDecl: ContextFieldDecl, ArrayValue: []ContextFieldDecl }
+PUB UNION ContextInitListItem { StructInitField: StructInitField, ArrayValue: []StructInitField }
+PUB UNION PromotedDeclListItem { Emittable: Emittable, ArrayValue: []Emittable }
+PUB UNION ContextFieldInput { ContextFieldDecl: ContextFieldDecl, ArrayValue: []ContextFieldListItem }
+PUB UNION ContextInitInput { StructInitField: StructInitField, ArrayValue: []ContextInitListItem }
+PUB UNION PromotedDeclInput { Emittable: Emittable, ArrayValue: []PromotedDeclListItem }
+PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?TransformValue, lowering: LoweringProtocol) RETURNS !?FsmLoweringResult ->
+  MUTABLE block_source = COPY bg_block;
+  MUTABLE suspend_points = (block_source.fsm_suspend_points() OR List[]);
+  MUTABLE need_conservative = TRY (fsmTransform__body_needs_conservative?(block_source.body()));
+  MUTABLE all_locals = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_2: ?[]PromotedLocalFact = NIL;
+  IF need_conservative THEN
+    rtoc_ternary_value_2 = TRY (fsmTransform__collect_body_locals(block_source.body()));
+  ELSE
+    rtoc_ternary_value_2 = List[];
+  END
+  rtoc_ternary_value_2? };
+  MUTABLE promoted_names = all_locals |> SELECT _.name();
+  MUTABLE field_locals = all_locals |> WHERE !(_.is_suspend_result());
+  MUTABLE captured = (castOptionalTransformValueToOptionalHashMapStringType(ctx[:captured]) OR_ELSE {});
+  MUTABLE captured_map = captured.keys().to_a();
+  MUTABLE ctx_id: Int64 = COPY castOptionalTransformValueToInt64(ctx[:id]);
+  MUTABLE promo_capture_map = ((captured_map + promoted_names)).to_h(%(n) USE(ctx_id) -> [n, "__ctx_${ctx_id.toString()}.${n}"]);
+  MUTABLE rec_segs = lowering.with_fiber_capture_map(promo_capture_map, {:rt_override: castOptionalTransformValueToString(ctx[:bg_rt])}, %() USE(block_source, ctx, lowering) -> RecursiveSplitter.split(block_source.body(), lowering, {:ctx: ctx}));
+  IF (rec_segs == NIL) THEN
+    RETURN NIL;
+  END
+  MUTABLE segments = rec_segs.segments();
+  MUTABLE expected = scopeBindings__length(suspend_points);
+  MUTABLE io_next_count = segments |> COUNT (_.tail() IS_A IoSuspend OR _.tail() IS_A NextSuspend);
+  MUTABLE lock_with_nodes = (segments |> SELECT:? (IF _.tail() IS_A LockSuspend THEN
+    _.tail().with_node()
+  ELSE
+    NIL
+  END) |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
+  MUTABLE actual = (io_next_count + scopeBindings__length(lock_with_nodes));
+  IF (expected != actual) THEN
+    RETURN NIL;
+  END
+  MUTABLE liveness = Liveness.analyze(segments, ctx);
+  MUTABLE ext_ctx = (TRY (fsmTransform__coerce_context_fields(ctx[:extra_ctx_fields])) + (field_locals |> SELECT ContextFieldDecl{ name: COPY _.name(), type_zig: COPY _.type_zig(), default_value: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } } }));
+  MUTABLE raw_ctx = COPY ctx;
+  MUTABLE emit_ctx = FsmEmitContext{ id: castOptionalTransformValueToInt64(raw_ctx[:id]?), bg_rt: COPY castOptionalTransformValueToString(raw_ctx[:bg_rt]?), blk_label: COPY castOptionalTransformValueToString(raw_ctx[:blk_label]?), ctx_type: COPY castOptionalTransformValueToString(raw_ctx[:ctx_type]?), promise_zig: COPY castOptionalTransformValueToString(raw_ctx[:promise_zig]?), async_result_shape: COPY castOptionalTransformValueToAsyncResultShape(raw_ctx[:async_result_shape]?), capture_fields: COPY TRY (fsmTransform__coerce_context_fields(raw_ctx[:capture_fields]?)), alloc_var: COPY castOptionalTransformValueToString(raw_ctx[:alloc_var]?), promise_var: COPY castOptionalTransformValueToString(raw_ctx[:promise_var]?), ctx_var: COPY castOptionalTransformValueToString(raw_ctx[:ctx_var]?), rt_name: COPY castOptionalTransformValueToString(raw_ctx[:rt_name]?), promoted_decls: COPY TRY (fsmTransform__coerce_promoted_decls(PromotedDeclInput{ Emittable: castOptionalTransformValueToEmittable(raw_ctx[:promoted_decls]) })), capture_inits: COPY TRY (fsmTransform__coerce_context_inits(raw_ctx[:capture_inits])), captured: COPY castTransformValueToHashMapStringType((raw_ctx[:captured] OR_ELSE {})), capture_close_plans: COPY castTransformValueToHashMapStringResourceClosePlan((raw_ctx[:capture_close_plans] OR_ELSE {})), pointer_captures: COPY CAST((raw_ctx[:pointer_captures] OR_ELSE Set[]) AS [Set]String), extra_ctx_fields: COPY ext_ctx, recursive_promoted_names: COPY promoted_names, fresh_heap_cleanup_names: COPY castTransformValueToString((raw_ctx[:fresh_heap_cleanup_names] OR_ELSE List[])), capture_finalizers: COPY castTransformValueToEmittable((raw_ctx[:capture_finalizers] OR_ELSE List[])), arena_init_flag: ruby_union_scalar_equal_optional_TransformValue_Bool(raw_ctx[:arena_init_flag], TRUE), is_void: ruby_union_scalar_equal_optional_TransformValue_Bool(raw_ctx[:is_void], TRUE), pin_mode: CAST(raw_ctx[:pin_mode] AS ?Any@multiowned), parallel: ruby_union_scalar_equal_optional_TransformValue_Bool(raw_ctx[:parallel], TRUE), profile_site_id: COPY castOptionalTransformValueToOptionalInt64(raw_ctx[:profile_site_id]), profile_line: COPY castOptionalTransformValueToOptionalInt64(raw_ctx[:profile_line]), profile_column: COPY castOptionalTransformValueToOptionalInt64(raw_ctx[:profile_column]), destroy_actions: List[] };
+  RETURN Emit.build_recursive(emit_ctx, rec_segs, liveness, lowering);
+END
+PUB FN fsmTransform__coerce_context_fields(raw: ?ContextFieldInput) RETURNS ![]ContextFieldDecl ->
+  IF raw EXISTS AS raw_value THEN
+    IF raw_value IS_A []ContextFieldListItem AS array THEN
+      RETURN array |> UNNEST TRY (fsmTransform__coerce_context_field(castContextFieldListItemToRaw(_)));
+    END
+    panic("FSM context fields must be MIR::ContextFieldDecl values, got {}");
+  ELSE
+    RETURN CAST(( { MUTABLE rtoc_empty_list_3: []ContextFieldDecl = List[]; rtoc_empty_list_3 } ) AS []ContextFieldDecl);
+  END
+END
+PUB FN fsmTransform__coerce_context_field(raw: Raw) RETURNS ![]ContextFieldDecl EFFECTS REENTRANT ->
+  IF raw IS_A ContextFieldDecl AS context_field_decl THEN
+    RETURN CAST([context_field_decl] AS []ContextFieldDecl);
+  END
+  IF raw IS_A []ContextFieldListItem AS array THEN
+    RETURN array |> UNNEST ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_5: ?[]ContextFieldDecl = NIL;
+    IF _ IS_A []ContextFieldDecl THEN
+      rtoc_ternary_value_5 = TRY (fsmTransform__coerce_context_fields(castContextFieldListItemToOptionalContextFieldInput(_)));
+    ELSE
+      rtoc_ternary_value_5 = TRY (fsmTransform__coerce_context_field(castContextFieldListItemToRaw(_)));
+    END
+    rtoc_ternary_value_5? });
+  END
+  panic("FSM context field must be MIR::ContextFieldDecl, got {}");
+END
+PUB FN fsmTransform__coerce_context_inits(raw: ?ContextInitInput) RETURNS ![]StructInitField EFFECTS REENTRANT ->
+  IF raw EXISTS AS raw_value THEN
+    IF raw_value IS_A []ContextInitListItem AS array THEN
+      RETURN array |> UNNEST (      IF _ IS_A StructInitField THEN
+        [_]
+      ELSE_IF _ IS_A []StructInitField THEN
+        TRY (fsmTransform__coerce_context_inits(castContextInitListItemToOptionalContextInitInput(_)))
+      ELSE
+        panic("FSM context init must be MIR::StructInitField, got {}")
+      END);
+    END
+    panic("FSM context inits must be MIR::StructInitField values, got {}");
+  ELSE
+    RETURN CAST(( { MUTABLE rtoc_empty_list_6: []StructInitField = List[]; rtoc_empty_list_6 } ) AS []StructInitField);
+  END
+END
+PUB FN fsmTransform__coerce_promoted_decls(raw: ?PromotedDeclInput) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  IF raw EXISTS AS raw_value THEN
+    IF raw_value IS_A []PromotedDeclListItem AS array THEN
+      RETURN array |> UNNEST (      IF _ IS_A Emittable THEN
+        [_]
+      ELSE_IF _ IS_A []Emittable THEN
+        TRY (fsmTransform__coerce_promoted_decls(castPromotedDeclListItemToOptionalPromotedDeclInput(_)))
+      ELSE
+        panic("FSM promoted decl must be MIR::Emittable, got {}")
+      END);
+    END
+    panic("FSM promoted decls must be MIR::Emittable values, got {}");
+  ELSE
+    RETURN CAST(( { MUTABLE rtoc_empty_list_7: []Emittable = List[]; rtoc_empty_list_7 } ) AS []Emittable);
+  END
+END
+PRIVATE FN fsmTransform__collect_body_locals(stmts: Any) RETURNS ![]PromotedLocalFact ->
+  MUTABLE out: []PromotedLocalFact = ( { MUTABLE rtoc_empty_list_8: []PromotedLocalFact = List[]; rtoc_empty_list_8 } );
+  MUTABLE seen: {String}Bool = {};
+  aST__each_locatable(stmts, %(node: Locatable) USE(MUTABLE out, MUTABLE seen) -> {
+  MUTABLE entry: ?PromotedLocalFact = TRY (fsmTransform__local_entry_for_node(&node));
+  IF !(entry) THEN
+      RETURN;
+  END
+  MUTABLE name = COPY entry.name;
+  IF seen[name] THEN
+      RETURN;
+  END
+  seen[name] = TRUE;
+  &out.append(UNWRAP (entry));
+  rubyToClearVoid()
+  });
+  RETURN out;
+END
+PRIVATE FN fsmTransform__local_entry_for_node(MUTABLE node: Locatable) RETURNS !?PromotedLocalFact ->
+  IF node IS_A VarDecl AS var_decl THEN
+    MUTABLE var_decl_mutable = COPY var_decl;
+    RETURN TRY (fsmTransform__local_entry(var_decl_mutable.name, &var_decl_mutable.full_type_mut()));
+  ELSE_IF node IS_A BindExpr AS bind_expr THEN
+    MUTABLE bind_expr_mutable = COPY bind_expr;
+    IF !((bind_expr_mutable.mode == :decl)) THEN
+      RETURN NIL;
+    END
+    RETURN TRY (fsmTransform__local_entry(bind_expr_mutable.name, &bind_expr_mutable.full_type_mut(), fsmTransform__suspend_value?(bind_expr_mutable.value)));
+  ELSE_IF node IS_A ForRange AS for_range THEN
+    IF for_range.var_name THEN
+      RETURN PromotedLocalFact{ name: COPY CAST(for_range.var_name AS String), type_zig: "i64", is_suspend_result: FALSE };
+    ELSE
+      RETURN NIL;
+    END
+  ELSE_IF node IS_A ForEach AS for_each THEN
+    RETURN TRY (fsmTransform__foreach_local_entry(for_each));
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN fsmTransform__foreach_local_entry(node: ForEach) RETURNS !?PromotedLocalFact ->
+  IF !(node.var_name) THEN
+    RETURN NIL;
+  END
+  MUTABLE ct = TRY (type__new(&node.collection.full_type_mut("FSM foreach collection")));
+  MUTABLE desc: ?TypeFsmForEachDescriptor = TRY (type__fsm_foreach_descriptor(ct));
+  MUTABLE elem_zig = { MUTABLE rtoc_value_block_marker = 0; MUTABLE elem_t: ?Type = TRY (type__element_type(ct));
+  (IF elem_t != NIL THEN
+    TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY elem_t })))))
+  ELSE
+    "anyopaque"
+  END) };
+  IF desc != NIL THEN
+    elem_zig = desc.var_zig_type;
+  END
+  RETURN PromotedLocalFact{ name: COPY CAST(node.var_name AS String), type_zig: COPY elem_zig, is_suspend_result: FALSE };
+END
+PRIVATE FN fsmTransform__body_needs_conservative?(stmts: Any) RETURNS !Bool EFFECTS REENTRANT ->
+  RETURN stmts |> ANY (IF _ IS_A WithBlock THEN TRUE ELSE (TRY (aST__child_bodies(_))) |> ANY (TRY (fsmTransform__contains_suspend_anywhere?(_)) OR TRY (fsmTransform__body_needs_conservative?(_))) END);
+END
+PRIVATE FN fsmTransform__contains_suspend_anywhere?(stmts: Any) RETURNS !Bool EFFECTS REENTRANT ->
+  RETURN stmts |> ANY (IF Segments.classify_suspend(_) THEN TRUE ELSE (IF _ IS_A WithBlock THEN TRUE ELSE (TRY (aST__child_bodies(_))) |> ANY TRY (fsmTransform__contains_suspend_anywhere?(_)) END) END);
+END
+PRIVATE FN fsmTransform__suspend_value?(value: Locatable) RETURNS !Bool ->
+  IF value IS_A NextExpr AS next_expr THEN
+    RETURN TRUE;
+  END
+  IF !(aST__call?(value)) THEN
+    RETURN FALSE;
+  END
+  MUTABLE md = value.matched_stdlib_def();
+  RETURN !(!(((((md != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_9 = (md?);
+  TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_9)) }) AND ((TRY (functionSignature__intrinsic_contract(&md))).behavior).fsm_setup_present))));
+END
+PUB FN fsmTransform__local_entry(name: String, type_obj: Type, is_suspend_result: Bool = FALSE) RETURNS !?PromotedLocalFact ->
+  MUTABLE t_branch_value: ?Type = NIL;
+  IF type_obj THEN
+    t_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY type_obj }));
+  ELSE
+    t_branch_value = NIL;
+  END
+  MUTABLE t: ?Type = t_branch_value;
+  MUTABLE zig_t: String = "";
+  IF t EXISTS AS t_value THEN
+    zig_t = TRY (type__zig_type(t_value));
+  ELSE
+    zig_t = "anyopaque";
+  END
+  RETURN PromotedLocalFact{ name: COPY name, type_zig: COPY zig_t, is_suspend_result: COPY is_suspend_result };
+END
+# End Ruby module FsmTransform
+FN castContextFieldListItemToOptionalContextFieldInput(value: ContextFieldListItem) RETURNS ?ContextFieldInput ->
+  PARTIAL MATCH value START
+    ContextFieldListItem.ContextFieldDecl AS cast_payload -> RETURN ContextFieldInput{ ContextFieldDecl: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?ContextFieldInput");
+  END
+  panic("Invalid cast to ?ContextFieldInput");
+END
+FN castContextFieldListItemToRaw(value: ContextFieldListItem) RETURNS Raw ->
+  PARTIAL MATCH value START
+    ContextFieldListItem.ContextFieldDecl AS cast_payload -> RETURN Raw{ ContextFieldDecl: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Raw");
+  END
+  panic("Invalid cast to Raw");
+END
+FN castContextInitListItemToOptionalContextInitInput(value: ContextInitListItem) RETURNS ?ContextInitInput ->
+  PARTIAL MATCH value START
+    ContextInitListItem.StructInitField AS cast_payload -> RETURN ContextInitInput{ StructInitField: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?ContextInitInput");
+  END
+  panic("Invalid cast to ?ContextInitInput");
+END
+FN castOptionalTransformValueToAsyncResultShape(value: ?TransformValue) RETURNS AsyncResultShape ->
+  IF value != NIL THEN
+    IF value IS_A AsyncResultShape AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN panic("Invalid cast to AsyncResultShape");
+END
+FN castOptionalTransformValueToEmittable(value: ?TransformValue) RETURNS Emittable ->
+  IF value == NIL THEN
+    panic("Invalid cast to Emittable");
+  END
+  PARTIAL MATCH value? START
+    TransformValue.MIRBgBlock AS cast_payload -> RETURN Emittable{ MIRBgBlock: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Emittable");
+  END
+  panic("Invalid cast to Emittable");
+END
+FN castOptionalTransformValueToInt64(value: ?TransformValue) RETURNS Int64 ->
+  IF value != NIL THEN
+    IF value IS_A Int64 AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN 0_i64;
+END
+FN castOptionalTransformValueToOptionalHashMapStringType(value: ?TransformValue) RETURNS ?{String}Type ->
+  IF value != NIL THEN
+    IF value IS_A {String}Type AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN NIL;
+END
+FN castOptionalTransformValueToOptionalInt64(value: ?TransformValue) RETURNS ?Int64 ->
+  IF value != NIL THEN
+    IF value IS_A Int64 AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN NIL;
+END
+FN castOptionalTransformValueToString(value: ?TransformValue) RETURNS String ->
+  IF value != NIL THEN
+    IF value IS_A String AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN "";
+END
+FN castPromotedDeclListItemToOptionalPromotedDeclInput(value: PromotedDeclListItem) RETURNS ?PromotedDeclInput ->
+  PARTIAL MATCH value START
+    PromotedDeclListItem.Emittable AS cast_payload -> RETURN PromotedDeclInput{ Emittable: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?PromotedDeclInput");
+  END
+  panic("Invalid cast to ?PromotedDeclInput");
+END
+FN castTransformValueToEmittable(value: TransformValue) RETURNS []Emittable ->
+  IF value IS_A []Emittable AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN List[];
+END
+FN castTransformValueToHashMapStringResourceClosePlan(value: TransformValue) RETURNS {String}ResourceClosePlan ->
+  IF value IS_A {String}ResourceClosePlan AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN {};
+END
+FN castTransformValueToHashMapStringType(value: TransformValue) RETURNS {String}Type ->
+  IF value IS_A {String}Type AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN {};
+END
+FN castTransformValueToString(value: TransformValue) RETURNS []String ->
+  IF value IS_A []String AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN List[];
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END
+FN ruby_union_scalar_equal_optional_TransformValue_Bool(value: ?TransformValue, expected: Bool) RETURNS Bool ->
+  IF value EXISTS AS equality_value THEN
+    IF equality_value IS_A Bool AS equality_payload THEN
+      RETURN equality_payload == expected;
+    END
+  END
+  FALSE;
+END

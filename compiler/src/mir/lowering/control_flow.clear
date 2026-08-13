@@ -1,0 +1,81 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
+REQUIRE "pkg:rtoc_6d69722f686f6973742e636c656172" AS hoist
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+# Ruby module MIRLoweringControlFlow
+PUB STRUCT MatchLoweringFacts {
+  expr_label: ?String,
+  subject: Emittable,
+  is_union: Bool,
+  is_int_match: Bool,
+  is_enum_match: Bool,
+  expr_type_sym: String@symbol
+}
+PUB STRUCT UnionMatchArmPlan {
+  variant: String,
+  body: []Emittable,
+  payload_name: ?String
+}
+PUB STRUCT ForEachPlan {
+  var: String,
+  body: []Emittable,
+  rt: Ident,
+  collection: Emittable,
+  collection_type: Type,
+  collection_setup: []Emittable,
+  mutable: Bool,
+  mark_per_iter: ?Bool,
+  tight: Bool
+}
+PUB STRUCT ForRangePlan {
+  var: String,
+  start_value: Emittable,
+  end_value: Emittable,
+  body: []Emittable,
+  rt: Ident,
+  comparison: String,
+  iter_var: String,
+  mark_per_iter: ?Bool,
+  tight: Bool
+}
+PUB STRUCT ReturnOwnershipPlan {
+  value: ?Emittable,
+  explicit_return_names: [Set]String,
+  moved_root_names: [Set]String,
+  consumed_root_names: [Set]String,
+  direct_value_names: [Set]String,
+  converted_cleanup_names: [Set]String,
+  transfer_required_names: [Set]String,
+  move_guard_required_names: [Set]String
+}
+
+PUB FN returnOwnershipPlan__returned_names(self: ReturnOwnershipPlan) RETURNS ![Set]String ->
+  MUTABLE out: [Set]String = Set[];
+  FOR _ IN self.explicit_return_names DO
+  &out.insert(COPY _);
+  END
+  FOR _ IN self.moved_root_names DO
+  &out.insert(COPY _);
+  END
+  FOR _ IN self.consumed_root_names DO
+  &out.insert(COPY _);
+  END
+  FOR _ IN self.direct_value_names DO
+  &out.insert(COPY _);
+  END
+  RETURN out;
+END
+PUB FN returnOwnershipPlan__transfer_marks_for(self: ReturnOwnershipPlan, value_names: [Set]String, visible_guarded_names: [Set]String) RETURNS ![]Stmt ->
+  MUTABLE names: [Set]String = Set[];
+  FOR _ IN value_names DO
+  &names.insert(COPY _);
+  END
+  FOR _ IN self.converted_cleanup_names DO
+  &names.insert(COPY _);
+  END
+  RETURN ((names |> WHERE ((self.transfer_required_names.contains?(_) OR self.converted_cleanup_names.contains?(_)) OR visible_guarded_names.contains?(_)))) |> UNNEST TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY _, target: :return, target_alloc: NIL, move_guarded: (visible_guarded_names.contains?(_) OR self.move_guard_required_names.contains?(_)) })));
+END
+# End Ruby module MIRLoweringControlFlow

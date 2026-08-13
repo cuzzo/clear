@@ -1,0 +1,161 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_73656d616e7469632f636170747572655f73747261746567792e636c656172" AS capture_strategy
+REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f656666656374732e636c656172" AS effects
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+# Ruby module Capabilities
+PUB UNION CaptureSiteNode { MoveNode: MoveNode, CopyNode: CopyNode, Copy: Copy, KeepNode: KeepNode }
+PUB STRUCT Conflict {
+  set_a: []String@symbol,
+  set_b: []String@symbol,
+  message: String
+}
+conflicts: [1]Any@multiowned = [Conflict{ set_a: [:soa], set_b: [:shared, :multiowned], message: "SOA layout is incompatible with reference-counted ownership" }];
+PUB FN capabilities__errors_for(type: Type) RETURNS ![]String ->
+  MUTABLE errors = List[];
+  MUTABLE caps = TRY (capabilities__active_capabilities(type));
+  FOR _ IN conflicts DO
+  MUTABLE has_a = _.set_a() |> ANY caps.contains?(_);
+  MUTABLE has_b = _.set_b() |> ANY caps.contains?(_);
+  IF (has_a AND has_b) THEN
+      &errors.append(_.message());
+  END
+  END
+  RETURN errors;
+END
+PUB FN capabilities__validate_mut(node: Locatable, type: Type, error_handler: ?FN(Locatable, String) -> Void = NIL) RETURNS !Void ->
+  MUTABLE errs = TRY (capabilities__errors_for(type));
+  IF (errs.length() == 0) THEN
+    RETURN;
+  END
+  IF error_handler EXISTS AS error_handler_value THEN
+    error_handler_value(node, UNWRAP (errs.first()));
+  END
+  NIL;
+END
+PUB FN capabilities__active_capabilities(type: Type) RETURNS ![Set]String@symbol ->
+  MUTABLE caps = Set[];
+  IF ((type__ownership(type) != NIL) AND (type__ownership(type) != :affine)) THEN
+    &caps.insert(type__ownership(type));
+  END
+  IF type__sync(type) THEN
+    &caps.insert(type__sync(type));
+  END
+  IF (TRUE AND type__soa?(type)) THEN
+    &caps.insert(:soa);
+  END
+  IF (TRUE AND type__sharded?(type)) THEN
+    &caps.insert(:sharded);
+  END
+  IF (TRUE AND type__pool?(type)) THEN
+    &caps.insert(:pool);
+  END
+  IF (TRUE AND type__list_collection?(type)) THEN
+    &caps.insert(:list);
+  END
+  RETURN caps;
+END
+# End Ruby module Capabilities
+# Ruby module CapabilityHelper
+PUB STRUCT PredicateContext {
+  kind: String@symbol,
+  with_node: ?WithBlock,
+  fn_node: ?FunctionDef,
+  pred_expr: Locatable,
+  guard_alias: ?String,
+  sibling_aliases: []String,
+  param_names: []String,
+  allowed_names: []String,
+  rejected_param_names: [Set]String,
+  fn_name: ?String
+}
+PUB STRUCT PredicateCallSite {
+  kind: String@symbol,
+  with_node: ?WithBlock,
+  fn_node: ?FunctionDef,
+  pred_expr: Locatable,
+  call: Any@multiowned,
+  callee: String
+}
+# End Ruby module CapabilityHelper
+# Ruby module PredicateAudit
+# Ruby module CapabilityHelper
+PUB STRUCT CaptureAnalysis {
+  has_local: Bool,
+  has_rc: Bool,
+  has_shared: Bool,
+  has_sharded: Bool,
+  has_affine_locked: Bool,
+  has_outer_ref: Bool,
+  has_non_escaping_capture: Bool,
+  captures: {String}Type,
+  capture_symbols: {String}SymbolEntry@multiowned,
+  close_plans: {String}ResourceClosePlan,
+  pointer_captures: [Set]String,
+  string_captures: [Set]String,
+  resource_captures: [Set]String,
+  site_moved: [Set]String,
+  site_copied: [Set]String,
+  strategies: {String}Strategy,
+  move_mark_names: [Set]String,
+  alloc_mark_entries: {String}String@symbol
+}
+
+PUB FN captureAnalysis__pin_reason(self: CaptureAnalysis) RETURNS String@symbol ->
+  IF self.has_sharded THEN
+    RETURN :sharded;
+  ELSE
+    RETURN :shared;
+  END
+END
+PUB FN captureAnalysis__merge_nested_mut(MUTABLE self: CaptureAnalysis, nested: CaptureAnalysis) RETURNS Void ->
+  &self.captures.merge_mut(nested.captures, %(ignored_name: Tuple<String,Type>, old, ignored_new) -> old);
+  &self.capture_symbols.merge_mut(nested.capture_symbols, %(ignored_name: Tuple<String,SymbolEntry@multiowned>, old, ignored_new) -> old);
+  &self.close_plans.merge_mut(nested.close_plans, %(ignored_name: Tuple<String,ResourceClosePlan>, old, ignored_new) -> old);
+  self.pointer_captures.merge(nested.pointer_captures);
+  self.string_captures.merge(nested.string_captures);
+  self.resource_captures.merge(nested.resource_captures);
+  self.site_moved.merge(nested.site_moved);
+  self.site_copied.merge(nested.site_copied);
+  &self.strategies.merge_mut(nested.strategies, %(ignored_name: Tuple<String,Strategy>, old, ignored_new) -> old);
+  self.move_mark_names.merge(nested.move_mark_names);
+  &self.alloc_mark_entries.merge_mut(nested.alloc_mark_entries, %(ignored_name: Tuple<String,String@symbol>, old, ignored_new) -> old);
+END
+PUB STRUCT CaptureContext {
+  analysis: CaptureAnalysis,
+  outer_scope: Scope@multiowned,
+  locals: [Set]String,
+  is_parallel: Bool,
+  mark_moves: Bool
+}
+# End Ruby module CapabilityHelper
+# Ruby module CapabilityAudit
+PUB STRUCT BindingAuditRecord {
+  fn: String,
+  var: String,
+  line: ?Int64,
+  column: ?Int64,
+  sync: ?String@symbol,
+  ownership: ?String@symbol,
+  storage: String@symbol,
+  sharded: Bool,
+  mutated: Bool,
+  captured_bg: Bool,
+  captured_parallel: Bool
+}
+
+PUB FN bindingAuditRecord__mark_mutated_mut(MUTABLE self: BindingAuditRecord) RETURNS Void ->
+  self.mutated = TRUE;
+END
+PUB FN bindingAuditRecord__mark_captured_mut(MUTABLE self: BindingAuditRecord, parallel: Bool) RETURNS Void ->
+  self.captured_bg = TRUE;
+  IF parallel THEN
+    self.captured_parallel = TRUE;
+  END
+END
+# End Ruby module CapabilityAudit
+# Ruby module CapabilityUsageAudit
+# Ruby module CapabilityAudit

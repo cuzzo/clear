@@ -1,0 +1,58 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+PUB UNION UnionPayloadCompatibilityReturnValue { StringValue: String, SymbolValue: String@symbol }
+# Ruby module UnionPayloadCompatibility
+PUB FN unionPayloadCompatibility__unique_variant(expected_type: Type, actual_type: Type, schema: ?SchemaValue) RETURNS !?UnionPayloadCompatibilityReturnValue ->
+  IF schema? IS_A UnionSchema AS union_schema THEN
+    MUTABLE compared_actual_branch_value: ?Type = NIL;
+    IF (type__optional?(expected_type) AND type__optional?(actual_type)) THEN
+      compared_actual_branch_value = UNWRAP (TRY (type__wrapped_type(actual_type)));
+    ELSE
+      compared_actual_branch_value = COPY actual_type;
+    END
+    MUTABLE compared_actual: Type = compared_actual_branch_value?;
+    MUTABLE matches: []String@symbol = ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } );
+    MUTABLE rtoc_each_items_2 = union_schema.variants.keys();
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < rtoc_each_items_2.length() DO
+    MUTABLE payload: ?SchemasUnionSchemaVariantValue = COPY union_schema.variants[rtoc_each_items_2[rtoc_idx]?];
+    IF !(payload) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE concrete_payload: ?SchemasUnionSchemaVariantValue = COPY payload;
+    IF concrete_payload IS_A Type AS type THEN
+          IF TRY (unionPayloadCompatibility__payload_matches?(type, compared_actual)) THEN
+            &matches.append(COPY rtoc_each_items_2[rtoc_idx]?);
+          END
+    END
+  rtoc_idx = rtoc_idx + 1;
+    END
+    IF (matches.length() == 1) THEN
+      RETURN COPY ruby_wrap_optional_String_symbol_UnionPayloadCompatibilityReturnValue(matches.first());
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PRIVATE FN unionPayloadCompatibility__payload_matches?(payload_type: Type, actual_type: Type) RETURNS !Bool ->
+  MUTABLE payload_surface = TRY (type__coercion_surface_name_type(payload_type));
+  MUTABLE actual_surface = TRY (type__coercion_surface_name_type(actual_type));
+  IF (payload_surface == actual_surface) THEN
+    RETURN TRUE;
+  END
+  IF (TRY (type__string?(payload_type)) OR TRY (type__string?(actual_type))) THEN
+    RETURN FALSE;
+  END
+  RETURN TRY (type__accepts?(payload_type, actual_type));
+END
+# End Ruby module UnionPayloadCompatibility
+# Ruby module UnionAnalysis
+FN ruby_wrap_optional_String_symbol_UnionPayloadCompatibilityReturnValue(value: ?String@symbol) RETURNS ?UnionPayloadCompatibilityReturnValue ->
+  IF value EXISTS AS optional_payload THEN
+    RETURN UnionPayloadCompatibilityReturnValue{ SymbolValue: COPY optional_payload };
+  END
+  NIL;
+END

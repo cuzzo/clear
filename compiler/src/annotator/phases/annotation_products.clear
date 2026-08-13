@@ -1,0 +1,206 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
+REQUIRE "pkg:rtoc_73656d616e7469632f6f776e6572736869705f67726170682e636c656172" AS ownership_graph
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6966656379636c655f706c616e2e636c656172" AS lifecycle_plan
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f66756e6374696f6e5f72656769737472792e636c656172" AS function_registry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f626f64795f616e616c797369732e636c656172" AS body_analysis
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f636f6e666f726d616e63655f726567697374726174696f6e2e636c656172" AS conformance_registration
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f6465636c61726174696f6e5f696e6465782e636c656172" AS declaration_index
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f696d706c656d656e746174696f6e5f726567697374726174696f6e2e636c656172" AS implementation_registration
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f646572697665645f70726f6772616d5f66616374732e636c656172" AS derived_program_facts
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB STRUCT ResolutionFacts {
+  conformance_resolutions: []ConformanceResolution,
+  declarations: DeclarationIndex,
+  function_names: []String,
+  function_registry: FunctionRegistry,
+  implementation_resolutions: []ImplementationResolution,
+  program: Program,
+  protocols: {String}ProtocolDef,
+  root_scope: Scope@multiowned,
+  type_names: []String@symbol
+}
+
+PUB FN resolutionFacts__empty() RETURNS !ResolutionFacts@multiowned ->
+  MUTABLE program = Program{ token: NIL, statements: COPY List[], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, sync_policy: NIL, mir_pass_state: NIL, language_mode: NIL };
+  MUTABLE root_scope = scope__new();
+  MUTABLE function_registry = FunctionRegistry{ nodes: {}, synthetic_definitions: List[], body_summaries: {} };
+  RETURN resolutionFacts__new(program, TRY (declarationIndexer__index(program)), root_scope, function_registry, root_scope.types.keys(), TRY (functionRegistry__names(function_registry)), ( { MUTABLE rtoc_empty_list_1: []ImplementationResolution = List[]; rtoc_empty_list_1 } ), ( { MUTABLE rtoc_empty_list_2: []ConformanceResolution = List[]; rtoc_empty_list_2 } ), {});
+END
+PUB FN resolutionFacts__initialize(MUTABLE self: ResolutionFacts, program: Program, declarations: DeclarationIndex, root_scope: Scope, function_registry: FunctionRegistry, type_names: []String@symbol, function_names: []String, implementation_resolutions: []ImplementationResolution, conformance_resolutions: []ConformanceResolution, protocols: {String}ProtocolDef) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.program = COPY program;
+    rtoc_self_view.declarations = COPY declarations;
+    rtoc_self_view.root_scope = COPY root_scope;
+    rtoc_self_view.function_registry = COPY function_registry;
+    rtoc_self_view.implementation_resolutions = COPY implementation_resolutions;
+    rtoc_self_view.conformance_resolutions = COPY conformance_resolutions;
+    rtoc_self_view.protocols = COPY protocols;
+    rtoc_self_view.type_names = COPY type_names;
+    rtoc_self_view.function_names = COPY function_names;
+}
+END
+PUB FN resolutionFacts__new(program: Program, declarations: DeclarationIndex, root_scope: Scope, function_registry: FunctionRegistry, type_names: []String@symbol, function_names: []String, implementation_resolutions: []ImplementationResolution, conformance_resolutions: []ConformanceResolution, protocols: {String}ProtocolDef) RETURNS ResolutionFacts@multiowned ->
+  MUTABLE self = ResolutionFacts{ conformance_resolutions: List[], declarations: COPY declarations, function_names: List[], function_registry: COPY function_registry, implementation_resolutions: List[], program: COPY program, protocols: {}, root_scope: COPY root_scope, type_names: List[] };
+  resolutionFacts__initialize(&self, program, declarations, root_scope, function_registry, type_names, function_names, implementation_resolutions, conformance_resolutions, protocols);
+  RETURN self @multiowned;
+END
+PUB STRUCT TypedProgramFacts {
+  body_summaries: {String}FunctionBodySummary,
+  lifecycle_registry: LifecycleRegistry@multiowned,
+  linear_resource_facts: LinearResourceFacts@multiowned,
+  local_function_facts: {String}LocalFunctionFacts,
+  ownership_graph: OwnershipGraph@multiowned,
+  resolution: ResolutionFacts@multiowned,
+  typed_node_count: Int64,
+  unresolved_node_count: Int64
+}
+
+PUB FN typedProgramFacts__initialize(MUTABLE self: TypedProgramFacts, resolution: ResolutionFacts, body_summaries: {String}FunctionBodySummary, typed_node_count: Int64, unresolved_node_count: Int64, ownership_graph: OwnershipGraph, lifecycle_registry: LifecycleRegistry = lifecycleRegistry__empty(), linear_resource_facts: LinearResourceFacts = linearResourceFacts__empty(), local_function_facts: ?{String}LocalFunctionFacts = NIL) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF !(unresolved_node_count.zero?()) THEN
+      panic("typed program cannot publish unresolved nodes");
+    END
+    rtoc_self_view.resolution = COPY resolution;
+    rtoc_self_view.body_summaries = COPY body_summaries;
+    MUTABLE facts = (local_function_facts OR_ELSE ( { MUTABLE rtoc_transform_values_result_3: {String}LocalFunctionFacts = {}; FOR rtoc_key IN body_summaries.keys() DO rtoc_transform_values_result_3[rtoc_key] = { MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE summary: FunctionBodySummary = (body_summaries[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS FunctionBodySummary));
+    localFunctionFacts__from_summary(summary)
+    }; END rtoc_transform_values_result_3 } ));
+    rtoc_self_view.local_function_facts = (facts |> ORDER_BY _).to_h();
+    rtoc_self_view.typed_node_count = COPY typed_node_count;
+    rtoc_self_view.unresolved_node_count = COPY unresolved_node_count;
+    rtoc_self_view.ownership_graph = COPY ownership_graph;
+    rtoc_self_view.lifecycle_registry = COPY lifecycle_registry;
+    rtoc_self_view.linear_resource_facts = COPY linear_resource_facts;
+}
+END
+PUB FN typedProgramFacts__program(self: TypedProgramFacts) RETURNS Program
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN COPY (KEEP rtoc_self_view.resolution).program;
+}
+END
+PUB FN typedProgramFacts__new(resolution: ResolutionFacts, body_summaries: {String}FunctionBodySummary, typed_node_count: Int64, unresolved_node_count: Int64, ownership_graph: OwnershipGraph, lifecycle_registry: LifecycleRegistry = lifecycleRegistry__empty(), linear_resource_facts: LinearResourceFacts = linearResourceFacts__empty(), local_function_facts: ?{String}LocalFunctionFacts = NIL) RETURNS !TypedProgramFacts@multiowned ->
+  MUTABLE self = TypedProgramFacts{ body_summaries: {}, lifecycle_registry: COPY lifecycle_registry, linear_resource_facts: COPY linear_resource_facts, local_function_facts: {}, ownership_graph: COPY ownership_graph, resolution: COPY resolution, typed_node_count: typed_node_count, unresolved_node_count: unresolved_node_count };
+  TRY (typedProgramFacts__initialize(&self, resolution, body_summaries, typed_node_count, unresolved_node_count, ownership_graph, lifecycle_registry, linear_resource_facts, local_function_facts));
+  RETURN self @multiowned;
+END
+PUB STRUCT CapabilityAuditReport {
+  checked_call_sites: Int64,
+  checked_functions: []String,
+  checked_with_sites: Int64,
+  derived_program: DerivedProgramFacts@multiowned,
+  typed_program: TypedProgramFacts@multiowned,
+  violation_count: Int64
+}
+
+PUB FN capabilityAuditReport__initialize(MUTABLE self: CapabilityAuditReport, typed_program: TypedProgramFacts, derived_program: DerivedProgramFacts, checked_functions: []String, checked_call_sites: Int64, checked_with_sites: Int64, violation_count: Int64) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.typed_program = COPY typed_program;
+    rtoc_self_view.derived_program = COPY derived_program;
+    rtoc_self_view.checked_functions = COPY checked_functions;
+    rtoc_self_view.checked_call_sites = COPY checked_call_sites;
+    rtoc_self_view.checked_with_sites = COPY checked_with_sites;
+    rtoc_self_view.violation_count = COPY violation_count;
+}
+END
+PUB FN capabilityAuditReport__success?(self: CapabilityAuditReport) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.violation_count.zero?();
+}
+END
+PUB FN capabilityAuditReport__new(typed_program: TypedProgramFacts, derived_program: DerivedProgramFacts, checked_functions: []String, checked_call_sites: Int64, checked_with_sites: Int64, violation_count: Int64) RETURNS CapabilityAuditReport@multiowned ->
+  MUTABLE self = CapabilityAuditReport{ checked_call_sites: checked_call_sites, checked_functions: List[], checked_with_sites: checked_with_sites, derived_program: COPY derived_program, typed_program: COPY typed_program, violation_count: violation_count };
+  capabilityAuditReport__initialize(&self, typed_program, derived_program, checked_functions, checked_call_sites, checked_with_sites, violation_count);
+  RETURN self @multiowned;
+END
+PUB STRUCT AnnotationProducts {
+  capability_audit: ?CapabilityAuditReport@multiowned,
+  resolution: ?ResolutionFacts@multiowned,
+  typed_program: ?TypedProgramFacts@multiowned
+}
+
+PUB FN annotationProducts__initialize(MUTABLE self: AnnotationProducts, resolution: ?ResolutionFacts = NIL, typed_program: ?TypedProgramFacts = NIL, capability_audit: ?CapabilityAuditReport = NIL) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.resolution = COPY resolution;
+    rtoc_self_view.typed_program = COPY typed_program;
+    rtoc_self_view.capability_audit = COPY capability_audit;
+}
+END
+PUB FN annotationProducts__publish_resolution(self: AnnotationProducts, facts: ResolutionFacts) RETURNS !AnnotationProducts@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF rtoc_self_view.resolution EXISTS AS resolution_value THEN
+      panic("resolution facts already published");
+    END
+    RETURN annotationProducts__new(facts);
+}
+END
+PUB FN annotationProducts__publish_typed_program(self: AnnotationProducts, facts: TypedProgramFacts) RETURNS !AnnotationProducts@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE resolution: ?ResolutionFacts@multiowned = COPY rtoc_self_view.resolution;
+    IF resolution EXISTS AS resolution_value THEN
+      IF !((KEEP facts.resolution).equal?(resolution_value)) THEN
+        panic("type analysis used different resolution facts");
+      END
+      IF rtoc_self_view.typed_program EXISTS AS typed_program_value THEN
+        panic("typed program facts already published");
+      END
+      RETURN annotationProducts__new(resolution_value, facts);
+    ELSE
+      panic("type analysis requires resolution facts");
+    END
+}
+END
+PUB FN annotationProducts__publish_capability_audit(self: AnnotationProducts, report: CapabilityAuditReport) RETURNS !AnnotationProducts@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE typed_program: ?TypedProgramFacts@multiowned = COPY rtoc_self_view.typed_program;
+    IF typed_program EXISTS AS typed_program_value THEN
+      IF !((KEEP report.typed_program).equal?(typed_program_value)) THEN
+        panic("capability audit used different typed program facts");
+      END
+      IF rtoc_self_view.capability_audit EXISTS AS capability_audit_value THEN
+        panic("capability audit report already published");
+      END
+      RETURN annotationProducts__new(UNWRAP (rtoc_self_view.resolution), typed_program_value, report);
+    ELSE
+      panic("capability audit requires typed program facts");
+    END
+}
+END
+PUB FN annotationProducts__complete?(self: AnnotationProducts) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN ((!((rtoc_self_view.resolution == NIL)) AND !((rtoc_self_view.typed_program == NIL))) AND !((rtoc_self_view.capability_audit == NIL)));
+}
+END
+PUB FN annotationProducts__new(resolution: ?ResolutionFacts = NIL, typed_program: ?TypedProgramFacts = NIL, capability_audit: ?CapabilityAuditReport = NIL) RETURNS AnnotationProducts@multiowned ->
+  MUTABLE self = AnnotationProducts{ capability_audit: COPY capability_audit, resolution: COPY resolution, typed_program: COPY typed_program };
+  annotationProducts__initialize(&self, resolution, typed_program, capability_audit);
+  RETURN self @multiowned;
+END
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

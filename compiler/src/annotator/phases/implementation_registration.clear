@@ -1,0 +1,25 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f6465636c61726174696f6e5f696e6465782e636c656172" AS declaration_index
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+# Ruby module Annotator
+# Ruby module Annotator::Phases
+PUB STRUCT OwnerGenericBinding {
+  position: Int64,
+  local_param: GenericParamDecl,
+  owner_param: GenericParamDecl
+}
+PUB STRUCT ImplementationResolution {
+  declaration: ImplementationDef,
+  owner: StructDef,
+  bindings: []OwnerGenericBinding
+}
+# Ruby module Annotator::Phases::ImplementationRegistration
+PUB FN implementationRegistration__function_name(owner_name: String, member_name: String) RETURNS String ->
+  RETURN "__inherent_${compilerRegexReplaceAll(owner_name, compilerRegexCompile("[^A-Za-z0-9_]"), "_")}_${member_name}";
+END
+# End Ruby module Annotator::Phases::ImplementationRegistration
+# End Ruby module Annotator::Phases
+# End Ruby module Annotator

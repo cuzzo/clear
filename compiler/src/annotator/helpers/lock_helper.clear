@@ -1,0 +1,42 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f6361706162696c69746965732e636c656172" AS capabilities
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172" AS lexer
+# Ruby module LockHelper
+PUB STRUCT LockEdge {
+  held: String@symbol,
+  acquired: String@symbol,
+  site_token: ?Token,
+  fn_name: String,
+  opted_out: Bool
+}
+PUB STRUCT LockHeldCallSite {
+  held: String@symbol,
+  callee: String,
+  site_token: Token,
+  opted_out: Bool
+}
+PUB STRUCT LockClauseSite {
+  node: WithBlock,
+  cap_types: []String@symbol
+}
+PUB STRUCT LockGraph {
+  nodes: [Set]String@symbol,
+  adj: {String@symbol}[Set]String@symbol,
+  edges: []LockEdge
+}
+PUB STRUCT LockSccFrame {
+  node: String@symbol,
+  expanded: Bool
+}
+PUB STRUCT LockAnalysisState {
+  direct_edges: {String}[]LockEdge,
+  direct_acquires: {String}[Set]String@symbol,
+  held_calls: {String}[]LockHeldCallSite,
+  clause_sites: []LockClauseSite,
+  type_ranks: {String@symbol}Int64
+}
+# End Ruby module LockHelper
+# Ruby module LockAudit

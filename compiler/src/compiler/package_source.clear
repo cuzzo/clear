@@ -1,0 +1,147 @@
+REQUIRE "pkg:fs"
+REQUIRE "pkg:path"
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN STRUCT CompilerRegexScanner {} CLOSE "deinit" FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS ?CompilerRegexScanner EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
+PUB UNION ResolvePkgReturn { StringValue: String, ArrayValue: []String }
+# Ruby module PackageSource
+PUB STRUCT MergedPackage {
+  source: String,
+  member_paths: []String
+}
+PUB FN packageSource__merge(member_paths: []String, resolve_pkg: FN(String) -> ?ResolvePkgReturn) RETURNS !MergedPackage ->
+  MUTABLE members = member_paths |> SELECT expand(_);
+  MUTABLE member_set = members |> DISTINCT _;
+  MUTABLE external_requires: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
+  MUTABLE seen_requires: [Set]Tuple<String, ?String> = Set[];
+  MUTABLE bodies: []String = ( { MUTABLE rtoc_empty_list_2: []String = List[]; rtoc_empty_list_2 } );
+  FOR _ IN members DO
+  MUTABLE dir = dirname(_);
+  MUTABLE body_lines: []String = ( { MUTABLE rtoc_empty_list_3: []String = List[]; rtoc_empty_list_3 } );
+  MUTABLE rtoc_each_items_4 = (TRY (read(_))).split("\n");
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < rtoc_each_items_4.length() DO
+      MUTABLE line = rtoc_each_items_4[rtoc_idx];
+      MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(line, (compilerRegexCompile("\\A\\s*REQUIRE\\s+\"([^\"]+)\"(\\s+AS\\s+([A-Za-z_][A-Za-z0-9_]*))?\\s*;?\\s*\\z")));
+      IF !(m) THEN
+          &body_lines.append("${line}\n");
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE target = COPY (CAST(compilerRegexCapture(m?, 1) AS String));
+      MUTABLE alias_name: ?String = NIL;
+      MUTABLE alias_match: ?CompilerRegexScanner = compilerRegexMatchData(line, (compilerRegexCompile("\\s+AS\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*;?\\s*\\z")));
+      IF alias_match EXISTS AS alias_match_value THEN
+          alias_name = COPY (CAST(compilerRegexCapture(alias_match_value, 1) AS String));
+      END
+      MUTABLE resolved = TRY (packageSource__resolve_require_targets(target, dir, resolve_pkg));
+      IF resolved |> ANY member_set.contains?(_) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE emitted_target = packageSource__portable_require_target(target, dir);
+      MUTABLE key_alias: ?String = NIL;
+      IF alias_name EXISTS AS alias_name_value THEN
+          key_alias = COPY alias_name_value;
+      END
+      MUTABLE key: Tuple<String, ?String> = CAST(Tuple{COPY emitted_target, key_alias} AS Tuple<String, ?String>);
+      IF seen_requires.contains?(key) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      &seen_requires.insert(key);
+      IF alias_name EXISTS AS alias_name_value THEN
+          &external_requires.append("REQUIRE \"${emitted_target}\" AS ${alias_name_value}\n");
+      ELSE
+          &external_requires.append("REQUIRE \"${emitted_target}\"\n");
+      END
+    rtoc_idx = rtoc_idx + 1;
+  END
+  &bodies.append("# FILE: ${_}\n");
+  &bodies.append(body_lines.join(""));
+  END
+  RETURN MergedPackage{ source: COPY packageSource__dedupe_generated_functions((((external_requires + ["\n"]) + bodies)).join("")), member_paths: COPY members };
+END
+PUB FN packageSource__dedupe_generated_functions(source: String) RETURNS String ->
+  MUTABLE seen: {String}String = {};
+  MUTABLE out: []String = ( { MUTABLE rtoc_empty_list_5: []String = List[]; rtoc_empty_list_5 } );
+  MUTABLE lines = source.split("\n");
+  MUTABLE i = 0;
+  MUTABLE seen_extern: [Set]String = Set[];
+  WHILE (i < lines.length()) DO
+    MUTABLE line = COPY UNWRAP (lines[i]);
+    MUTABLE stripped_line = line.trim();
+    IF stripped_line.startsWith?("EXTERN ") THEN
+      MUTABLE key = stripped_line;
+      IF seen_extern.contains?(key) THEN
+        i = (i + 1);
+      ELSE
+        &seen_extern.insert(key);
+        &out.append(COPY line);
+        i = (i + 1);
+      END
+      CONTINUE;
+    END
+    MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(line, (compilerRegexCompile("\\A(?:PUB |PRIVATE )?FN ([A-Za-z_][A-Za-z0-9_]*)\\(")));
+    IF m EXISTS AS m_value THEN
+      MUTABLE block: []String = [COPY line];
+      MUTABLE j = (i + 1);
+      WHILE (j < lines.length()) DO
+        MUTABLE block_line = COPY UNWRAP (lines[j]);
+        IF ((block_line == "END\n") OR (block_line == "END")) THEN
+          BREAK;
+        END
+        &block.append(COPY block_line);
+        j = (j + 1);
+      END
+      IF (j < lines.length()) THEN
+        &block.append(COPY UNWRAP (lines[j]));
+      END
+      MUTABLE text = block.join("");
+      MUTABLE name = COPY compilerRegexCapture(m_value, 1);
+      IF (seen[name] == text) THEN
+      
+      ELSE
+        &out.append(text);
+        IF !(seen.contains?(name)) THEN
+          seen[name] = text;
+        END
+      END
+      i = (j + 1);
+    ELSE
+      &out.append(COPY line);
+      i = (i + 1);
+      CONTINUE;
+    END
+  END
+  RETURN out.join("");
+END
+PUB FN packageSource__resolve_require_targets(target: String, member_dir: String, resolve_pkg: FN(String) -> ?ResolvePkgReturn) RETURNS ![]String ->
+  IF target.startsWith?("pkg:") THEN
+    MUTABLE resolved: ?ResolvePkgReturn = resolve_pkg(target.deletePrefix("pkg:"));
+    IF resolved EXISTS AS resolved_value THEN
+      MUTABLE list =       IF resolved_value IS_A String THEN
+        resolved_value.split(",")
+      ELSE
+        resolved_value
+      END;
+      MUTABLE expanded: []String = ( { MUTABLE rtoc_empty_list_6: []String = List[]; rtoc_empty_list_6 } );
+      FOR _ IN list DO
+      &expanded.append(expand(_.trim()));
+      END
+      RETURN expanded;
+    ELSE
+      RETURN CAST(( { MUTABLE rtoc_empty_list_7: []String = List[]; rtoc_empty_list_7 } ) AS []String);
+    END
+  END
+  RETURN CAST([expand(target, member_dir)] AS []String);
+END
+PUB FN packageSource__portable_require_target(target: String, member_dir: String) RETURNS String ->
+  IF target.startsWith?("pkg:") THEN
+    RETURN COPY target;
+  END
+  RETURN expand(target, member_dir);
+END
+# End Ruby module PackageSource

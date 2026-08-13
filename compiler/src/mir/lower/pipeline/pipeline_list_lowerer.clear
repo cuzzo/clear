@@ -1,0 +1,357 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f7265636f7264732e636c656172" AS pipeline_records
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
+PUB UNION PipelineListTerminalOp { WhereOpMultiowned: WhereOp@multiowned, SelectOpMultiowned: SelectOp@multiowned, LimitOp: LimitOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, SkipOp: SkipOp, UnnestOpMultiowned: UnnestOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, JoinOp: JoinOp, TapOp: TapOp, WhereOp: WhereOp, SelectOp: SelectOp, TakeWhileOp: TakeWhileOp, UnnestOp: UnnestOp, ReduceOp: ReduceOp, WindowOp: WindowOp, OrderByOp: OrderByOp }
+PUB STRUCT PipelineListLowerer {
+  visit_mir: FN(Locatable) -> Emittable,
+  visit_expr: FN(Locatable, Locatable, String) -> Emittable,
+  visit_expr_head: FN(Locatable, String, String@symbol) -> PipelineElementHead,
+  visit_reduce_expr: FN(Locatable, String, String) -> Emittable,
+  visit_body: FN(Locatable[], String) -> ![]Emittable,
+  visit_join_lambda: FN(Locatable, {String}String) -> Emittable,
+  pipeline_block: FN(Locatable, FN(String, String) -> !Emittable[]) -> MIRBlockExpr,
+  transpile_type: FN(PipelineTypeInput) -> String,
+  pipeline_alloc: FN(BinaryOp) -> String@symbol,
+  pipeline_result_alloc: FN() -> String@symbol,
+  source_shape: FN(Locatable) -> PipelineSourceShape,
+  next_label: FN() -> String,
+  set_current_label: FN(String) -> Void,
+  append_owned_value_stmt: FN(String, String@symbol, Emittable) -> Emittable,
+  append_fresh_owned_value_stmt: FN(String, String@symbol, Emittable, Type) -> Emittable,
+  borrowed_pipeline_value: FN(Emittable, Type, String@symbol) -> Emittable,
+  cleanup_bearing_type: FN(Type) -> Bool,
+  owning_pipeline_temp_stmts: FN(String, Emittable, Type, String, String@symbol) -> ![]Emittable,
+  loop_mark_stmts: FN() -> ![]Emittable
+}
+
+PUB FN pipelineListLowerer__lower(self: PipelineListLowerer, site: PipelineSite, MUTABLE op: PipelineListTerminalOp) RETURNS !MIRBlockExpr ->
+  IF op IS_A WhereOp@multiowned AS where_op_multiowned THEN
+    RETURN TRY (pipelineListLowerer__lower_where(self, site, whereOp__expression(where_op_multiowned)));
+  ELSE_IF op IS_A SelectOp@multiowned AS select_op_multiowned THEN
+    RETURN TRY (pipelineListLowerer__lower_select(self, site, selectOp__expression(select_op_multiowned)));
+  ELSE_IF op IS_A LimitOp AS limit_op THEN
+    RETURN TRY (pipelineListLowerer__lower_limit(self, site, limit_op));
+  ELSE_IF op IS_A TakeWhileOp@multiowned AS take_while_op_multiowned THEN
+    RETURN TRY (pipelineListLowerer__lower_take_while(self, site, takeWhileOp__expression(take_while_op_multiowned)));
+  ELSE_IF op IS_A SkipOp AS skip_op THEN
+    RETURN TRY (pipelineListLowerer__lower_skip(self, site, skip_op));
+  ELSE_IF op IS_A UnnestOp@multiowned AS unnest_op_multiowned THEN
+    MUTABLE unnest_op_multiowned_mutable = COPY unnest_op_multiowned;
+    RETURN TRY (pipelineListLowerer__lower_unnest(self, site, CAST(COPY unnest_op_multiowned_mutable AS UnnestOp)));
+  ELSE_IF op IS_A ReduceOp@multiowned AS reduce_op_multiowned THEN
+    MUTABLE reduce_op_multiowned_mutable = COPY reduce_op_multiowned;
+    RETURN TRY (pipelineListLowerer__lower_reduce(self, site, CAST(COPY reduce_op_multiowned_mutable AS ReduceOp)));
+  ELSE_IF op IS_A WindowOp@multiowned AS window_op_multiowned THEN
+    RETURN TRY (pipelineListLowerer__lower_window(self, site, CAST(COPY window_op_multiowned AS WindowOp)));
+  ELSE_IF op IS_A OrderByOp@multiowned AS order_by_op_multiowned THEN
+    RETURN TRY (pipelineListLowerer__lower_order_by(self, site, CAST(COPY order_by_op_multiowned AS OrderByOp)));
+  ELSE_IF op IS_A JoinOp AS join_op THEN
+    RETURN TRY (pipelineListLowerer__lower_join(self, site, join_op));
+  ELSE_IF op IS_A TapOp AS tap_op THEN
+    RETURN pipelineListLowerer__lower_tap(self, site, tap_op);
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN pipelineListLowerer__lower_where_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
+  RETURN TRY (pipelineListLowerer__lower_where(self, site, expr_node));
+END
+PUB FN pipelineListLowerer__lower_select_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
+  RETURN TRY (pipelineListLowerer__lower_select(self, site, expr_node));
+END
+PUB FN pipelineListLowerer__lower_take_while_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
+  RETURN TRY (pipelineListLowerer__lower_take_while(self, site, expr_node));
+END
+PRIVATE FN pipelineListLowerer__lower_where(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE smooth_node = COPY site.options;
+  MUTABLE elem_type = COPY CAST((&list_node.full_type_mut()).element_type().resolved() AS String);
+  MUTABLE elem_zig = self.transpile_type(elem_type);
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  MUTABLE pred_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, expr_node);
+  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, elem_type, elem_zig, pred_mir, self) -> {
+  MUTABLE res = pipelineListLowerer__result_binding_name(self, label);
+  CAST(Tuple{Let{ name: Name{ StringValue: COPY res }, init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: ( { MUTABLE rtoc_empty_list_1: []Emittable = List[]; rtoc_empty_list_1 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY "matches" }, init: COPY pred_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, IfStmt{ cond: Emittable{ Ident: COPY Ident{ name: "matches", lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [castEmittableToBreakStmt(self.append_owned_value_stmt(res, alloc, self.borrowed_pipeline_value(Ident{ name: "it", lowered_node_id: NIL, ownership_consumption: NIL }, TRY (type__new(TypeConstructionInput{ StringValue: COPY elem_type })), alloc)))], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }} AS Tuple<Let, IfStmt>), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: COPY res, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt, BreakStmt>)
+  });
+END
+PRIVATE FN pipelineListLowerer__lower_select(self: PipelineListLowerer, site: PipelineSite, MUTABLE expr_node: Locatable) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE smooth_node = COPY site.options;
+  MUTABLE res_type = TRY (pipelineListLowerer__select_result_type(self, &expr_node));
+  MUTABLE res_zig = self.transpile_type(res_type);
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, expr_node, res_type, res_zig, MUTABLE smooth_node, self) -> {
+  MUTABLE res = pipelineListLowerer__result_binding_name(self, label);
+  MUTABLE raw_it = COPY CAST(label AS String);
+  WHILE raw_it.startsWith?("_") DO
+      raw_it = raw_it.substr(1, (raw_it.length() - 1));
+  END
+  MUTABLE it_name = "it_${raw_it}";
+  MUTABLE head = self.visit_expr_head(expr_node, it_name, alloc);
+  MUTABLE rewind_per_iter = ((alloc == :heap) AND pipelineListLowerer__element_head_frame_transients?(self, head));
+  MUTABLE element_owned = head.owned;
+  MUTABLE body: []Emittable = List[];
+    IF rewind_per_iter THEN
+      body = COPY (TRY (self.loop_mark_stmts()));
+    ELSE
+      body = ( { MUTABLE rtoc_empty_list_2: []Emittable = List[]; rtoc_empty_list_2 } );
+    END
+  ruby_array_concat_Emittable(body, head.pending);
+  IF element_owned THEN
+      &body.append(self.append_fresh_owned_value_stmt(res, alloc, head.value, res_type));
+  ELSE
+      &body.append(Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY "val" }, init: COPY head.value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
+      &body.append(self.append_owned_value_stmt(res, alloc, self.borrowed_pipeline_value(Ident{ name: "val", lowered_node_id: NIL, ownership_consumption: NIL }, res_type, alloc)));
+  END
+  ([AllocMark{ name: COPY res, alloc: COPY alloc, type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() })), scope: COPY placement__alloc_scope(alloc), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, Let{ name: Name{ StringValue: COPY res }, init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY res_zig, items: ( { MUTABLE rtoc_empty_list_3: []Emittable = List[]; rtoc_empty_list_3 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: COPY it_name, body: Body{ ArrayValue: body |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY res, target: :block_result, target_alloc: COPY alloc, move_guarded: FALSE }))) + [BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: COPY res, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }])
+  });
+END
+PRIVATE FN pipelineListLowerer__element_head_frame_transients?(self: PipelineListLowerer, head: PipelineElementHead) RETURNS Bool ->
+  MUTABLE found: Bool = FALSE;
+  MUTABLE boundary = %(node) -> (node IS_A MIRBgBlock OR node IS_A LambdaExpr);
+  MUTABLE nodes: []Emittable = (COPY head.pending + CAST([head.value] AS []Emittable));
+  mIR__each_node_until(NodeRoot{ ArrayValue: COPY nodes }, boundary, %(node: Emittable) -> {
+  IF (IF node IS_A AllocMark AS alloc_mark THEN placement__frame?(alloc_mark.alloc) ELSE FALSE END) THEN
+      found = TRUE;
+  END
+  rubyToClearVoid()
+  });
+  RETURN found;
+END
+PRIVATE FN pipelineListLowerer__result_binding_name(self: PipelineListLowerer, label: String) RETURNS String ->
+  MUTABLE raw = COPY label;
+  WHILE raw.startsWith?("_") DO
+    raw = raw.substr(1, (raw.length() - 1));
+  END
+  RETURN "res_list_${raw}";
+END
+PRIVATE FN pipelineListLowerer__select_result_type(self: PipelineListLowerer, MUTABLE expr_node: Locatable) RETURNS !Type ->
+  MUTABLE retained_error =   IF ((respondsTo?(expr_node, "retain_error_channel") AND (expr_node.retain_error_channel() == TRUE)) AND respondsTo?(expr_node, "error_union_type")) THEN
+    expr_node.error_union_type()
+  ELSE
+    NIL
+  END;
+  IF retained_error THEN
+    RETURN TRY (type__new(retained_error));
+  ELSE
+    RETURN &expr_node.full_type_mut("SELECT result");
+  END
+END
+PRIVATE FN pipelineListLowerer__lower_limit(self: PipelineListLowerer, site: PipelineSite, limit_node: LimitOp) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE smooth_node = COPY site.options;
+  MUTABLE source_shape = self.source_shape(list_node);
+  MUTABLE elem_type = COPY CAST((type__resolved((TRY (pipelineSourceShape__element_type(source_shape))))) AS String);
+  MUTABLE elem_zig = self.transpile_type(elem_type);
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  MUTABLE count_mir = self.visit_mir(limit_node.count);
+  IF pipelineSourceShape__bc_infinite_stream?(source_shape) THEN
+    MUTABLE label = self.next_label();
+    MUTABLE source_mir = self.visit_mir(list_node);
+    self.set_current_label(label);
+    RETURN MIRBlockExpr{ label: label, body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY "__lim_src" }, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "__lim_n" }, init: COPY count_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "__lim_res" }, init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: ( { MUTABLE rtoc_empty_list_4: []Emittable = List[]; rtoc_empty_list_4 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "__lim_i" }, init: Emittable{ Lit: COPY Lit{ value: "0_i64", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: "__lim_src", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__lim_it", body: COPY CAST(Tuple{IfStmt{ cond: COPY BinOp{ op: ">=", left: Emittable{ Ident: COPY Ident{ name: "__lim_i", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "__lim_n", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }, then_body: [BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }, ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "__lim_res", lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(Ident{ name: "__lim_it", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, Set{ target: Emittable{ Ident: COPY Ident{ name: "__lim_i", lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY BinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: "__lim_i", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "1_i64", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<IfStmt, ExprStmt, Set>), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "__lim_res", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Let, Let, Let, ForStmt, BreakStmt>), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+  END
+  RETURN self.pipeline_block(list_node, %(items, label: String) USE(alloc, count_mir, elem_type, elem_zig, self) -> {
+  rtoc_lambda_result_6 = CAST(Tuple{Let{ name: Name{ StringValue: COPY "lim_requested" }, init: Emittable{ MIRCast: COPY MIRCast{ expr: COPY count_mir, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "lim_actual" }, init: Emittable{ Call: COPY Call{ callee: "@min", args: [Emittable{ Ident: COPY Ident{ name: "lim_requested", lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ ListLength: COPY ListLength{ expr: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(2)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "lim_result" }, init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: ( { MUTABLE rtoc_empty_list_5: []Emittable = List[]; rtoc_empty_list_5 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ SliceExpr: COPY SliceExpr{ target: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_expr: Emittable{ Ident: COPY Ident{ name: "lim_actual", lowered_node_id: NIL, ownership_consumption: NIL } }, elem_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: Body{ ArrayValue: [self.append_owned_value_stmt("lim_result", alloc, self.borrowed_pipeline_value(Ident{ name: "it", lowered_node_id: NIL, ownership_consumption: NIL }, TRY (type__new(TypeConstructionInput{ StringValue: COPY elem_type })), alloc))] |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "lim_result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Let, Let, ForStmt, BreakStmt>);
+  rtoc_lambda_result_6
+  });
+END
+PRIVATE FN pipelineListLowerer__lower_take_while(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE smooth_node = COPY site.options;
+  MUTABLE elem_type = COPY CAST((&list_node.full_type_mut()).element_type().resolved() AS String);
+  MUTABLE elem_zig = self.transpile_type(elem_type);
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  MUTABLE pred_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, expr_node);
+  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, elem_type, elem_zig, pred_mir, self) -> {
+  MUTABLE res = pipelineListLowerer__result_binding_name(self, label);
+  CAST(Tuple{Let{ name: Name{ StringValue: COPY res }, init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: ( { MUTABLE rtoc_empty_list_7: []Emittable = List[]; rtoc_empty_list_7 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY "matches" }, init: COPY pred_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: Emittable{ Ident: COPY Ident{ name: "matches", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }, self.append_owned_value_stmt(res, alloc, self.borrowed_pipeline_value(Ident{ name: "it", lowered_node_id: NIL, ownership_consumption: NIL }, TRY (type__new(TypeConstructionInput{ StringValue: COPY elem_type })), alloc))} AS Tuple<Let, IfStmt, Emittable>), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: COPY res, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt, BreakStmt>)
+  });
+END
+PRIVATE FN pipelineListLowerer__lower_skip(self: PipelineListLowerer, site: PipelineSite, skip_node: SkipOp) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE label = self.next_label();
+  MUTABLE source_mir = self.visit_mir(list_node);
+  self.set_current_label(label);
+  MUTABLE count_mir = self.visit_mir(skip_node.count);
+  MUTABLE block = MIRBlockExpr{ label: label, body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY "__skip_src" }, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "__skip_items" }, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY Ident{ name: "__skip_src", lowered_node_id: NIL, ownership_consumption: NIL } }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "skip_requested" }, init: Emittable{ MIRCast: COPY MIRCast{ expr: COPY count_mir, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "skip_actual" }, init: Emittable{ Call: COPY Call{ callee: "@min", args: [Emittable{ Ident: COPY Ident{ name: "skip_requested", lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ ListLength: COPY ListLength{ expr: Emittable{ Ident: COPY Ident{ name: "__skip_items", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(2)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, BreakStmt{ label: label, value: Emittable{ SliceExpr: COPY SliceExpr{ target: Emittable{ Ident: COPY Ident{ name: "__skip_items", lowered_node_id: NIL, ownership_consumption: NIL } }, start: Emittable{ Ident: COPY Ident{ name: "skip_actual", lowered_node_id: NIL, ownership_consumption: NIL } }, end_expr: NIL, elem_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Let, Let, Let, BreakStmt>), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+  block.borrowed_view = TRUE;
+  RETURN block;
+END
+PRIVATE FN pipelineListLowerer__lower_unnest(self: PipelineListLowerer, site: PipelineSite, MUTABLE unnest_node: UnnestOp) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE smooth_node = COPY site.options;
+  MUTABLE inner_elem_type = COPY CAST((type__resolved(UNWRAP (TRY (type__element_type((&unnest_node.full_type_mut())))))) AS String);
+  MUTABLE inner_zig = self.transpile_type(inner_elem_type);
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  MUTABLE elem_ti = TRY (type__new(TypeConstructionInput{ StringValue: COPY inner_elem_type }));
+  MUTABLE inner_list_ti = TRY (type__new(&unnest_node.expression.full_type_mut()));
+  MUTABLE expr_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, unnest_node.expression);
+  MUTABLE inner_owned = (ownershipEffect__of(expr_mir).produces_owned OR expr_mir IS_A MakeList);
+  MUTABLE inner_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } );
+  IF inner_owned THEN
+    MUTABLE entry = cleanupEntry__build(:uniform, :heap, FALSE, {:zig_type: TRY (type__zig_type(inner_list_ti))});
+    &inner_stmts.append(Emittable{ AllocMark: COPY AllocMark{ name: "unn_inner", alloc: :heap, type_info: COPY inner_list_ti, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+    &inner_stmts.append(Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY "unn_inner" }, init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
+    &inner_stmts.append(Emittable{ Cleanup: COPY Cleanup{ name: "unn_inner", cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+  ELSE
+    &inner_stmts.append(Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY "unn_inner" }, init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
+  END
+  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, elem_ti, inner_stmts, inner_zig, self) -> {
+  MUTABLE res = pipelineListLowerer__result_binding_name(self, label);
+  CAST(Tuple{Let{ name: Name{ StringValue: COPY res }, init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY inner_zig, items: ( { MUTABLE rtoc_empty_list_9: []Emittable = List[]; rtoc_empty_list_9 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: COPY (inner_stmts + [Let{ name: Name{ StringValue: COPY "unn_inner_items" }, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY Ident{ name: "unn_inner", lowered_node_id: NIL, ownership_consumption: NIL } }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: "unn_inner_items", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "inner_it", body: Body{ ArrayValue: [self.append_owned_value_stmt(res, alloc, self.borrowed_pipeline_value(Ident{ name: "inner_it", lowered_node_id: NIL, ownership_consumption: NIL }, elem_ti, alloc))] |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: COPY res, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt, BreakStmt>)
+  });
+END
+PRIVATE FN pipelineListLowerer__lower_reduce(self: PipelineListLowerer, site: PipelineSite, MUTABLE reduce_node: ReduceOp) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE acc_zig = self.transpile_type(&reduce_node.full_type_mut());
+  MUTABLE init_mir = self.visit_mir(reduce_node.initial_value);
+  MUTABLE expr_mir = self.visit_reduce_expr(reduce_node.expression, "it", "acc");
+  RETURN self.pipeline_block(list_node, %(items, label) USE(acc_zig, expr_mir, init_mir) -> {
+  rtoc_lambda_result_10 = CAST(Tuple{Let{ name: Name{ StringValue: COPY "acc" }, init: COPY init_mir, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: COPY [Set{ target: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY expr_mir, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt, BreakStmt>);
+  rtoc_lambda_result_10
+  });
+END
+PRIVATE FN pipelineListLowerer__lower_window(self: PipelineListLowerer, site: PipelineSite, window_node: WindowOp) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE smooth_node = COPY site.options;
+  MUTABLE expr_type_str = COPY CAST((&window_node.expression.full_type_mut()) AS String);
+  MUTABLE res_zig = self.transpile_type(expr_type_str);
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  MUTABLE size_mir = self.visit_mir(window_node.size);
+  MUTABLE expr_mir = self.visit_expr(list_node, window_node.expression, "window_slice");
+  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, expr_mir, res_zig, size_mir, self) -> {
+  MUTABLE res = pipelineListLowerer__result_binding_name(self, label);
+  CAST(Tuple{Let{ name: Name{ StringValue: COPY res }, init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY res_zig, items: ( { MUTABLE rtoc_empty_list_11: []Emittable = List[]; rtoc_empty_list_11 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ScopeBlock{ body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY "__w_size" }, init: Emittable{ MIRCast: COPY MIRCast{ expr: COPY size_mir, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, IfStmt{ cond: COPY BinOp{ op: ">=", left: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "len", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "__w_size", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }, then_body: [Let{ name: Name{ StringValue: COPY "__wi" }, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, WhileStmt{ cond: COPY BinOp{ op: "<=", left: Emittable{ Ident: COPY Ident{ name: "__wi", lowered_node_id: NIL, ownership_consumption: NIL } }, right: COPY BinOp{ op: "-", left: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "len", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "__w_size", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }, lowered_node_id: NIL, ownership_consumption: NIL }, body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY "window_slice" }, init: Emittable{ SliceExpr: COPY SliceExpr{ target: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, start: Emittable{ Ident: COPY Ident{ name: "__wi", lowered_node_id: NIL, ownership_consumption: NIL } }, end_expr: COPY BinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: "__wi", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "__w_size", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }, elem_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "val" }, init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: COPY res, lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(Ident{ name: "val", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Let, ExprStmt>), capture: NIL, update: Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: "__wi", lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY BinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: "__wi", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }} AS Tuple<Let, IfStmt>), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: COPY res, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ScopeBlock, BreakStmt>)
+  });
+END
+PRIVATE FN pipelineListLowerer__lower_order_by(self: PipelineListLowerer, site: PipelineSite, order_node: OrderByOp) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE smooth_node = COPY site.options;
+  MUTABLE elem_type = COPY CAST((&list_node.full_type_mut()).element_type().resolved() AS String);
+  MUTABLE elem_zig = self.transpile_type(elem_type);
+  MUTABLE alloc = self.pipeline_alloc(smooth_node);
+  MUTABLE key_expr = COPY order_node.expression;
+  MUTABLE key_a = self.visit_expr(list_node, key_expr, "a");
+  MUTABLE key_b = self.visit_expr(list_node, key_expr, "b");
+  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, elem_type, elem_zig, key_a, key_b, MUTABLE key_expr, MUTABLE smooth_node, self) -> {
+  MUTABLE result_name = "${label}_ord_result";
+  ([AllocMark{ name: COPY result_name, alloc: COPY alloc, type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() })), scope: COPY placement__alloc_scope(alloc), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, Let{ name: Name{ StringValue: COPY result_name }, init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: ( { MUTABLE rtoc_empty_list_12: []Emittable = List[]; rtoc_empty_list_12 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: "_ = &${result_name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: Body{ ArrayValue: [self.append_owned_value_stmt(result_name, alloc, self.borrowed_pipeline_value(Ident{ name: "it", lowered_node_id: NIL, ownership_consumption: NIL }, TRY (type__new(TypeConstructionInput{ StringValue: COPY elem_type })), alloc))] |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, Sort{ elem_type: elem_zig, items_expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY result_name, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "items", lowered_node_id: NIL, ownership_consumption: NIL } }, key_a: COPY key_a, key_b: COPY key_b, string_keys: TRY (type__string?((TRY (type__new(&key_expr.full_type_mut("ORDER_BY key")))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY result_name, target: :block_result, target_alloc: COPY alloc, move_guarded: FALSE }))) + [BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: COPY result_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }])
+  });
+END
+PRIVATE FN pipelineListLowerer__lower_join(self: PipelineListLowerer, site: PipelineSite, join_node: JoinOp) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE left_type_info = (&list_node.full_type_mut()).element_type();
+  MUTABLE left_zig = self.transpile_type(CAST(left_type_info.resolved() AS String));
+  MUTABLE right_src_mir = self.visit_mir(join_node.right_source);
+  MUTABLE right_type_info = &join_node.right_source.full_type_mut();
+  MUTABLE right_element_type = right_type_info.element_type();
+  MUTABLE right_zig = self.transpile_type(CAST(right_element_type.resolved() AS String));
+  MUTABLE result_zig = "struct { left: ${left_zig}, right: ?${right_zig} }";
+  MUTABLE alloc = self.pipeline_result_alloc();
+  MUTABLE left_owns = self.cleanup_bearing_type(left_type_info);
+  MUTABLE right_owns = self.cleanup_bearing_type(right_element_type);
+  MUTABLE pred_mir = pipelineListLowerer__join_predicate_mir(self, list_node, join_node);
+  MUTABLE label = self.next_label();
+  MUTABLE source_mir = self.visit_mir(list_node);
+  self.set_current_label(label);
+  MUTABLE left_value_branch_value: ?Ident = NIL;
+  IF left_owns THEN
+    left_value_branch_value = Ident{ name: "__jl_owned", lowered_node_id: NIL, ownership_consumption: NIL };
+  ELSE
+    left_value_branch_value = Ident{ name: "__jl", lowered_node_id: NIL, ownership_consumption: NIL };
+  END
+  MUTABLE left_value: Ident = left_value_branch_value?;
+  MUTABLE right_value = Ident{ name: "__match", lowered_node_id: NIL, ownership_consumption: NIL };
+  MUTABLE after_append = TRY (pipelineListLowerer__ownership_sink_marks(self, left_owns, right_owns));
+  RETURN MIRBlockExpr{ label: label, body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY "__jl_src" }, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "__jr_src" }, init: COPY right_src_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "__jl_items" }, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY Ident{ name: "__jl_src", lowered_node_id: NIL, ownership_consumption: NIL } }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "__jr_items" }, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY Ident{ name: "__jr_src", lowered_node_id: NIL, ownership_consumption: NIL } }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "res_list" }, init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: "std.ArrayListUnmanaged(${result_zig})", strategy: :array_list_empty, alloc: COPY alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: "__jl_items", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__jl", body: COPY ([Let{ name: Name{ StringValue: COPY "__match" }, init: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "?${right_zig}" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] + TRY (pipelineListLowerer__right_cleanup_stmts(self, right_owns, alloc, right_zig)) + [ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: "__jr_items", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__jr", body: COPY [IfStmt{ cond: COPY pred_mir, then_body: [Set{ target: Emittable{ Ident: COPY Ident{ name: "__match", lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_14: ?DeepCopy = NIL;
+  IF right_owns THEN
+    rtoc_ternary_value_14 = DeepCopy{ source: COPY Ident{ name: "__jr", lowered_node_id: NIL, ownership_consumption: NIL }, zig_type: COPY right_zig, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+  ELSE
+    rtoc_ternary_value_14 = Ident{ name: "__jr", lowered_node_id: NIL, ownership_consumption: NIL };
+  END
+  rtoc_ternary_value_14? }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_15: ?![]Emittable = NIL;
+  IF left_owns THEN
+    rtoc_ternary_value_15 = TRY (self.owning_pipeline_temp_stmts("__jl_owned", Ident{ name: "__jl", lowered_node_id: NIL, ownership_consumption: NIL }, left_type_info, left_zig, alloc));
+  ELSE
+    rtoc_ternary_value_15 = List[];
+  END
+  rtoc_ternary_value_15? }) + [ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(StructInit{ zig_type: NIL, fields: [CAST(mIR__named_field(Name{ StringValue: COPY "left" }, Emittable{ Ident: COPY left_value }) AS Any), CAST(mIR__named_field(Name{ StringValue: COPY "right" }, Emittable{ Ident: COPY right_value }) AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + after_append), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Let, Let, Let, Let, ForStmt, BreakStmt>), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+END
+PRIVATE FN pipelineListLowerer__lower_tap(self: PipelineListLowerer, site: PipelineSite, tap_op: TapOp) RETURNS !MIRBlockExpr ->
+  MUTABLE list_node = COPY site.list;
+  MUTABLE label = self.next_label();
+  MUTABLE source_mir = self.visit_mir(list_node);
+  self.set_current_label(label);
+  MUTABLE body_mir = TRY (self.visit_body(tap_op.body, "__tap_item"));
+  RETURN MIRBlockExpr{ label: label, body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY "__tap_src" }, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "__tap_items" }, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY Ident{ name: "__tap_src", lowered_node_id: NIL, ownership_consumption: NIL } }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: "__tap_items", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__tap_item", body: COPY body_mir, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "__tap_src", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Let, ForStmt, BreakStmt>), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+END
+PRIVATE FN pipelineListLowerer__visit_pipeline_expr_mir(self: PipelineListLowerer, list_node: Locatable, expr_node: Locatable, placeholder: String = "it") RETURNS Emittable ->
+  RETURN self.visit_expr(list_node, expr_node, placeholder);
+END
+PRIVATE FN pipelineListLowerer__join_predicate_mir(self: PipelineListLowerer, list_node: Locatable, join_node: JoinOp) RETURNS Emittable ->
+  MUTABLE key_expr = join_node.key_expr;
+  IF key_expr IS_A LambdaLit THEN
+    MUTABLE params = key_expr.params();
+    MUTABLE left_param = params[0].name();
+    MUTABLE right_param = params[1].name();
+    MUTABLE join_params: {String}String = CAST({left_param: "__jl", right_param: "__jr"} AS {String}String);
+    RETURN self.visit_join_lambda(CAST(key_expr.body() AS Locatable), join_params);
+  END
+  MUTABLE left_key_mir = self.visit_expr(list_node, key_expr, "__jl");
+  MUTABLE right_key_mir = self.visit_expr(list_node, key_expr, "__jr");
+  RETURN Emittable{ RuntimeCall: COPY RuntimeCall{ spec: COPY runtimeCalls__eql_spec(), args: [left_key_mir, right_key_mir], lowered_node_id: NIL, ownership_consumption: NIL } };
+END
+PRIVATE FN pipelineListLowerer__ownership_sink_marks(self: PipelineListLowerer, left_owns: Bool, right_owns: Bool) RETURNS ![]Emittable ->
+  MUTABLE marks: []Emittable = ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } );
+  IF left_owns THEN
+    marks = ruby_array_concat_Emittable(marks, CAST(TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: "__jl_owned", target: :owned_sink, target_alloc: COPY self.pipeline_result_alloc(), move_guarded: TRUE }))) AS []Emittable));
+  END
+  IF right_owns THEN
+    marks = ruby_array_concat_Emittable(marks, CAST(TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: "__match", target: :owned_sink, target_alloc: COPY self.pipeline_result_alloc(), move_guarded: TRUE }))) AS []Emittable));
+  END
+  RETURN marks;
+END
+PRIVATE FN pipelineListLowerer__right_cleanup_stmts(self: PipelineListLowerer, right_owns: Bool, alloc: String@symbol, right_zig: String) RETURNS ![]Emittable ->
+  IF !(right_owns) THEN
+    RETURN CAST(( { MUTABLE rtoc_empty_list_17: []Emittable = List[]; rtoc_empty_list_17 } ) AS []Emittable);
+  END
+  RETURN CAST([Emittable{ ErrCleanup: COPY ErrCleanup{ name: "__match", cleanup_entry: COPY cleanupEntry__build(:uniform, alloc, TRUE, {:zig_type: "?${right_zig}"}), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
+END
+FN castEmittableToBreakStmt(value: Emittable) RETURNS BreakStmt ->
+  IF value IS_A BreakStmt AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to BreakStmt");
+END
+FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    Emittable.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Emittable.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Emittable.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Emittable.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Emittable.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Emittable.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Emittable.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Emittable.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Emittable.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Emittable.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Emittable.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Emittable.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Emittable.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END
+FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+  MUTABLE result: []Emittable = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END
