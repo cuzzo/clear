@@ -9046,6 +9046,12 @@ end
       code
     end
 
+    def noreturn_branch_code(node)
+      return nil unless node.is_a?(Prism::CallNode) && sorbet_call?(node) && node.name.to_s == "absurd"
+
+      visit(node).to_s.delete_suffix(";")
+    end
+
     def assignment_branch_statements(name, statements, type = nil)
       return "#{indent}#{name} = NIL;" unless statements.is_a?(Prism::StatementsNode) && statements.body.any?
 
@@ -9060,6 +9066,13 @@ end
       if jump_statement_node?(body.last) ||
          (body.last.is_a?(Prism::CallNode) && ruby_raise_call?(body.last))
         rendered << format_statement_code(visit(body.last))
+        return rendered.join("\n")
+      end
+      # A branch whose value never returns (T.absurd, panic) terminates rather
+      # than producing one: assigning NoReturn to the destination's type is a
+      # type error, and the assignment is unreachable anyway.
+      if (terminating = noreturn_branch_code(body.last))
+        rendered << "#{indent}#{terminating};"
         return rendered.join("\n")
       end
       value = if name.start_with?("self.")
