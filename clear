@@ -1626,8 +1626,11 @@ when 'test'
     else
       tag_filters.each { |t| cmd_parts += ['--test-filter', "##{t}"] }
     end
+    # CLEAR programs resolve relative filesystem paths from the user's
+    # invocation directory. Both run paths below have to honour that or the
+    # same test reads different files with and without --coverage.
+    invocation_cwd = Dir.pwd
     unless coverage_mode
-      invocation_cwd = Dir.pwd
       cmd_parts += [
         '--test-cmd', RbConfig.ruby,
         '--test-cmd', '-e',
@@ -1643,7 +1646,7 @@ when 'test'
         args: cmd_parts.drop(2),
         suite: 'examples-benchmarks',
         name: source.delete_prefix("#{CLEAR_ROOT}/"),
-        run_dir: source_dir
+        run_dir: invocation_cwd
       )
       success = compile_status.success?
       cleanup_paths.each { |path| FileUtils.rm_f(path) } unless ENV['ZIG_COVERAGE_KEEP_BUNDLE'] == '1'
