@@ -35,4 +35,17 @@ FN main() RETURNS Void ->
   # bytes, and the `.len` fast path reads them.
   ASSERT tag.length() == 5, "length on a symbol receiver";
   ASSERT tag.capitalize() == "Alpha", "string method on a symbol receiver";
+
+  MUTABLE maybe: ?String = NIL;
+  MUTABLE merged = "${(maybe OR_ELSE tag)}";
+  ASSERT merged == "alpha", "symbol fallback merges into a String";
+
+  # The reverse merges hold their types: a symbol fallback into a symbol slot
+  # stays a handle, and a string LITERAL fallback narrows into one (rodata is
+  # immortal, so wrapping it orphans nothing).
+  MUTABLE none: ?String@symbol = NIL;
+  MUTABLE kept: String@symbol = (none OR_ELSE :beta);
+  ASSERT kept == :beta, "symbol fallback into a symbol merge stays a handle";
+  MUTABLE narrowed: String@symbol = (none OR_ELSE "gamma");
+  ASSERT narrowed == symbol("gamma"), "a literal fallback narrows into a symbol merge";
 END

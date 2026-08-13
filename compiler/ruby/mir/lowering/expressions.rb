@@ -1138,7 +1138,21 @@ module MIRLoweringExpressions
     fallback_type = or_fallback_expected_type(node)
     right = lower_scoped do
       with_expected_type(fallback_type) do
-        materialize_or_fallback_value(T.cast(lower(node.right), MIR::Node), node.right)
+        # The fallback coerces to the MERGE type here, where its stamp is
+        # still in hand -- placement dupes each branch and cannot widen a bare
+        # MIR value. A symbol fallback merging into a String widens to its
+        # bytes; a string LITERAL merging into a symbol wraps as a handle,
+        # which is sound only for literals (rodata is immortal; wrapping an
+        # owned String would orphan its cleanup).
+        fallback_mir = T.cast(lower(node.right), MIR::Node)
+        merge_type = Type.from_node!(node, context: "OR_ELSE merge type")
+        if merge_type.byte_string?
+          fallback_mir = widen_symbol_to_bytes(fallback_mir, node.right)
+        elsif merge_type.symbol? && node.right.is_a?(AST::Literal) && T.cast(node.right, AST::Literal).type == :STRING
+          fallback_mir = MIR::Call.new("CheatLib.symbolOf", [fallback_mir], false, false,
+                                       MIR::CallableContract.no_ownership(1))
+        end
+        materialize_or_fallback_value(fallback_mir, node.right)
       end
     end
 
