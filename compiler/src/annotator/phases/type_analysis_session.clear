@@ -8298,7 +8298,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         RETURN COPY replacement.shape.expression;
       END
-      RETURN TypeExpression{ kind: COPY NamedTypeExpression{ name: COPY kind.name(), arguments: COPY kind.arguments() |> SELECT typeAnalysisSession__apply_expression_subst(rtoc_self_view, _, subst) }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY kind.name(), arguments: COPY kind.arguments() |> SELECT typeAnalysisSession__apply_expression_subst(rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A TypeProjectionExpression) THEN
       MUTABLE binding: ?GenericBinding = COPY subst[kind.owner()];
       IF binding EXISTS AS binding_value THEN
@@ -8325,7 +8325,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF projected EXISTS AS projected_value THEN
           RETURN typeExpressionTree__with_root_capabilities(projected_value.shape.expression, cap);
         ELSE
-          RETURN TypeExpression{ kind: COPY TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY kind.member(), protocol: COPY kind.protocol() }, capabilities: COPY cap };
+          RETURN TypeExpression{ kind: TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY kind.member(), protocol: COPY kind.protocol() } }, capabilities: COPY cap };
         END
       ELSE
         RETURN COPY expression;
@@ -8334,9 +8334,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE signature = TRY (type__function_type_for_expression(kind));
       RETURN TypeExpression{ kind: COPY type__function_type_expression_for(FunctionType{ params: COPY signature.params |> SELECT FunctionTypeParam{ type: CAST(COPY typeAnalysisSession__apply_type_subst(rtoc_self_view, castTypeToTypeTypeInput(_.type), subst) AS Type), mutable: FALSE }, return_type: CAST(COPY typeAnalysisSession__apply_type_subst(rtoc_self_view, castTypeToTypeTypeInput(signature.return_type), subst) AS Type), reentrant: signature.reentrant, source_signature: COPY signature.source_signature, abi: COPY signature.abi }), capabilities: COPY cap };
     ELSE_IF (kind IS_A TupleTypeExpression) THEN
-      RETURN TypeExpression{ kind: COPY TupleTypeExpression{ items: COPY kind.items() |> SELECT typeAnalysisSession__apply_expression_subst(rtoc_self_view, _, subst) }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY kind.items() |> SELECT typeAnalysisSession__apply_expression_subst(rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A OptionalTypeExpression) THEN
-      RETURN TypeExpression{ kind: COPY OptionalTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.inner(), subst) }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.inner(), subst)  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A FallibleTypeExpression) THEN
       MUTABLE error_set = kind.error_set();
       RETURN TypeExpression{ kind: COPY FallibleTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.inner(), subst), error_set: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_186: ?Void = NIL;
@@ -8347,13 +8347,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       rtoc_ternary_value_186? } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A FutureTypeExpression) THEN
-      RETURN TypeExpression{ kind: COPY FutureTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.inner(), subst) }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.inner(), subst)  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A LinearTypeExpression) THEN
-      RETURN TypeExpression{ kind: COPY LinearTypeExpression{ kind: COPY kind.kind(), dimensions: COPY kind.dimensions(), item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.item(), subst), allocation_hint: kind.allocation_hint() }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ kind: COPY kind.kind(), dimensions: COPY kind.dimensions(), item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.item(), subst), allocation_hint: kind.allocation_hint()  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A MapTypeExpression) THEN
-      RETURN TypeExpression{ kind: COPY MapTypeExpression{ key: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.key(), subst), value: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.value(), subst), key_implicit: kind.key_implicit(), legacy_separator: COPY kind.legacy_separator() }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.key(), subst), value: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.value(), subst), key_implicit: kind.key_implicit(), legacy_separator: COPY kind.legacy_separator()  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A StreamTypeExpression) THEN
-      RETURN TypeExpression{ kind: COPY StreamTypeExpression{ cardinality: COPY kind.cardinality(), item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.item(), subst) }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ StreamTypeExpression: COPY StreamTypeExpression{ cardinality: COPY kind.cardinality(), item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.item(), subst)  } }, capabilities: COPY cap };
     ELSE
       RETURN COPY expression;
     END

@@ -28,11 +28,11 @@ END
 PUB FN tenseLayer__wrap(self: TenseLayer, inner: TypeExpression) RETURNS !TypeExpression ->
   MUTABLE layer_kind = COPY self.kind;
   IF (layer_kind == TenseLayerKind.Fallible) THEN
-    RETURN TypeExpression{ kind: COPY FallibleTypeExpression{ inner: COPY inner, error_set: COPY self.error_set }, capabilities: COPY self.capabilities };
+    RETURN TypeExpression{ kind: TypeExpressionKind{ FallibleTypeExpression: COPY FallibleTypeExpression{ inner: COPY inner, error_set: COPY self.error_set  } }, capabilities: COPY self.capabilities };
   ELSE_IF (layer_kind == TenseLayerKind.Future) THEN
-    RETURN TypeExpression{ kind: COPY FutureTypeExpression{ inner: COPY inner }, capabilities: COPY self.capabilities };
+    RETURN TypeExpression{ kind: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY inner  } }, capabilities: COPY self.capabilities };
   ELSE_IF (layer_kind == TenseLayerKind.Optional) THEN
-    RETURN TypeExpression{ kind: COPY OptionalTypeExpression{ inner: COPY inner }, capabilities: COPY self.capabilities };
+    RETURN TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY inner  } }, capabilities: COPY self.capabilities };
   ELSE
     panic("unknown tense layer kind {}");
   END

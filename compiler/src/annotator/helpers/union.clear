@@ -20,11 +20,12 @@ PUB FN unionPayloadCompatibility__unique_variant(expected_type: Type, actual_typ
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE concrete_payload: ?SchemasUnionSchemaVariantValue = COPY payload;
-    IF concrete_payload IS_A Type AS type THEN
-          IF TRY (unionPayloadCompatibility__payload_matches?(type, compared_actual)) THEN
-            &matches.append(COPY rtoc_each_items_2[rtoc_idx]?);
-          END
+    IF payload EXISTS AS concrete_payload THEN
+      IF concrete_payload IS_A Type AS type THEN
+        IF TRY (unionPayloadCompatibility__payload_matches?(type, compared_actual)) THEN
+          &matches.append(COPY rtoc_each_items_2[rtoc_idx]?);
+        END
+      END
     END
   rtoc_idx = rtoc_idx + 1;
     END
