@@ -210,13 +210,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       ELSE
         autoConstraintCollector__record_constraint(&rtoc_self_view, node_value_mutable, current_fn);
-        MUTABLE next_fn = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_4: ?AutoInferenceWalkNode = NIL;
-        IF node_value_mutable IS_A FunctionDef THEN
-          rtoc_ternary_value_4 = node_value_mutable;
-        ELSE
-          rtoc_ternary_value_4 = current_fn;
+        MUTABLE next_fn: ?FunctionDef = COPY current_fn;
+        IF node_value_mutable IS_A FunctionDef AS next_function_def THEN
+          next_fn = COPY next_function_def;
         END
-        rtoc_ternary_value_4? };
         MUTABLE saved_local_decls: {String}AutoConstraintCollectorLocalDeclEntry = {};
         IF node_value_mutable IS_A FunctionDef AS function_def THEN
           saved_local_decls = COPY rtoc_self_view.local_decls;
