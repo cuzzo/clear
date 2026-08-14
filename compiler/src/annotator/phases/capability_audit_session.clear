@@ -4297,8 +4297,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, %(type) USE(rtoc_self_view) -> (capabilityAuditSession__lookup_type_schema(rtoc_self_view, type) OR_ELSE NIL)));
     TRY (effectInference__analyze_mut(fn_nodes));
-    MUTABLE error_handler = %(node, message) USE(rtoc_self_view) -> capabilityAuditSession__error_mut(rtoc_self_view, node, CapabilityAuditCodeOrMessage{ SymbolValue: :EFFECT_INFERENCE_VIOLATION }, [], {:detail: message});
-    MUTABLE warning_handler = %(node, message) USE(rtoc_self_view) -> capabilityAuditSession__note_mut(rtoc_self_view, node, message);
+    MUTABLE error_handler = %(node: Locatable, message: String) USE(rtoc_self_view) -> capabilityAuditSession__error_mut(rtoc_self_view, node, CapabilityAuditCodeOrMessage{ SymbolValue: :EFFECT_INFERENCE_VIOLATION }, [], {:detail: message});
+    MUTABLE warning_handler = %(node: Locatable, message: String) USE(rtoc_self_view) -> capabilityAuditSession__note_mut(rtoc_self_view, node, message);
     MUTABLE root_scope = capabilityAuditSession__whole_program_root_scope(rtoc_self_view);
     MUTABLE signature_lookup = %(name) USE(root_scope) -> (IF scope__resolve_entry(root_scope, name) != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_47 = (scope__resolve_entry(root_scope, name));

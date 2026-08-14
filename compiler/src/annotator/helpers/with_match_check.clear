@@ -10,13 +10,40 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e
 REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
 # Ruby module WithMatchCheck
 PUB FN withMatchCheck__admissible_axes(family_set: ?[Set]String@symbol) RETURNS ![Set]String@symbol ->
-  RETURN ((family_set OR_ELSE List[])) |> UNNEST ((((CAST({:LOCKED: [:locked, :write_locked] |> DISTINCT _, :SNAPSHOTTED: [:versioned, :atomic] |> DISTINCT _, :VERSIONED: [:versioned] |> DISTINCT _, :ATOMIC: [:atomic] |> DISTINCT _, :LOCAL: [:local, :multiowned, :plain] |> DISTINCT _, :ACTOR: [:actor] |> DISTINCT _, :LOCK_FREE: [:lock_free] |> DISTINCT _} AS {String@symbol}[Set]String@symbol))[_]) OR_ELSE Set[])).to_a() |> DISTINCT _;
+  MUTABLE axes: [Set]String@symbol = Set[];
+  IF family_set EXISTS AS families THEN
+    FOR family IN families DO
+      IF (family == :LOCKED) THEN
+        &axes.insert(:locked);
+        &axes.insert(:write_locked);
+      ELSE_IF (family == :SNAPSHOTTED) THEN
+        &axes.insert(:versioned);
+        &axes.insert(:atomic);
+      ELSE_IF (family == :VERSIONED) THEN
+        &axes.insert(:versioned);
+      ELSE_IF (family == :ATOMIC) THEN
+        &axes.insert(:atomic);
+      ELSE_IF (family == :LOCAL) THEN
+        &axes.insert(:local);
+        &axes.insert(:multiowned);
+        &axes.insert(:plain);
+      ELSE_IF (family == :ACTOR) THEN
+        &axes.insert(:actor);
+      ELSE_IF (family == :LOCK_FREE) THEN
+        &axes.insert(:lock_free);
+      END
+    END
+  END
+  RETURN axes;
 END
 PUB FN withMatchCheck__poly_requires?(family_set: ?[Set]String@symbol) RETURNS !Bool ->
-  RETURN ((TRY (withMatchCheck__admissible_axes(family_set))).size() > 1);
+  RETURN ((TRY (withMatchCheck__admissible_axes(family_set))).length() > 1);
 END
-PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_blocks: []WithBlock, error_handler: Any, warn_handler: ?Any = NIL, policy_handlers: []ErrorClause) RETURNS !Void ->
-  MUTABLE requires_map = (fn_value.requires);
+PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_blocks: []WithBlock, error_handler: FN(Locatable, String) -> Void, warn_handler: ?FN(Locatable, String) -> Void = NIL, policy_handlers: []ErrorClause) RETURNS !Void ->
+  MUTABLE requires_map: {String}[Set]String@symbol = {};
+  IF fn_value.requires EXISTS AS declared_requires THEN
+    requires_map = COPY declared_requires;
+  END
   MUTABLE param_names = (fn_value.params |> SELECT _.name) |> DISTINCT _;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < with_blocks.length() DO
@@ -41,50 +68,72 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
       ELSE
         requires_bound_params = TRY (withMatchCheck__collect_sync_bound_param_names(with_blocks[rtoc_idx]?, param_names));
       END
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < requires_bound_params.length() DO
-        IF requires_map.key?(requires_bound_params[rtoc_idx]) THEN
-          rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-        END
-        IF with_blocks[rtoc_idx]?.polymorphic THEN
-            requires_map[requires_bound_params[rtoc_idx]] = Set[];
-            fn_value.requires = (fn_value.requires OR_ELSE {});
-            fn_value.requires[requires_bound_params[rtoc_idx]] = Set[];
-            MUTABLE rtoc_writer_receiver_1: WithBlock = with_blocks[rtoc_idx]?;
-            rtoc_writer_receiver_1.universal_poly = TRUE;
-            fn_value.uses_rt = TRUE;
-            fn_value.uses_alloc = TRUE;
-            rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-        END
-        IF warn_handler EXISTS AS warn_handler_value THEN
-            MUTABLE warn_handler_value_mutable = COPY warn_handler_value;
-            runtimeCallSpec__call(CAST(warn_handler_value_mutable AS RuntimeCallSpec), with_blocks[rtoc_idx]?, "WITH at line ${(with_blocks[rtoc_idx]?.token).line.toString()} uses parameter '${requires_bound_params[rtoc_idx]}' without a REQUIRES clause. Auto-inferring 'REQUIRES ${requires_bound_params[rtoc_idx]}: LOCKED' for this release. Add the clause explicitly to silence this warning; the shim will be removed in a future release.");
-            requires_map[requires_bound_params[rtoc_idx]] = COPY [:LOCKED] |> DISTINCT _;
-            fn_value.requires = (fn_value.requires OR_ELSE {});
-            fn_value.requires[requires_bound_params[rtoc_idx]] = COPY [:LOCKED] |> DISTINCT _;
-        ELSE
-            runtimeCallSpec__call(CAST(error_handler AS RuntimeCallSpec), with_blocks[rtoc_idx]?, "WITH at line ${(with_blocks[rtoc_idx]?.token).line.toString()} uses parameter '${requires_bound_params[rtoc_idx]}', but '${requires_bound_params[rtoc_idx]}' is not constrained by REQUIRES. Add a REQUIRES clause naming the families this function supports:\n    REQUIRES ${requires_bound_params[rtoc_idx]}: LOCKED\nREQUIRES is mandatory whenever WITH is used on a parameter \u{2014} capability flow stops here.");
-        END
-      rtoc_idx = rtoc_idx + 1;
+    MUTABLE rtoc_req_idx = 0;
+    WHILE rtoc_req_idx < requires_bound_params.length() DO
+      MUTABLE pname: String = COPY UNWRAP (requires_bound_params[rtoc_req_idx]);
+      IF requires_map.contains?(pname) THEN
+        rtoc_req_idx = rtoc_req_idx + 1;
+        CONTINUE;
+      END
+      IF with_blocks[rtoc_idx]?.polymorphic THEN
+        requires_map[pname] = Set[];
+        fn_value.requires = (fn_value.requires OR_ELSE {});
+        fn_value.requires[pname] = Set[];
+        MUTABLE rtoc_writer_receiver_1: WithBlock = with_blocks[rtoc_idx]?;
+        rtoc_writer_receiver_1.universal_poly = TRUE;
+        fn_value.uses_rt = TRUE;
+        fn_value.uses_alloc = TRUE;
+        rtoc_req_idx = rtoc_req_idx + 1;
+        CONTINUE;
+      END
+      IF warn_handler EXISTS AS warn_handler_value THEN
+        MUTABLE warn_handler_value_mutable = COPY warn_handler_value;
+        warn_handler_value_mutable(Locatable{ WithBlock: COPY with_blocks[rtoc_idx]? }, "WITH at line ${UNWRAP ((with_blocks[rtoc_idx]?.token)?.line).toString()} binds '${pname}' without REQUIRES; assuming REQUIRES ${pname}: LOCKED");
+        MUTABLE locked_family: [Set]String@symbol = Set[];
+        &locked_family.insert(:LOCKED);
+        requires_map[pname] = COPY locked_family;
+        fn_value.requires = (fn_value.requires OR_ELSE {});
+        fn_value.requires[pname] = COPY locked_family;
+      ELSE
+        error_handler(Locatable{ WithBlock: COPY with_blocks[rtoc_idx]? }, "WITH at line ${UNWRAP ((with_blocks[rtoc_idx]?.token)?.line).toString()} binds '${pname}' without REQUIRES");
+      END
+      rtoc_req_idx = rtoc_req_idx + 1;
     END
+
     MUTABLE arms: ?[]WithMatchArm = COPY with_blocks[rtoc_idx]?.arms;
     IF !(arms) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE arm_families = (arms |> SELECT _.family()) |> DISTINCT _;
-    MUTABLE required_families = ((bound_params |> UNNEST ((requires_map[_] OR Set[])).to_a())) |> DISTINCT _;
-    MUTABLE missing = (required_families - arm_families);
-    MUTABLE extra = (arm_families - required_families);
+    MUTABLE arm_families: [Set]String@symbol = Set[];
+    FOR arm IN UNWRAP (arms) DO
+      &arm_families.insert(COPY arm.family);
+    END
+    MUTABLE required_families: [Set]String@symbol = Set[];
+    FOR bound_param IN bound_params DO
+      IF requires_map[bound_param] EXISTS AS declared_families THEN
+        FOR declared IN declared_families DO
+          &required_families.insert(COPY declared);
+        END
+      END
+    END
+    MUTABLE missing: [Set]String@symbol = Set[];
+    FOR required IN required_families DO
+      IF !(arm_families.contains?(required)) THEN
+        &missing.insert(COPY required);
+      END
+    END
+    MUTABLE extra: [Set]String@symbol = Set[];
+    FOR present IN arm_families DO
+      IF !(required_families.contains?(present)) THEN
+        &extra.insert(COPY present);
+      END
+    END
     FOR _ IN missing DO
-    runtimeCallSpec__call(CAST(error_handler AS RuntimeCallSpec), with_blocks[rtoc_idx]?, "WITH MATCH at line ${(with_blocks[rtoc_idx]?.token).line.toString()} is missing a WHEN arm for ${_} (declared in REQUIRES). Add an arm:\n    WHEN ${_}\n        -> { <body for ${_} strategy> }");
+    error_handler(Locatable{ WithBlock: COPY with_blocks[rtoc_idx]? }, "WITH MATCH at line ${UNWRAP ((with_blocks[rtoc_idx]?.token)?.line).toString()} is missing a WHEN arm for ${_} (declared in REQUIRES). Add an arm:\n    WHEN ${_}\n        -> { <body for ${_} strategy> }");
     END
     FOR _ IN extra DO
-    runtimeCallSpec__call(CAST(error_handler AS RuntimeCallSpec), with_blocks[rtoc_idx]?, "WITH MATCH at line ${(with_blocks[rtoc_idx]?.token).line.toString()} has a WHEN arm for ${_}, but ${_} is not in REQUIRES. Either remove the arm or add ${_} to REQUIRES.");
+    error_handler(Locatable{ WithBlock: COPY with_blocks[rtoc_idx]? }, "WITH MATCH at line ${UNWRAP ((with_blocks[rtoc_idx]?.token)?.line).toString()} has a WHEN arm for ${_}, but ${_} is not in REQUIRES. Either remove the arm or add ${_} to REQUIRES.");
     END
   rtoc_idx = rtoc_idx + 1;
   END
@@ -138,19 +187,19 @@ PUB FN withMatchCheck__enforce_polymorphic_iff_rule_mut(node: WithBlock, bound_p
     NIL
   END)));
   IF ((node.polymorphic AND !(has_poly_param)) AND !(has_universal_poly_param)) THEN
-    RETURN runtimeCallSpec__call(CAST(error_handler AS RuntimeCallSpec), node, "WITH POLYMORPHIC is only allowed when at least one bound binding is a polymorphic parameter (REQUIRES admits more than one storage family, e.g. `LOCKED` or `SNAPSHOTTED`). Either drop POLYMORPHIC and use plain WITH (be specific), or broaden REQUIRES to a polymorphic family.");
+    RETURN error_handler(Locatable{ WithBlock: COPY node }, "WITH POLYMORPHIC is only allowed when at least one bound binding is a polymorphic parameter (REQUIRES admits more than one storage family, e.g. `LOCKED` or `SNAPSHOTTED`). Either drop POLYMORPHIC and use plain WITH (be specific), or broaden REQUIRES to a polymorphic family.");
   ELSE_IF (!(node.polymorphic) AND has_poly_param) THEN
     MUTABLE poly_param_examples = bound_params |> WHERE TRY (withMatchCheck__poly_requires?(requires_map[_]));
     MUTABLE example = poly_param_examples.first();
     MUTABLE example_fams = ((requires_map[example] OR_ELSE Set[])).to_a().join(" | ");
-    RETURN runtimeCallSpec__call(CAST(error_handler AS RuntimeCallSpec), node, "Plain WITH on the polymorphic parameter '${example}' (REQUIRES admits ${example_fams}) is not allowed. Use `WITH POLYMORPHIC ...` so the body's polymorphism is visible at the use site (the comptime dispatch lowers per family). If you want to commit to a single family, narrow REQUIRES to one of: VERSIONED, ATOMIC.");
+    RETURN error_handler(Locatable{ WithBlock: COPY node }, "Plain WITH on the polymorphic parameter '${example}' (REQUIRES admits ${example_fams}) is not allowed. Use `WITH POLYMORPHIC ...` so the body's polymorphism is visible at the use site (the comptime dispatch lowers per family). If you want to commit to a single family, narrow REQUIRES to one of: VERSIONED, ATOMIC.");
   END
 END
 PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_lookup: Any, error_handler: Any) RETURNS !Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < call_sites.length() DO
     MUTABLE call_node = COPY KEEP call_sites[rtoc_idx]?.node;
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(runtimeCallSpec__call(CAST(sig_lookup AS RuntimeCallSpec), call_sites[rtoc_idx]?.callee_name));
+    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(sig_lookup(call_sites[rtoc_idx]?.callee_name));
     IF !(sig) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -209,9 +258,9 @@ PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_look
         END
         MUTABLE arg_family: ?String@symbol = withMatchCheck__family_of_arg(arg);
         IF (arg_family == NIL) THEN
-            runtimeCallSpec__call(CAST(error_handler AS RuntimeCallSpec), call_node, "Call to '${call_node.name()}' requires parameter '${param_name}' to be bound under one of: ${(disjunction |> SELECT COPY _).join(" | ")}. The argument here is bound without sync, which belongs to no family. Add a sync wrapper at the binding declaration (e.g., '@locked' or '@shared:locked').");
+            error_handler(call_node, "Call to '${call_node.name()}' requires parameter '${param_name}' to be bound under one of: ${(disjunction |> SELECT COPY _).join(" | ")}. The argument here is bound without sync, which belongs to no family. Add a sync wrapper at the binding declaration (e.g., '@locked' or '@shared:locked').");
         ELSE_IF !(withMatchCheck__disjunction_admits?(disjunction, symbol(UNWRAP (arg_family)))) THEN
-            runtimeCallSpec__call(CAST(error_handler AS RuntimeCallSpec), call_node, "Call to '${call_node.name()}' requires parameter '${param_name}' to be bound under one of: ${(disjunction |> SELECT COPY _).join(" | ")}. The argument here is in family ${arg_family}, which is not accepted by this function.");
+            error_handler(call_node, "Call to '${call_node.name()}' requires parameter '${param_name}' to be bound under one of: ${(disjunction |> SELECT COPY _).join(" | ")}. The argument here is in family ${arg_family}, which is not accepted by this function.");
         END
       rtoc_idx = rtoc_idx + 1;
     END
@@ -265,7 +314,7 @@ END
 PUB FN withMatchCheck__family_of_arg_set(arg: Any) RETURNS ![Set]String@symbol ->
   MUTABLE sym = withMatchCheck__capability_argument_symbol(arg);
   MUTABLE families = sym.sync_families();
-  IF (families AND (families.size() > 1)) THEN
+  IF (families AND (families.length() > 1)) THEN
     RETURN TRY (withMatchCheck__expand_snapshotted(families));
   END
   IF (families AND (families.size() == 1)) THEN
@@ -307,7 +356,7 @@ PUB FN withMatchCheck__warn_polymorphic_unhandled_errors_mut(node: WithBlock, bo
     MUTABLE possible = TRY (withMatchCheck__errors_for_requires(fams));
     MUTABLE unhandled = (possible - handled);
     FOR _ IN unhandled DO
-    runtimeCallSpec__call(CAST(warn_handler AS RuntimeCallSpec), node, "Polymorphic error `${_}` may fire under `REQUIRES ${bound_params[rtoc_idx]}: ${(fams |> SELECT COPY _).join(" | ")}` but no handler is in scope (per-WITH `ON ${_} ...` or program SYNC POLICY).");
+    warn_handler(node, "Polymorphic error `${_}` may fire under `REQUIRES ${bound_params[rtoc_idx]}: ${(fams |> SELECT COPY _).join(" | ")}` but no handler is in scope (per-WITH `ON ${_} ...` or program SYNC POLICY).");
     END
   rtoc_idx = rtoc_idx + 1;
   END
