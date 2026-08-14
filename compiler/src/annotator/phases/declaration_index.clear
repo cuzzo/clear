@@ -68,19 +68,17 @@ PRIVATE FN declarationIndexer__collect_error_type_registrations(program: Program
   MUTABLE registrations: []ErrorTypeRegistration = ( { MUTABLE rtoc_empty_list_9: []ErrorTypeRegistration = List[]; rtoc_empty_list_9 } );
   aST__each_locatable(program, TRUE, %(node: Locatable) USE(MUTABLE registrations) -> {
   IF node IS_A Raise AS raise THEN
-      MUTABLE kind = raise.kind;
-      MUTABLE type_name = raise.error_name;
-      IF ((kind == NIL) OR (type_name == NIL)) THEN
-        RETURN;
+      IF raise.kind EXISTS AS kind THEN
+        IF raise.error_name EXISTS AS type_name THEN
+          &registrations.append(ErrorTypeRegistration{ kind: COPY kind, type_name: COPY type_name, token: COPY raise.token });
+        END
       END
-      &registrations.append(ErrorTypeRegistration{ kind: COPY kind, type_name: COPY type_name, token: raise.token });
   ELSE_IF node IS_A OrElseExit AS or_else_exit THEN
-      MUTABLE kind = or_else_exit.kind;
-      MUTABLE type_name = or_else_exit.error_name;
-      IF ((kind == NIL) OR (type_name == NIL)) THEN
-        RETURN;
+      IF or_else_exit.kind EXISTS AS kind THEN
+        IF or_else_exit.error_name EXISTS AS type_name THEN
+          &registrations.append(ErrorTypeRegistration{ kind: COPY kind, type_name: COPY type_name, token: COPY or_else_exit.token });
+        END
       END
-      &registrations.append(ErrorTypeRegistration{ kind: COPY kind, type_name: COPY type_name, token: or_else_exit.token });
   END
   rubyToClearVoid()
   });

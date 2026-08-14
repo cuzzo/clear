@@ -55,18 +55,15 @@ PUB FN tenseEnvelope__from_expression(expression: TypeExpression) RETURNS !Tense
   MUTABLE current: TypeExpression = COPY expression;
   WHILE TRUE DO
     MUTABLE layer_kind = COPY current.kind;
-    IF (layer_kind IS_A FallibleTypeExpression) THEN
-      MUTABLE fallible = COPY layer_kind;
-      &layers.append(TenseLayer{ kind: COPY TenseLayerKind.Fallible, capabilities: COPY current.capabilities, error_set: COPY fallible.error_set() });
-      current = fallible.inner();
-    ELSE_IF (layer_kind IS_A FutureTypeExpression) THEN
-      MUTABLE future = COPY layer_kind;
+    IF layer_kind IS_A FallibleTypeExpression AS fallible THEN
+      &layers.append(TenseLayer{ kind: COPY TenseLayerKind.Fallible, capabilities: COPY current.capabilities, error_set: COPY fallible.error_set });
+      current = COPY fallible.inner;
+    ELSE_IF layer_kind IS_A FutureTypeExpression AS future THEN
       &layers.append(TenseLayer{ kind: COPY TenseLayerKind.Future, capabilities: COPY current.capabilities, error_set: NIL });
-      current = future.inner();
-    ELSE_IF (layer_kind IS_A OptionalTypeExpression) THEN
-      MUTABLE optional = layer_kind;
+      current = COPY future.inner;
+    ELSE_IF layer_kind IS_A OptionalTypeExpression AS optional THEN
       &layers.append(TenseLayer{ kind: COPY TenseLayerKind.Optional, capabilities: COPY current.capabilities, error_set: NIL });
-      current = optional.inner();
+      current = COPY optional.inner;
     ELSE
       BREAK;
     END
@@ -231,7 +228,7 @@ PUB FN tenseSelectorPlan__stream_result_type(self: TenseSelectorPlan, cardinalit
   MUTABLE split = tenseEnvelope__split_future(self.envelope);
   MUTABLE item = TRY (tenseEnvelope__wrap_layers(self.envelope.payload_expression, split.inner));
   MUTABLE stream_kind = StreamTypeExpression{ cardinality: COPY cardinality, item: COPY item };
-  MUTABLE stream = typeExpression__of(stream_kind);
+  MUTABLE stream = typeExpression__of(TypeExpressionKind{ StreamTypeExpression: COPY stream_kind });
   RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(stream, split.outer)) }));
 END
 PUB FN tenseOperationPlanner__navigation_markers() RETURNS ![]String ->
