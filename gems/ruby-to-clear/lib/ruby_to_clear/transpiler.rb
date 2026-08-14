@@ -4771,6 +4771,49 @@ end
     # two-statement code (not just an expression) or nil if no upgrade is
     # needed (source already correctly owned, or destination isn't
     # multiowned/shared - the ordinary bare/COPY paths apply instead).
+    # `sig { returns(T.untyped) }` over a body that only reads a field is the
+    # shape a record uses when naming the field's real type would close a load
+    # cycle -- ast/struct_field.rb says exactly that, and carries a
+    # `ruby-to-clear: field-type` directive for the field instead. The
+    # directive is the authoritative type, so the reader hands back the field's
+    # type rather than an Any the getter then has to launder into the
+    # destination's ownership (which CLEAR rejects as a borrowed return).
+    def field_reader_return_type(node, name)
+      declared_sig = parse_sig(@current_sig)[1].to_s
+      return nil unless %w[Auto Any].include?(declared_sig.delete_prefix("?").sub(/@.*\z/, ""))
+
+      owner = @current_class || @current_struct_name
+      return nil unless owner
+
+      body = node.body&.body
+      return nil unless body && body.length == 1
+      return nil unless bare_field_read_of?(body.first, name)
+
+      declared = @class_instance_field_types[owner][name] ||
+        @class_instance_field_types[resolve_qualified_class_name(owner)][name]
+      return nil if declared.to_s.empty? || %w[Auto Any].include?(declared.to_s)
+
+      declared
+    end
+
+    # `self[:name]`, `@name`, or `self.name` -- the three ways a record reader
+    # spells "give me my own field".
+    def bare_field_read_of?(stmt, name)
+      case stmt
+      when Prism::InstanceVariableReadNode
+        stmt.name.to_s.delete_prefix("@") == name
+      when Prism::CallNode
+        return false unless stmt.receiver.is_a?(Prism::SelfNode)
+        return stmt.name.to_s == name if stmt.arguments.nil?
+
+        args = stmt.arguments.arguments
+        stmt.name.to_s == "[]" && args.length == 1 &&
+          args.first.is_a?(Prism::SymbolNode) && args.first.value.to_s == name
+      else
+        false
+      end
+    end
+
     def ownership_upgrade_return_code(code, node)
       return nil unless @current_function_return_type.to_s.match?(/@(?:multiowned|shared)(?:$|:)/)
       # A freshly-owned value (e.g. `item = Item.new; item`, access :owned
@@ -7301,6 +7344,7 @@ end
       name = node.name.to_s
       class_storage_declarations = class_method_storage_declarations(node)
       param_types, sig_return_type, sig_type_params = parse_sig(@current_sig)
+      sig_return_type = field_reader_return_type(node, name) || sig_return_type
       param_names = extract_parameter_names(node)
       param_renames = function_parameter_renames(param_names)
       type_bindings = infer_function_type_bindings(node.body, param_names, param_types, sig_type_params)
