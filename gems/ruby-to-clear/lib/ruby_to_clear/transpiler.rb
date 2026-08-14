@@ -4944,10 +4944,12 @@ end
     # An OPTIONAL is never one of them, whatever it wraps.
     def implicitly_copyable_clear_type?(type)
       normalized = expand_clear_type_alias(type.to_s).to_s
-      return false if normalized.start_with?("?")
-      return true if normalized == "String@symbol"
+      return true if normalized.delete_prefix("?") == "String@symbol"
 
-      normalized.sub(/@.*\z/, "").match?(/\A(?:Bool|U?Int\d*|Float\d*|Byte\d*|Void|Nil|String)\z/)
+      # An optional primitive is still a primitive: CLEAR only rejects the
+      # borrowed return when the payload itself needs an owner.
+      normalized.delete_prefix("?").sub(/@.*\z/, "")
+                .match?(/\A(?:Bool|U?Int\d*|Float\d*|Byte\d*|Void|Nil|String)\z/)
     end
 
     def direct_retained_carrier_type?(type)
