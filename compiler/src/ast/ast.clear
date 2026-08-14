@@ -6420,7 +6420,7 @@ PUB STRUCT GenericParamDecl {
 }
 PUB STRUCT ProtocolRequirement {
   can_fail: ?Bool,
-  coerced_type_object: ?Type@multiowned,
+  coerced_type_object: ?Type,
   collection_return: ?Type@multiowned,
   container_borrow: ?Bool,
   error_kind: ?String@symbol,
@@ -6441,7 +6441,7 @@ PUB STRUCT ProtocolRequirement {
   storage_override: ?String@symbol,
   symbol: ?SymbolEntry@multiowned,
   tense_plan: ?TensePlanValue,
-  type_object: ?Type@multiowned,
+  type_object: ?Type,
   var_mutated: ?Bool,
   var_used: ?Bool,
   was_moved: ?Bool,
