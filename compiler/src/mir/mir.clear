@@ -45,10 +45,10 @@ STRUCT FnDef {
   visibility: Any@multiowned,
   can_fail: Any@multiowned,
   comptime_params: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN fnDef__params(self: FnDef) RETURNS ![]MIRParam ->
@@ -123,8 +123,8 @@ STRUCT MIRParam {
   name: Any@multiowned,
   zig_type: Any@multiowned,
   pointer_passed: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 PUB FN mIRParam__name(self: MIRParam) RETURNS Any@multiowned ->
@@ -205,10 +205,10 @@ PUB STRUCT MIRStructDef {
   fields: Any@multiowned,
   methods: Any@multiowned,
   visibility: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 PUB FN mIRStructDef__name(self: MIRStructDef) RETURNS Any@multiowned ->
@@ -307,8 +307,8 @@ STRUCT FieldDef {
   zig_type: Any@multiowned,
   default: Any@multiowned,
   boxed_capture: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN fieldDef__mir?(self: FieldDef) RETURNS Bool ->
@@ -372,10 +372,10 @@ PUB STRUCT MIREnumDef {
   name: Any@multiowned,
   variants: Any@multiowned,
   visibility: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 PUB FN mIREnumDef__name(self: MIREnumDef) RETURNS Any@multiowned ->
@@ -465,10 +465,10 @@ STRUCT UnionTypeDef {
   variants: Any@multiowned,
   visibility: Any@multiowned,
   methods: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN unionTypeDef__name(self: UnionTypeDef) RETURNS UnionTypeDefReturnValue ->
@@ -535,10 +535,10 @@ STRUCT Import {
   alias_name: Any@multiowned,
   module_path: Any@multiowned,
   member: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN import__mir?(self: Import) RETURNS Bool ->
@@ -601,10 +601,10 @@ END
 STRUCT TypeAlias {
   name: Any@multiowned,
   target: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN typeAlias__name(self: TypeAlias) RETURNS TypeAliasReturnValue ->
@@ -673,10 +673,10 @@ STRUCT CExternFnDecl {
   return_type: Any@multiowned,
   library: Any@multiowned,
   callconv: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN cExternFnDecl__name(self: CExternFnDecl) RETURNS CExternFnDeclReturnValue ->
@@ -742,10 +742,10 @@ END
 STRUCT CExternStructDef {
   name: Any@multiowned,
   fields: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN cExternStructDef__name(self: CExternStructDef) RETURNS CExternStructDefReturnValue ->
@@ -811,10 +811,10 @@ END
 STRUCT ModuleNamespace {
   name: Any@multiowned,
   items: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN moduleNamespace__child_exprs(self: ModuleNamespace) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -876,11 +876,11 @@ END
 STRUCT TestDef {
   name: Any@multiowned,
   body: []Emittable,
-  lowered_node_id: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
   needs_scheduler: ?Bool,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN testDef__needs_scheduler(MUTABLE self: TestDef) RETURNS Bool ->
@@ -962,11 +962,11 @@ PUB STRUCT Let {
   suppression: ?String,
   alias_safe: ?Bool,
   const_visibility: ?String@symbol,
-  lowered_node_id: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
   module_const: ?Bool,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN let__module_const(self: Let) RETURNS ?Bool ->
@@ -1049,10 +1049,10 @@ PUB STRUCT Set {
   target: Emittable,
   value: Emittable,
   needs_field_cleanup: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN set__child_exprs(self: Set) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1115,8 +1115,8 @@ PUB STRUCT MIRDestructureTarget {
   name: Any@multiowned,
   declaration_kind: Any@multiowned,
   annotation: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 PUB FN mIRDestructureTarget__name(self: MIRDestructureTarget) RETURNS Any@multiowned ->
@@ -1195,10 +1195,10 @@ END
 STRUCT DestructureSet {
   targets: Any@multiowned,
   value: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN destructureSet__child_exprs(self: DestructureSet) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1262,10 +1262,10 @@ STRUCT ReassignWithCleanup {
   value: Emittable,
   zig_type: Any@multiowned,
   alloc: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN reassignWithCleanup__child_exprs(self: ReassignWithCleanup) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1327,10 +1327,10 @@ END
 STRUCT ResourceClose {
   target: Emittable,
   close_plan: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN resourceClose__child_exprs(self: ResourceClose) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1394,10 +1394,10 @@ PUB STRUCT IfStmt {
   then_body: Any@multiowned,
   else_body: Any@multiowned,
   comptime: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ifStmt__child_exprs(self: IfStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1474,10 +1474,10 @@ STRUCT IfBindStmt {
   bindings: []MIRIfBinding,
   then_body: Any@multiowned,
   else_body: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ifBindStmt__child_exprs(self: IfBindStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1556,10 +1556,10 @@ STRUCT WhileStmt {
   update: Emittable,
   mark_per_iter: Any@multiowned,
   tight: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN whileStmt__child_exprs(self: WhileStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1630,10 +1630,10 @@ STRUCT ForStmt {
   index_capture: Any@multiowned,
   mark_per_iter: Any@multiowned,
   tight: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN forStmt__child_exprs(self: ForStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1699,10 +1699,10 @@ FN forStmt__stmt?(self: ForStmt) RETURNS Bool ->
 END
 STRUCT ScopeBlock {
   body: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN scopeBlock__body_slots(MUTABLE self: ScopeBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
@@ -1772,10 +1772,10 @@ STRUCT SwitchStmt {
   subject: Emittable,
   arms: []SwitchArm,
   default_body: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN switchStmt__child_exprs(self: SwitchStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1863,10 +1863,10 @@ STRUCT UnionMatchStmt {
   subject: Emittable,
   arms: []UnionMatchArm,
   default_body: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN unionMatchStmt__child_exprs(self: UnionMatchStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -1947,10 +1947,10 @@ END
 STRUCT IfChain {
   branches: []IfChainBranch,
   default_body: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ifChain__child_exprs(self: IfChain) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2031,10 +2031,10 @@ FN ifChain__stmt?(self: IfChain) RETURNS Bool ->
 END
 PUB STRUCT ReturnStmt {
   value: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN returnStmt__child_exprs(self: ReturnStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2096,10 +2096,10 @@ END
 STRUCT BreakStmt {
   label: Any@multiowned,
   value: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN breakStmt__child_exprs(self: BreakStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2161,8 +2161,8 @@ END
 STRUCT BreakExpr {
   label: Any@multiowned,
   value: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN breakExpr__child_exprs(self: BreakExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2221,10 +2221,10 @@ FN breakExpr__expr?(self: BreakExpr) RETURNS Bool ->
 END
 STRUCT ContinueStmt {
   unused: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN continueStmt__mir?(self: ContinueStmt) RETURNS Bool ->
@@ -2286,10 +2286,10 @@ FN continueStmt__stmt?(self: ContinueStmt) RETURNS Bool ->
 END
 STRUCT Panic {
   message: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN panic__mir?(self: Panic) RETURNS Bool ->
@@ -2352,10 +2352,10 @@ END
 STRUCT AssertStmt {
   cond: Emittable,
   message: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN assertStmt__child_exprs(self: AssertStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2419,10 +2419,10 @@ STRUCT AssertRaisesCheck {
   rt_name: Any@multiowned,
   kind: Any@multiowned,
   error_name: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN assertRaisesCheck__child_exprs(self: AssertRaisesCheck) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2486,10 +2486,10 @@ FN assertRaisesCheck__stmt?(self: AssertRaisesCheck) RETURNS Bool ->
 END
 STRUCT TestPreamble {
   unused: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN testPreamble__mir?(self: TestPreamble) RETURNS Bool ->
@@ -2551,10 +2551,10 @@ FN testPreamble__stmt?(self: TestPreamble) RETURNS Bool ->
 END
 STRUCT DebugOnly {
   body: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN debugOnly__body_slots(MUTABLE self: DebugOnly) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
@@ -2625,10 +2625,10 @@ STRUCT Sort {
   key_a: Emittable,
   key_b: Emittable,
   string_keys: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN sort__child_exprs(self: Sort) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2690,8 +2690,8 @@ END
 STRUCT SoaFieldAccess {
   soa_expr: Any@multiowned,
   field_name: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN soaFieldAccess__mir?(self: SoaFieldAccess) RETURNS Bool ->
@@ -2754,8 +2754,8 @@ END
 STRUCT TryOrPanic {
   expr: Emittable,
   panic_msg: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN tryOrPanic__expr(self: TryOrPanic) RETURNS Emittable ->
@@ -2825,10 +2825,10 @@ STRUCT IndexInsert {
   key_zig_type: Any@multiowned,
   elem_zig_type: Any@multiowned,
   alloc: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN indexInsert__child_exprs(self: IndexInsert) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2895,10 +2895,10 @@ STRUCT BatchWindowPush {
   result_var: Any@multiowned,
   value_expr: Emittable,
   alloc: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN batchWindowPush__child_exprs(self: BatchWindowPush) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -2963,10 +2963,10 @@ STRUCT BatchWindowFlush {
   result_var: Any@multiowned,
   value_expr: Emittable,
   alloc: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN batchWindowFlush__child_exprs(self: BatchWindowFlush) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -3026,10 +3026,10 @@ FN batchWindowFlush__stmt?(self: BatchWindowFlush) RETURNS Bool ->
 END
 PUB STRUCT MIRDeferStmt {
   body: DeferBody,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 PUB FN mIRDeferStmt__body(self: MIRDeferStmt) RETURNS DeferBody ->
@@ -3122,10 +3122,10 @@ FN deferStmt__stmt?(self: MIRDeferStmt) RETURNS Bool ->
 END
 PUB STRUCT ErrDeferStmt {
   body: DeferBody,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN errDeferStmt__initialize(MUTABLE self: ErrDeferStmt, body: DeferBodyInput) RETURNS !Void ->
@@ -3203,10 +3203,10 @@ END
 PUB STRUCT ExprStmt {
   expr: Emittable,
   discard: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN exprStmt__child_exprs(self: ExprStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -3276,10 +3276,10 @@ STRUCT DiscardOwned {
   expr: Emittable,
   cleanup_entry: Any@multiowned,
   zig_type: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN discardOwned__child_exprs(self: DiscardOwned) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -3347,11 +3347,11 @@ PUB STRUCT MIRBgBlock {
   run_body: []Emittable,
   fsm_structure: ?Emittable,
   boundary_fact: ?ExecutionBoundaryFact,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 PUB FN mIRBgBlock__code(self: MIRBgBlock) RETURNS BgBlockPlan ->
@@ -3477,10 +3477,10 @@ STRUCT StreamSpawn {
   captures: Any@multiowned,
   body: []Emittable,
   boundary_fact: ?ExecutionBoundaryFact,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN streamSpawn__boundary_fact(MUTABLE self: StreamSpawn) RETURNS ?ExecutionBoundaryFact ->
@@ -3564,9 +3564,9 @@ STRUCT FsmStructure {
   ctx_id: Any@multiowned,
   result_aliases_finalized: Any@multiowned,
   facts: FsmStructureFacts,
-  lowered_node_id: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
   owned_result_required: ?Bool,
-  ownership_consumption: Any@multiowned
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN fsmStructure__initialize(MUTABLE self: FsmStructure, args: Any[] = []) RETURNS Void ->
@@ -3668,10 +3668,10 @@ STRUCT FsmIoBody {
   blk_label: Any@multiowned,
   ctx_struct: Any@multiowned,
   spawn_setup: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN fsmIoBody__expr?(self: FsmIoBody) RETURNS Bool ->
@@ -3733,10 +3733,10 @@ FN fsmIoBody__stmt?(self: FsmIoBody) RETURNS Bool ->
 END
 STRUCT StreamYield {
   value: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN streamYield__expr?(self: StreamYield) RETURNS Bool ->
@@ -3799,10 +3799,10 @@ STRUCT FsmB1Body {
   blk_label: Any@multiowned,
   ctx_struct: Any@multiowned,
   spawn_setup: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN fsmB1Body__expr?(self: FsmB1Body) RETURNS Bool ->
@@ -3872,10 +3872,10 @@ STRUCT FsmGenericBody {
   blk_label: Any@multiowned,
   ctx_struct: Any@multiowned,
   spawn_setup: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN fsmGenericBody__expr?(self: FsmGenericBody) RETURNS Bool ->
@@ -4083,8 +4083,8 @@ STRUCT CapabilityLockTarget {
   source: Emittable,
   arc_wrapped: Any@multiowned,
   comptime_arc_unwrap: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN capabilityLockTarget__child_exprs(self: CapabilityLockTarget) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -4146,8 +4146,8 @@ END
 STRUCT CapabilityLockAddress {
   source: Emittable,
   arc_wrapped: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN capabilityLockAddress__child_exprs(self: CapabilityLockAddress) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -4212,13 +4212,13 @@ STRUCT SortedLockAcquire {
   matched_types: Any@multiowned,
   bubble_types: Any@multiowned,
   retries: Any@multiowned,
-  source_line: Any@multiowned,
+  source_line: ?Int64,
   loop_label: Any@multiowned,
   rt_name: Any@multiowned,
   fallible: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64
 }
 
 FN sortedLockAcquire__stmt?(self: SortedLockAcquire) RETURNS Bool ->
@@ -4294,12 +4294,12 @@ STRUCT FallibleLockBinding {
   retries: Any@multiowned,
   matched_types: Any@multiowned,
   bubble_types: Any@multiowned,
-  source_line: Any@multiowned,
+  source_line: ?Int64,
   acquire_block: Any@multiowned,
   rt_name: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64
 }
 
 FN fallibleLockBinding__stmt?(self: FallibleLockBinding) RETURNS Bool ->
@@ -4366,10 +4366,10 @@ STRUCT CatchWrapper {
   default_action: Any@multiowned,
   snapshot_type: Any@multiowned,
   rt_name: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN catchWrapper__child_exprs(self: CatchWrapper) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -4467,10 +4467,10 @@ PUB STRUCT MIRDoBlock {
   code: DoBlockPlan,
   branch_bodies: [][]Emittable,
   boundary_facts: []ExecutionBoundaryFact,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 PUB FN mIRDoBlock__code(self: MIRDoBlock) RETURNS DoBlockPlan ->
@@ -4572,10 +4572,10 @@ FN doBlock__stmt?(self: MIRDoBlock) RETURNS Bool ->
 END
 STRUCT Noop {
   reason: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN noop__mir?(self: Noop) RETURNS Bool ->
@@ -4637,10 +4637,10 @@ FN noop__stmt?(self: Noop) RETURNS Bool ->
 END
 STRUCT Comment {
   text: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN comment__mir?(self: Comment) RETURNS Bool ->
@@ -4702,10 +4702,10 @@ FN comment__stmt?(self: Comment) RETURNS Bool ->
 END
 STRUCT Suppress {
   name: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN suppress__mir?(self: Suppress) RETURNS Bool ->
@@ -4768,10 +4768,10 @@ END
 STRUCT PubConst {
   name: Any@multiowned,
   value: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN pubConst__mir?(self: PubConst) RETURNS Bool ->
@@ -4835,10 +4835,10 @@ STRUCT ModuleVar {
   name: Any@multiowned,
   zig_type: Any@multiowned,
   visibility: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN moduleVar__mir?(self: ModuleVar) RETURNS Bool ->
@@ -4900,10 +4900,10 @@ FN moduleVar__stmt?(self: ModuleVar) RETURNS Bool ->
 END
 STRUCT ModuleConstFree {
   name: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN moduleConstFree__mir?(self: ModuleConstFree) RETURNS Bool ->
@@ -4968,8 +4968,8 @@ PUB STRUCT HeapCreate {
   init: Emittable,
   alloc: String@symbol,
   label: ?String,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN heapCreate__initialize(MUTABLE self: HeapCreate, zig_type: String, init: Any, alloc: String@symbol, label: ?String = NIL) RETURNS Void ->
@@ -5033,8 +5033,8 @@ END
 PUB STRUCT DupeSlice {
   source: Emittable,
   alloc: String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN dupeSlice__initialize(MUTABLE self: DupeSlice, source: Any, alloc: String@symbol) RETURNS Void ->
@@ -5100,8 +5100,8 @@ PUB STRUCT AllocSlice {
   elem_type: String,
   len: Emittable,
   alloc: String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN allocSlice__initialize(MUTABLE self: AllocSlice, elem_type: String, len: Any, alloc: String@symbol) RETURNS Void ->
@@ -5166,8 +5166,8 @@ END
 STRUCT FreeSlice {
   slice: Emittable,
   alloc: Alloc,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN freeSlice__initialize(MUTABLE self: FreeSlice, slice: Any, alloc: Alloc) RETURNS Void ->
@@ -5232,8 +5232,8 @@ END
 PUB STRUCT DestroyPtr {
   ptr: Emittable,
   alloc: Alloc,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN destroyPtr__initialize(MUTABLE self: DestroyPtr, ptr: Any, alloc: Alloc) RETURNS Void ->
@@ -5298,10 +5298,10 @@ END
 PUB STRUCT Cleanup {
   name: Any@multiowned,
   cleanup_entry: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN cleanup__mir?(self: Cleanup) RETURNS Bool ->
@@ -5364,10 +5364,10 @@ END
 PUB STRUCT ErrCleanup {
   name: Any@multiowned,
   cleanup_entry: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN errCleanup__mir?(self: ErrCleanup) RETURNS Bool ->
@@ -5429,10 +5429,10 @@ FN errCleanup__stmt?(self: ErrCleanup) RETURNS Bool ->
 END
 PUB STRUCT MoveMark {
   name: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN moveMark__mir?(self: MoveMark) RETURNS Bool ->
@@ -5500,8 +5500,8 @@ PUB STRUCT DeepCopy {
   alloc: ?String@symbol,
   copy_shape: String@symbol,
   type_info: ?Type,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN deepCopy__initialize(MUTABLE self: DeepCopy, source: Any, zig_type: ?String, elem_type: ?String, strategy: String@symbol, alloc: ?String@symbol, copy_shape: String@symbol = deepCopy__copy_shape_for_zig_type(zig_type), type_info: ?Type = NIL) RETURNS Void ->
@@ -5575,8 +5575,8 @@ PUB STRUCT ContainerInit {
   strategy: String@symbol,
   alloc: ?String@symbol,
   capacity: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN containerInit__initialize(MUTABLE self: ContainerInit, zig_type: String, strategy: String@symbol, alloc: ?String@symbol, capacity: Any) RETURNS Void ->
@@ -5646,8 +5646,8 @@ PUB STRUCT CapWrap {
   sync_type: ?String,
   own_fn: ?String,
   alloc: String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN capWrap__initialize(MUTABLE self: CapWrap, inner: Any, zig_base: String, strategy: String@symbol, sync_fn: ?String, sync_type: ?String, own_fn: ?String, alloc: String@symbol) RETURNS Void ->
@@ -5717,8 +5717,8 @@ PUB STRUCT SharePromote {
   source: Emittable,
   zig_base: String,
   alloc: String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN sharePromote__initialize(MUTABLE self: SharePromote, source: Emittable, zig_base: String, alloc: String@symbol) RETURNS Void ->
@@ -5783,8 +5783,8 @@ PUB STRUCT RcRetain {
   source: Emittable,
   zig_base: Any@multiowned,
   func: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN rcRetain__child_exprs(self: RcRetain) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -5845,8 +5845,8 @@ FN rcRetain__expr?(self: RcRetain) RETURNS Bool ->
 END
 STRUCT ComptimeCarrierPayload {
   source: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN comptimeCarrierPayload__child_exprs(self: ComptimeCarrierPayload) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -5909,8 +5909,8 @@ STRUCT MonomorphicKeep {
   source: Emittable,
   zig_base: Any@multiowned,
   alloc: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN monomorphicKeep__child_exprs(self: MonomorphicKeep) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -5974,8 +5974,8 @@ STRUCT RcRelease {
   zig_base: Any@multiowned,
   func: Any@multiowned,
   alloc: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN rcRelease__child_exprs(self: RcRelease) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -6038,8 +6038,8 @@ PUB STRUCT RcDowngrade {
   source: Any@multiowned,
   zig_base: Any@multiowned,
   func: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN rcDowngrade__ownership_effect(self: RcDowngrade) RETURNS OwnershipEffect EFFECTS REENTRANT ->
@@ -6103,8 +6103,8 @@ PUB STRUCT WeakUpgrade {
   source: Any@multiowned,
   zig_base: Any@multiowned,
   func: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN weakUpgrade__ownership_effect(self: WeakUpgrade) RETURNS OwnershipEffect EFFECTS REENTRANT ->
@@ -6166,8 +6166,8 @@ FN weakUpgrade__expr?(self: WeakUpgrade) RETURNS Bool ->
 END
 STRUCT AllocatorRef {
   kind: String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN allocatorRef__mir?(self: AllocatorRef) RETURNS Bool ->
@@ -6231,8 +6231,8 @@ STRUCT FreezeExpr {
   inner: Emittable,
   zig_base: String,
   alloc_ref: AllocatorRef,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN freezeExpr__initialize(MUTABLE self: FreezeExpr, inner: Emittable, zig_base: String, alloc_ref: AllocatorRef = AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL }) RETURNS Void ->
@@ -6301,8 +6301,8 @@ PUB STRUCT MakeList {
   items: []Emittable,
   alloc: String@symbol,
   minimum_capacity: ?Int64,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN makeList__initialize(MUTABLE self: MakeList, elem_type: String, items: []Emittable, alloc: String@symbol, minimum_capacity: ?Int64 = NIL) RETURNS Void ->
@@ -6365,10 +6365,10 @@ FN makeList__expr?(self: MakeList) RETURNS Bool ->
 END
 STRUCT FrameSave {
   rt_expr: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN frameSave__mir?(self: FrameSave) RETURNS Bool ->
@@ -6430,10 +6430,10 @@ FN frameSave__stmt?(self: FrameSave) RETURNS Bool ->
 END
 STRUCT FrameRestore {
   rt_expr: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN frameRestore__mir?(self: FrameRestore) RETURNS Bool ->
@@ -6495,8 +6495,8 @@ FN frameRestore__stmt?(self: FrameRestore) RETURNS Bool ->
 END
 STRUCT CapabilityUnwrap {
   source: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN capabilityUnwrap__child_exprs(self: CapabilityUnwrap) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -6561,10 +6561,10 @@ STRUCT SnapshotRead {
   alias_name: Any@multiowned,
   guard_var: Any@multiowned,
   body: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN snapshotRead__stmt?(self: SnapshotRead) RETURNS Bool ->
@@ -6639,10 +6639,10 @@ STRUCT SnapshotTransaction {
   retries: Any@multiowned,
   with_label: Any@multiowned,
   is_atomic_ptr: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN snapshotTransaction__stmt?(self: SnapshotTransaction) RETURNS Bool ->
@@ -6723,10 +6723,10 @@ STRUCT SnapshotMultiTxn {
   conflict_action: Emittable,
   retries: Any@multiowned,
   with_label: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN snapshotMultiTxn__stmt?(self: SnapshotMultiTxn) RETURNS Bool ->
@@ -6804,10 +6804,10 @@ STRUCT PolymorphicMutate {
   alias_name: Any@multiowned,
   bare_type: Any@multiowned,
   body: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN polymorphicMutate__stmt?(self: PolymorphicMutate) RETURNS Bool ->
@@ -6880,10 +6880,10 @@ STRUCT PolymorphicMutateFlow {
   body: []Emittable,
   guard_cond: Emittable,
   guard_fail_body: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN polymorphicMutateFlow__stmt?(self: PolymorphicMutateFlow) RETURNS Bool ->
@@ -6957,10 +6957,10 @@ END
 STRUCT PolymorphicFlowSignal {
   kind: Any@multiowned,
   ret: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN polymorphicFlowSignal__child_exprs(self: PolymorphicFlowSignal) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -7025,10 +7025,10 @@ STRUCT WithMatchDispatch {
   snapshot_mode: Any@multiowned,
   rt_name: Any@multiowned,
   arms: []MIRWithMatchArm,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN withMatchDispatch__stmt?(self: WithMatchDispatch) RETURNS Bool ->
@@ -7105,10 +7105,10 @@ PUB STRUCT AllocMark {
   alloc: String@symbol,
   type_info: Type,
   scope: ?String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN allocMark__initialize(MUTABLE self: AllocMark, name: String, alloc: String@symbol, type_info: Type, scope: ?String@symbol = NIL) RETURNS !Void ->
@@ -7185,10 +7185,10 @@ PUB STRUCT OwnedCreate {
   alloc: String@symbol,
   type_info: Type,
   source: String,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ownedCreate__initialize(MUTABLE self: OwnedCreate, name: String, alloc: String@symbol, type_info: Type, source: String) RETURNS Void ->
@@ -7255,10 +7255,10 @@ PUB STRUCT OwnedDestroy {
   name: String,
   alloc: String@symbol,
   source: String,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ownedDestroy__initialize(MUTABLE self: OwnedDestroy, name: String, alloc: String@symbol, source: String) RETURNS Void ->
@@ -7325,10 +7325,10 @@ PUB STRUCT OwnedTransfer {
   name: Any@multiowned,
   target: Any@multiowned,
   source: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ownedTransfer__stmt?(self: OwnedTransfer) RETURNS Bool ->
@@ -7391,10 +7391,10 @@ END
 STRUCT OwnedBorrow {
   name: Any@multiowned,
   source: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ownedBorrow__stmt?(self: OwnedBorrow) RETURNS Bool ->
@@ -7459,10 +7459,10 @@ PUB STRUCT OwnedStore {
   target: String,
   alloc: ?String@symbol,
   source: String,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ownedStore__initialize(MUTABLE self: OwnedStore, name: String, target: String, alloc: ?String@symbol, source: String) RETURNS Void ->
@@ -7528,10 +7528,10 @@ END
 PUB STRUCT OwnedReturn {
   name: Any@multiowned,
   source: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN ownedReturn__stmt?(self: OwnedReturn) RETURNS Bool ->
@@ -7593,10 +7593,10 @@ FN ownedReturn__owned_effect_for_alloc(self: OwnedReturn, alloc: ?String@symbol,
 END
 STRUCT ReturnMark {
   escaped_vars: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN returnMark__stmt?(self: ReturnMark) RETURNS Bool ->
@@ -7660,10 +7660,10 @@ PUB STRUCT TransferMark {
   name: String,
   target: String@symbol,
   target_alloc: ?String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN transferMark__initialize(MUTABLE self: TransferMark, name: String, target: String@symbol, target_alloc: ?String@symbol = NIL) RETURNS Void ->
@@ -7729,10 +7729,10 @@ END
 STRUCT ReassignMark {
   name: String,
   alloc: String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN reassignMark__initialize(MUTABLE self: ReassignMark, name: String, alloc: String@symbol) RETURNS Void ->
@@ -7799,10 +7799,10 @@ STRUCT FieldCleanupMark {
   target_name: String,
   field: String,
   alloc: String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN fieldCleanupMark__initialize(MUTABLE self: FieldCleanupMark, target_name: String, field: String, alloc: String@symbol) RETURNS Void ->
@@ -7871,9 +7871,9 @@ PUB STRUCT Call {
   try_wrap: Bool,
   owned_return: Bool,
   callable_contract: ?CallableContract@multiowned,
-  lowered_node_id: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
   never_success: Bool,
-  ownership_consumption: Any@multiowned,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
 }
 
@@ -7980,8 +7980,8 @@ END
 STRUCT RuntimeCall {
   spec: RuntimeCallSpec,
   args: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN runtimeCall__initialize(MUTABLE self: RuntimeCall, spec: RuntimeCallSpec, args: []Emittable) RETURNS Void ->
@@ -8060,8 +8060,8 @@ PUB STRUCT TailCall {
   callee: String,
   args: []@multiowned Any,
   callable_contract: ?CallableContract@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN tailCall__initialize(MUTABLE self: TailCall, callee: String, args: []Any, callable_contract: ?CallableContract = NIL) RETURNS Void ->
@@ -8134,8 +8134,8 @@ PUB STRUCT MIRMethodCall {
   try_wrap: Bool,
   callable_contract: ?CallableContract@multiowned,
   owned_result_alloc: ?String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
 }
 
@@ -8253,8 +8253,8 @@ END
 PUB STRUCT FieldGet {
   object: Emittable,
   field: String,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN fieldGet__child_exprs(self: FieldGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -8316,8 +8316,8 @@ END
 STRUCT UnionPayloadGet {
   subject: Emittable,
   variant: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN unionPayloadGet__child_exprs(self: UnionPayloadGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -8379,8 +8379,8 @@ END
 STRUCT IndexGet {
   object: Emittable,
   index: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN indexGet__child_exprs(self: IndexGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -8444,8 +8444,8 @@ STRUCT ProtocolCall {
   operation: Any@multiowned,
   receiver: Emittable,
   args: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN protocolCall__child_exprs(self: ProtocolCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -8508,8 +8508,8 @@ PUB STRUCT MIRBinOp {
   op: Any@multiowned,
   left: Emittable,
   right: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 PUB FN mIRBinOp__op(self: MIRBinOp) RETURNS Any@multiowned ->
@@ -8587,8 +8587,8 @@ END
 PUB STRUCT MIRUnaryOp {
   op: Any@multiowned,
   operand: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 PUB FN mIRUnaryOp__op(self: MIRUnaryOp) RETURNS Any@multiowned ->
@@ -8662,8 +8662,8 @@ FN unaryOp__expr?(self: MIRUnaryOp) RETURNS Bool ->
 END
 STRUCT FallibleOk {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN fallibleOk__child_exprs(self: FallibleOk) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -8724,8 +8724,8 @@ FN fallibleOk__expr?(self: FallibleOk) RETURNS Bool ->
 END
 STRUCT FutureReady {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN futureReady__child_exprs(self: FutureReady) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -8786,8 +8786,8 @@ FN futureReady__expr?(self: FutureReady) RETURNS Bool ->
 END
 PUB STRUCT Lit {
   value: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN lit__mir?(self: Lit) RETURNS Bool ->
@@ -8849,8 +8849,8 @@ FN lit__expr?(self: Lit) RETURNS Bool ->
 END
 STRUCT SymbolLit {
   value: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN symbolLit__mir?(self: SymbolLit) RETURNS Bool ->
@@ -8911,8 +8911,8 @@ FN symbolLit__expr?(self: SymbolLit) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT VoidLiteral {
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN voidLiteral__mir?(self: VoidLiteral) RETURNS Bool ->
@@ -8974,8 +8974,8 @@ FN voidLiteral__expr?(self: VoidLiteral) RETURNS Bool ->
 END
 STRUCT EnumOrdinal {
   value: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN enumOrdinal__child_exprs(self: EnumOrdinal) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9036,8 +9036,8 @@ FN enumOrdinal__expr?(self: EnumOrdinal) RETURNS Bool ->
 END
 PUB STRUCT Ident {
   name: String,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN ident__mir?(self: Ident) RETURNS Bool ->
@@ -9099,8 +9099,8 @@ FN ident__expr?(self: Ident) RETURNS Bool ->
 END
 STRUCT TupleLiteral {
   items: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN tupleLiteral__child_exprs(self: TupleLiteral) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9165,8 +9165,8 @@ FN tupleLiteral__expr?(self: TupleLiteral) RETURNS Bool ->
 END
 STRUCT FnRef {
   name: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN fnRef__mir?(self: FnRef) RETURNS Bool ->
@@ -9230,8 +9230,8 @@ STRUCT LockAcquire {
   lock_expr: Emittable,
   lock_sync: Any@multiowned,
   fallible: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN lockAcquire__child_exprs(self: LockAcquire) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9292,8 +9292,8 @@ FN lockAcquire__expr?(self: LockAcquire) RETURNS Bool ->
 END
 PUB STRUCT TypeOf {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN typeOf__child_exprs(self: TypeOf) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9358,8 +9358,8 @@ END
 STRUCT TypeEq {
   left: Emittable,
   right: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN typeEq__child_exprs(self: TypeEq) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9421,8 +9421,8 @@ END
 STRUCT StructInit {
   zig_type: Any@multiowned,
   fields: []@multiowned Any,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN structInit__child_exprs(self: StructInit) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9491,8 +9491,8 @@ PUB STRUCT ArrayInit {
   elem_type: Any@multiowned,
   count: Any@multiowned,
   items: []Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN arrayInit__child_exprs(self: ArrayInit) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9555,8 +9555,8 @@ STRUCT ArrayDefaultInit {
   count: String,
   default_value: Emittable,
   alloc: ?String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: Type
 }
 
@@ -9626,8 +9626,8 @@ PUB STRUCT SliceExpr {
   start: Emittable,
   end_expr: Emittable,
   elem_type: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN sliceExpr__child_exprs(self: SliceExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9691,8 +9691,8 @@ PUB STRUCT MIRBlockExpr {
   body: []Emittable,
   borrowed_view: ?Bool,
   lazy_boundary: ?Bool,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
 }
 
@@ -9811,8 +9811,8 @@ PUB STRUCT ConcatStr {
   parts: []@multiowned Any,
   alloc: String@symbol,
   rt_expr: ?String,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN concatStr__initialize(MUTABLE self: ConcatStr, parts: []Any, alloc: String@symbol, rt_expr: ?String) RETURNS Void ->
@@ -9878,8 +9878,8 @@ PUB STRUCT MIRCast {
   expr: Emittable,
   target_type: Any@multiowned,
   method: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 PUB FN mIRCast__expr(self: MIRCast) RETURNS Emittable ->
@@ -9957,8 +9957,8 @@ FN cast__expr?(self: MIRCast) RETURNS Bool ->
 END
 STRUCT TryExpr {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN tryExpr__child_exprs(self: TryExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10022,8 +10022,8 @@ STRUCT TryCatch {
   expr: Emittable,
   catch_body: Emittable,
   capture: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
 }
 
@@ -10099,8 +10099,8 @@ END
 STRUCT Orelse {
   expr: Emittable,
   fallback: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
 }
 
@@ -10174,8 +10174,8 @@ PUB STRUCT Conditional {
   cond: Emittable,
   then_val: Emittable,
   else_val: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN conditional__child_exprs(self: Conditional) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10237,8 +10237,8 @@ STRUCT IfOptional {
   capture: Any@multiowned,
   then_expr: Emittable,
   else_expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
 }
 
@@ -10307,8 +10307,8 @@ FN ifOptional__expr?(self: IfOptional) RETURNS Bool ->
 END
 STRUCT Comptime {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN comptime__child_exprs(self: Comptime) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10372,8 +10372,8 @@ STRUCT UnionVariantGet {
   object: Emittable,
   variant: Any@multiowned,
   zig_type: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN unionVariantGet__child_exprs(self: UnionVariantGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10434,8 +10434,8 @@ FN unionVariantGet__expr?(self: UnionVariantGet) RETURNS Bool ->
 END
 STRUCT ListItems {
   list: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN listItems__child_exprs(self: ListItems) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10496,8 +10496,8 @@ FN listItems__expr?(self: ListItems) RETURNS Bool ->
 END
 STRUCT ListLength {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN listLength__child_exprs(self: ListLength) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10561,8 +10561,8 @@ FN listLength__expr?(self: ListLength) RETURNS Bool ->
 END
 PUB STRUCT AddressOf {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN addressOf__child_exprs(self: AddressOf) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10626,8 +10626,8 @@ FN addressOf__expr?(self: AddressOf) RETURNS Bool ->
 END
 STRUCT Deref {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN deref__child_exprs(self: Deref) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10692,8 +10692,8 @@ END
 STRUCT PointerCast {
   expr: Emittable,
   target_type: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN pointerCast__child_exprs(self: PointerCast) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10757,8 +10757,8 @@ FN pointerCast__expr?(self: PointerCast) RETURNS Bool ->
 END
 STRUCT ConstCast {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN constCast__child_exprs(self: ConstCast) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10822,8 +10822,8 @@ FN constCast__expr?(self: ConstCast) RETURNS Bool ->
 END
 STRUCT DefaultStreamCapacity {
   worker_count: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN defaultStreamCapacity__child_exprs(self: DefaultStreamCapacity) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -10884,8 +10884,8 @@ FN defaultStreamCapacity__expr?(self: DefaultStreamCapacity) RETURNS Bool ->
 END
 PUB STRUCT Undef {
   zig_type: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN undef__mir?(self: Undef) RETURNS Bool ->
@@ -10948,8 +10948,8 @@ END
 STRUCT TypeSentinel {
   extreme: Any@multiowned,
   zig_type: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN typeSentinel__mir?(self: TypeSentinel) RETURNS Bool ->
@@ -11013,8 +11013,8 @@ STRUCT IterRange {
   start: Any@multiowned,
   end_val: Any@multiowned,
   capture_type: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN iterRange__mir?(self: IterRange) RETURNS Bool ->
@@ -11076,8 +11076,8 @@ FN iterRange__expr?(self: IterRange) RETURNS Bool ->
 END
 PUB STRUCT MIROptionalUnwrap {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 PUB FN mIROptionalUnwrap__expr(self: MIROptionalUnwrap) RETURNS Emittable ->
@@ -11149,8 +11149,8 @@ FN optionalUnwrap__expr?(self: MIROptionalUnwrap) RETURNS Bool ->
 END
 STRUCT TryOptional {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN tryOptional__child_exprs(self: TryOptional) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -11212,8 +11212,8 @@ FN tryOptional__expr?(self: TryOptional) RETURNS Bool ->
 END
 STRUCT ForeignOwnedUnwrap {
   expr: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN foreignOwnedUnwrap__child_exprs(self: ForeignOwnedUnwrap) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -11274,8 +11274,8 @@ END
 STRUCT ForeignSliceView {
   pointer: Emittable,
   count: Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN foreignSliceView__child_exprs(self: ForeignSliceView) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -11338,8 +11338,8 @@ PUB STRUCT MIRRangeLit {
   start: Emittable,
   end_val: Emittable,
   elem_type: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
 }
 
@@ -11430,8 +11430,8 @@ END
 STRUCT HasField {
   expr: Emittable,
   field: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN hasField__child_exprs(self: HasField) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -11496,8 +11496,8 @@ END
 STRUCT ItemsAccess {
   expr: Emittable,
   safe: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN itemsAccess__child_exprs(self: ItemsAccess) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -11561,8 +11561,8 @@ END
 STRUCT OwnedSlice {
   expr: Emittable,
   alloc: String@symbol,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN ownedSlice__initialize(MUTABLE self: OwnedSlice, expr: Emittable, alloc: String@symbol) RETURNS Void ->
@@ -11629,8 +11629,8 @@ END
 STRUCT LambdaExpr {
   fn_def: Any@multiowned,
   captures: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN lambdaExpr__mir?(self: LambdaExpr) RETURNS Bool ->
@@ -11697,10 +11697,10 @@ PUB STRUCT Pipeline {
   stages: Any@multiowned,
   sink: Any@multiowned,
   sink_alloc: Any@multiowned,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN pipeline__expr?(self: Pipeline) RETURNS Bool ->
@@ -11762,8 +11762,8 @@ STRUCT InlineBc {
   args: []Emittable,
   stdlib_def: Any@multiowned,
   suppress_try: Bool,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN inlineBc__initialize(MUTABLE self: InlineBc, op: String@symbol, args: []Emittable, stdlib_def: Any, suppress_try: Bool = FALSE) RETURNS Void ->
@@ -11850,8 +11850,8 @@ STRUCT OrElseExitBcRewrite {
   has_message: Bool,
   line: Int64,
   message: ?Emittable,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN orElseExitBcRewrite__initialize(MUTABLE self: OrElseExitBcRewrite, kind: ?String, name_id: ?Int64, clear_type: Bool, has_message: Bool, line: Int64, message: ?Emittable = NIL) RETURNS Void ->
@@ -11926,10 +11926,10 @@ STRUCT ShardedMapPut {
   resolved_allocs: InlineAllocMetadata@multiowned,
   template_kind: IntrinsicTemplateKind,
   target_var: ?String,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned,
-  source_column: Any@multiowned,
-  source_line: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64
 }
 
 FN shardedMapPut__initialize(MUTABLE self: ShardedMapPut, target: Emittable, key: Emittable, value: Emittable, shard_idx: ?Emittable, shard_key: ?Emittable, map_kind: String@symbol, stdlib_def: FunctionSignature, key_type: ?Type, value_type: ?Type, resolved_allocs: InlineAllocMetadata, template_kind: IntrinsicTemplateKind, target_var: ?String = NIL) RETURNS Void ->
@@ -12014,8 +12014,8 @@ STRUCT ShardedMapGet {
   value_type: ?Type,
   resolved_allocs: InlineAllocMetadata@multiowned,
   template_kind: IntrinsicTemplateKind,
-  lowered_node_id: Any@multiowned,
-  ownership_consumption: Any@multiowned
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact
 }
 
 FN shardedMapGet__initialize(MUTABLE self: ShardedMapGet, target: Emittable, key: Emittable, shard_idx: ?Emittable, shard_key: ?Emittable, map_kind: String@symbol, stdlib_def: FunctionSignature, key_type: ?Type, value_type: ?Type, resolved_allocs: InlineAllocMetadata, template_kind: IntrinsicTemplateKind) RETURNS Void ->
@@ -12351,7 +12351,7 @@ FN bodySlot__new(name: String@symbol, body: []Emittable, writer: FN(Emittable[])
   bodySlot__initialize(&self, name, body, writer);
   RETURN self @multiowned;
 END
-STRUCT LoweredNodeId {
+PUB STRUCT LoweredNodeId {
   value: Int64
 }
 
