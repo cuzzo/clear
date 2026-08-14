@@ -5,7 +5,7 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f6361706162696c69746965732e
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
 REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
 # Ruby module BgCaptureClassifier
-PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?Any = NIL) RETURNS !{String}CaptureAnalysis ->
+PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !{String}CaptureAnalysis ->
   MUTABLE analyses: {String}CaptureAnalysis = {};
   FOR rtoc_each_key IN fn_nodes.keys() DO
   MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_each_key]);
@@ -25,7 +25,7 @@ PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, sche
   END
   RETURN analyses;
 END
-PUB FN bgCaptureClassifier__classify_one_mut(MUTABLE a: CaptureAnalysis, live_param_syms: {String}SymbolEntry, schema_lookup: ?Any = NIL) RETURNS !{String}Strategy ->
+PUB FN bgCaptureClassifier__classify_one_mut(MUTABLE a: CaptureAnalysis, live_param_syms: {String}SymbolEntry, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !{String}Strategy ->
   FOR rtoc_inner_key IN a.capture_symbols.keys() DO
   MUTABLE ignored_entry: SymbolEntry@multiowned = COPY UNWRAP (a.capture_symbols[rtoc_inner_key]);
   MUTABLE live: ?SymbolEntry = COPY live_param_syms[rtoc_inner_key];

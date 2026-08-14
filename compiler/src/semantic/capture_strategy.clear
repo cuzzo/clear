@@ -84,7 +84,7 @@ END
 PUB FN captureSiteInfo__empty() RETURNS CaptureSiteInfo ->
   RETURN CaptureSiteInfo{ copied_names: COPY Set[], moved_names: COPY Set[] };
 END
-PUB FN captureStrategy__classify(name: String, type: Type, site_info: CaptureSiteInfo, is_resource: Bool = FALSE, schema_lookup: ?Any = NIL) RETURNS !Strategy ->
+PUB FN captureStrategy__classify(name: String, type: Type, site_info: CaptureSiteInfo, is_resource: Bool = FALSE, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Strategy ->
   MUTABLE zig_t = TRY (captureStrategy__field_zig_type(type));
   IF captureSiteInfo__moved?(site_info, name) THEN
     RETURN Strategy{ MoveInto: COPY MoveInto{ zig_type: COPY zig_t, ctx_init_name: COPY name, source_name: COPY name } };
@@ -132,7 +132,7 @@ PUB FN captureStrategy__owned_affine_promise_handle?(type: Type) RETURNS !Bool -
   END
   RETURN TRUE;
 END
-PUB FN captureStrategy__value_like?(type: Type, schema_lookup: ?Any = NIL) RETURNS !Bool ->
+PUB FN captureStrategy__value_like?(type: Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Bool ->
   IF type__primitive?(type) THEN
     RETURN TRUE;
   END
@@ -155,7 +155,7 @@ PUB FN captureStrategy__value_like?(type: Type, schema_lookup: ?Any = NIL) RETUR
   END
   RETURN FALSE;
 END
-PUB FN captureStrategy__deep_copy_capture?(type: Type, schema_lookup: ?Any = NIL) RETURNS !Bool ->
+PUB FN captureStrategy__deep_copy_capture?(type: Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Bool ->
   IF type__needs_pointer_passing?(type) THEN
     RETURN FALSE;
   END

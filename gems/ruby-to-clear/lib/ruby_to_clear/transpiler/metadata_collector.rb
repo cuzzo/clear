@@ -962,7 +962,9 @@ module RubyToClear
 
     def narrowed_each_element_type(each_call)
       block = each_call.block
-      parameter = block&.parameters&.parameters&.requireds&.first
+      return nil unless block.is_a?(Prism::BlockNode)
+
+      parameter = block.parameters&.parameters&.requireds&.first
       return nil unless parameter&.respond_to?(:name)
 
       parameter_name = parameter.name.to_s

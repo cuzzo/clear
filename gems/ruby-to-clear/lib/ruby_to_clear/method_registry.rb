@@ -2514,7 +2514,10 @@ module RubyToClear
       receiver = context.receiver_code
       node = context.node
       transpiler = context.transpiler
-      requireds = node.block&.parameters&.parameters&.requireds || []
+      block = node.block
+      # `&blk` forwards someone else's block: a BlockArgumentNode has no
+      # parameter list to shape the iteration from.
+      requireds = block.is_a?(Prism::BlockNode) ? (block.parameters&.parameters&.requireds || []) : []
       if requireds.length == 2
         # A two-parameter block destructures Array elements but iterates
         # key/value on a Hash; only a statically array-like receiver may

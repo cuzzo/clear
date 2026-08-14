@@ -1739,7 +1739,7 @@ PUB FN useAfterMoveChecker__new(fn_node: FunctionDef, dataflow: OwnershipDataflo
 END
 # Ruby module LoopFrameAnalysis
 PUB UNION LoopNode { WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, ForRange: ForRange, ForEach: ForEach }
-PUB FN loopFrameAnalysis__analyze_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?Any = NIL) RETURNS !{String}FunctionDef ->
+PUB FN loopFrameAnalysis__analyze_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !{String}FunctionDef ->
   FOR _ IN fn_nodes.values() DO
   IF !(_.body) THEN
     CONTINUE;
@@ -1749,12 +1749,12 @@ PUB FN loopFrameAnalysis__analyze_mut(fn_nodes: {String}FunctionDef, schema_look
   END
   RETURN NIL;
 END
-PUB FN loopFrameAnalysis__walk_stmts_mut(stmts: []Locatable, schema_lookup: ?Any = NIL, fn_nodes: {String}FunctionDef) RETURNS !Void ->
+PUB FN loopFrameAnalysis__walk_stmts_mut(stmts: []Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, fn_nodes: {String}FunctionDef) RETURNS !Void ->
   FOR _ IN stmts DO
   TRY (loopFrameAnalysis__walk_stmt_mut(castLocatableToOptionalStmt(_), schema_lookup, fn_nodes));
   END
 END
-PUB FN loopFrameAnalysis__walk_stmt_mut(stmt: ?Stmt, schema_lookup: ?Any = NIL, fn_nodes: {String}FunctionDef) RETURNS !Void ->
+PUB FN loopFrameAnalysis__walk_stmt_mut(stmt: ?Stmt, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, fn_nodes: {String}FunctionDef) RETURNS !Void ->
   MUTABLE child_bodies = TRY (aST__child_bodies(castOptionalStmtToLocatable(stmt)));
   FOR _ IN child_bodies DO
   TRY (loopFrameAnalysis__walk_stmts_mut(_, schema_lookup, fn_nodes));
@@ -1764,7 +1764,7 @@ PUB FN loopFrameAnalysis__walk_stmt_mut(stmt: ?Stmt, schema_lookup: ?Any = NIL, 
   END
   NIL;
 END
-PUB FN loopFrameAnalysis__process_loop_mut(MUTABLE loop_node: LoopNode, body: []Locatable, schema_lookup: ?Any = NIL, fn_nodes: {String}FunctionDef) RETURNS !Void ->
+PUB FN loopFrameAnalysis__process_loop_mut(MUTABLE loop_node: LoopNode, body: []Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, fn_nodes: {String}FunctionDef) RETURNS !Void ->
   IF (MATCH loop_node START LoopNode.WhileLoop AS item -> item.tight, LoopNode.WhileBindLoop AS item -> item.tight, LoopNode.ForRange AS item -> item.tight, LoopNode.ForEach AS item -> item.tight END) THEN
     RETURN;
   END
@@ -1965,7 +1965,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   }));
   RETURN found;
 END
-PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema_lookup: ?Any = NIL) RETURNS !Bool ->
+PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Bool ->
   IF loop_node IS_A WhileBindLoop AS while_bind_loop THEN
     MUTABLE cond_t = &while_bind_loop.condition.full_type_mut("loop capture condition");
     MUTABLE inner = TRY (type__wrapped_type(cond_t));

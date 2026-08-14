@@ -140,10 +140,10 @@ END
 PUB FN cleanupClassificationPlan__bindings(self: CleanupClassificationPlan) RETURNS !{String}CleanupEntry@multiowned EFFECTS REENTRANT ->
   RETURN TRY (frozenCleanupFacts__bindings(self.facts));
 END
-PUB FN cleanupClassifier__classify(fn_node: FunctionDef, schema_lookup: Any) RETURNS !{String}CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify(fn_node: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !{String}CleanupEntry@multiowned ->
   RETURN TRY (cleanupClassificationPlan__bindings((TRY (cleanupClassifier__classify_plan(fn_node, schema_lookup)))));
 END
-PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !CleanupClassificationPlan ->
+PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !CleanupClassificationPlan ->
   IF !(fn_node.body) THEN
     RETURN cleanupClassificationPlan__from_bindings(CAST(fn_node.name AS String), {});
   END
@@ -364,7 +364,7 @@ PUB FN cleanupClassifier__params_for_method_call(call: MethodCall) RETURNS ![]Pa
     RETURN CAST(( { MUTABLE rtoc_empty_list_3: []Param = List[]; rtoc_empty_list_3 } ) AS []Param);
   END
 END
-PUB FN cleanupClassifier__stamp_field_pre_cleanups_mut(body: []Locatable, facts: FrozenCleanupFacts, schema_lookup: ?Any = NIL, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !Void ->
+PUB FN cleanupClassifier__stamp_field_pre_cleanups_mut(body: []Locatable, facts: FrozenCleanupFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !Void ->
   aST__each_locatable(body, FALSE, %(stmt: Locatable) USE(facts, lifecycle_registry, schema_lookup) -> {
   IF !(stmt IS_A Assignment) THEN
       RETURN;
@@ -424,11 +424,11 @@ PUB FN cleanupClassifier__field_owner_cleanup_alloc(target_node: Locatable, fact
     RETURN :frame;
   END
 END
-PUB FN cleanupClassifier__walk_bindings(body: []AstBodyNode, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS ![]CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__walk_bindings(body: []AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS ![]CleanupEntry@multiowned ->
   TRY (classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place));
   RETURN bindings.values();
 END
-PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []AstBodyNode, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
   FOR _ IN body DO
   MUTABLE rtoc_mutable_block_param_4 = COPY _;
   IF (rtoc_mutable_block_param_4 IS_A VarDecl OR rtoc_mutable_block_param_4 IS_A BindExpr) THEN
@@ -440,7 +440,7 @@ PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []AstBodyNode, sch
   END
   END
 END
-PUB FN cleanupClassifier__classify_inline_bg_binding_body(node: AstBodyNode, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+PUB FN cleanupClassifier__classify_inline_bg_binding_body(node: AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
   MUTABLE rtoc_each_items_5 = (TRY (aST__expression_children(castAstBodyNodeToLocatable(node))));
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_5.length() DO
@@ -470,7 +470,7 @@ PUB FN cleanupClassifier__classify_inline_bg_binding_body(node: AstBodyNode, sch
   rtoc_idx = rtoc_idx + 1;
   END
 END
-PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNode, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void ->
+PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void ->
   IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
     RETURN;
   END
@@ -534,7 +534,7 @@ PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNod
     &entries_by_place.delete(cleanupClassifier__place_for_binding_node(var_name, castBindingNodeToLocatable(node)));
   END
 END
-PUB FN cleanupClassifier__no_cleanup_alloc_entry(full_type: Any, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__no_cleanup_alloc_entry(full_type: Any, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE ti_branch_value: ?Type = NIL;
   IF full_type IS_A Type THEN
     ti_branch_value = COPY full_type;
@@ -604,10 +604,10 @@ PUB FN cleanupClassifier__collect_payload_binding_names(node: Locatable, MUTABLE
   TRY (collect_payload_binding_names(_, &names));
   END
 END
-PUB FN cleanupClassifier__transferred_payload_entry(ti: Type, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__transferred_payload_entry(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry) RETURNS !?CleanupEntry@multiowned ->
   RETURN TRY (takes_param_base_entry(ti, schema_lookup, lifecycle_registry));
 END
-PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
   MUTABLE rtoc_each_items_7 = (fn_node.params |> WHERE _.takes);
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_7.length() DO
@@ -679,10 +679,10 @@ PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup:
   rtoc_idx = rtoc_idx + 1;
   END
 END
-PUB FN cleanupClassifier__owned_value_entry(ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__owned_value_entry(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   RETURN TRY (takes_param_base_entry(ti, schema_lookup));
 END
-PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE lifecycle: ?LifecyclePlan = NIL;
   IF lifecycle_registry != NIL THEN
     lifecycle = COPY UNWRAP (lifecycle_registry?[ti]);
@@ -740,7 +740,7 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: Any, l
   END
   RETURN NIL;
 END
-PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
   aST__walk_body(Body{ ArrayValue: COPY body }, %(node: Locatable) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
   IF !(node IS_A MatchStatement) THEN
       RETURN;
@@ -835,7 +835,7 @@ PUB FN cleanupClassifier__match_as_entry_for(variant_type: ?SchemasUnionSchemaVa
     RETURN NIL;
   END
 END
-PUB FN cleanupClassifier__walk_capture_bindings(body: []Locatable, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+PUB FN cleanupClassifier__walk_capture_bindings(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
   each_capture_binding(body, %(name, expr, anchor_node) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
   IF !(aST__capture_expr_owns_result?(expr)) THEN
       RETURN NIL;
@@ -883,10 +883,10 @@ PUB FN cleanupClassifier__walk_capture_bindings(body: []Locatable, schema_lookup
   NIL
   });
 END
-PUB FN cleanupClassifier__capture_expr_heap?(expr: Locatable, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__capture_expr_heap?(expr: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN (TRY (capture_expr_owned_alloc(expr, schema_lookup)) == :heap);
 END
-PUB FN cleanupClassifier__capture_expr_owned_alloc(expr: Locatable, schema_lookup: Any) RETURNS !?String@symbol ->
+PUB FN cleanupClassifier__capture_expr_owned_alloc(expr: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?String@symbol ->
   IF expr IS_A NextExpr AS next_expr THEN
     RETURN :heap;
   ELSE_IF expr IS_A ResolveNode AS resolve_node THEN
@@ -928,7 +928,7 @@ PUB FN cleanupClassifier__capture_expr_owned_alloc(expr: Locatable, schema_looku
     RETURN NIL;
   END
 END
-PUB FN cleanupClassifier__call_returns_heap_owned?(expr: Locatable, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__call_returns_heap_owned?(expr: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
     sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(expr));
@@ -1039,7 +1039,7 @@ PUB FN cleanupClassifier__each_capture_binding(body: []Node, block: FN(String, L
   rubyToClearVoid()
   });
 END
-PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_lookup: Any, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
   IF TRY (type__node_reference?(ti)) THEN
     RETURN NIL;
   END
@@ -1137,7 +1137,7 @@ PUB FN cleanupClassifier__tuple_with_borrowed_element?(ti: Type) RETURNS !Bool -
   END
   RETURN (TRY (type__generic_args(ti))) |> ANY (type__symbol?(_) OR type__borrowed_reference?(_));
 END
-PUB FN cleanupClassifier__classify_structural_product(ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_structural_product(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   IF !(type__tuple?(ti)) THEN
     RETURN NIL;
   END
@@ -1184,7 +1184,7 @@ END
 PUB FN cleanupClassifier__binding_container_borrow?(node: Locatable) RETURNS Bool ->
   RETURN (aST__container_borrow?(node) OR aST__container_borrow?(binding_value(node)));
 END
-PUB FN cleanupClassifier__finalize_alloc_from_storage_mut(MUTABLE entry: ?CleanupEntry, node: Locatable, ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__finalize_alloc_from_storage_mut(MUTABLE entry: ?CleanupEntry, node: Locatable, ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   IF entry EXISTS AS entry_value THEN
     MUTABLE entry_value_mutable = COPY entry_value;
     IF !(TRUE) THEN
@@ -1238,19 +1238,19 @@ END
 PUB FN cleanupClassifier__stream_handle_type?(ti: Type) RETURNS !Bool ->
   RETURN (((((TRY (type__dynamic_stream?(ti)) OR TRY (type__bounded_stream?(ti))) OR TRY (type__open_stream?(ti))) OR TRY (type__inf_stream?(ti))) OR TRY (type__split_open_stream?(ti))) OR type__shared_promise?(ti));
 END
-PUB FN cleanupClassifier__mutable_owning_slot?(ti: Type, node: Locatable, schema_lookup: Any) RETURNS Bool ->
+PUB FN cleanupClassifier__mutable_owning_slot?(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
   IF !((node.var_mutated() == TRUE)) THEN
     RETURN FALSE;
   END
   RETURN ownership_bearing_type?(ti, schema_lookup);
 END
-PUB FN cleanupClassifier__ownership_bearing_type?(ti: Type, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__ownership_bearing_type?(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN TRY (type__ownership_bearing?(ti, schema_lookup));
 END
 PUB FN cleanupClassifier__cleanup_owned_string_type?(ti: Type) RETURNS !Bool ->
   RETURN ((TRY (type__string?(ti)) AND !(type__symbol?(ti))) AND !(type__raw?(ti)));
 END
-PUB FN cleanupClassifier__classify_mutable_owning_slot(ti: Type, node: Locatable, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_mutable_owning_slot(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   IF !(mutable_owning_slot?(ti, node, schema_lookup)) THEN
     RETURN NIL;
   END
@@ -1263,7 +1263,7 @@ PUB FN cleanupClassifier__classify_mutable_owning_slot(ti: Type, node: Locatable
   MUTABLE e = entry(kind, alloc, TRUE);
   RETURN e;
 END
-PUB FN cleanupClassifier__classify_owned_return_call(ti: Type, node: Locatable, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_owned_return_call(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE value = IF respondsTo?(node, "value") THEN
     node.value()
   ELSE
@@ -1304,7 +1304,7 @@ PUB FN cleanupClassifier__contains_call?(node: Locatable) RETURNS Bool ->
   });
   RETURN found;
 END
-PUB FN cleanupClassifier__classify_collection(ti: Type, schema_lookup: Any, node: ?Locatable = NIL) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_collection(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, node: ?Locatable = NIL) RETURNS !?CleanupEntry@multiowned ->
   IF TRY (type__any_rc?(ti)) THEN
     RETURN NIL;
   END
@@ -1342,7 +1342,7 @@ PUB FN cleanupClassifier__wrapper_alloc(ti: Type) RETURNS String@symbol ->
   RETURN :heap;
   END
 END
-PUB FN cleanupClassifier__classify_array_struct_strings(ti: Type, node: Any, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_array_struct_strings(ti: Type, node: Any, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE val = IF respondsTo?(node, "value") THEN
     node.value()
   ELSE
@@ -1391,7 +1391,7 @@ PUB FN cleanupClassifier__container_alloc_from(sym: ?SymbolEntry, node: Any) RET
     DEFAULT -> :heap
   END;
 END
-PUB FN cleanupClassifier__classify_rc_or_link(ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_rc_or_link(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   IF !((TRY (type__any_rc?(ti)) OR type__link?(ti))) THEN
     RETURN NIL;
   END
@@ -1404,7 +1404,7 @@ PUB FN cleanupClassifier__classify_rc_or_link(ti: Type, schema_lookup: Any) RETU
     RETURN entry(:rc, :heap, TRUE, {:rc_alloc: rc_alloc});
   END
 END
-PUB FN cleanupClassifier__classify_optional(ti: Type, schema_lookup: Any, node: Any = NIL) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_optional(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, node: Any = NIL) RETURNS !?CleanupEntry@multiowned ->
   IF !(type__optional?(ti)) THEN
     RETURN NIL;
   END
@@ -1455,7 +1455,7 @@ PUB FN cleanupClassifier__optional_empty_initializer?(value: ?Locatable) RETURNS
     RETURN FALSE;
   END
 END
-PUB FN cleanupClassifier__optional_payload_needs_cleanup?(inner: Type, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__optional_payload_needs_cleanup?(inner: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF cleanup_owned_string_type?(inner) THEN
     RETURN TRUE;
   END
@@ -1474,7 +1474,7 @@ PUB FN cleanupClassifier__optional_payload_needs_cleanup?(inner: Type, schema_lo
   END
   RETURN FALSE;
 END
-PUB FN cleanupClassifier__classify_owned_string(ti: Type, node: Locatable, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_owned_string(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   IF !(cleanup_owned_string_type?(ti)) THEN
     RETURN NIL;
   END
@@ -1502,7 +1502,7 @@ PUB FN cleanupClassifier__classify_owned_string(ti: Type, node: Locatable, schem
   END
   RETURN e;
 END
-PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schema_lookup: Any, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE node_sym = IF TRUE THEN
     aST__node__symbol(node)
   ELSE
@@ -1552,7 +1552,7 @@ PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schem
   END
   RETURN NIL;
 END
-PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Any, schema_lookup: Any, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Any, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
   IF !((respondsTo?(node, "heap_storage?") AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = CAST(node AS SymbolEntry);
   symbolEntry__heap_storage?(rtoc_local_receiver_19) })) THEN
     RETURN NIL;
@@ -1589,7 +1589,7 @@ PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Any, schema_lo
   END
   RETURN entry(:uniform);
 END
-PUB FN cleanupClassifier__struct_lit_borrows_cleanup_fields?(node: Any, schema: FieldBearingSchema, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__struct_lit_borrows_cleanup_fields?(node: Any, schema: FieldBearingSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE value = IF respondsTo?(node, "value") THEN
     node.value()
   ELSE
@@ -1602,7 +1602,7 @@ PUB FN cleanupClassifier__struct_lit_borrows_cleanup_fields?(node: Any, schema: 
   RETURN schema.fields() |> ALL { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanup_field_type(_._1)); (IF !(TRY (elem_type_needs_cleanup?(t, schema_lookup))) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fval = (value.fields()[CAST(_._0 AS String)] OR value.fields()[_._0]); (((cleanup_field_borrowed?(_._1) OR borrowed.contains?(CAST(_._0 AS String))) OR ((TRUE AND ((aST__node__symbol(fval) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_20 = ((aST__node__symbol(fval))?);
   symbolEntry__borrow_provenance?(rtoc_local_receiver_20) })))) OR ((fval AND type__borrowed_reference?((TRY (type__from_node_mut(fval, "struct literal borrowed field"))))))) } END) };
 END
-PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locatable, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
   IF !(schemas__field_bearing?(schema)) THEN
     RETURN NIL;
@@ -1641,7 +1641,7 @@ PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locata
   END;
   RETURN entry(:uniform, alloc);
 END
-PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: Any) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
   IF !(schemas__union?(schema)) THEN
     RETURN NIL;
@@ -1662,7 +1662,7 @@ PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: Any) 
   END
   RETURN e;
 END
-PUB FN cleanupClassifier__elem_needs_cleanup?(ti: Type, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__elem_needs_cleanup?(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE et: ?Type = TRY (type__element_type(ti));
   IF et EXISTS AS et_value THEN
     RETURN TRY (elem_type_needs_cleanup?(et_value, schema_lookup));
@@ -1670,7 +1670,7 @@ PUB FN cleanupClassifier__elem_needs_cleanup?(ti: Type, schema_lookup: Any) RETU
     RETURN FALSE;
   END
 END
-PUB FN cleanupClassifier__elem_type_needs_cleanup?(et: Type, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__elem_type_needs_cleanup?(et: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF type__borrowed_reference?(et) THEN
     RETURN FALSE;
   END
@@ -1689,14 +1689,14 @@ PUB FN cleanupClassifier__elem_type_needs_cleanup?(et: Type, schema_lookup: Any)
   END
   RETURN FALSE;
 END
-PUB FN cleanupClassifier__union_variants_need_cleanup?(schema: ?UnionSchema, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__union_variants_need_cleanup?(schema: ?UnionSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF !(schemas__union?(ruby_wrap_optional_UnionSchema_SchemaValue(schema))) THEN
     RETURN FALSE;
   END
   MUTABLE concrete_schema = COPY schema?;
   RETURN (concrete_schema.variants) |> ANY TRY (variant_type_needs_cleanup?(_._1, schema_lookup));
 END
-PUB FN cleanupClassifier__variant_type_needs_cleanup?(vt: ?SchemasUnionSchemaVariantValue, schema_lookup: Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__variant_type_needs_cleanup?(vt: ?SchemasUnionSchemaVariantValue, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF vt? IS_A InlineStructVariant AS inline_struct_variant THEN
     RETURN TRY (elem_has_cleanup_fields?(inline_struct_variant, schema_lookup));
   END
@@ -1709,7 +1709,7 @@ END
 PUB FN cleanupClassifier__elem_has_string_fields?(schema: ?FieldBearingSchema) RETURNS !Bool ->
   RETURN TRY (elem_has_cleanup_fields?(schema, NIL));
 END
-PUB FN cleanupClassifier__elem_has_cleanup_fields?(schema: ?FieldBearingSchema, schema_lookup: ?Any) RETURNS !Bool ->
+PUB FN cleanupClassifier__elem_has_cleanup_fields?(schema: ?FieldBearingSchema, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF !(((((schema != NIL) AND (schema IS_A InlineStructVariant)) OR ((schema != NIL) AND (schema IS_A StructSchema))) OR ((schema != NIL) AND (schema IS_A ResourceSchema)))) THEN
     RETURN FALSE;
   END

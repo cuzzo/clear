@@ -88,7 +88,7 @@ PUB STRUCT FiberCtxBuilderResult {
 PUB FN result__has_fresh_heap_copy?(self: FiberCtxBuilderResult) RETURNS Bool ->
   RETURN self.specs |> ANY (captureCleanupPlan__captured_value?(_.cleanup_plan) AND captureSpec__requires_setup?(_));
 END
-PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: String, promoted_names: {String}String, fresh_heap_alloc: ?String = NIL, fresh_heap_id: Int64 = 0, source_overrides: {String}String, schema_lookup: ?Any = NIL) RETURNS !FiberCtxBuilderResult ->
+PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: String, promoted_names: {String}String, fresh_heap_alloc: ?String = NIL, fresh_heap_id: Int64 = 0, source_overrides: {String}String, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !FiberCtxBuilderResult ->
   MUTABLE captured: {Any}Any = {};
   IF analysis != NIL THEN
     captured = COPY analysis.captures;
@@ -202,7 +202,7 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
   MUTABLE map = captured.keys().to_h(%(n) USE(body_access_prefix) -> [n, "${body_access_prefix}.${n}"]);
   RETURN FiberCtxBuilderResult{ specs: COPY specs, capture_map: COPY map, capture_symbols: (analysis?.capture_symbols OR_ELSE {}) };
 END
-PUB FN fiberCtxBuilder__needs_move_capture_cleanup?(type_obj: Any, schema_lookup: ?Any = NIL) RETURNS !Bool ->
+PUB FN fiberCtxBuilder__needs_move_capture_cleanup?(type_obj: Any, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Bool ->
   MUTABLE ti_branch_value: ?Type = NIL;
   IF type_obj IS_A Type THEN
     ti_branch_value = COPY type_obj;
@@ -217,7 +217,7 @@ PUB FN fiberCtxBuilder__needs_move_capture_cleanup?(type_obj: Any, schema_lookup
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
-PUB FN fiberCtxBuilder__needs_fresh_heap_capture_cleanup?(type_obj: Type, schema_lookup: ?Any = NIL, capture_symbol: ?SymbolEntry = NIL) RETURNS !Bool ->
+PUB FN fiberCtxBuilder__needs_fresh_heap_capture_cleanup?(type_obj: Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, capture_symbol: ?SymbolEntry = NIL) RETURNS !Bool ->
   MUTABLE ti_branch_value: ?Type = NIL;
   IF TRUE THEN
     ti_branch_value = TRY (type__new(castTypeToTypeConstructionInput(type_obj)));
@@ -238,7 +238,7 @@ PUB FN fiberCtxBuilder__needs_fresh_heap_capture_cleanup?(type_obj: Type, schema
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
-PUB FN fiberCtxBuilder__needs_capture_value_cleanup?(type_obj: Any, schema_lookup: ?Any = NIL, capture_symbol: ?SymbolEntry = NIL) RETURNS !Bool ->
+PUB FN fiberCtxBuilder__needs_capture_value_cleanup?(type_obj: Any, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, capture_symbol: ?SymbolEntry = NIL) RETURNS !Bool ->
   MUTABLE ti_branch_value: ?Type = NIL;
   IF type_obj IS_A Type THEN
     ti_branch_value = COPY type_obj;

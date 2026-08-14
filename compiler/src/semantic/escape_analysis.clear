@@ -86,7 +86,7 @@ PUB STRUCT EscapeContext {
   fn_nodes: {String}FunctionDef,
   facts_by_name: {String}FunctionFacts,
   bg_heap: [Set]String,
-  schema_lookup: ?Any@multiowned
+  schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult
 }
 PUB STRUCT EscapeSink {
   name: String@symbol,
@@ -110,11 +110,11 @@ PUB FN escapeSink__matches?(self: EscapeSink, node: Any) RETURNS Bool ->
   END;
 END
 escape_sinks: [8]EscapeSink = [EscapeSink{ name: :owning_return, node_classes: [AST.ReturnNode], handler: symbol("apply_return_escape_sink!") }, EscapeSink{ name: :enclosing_scope_store, node_classes: [AST.Assignment], handler: symbol("apply_assignment_escape_sink!") }, EscapeSink{ name: :binding_result, node_classes: [AST.VarDecl, AST.BindExpr], handler: symbol("apply_binding_escape_sink!") }, EscapeSink{ name: :destructured_binding, node_classes: [AST.DestructuringAssignment], handler: symbol("apply_destructuring_escape_sink!") }, EscapeSink{ name: :execution_boundary_capture, node_classes: [AST.BgBlock, AST.BgStreamBlock], handler: symbol("apply_execution_boundary_escape_sink!") }, EscapeSink{ name: :lambda_capture, node_classes: [AST.LambdaLit], handler: symbol("apply_lambda_escape_sink!") }, EscapeSink{ name: :takes_or_mutable_arg, node_classes: [AST.FuncCall], handler: symbol("apply_func_call_escape_sink!") }, EscapeSink{ name: :takes_or_mutable_arg, node_classes: [AST.MethodCall], handler: symbol("apply_method_call_escape_sink!") }];
-PUB FN escapeAnalysis__apply_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?Any = NIL) RETURNS !Tuple<[Set]String, [Set]String> ->
+PUB FN escapeAnalysis__apply_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Tuple<[Set]String, [Set]String> ->
   MUTABLE result = TRY (escapeAnalysis__apply_with_facts_mut(fn_nodes, schema_lookup));
   RETURN CAST(Tuple{result.heap_fns, result.bg_heap} AS Tuple<[Set]String, [Set]String>);
 END
-PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?Any = NIL, body_summaries: {String}FunctionBodySummary, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS !EscapeAnalysisResult ->
+PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, body_summaries: {String}FunctionBodySummary, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS !EscapeAnalysisResult ->
   MUTABLE bg_heap: [Set]String = Set[];
   MUTABLE placements = EscapePlacementFacts{ placements: List[] };
   MUTABLE facts_by_name: {String}FunctionFacts = {};
@@ -625,7 +625,7 @@ PUB FN escapeAnalysis__param_accepts_caller_sync?(fn_node: FunctionDef, param: P
   END
   RETURN (families.contains?(:ATOMIC) OR families.contains?(:SNAPSHOTTED));
 END
-PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, bg_heap: [Set]String, schema_lookup: ?Any) RETURNS !Void ->
+PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, bg_heap: [Set]String, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE context = EscapeContext{ fn: facts.fn, facts: COPY facts, fn_nodes: COPY fn_nodes, facts_by_name: COPY facts_by_name, bg_heap: COPY bg_heap, schema_lookup: schema_lookup };
   FOR _ IN facts.escape_nodes DO
   FOR _ IN escape_sinks DO
@@ -813,7 +813,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
   rtoc_idx = rtoc_idx + 1;
   END
 END
-PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE fn = COPY facts.fn;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < fn.params.length() DO
@@ -871,7 +871,7 @@ PUB FN escapeAnalysis__aggregate_contains_heap_owned_value?(node: ?Locatable) RE
     RETURN FALSE;
   END
 END
-PUB FN escapeAnalysis__aggregate_owner_requires_heap?(ti: ?Type, schema_lookup: ?Any) RETURNS !Bool ->
+PUB FN escapeAnalysis__aggregate_owner_requires_heap?(ti: ?Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF ti EXISTS AS ti_value THEN
     MUTABLE t = TRY (type__value_payload_type(ti_value));
     IF (type__rodata?(t) OR type__borrowed_reference?(t)) THEN
@@ -1054,7 +1054,7 @@ PUB FN escapeAnalysis__mark_capture_analysis_heap_mut(analysis: ?CaptureAnalysis
     RETURN;
   END
 END
-PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup: ?Any) RETURNS !Void ->
+PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   IF !((node.spawn_form == :fsm)) THEN
     RETURN;
   END
@@ -1077,7 +1077,7 @@ PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup
   mark_symbol_heap_mut(child.symbol())
   });
 END
-PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Param, schema_lookup: ?Any) RETURNS Void ->
+PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Param, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
     MUTABLE arg: ?Locatable = COPY args[rtoc_idx];
@@ -1098,7 +1098,7 @@ PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Par
   rtoc_idx = rtoc_idx + 1;
   END
 END
-PUB FN escapeAnalysis__mark_method_takes_heap_mut(call: MethodCall, params: []Param, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+PUB FN escapeAnalysis__mark_method_takes_heap_mut(call: MethodCall, params: []Param, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE receiver_param: ?Param = COPY params.first();
   IF (receiver_is_param?(call.object) AND escapeAnalysis__symbol_heap?(receiver_param?.symbol)) THEN
     mark_expr_roots_heap_mut(call.object);
@@ -1108,7 +1108,7 @@ PUB FN escapeAnalysis__mark_method_takes_heap_mut(call: MethodCall, params: []Pa
   TRY (mark_receiver_for_owned_sink_mut(call.object, call.args, value_params, fn_nodes, facts_by_name, schema_lookup));
   TRY (mark_receiver_scope_escapes_mut(call.object, call.args, value_params));
 END
-PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, args: []Locatable, params: []Param, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, args: []Locatable, params: []Param, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE receiver_root: ?Identifier = aST__root_identifier(receiver);
   MUTABLE receiver_sym: ?SymbolEntry = NIL;
   IF receiver_root != NIL THEN
@@ -1215,7 +1215,7 @@ PUB FN escapeAnalysis__each_loop_body_node(body: []Node, block: FN(Locatable) ->
   END
   NIL;
 END
-PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable, schema_lookup: ?Any) RETURNS Bool ->
+PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
   IF arg? IS_A MoveNode AS move_node THEN
     RETURN type_requires_owned_storage?(&move_node.value.full_type_mut("moved transfer value"), schema_lookup);
   END
@@ -1314,7 +1314,7 @@ PUB FN escapeAnalysis__heap_binding_carries_sources?(value: Locatable) RETURNS B
   END
   RETURN FALSE;
 END
-PUB FN escapeAnalysis__propagate_assignment_ownership_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+PUB FN escapeAnalysis__propagate_assignment_ownership_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE changed: Bool = TRUE;
   WHILE changed DO
     changed = FALSE;
@@ -1361,7 +1361,7 @@ PUB FN escapeAnalysis__assigned_binding_name(node: AssignmentNode) RETURNS ?Stri
     RETURN NIL;
   END
 END
-PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?Any) RETURNS !Bool ->
+PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF !(respondsTo?(node, "value")) THEN
     RETURN FALSE;
   END
@@ -1410,7 +1410,7 @@ END
 PUB FN escapeAnalysis__string_concat_expr?(expr: ?Locatable) RETURNS Bool ->
   RETURN (((expr != NIL) AND (expr IS_A StringConcat)) OR ((IF expr? IS_A BinaryOp AS binary_op THEN (binary_op.string_concat == TRUE) ELSE FALSE END)));
 END
-PUB FN escapeAnalysis__type_requires_owned_storage?(ti: ?Type, schema_lookup: ?Any) RETURNS !Bool ->
+PUB FN escapeAnalysis__type_requires_owned_storage?(ti: ?Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF ti EXISTS AS ti_value THEN
     MUTABLE t = TRY (type__value_payload_type(ti_value));
     IF (type__rodata?(t) OR type__borrowed_reference?(t)) THEN
@@ -1704,7 +1704,7 @@ PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) 
   END
   RETURN !((ruby_set_intersection_String_set(returned, borrowed)).empty?());
 END
-PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef, MUTABLE expr: Locatable, schema_lookup: ?Any) RETURNS !Bool ->
+PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef, MUTABLE expr: Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF TRY (borrowed_return?(fn_value, expr)) THEN
     RETURN FALSE;
   END
@@ -1795,7 +1795,7 @@ PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, 
   rtoc_idx = rtoc_idx + 1;
   END
 END
-PUB FN escapeAnalysis__mark_heap_return_facts_mut(facts: FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+PUB FN escapeAnalysis__mark_heap_return_facts_mut(facts: FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   FOR _ IN facts.return_values DO
   MUTABLE rtoc_mutable_block_param_33 = COPY _;
   IF TRY (owning_return_needs_heap_placement?(facts.fn, &rtoc_mutable_block_param_33, schema_lookup)) THEN
@@ -1823,14 +1823,14 @@ PUB FN escapeAnalysis__collect_identifier_names_mut(expr: Locatable, MUTABLE nam
     TRY (push_locatable_children_mut(node, &stack));
   END
 END
-PUB FN escapeAnalysis__assignment_target_heap_destination?(facts: FunctionFacts, target: AssignmentTarget, schema_lookup: ?Any) RETURNS Bool ->
+PUB FN escapeAnalysis__assignment_target_heap_destination?(facts: FunctionFacts, target: AssignmentTarget, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
   RETURN PARTIAL MATCH target START
     AssignmentTarget.StringValue AS string -> escapeAnalysis__symbol_heap?(symbol_for_name(facts, string)),
     AssignmentTarget.SymbolValue AS string_symbol -> escapeAnalysis__symbol_heap?(symbol_for_name(facts, CAST(string_symbol AS String))),
     DEFAULT -> heap_destination?(facts, target, schema_lookup)
   END;
 END
-PUB FN escapeAnalysis__heap_destination?(facts: FunctionFacts, target: Locatable, schema_lookup: ?Any) RETURNS !Bool ->
+PUB FN escapeAnalysis__heap_destination?(facts: FunctionFacts, target: Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE root: ?Identifier = aST__root_identifier(target);
   IF root EXISTS AS root_value THEN
     MUTABLE root_value_mutable = COPY root_value;
@@ -1852,7 +1852,7 @@ PUB FN escapeAnalysis__heap_destination?(facts: FunctionFacts, target: Locatable
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
-PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: ?Any, facts_by_name: {String}FunctionFacts) RETURNS !Bool ->
+PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, facts_by_name: {String}FunctionFacts) RETURNS !Bool ->
   MUTABLE call = unwrap_value(value);
   IF (call IS_A BinaryOp AND (call.op() == symbol("OR_ELSE"))) THEN
     call = unwrap_value(call.left());
@@ -1895,7 +1895,7 @@ PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}
     RETURN FALSE;
   END
 END
-PUB FN escapeAnalysis__call_result_is_heap_for_callee?(call: EscapeAnalysisCall, callee: FunctionDef, schema_lookup: ?Any, facts: ?FunctionFacts = NIL) RETURNS !Bool ->
+PUB FN escapeAnalysis__call_result_is_heap_for_callee?(call: EscapeAnalysisCall, callee: FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, facts: ?FunctionFacts = NIL) RETURNS !Bool ->
   MUTABLE dep = TRY (heap_return_from_args?((MATCH call START EscapeAnalysisCall.FuncCall AS item -> item.args, EscapeAnalysisCall.MethodCall AS item -> item.args END), callee.params, callee.heap_carry_return_vars, callee.return_type, schema_lookup));
   IF !((dep == NIL)) THEN
     RETURN dep;
@@ -1906,7 +1906,7 @@ END
 PUB FN escapeAnalysis__signature_heap_return_from_args?(call: EscapeAnalysisCall, sig_obj: FunctionSignature) RETURNS !?Bool ->
   RETURN TRY (heap_return_from_args?((MATCH call START EscapeAnalysisCall.FuncCall AS item -> item.args, EscapeAnalysisCall.MethodCall AS item -> item.args END), TRY (functionSignature__params(sig_obj)), TRY (functionSignature__heap_carry_return_vars(sig_obj)), functionSignature__return_type(sig_obj), NIL));
 END
-PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param, returned_names: ?[Set]String, return_type: ?TypeTypeInput = NIL, schema_lookup: ?Any = NIL) RETURNS !?Bool ->
+PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param, returned_names: ?[Set]String, return_type: ?TypeTypeInput = NIL, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !?Bool ->
   IF returned_names EXISTS AS returned_names_value THEN
     IF !(returned_names_value.empty?()) THEN
       MUTABLE by_name: {String}Int64 = {};
@@ -2002,7 +2002,7 @@ PUB FN escapeAnalysis__function_def_has_return_lifetime?(fn_value: FunctionDef) 
   END
   RETURN !(rl.empty?());
 END
-PUB FN escapeAnalysis__function_facts_have_owned_return_value?(facts: FunctionFacts, schema_lookup: ?Any) RETURNS !Bool ->
+PUB FN escapeAnalysis__function_facts_have_owned_return_value?(facts: FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN facts.return_values |> ANY { MUTABLE rtoc_mutable_block_param_35 = COPY _;
   TRY (owning_return_needs_heap_placement?(facts.fn, &rtoc_mutable_block_param_35, schema_lookup)) };
 END
