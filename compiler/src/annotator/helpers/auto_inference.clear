@@ -343,7 +343,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN;
       END
       MUTABLE slot_id = autoSlotId__local(castAutoConstraintCollectorDeclarationNodeToLocatable(decl_node));
-      rtoc_self_view.slots[slot_id] = (rtoc_self_view.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: ( { MUTABLE rtoc_empty_list_6: []Locatable = List[]; rtoc_empty_list_6 } ), shape: NIL, auto_token: (MATCH decl_node START AutoConstraintCollectorDeclarationNode.VarDecl AS item -> KEEP item.type.auto_token, AutoConstraintCollectorDeclarationNode.BindExpr AS item -> KEEP item.type.auto_token END), resolved_scalar: NIL } @multiowned);
+      rtoc_self_view.slots[slot_id] = (rtoc_self_view.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: ( { MUTABLE rtoc_empty_list_6: []Locatable = List[]; rtoc_empty_list_6 } ), shape: NIL, auto_token: declNodeAutoToken(decl_node), resolved_scalar: NIL } @multiowned);
       IF declNodeValue(decl_node) THEN
         IF rtoc_self_view.slots[slot_id] EXISTS AS rtoc_map_slot_7 THEN
           &rtoc_map_slot_7.sources.append(CAST(declNodeValue(decl_node) AS Locatable));
@@ -415,7 +415,7 @@ PRIVATE FN autoConstraintCollector__register_list_shape_slot(MUTABLE self: AutoC
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE slot_id = autoSlotId__list_element(castAutoConstraintCollectorDeclarationNodeToLocatable(decl_node));
-    rtoc_self_view.slots[slot_id] = (rtoc_self_view.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: ( { MUTABLE rtoc_empty_list_8: []Locatable = List[]; rtoc_empty_list_8 } ), shape: :list_element, auto_token: (MATCH decl_node START AutoConstraintCollectorDeclarationNode.VarDecl AS item -> KEEP item.type.auto_token, AutoConstraintCollectorDeclarationNode.BindExpr AS item -> KEEP item.type.auto_token END), resolved_scalar: NIL } @multiowned);
+    rtoc_self_view.slots[slot_id] = (rtoc_self_view.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: ( { MUTABLE rtoc_empty_list_8: []Locatable = List[]; rtoc_empty_list_8 } ), shape: :list_element, auto_token: declNodeAutoToken(decl_node), resolved_scalar: NIL } @multiowned);
     rtoc_self_view.local_decls[declNodeName(decl_node)] = AutoConstraintCollectorLocalDeclEntry{ AutoSlotIdMultiowned: COPY slot_id };
 }
 END
