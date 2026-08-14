@@ -74,12 +74,7 @@ module RubyToClear
       type_node = call_node.arguments&.arguments&.first
       return untyped_type unless type_node
 
-      union_name = if @imported_union_names.include?("ReturnValue")
-        "#{camel_type_name((@current_class || 'Local').split('::').last)}ReturnValue"
-      else
-        "ReturnValue"
-      end
-      convert_sorbet_type(type_node, union_name: union_name, emit_union: true)
+      convert_sorbet_type(type_node, union_name: synthesized_union_name("ReturnValue"), emit_union: true)
     end
 
     def sig_param_types(call_node)
@@ -95,7 +90,7 @@ module RubyToClear
           param_name = assoc.key.value.to_s
           types[param_name] = convert_sorbet_type(
             assoc.value,
-            union_name: camel_type_name(param_name),
+            union_name: synthesized_union_name(camel_type_name(param_name), imported_unions_collide: false),
             emit_union: true
           )
         end
@@ -771,6 +766,32 @@ module RubyToClear
       yield
     ensure
       @type_alias_context.pop if alias_name
+    end
+
+    # A union synthesized from a parameter name takes that name -- `capture:
+    # T.any(String, Symbol)` becomes `UNION Capture`. When another unit already
+    # publishes a type by that name (AST::Capture, say), both land in one
+    # compile and CLEAR reports a duplicate declaration. Qualify ours with the
+    # owning class, the way the emitter already qualifies imported constants.
+    def synthesized_union_name(base, imported_unions_collide: true)
+      return base unless synthesized_union_name_taken?(base, imported_unions_collide: imported_unions_collide)
+
+      owner = @current_class.to_s.split("::").last.to_s
+      owner = "Local" if owner.empty?
+      return base if base.start_with?(camel_type_name(owner))
+
+      "#{camel_type_name(owner)}#{base}"
+    end
+
+    # Only a name another unit publishes counts. Our own registration of the
+    # synthesized union must not make it look taken, or every one of them would
+    # be qualified on the second pass.
+    def synthesized_union_name_taken?(base, imported_unions_collide: true)
+      return true if imported_unions_collide && @imported_union_names.include?(base)
+      # A type another unit declares -- including a plain struct such as
+      # AST::Capture -- is visible in the same compile, so a synthesized union
+      # by that name is a duplicate declaration.
+      @imported_class_names.any? { |name| camel_type_name(name.to_s.split("::").last) == base }
     end
 
     def camel_type_name(name)
