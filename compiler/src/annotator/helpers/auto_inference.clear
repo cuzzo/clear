@@ -346,7 +346,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_self_view.slots[slot_id] = (rtoc_self_view.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: ( { MUTABLE rtoc_empty_list_6: []Locatable = List[]; rtoc_empty_list_6 } ), shape: NIL, auto_token: declNodeAutoToken(decl_node), resolved_scalar: NIL } @multiowned);
       IF declNodeValue(decl_node) THEN
         IF rtoc_self_view.slots[slot_id] EXISTS AS rtoc_map_slot_7 THEN
-          &rtoc_map_slot_7.sources.append(CAST(declNodeValue(decl_node) AS Locatable));
+          MUTABLE local_slot = KEEP rtoc_map_slot_7;
+          &local_slot.sources.append(declNodeValue(decl_node));
         ELSE
           panic("T.must: map slot is NIL");
         END
