@@ -49,7 +49,17 @@ FN autoSlotId__hash(self: AutoSlotId) RETURNS Int64
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (CAST(Tuple{rtoc_self_view.kind, rtoc_self_view.fn_name, rtoc_self_view.index, rtoc_self_view.decl_id} AS Tuple<String@symbol, ?String, ?Int64, ?Int64>)).hash();
+    MUTABLE combined: Int64 = (CAST(rtoc_self_view.kind AS String)).length();
+    IF rtoc_self_view.fn_name EXISTS AS fn_name_value THEN
+      combined = ((combined * 31) + fn_name_value.length());
+    END
+    IF rtoc_self_view.index EXISTS AS index_value THEN
+      combined = ((combined * 31) + index_value);
+    END
+    IF rtoc_self_view.decl_id EXISTS AS decl_id_value THEN
+      combined = ((combined * 31) + decl_id_value);
+    END
+    RETURN combined;
 }
 END
 FN autoSlotId__eql?(self: AutoSlotId, other: AutoSlotId) RETURNS Bool
