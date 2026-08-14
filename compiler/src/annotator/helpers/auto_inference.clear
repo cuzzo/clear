@@ -505,12 +505,17 @@ PUB STRUCT Result {
   ambiguous: {AutoSlotId@multiowned}Ambiguity,
   unresolved: {AutoSlotId@multiowned}Slot@multiowned
 }
+FN autoUnifier__default_type_of(node: Locatable) RETURNS ?AutoConstraintCollectorObservedType EFFECTS REENTRANT ->
+  RETURN AutoConstraintCollectorObservedType{ Type: TRY (aST__full_type_mut(node)) };
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN NIL;
+END
 FN autoUnifier__initialize(MUTABLE self: AutoUnifier, slots: {AutoSlotId@multiowned}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.slots = COPY slots;
-    rtoc_self_view.type_of = (type_of OR_ELSE %(node) -> &node.full_type_mut({:context: "AUTO inference source"}));
+    rtoc_self_view.type_of = (type_of OR_ELSE autoUnifier__default_type_of);
 }
 END
 FN autoUnifier__resolve_mut(self: AutoUnifier) RETURNS !Result
@@ -702,7 +707,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 FN autoUnifier__new(slots: {AutoSlotId@multiowned}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS AutoUnifier@multiowned ->
-  MUTABLE self = AutoUnifier{ slots: COPY slots, type_of: (COPY type_of OR_ELSE %(node) -> &node.full_type_mut({:context: "AUTO inference source"})) };
+  MUTABLE self = AutoUnifier{ slots: COPY slots, type_of: (COPY type_of OR_ELSE autoUnifier__default_type_of) };
   autoUnifier__initialize(&self, slots, type_of);
   RETURN self @multiowned;
 END
