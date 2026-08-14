@@ -235,16 +235,20 @@ PRIVATE FN autoConstraintCollector__record_constraint(MUTABLE self: AutoConstrai
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF node IS_A FuncCall AS func_call THEN
-      autoConstraintCollector__record_call_site(rtoc_self_view, func_call);
-    ELSE_IF node IS_A ReturnNode AS return_node THEN
-      autoConstraintCollector__record_return(rtoc_self_view, return_node, current_fn?);
-    ELSE_IF node IS_A BindExpr AS bind_expr THEN
-      MUTABLE bind_expr_mutable = COPY bind_expr;
-      autoConstraintCollector__record_local(&rtoc_self_view, AutoConstraintCollectorDeclarationNode{ BindExpr: COPY bind_expr_mutable });
-    ELSE_IF node IS_A VarDecl AS var_decl THEN
-      MUTABLE var_decl_mutable = COPY var_decl;
-      autoConstraintCollector__record_local(&rtoc_self_view, AutoConstraintCollectorDeclarationNode{ VarDecl: COPY var_decl_mutable });
+    IF node EXISTS AS node_value THEN
+      IF node_value IS_A FuncCall AS func_call THEN
+        autoConstraintCollector__record_call_site(rtoc_self_view, func_call);
+      ELSE_IF node_value IS_A ReturnNode AS return_node THEN
+        IF current_fn EXISTS AS current_fn_value THEN
+          autoConstraintCollector__record_return(rtoc_self_view, return_node, current_fn_value);
+        END
+      ELSE_IF node_value IS_A BindExpr AS bind_expr THEN
+        MUTABLE bind_expr_mutable = COPY bind_expr;
+        autoConstraintCollector__record_local(&rtoc_self_view, AutoConstraintCollectorDeclarationNode{ BindExpr: COPY bind_expr_mutable });
+      ELSE_IF node_value IS_A VarDecl AS var_decl THEN
+        MUTABLE var_decl_mutable = COPY var_decl;
+        autoConstraintCollector__record_local(&rtoc_self_view, AutoConstraintCollectorDeclarationNode{ VarDecl: COPY var_decl_mutable });
+      END
     END
 }
 END
