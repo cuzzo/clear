@@ -174,10 +174,10 @@ PUB FN withMatchCheck__collect_sync_bound_param_names(with_node: WithBlock, para
   RETURN out;
 END
 PUB FN withMatchCheck__enforce_polymorphic_iff_rule_mut(node: WithBlock, bound_params: [Set]String, requires_map: {String}[Set]String@symbol, fn_value: FunctionDef, error_handler: FN(Locatable, String) -> Void) RETURNS !Void ->
-  IF (node.view_kind OR node.snapshot_mode) THEN
+  IF ((node.view_kind != NIL) OR (node.snapshot_mode != NIL)) THEN
     RETURN;
   END
-  IF node.universal_poly THEN
+  IF (node.universal_poly OR_ELSE FALSE) THEN
     RETURN;
   END
   MUTABLE has_poly_param = FALSE;
@@ -194,9 +194,9 @@ PUB FN withMatchCheck__enforce_polymorphic_iff_rule_mut(node: WithBlock, bound_p
       has_universal_poly_param = TRUE;
     END
   END
-  IF ((node.polymorphic AND !(has_poly_param)) AND !(has_universal_poly_param)) THEN
+  IF ((((node.polymorphic OR_ELSE FALSE) AND !(has_poly_param))) AND !(has_universal_poly_param)) THEN
     RETURN error_handler(Locatable{ WithBlock: COPY node }, "WITH POLYMORPHIC is only allowed when at least one bound binding is a polymorphic parameter (REQUIRES admits more than one storage family, e.g. `LOCKED` or `SNAPSHOTTED`). Either drop POLYMORPHIC and use plain WITH (be specific), or broaden REQUIRES to a polymorphic family.");
-  ELSE_IF (!(node.polymorphic) AND has_poly_param) THEN
+  ELSE_IF (!((node.polymorphic OR_ELSE FALSE)) AND has_poly_param) THEN
     MUTABLE example: String = "";
     MUTABLE example_fams: String = "";
     FOR bound_param IN bound_params DO
@@ -217,78 +217,68 @@ PUB FN withMatchCheck__enforce_polymorphic_iff_rule_mut(node: WithBlock, bound_p
   END
 END
 PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_lookup: FN(String) -> ?Type, error_handler: FN(Locatable, String) -> Void) RETURNS !Void ->
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < call_sites.length() DO
-    MUTABLE call_node = COPY KEEP call_sites[rtoc_idx]?.node;
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(sig_lookup(call_sites[rtoc_idx]?.callee_name));
-    IF !(sig) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+  FOR call_site IN call_sites DO
+    MUTABLE looked_up: ?Type = sig_lookup(COPY call_site.callee_name);
+    MUTABLE sig: ?FunctionSignature@multiowned = NIL;
+    IF looked_up EXISTS AS looked_up_type THEN
+      sig = functionSignature__unwrap(X{ Type: COPY looked_up_type });
     END
-    MUTABLE requires_map = TRY (functionSignature__requires(sig));
-    MUTABLE rtoc_each_items_4 = (TRY (functionSignature__params(sig)));
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_4.length() DO
-        MUTABLE pname = COPY (rtoc_each_items_4[rtoc_idx]?.name);
-        MUTABLE fams: ?[Set]String@symbol = COPY requires_map[pname];
-        IF !(((fams != NIL) AND fams.empty?())) THEN
-            rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+    IF sig EXISTS AS sig_value THEN
+      MUTABLE sig_mutable = COPY sig_value;
+      MUTABLE requires_map = TRY (functionSignature__requires(sig_mutable));
+      MUTABLE params = TRY (functionSignature__params(sig_mutable));
+      MUTABLE idx: Int64 = 0;
+      WHILE (idx < params.length()) DO
+        MUTABLE param_name: String = COPY UNWRAP (params[idx]).name;
+        MUTABLE arg: ?Locatable = NIL;
+        IF (idx < call_site.args.length()) THEN
+          arg = COPY call_site.args[idx];
         END
-        MUTABLE arg: ?Locatable = COPY (call_sites[rtoc_idx]?.args)[rtoc_idx];
-        IF !(((arg != NIL) AND (arg IS_A Identifier))) THEN
-            rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+        MUTABLE families: ?[Set]String@symbol = COPY requires_map[param_name];
+        IF families EXISTS AS declared_families THEN
+          IF declared_families.empty?() THEN
+            # A plain-T argument bound to a universal-poly parameter is lowered
+            # as a Zig `var` so &c yields *T and polymorphicMutate can write back.
+            IF arg EXISTS AS arg_value THEN
+              IF arg_value IS_A Identifier AS identifier THEN
+                IF identifier.symbol EXISTS AS sym THEN
+                  MUTABLE sym_mutable = COPY sym;
+                  IF !(symbolEntry__with_match_capability_family?(sym_mutable)) THEN
+                    IF (sym_mutable.mutable OR_ELSE FALSE) THEN
+                      symbolEntry__mark_poly_borrow_target_mut(&sym_mutable);
+                    END
+                  END
+                END
+              END
+            END
+          ELSE
+            IF arg EXISTS AS arg_value THEN
+              MUTABLE family_names: String = "";
+              FOR family IN declared_families DO
+                IF (family_names.length() == 0) THEN
+                  family_names = "${family}";
+                ELSE
+                  family_names = "${family_names} | ${family}";
+                END
+              END
+              MUTABLE arg_family: ?String@symbol = withMatchCheck__family_of_arg(arg_value);
+              IF arg_family EXISTS AS arg_family_value THEN
+                IF !(withMatchCheck__disjunction_admits?(declared_families, arg_family_value)) THEN
+                  error_handler(COPY call_site.node, "Call to '${call_site.callee_name}' requires parameter '${param_name}' to be bound under one of: ${family_names}. The argument here is in family ${arg_family_value}, which is not accepted by this function.");
+                END
+              ELSE
+                error_handler(COPY call_site.node, "Call to '${call_site.callee_name}' requires parameter '${param_name}' to be bound under one of: ${family_names}. The argument here is bound without sync, which belongs to no family. Add a sync wrapper at the binding declaration (e.g., '@locked' or '@shared:locked').");
+              END
+            END
+          END
         END
-        MUTABLE sym = arg.symbol();
-        IF !(sym) THEN
-            rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-        END
-        IF symbolEntry__with_match_capability_family?(sym) THEN
-            rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-        END
-        IF !((respondsTo?(sym, "mutable") AND sym.mutable())) THEN
-            rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-        END
-        symbolEntry__mark_poly_borrow_target_mut(&sym);
-      rtoc_idx = rtoc_idx + 1;
+        idx = (idx + 1);
+      END
     END
-    MUTABLE rtoc_each_items_5 = (TRY (functionSignature__params(sig)));
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_5.length() DO
-        MUTABLE param_name = COPY (rtoc_each_items_5[rtoc_idx]?.name);
-        MUTABLE disjunction: ?[Set]String@symbol = COPY requires_map[param_name];
-        IF !(((disjunction != NIL) AND !(disjunction.empty?()))) THEN
-            rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-        END
-        MUTABLE arg: ?Locatable = COPY (call_sites[rtoc_idx]?.args)[rtoc_idx];
-        IF !(arg) THEN
-            rtoc_idx = rtoc_idx + 1;
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-        END
-        MUTABLE arg_family: ?String@symbol = withMatchCheck__family_of_arg(arg);
-        IF (arg_family == NIL) THEN
-            error_handler(call_node, "Call to '${call_node.name()}' requires parameter '${param_name}' to be bound under one of: ${(disjunction |> SELECT COPY _).join(" | ")}. The argument here is bound without sync, which belongs to no family. Add a sync wrapper at the binding declaration (e.g., '@locked' or '@shared:locked').");
-        ELSE_IF !(withMatchCheck__disjunction_admits?(disjunction, symbol(UNWRAP (arg_family)))) THEN
-            error_handler(call_node, "Call to '${call_node.name()}' requires parameter '${param_name}' to be bound under one of: ${(disjunction |> SELECT COPY _).join(" | ")}. The argument here is in family ${arg_family}, which is not accepted by this function.");
-        END
-      rtoc_idx = rtoc_idx + 1;
-    END
-  rtoc_idx = rtoc_idx + 1;
   END
+  RETURN;
 END
-PUB FN withMatchCheck__family_of_arg(arg: Any) RETURNS ?String@symbol ->
+PUB FN withMatchCheck__family_of_arg(arg: Locatable) RETURNS ?String@symbol ->
   MUTABLE sym = withMatchCheck__capability_argument_symbol(arg);
   MUTABLE sync: ?String@symbol = sym.sync();
   IF ((sync != NIL) AND ((([:locked, :write_locked, :always_mutable]) |> DISTINCT _).contains?(sync))) THEN
@@ -363,7 +353,7 @@ PUB FN withMatchCheck__errors_for_requires(family_set: ?[Set]String@symbol) RETU
   RETURN (TRY (withMatchCheck__admissible_axes(family_set))) |> UNNEST ((((CAST({:locked: [:LockTimeout] |> DISTINCT _, :write_locked: [:LockTimeout] |> DISTINCT _, :versioned: [:MvccConflict] |> DISTINCT _, :atomic: [:AtomicConflict] |> DISTINCT _} AS {String@symbol}[Set]String@symbol))[_]) OR_ELSE Set[])).to_a() |> DISTINCT _;
 END
 PUB FN withMatchCheck__warn_polymorphic_unhandled_errors_mut(node: WithBlock, bound_params: [Set]String, requires_map: {String}[Set]String@symbol, policy_handlers: []ErrorClause, warn_handler: Any) RETURNS !?[Set]String ->
-  IF !((warn_handler AND node.polymorphic)) THEN
+  IF !(((warn_handler != NIL) AND (node.polymorphic OR_ELSE FALSE))) THEN
     RETURN;
   END
   MUTABLE handled = TRY (withMatchCheck__handled_error_set(node, policy_handlers));

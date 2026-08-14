@@ -54,7 +54,7 @@ PUB FN bodyIdentity__for_ordinal(ordinal: Int64) RETURNS BodyIdentity ->
 END
 PUB STRUCT CallSiteFact {
   id: CallSiteId,
-  node: Any@multiowned,
+  node: Locatable,
   callee_name: String,
   args: []Locatable,
   fn_var_call: Bool,

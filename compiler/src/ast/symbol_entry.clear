@@ -533,7 +533,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (symbolEntry__lock_sync?(rtoc_self_view) AND !(symbolEntry__rc_stored?(rtoc_self_view)));
 }
 END
-FN symbolEntry__with_match_capability_family?(self: SymbolEntry) RETURNS Bool
+PUB FN symbolEntry__with_match_capability_family?(self: SymbolEntry) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -711,7 +711,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.flow.mutable_ref_target = TRUE;
 }
 END
-FN symbolEntry__mark_poly_borrow_target_mut(MUTABLE self: SymbolEntry) RETURNS Void
+PUB FN symbolEntry__mark_poly_borrow_target_mut(MUTABLE self: SymbolEntry) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
