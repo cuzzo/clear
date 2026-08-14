@@ -23,9 +23,9 @@ PUB FN packageSource__merge(member_paths: []String, resolve_pkg: FN(String) -> ?
   MUTABLE rtoc_each_items_4 = (TRY (read(_))).split("\n");
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_4.length() DO
-      MUTABLE line = rtoc_each_items_4[rtoc_idx];
+      MUTABLE line: String = COPY UNWRAP (rtoc_each_items_4[rtoc_idx]);
       MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(line, (compilerRegexCompile("\\A\\s*REQUIRE\\s+\"([^\"]+)\"(\\s+AS\\s+([A-Za-z_][A-Za-z0-9_]*))?\\s*;?\\s*\\z")));
-      IF !(m) THEN
+      IF (m == NIL) THEN
           &body_lines.append("${line}\n");
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;

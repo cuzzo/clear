@@ -15,8 +15,8 @@ PUB FN done__kind(self: Done) RETURNS String@symbol ->
   RETURN :done;
 END
 PUB STRUCT IoSuspend {
-  call_node: Any@multiowned,
-  stdlib_def: Any@multiowned,
+  call_node: ?Locatable,
+  stdlib_def: ?FunctionSignature,
   result_var: ?String,
   next_index: ?Int64
 }
@@ -31,22 +31,20 @@ PUB FN ioSuspend__with_next_index(self: IoSuspend, index_value: ?Int64) RETURNS 
   RETURN IoSuspend{ call_node: self.call_node, stdlib_def: self.stdlib_def, result_var: COPY self.result_var, next_index: COPY index_value };
 END
 PUB FN ioSuspend__result_type(self: IoSuspend) RETURNS !?Type ->
-  IF !(self.call_node) THEN
-    RETURN NIL;
-  END
-  MUTABLE node = self.call_node;
-  MUTABLE type_object = aST__node_type_object(node);
-  IF !(type_object) THEN
+  IF self.call_node EXISTS AS call_node_value THEN
+    MUTABLE node: Locatable = COPY call_node_value;
+    IF aST__node_type_object(node) EXISTS AS type_object THEN
+      IF type__untyped?(type_object) THEN
+        panic("FSM IO suspend result: unresolved type info");
+      END
+      RETURN COPY type_object;
+    END
     panic("FSM IO suspend result: missing type info");
   END
-  MUTABLE concrete_type = type_object;
-  IF type__untyped?(concrete_type) THEN
-    panic("FSM IO suspend result: unresolved type info");
-  END
-  RETURN concrete_type;
+  RETURN NIL;
 END
 PUB STRUCT NextSuspend {
-  promise_ast: Any@multiowned,
+  promise_ast: ?Locatable,
   result_var: ?String,
   next_index: ?Int64
 }
@@ -383,7 +381,7 @@ PRIVATE FN segments__suspend_for(v: ?Locatable, name: ?String) RETURNS ?SegmentT
     MUTABLE value = COPY v_value;
     IF (value IS_A FuncCall) OR (value IS_A MethodCall) THEN
       IF segments__io_suspending_call?(castLocatableToCallNode(value)) THEN
-        RETURN SegmentTail{ IoSuspend: COPY IoSuspend{ call_node: value, stdlib_def: value.matched_stdlib_def(), result_var: COPY name, next_index: NIL } };
+        RETURN SegmentTail{ IoSuspend: COPY IoSuspend{ call_node: COPY value, stdlib_def: aST__node__matched_signature(value), result_var: COPY name, next_index: NIL } };
       END
     ELSE_IF value IS_A NextExpr AS next_expr THEN
       RETURN SegmentTail{ NextSuspend: COPY NextSuspend{ promise_ast: nextExpr__expr(next_expr), result_var: COPY name, next_index: NIL } };
