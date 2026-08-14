@@ -6789,6 +6789,15 @@ end
 
         return "UNWRAP (#{code.to_s.strip.delete_suffix('?')}).toString()"
       end
+      # A string or symbol payload interpolates as-is once it is definite.
+      # string_like_clear_type? excludes symbols, which interpolate too.
+      if source_type.to_s.start_with?("?") &&
+         (string_like_clear_type?(source_type.to_s.delete_prefix("?")) ||
+          source_type.to_s.delete_prefix("?").end_with?("@symbol"))
+        return code if narrowed_binding_read?(code)
+
+        return "UNWRAP (#{code.to_s.strip.delete_suffix('?')})"
+      end
       if source_type.to_s.match?(/\A(?:U?Int\d*|Byte\d*|Float\d*)\z/)
         # `x?` is CLEAR's postfix unwrap, but a call on it -- even
         # parenthesized as `(x?).m()` -- still types as SAFE NAVIGATION and
