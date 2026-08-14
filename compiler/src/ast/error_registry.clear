@@ -104,7 +104,7 @@ FN aST__enum_entries() RETURNS ![]Tuple<String@symbol, Int64> ->
   END
   RETURN ordered;
 END
-FN aST__types_for_kind(kind: String@symbol) RETURNS ![]String@symbol ->
+PUB FN aST__types_for_kind(kind: String@symbol) RETURNS ![]String@symbol ->
   MUTABLE types: []String@symbol = ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } );
   (TRY (aST__error_types())).keys() |> EACH {
   MUTABLE meta: ErrorTypeEntry = ((TRY (aST__error_types()))[_] OR_ELSE CAST(panic("missing hash key") AS ErrorTypeEntry));

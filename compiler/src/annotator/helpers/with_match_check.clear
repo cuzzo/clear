@@ -375,39 +375,54 @@ PUB FN withMatchCheck__errors_for_requires(family_set: ?[Set]String@symbol) RETU
   END
   RETURN errors;
 END
-PUB FN withMatchCheck__warn_polymorphic_unhandled_errors_mut(node: WithBlock, bound_params: [Set]String, requires_map: {String}[Set]String@symbol, policy_handlers: []ErrorClause, warn_handler: Any) RETURNS !?[Set]String ->
+PUB FN withMatchCheck__warn_polymorphic_unhandled_errors_mut(node: WithBlock, bound_params: [Set]String, requires_map: {String}[Set]String@symbol, policy_handlers: []ErrorClause, warn_handler: ?FN(Locatable, String) -> Void) RETURNS !Void ->
   IF !(((warn_handler != NIL) AND (node.polymorphic OR_ELSE FALSE))) THEN
     RETURN;
   END
   MUTABLE handled = TRY (withMatchCheck__handled_error_set(node, policy_handlers));
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < bound_params.length() DO
-    MUTABLE fams: ?[Set]String@symbol = COPY requires_map[bound_params[rtoc_idx]];
-    IF !(((fams != NIL) AND !(fams.empty?()))) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+  FOR bound_param IN bound_params DO
+    IF requires_map[bound_param] EXISTS AS fams THEN
+      IF !(fams.empty?()) THEN
+        MUTABLE possible = TRY (withMatchCheck__errors_for_requires(fams));
+        MUTABLE family_names: String = "";
+        FOR family IN fams DO
+          IF (family_names.length() == 0) THEN
+            family_names = "${family}";
+          ELSE
+            family_names = "${family_names} | ${family}";
+          END
+        END
+        FOR possible_error IN possible DO
+          IF !(handled.contains?(possible_error)) THEN
+            IF warn_handler EXISTS AS warn_handler_value THEN
+              warn_handler_value(Locatable{ WithBlock: COPY node }, "Polymorphic error `${possible_error}` may fire under `REQUIRES ${bound_param}: ${family_names}` but no ON clause or SYNC POLICY handles it");
+            END
+          END
+        END
+      END
     END
-    MUTABLE possible = TRY (withMatchCheck__errors_for_requires(fams));
-    MUTABLE unhandled = (possible - handled);
-    FOR _ IN unhandled DO
-    warn_handler(node, "Polymorphic error `${_}` may fire under `REQUIRES ${bound_params[rtoc_idx]}: ${(fams |> SELECT COPY _).join(" | ")}` but no handler is in scope (per-WITH `ON ${_} ...` or program SYNC POLICY).");
-    END
-  rtoc_idx = rtoc_idx + 1;
   END
-  RETURN NIL;
+  RETURN;
 END
 PUB FN withMatchCheck__handled_error_set(node: WithBlock, policy_handlers: []ErrorClause) RETURNS ![Set]String@symbol ->
-  MUTABLE handled = Set[];
-  FOR _ IN ([node.lock_error_clause] + policy_handlers) DO
-  FOR _ IN _.selectors() DO
-  IF (_.form() == :type) THEN
-    &handled.insert(_.name());
-  ELSE_IF (_.form() == :kind) THEN
-    FOR _ IN (AST.types_for_kind(_.name())) DO
-    &handled.insert(COPY _);
+  MUTABLE handled: [Set]String@symbol = Set[];
+  MUTABLE clauses: []ErrorClause = [];
+  IF node.lock_error_clause EXISTS AS lock_clause THEN
+    &clauses.append(COPY lock_clause);
+  END
+  FOR policy_handler IN policy_handlers DO
+    &clauses.append(COPY policy_handler);
+  END
+  FOR clause IN clauses DO
+    FOR selector IN clause.selectors DO
+      IF (selector.form == :type) THEN
+        &handled.insert(COPY selector.name);
+      ELSE_IF (selector.form == :kind) THEN
+        FOR kind_type IN (TRY (aST__types_for_kind(selector.name))) DO
+          &handled.insert(COPY kind_type);
+        END
+      END
     END
-  END
-  END
   END
   RETURN handled;
 END
