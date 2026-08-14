@@ -163,11 +163,10 @@ PRIVATE FN autoConstraintCollector__auto?(self: AutoConstraintCollector, t: ?Typ
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN !(!((IF t != NIL THEN
-      type__auto?((t?))
-    ELSE
-      NIL
-    END)));
+    IF t EXISTS AS t_value THEN
+      RETURN type__auto?(t_value);
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN autoConstraintCollector__walk(MUTABLE self: AutoConstraintCollector, node: ?AutoInferenceWalkNode, current_fn: ?FunctionDef) RETURNS Void
@@ -1022,11 +1021,10 @@ PRIVATE FN operatorEvidenceCollector__auto?(self: OperatorEvidenceCollector, t: 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN !(!((IF t != NIL THEN
-      type__auto?((t?))
-    ELSE
-      NIL
-    END)));
+    IF t EXISTS AS t_value THEN
+      RETURN type__auto?(t_value);
+    END
+    RETURN FALSE;
 }
 END
 FN operatorEvidenceCollector__new(slots: {AutoSlotId@multiowned}Slot, fn_nodes: {String}FunctionDef) RETURNS OperatorEvidenceCollector@multiowned ->
