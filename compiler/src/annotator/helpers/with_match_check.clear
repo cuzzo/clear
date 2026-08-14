@@ -173,29 +173,50 @@ PUB FN withMatchCheck__collect_sync_bound_param_names(with_node: WithBlock, para
   END
   RETURN out;
 END
-PUB FN withMatchCheck__enforce_polymorphic_iff_rule_mut(node: WithBlock, bound_params: [Set]String, requires_map: {String}[Set]String@symbol, fn_value: FunctionDef, error_handler: Any) RETURNS !?CallExpr ->
+PUB FN withMatchCheck__enforce_polymorphic_iff_rule_mut(node: WithBlock, bound_params: [Set]String, requires_map: {String}[Set]String@symbol, fn_value: FunctionDef, error_handler: FN(Locatable, String) -> Void) RETURNS !Void ->
   IF (node.view_kind OR node.snapshot_mode) THEN
     RETURN;
   END
   IF node.universal_poly THEN
     RETURN;
   END
-  MUTABLE has_poly_param = bound_params |> ANY TRY (withMatchCheck__poly_requires?(requires_map[_]));
-  MUTABLE has_universal_poly_param = bound_params |> ANY (!(requires_map.contains?(_)) OR ((IF requires_map[_] != NIL THEN
-    (requires_map[_]).empty?()
-  ELSE
-    NIL
-  END)));
+  MUTABLE has_poly_param = FALSE;
+  MUTABLE has_universal_poly_param = FALSE;
+  FOR bound_param IN bound_params DO
+    IF requires_map[bound_param] EXISTS AS declared_families THEN
+      IF TRY (withMatchCheck__poly_requires?(declared_families)) THEN
+        has_poly_param = TRUE;
+      END
+      IF declared_families.empty?() THEN
+        has_universal_poly_param = TRUE;
+      END
+    ELSE
+      has_universal_poly_param = TRUE;
+    END
+  END
   IF ((node.polymorphic AND !(has_poly_param)) AND !(has_universal_poly_param)) THEN
     RETURN error_handler(Locatable{ WithBlock: COPY node }, "WITH POLYMORPHIC is only allowed when at least one bound binding is a polymorphic parameter (REQUIRES admits more than one storage family, e.g. `LOCKED` or `SNAPSHOTTED`). Either drop POLYMORPHIC and use plain WITH (be specific), or broaden REQUIRES to a polymorphic family.");
   ELSE_IF (!(node.polymorphic) AND has_poly_param) THEN
-    MUTABLE poly_param_examples = bound_params |> WHERE TRY (withMatchCheck__poly_requires?(requires_map[_]));
-    MUTABLE example = poly_param_examples.first();
-    MUTABLE example_fams = ((requires_map[example] OR_ELSE Set[])).to_a().join(" | ");
+    MUTABLE example: String = "";
+    MUTABLE example_fams: String = "";
+    FOR bound_param IN bound_params DO
+      IF requires_map[bound_param] EXISTS AS declared_families THEN
+        IF (TRY (withMatchCheck__poly_requires?(declared_families)) AND (example.length() == 0)) THEN
+          example = COPY bound_param;
+          FOR family IN declared_families DO
+            IF (example_fams.length() == 0) THEN
+              example_fams = "${family}";
+            ELSE
+              example_fams = "${example_fams} | ${family}";
+            END
+          END
+        END
+      END
+    END
     RETURN error_handler(Locatable{ WithBlock: COPY node }, "Plain WITH on the polymorphic parameter '${example}' (REQUIRES admits ${example_fams}) is not allowed. Use `WITH POLYMORPHIC ...` so the body's polymorphism is visible at the use site (the comptime dispatch lowers per family). If you want to commit to a single family, narrow REQUIRES to one of: VERSIONED, ATOMIC.");
   END
 END
-PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_lookup: Any, error_handler: Any) RETURNS !Void ->
+PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_lookup: FN(String) -> ?Type, error_handler: FN(Locatable, String) -> Void) RETURNS !Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < call_sites.length() DO
     MUTABLE call_node = COPY KEEP call_sites[rtoc_idx]?.node;
