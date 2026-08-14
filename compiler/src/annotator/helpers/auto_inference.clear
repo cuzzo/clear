@@ -633,15 +633,15 @@ PRIVATE FN autoUnifier__stamp_slot_mut(self: AutoUnifier, MUTABLE slot: Slot, ty
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE resolved_type = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_13: ?AutoConstraintCollectorObservedType = NIL;
-    IF type IS_A Type THEN
-      rtoc_ternary_value_13 = type;
+    MUTABLE resolved_branch: ?Type = NIL;
+    IF type IS_A Type AS observed_type_value THEN
+      resolved_branch = COPY observed_type_value;
     ELSE
-      rtoc_ternary_value_13 = TRY (type__new(castAutoConstraintCollectorObservedTypeToTypeConstructionInput(type)));
+      resolved_branch = TRY (type__new(castAutoConstraintCollectorObservedTypeToTypeConstructionInput(type)));
     END
-    rtoc_ternary_value_13? };
+    MUTABLE resolved_type: Type = UNWRAP (resolved_branch);
     IF (slot.shape == :list_element) THEN
-      MUTABLE element_sym = resolved_type.resolved();
+      MUTABLE element_sym = type__resolved(resolved_type);
       MUTABLE rtoc_writer_receiver_14: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node);
       rtoc_writer_receiver_14.type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${element_sym}[]") }));
       RETURN;
