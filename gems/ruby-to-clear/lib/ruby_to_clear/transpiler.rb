@@ -4706,9 +4706,27 @@ end
       value_node.is_a?(Prism::LocalVariableReadNode) && @current_param_names.include?(value_node.name.to_s)
     end
 
+    # Last net for the "Cannot return borrowed value without COPY" class: the
+    # emitted code is a bare field read (optionally behind the CAST a T.cast
+    # produced) and the function hands it out with a type CLEAR will not copy
+    # implicitly. Type resolution can miss the receiver -- an alias of an alias,
+    # a narrowing the emitter did not record -- but the SHAPE is unambiguous.
+    def borrowed_field_read_code?(code)
+      declared = @current_function_return_type.to_s
+      return false if declared.empty?
+      # An unresolved return type says nothing about ownership; forcing a deep
+      # copy there would change programs the compiler never complained about.
+      return false if %w[Auto Any Void].include?(declared)
+      return false if implicitly_copyable_clear_type?(declared)
+
+      text = code.to_s.strip
+      text = text.sub(/\ACAST\((.*) AS [^)]*\)\z/, '\\1').strip
+      text.match?(/\A[a-z_][A-Za-z0-9_]*(?:\.[a-z_][A-Za-z0-9_]*)+\z/)
+    end
+
     def materialize_borrowed_code(code, node)
       return code unless stored_borrowed_value?(node) || returning_borrowed_owned_read?(node) ||
-        narrowed_binding_read?(code)
+        narrowed_binding_read?(code) || borrowed_field_read_code?(code)
       semantic_type = @typed_ir.value_for(node)&.type&.to_clear
       value_type = semantic_type || inferred_clear_type(node)
       return code if value_type.to_s.delete_prefix("?").end_with?("@symbol")
