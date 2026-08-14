@@ -51,7 +51,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE bound_params = TRY (withMatchCheck__collect_bound_param_names(with_blocks[rtoc_idx]?, param_names));
+    MUTABLE bound_params = withMatchCheck__collect_bound_param_names(with_blocks[rtoc_idx]?, param_names);
     IF !(with_blocks[rtoc_idx]?.arms) THEN
         TRY (withMatchCheck__enforce_polymorphic_iff_rule_mut(with_blocks[rtoc_idx]?, bound_params, requires_map, fn_value, error_handler));
     END
@@ -66,7 +66,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
       IF with_blocks[rtoc_idx]?.polymorphic THEN
         requires_bound_params = bound_params;
       ELSE
-        requires_bound_params = TRY (withMatchCheck__collect_sync_bound_param_names(with_blocks[rtoc_idx]?, param_names));
+        requires_bound_params = withMatchCheck__collect_sync_bound_param_names(with_blocks[rtoc_idx]?, param_names);
       END
     MUTABLE rtoc_req_idx = 0;
     WHILE rtoc_req_idx < requires_bound_params.length() DO
@@ -139,35 +139,35 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
   END
   NIL;
 END
-PUB FN withMatchCheck__collect_bound_param_names(with_node: WithBlock, param_names: [Set]String) RETURNS ![Set]String ->
-  MUTABLE out = Set[];
+PUB FN withMatchCheck__collect_bound_param_names(with_node: WithBlock, param_names: [Set]String) RETURNS [Set]String ->
+  MUTABLE out: [Set]String = Set[];
   MUTABLE rtoc_each_items_2 = ((TRY (capabilityPlan__require_for(with_node))).all);
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_2.length() DO
-    MUTABLE vn = COPY rtoc_each_items_2[rtoc_idx]?.var_node;
-    IF !(vn IS_A Identifier) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    IF param_names.contains?(vn.name()) THEN
-        &out.insert(vn.name());
+    MUTABLE vn: ?Locatable = COPY rtoc_each_items_2[rtoc_idx]?.var_node;
+    IF vn EXISTS AS vn_value THEN
+      IF vn_value IS_A Identifier AS identifier THEN
+        IF param_names.contains?(identifier.name) THEN
+          &out.insert(COPY identifier.name);
+        END
+      END
     END
   rtoc_idx = rtoc_idx + 1;
   END
   RETURN out;
 END
-PUB FN withMatchCheck__collect_sync_bound_param_names(with_node: WithBlock, param_names: [Set]String) RETURNS ![Set]String ->
-  MUTABLE out = Set[];
+PUB FN withMatchCheck__collect_sync_bound_param_names(with_node: WithBlock, param_names: [Set]String) RETURNS [Set]String ->
+  MUTABLE out: [Set]String = Set[];
   MUTABLE rtoc_each_items_3 = (TRY (withCapabilityPlan__sync_constrained((TRY (capabilityPlan__require_for(with_node))))));
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_3.length() DO
-    MUTABLE vn = COPY rtoc_each_items_3[rtoc_idx]?.var_node;
-    IF !(vn IS_A Identifier) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    IF param_names.contains?(vn.name()) THEN
-        &out.insert(vn.name());
+    MUTABLE vn: ?Locatable = COPY rtoc_each_items_3[rtoc_idx]?.var_node;
+    IF vn EXISTS AS vn_value THEN
+      IF vn_value IS_A Identifier AS identifier THEN
+        IF param_names.contains?(identifier.name) THEN
+          &out.insert(COPY identifier.name);
+        END
+      END
     END
   rtoc_idx = rtoc_idx + 1;
   END

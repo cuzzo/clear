@@ -28,7 +28,7 @@ FN capabilityRequest__effective_alias_name(self: CapabilityRequest) RETURNS Stri
   RETURN capabilityPlan__var_name_for(self.var_node);
   END
 END
-STRUCT CapabilityTargetFact {
+PUB STRUCT CapabilityTargetFact {
   var_node: Locatable,
   var_name: String,
   target_label: String,
@@ -196,23 +196,23 @@ FN capabilityTransition__with_source_entry(self: CapabilityTransition, source_en
   MUTABLE refreshed_target = TRY (capabilityTargetFact__with_source_entry(self.target, source_entry));
   RETURN TRY (capabilityPlan__transition_from(self.request, refreshed_target, self.borrowed_qualifier));
 END
-STRUCT WithCapabilityPlan {
+PUB STRUCT WithCapabilityPlan {
   all: []CapabilityTransition
 }
 
-FN withCapabilityPlan__add(MUTABLE self: WithCapabilityPlan, fact: CapabilityTransition) RETURNS Void ->
+PUB FN withCapabilityPlan__add(MUTABLE self: WithCapabilityPlan, fact: CapabilityTransition) RETURNS Void ->
   &self.all.append(COPY fact);
 END
-FN withCapabilityPlan__locks(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
+PUB FN withCapabilityPlan__locks(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
   RETURN self.all |> WHERE ([symbol("EXCLUSIVE"), :write_locked_read] |> DISTINCT _).contains?(_.capability);
 END
-FN withCapabilityPlan__guarded(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
+PUB FN withCapabilityPlan__guarded(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
   RETURN self.all |> WHERE !((_.guard_expr == NIL));
 END
-FN withCapabilityPlan__sync_constrained(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
+PUB FN withCapabilityPlan__sync_constrained(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
   RETURN self.all |> WHERE capabilityTransition__sync_constrained?(_);
 END
-FN withCapabilityPlan__snapshot_transitions(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
+PUB FN withCapabilityPlan__snapshot_transitions(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
   RETURN self.all |> WHERE capabilityTransition__snapshot?(_);
 END
 FN withCapabilityPlan__mutable_snapshot?(self: WithCapabilityPlan) RETURNS !Bool ->
@@ -260,7 +260,7 @@ FN capabilityPlan__refresh_function_plans_mut(fn_value: FunctionDef, with_blocks
   rtoc_idx = rtoc_idx + 1;
   END
 END
-FN capabilityPlan__require_for(node: WithBlock) RETURNS !WithCapabilityPlan ->
+PUB FN capabilityPlan__require_for(node: WithBlock) RETURNS !WithCapabilityPlan ->
   MUTABLE plan: ?WithCapabilityPlan = COPY node.capability_plan;
   IF plan EXISTS AS plan_value THEN
     RETURN COPY CAST(plan_value AS WithCapabilityPlan);
