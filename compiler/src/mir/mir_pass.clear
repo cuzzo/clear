@@ -1,0 +1,1034 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f636c61737369666965722e636c656172" AS cleanup_classifier
+REQUIRE "pkg:rtoc_73656d616e7469632f6573636170655f616e616c797369732e636c656172" AS escape_analysis
+REQUIRE "pkg:rtoc_73656d616e7469632f62675f636170747572655f636c61737369666965722e636c656172" AS bg_capture_classifier
+REQUIRE "pkg:rtoc_636f6d70696c65722f656e747279706f696e742e636c656172" AS entrypoint
+REQUIRE "pkg:rtoc_6d69722f636f6e74726f6c5f666c6f772e636c656172" AS control_flow
+REQUIRE "pkg:rtoc_73656d616e7469632f706173735f73746174652e636c656172" AS pass_state
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6966656379636c655f706c616e2e636c656172" AS lifecycle_plan
+REQUIRE "pkg:rtoc_6d69722f6d69725f706c616e6e696e672e636c656172" AS mir_planning
+REQUIRE "pkg:rtoc_6d69722f70726f6772616d5f6d69725f66616374732e636c656172" AS program_mir_facts
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6f63616c5f62696e64696e675f66616374732e636c656172" AS local_binding_facts
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f626f64795f616e616c797369732e636c656172" AS body_analysis
+REQUIRE "pkg:rtoc_616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+PUB STRUCT MIRPass {
+  body_summaries: {String}FunctionBodySummary,
+  current_transform_fn: ?FunctionDef,
+  escape_placement_facts: EscapePlacementFacts,
+  fn_nodes: {String}FunctionDef@multiowned,
+  hoist_bindings: {String}[]VarDecl,
+  lifecycle_registry: ?LifecycleRegistry@multiowned,
+  program_facts: ProgramMIRFacts@multiowned,
+  schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult
+}
+
+PUB UNION MIRPassAstCall { FuncCall: FuncCall, MethodCall: MethodCall }
+PUB STRUCT WalkCtx {
+  cleanup_facts: FrozenCleanupFacts
+}
+
+PUB FN walkCtx__with(self: WalkCtx, cleanup_facts: FrozenCleanupFacts = self.cleanup_facts) RETURNS WalkCtx ->
+  RETURN WalkCtx{ cleanup_facts: COPY cleanup_facts };
+END
+PUB FN mIRPass__initialize(MUTABLE self: MIRPass, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL, body_summaries: {String}FunctionBodySummary, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.fn_nodes = COPY fn_nodes;
+    rtoc_self_view.schema_lookup = COPY schema_lookup;
+    rtoc_self_view.lifecycle_registry = COPY lifecycle_registry;
+    rtoc_self_view.body_summaries = COPY body_summaries;
+    rtoc_self_view.hoist_bindings = (hoist_bindings OR_ELSE {});
+    rtoc_self_view.escape_placement_facts = EscapePlacementFacts{ placements: List[] };
+    rtoc_self_view.program_facts = programMIRFacts__empty();
+    rtoc_self_view.current_transform_fn = NIL;
+}
+END
+PUB FN mIRPass__live_cleanup_entry(self: MIRPass, facts: FrozenCleanupFacts, name: Name) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN frozenCleanupFacts__live_entry_for(facts, name);
+}
+END
+PUB FN mIRPass__alloc_marker(self: MIRPass, name: String, alloc: String@symbol, type_info: Type) RETURNS AllocMark
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE marker = AllocMark{ name: COPY name, alloc: COPY alloc, type_info: COPY type_info, scope: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    marker.scope = placement__alloc_scope(alloc);
+    RETURN marker;
+}
+END
+PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, ast: Program) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE pass_state = mIRPassState__for_mut(MIRPassStateProgram{ Emittable: COPY CAST(ast AS Emittable) });
+    TRY (mIRPassState__require_mut(pass_state, :premir_type_checked, "MIRPass"));
+    MUTABLE planning = TRY (mIRPlanner__plan_all_mut(rtoc_self_view.fn_nodes, rtoc_self_view.schema_lookup, rtoc_self_view.lifecycle_registry, rtoc_self_view.body_summaries, rtoc_self_view.hoist_bindings));
+    rtoc_self_view.escape_placement_facts = COPY planning.escape_placements;
+    TRY (mIRPassState__mark_mut(&pass_state, :escape_analyzed));
+    TRY (mIRPassState__mark_mut(&pass_state, :cleanup_classified));
+    TRY (mIRPassState__mark_mut(&pass_state, :loop_frame_analyzed));
+    rtoc_self_view.program_facts = TRY (programMIRFinalizer__finalize(rtoc_self_view.fn_nodes, planning.cleanup_plans, rtoc_self_view.body_summaries, rtoc_self_view.schema_lookup));
+    TRY (mIRPass__apply_program_facts_mut(rtoc_self_view));
+    TRY (mIRPassState__mark_mut(&pass_state, :needs_rt_finalized));
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < ast.statements.length() DO
+      IF !((ast.statements[rtoc_idx] IS_A FunctionDef AND ast.statements[rtoc_idx].body())) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      TRY (mIRPass__transform_function_mut(&rtoc_self_view, &ast.statements[rtoc_idx], mIRPlanningResult__cleanup_plan_for(planning, CAST(ast.statements[rtoc_idx].name() AS String)), planning.can_fail_functions));
+    rtoc_idx = rtoc_idx + 1;
+    END
+    FOR rtoc_key IN rtoc_self_view.fn_nodes.keys() DO
+    MUTABLE fn_value: FunctionDef@multiowned = COPY UNWRAP (rtoc_self_view.fn_nodes[rtoc_key]);
+    IF !((TRUE AND rtoc_key.startsWith?("__test_body_"))) THEN
+      CONTINUE;
+    END
+    IF !((IF fn_value != NIL THEN
+        fn_value.body
+      ELSE
+        NIL
+      END)) THEN
+        CONTINUE;
+    END
+    TRY (mIRPass__transform_function_mut(&rtoc_self_view, CAST(COPY fn_value AS FunctionDef), mIRPlanningResult__cleanup_plan_for(planning, rtoc_key), planning.can_fail_functions));
+    END
+    TRY (mIRPassState__mark_mut(&pass_state, :mir_pass_complete));
+    NIL;
+}
+END
+PRIVATE FN mIRPass__apply_program_facts_mut(self: MIRPass) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    FOR rtoc_key IN rtoc_self_view.fn_nodes.keys() DO
+    MUTABLE function: FunctionDef@multiowned = COPY UNWRAP (rtoc_self_view.fn_nodes[rtoc_key]);
+    function.needs_rt = rtoc_self_view.program_facts.functions[rtoc_key]?.needs_runtime;
+    MUTABLE signature = TRY (functionSignature__from_function_def(CAST(COPY function AS FunctionDef)));
+      TRY (functionSignature__sync_from_function_def_mut(&signature, FunctionSignatureSyncSource{ FunctionDefMultiowned: COPY function }));
+    END
+    NIL;
+}
+END
+PRIVATE FN mIRPass__transform_function_mut(MUTABLE self: MIRPass, MUTABLE function: FunctionDef, cleanup_plan: CleanupClassificationPlan, can_fail_functions: [Set]String) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE cleanup_facts = COPY cleanup_plan.facts;
+    TRY (cleanupClassifier__stamp_field_pre_cleanups_mut(function.body, cleanup_facts, rtoc_self_view.schema_lookup, rtoc_self_view.lifecycle_registry));
+    IF cleanupClassificationPlan__empty?(cleanup_plan) THEN
+      RETURN;
+    END
+    MUTABLE bc_errors = TRY (borrowChecker__check(function, rtoc_self_view.schema_lookup));
+    IF !((bc_errors.length() == 0)) THEN
+      panic("[Borrow Error] {}");
+    END
+    TRY (mIRPass__pre_mark_bg_resource_captures_mut(rtoc_self_view, function, cleanup_facts));
+    MUTABLE dataflow = TRY (ownershipDataflow__analyze(function, can_fail_functions, rtoc_self_view.schema_lookup));
+    TRY (ownershipDataflow__cleanup_decisions_mut(dataflow, function, cleanup_facts));
+    TRY (mIRPass__mark_returned_cleanup_bindings_mut(rtoc_self_view, function, cleanup_facts));
+    function.cleanup_bindings = TRY (frozenCleanupFacts__bindings(cleanup_facts));
+    rtoc_self_view.current_transform_fn = COPY function;
+    function.body = TRY (mIRPass__transform_body(rtoc_self_view, function.body, WalkCtx{ cleanup_facts: COPY cleanup_facts }));
+    rtoc_self_view.current_transform_fn = NIL;
+    mIRPass__stamp_moved_guard_info_mut(rtoc_self_view, &function, cleanup_facts);
+    NIL;
+}
+END
+PRIVATE FN mIRPass__pre_mark_bg_resource_captures_mut(self: MIRPass, fn_value: FunctionDef, facts: FrozenCleanupFacts) RETURNS ![]Locatable
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    TRY (aST__each_bg_block(Body{ ArrayValue: COPY fn_value.body }, %(bg_value: BgNode) USE(facts) -> {
+    MUTABLE resource_captures = (IF selectOp__capture_analysis(bg_value) != NIL THEN
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = (selectOp__capture_analysis(bg_value));
+    TRY (ownershipDataflow__resource_captures(rtoc_local_receiver_1)) }
+      ELSE
+        NIL
+      END);
+    IF !((IF resource_captures != NIL THEN
+        type__any?(resource_captures)
+      ELSE
+        NIL
+      END)) THEN
+        RETURN;
+    END
+    FOR _ IN resource_captures DO
+    frozenCleanupFacts__with_live_entry_for(facts, _, %(entry: CleanupEntry) -> {
+      cleanupEntry__mark_moved_guard_mut(&entry);
+      rubyToClearVoid()
+    });
+    END
+    rubyToClearVoid()
+    }));
+    RETURN COPY fn_value.body;
+}
+END
+PRIVATE FN mIRPass__transform_body(self: MIRPass, stmts: []Locatable, ctx: WalkCtx) RETURNS ![]Any@multiowned
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE result = List[];
+    MUTABLE cleanup_facts = COPY ctx.cleanup_facts;
+    FOR _ IN stmts DO
+    MUTABLE rtoc_mutable_block_param_2 = COPY _;
+    TRY (mIRPass__recurse_branches_mut(rtoc_self_view, &rtoc_mutable_block_param_2, ctx));
+    IF rtoc_mutable_block_param_2 IS_A ReturnNode AS return_node THEN
+        mIRPass__insert_return_mut(rtoc_self_view, result, return_node, cleanup_facts, rtoc_self_view.current_transform_fn);
+    END
+    TRY (mIRPass__stamp_reassign_cleanup_mut(rtoc_self_view, &rtoc_mutable_block_param_2, cleanup_facts));
+    TRY (mIRPass__stamp_match_as_cleanup_mut(rtoc_self_view, rtoc_mutable_block_param_2, cleanup_facts));
+    TRY (mIRPass__stamp_while_bind_cleanup_mut(rtoc_self_view, &rtoc_mutable_block_param_2, cleanup_facts));
+    mIRPass__stamp_if_bind_cleanup_mut(rtoc_self_view, &rtoc_mutable_block_param_2, cleanup_facts);
+    &result.append(COPY rtoc_mutable_block_param_2);
+    IF (IF rtoc_mutable_block_param_2 IS_A BindExpr AS bind_expr THEN bind_expr.reassign_cleanup ELSE FALSE END) THEN
+        &result.append(ReassignCleanup{ token: rtoc_mutable_block_param_2.token(), name: COPY CAST(rtoc_mutable_block_param_2.name() AS String), alloc: rtoc_mutable_block_param_2.reassign_cleanup().alloc_mut(), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+    END
+    IF (IF rtoc_mutable_block_param_2 IS_A Assignment AS assignment THEN assignment.field_pre_cleanup ELSE FALSE END) THEN
+        MUTABLE target = rtoc_mutable_block_param_2.name();
+        MUTABLE target_name: ?String = IF (target IS_A GetField AND respondsTo?(target.target(), "name")) THEN
+          CAST(target.target().name() AS String)
+        ELSE
+          NIL
+        END;
+        IF target_name EXISTS AS target_name_value THEN
+          &result.append(FieldCleanup{ token: rtoc_mutable_block_param_2.token(), target_name: target_name_value, field: target.field(), alloc: rtoc_mutable_block_param_2.field_pre_cleanup(), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+        END
+    END
+    TRY (mIRPass__mark_consumed_cleanup_guards_mut(rtoc_self_view, rtoc_mutable_block_param_2, cleanup_facts));
+    END
+    RETURN result;
+}
+END
+PRIVATE FN mIRPass__recurse_branches_mut(self: MIRPass, MUTABLE stmt: Locatable, ctx: WalkCtx) RETURNS !Void
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE branch_ctx_branch_value: ?WalkCtx = NIL;
+    IF (stmt IS_A BgBlock OR stmt IS_A BgStreamBlock) THEN
+      branch_ctx_branch_value = walkCtx__with(ctx, {:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castLocatableToBgNode(stmt), ctx.cleanup_facts)});
+    ELSE
+      branch_ctx_branch_value = COPY ctx;
+    END
+    MUTABLE branch_ctx: WalkCtx = branch_ctx_branch_value?;
+    FOR _ IN (TRY (aST__body_slots(&stmt))) DO
+    MUTABLE rtoc_mutable_block_param_4 = COPY _;
+    MUTABLE rtoc_mutable_alias_arg_3 = COPY TRY (mIRPass__transform_body(rtoc_self_view, rtoc_mutable_block_param_4.body, branch_ctx));
+    bodySlot__replace(&rtoc_mutable_block_param_4, rtoc_mutable_alias_arg_3);
+    END
+    IF stmt IS_A VarDecl AS var_decl THEN
+      MUTABLE var_decl_mutable = COPY var_decl;
+      TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &var_decl_mutable.value, ctx));
+    ELSE_IF stmt IS_A BindExpr AS bind_expr THEN
+      MUTABLE bind_expr_mutable = COPY bind_expr;
+      TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &bind_expr_mutable.value, ctx));
+    ELSE_IF stmt IS_A Assignment AS assignment THEN
+      MUTABLE assignment_mutable = COPY assignment;
+      TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &assignment_mutable.value, ctx));
+    ELSE_IF stmt IS_A DestructuringAssignment AS destructuring_assignment THEN
+      MUTABLE destructuring_assignment_mutable = COPY destructuring_assignment;
+      TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &destructuring_assignment_mutable.value, ctx));
+    ELSE_IF stmt IS_A ReturnNode AS return_node THEN
+      MUTABLE return_node_mutable = COPY return_node;
+      TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &return_node_mutable.value, ctx));
+    ELSE_IF (stmt IS_A MethodCall) OR (stmt IS_A FuncCall) THEN
+      FOR _ IN stmt.args() DO
+    MUTABLE rtoc_mutable_block_param_5 = COPY _;
+      TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &rtoc_mutable_block_param_5, ctx));
+      END
+    END
+}
+END
+PRIVATE FN mIRPass__recurse_expr_body_mut(self: MIRPass, MUTABLE val: ?Locatable, ctx: WalkCtx) RETURNS !Void
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF (((val != NIL) AND (val IS_A BgBlock)) AND val.body()) THEN
+      val.body = TRY (mIRPass__transform_body(rtoc_self_view, val.body(), walkCtx__with(ctx, {:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castOptionalLocatableToBgNode(val), ctx.cleanup_facts)})));
+    ELSE_IF ((val != NIL) AND (val IS_A BlockExpr)) THEN
+      val.body = TRY (mIRPass__transform_body(rtoc_self_view, val.body(), ctx));
+    END
+}
+END
+PRIVATE FN mIRPass__bg_inner_facts(self: MIRPass, bg_node: BgNode, facts: FrozenCleanupFacts) RETURNS FrozenCleanupFacts
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE captures = (IF bg_node.capture_analysis() != NIL THEN
+      (bg_node.capture_analysis()).captures()
+    ELSE
+      NIL
+    END);
+    IF !((IF captures != NIL THEN
+      type__any?(captures)
+    ELSE
+      NIL
+    END)) THEN
+      RETURN COPY facts;
+    END
+    RETURN frozenCleanupFacts__without_names(facts, captures.keys() |> SELECT _.toString());
+}
+END
+PRIVATE FN mIRPass__mark_consumed_cleanup_guards_mut(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !?[Set]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF stmt IS_A ReturnNode AS return_node THEN
+      RETURN;
+    END
+    RETURN TRY (mIRPass__collect_consumed_names(rtoc_self_view, stmt, facts));
+}
+END
+PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS ![Set]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE names = Set[];
+    MUTABLE rhs = PARTIAL MATCH stmt START
+      Locatable.VarDecl AS var_decl -> var_decl.value,
+      Locatable.BindExpr AS bind_expr -> bind_expr.value,
+      Locatable.Assignment AS assignment -> assignment.value,
+      Locatable.DestructuringAssignment AS destructuring_assignment -> destructuring_assignment.value,
+      DEFAULT -> NIL
+    END;
+    IF rhs THEN
+      MUTABLE ident = IF rhs IS_A MoveNode THEN
+        rhs.value()
+      ELSE
+        rhs
+      END;
+      IF ident IS_A Identifier THEN
+        TRY (mIRPass__add_if_consumed(rtoc_self_view, &ident, &names, facts, aST__moved?(ident)));
+      END
+    END
+    IF stmt IS_A MoveNode AS move_node THEN
+    IF move_node.value IS_A Identifier THEN
+      TRY (mIRPass__add_if_consumed(rtoc_self_view, &move_node.value, &names, facts, aST__moved?(move_node.value)));
+    END
+    END
+    MUTABLE value_expr = PARTIAL MATCH stmt START
+      Locatable.VarDecl AS var_decl -> var_decl.value,
+      Locatable.BindExpr AS bind_expr -> bind_expr.value,
+      Locatable.Assignment AS assignment -> assignment.value,
+      Locatable.DestructuringAssignment AS destructuring_assignment -> destructuring_assignment.value,
+      DEFAULT -> stmt
+    END;
+    IF value_expr IS_A MoveNode THEN
+      value_expr = value_expr.value();
+    END
+    TRY (mIRPass__walk_consumed(rtoc_self_view, value_expr, &names, facts));
+    RETURN names;
+}
+END
+PRIVATE FN mIRPass__walk_consumed(self: MIRPass, MUTABLE node: ?Locatable, MUTABLE names: [Set]String, facts: FrozenCleanupFacts) RETURNS !Void
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF node EXISTS AS node_value THEN
+      MUTABLE node_value_mutable = COPY node_value;
+      IF node_value_mutable IS_A CapabilityWrap AS capability_wrap THEN
+        MUTABLE capability_wrap_mutable = COPY capability_wrap;
+        TRY (mIRPass__walk_consumed(rtoc_self_view, capability_wrap_mutable.value, &names, facts));
+      ELSE_IF node_value_mutable IS_A StructLit AS struct_lit THEN
+        MUTABLE struct_lit_mutable = COPY struct_lit;
+        FOR _ IN struct_lit_mutable.fields.values() DO
+    MUTABLE rtoc_mutable_block_param_6 = COPY _;
+        IF rtoc_mutable_block_param_6 IS_A Identifier THEN
+          TRY (mIRPass__add_if_consumed(rtoc_self_view, &rtoc_mutable_block_param_6, &names, facts, FALSE));
+        ELSE
+          TRY (mIRPass__walk_consumed(rtoc_self_view, rtoc_mutable_block_param_6, &names, facts));
+        END
+        END
+      ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
+        MUTABLE list_lit_mutable = COPY list_lit;
+        FOR _ IN list_lit_mutable.items DO
+        TRY (mIRPass__walk_consumed(rtoc_self_view, _, &names, facts));
+        END
+      ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
+        MUTABLE get_field_mutable = COPY get_field;
+        IF mIRPass__owning_field_move?(rtoc_self_view, Locatable{ GetField: COPY get_field_mutable }) THEN
+          MUTABLE root: ?Identifier = aST__root_identifier(Locatable{ GetField: COPY get_field_mutable });
+          IF root EXISTS AS root_value THEN
+            MUTABLE root_value_mutable = COPY root_value;
+            frozenCleanupFacts__with_live_entry_for_node(facts, Name{ StringValue: COPY root_value_mutable.name }, Locatable{ Identifier: COPY root_value_mutable }, %(entry: CleanupEntry) USE(MUTABLE names, root_value_mutable) -> {
+    cleanupEntry__mark_moved_guard_mut(&entry);
+    &names.insert(COPY root_value_mutable.name);
+    rubyToClearVoid()
+            });
+          END
+        ELSE
+          TRY (mIRPass__walk_consumed(rtoc_self_view, get_field_mutable.target, &names, facts));
+        END
+      ELSE_IF node_value_mutable IS_A MoveNode AS move_node THEN
+        MUTABLE move_node_mutable = COPY move_node;
+        IF move_node_mutable.value IS_A Identifier THEN
+          TRY (mIRPass__add_if_consumed(rtoc_self_view, &move_node_mutable.value, &names, facts, aST__moved?(move_node_mutable.value)));
+        ELSE
+          TRY (mIRPass__walk_consumed(rtoc_self_view, move_node_mutable.value, &names, facts));
+        END
+      ELSE_IF (node_value_mutable IS_A FuncCall) OR (node_value_mutable IS_A MethodCall) THEN
+        TRY (mIRPass__consume_call_args(rtoc_self_view, castLocatableToNode(node_value_mutable), names, facts));
+        IF node_value_mutable IS_A MethodCall THEN
+          TRY (mIRPass__walk_consumed(rtoc_self_view, node_value_mutable.object(), &names, facts));
+        END
+      ELSE_IF node_value_mutable IS_A BinaryOp AS binary_op THEN
+        MUTABLE binary_op_mutable = COPY binary_op;
+        TRY (mIRPass__walk_consumed(rtoc_self_view, binary_op_mutable.left, &names, facts));
+        TRY (mIRPass__walk_consumed(rtoc_self_view, binary_op_mutable.right, &names, facts));
+      ELSE_IF node_value_mutable IS_A Assert AS assert THEN
+        MUTABLE assert_mutable = COPY assert;
+        MUTABLE expr = assert_mutable.condition;
+        TRY (mIRPass__walk_consumed(rtoc_self_view, expr, &names, facts));
+      ELSE_IF node_value_mutable IS_A ReturnNode AS return_node THEN
+        MUTABLE return_node_mutable = COPY return_node;
+        MUTABLE expr = IF return_node_mutable IS_A Assert THEN
+          return_node_mutable.condition()
+        ELSE
+          return_node_mutable.value
+        END;
+        TRY (mIRPass__walk_consumed(rtoc_self_view, expr, &names, facts));
+      END
+    ELSE
+      RETURN;
+    END
+}
+END
+PRIVATE FN mIRPass__consume_call_args(self: MIRPass, node: Node, MUTABLE names: [Set]String, facts: FrozenCleanupFacts) RETURNS !Void
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE sig_obj: ?FunctionSignature@multiowned = NIL;
+    IF respondsTo?(node, "matched_signature") THEN
+      sig_obj = functionSignature__unwrap(node.matched_signature());
+    END
+    MUTABLE params: []Any = List[];
+    IF sig_obj != NIL THEN
+      params = COPY TRY (functionSignature__params(sig_obj));
+    END
+    MUTABLE param_offset = IF node IS_A MethodCall THEN
+      1
+    ELSE
+      0
+    END;
+    MUTABLE rtoc_each_items_7 = node.args();
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < rtoc_each_items_7.length() DO
+      MUTABLE param: ?Any = COPY params[(rtoc_idx + param_offset)];
+      MUTABLE consumes = ((param != NIL) AND (param.takes() == TRUE));
+      IF (rtoc_each_items_7[rtoc_idx] IS_A Identifier AND ((rtoc_each_items_7[rtoc_idx].was_moved() OR consumes))) THEN
+          TRY (mIRPass__add_if_consumed(rtoc_self_view, &rtoc_each_items_7[rtoc_idx], &names, facts, (aST__moved?(rtoc_each_items_7[rtoc_idx]) OR consumes)));
+      ELSE
+          TRY (mIRPass__walk_consumed(rtoc_self_view, rtoc_each_items_7[rtoc_idx], &names, facts));
+      END
+    rtoc_idx = rtoc_idx + 1;
+    END
+}
+END
+PRIVATE FN mIRPass__add_if_consumed(self: MIRPass, MUTABLE ident: Identifier, MUTABLE names: [Set]String, facts: FrozenCleanupFacts, is_move: Bool) RETURNS !?[Set]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE name = COPY ident.name;
+    MUTABLE entry = frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY name }, Locatable{ Identifier: COPY ident });
+    IF !(cleanupEntry__present?(entry)) THEN
+      RETURN;
+    END
+    MUTABLE ti = &ident.full_type_mut();
+    MUTABLE owns_transferable_value = (TRUE AND TRY (type__needs_cleanup?(ti, rtoc_self_view.schema_lookup)));
+    IF !((cleanupEntry__needs_cleanup?(entry) OR owns_transferable_value)) THEN
+      RETURN;
+    END
+    IF is_move THEN
+      cleanupEntry__mark_moved_guard_mut(&entry);
+    ELSE_IF !(cleanupEntry__has_moved_guard?(entry)) THEN
+      RETURN;
+    END
+    MUTABLE is_atomic_ptr = type__atomic_ptr?(ti);
+    IF ((TRUE AND ((TRY (type__any_rc?(ti)) OR_ELSE FALSE))) AND !(is_atomic_ptr)) THEN
+      IF is_move THEN
+        &names.insert(name);
+      END
+      RETURN;
+    END
+    RETURN &names.insert(name);
+}
+END
+PRIVATE FN mIRPass__owning_field_move?(self: MIRPass, MUTABLE node: Locatable) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF node IS_A GetField AS get_field THEN
+      MUTABLE get_field_mutable = COPY get_field;
+      MUTABLE ti = &get_field_mutable.full_type_mut("MIR pass field move");
+      RETURN type__indirect_type?(CAST(ti AS Type));
+    ELSE
+      RETURN FALSE;
+    END
+}
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PRIVATE FN mIRPass__stamp_reassign_cleanup_mut(self: MIRPass, MUTABLE stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF stmt IS_A BindExpr AS bind_expr THEN
+      MUTABLE bind_expr_mutable = COPY bind_expr;
+    IF (bind_expr_mutable.mode == :assign) THEN
+        MUTABLE entry = mIRPass__cleanup_entry_for_binding_node(rtoc_self_view, Locatable{ BindExpr: COPY bind_expr_mutable }, facts);
+        IF !((cleanupEntry__present?(entry) AND (cleanupEntry__kind(entry) != :resource))) THEN
+          RETURN;
+        END
+        MUTABLE lifecycle: ?LifecyclePlan = cleanupEntry__lifecycle_plan(entry);
+        IF lifecycle EXISTS AS lifecycle_value THEN
+          IF !(lifecyclePlan__needs_drop?(lifecycle_value)) THEN
+            RETURN;
+          END
+          IF !((cleanupEntry__needs_cleanup?(entry) OR cleanupEntry__heap?(entry))) THEN
+            RETURN;
+          END
+          MUTABLE ti = &bind_expr_mutable.full_type_mut();
+          IF type__symbol?((TRY (type__new(TypeConstructionInput{ Type: COPY ti })))) THEN
+            RETURN;
+          END
+          MUTABLE zig_type = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY type__resolved(ti) }))))) OR_ELSE CAST(type__resolved(ti) AS String)));
+          bind_expr_mutable.reassign_cleanup = ReassignPlan{ alloc: cleanupEntry__alloc(entry), zig_type: zig_type, lifecycle_plan: lifecycle_value };
+        ELSE
+          panic("missing planned lifecycle for reassignment '{}'");
+        END
+      ELSE
+        RETURN;
+      END
+    ELSE
+      RETURN;
+    END
+}
+END
+PRIVATE FN mIRPass__cleanup_entry_for_binding_node(self: MIRPass, node: Locatable, facts: FrozenCleanupFacts) RETURNS CleanupEntry@multiowned
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE symbol = IF respondsTo?(node, "symbol") THEN
+      node.symbol()
+    ELSE
+      NIL
+    END;
+    MUTABLE decl = symbol.reg();
+    MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(decl);
+    IF entry EXISTS AS entry_value THEN
+      RETURN KEEP entry_value;
+    END
+    IF respondsTo?(node, "name") THEN
+      RETURN frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY CAST(node.name() AS String) }, node);
+    END
+    RETURN new();
+}
+END
+PRIVATE FN mIRPass__stamp_match_as_cleanup_mut(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF stmt IS_A MatchStatement AS match_statement THEN
+      MUTABLE match_statement_mutable = COPY match_statement;
+      IF !(match_statement_mutable.takes) THEN
+        RETURN;
+      END
+      MUTABLE expr = matchStatement__expr(match_statement_mutable);
+      IF expr IS_A Identifier AS identifier THEN
+        MUTABLE identifier_mutable = COPY identifier;
+      IF identifier_mutable.was_moved THEN
+          MUTABLE src_entry = mIRPass__live_cleanup_entry(rtoc_self_view, facts, Name{ StringValue: COPY identifier__name(identifier_mutable) });
+          MUTABLE has_as_cleanup: Bool = FALSE;
+          MUTABLE has_source_cleanup = cleanupEntry__needs_cleanup?(src_entry);
+          MUTABLE rtoc_idx = 0;
+          WHILE rtoc_idx < match_statement_mutable.cases.length() DO
+      IF !(match_statement_mutable.cases[rtoc_idx].binding()) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE binding = match_statement_mutable.cases[rtoc_idx].binding();
+      frozenCleanupFacts__with_live_entry_for(facts, binding, %(as_entry: CleanupEntry) USE(binding, identifier_mutable, has_source_cleanup, match_statement_mutable, rtoc_idx, rtoc_self_view) -> {
+        has_as_cleanup = TRUE;
+        MUTABLE mir_prefix = List[];
+        IF has_source_cleanup THEN
+                  &mir_prefix.append(SuppressCleanup{ token: match_statement_mutable.token, name: COPY identifier__name(identifier_mutable), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+        END
+        MUTABLE destructure = match_statement_mutable.cases[rtoc_idx].destructure();
+        MUTABLE alloc_type_branch_value: ?Type = NIL;
+                IF destructure THEN
+                  alloc_type_branch_value = &destructure.full_type_mut({:context: "match AS allocation marker"});
+                ELSE
+                  alloc_type_branch_value = TRY (type__from_node_mut(identifier_mutable, "match AS allocation marker"));
+                END
+        MUTABLE alloc_type: Type = alloc_type_branch_value?;
+        &mir_prefix.append(mIRPass__alloc_marker(rtoc_self_view, binding, cleanupEntry__alloc(as_entry), alloc_type));
+        MUTABLE drop = Drop{ token: match_statement_mutable.token, name: binding, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
+        drop.cleanup_entry = COPY as_entry;
+        &mir_prefix.append(drop);
+        match_statement_mutable.cases[rtoc_idx].body = (mir_prefix + match_statement_mutable.cases[rtoc_idx].body());
+        rubyToClearVoid()
+      });
+    rtoc_idx = rtoc_idx + 1;
+          END
+          IF (has_as_cleanup AND has_source_cleanup) THEN
+            cleanupEntry__mark_moved_guard_mut(&src_entry);
+          END
+        ELSE
+          RETURN;
+        END
+      ELSE
+        RETURN;
+      END
+    ELSE
+      RETURN;
+    END
+}
+END
+PRIVATE FN mIRPass__stamp_while_bind_cleanup_mut(self: MIRPass, MUTABLE stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF stmt IS_A WhileBindLoop AS while_bind_loop THEN
+      MUTABLE while_bind_loop_mutable = COPY while_bind_loop;
+      frozenCleanupFacts__with_live_entry_for(facts, while_bind_loop_mutable.binding_name, %(entry: CleanupEntry) USE(MUTABLE while_bind_loop_mutable, rtoc_self_view) -> {
+    MUTABLE cond_type = TRY (type__from_node_mut(while_bind_loop_mutable.condition, "while-bind allocation marker"));
+    MUTABLE item_type_branch_value: ?Type = NIL;
+        IF TRY (type__stream_step?(cond_type)) THEN
+          item_type_branch_value = TRY (type__stream_step_item_type(cond_type));
+        ELSE
+          item_type_branch_value = TRY (type__wrapped_type(cond_type));
+        END
+    MUTABLE item_type: ?Type = item_type_branch_value;
+    MUTABLE alloc_node = mIRPass__alloc_marker(rtoc_self_view, CAST(while_bind_loop_mutable.binding_name AS String), cleanupEntry__alloc(entry), item_type?);
+    MUTABLE drop = Drop{ token: while_bind_loop_mutable.token, name: COPY CAST(while_bind_loop_mutable.binding_name AS String), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
+    drop.cleanup_entry = COPY entry;
+    while_bind_loop_mutable.do_branch = (CAST(Tuple{alloc_node, drop} AS Tuple<AllocMark, Drop>) + (while_bind_loop_mutable.do_branch));
+    rubyToClearVoid()
+      });
+    ELSE
+      RETURN;
+    END
+}
+END
+PRIVATE FN mIRPass__stamp_if_bind_cleanup_mut(self: MIRPass, MUTABLE stmt: Locatable, facts: FrozenCleanupFacts) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF stmt IS_A IfBind AS if_bind THEN
+      MUTABLE if_bind_mutable = COPY if_bind;
+      MUTABLE mir_prefix = List[];
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < if_bind_mutable.bindings.length() DO
+      MUTABLE entry = if_bind_mutable.bindings[rtoc_idx]?.mir_binding_entry;
+      IF !((IF entry != NIL THEN
+            entry.needs_cleanup?()
+          ELSE
+            NIL
+          END)) THEN
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      &mir_prefix.append(mIRPass__alloc_marker(rtoc_self_view, binding__name(if_bind_mutable.bindings[rtoc_idx]?), entry.alloc(), binding__unwrapped_type(if_bind_mutable.bindings[rtoc_idx]?)));
+      MUTABLE drop = Drop{ token: if_bind_mutable.token, name: COPY binding__name(if_bind_mutable.bindings[rtoc_idx]?), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
+      drop.cleanup_entry = entry;
+      &mir_prefix.append(drop);
+    rtoc_idx = rtoc_idx + 1;
+      END
+      IF !((mir_prefix.length() == 0)) THEN
+        if_bind_mutable.then_branch = (mir_prefix + ((if_bind_mutable.then_branch OR List[])));
+      END
+    ELSE
+      RETURN;
+    END
+}
+END
+PRIVATE FN mIRPass__stamp_moved_guard_info_mut(self: MIRPass, MUTABLE fn_value: FunctionDef, facts: FrozenCleanupFacts) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE info = {};
+    FOR rtoc_key IN (TRY (frozenCleanupFacts__bindings(facts))).keys() DO
+    MUTABLE entry: CleanupEntry@multiowned = COPY UNWRAP ((TRY (frozenCleanupFacts__bindings(facts)))[rtoc_key]);
+    IF (cleanupEntry__has_moved_guard?(entry) AND cleanupEntry__needs_cleanup?(entry)) THEN
+      info[rtoc_key] = TRUE;
+    END
+    END
+    IF !((info.count() == 0)) THEN
+      fn_value.moved_guard_info = info;
+    END
+}
+END
+PRIVATE FN mIRPass__mark_returned_cleanup_bindings_mut(self: MIRPass, fn_value: FunctionDef, facts: FrozenCleanupFacts) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF !(fn_value.body) THEN
+      RETURN;
+    END
+    MUTABLE returned: [Set]String = Set[];
+    aST__each_locatable(fn_value.body, %(node: Locatable) USE(MUTABLE returned, rtoc_self_view) -> {
+    IF !((IF node IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END)) THEN
+        RETURN;
+    END
+    FOR _ IN (TRY (mIRPass__collect_escaping_ids(rtoc_self_view, node.value()))) DO
+    &returned.insert(COPY _.name);
+    END
+    rubyToClearVoid()
+    });
+    IF (TRUE AND fn_value.heap_carry_return_vars) THEN
+      FOR _ IN fn_value.heap_carry_return_vars DO
+      &returned.insert(COPY CAST(_ AS String));
+      END
+    END
+    FOR _ IN returned DO
+    frozenCleanupFacts__with_live_entry_for(facts, _, %(entry: CleanupEntry) -> {
+    cleanupEntry__mark_moved_guard_mut(&entry);
+    rubyToClearVoid()
+    });
+    END
+}
+END
+PRIVATE FN mIRPass__insert_return_mut(self: MIRPass, result: []Locatable, ret_node: ReturnNode, facts: FrozenCleanupFacts, fn_node: ?FunctionDef = NIL) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE _: Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef> = CAST(Tuple{result, ret_node, facts, fn_node} AS Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef>);
+    NIL;
+}
+END
+PRIVATE FN mIRPass__collect_return_escapes(self: MIRPass, ret_node: ReturnNode, facts: FrozenCleanupFacts, fn_node: ?FunctionDef = NIL) RETURNS ![]String
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF !(ret_node.value) THEN
+      RETURN CAST(( { MUTABLE rtoc_empty_list_8: []String = List[]; rtoc_empty_list_8 } ) AS []String);
+    END
+    MUTABLE ids = TRY (mIRPass__collect_escaping_ids(rtoc_self_view, ret_node.value));
+    RETURN CAST(((((ids |> WHERE {
+    MUTABLE n = COPY _.name;
+    MUTABLE decl: ?SymbolEntryRegInput = NIL;
+    IF _.symbol != NIL THEN
+        decl = COPY ((_.symbol)?).reg;
+      END
+    MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(castOptionalSymbolEntryRegInputToOptionalLocatable(decl));
+    MUTABLE cleanup_entry = (entry OR_ELSE frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY n }, Locatable{ Identifier: COPY _ }));
+    (((cleanupEntry__has_moved_guard?(cleanup_entry) AND cleanupEntry__needs_cleanup?(cleanup_entry))) OR (((n.startsWith?("__hoist_") AND aST__moved?(Locatable{ Identifier: COPY _ })) AND cleanupEntry__needs_cleanup?(cleanup_entry))))
+    })) |> SELECT identifier__name(_)) |> DISTINCT _) AS []String);
+}
+END
+PRIVATE FN mIRPass__collect_escaping_ids(self: MIRPass, node: ?Locatable) RETURNS ![]Identifier
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF node EXISTS AS node_value THEN
+      IF node_value IS_A Identifier AS identifier THEN
+        RETURN CAST([identifier] AS []Identifier);
+      ELSE_IF node_value IS_A MoveNode AS move_node THEN
+        RETURN TRY (mIRPass__collect_escaping_ids(rtoc_self_view, move_node.value));
+      ELSE_IF node_value IS_A StructLit AS struct_lit THEN
+        RETURN (TRY (inlineAllocMetadata__values(struct_lit.fields))) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
+      ELSE_IF node_value IS_A UnionVariantLit AS union_variant_lit THEN
+        RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = CAST(union_variant_lit.fields AS InlineAllocMetadata);
+        TRY (inlineAllocMetadata__values(rtoc_local_receiver_9)) }) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
+      ELSE_IF (node_value IS_A FuncCall) OR (node_value IS_A MethodCall) THEN
+        RETURN (node_value.args() |> WHERE _.was_moved()) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
+      ELSE
+        RETURN CAST(( { MUTABLE rtoc_empty_list_10: []Identifier = List[]; rtoc_empty_list_10 } ) AS []Identifier);
+      END
+    ELSE
+      RETURN CAST(( { MUTABLE rtoc_empty_list_11: []Identifier = List[]; rtoc_empty_list_11 } ) AS []Identifier);
+    END
+}
+END
+PUB FN mIRPass__new(fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL, body_summaries: {String}FunctionBodySummary, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS MIRPass@multiowned ->
+  MUTABLE self = MIRPass{ body_summaries: COPY body_summaries, current_transform_fn: NIL, escape_placement_facts: EscapePlacementFacts{ placements: List[] }, fn_nodes: COPY fn_nodes, hoist_bindings: (COPY hoist_bindings OR_ELSE {}), lifecycle_registry: COPY lifecycle_registry, program_facts: NIL, schema_lookup: COPY schema_lookup };
+  mIRPass__initialize(&self, fn_nodes, schema_lookup, lifecycle_registry, body_summaries, hoist_bindings);
+  RETURN self @multiowned;
+END
+FN castLocatableToBgNode(value: Locatable) RETURNS BgNode ->
+  PARTIAL MATCH value START
+    Locatable.MIRBgBlock AS cast_payload -> RETURN BgNode{ MIRBgBlock: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN BgNode{ BgStreamBlock: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to BgNode");
+  END
+  panic("Invalid cast to BgNode");
+END
+FN castLocatableToNode(value: Locatable) RETURNS Node ->
+  PARTIAL MATCH value START
+    Locatable.MIRProgram AS cast_payload -> RETURN Node{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN Node{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN Node{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN Node{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN Node{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN Node{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN Node{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN Node{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN Node{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN Node{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN Node{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN Node{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN Node{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN Node{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN Node{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN Node{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN Node{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN Node{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN Node{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN Node{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN Node{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN Node{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN Node{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN Node{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN Node{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN Node{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN Node{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN Node{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN Node{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN Node{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN Node{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN Node{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN Node{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN Node{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN Node{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN Node{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN Node{ Assert: COPY cast_payload };,
+    Locatable.TenseRecoveryRaise AS cast_payload -> RETURN Node{ TenseRecoveryRaise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN Node{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN Node{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN Node{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN Node{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN Node{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN Node{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN Node{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN Node{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN Node{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN Node{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN Node{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN Node{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN Node{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN Node{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN Node{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN Node{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN Node{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN Node{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN Node{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN Node{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN Node{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN Node{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN Node{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN Node{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN Node{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN Node{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN Node{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN Node{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN Node{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN Node{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN Node{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN Node{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN Node{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN Node{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN Node{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN Node{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN Node{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN Node{ MutableBorrow: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseRaise AS cast_payload -> RETURN Node{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseExit AS cast_payload -> RETURN Node{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePass AS cast_payload -> RETURN Node{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePrune AS cast_payload -> RETURN Node{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseBreak AS cast_payload -> RETURN Node{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN Node{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN Node{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN Node{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN Node{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN Node{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN Node{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN Node{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN Node{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN Node{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN Node{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN Node{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN Node{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN Node{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN Node{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN Node{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN Node{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN Node{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN Node{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN Node{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN Node{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN Node{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN Node{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN Node{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN Node{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN Node{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN Node{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN Node{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN Node{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN Node{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN Node{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN Node{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN Node{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN Node{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN Node{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN Node{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN Node{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN Node{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN Node{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN Node{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN Node{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN Node{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN Node{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN Node{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN Node{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN Node{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Node");
+  END
+  panic("Invalid cast to Node");
+END
+FN castOptionalLocatableToBgNode(value: ?Locatable) RETURNS BgNode ->
+  IF value == NIL THEN
+    panic("Invalid cast to BgNode");
+  END
+  PARTIAL MATCH value? START
+    Locatable.MIRBgBlock AS cast_payload -> RETURN BgNode{ MIRBgBlock: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN BgNode{ BgStreamBlock: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to BgNode");
+  END
+  panic("Invalid cast to BgNode");
+END
+FN castOptionalSymbolEntryRegInputToOptionalLocatable(value: ?SymbolEntryRegInput) RETURNS ?Locatable ->
+  IF value == NIL THEN
+    panic("Invalid cast to ?Locatable");
+  END
+  PARTIAL MATCH value? START
+    SymbolEntryRegInput.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    SymbolEntryRegInput.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    SymbolEntryRegInput.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    SymbolEntryRegInput.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    SymbolEntryRegInput.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    SymbolEntryRegInput.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    SymbolEntryRegInput.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    SymbolEntryRegInput.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    SymbolEntryRegInput.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    SymbolEntryRegInput.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    SymbolEntryRegInput.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    SymbolEntryRegInput.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    SymbolEntryRegInput.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    SymbolEntryRegInput.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    SymbolEntryRegInput.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    SymbolEntryRegInput.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    SymbolEntryRegInput.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    SymbolEntryRegInput.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    SymbolEntryRegInput.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    SymbolEntryRegInput.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    SymbolEntryRegInput.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    SymbolEntryRegInput.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    SymbolEntryRegInput.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    SymbolEntryRegInput.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    SymbolEntryRegInput.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    SymbolEntryRegInput.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    SymbolEntryRegInput.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    SymbolEntryRegInput.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    SymbolEntryRegInput.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    SymbolEntryRegInput.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    SymbolEntryRegInput.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    SymbolEntryRegInput.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    SymbolEntryRegInput.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    SymbolEntryRegInput.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    SymbolEntryRegInput.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    SymbolEntryRegInput.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    SymbolEntryRegInput.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    SymbolEntryRegInput.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    SymbolEntryRegInput.TenseRecoveryRaise AS cast_payload -> RETURN Locatable{ TenseRecoveryRaise: COPY cast_payload };,
+    SymbolEntryRegInput.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    SymbolEntryRegInput.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    SymbolEntryRegInput.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    SymbolEntryRegInput.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    SymbolEntryRegInput.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    SymbolEntryRegInput.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    SymbolEntryRegInput.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    SymbolEntryRegInput.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    SymbolEntryRegInput.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    SymbolEntryRegInput.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    SymbolEntryRegInput.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    SymbolEntryRegInput.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    SymbolEntryRegInput.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    SymbolEntryRegInput.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    SymbolEntryRegInput.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    SymbolEntryRegInput.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    SymbolEntryRegInput.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    SymbolEntryRegInput.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    SymbolEntryRegInput.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    SymbolEntryRegInput.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    SymbolEntryRegInput.TenseOperationKindOrElseRaise AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    SymbolEntryRegInput.TenseOperationKindOrElseExit AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    SymbolEntryRegInput.TenseOperationKindOrElsePass AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    SymbolEntryRegInput.TenseOperationKindOrElsePrune AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    SymbolEntryRegInput.TenseOperationKindOrElseBreak AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    SymbolEntryRegInput.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    SymbolEntryRegInput.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    SymbolEntryRegInput.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    SymbolEntryRegInput.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    SymbolEntryRegInput.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    SymbolEntryRegInput.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    SymbolEntryRegInput.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    SymbolEntryRegInput.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    SymbolEntryRegInput.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    SymbolEntryRegInput.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    SymbolEntryRegInput.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    SymbolEntryRegInput.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    SymbolEntryRegInput.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    SymbolEntryRegInput.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    SymbolEntryRegInput.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    SymbolEntryRegInput.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    SymbolEntryRegInput.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    SymbolEntryRegInput.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    SymbolEntryRegInput.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    SymbolEntryRegInput.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    SymbolEntryRegInput.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    SymbolEntryRegInput.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    SymbolEntryRegInput.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    SymbolEntryRegInput.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    SymbolEntryRegInput.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    SymbolEntryRegInput.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    SymbolEntryRegInput.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    SymbolEntryRegInput.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    SymbolEntryRegInput.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    SymbolEntryRegInput.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    SymbolEntryRegInput.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    SymbolEntryRegInput.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    SymbolEntryRegInput.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    SymbolEntryRegInput.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    SymbolEntryRegInput.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    SymbolEntryRegInput.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    SymbolEntryRegInput.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    SymbolEntryRegInput.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    SymbolEntryRegInput.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    SymbolEntryRegInput.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    SymbolEntryRegInput.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?Locatable");
+  END
+  panic("Invalid cast to ?Locatable");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

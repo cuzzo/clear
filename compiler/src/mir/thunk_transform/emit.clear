@@ -1,0 +1,219 @@
+REQUIRE "../../ast/type.clear"
+REQUIRE "../../backends/zig_type.clear"
+REQUIRE "../mir.clear"
+REQUIRE "../../ast/ast.clear"
+REQUIRE "../../ast/param.clear"
+REQUIRE "../thunk_transform.clear"
+REQUIRE "recursive_splitter.clear"
+# Ruby module ThunkTransform
+# Ruby module ThunkTransform::Emit
+STRUCT FrameBindingContext {
+  receiver_name: String,
+  param_names: [Set]String
+}
+
+FN frameBindingContext__binds?(self: FrameBindingContext, name: String) RETURNS Bool ->
+  RETURN self.param_names.contains?(name);
+END
+FN frameBindingContext__field_ref(self: FrameBindingContext, name: String) RETURNS FieldGet ->
+  RETURN FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY self.receiver_name, lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY name, lowered_node_id: NIL, ownership_consumption: NIL };
+END
+STRUCT ThunkParamFact {
+  name: String,
+  type_info: Type
+}
+
+FN thunkParamFact__from_param(param: Param) RETURNS !ThunkParamFact ->
+  RETURN ThunkParamFact{ name: COPY CAST(param.name AS String), type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY param.type })) };
+END
+FN emit__build_trampoline(fn_node: FunctionDef, lowering: LoweringProtocol) RETURNS !ThunkTrampoline ->
+  MUTABLE plan = TRY (emit__thunk_plan_mut(fn_node));
+  MUTABLE return_type = TRY (emit__return_type_info(fn_node, lowering));
+  TRY (emit__assert_non_fallible_ret_mut(fn_node, CAST(return_type AS Type)));
+  MUTABLE params = TRY (emit__function_params(fn_node));
+  MUTABLE param_fields = params |> SELECT emit__frame_field(_.name, _.type_info);
+  MUTABLE param_init_fields = params |> SELECT emit__frame_init(_.name, Emittable{ Ident: COPY Ident{ name: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } });
+  MUTABLE context = TRY (emit__current_frame_context(fn_node));
+  MUTABLE base_cases = plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY emit__lower_frame_expr(_.cond_ast, lowering, context), value: COPY emit__lower_frame_expr(_.value_ast, lowering, context) };
+  MUTABLE recurse_arg_inits = {
+  MUTABLE rtoc_value_block_marker = 0;
+  MUTABLE rtoc_indexed_items_1: []Locatable = plan.recurse_args;
+  MUTABLE rtoc_indexed_output_3 = [];
+  MUTABLE rtoc_indexed_i_2 = 0;
+  WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length() DO
+    &rtoc_indexed_output_3.append({
+  MUTABLE param: ?ThunkParamFact = COPY params[rtoc_indexed_i_2];
+  IF (param == NIL) THEN
+      panic("thunk arg/param count mismatch in '{}'");
+  END
+  emit__frame_init(param.name, emit__lower_frame_expr(rtoc_indexed_items_1[rtoc_indexed_i_2], lowering, context))
+  });
+    rtoc_indexed_i_2 = rtoc_indexed_i_2 + 1;
+  END
+  rtoc_indexed_output_3
+  };
+  MUTABLE combine_lhs = emit__lower_frame_expr(plan.combine_lhs, lowering, context);
+  TRY (emit__validate_combine_op_mut(plan.combine_op));
+  RETURN ThunkTrampoline{ fn_name: COPY fn_node.name, return_type: CAST(COPY return_type AS Type), param_fields: COPY param_fields, param_init_fields: COPY param_init_fields, base_cases: COPY base_cases, recurse_arg_inits: COPY recurse_arg_inits, combine_lhs: COPY combine_lhs, combine_op: COPY plan.combine_op, yield_policy: IF fn_node.tight_reentrance THEN
+    :tight_skip
+  ELSE
+    :check
+  END };
+END
+FN emit__lower_frame_expr(ast_expr: Locatable, lowering: LoweringProtocol, context: FrameBindingContext) RETURNS Emittable ->
+  MUTABLE lowering_api = COPY lowering;
+  MUTABLE mir = lowering_api.lower(ast_expr);
+  RETURN emit__bind_frame_refs(CAST(mir AS Emittable), context);
+END
+FN emit__frame_init(field_name: String, value: Emittable) RETURNS ThunkFrameInit ->
+  RETURN ThunkFrameInit{ field_name: COPY field_name, value: COPY value };
+END
+FN emit__frame_field(field_name: String, type_info: Type) RETURNS ThunkFrameField ->
+  RETURN ThunkFrameField{ name: COPY field_name, type_info: COPY type_info };
+END
+PRIVATE FN emit__current_frame_context(fn_node: FunctionDef) RETURNS !FrameBindingContext ->
+  RETURN FrameBindingContext{ receiver_name: "current", param_names: COPY TRY (emit__param_names(fn_node)) };
+END
+PRIVATE FN emit__mutual_frame_context(fn_node: FunctionDef) RETURNS !FrameBindingContext ->
+  RETURN FrameBindingContext{ receiver_name: "f", param_names: COPY TRY (emit__param_names(fn_node)) };
+END
+FN emit__param_names(fn_node: FunctionDef) RETURNS ![Set]String ->
+  MUTABLE names: [Set]String = Set[];
+  FOR _ IN (TRY (emit__function_params(fn_node))) DO
+  &names.insert(COPY _.name);
+  END
+  RETURN names;
+END
+PRIVATE FN emit__bind_frame_refs(mir: Emittable, context: FrameBindingContext) RETURNS Emittable EFFECTS REENTRANT ->
+  IF mir IS_A Ident AS ident THEN
+    MUTABLE name = COPY ident.name;
+    IF frameBindingContext__binds?(context, name) THEN
+      RETURN Emittable{ FieldGet: COPY frameBindingContext__field_ref(context, name) };
+    ELSE
+      RETURN COPY Emittable{ Ident: COPY ident };
+    END
+  ELSE_IF mir IS_A MIRBinOp AS mir_bin_op THEN
+    RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: mir_bin_op.op, left: COPY emit__bind_frame_refs(mir_bin_op.left, context), right: COPY emit__bind_frame_refs(mir_bin_op.right, context), lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A MIRUnaryOp AS mir_unary_op THEN
+    RETURN Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: mir_unary_op.op, operand: COPY emit__bind_frame_refs(mir_unary_op.operand, context), lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A FieldGet AS field_get THEN
+    RETURN Emittable{ FieldGet: COPY FieldGet{ object: COPY emit__bind_frame_refs(field_get.object, context), field: COPY field_get.field, lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A IndexGet AS index_get THEN
+    RETURN Emittable{ IndexGet: COPY IndexGet{ object: COPY emit__bind_frame_refs(index_get.object, context), index: COPY emit__bind_frame_refs(index_get.indexOf(), context), lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A MIRMethodCall AS mir_method_call THEN
+    RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY emit__bind_frame_refs(mir_method_call.receiver, context), method: COPY mir_method_call.method, args: COPY mir_method_call.args |> SELECT emit__bind_frame_refs(_, context), try_wrap: mir_method_call.try_wrap, callable_contract: COPY mir_method_call.callable_contract, owned_result_alloc: COPY mir_method_call.owned_result_alloc, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
+  ELSE_IF mir IS_A Call AS call THEN
+    RETURN Emittable{ Call: COPY Call{ callee: COPY call.callee, args: COPY call.args |> SELECT emit__bind_frame_refs(_, context), try_wrap: (call.try_wrap == TRUE), owned_return: call__owned_return?(call), callable_contract: COPY call.callable_contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
+  ELSE_IF mir IS_A RegistryCall AS registry_call THEN
+    RETURN Emittable{ RegistryCall: COPY RegistryCall{ entry: KEEP registry_call.entry, args: COPY registry_call.args |> SELECT RegistryCallArg{ expr: COPY emit__bind_frame_refs(_.expr, context), coerce_type: COPY _.coerce_type }, reason: COPY registry_call.reason, ownership_contract: KEEP registry_call.ownership_contract, allocs: KEEP registry_call.allocs, target_var: COPY registry_call.target_var, result_type: COPY registry_call.result_type, result_ownership_bearing: registry_call.result_ownership_bearing, key_type: COPY registry_call.key_type, value_type: COPY registry_call.value_type, suppress_try: registry_call.suppress_try, owned_result_alloc: NIL } };
+  ELSE_IF mir IS_A MIRCast AS mir_cast THEN
+    RETURN Emittable{ MIRCast: COPY MIRCast{ expr: COPY emit__bind_frame_refs(cast__expr(mir_cast), context), target_type: mir_cast.target_type, method: mir_cast.method, lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A TryExpr AS try_expr THEN
+    RETURN Emittable{ TryExpr: COPY TryExpr{ expr: COPY emit__bind_frame_refs(tryExpr__expr(try_expr), context), lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A TryOptional AS try_optional THEN
+    RETURN Emittable{ TryOptional: COPY TryOptional{ expr: COPY emit__bind_frame_refs(tryOptional__expr(try_optional), context), lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A TryCatch AS try_catch THEN
+    RETURN Emittable{ TryCatch: COPY TryCatch{ expr: COPY emit__bind_frame_refs(tryCatch__expr(try_catch), context), catch_body: COPY emit__bind_frame_refs(try_catch.catch_body, context), capture: try_catch.capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
+  ELSE_IF mir IS_A AddressOf AS address_of THEN
+    RETURN Emittable{ AddressOf: COPY AddressOf{ expr: COPY emit__bind_frame_refs(addressOf__expr(address_of), context), lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A Deref AS deref THEN
+    RETURN Emittable{ Deref: COPY Deref{ expr: COPY emit__bind_frame_refs(deref__expr(deref), context), lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE_IF mir IS_A MIROptionalUnwrap AS mir_optional_unwrap THEN
+    RETURN Emittable{ MIROptionalUnwrap: COPY MIROptionalUnwrap{ expr: COPY emit__bind_frame_refs(optionalUnwrap__expr(mir_optional_unwrap), context), lowered_node_id: NIL, ownership_consumption: NIL } };
+  ELSE
+    RETURN COPY mir;
+  END
+END
+FN emit__return_type_info(fn_node: FunctionDef, ignored_lowering: LoweringProtocol) RETURNS !Type ->
+  MUTABLE rt: ?Type = COPY fn_node.return_type;
+  IF rt EXISTS AS rt_value THEN
+    IF TRUE THEN
+      RETURN rt_value;
+    ELSE
+      RETURN TRY (type__new(TypeConstructionInput{ Type: COPY rt_value }));
+    END
+  ELSE
+    RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
+  END
+END
+PRIVATE FN emit__validate_combine_op_mut(op: String@symbol) RETURNS !Void ->
+  IF ([:ADD, :SUB, :MUL, :DIV] |> DISTINCT _).contains?(op) THEN
+    RETURN;
+  END
+  panic("thunk: unsupported op {}");
+END
+PRIVATE FN emit__assert_non_fallible_ret_mut(fn_node: FunctionDef, return_type: Type) RETURNS !Void ->
+  MUTABLE return_type_zig = TRY (type__zig_type(return_type));
+  IF !(zigType__inferred_error_union?(zigType__new(return_type_zig))) THEN
+    RETURN;
+  END
+  panic("{}{}heap-allocated child Frames only on the normal return path; an error return would leak the in-flight chain. Before lifting the non-fallible invariant, extend `build_trampoline` and `build_mutual_trampoline` to emit an errdefer that walks `current.parent` and frees every non-initial Frame.");
+END
+FN emit__build_mutual_trampoline(fn_node: FunctionDef, lowering: LoweringProtocol) RETURNS !MutualThunkTrampoline ->
+  MUTABLE mtp = TRY (emit__mutual_thunk_plan_mut(fn_node));
+  MUTABLE return_type = TRY (emit__return_type_info(fn_node, lowering));
+  TRY (emit__assert_non_fallible_ret_mut(fn_node, CAST(return_type AS Type)));
+  MUTABLE cycle_fns: []FunctionDef@multiowned = COPY mtp.cycle_fns;
+  MUTABLE variants = cycle_fns |> SELECT ThunkVariant{ name: COPY _.name, param_fields: COPY (TRY (emit__function_params(CAST(COPY _ AS FunctionDef)))) |> SELECT emit__frame_field(_.name, _.type_info) };
+  MUTABLE initial_fields = (TRY (emit__function_params(fn_node))) |> SELECT emit__frame_init(_.name, Emittable{ Ident: COPY Ident{ name: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } });
+  MUTABLE arms = cycle_fns |> SELECT TRY (emit__build_mutual_arm(CAST(COPY _ AS FunctionDef), mtp, lowering));
+  RETURN MutualThunkTrampoline{ fn_name: COPY fn_node.name, return_type: CAST(COPY return_type AS Type), variants: COPY variants, initial_variant: COPY fn_node.name, initial_fields: COPY initial_fields, arms: COPY arms, yield_policy: IF fn_node.tight_reentrance THEN
+    :tight_skip
+  ELSE
+    :check
+  END };
+END
+PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan, lowering: LoweringProtocol) RETURNS !MutualThunkArm ->
+  MUTABLE own_plan = COPY (TRY (emit__mutual_thunk_plan_mut(cf))).own_plan;
+  MUTABLE context = TRY (emit__mutual_frame_context(cf));
+  MUTABLE base_cases = own_plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY emit__lower_frame_expr(_.cond_ast, lowering, context), value: COPY emit__lower_frame_expr(_.value_ast, lowering, context) };
+  MUTABLE target_fn = COPY own_plan.target_fn;
+  MUTABLE target_args = COPY own_plan.target_args;
+  MUTABLE target_params = TRY (emit__function_params(CAST(TRY (emit__find_cycle_member(cf, target_fn)) AS FunctionDef)));
+  IF (target_args.length() != target_params.length()) THEN
+    panic("thunk: target arg/param count mismatch for '{}' -> '{}'");
+  END
+  MUTABLE arg_inits = {
+  MUTABLE rtoc_value_block_marker = 0;
+  MUTABLE rtoc_indexed_items_4: []Locatable = target_args;
+  MUTABLE rtoc_indexed_output_6 = [];
+  MUTABLE rtoc_indexed_i_5 = 0;
+  WHILE rtoc_indexed_i_5 < rtoc_indexed_items_4.length() DO
+    &rtoc_indexed_output_6.append({
+  MUTABLE target_param = COPY UNWRAP (target_params[rtoc_indexed_i_5]);
+  emit__frame_init(target_param.name, emit__lower_frame_expr(rtoc_indexed_items_4[rtoc_indexed_i_5], lowering, context))
+  });
+    rtoc_indexed_i_5 = rtoc_indexed_i_5 + 1;
+  END
+  rtoc_indexed_output_6
+  };
+  RETURN MutualThunkArm{ variant_name: COPY cf.name, base_cases: COPY base_cases, target_variant: COPY target_fn, target_arg_inits: COPY arg_inits };
+END
+PRIVATE FN emit__find_cycle_member(cf: FunctionDef, name: String) RETURNS !FunctionDef ->
+  IF ((TRY (emit__mutual_thunk_plan_mut(cf))).cycle_fns) |> FIND (_.name == name) != NIL THEN
+  RETURN CAST(((TRY (emit__mutual_thunk_plan_mut(cf))).cycle_fns) |> FIND (_.name == name) AS FunctionDef);
+  ELSE
+  panic("thunk: cycle member '{}' not found for '{}'");
+  END
+END
+PRIVATE FN emit__thunk_plan_mut(fn_node: FunctionDef) RETURNS !Plan ->
+  MUTABLE plan: ?Plan = COPY CAST(fn_node.thunk_plan AS ?Plan);
+  IF plan EXISTS AS plan_value THEN
+    RETURN plan_value;
+  ELSE
+    panic("fn '{}' has no thunk_plan");
+  END
+END
+PRIVATE FN emit__mutual_thunk_plan_mut(fn_node: FunctionDef) RETURNS !MutualThunkPlan ->
+  MUTABLE plan: ?MutualThunkPlan = COPY CAST(fn_node.mutual_thunk_plan AS ?MutualThunkPlan);
+  IF plan EXISTS AS plan_value THEN
+    RETURN plan_value;
+  ELSE
+    panic("fn '{}' has no mutual_thunk_plan");
+  END
+END
+PRIVATE FN emit__function_params(fn_node: FunctionDef) RETURNS ![]ThunkParamFact ->
+  RETURN fn_node.params |> SELECT TRY (thunkParamFact__from_param(_));
+END
+# End Ruby module ThunkTransform::Emit
+# End Ruby module ThunkTransform

@@ -1,0 +1,160 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
+# Ruby module MIR
+PUB UNION LocalBindingBodyItem { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Struct: Struct, FunctionDef: FunctionDef, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB STRUCT LocalBindingFacts {
+  names: [Set]String,
+  entries: {String}CleanupEntry@multiowned,
+  frame_decls: []Locatable,
+  iteration_frame_decls: []Locatable
+}
+# Ruby module MIR::LocalBindingAnalysis
+PUB FN localBindingAnalysis__direct_loop_body_facts(body: []LocalBindingBodyItem) RETURNS !LocalBindingFacts ->
+  MUTABLE names: [Set]String = Set[];
+  MUTABLE entries: {String}CleanupEntry@multiowned = {};
+  MUTABLE frame_decls: []Locatable = ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } );
+  MUTABLE iteration_frame_decls: []Locatable = ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } );
+  TRY (localBindingAnalysis__each_direct_loop_node(body, %(node: Locatable) USE(MUTABLE entries, MUTABLE frame_decls, MUTABLE iteration_frame_decls, MUTABLE names) -> {
+  MUTABLE name: ?String = localBindingAnalysis__binding_decl_name(node);
+  IF !(name) THEN
+      RETURN;
+  END
+  &names.insert(UNWRAP (name));
+  MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
+  IF (IF entry != NIL THEN
+      cleanupEntry__present?(entry)
+    ELSE
+      NIL
+    END) THEN
+      entries[name] = UNWRAP (entry);
+  END
+  IF !(localBindingAnalysis__binding_frame_allocates?(node, entry)) THEN
+      RETURN;
+  END
+  &frame_decls.append(COPY node);
+  IF (((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = (entry?);
+  cleanupEntry__present?(rtoc_local_receiver_3) }) AND (cleanupEntry__scope(entry) == :iteration)) THEN
+      &iteration_frame_decls.append(COPY node);
+  END
+  rubyToClearVoid()
+  }));
+  RETURN LocalBindingFacts{ names: COPY names, entries: entries, frame_decls: COPY frame_decls, iteration_frame_decls: COPY iteration_frame_decls };
+END
+PUB FN localBindingAnalysis__each_direct_loop_node(body: []LocalBindingBodyItem, block: FN(Locatable) -> Void) RETURNS !Void EFFECTS REENTRANT ->
+  IF !(TRUE) THEN
+    panic("body must be an Array");
+  END
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < body.length() DO
+    IF !(body[rtoc_idx]? IS_A Locatable) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    block(body[rtoc_idx]?);
+    IF body[rtoc_idx]? IS_A WhileLoop AS while_loop THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    ELSE_IF body[rtoc_idx]? IS_A WhileBindLoop AS while_bind_loop THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    ELSE_IF body[rtoc_idx]? IS_A ForRange AS for_range THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    ELSE_IF body[rtoc_idx]? IS_A ForEach AS for_each THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    ELSE_IF body[rtoc_idx]? IS_A FunctionDef@multiowned AS function_def_multiowned THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    ELSE_IF body[rtoc_idx]? IS_A LambdaLit AS lambda_lit THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    ELSE_IF body[rtoc_idx]? IS_A IfStatement AS if_statement THEN
+        TRY (localBindingAnalysis__each_direct_loop_node(if_statement.then_branch, block));
+        TRY (localBindingAnalysis__each_direct_loop_node(if_statement.else_branch, block));
+    ELSE_IF body[rtoc_idx]? IS_A IfBind AS if_bind THEN
+        TRY (localBindingAnalysis__each_direct_loop_node(if_bind.then_branch, block));
+        TRY (localBindingAnalysis__each_direct_loop_node(if_bind.else_branch, block));
+    ELSE_IF body[rtoc_idx]? IS_A MatchStatement AS match_statement THEN
+        FOR _ IN match_statement.cases DO
+        TRY (localBindingAnalysis__each_direct_loop_node(matchCase__body(_), block));
+        END
+        IF match_statement.default_case THEN
+          TRY (localBindingAnalysis__each_direct_loop_node(match_statement.default_case, block));
+        END
+    ELSE_IF body[rtoc_idx]? IS_A WithBlock AS with_block THEN
+        TRY (localBindingAnalysis__each_direct_loop_node(with_block.body, block));
+    ELSE_IF (body[rtoc_idx]? IS_A DoBlock) THEN
+        FOR _ IN (body[rtoc_idx]?.branches()) DO
+        TRY (localBindingAnalysis__each_direct_loop_node(_.body(), block));
+        END
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+  NIL;
+END
+PUB FN localBindingAnalysis__binding_decl_name(node: Locatable) RETURNS ?String ->
+  IF node IS_A VarDecl AS var_decl THEN
+    IF var_decl.name IS_A String THEN
+      RETURN var_decl.name;
+    ELSE
+      RETURN NIL;
+    END
+  ELSE_IF node IS_A BindExpr AS bind_expr THEN
+    IF (bind_expr.mode == :decl) THEN
+    IF bind_expr.name IS_A String THEN
+      RETURN bind_expr.name;
+    ELSE
+      RETURN NIL;
+    END
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN localBindingAnalysis__binding_entry(node: ?Locatable) RETURNS ?CleanupEntry@multiowned ->
+  IF node IS_A VarDecl AS var_decl THEN
+    RETURN var_decl.mir_binding_entry;
+  ELSE_IF node IS_A BindExpr AS bind_expr THEN
+    RETURN bind_expr.mir_binding_entry;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN localBindingAnalysis__binding_frame_allocates?(node: Locatable, entry: ?CleanupEntry) RETURNS Bool ->
+  IF entry EXISTS AS entry_value THEN
+    IF cleanupEntry__none?(entry_value) THEN
+      RETURN FALSE;
+    END
+    MUTABLE alloc = cleanupEntry__alloc(entry_value);
+    IF !((alloc == :frame)) THEN
+      RETURN FALSE;
+    END
+    MUTABLE needs_cleanup = cleanupEntry__needs_cleanup?(entry_value);
+    IF needs_cleanup THEN
+      RETURN TRUE;
+    END
+    IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
+      RETURN FALSE;
+    END
+    MUTABLE value = node.value();
+    IF !(value) THEN
+      RETURN FALSE;
+    END
+    IF (value IS_A Literal OR value IS_A Identifier) THEN
+      RETURN FALSE;
+    END
+    RETURN TRUE;
+  ELSE
+    RETURN FALSE;
+  END
+END
+# End Ruby module MIR::LocalBindingAnalysis
+# End Ruby module MIR
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

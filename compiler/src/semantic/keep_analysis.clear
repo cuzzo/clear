@@ -1,0 +1,109 @@
+REQUIRE "../ast/type.clear"
+REQUIRE "semantic_ids.clear"
+REQUIRE "../annotator/phases/body_analysis.clear"
+REQUIRE "../ast/ast.clear"
+REQUIRE "../annotator.clear"
+REQUIRE "../annotator/annotator.clear"
+REQUIRE "../ast/symbol_entry.clear"
+REQUIRE "../ast/param.clear"
+# Ruby module KeepAnalysis
+FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary) RETURNS Void ->
+  MUTABLE caller_params: {String}{String}SymbolEntry@multiowned = {};
+  FOR rtoc_key IN fn_nodes.keys() DO
+  MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
+  MUTABLE params: {String}SymbolEntry@multiowned = {};
+  FOR _ IN fn_value.params DO
+    MUTABLE entry = _.symbol;
+    IF entry THEN
+        params[_.name] = entry;
+    END
+  END
+  caller_params[rtoc_key] = params;
+  END
+  MUTABLE kept_param_indexes: {String}[]Int64 = {};
+  MUTABLE refresh_kept: FN() -> Void = %() USE(fn_nodes, MUTABLE kept_param_indexes) -> {
+  &kept_param_indexes.clear();
+  FOR rtoc_key IN fn_nodes.keys() DO
+    MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
+    MUTABLE indexes: []Int64 = ( { MUTABLE rtoc_empty_list_1: []Int64 = List[]; rtoc_empty_list_1 } );
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < fn_value.params.length() DO
+        MUTABLE entry = fn_value.params[rtoc_idx]?.symbol;
+        IF (IF entry != NIL THEN
+            { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = CAST(entry AS SymbolEntry);
+        symbolEntry__kept_identity(rtoc_local_receiver_2) }
+          ELSE
+            NIL
+          END) THEN
+            &indexes.append(COPY rtoc_idx);
+        END
+      rtoc_idx = rtoc_idx + 1;
+    END
+    IF !((indexes.length() == 0)) THEN
+        kept_param_indexes[rtoc_key] = indexes;
+    END
+  END
+  NIL
+  };
+  refresh_kept();
+  fn_nodes.count().times(%() USE(body_summaries, caller_params, fn_nodes, kept_param_indexes, refresh_kept) -> {
+  MUTABLE changed: Bool = FALSE;
+  FOR rtoc_key IN body_summaries.keys() DO
+    MUTABLE summary: FunctionBodySummary = COPY UNWRAP (body_summaries[rtoc_key]);
+    MUTABLE params: ?{String}SymbolEntry@multiowned = COPY caller_params[rtoc_key];
+    IF ((params == NIL) OR ((params?).count() == 0)) THEN
+        RETURN;
+    END
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < summary.call_site_facts.length() DO
+        IF summary.call_site_facts[rtoc_idx]?.fn_var_call THEN
+          rtoc_idx = rtoc_idx + 1;
+      CONTINUE;
+        END
+        MUTABLE kept: ?[]Int64 = COPY kept_param_indexes[summary.call_site_facts[rtoc_idx]?.callee_name];
+        IF !(kept) THEN
+            RETURN;
+        END
+        MUTABLE rtoc_idx = 0;
+        WHILE rtoc_idx < kept.length() DO
+            MUTABLE arg: ?Locatable = COPY (summary.call_site_facts[rtoc_idx]?.args)[kept[rtoc_idx]];
+            IF !(((arg != NIL) AND (arg IS_A Identifier))) THEN
+                RETURN;
+            END
+            MUTABLE entry: ?SymbolEntry@multiowned = COPY params[arg.name()];
+            IF ((entry == NIL) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_4 = (entry?);
+            symbolEntry__kept_identity(rtoc_local_receiver_4) }) THEN
+                RETURN;
+            END
+            MUTABLE callee_param = ((fn_nodes[summary.call_site_facts[rtoc_idx]?.callee_name])?.params[kept[rtoc_idx]] OR_ELSE NIL);
+            MUTABLE inherited: ?KeptIdentityContract = NIL;
+            IF (IF callee_param != NIL THEN
+                callee_param.symbol()
+              ELSE
+                NIL
+              END) != NIL THEN
+                inherited = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = (((IF callee_param != NIL THEN
+                callee_param.symbol()
+              ELSE
+                NIL
+              END))?);
+            symbolEntry__kept_identity(rtoc_local_receiver_5) };
+              END
+            symbolEntry__set_kept_identity(&entry, (inherited OR_ELSE KeptIdentityContract{ family: :multiowned, sink: "${summary.call_site_facts[rtoc_idx]?.callee_name} kept position ${kept[rtoc_idx]}" }));
+            changed = TRUE;
+          rtoc_idx = rtoc_idx + 1;
+        END
+      rtoc_idx = rtoc_idx + 1;
+    END
+  END
+  IF !(changed) THEN
+      BREAK;
+  END
+  refresh_kept();
+  rubyToClearVoid()
+  });
+END
+# End Ruby module KeepAnalysis
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

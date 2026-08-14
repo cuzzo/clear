@@ -1,0 +1,45 @@
+REQUIRE "../ast/type.clear"
+REQUIRE "../ast/ast.clear"
+REQUIRE "effect_set.clear"
+# Ruby module EffectInference
+FN effectInference__analyze_mut(fn_nodes: {String}FunctionDef) RETURNS !Void ->
+  FOR rtoc_key IN fn_nodes.keys() DO
+  MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
+  fn_value.effect_set = TRY (effectInference__build(fn_value));
+  fn_value.inferred_effects = fn_value.effect_set;
+  END
+END
+FN effectInference__build(fn_value: FunctionDef) RETURNS !EffectSet@multiowned ->
+  MUTABLE eff = Set[];
+  MUTABLE raw = fn_value.effects;
+  IF raw THEN
+    IF raw.contains?(symbol("YIELD")) THEN
+      &eff.insert(:yield);
+    END
+    IF raw.contains?(symbol("HEAP")) THEN
+      &eff.insert(:alloc_heap);
+    END
+    IF (raw.contains?(symbol("IO")) OR raw.contains?(symbol("EXTERN"))) THEN
+      &eff.insert(:io);
+    END
+  END
+  IF (TRUE AND (fn_value.can_fail != NIL)) THEN
+    &eff.insert(:fail);
+  END
+  IF raw THEN
+    IF raw.contains?(symbol("CONTENTION")) THEN
+      &eff.insert(:contention);
+    END
+    IF raw.contains?(symbol("BLOCKING")) THEN
+      &eff.insert(:blocking);
+    END
+    IF raw.contains?(symbol("CONTENTION_MAYBE")) THEN
+      &eff.insert(:contends_maybe);
+    END
+    IF raw.contains?(symbol("BLOCKING_MAYBE")) THEN
+      &eff.insert(:blocks_maybe);
+    END
+  END
+  RETURN TRY (effectSet__new(eff));
+END
+# End Ruby module EffectInference

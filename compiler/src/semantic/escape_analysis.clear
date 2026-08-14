@@ -1,0 +1,2842 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f626f64795f616e616c797369732e636c656172" AS body_analysis
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f6361706162696c69746965732e636c656172" AS capabilities
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6f63616c5f62696e64696e675f66616374732e636c656172" AS local_binding_facts
+REQUIRE "pkg:rtoc_73656d616e7469632f6f776e6572736869705f6964656e746974792e636c656172" AS ownership_identity
+REQUIRE "pkg:rtoc_616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_73656d616e7469632f73656d616e7469635f6964732e636c656172" AS semantic_ids
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172" AS param
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+PUB UNION EscapeAnalysisCall { FuncCall: FuncCall, MethodCall: MethodCall }
+# Ruby module EscapeAnalysis
+PUB UNION AssignmentTarget { StringValue: String, SymbolValue: String@symbol, MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB UNION DynamicValue { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, StringValue: String, SymbolValue: String@symbol, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB STRUCT EscapePlacementFact {
+  fn_name: String,
+  binding: BindingId,
+  reason: String@symbol
+}
+
+PUB FN escapePlacementFact__symbol_name(self: EscapePlacementFact) RETURNS String ->
+  RETURN COPY self.binding.name;
+END
+PUB FN escapePlacementFact__binding_id(self: EscapePlacementFact) RETURNS Int64 EFFECTS REENTRANT ->
+  RETURN self.binding.binding_id;
+END
+PUB STRUCT FunctionFacts {
+  fn: FunctionDef,
+  symbols: {String}SymbolEntry@multiowned,
+  binding_values: {String}[]Locatable,
+  return_values: []Locatable,
+  assignment_nodes: []AssignmentNode,
+  escape_nodes: []Locatable,
+  lambda_body_identifier_refs: {Int64}[]Identifier
+}
+
+PUB FN functionFacts__heap_symbol_count(self: FunctionFacts) RETURNS !Int64 ->
+  RETURN (TRY (functionFacts__heap_symbol_ids(self))).length();
+END
+PUB FN functionFacts__heap_symbols(self: FunctionFacts) RETURNS !{String}SymbolEntry@multiowned ->
+  MUTABLE out: {String}SymbolEntry@multiowned = {};
+  FOR _ IN self.fn.params DO
+  MUTABLE sym: ?SymbolEntry = COPY _.symbol;
+  IF (escapeAnalysis__symbol_heap?(sym) AND (sym != NIL)) THEN
+      out[_.name] = sym;
+  END
+  END
+  FOR rtoc_key IN self.symbols.keys() DO
+  MUTABLE sym: SymbolEntry@multiowned = COPY UNWRAP (self.symbols[rtoc_key]);
+  IF escapeAnalysis__symbol_heap?(sym) THEN
+    out[rtoc_key] = sym;
+  END
+  END
+  RETURN out;
+END
+PUB FN functionFacts__heap_symbol_ids(self: FunctionFacts) RETURNS ![Set]Int64 ->
+  RETURN (TRY (functionFacts__heap_symbols(self))).values() |> SELECT _.binding_id() |> DISTINCT _;
+END
+PUB STRUCT EscapePlacementFacts {
+  placements: []EscapePlacementFact
+}
+
+PUB FN escapePlacementFacts__record_new_heap_symbols_mut(MUTABLE self: EscapePlacementFacts, facts: FunctionFacts, before_heap_ids: [Set]Int64, reason: String@symbol) RETURNS !Void ->
+  FOR rtoc_key IN (TRY (functionFacts__heap_symbols(facts))).keys() DO
+  MUTABLE sym: SymbolEntry@multiowned = COPY UNWRAP ((TRY (functionFacts__heap_symbols(facts)))[rtoc_key]);
+  IF before_heap_ids.contains?(sym.binding_id) THEN
+    CONTINUE;
+  END
+  &self.placements.append(COPY EscapePlacementFact{ fn_name: COPY facts.fn.name, binding: COPY bindingId__from_symbol(rtoc_key, sym), reason: COPY reason });
+  END
+END
+PUB FN escapePlacementFacts__heap_function_names(self: EscapePlacementFacts) RETURNS ![Set]String ->
+  RETURN (self.placements |> SELECT _.fn_name) |> DISTINCT _;
+END
+PUB STRUCT EscapeAnalysisResult {
+  heap_fns: [Set]String,
+  bg_heap: [Set]String,
+  placements: EscapePlacementFacts
+}
+PUB STRUCT EscapeContext {
+  fn: FunctionDef,
+  facts: ?FunctionFacts,
+  fn_nodes: {String}FunctionDef,
+  facts_by_name: {String}FunctionFacts,
+  bg_heap: [Set]String,
+  schema_lookup: ?Any@multiowned
+}
+PUB STRUCT EscapeSink {
+  name: String@symbol,
+  node_classes: []Any@multiowned,
+  handler: String@symbol
+}
+
+PUB FN escapeSink__matches?(self: EscapeSink, node: Any) RETURNS Bool ->
+  RETURN PARTIAL MATCH node START
+    AST.ReturnNode -> (self.handler == symbol("apply_return_escape_sink!")),
+    AST.Assignment -> (self.handler == symbol("apply_assignment_escape_sink!")),
+    AST.VarDecl -> (self.handler == symbol("apply_binding_escape_sink!")),
+    AST.BindExpr -> (self.handler == symbol("apply_binding_escape_sink!")),
+    AST.DestructuringAssignment -> (self.handler == symbol("apply_destructuring_escape_sink!")),
+    AST.BgBlock -> (self.handler == symbol("apply_execution_boundary_escape_sink!")),
+    AST.BgStreamBlock -> (self.handler == symbol("apply_execution_boundary_escape_sink!")),
+    AST.LambdaLit -> (self.handler == symbol("apply_lambda_escape_sink!")),
+    AST.FuncCall -> (self.handler == symbol("apply_func_call_escape_sink!")),
+    AST.MethodCall -> (self.handler == symbol("apply_method_call_escape_sink!")),
+    DEFAULT -> FALSE
+  END;
+END
+escape_sinks: [8]EscapeSink = [EscapeSink{ name: :owning_return, node_classes: [AST.ReturnNode], handler: symbol("apply_return_escape_sink!") }, EscapeSink{ name: :enclosing_scope_store, node_classes: [AST.Assignment], handler: symbol("apply_assignment_escape_sink!") }, EscapeSink{ name: :binding_result, node_classes: [AST.VarDecl, AST.BindExpr], handler: symbol("apply_binding_escape_sink!") }, EscapeSink{ name: :destructured_binding, node_classes: [AST.DestructuringAssignment], handler: symbol("apply_destructuring_escape_sink!") }, EscapeSink{ name: :execution_boundary_capture, node_classes: [AST.BgBlock, AST.BgStreamBlock], handler: symbol("apply_execution_boundary_escape_sink!") }, EscapeSink{ name: :lambda_capture, node_classes: [AST.LambdaLit], handler: symbol("apply_lambda_escape_sink!") }, EscapeSink{ name: :takes_or_mutable_arg, node_classes: [AST.FuncCall], handler: symbol("apply_func_call_escape_sink!") }, EscapeSink{ name: :takes_or_mutable_arg, node_classes: [AST.MethodCall], handler: symbol("apply_method_call_escape_sink!") }];
+PUB FN escapeAnalysis__apply_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?Any = NIL) RETURNS !Tuple<[Set]String, [Set]String> ->
+  MUTABLE result = TRY (escapeAnalysis__apply_with_facts_mut(fn_nodes, schema_lookup));
+  RETURN CAST(Tuple{result.heap_fns, result.bg_heap} AS Tuple<[Set]String, [Set]String>);
+END
+PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?Any = NIL, body_summaries: {String}FunctionBodySummary, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS !EscapeAnalysisResult ->
+  MUTABLE bg_heap: [Set]String = Set[];
+  MUTABLE placements = EscapePlacementFacts{ placements: List[] };
+  MUTABLE facts_by_name: {String}FunctionFacts = {};
+  FOR rtoc_key IN fn_nodes.keys() DO
+  MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
+  IF fn_value.body THEN
+    facts_by_name[rtoc_key] = TRY (function_facts(fn_value, body_summaries[rtoc_key], ((IF hoist_bindings != NIL THEN
+      hoist_bindings[rtoc_key]
+    ELSE
+      NIL
+    END) OR_ELSE List[])));
+  END
+  END
+  FOR _ IN facts_by_name.values() DO
+  escapeAnalysis__record_placement_phase_mut(&placements, _, :owning_return, %() USE(schema_lookup, _) -> {
+  TRY (mark_heap_return_facts_mut(_, schema_lookup));
+  rubyToClearVoid()
+  });
+  END
+  FOR _ IN facts_by_name.values() DO
+  escapeAnalysis__record_placement_phase_mut(&placements, _, :receiver_backing_storage, %() USE(_) -> {
+    mark_param_receiver_allocations_heap_mut(_.escape_nodes);
+    rubyToClearVoid()
+  });
+  escapeAnalysis__record_placement_phase_mut(&placements, _, :recursive_aggregate_owner, %() USE(schema_lookup, _) -> {
+    TRY (mark_recursive_aggregate_owners_heap_mut(_, schema_lookup));
+    rubyToClearVoid()
+  });
+  END
+  FOR _ IN facts_by_name.values() DO
+  MUTABLE body = COPY _.fn.body;
+  escapeAnalysis__record_placement_phase_mut(&placements, _, :escape_sink, %() USE(bg_heap, facts_by_name, fn_nodes, schema_lookup, _) -> {
+    TRY (mark_body_escapes_mut(_, fn_nodes, facts_by_name, bg_heap, schema_lookup));
+    rubyToClearVoid()
+  });
+  escapeAnalysis__record_placement_phase_mut(&placements, _, :loop_receiver_backing_storage, %() USE(body) -> {
+    TRY (mark_loop_receiver_allocations_heap_mut(body));
+    rubyToClearVoid()
+  });
+  escapeAnalysis__record_placement_phase_mut(&placements, _, :assignment_ownership, %() USE(facts_by_name, fn_nodes, schema_lookup, _) -> {
+    TRY (propagate_assignment_ownership_mut(_, fn_nodes, facts_by_name, schema_lookup));
+    rubyToClearVoid()
+  });
+  escapeAnalysis__record_placement_phase_mut(&placements, _, :hoist_dependency, %() USE(_) -> {
+    TRY (propagate_hoist_dependencies_mut(_));
+    rubyToClearVoid()
+  });
+  escapeAnalysis__record_placement_phase_mut(&placements, _, :value_block_placement, %() USE(_) -> {
+    propagate_value_block_placements_mut(_);
+    rubyToClearVoid()
+  });
+  END
+  RETURN EscapeAnalysisResult{ heap_fns: COPY TRY (escapePlacementFacts__heap_function_names(placements)), bg_heap: COPY bg_heap, placements: COPY placements };
+END
+PRIVATE FN escapeAnalysis__record_placement_phase_mut(MUTABLE placements: EscapePlacementFacts, facts: FunctionFacts, reason: String@symbol, blk: FN() -> Void) RETURNS !Void ->
+  MUTABLE before = TRY (functionFacts__heap_symbol_ids(facts));
+  blk();
+  escapePlacementFacts__record_new_heap_symbols_mut(&placements, facts, before, reason);
+END
+PUB FN escapeAnalysis__validate_escape_sink_handlers_mut() RETURNS !Void ->
+  TRY (escapeAnalysis__validate_handler_registry_mut("EscapeAnalysis sink registry", CAST({:owning_return: [symbol("mark_heap_return_facts!"), symbol("mark_body_escapes!")], :enclosing_scope_store: [symbol("mark_body_escapes!")], :binding_result: [symbol("mark_body_escapes!")], :execution_boundary_capture: [symbol("mark_body_escapes!")], :lambda_capture: [symbol("mark_body_escapes!")], :takes_or_mutable_arg: [symbol("mark_body_escapes!")], :receiver_backing_storage: [symbol("mark_param_receiver_allocations_heap!"), symbol("mark_loop_receiver_allocations_heap!")]} AS {String@symbol}[]String@symbol)));
+END
+PUB FN escapeAnalysis__validate_escape_sinks_mut() RETURNS !Void ->
+  MUTABLE missing: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
+  FOR _ IN escape_sinks DO
+  IF !(([:owning_return, :enclosing_scope_store, :binding_result, :destructured_binding, :execution_boundary_capture, :lambda_capture, :takes_or_mutable_arg, :receiver_backing_storage] |> DISTINCT _).contains?(_.name)) THEN
+      &missing.append(COPY CAST(_.name AS String));
+  END
+  IF !(([symbol("apply_return_escape_sink!"), symbol("apply_assignment_escape_sink!"), symbol("apply_binding_escape_sink!"), symbol("apply_destructuring_escape_sink!"), symbol("apply_execution_boundary_escape_sink!"), symbol("apply_lambda_escape_sink!"), symbol("apply_func_call_escape_sink!"), symbol("apply_method_call_escape_sink!"), symbol("mark_heap_return_facts!"), symbol("mark_body_escapes!"), symbol("mark_param_receiver_allocations_heap!"), symbol("mark_loop_receiver_allocations_heap!"), symbol("propagate_assignment_ownership!"), symbol("mark_recursive_aggregate_owners_heap!"), symbol("propagate_hoist_dependencies!")] |> DISTINCT _).contains?(_.handler)) THEN
+      &missing.append(COPY CAST(_.handler AS String));
+  END
+  END
+  IF (missing.length() == 0) THEN
+    RETURN;
+  END
+  panic("EscapeAnalysis executable sink registry is incomplete: {}");
+END
+PUB FN escapeAnalysis__validate_derived_placement_handlers_mut() RETURNS !Void ->
+  TRY (escapeAnalysis__validate_handler_registry_mut("EscapeAnalysis derived placement registry", CAST({:recursive_aggregate_owner: [symbol("mark_recursive_aggregate_owners_heap!")], :assignment_ownership: [symbol("propagate_assignment_ownership!")], :hoist_dependency: [symbol("propagate_hoist_dependencies!")]} AS {String@symbol}[]String@symbol)));
+END
+PUB FN escapeAnalysis__validate_handler_registry_mut(label: String, registry: {String@symbol}[]String@symbol) RETURNS !Void ->
+  MUTABLE missing: []String = ( { MUTABLE rtoc_empty_list_2: []String = List[]; rtoc_empty_list_2 } );
+  FOR rtoc_key IN registry.keys() DO
+  MUTABLE handlers: []String@symbol = COPY UNWRAP (registry[rtoc_key]);
+  FOR _ IN handlers DO
+  IF !(([symbol("apply_return_escape_sink!"), symbol("apply_assignment_escape_sink!"), symbol("apply_binding_escape_sink!"), symbol("apply_destructuring_escape_sink!"), symbol("apply_execution_boundary_escape_sink!"), symbol("apply_lambda_escape_sink!"), symbol("apply_func_call_escape_sink!"), symbol("apply_method_call_escape_sink!"), symbol("mark_heap_return_facts!"), symbol("mark_body_escapes!"), symbol("mark_param_receiver_allocations_heap!"), symbol("mark_loop_receiver_allocations_heap!"), symbol("propagate_assignment_ownership!"), symbol("mark_recursive_aggregate_owners_heap!"), symbol("propagate_hoist_dependencies!")] |> DISTINCT _).contains?(_)) THEN
+    &missing.append("${rtoc_key}=${_}");
+  END
+  END
+  END
+  IF (missing.length() == 0) THEN
+    RETURN;
+  END
+  panic("{} is incomplete: {}");
+END
+PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary) RETURNS Void ->
+  MUTABLE callsites: {String}[]CallSiteFact = {};
+  FOR _ IN body_summaries.values() DO
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < _.call_site_facts.length() DO
+    IF _.call_site_facts[rtoc_idx].fn_var_call THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF callsites[_.call_site_facts[rtoc_idx].callee_name] == NIL THEN
+        callsites[_.call_site_facts[rtoc_idx].callee_name] = List[];
+      END
+    (callsites[_.call_site_facts[rtoc_idx].callee_name])?.append(_.call_site_facts[rtoc_idx]);
+  rtoc_idx = rtoc_idx + 1;
+  END
+  END
+  fn_nodes.count().times(%() USE(callsites, fn_nodes) -> {
+  MUTABLE changed: Bool = FALSE;
+  FOR rtoc_key IN fn_nodes.keys() DO
+    MUTABLE callee_fn: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
+    MUTABLE sites = COPY (callsites[rtoc_key] OR_ELSE List[]);
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < callee_fn.params.length() DO
+        MUTABLE entry: ?SymbolEntry = callee_fn.params[rtoc_idx]?.symbol;
+        IF !(entry) THEN
+            RETURN;
+        END
+        IF !(param_sync_was_declared?(callee_fn.params[rtoc_idx]?)) THEN
+            MUTABLE unified = unify_caller_attr(sites, rtoc_idx, %(s) -> {
+          IF s.sync() THEN
+                RETURN;
+          END
+          MUTABLE t = s.type();
+          t.sync()
+            });
+            IF ((unified AND (symbolEntry__sync(entry) != unified)) AND param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, unified)) THEN
+              symbolEntry__set_sync(&entry, unified);
+              changed = TRUE;
+            END
+        END
+        MUTABLE unified_storage = unify_caller_attr(sites, rtoc_idx, %(s) -> {
+          IF symbolEntry__rc_stored?(s) THEN
+              RETURN;
+          END
+          MUTABLE t = s.type();
+          IF type__shared?(t) THEN
+              RETURN;
+          END
+          IF t.multiowned?() THEN
+              RETURN;
+          END
+          NIL
+        });
+        IF (unified_storage AND (symbolEntry__storage(entry) != unified_storage)) THEN
+            symbolEntry__set_storage(&entry, unified_storage);
+            changed = TRUE;
+        END
+      rtoc_idx = rtoc_idx + 1;
+    END
+  END
+  IF !(changed) THEN
+      BREAK;
+  END
+  rubyToClearVoid()
+  });
+END
+PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary, on_mutable_violation: ?FN(SymbolEntry, Identifier, String) -> Void = NIL, on_family_violation: ?FN(Locatable, String@symbol, String@symbol, String) -> Void = NIL, imported_params: {String}[]Param) RETURNS !Void ->
+  MUTABLE kept_contracts: {String}{Int64}KeptIdentityContract = {};
+  MUTABLE all_params = ( { MUTABLE rtoc_transform_values_result_4: {String}Any = {}; FOR rtoc_key IN fn_nodes.keys() DO rtoc_transform_values_result_4[rtoc_key] = COPY UNWRAP (fn_nodes[rtoc_key]).params; END rtoc_transform_values_result_4 } ).keys() |> REDUCE(COPY imported_params) { acc[_] = COPY UNWRAP (( { MUTABLE rtoc_transform_values_result_4: {String}Any = {}; FOR rtoc_key IN fn_nodes.keys() DO rtoc_transform_values_result_4[rtoc_key] = COPY UNWRAP (fn_nodes[rtoc_key]).params; END rtoc_transform_values_result_4 } )[_]); acc };
+  FOR rtoc_key IN all_params.keys() DO
+  MUTABLE params: Any = COPY UNWRAP (all_params[rtoc_key]);
+  MUTABLE by_index: {Int64}KeptIdentityContract = {};
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < params.length() DO
+      MUTABLE entry = params[rtoc_idx].symbol();
+      MUTABLE contract: ?KeptIdentityContract = NIL;
+      IF entry != NIL THEN
+          contract = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = (entry?);
+      symbolEntry__kept_identity(rtoc_local_receiver_5) };
+        END
+      IF !((entry AND (contract != NIL))) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      IF keptIdentityContract__rc?(contract) THEN
+          entry.storage = :multiowned;
+      END
+      by_index[rtoc_idx] = UNWRAP (contract);
+    rtoc_idx = rtoc_idx + 1;
+  END
+  IF !((by_index.count() == 0)) THEN
+      kept_contracts[rtoc_key] = by_index;
+  END
+  END
+  FOR _ IN body_summaries.values() DO
+  MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[_.name];
+  MUTABLE liveness: ?KeptEdgeLiveness@multiowned = NIL;
+  MUTABLE local_entries = _.binding_nodes.each_with_object({}, %(node: BindingNode, map: {String}SymbolEntry@multiowned) -> {
+    MUTABLE sym = IF respondsTo?(node, "symbol") THEN
+        node.symbol()
+      ELSE
+        NIL
+      END;
+    IF sym IS_A SymbolEntry THEN
+      map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
+      RETURN NIL;
+    END
+    NIL
+  });
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < _.call_site_facts.length() DO
+      MUTABLE kept: ?{Int64}KeptIdentityContract = COPY kept_contracts[_.call_site_facts[rtoc_idx].callee_name];
+      IF !(kept) THEN
+          rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      FOR rtoc_key IN kept.keys() DO
+        MUTABLE contract: KeptIdentityContract = COPY UNWRAP (kept[rtoc_key]);
+        MUTABLE raw_arg = _.call_site_facts[rtoc_idx].args[rtoc_key];
+        IF !(respondsTo?(raw_arg, "kept_edge_plan")) THEN
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        IF raw_arg.kept_edge_plan() THEN
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        MUTABLE stamp_plan: FN(CallEdgeOwnershipPlan) -> Void = %(plan) USE(raw_arg, rtoc_idx, rtoc_key) -> {
+          raw_arg.kept_edge_plan = plan;
+          MUTABLE call_node = KEEP _.call_site_facts[rtoc_idx].node;
+          call_node.kept_edge_plans = TRY (ownershipGraph__merge(((call_node.kept_edge_plans() OR {})), {rtoc_key: plan}));
+          NIL
+        };
+        MUTABLE given = raw_arg IS_A MoveNode;
+        MUTABLE arg = IF raw_arg IS_A MoveNode THEN
+            raw_arg.value()
+          ELSE
+            raw_arg
+          END;
+        MUTABLE family = contract.family;
+        IF arg IS_A CopyNode THEN
+            MUTABLE plan = CallEdgeOwnershipPlan{ op: :copy_wrap, family: COPY family };
+            stamp_plan(plan);
+            MUTABLE inner_value = arg.value();
+            IF respondsTo?(inner_value, "kept_edge_plan") THEN
+              inner_value.kept_edge_plan = plan;
+            END
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        IF (arg IS_A Literal AND (arg.type() == symbol("NIL"))) THEN
+            stamp_plan(CallEdgeOwnershipPlan{ op: :pass_null, family: COPY family });
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        IF !(arg IS_A Identifier) THEN
+            MUTABLE arg_type = TRY (kept_edge_arg_type(arg));
+            MUTABLE conflict: ?String@symbol = escapeAnalysis__kept_family_conflict(arg_type, family);
+            IF conflict EXISTS AS conflict_value THEN
+              (IF on_family_violation != NIL THEN
+                on_family_violation(arg, conflict_value, family, _.call_site_facts[rtoc_idx].callee_name)
+              ELSE
+                NIL
+              END);
+              rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+            END
+            MUTABLE op = IF (IF arg_type != NIL THEN
+              TRY (type__any_rc?(arg_type))
+            ELSE
+              NIL
+            END) THEN
+              :retain_handle
+            ELSE
+              :move_payload_wrap
+            END;
+            stamp_plan(CallEdgeOwnershipPlan{ op: COPY op, family: COPY family });
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        MUTABLE entry: ?SymbolEntry@multiowned = arg.symbol();
+        IF !((entry != NIL)) THEN
+            entry = local_entries[arg.name()];
+        END
+        IF !((entry != NIL)) THEN
+            arg_type = TRY (kept_edge_arg_type(arg));
+            op = IF (IF arg_type != NIL THEN
+              TRY (type__any_rc?(arg_type))
+            ELSE
+              NIL
+            END) THEN
+              :retain_handle
+            ELSE
+              :move_payload_wrap
+            END;
+            stamp_plan(CallEdgeOwnershipPlan{ op: COPY op, family: COPY family });
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        conflict = escapeAnalysis__kept_family_conflict(CAST(symbolEntry__type(entry) AS ?Type), family);
+        IF conflict EXISTS AS conflict_value THEN
+            (IF on_family_violation != NIL THEN
+              on_family_violation(arg, conflict_value, family, _.call_site_facts[rtoc_idx].callee_name)
+            ELSE
+              NIL
+            END);
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        liveness = (liveness OR_ELSE keptEdgeLiveness__new((owner_fn?.body OR_ELSE List[])));
+        MUTABLE last_use = (given OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_6 = NIL;
+        keptEdgeLiveness__last_use?(rtoc_local_receiver_6, arg) });
+        IF symbolEntry__is_param(entry) THEN
+            op = IF last_use THEN
+              :move_handle
+            ELSE
+              :retain_handle
+            END;
+            IF (last_use AND !(given)) THEN
+              arg.was_moved = TRUE;
+            END
+            stamp_plan(CallEdgeOwnershipPlan{ op: COPY op, family: COPY family });
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        MUTABLE already_rc = (symbolEntry__rc_stored?(entry) OR TRY (type__any_rc?(symbolEntry__type(entry))));
+        IF ((!(already_rc) AND entry.mutable) AND !(last_use)) THEN
+            (IF on_mutable_violation != NIL THEN
+              on_mutable_violation(entry, arg, _.call_site_facts[rtoc_idx].callee_name)
+            ELSE
+              NIL
+            END);
+            rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+        END
+        IF !(already_rc) THEN
+            promote_kept_binding_mut(_, fn_nodes, &entry, &arg);
+        END
+        op = IF last_use THEN
+            :move_handle
+          ELSE
+            :retain_handle
+          END;
+        IF (last_use AND !(given)) THEN
+            arg.was_moved = TRUE;
+        END
+        stamp_plan(CallEdgeOwnershipPlan{ op: COPY op, family: COPY family });
+      END
+    rtoc_idx = rtoc_idx + 1;
+  END
+  END
+END
+PUB FN escapeAnalysis__kept_edge_arg_type(arg: Locatable) RETURNS !Type ->
+  IF !((respondsTo?(arg, "typed?") AND arg.typed?())) THEN
+    panic("{}placement cannot plan an ownership edge for it");
+  END
+  RETURN TRY (type__from_node_mut(arg, "kept edge argument"));
+END
+PUB FN escapeAnalysis__kept_family_conflict(source_type: ?Type, dest_family: String@symbol) RETURNS ?String@symbol ->
+  IF source_type EXISTS AS source_type_value THEN
+    MUTABLE source_family =     IF type__shared?(source_type_value) THEN
+      :shared
+    ELSE_IF type__multiowned?(source_type_value) THEN
+      :multiowned
+    ELSE
+      NIL
+    END;
+    IF (FALSE OR (source_family == dest_family)) THEN
+      RETURN NIL;
+    END
+    RETURN source_family;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn_nodes: {String}FunctionDef, MUTABLE entry: SymbolEntry, MUTABLE arg: Identifier) RETURNS !Void ->
+  MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
+  TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
+  symbolEntry__set_storage(&entry, :multiowned);
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND (respondsTo?(_, "symbol") AND _.symbol().equal?(entry));
+  IF decl EXISTS AS decl_value THEN
+    MUTABLE decl_value_mutable = COPY decl_value;
+    MUTABLE stamped = (decl_value_mutable.full_type() OR_ELSE NIL);
+    IF (stamped IS_A Type AND !(stamped.equal?(symbolEntry__type(entry)))) THEN
+      TRY (type__set_ownership(&stamped, :multiowned));
+    END
+  END
+  MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[summary.name];
+  IF owner_fn?.body THEN
+    restamp_promoted_uses_mut(owner_fn.body, arg.name, entry);
+  END
+  arg.symbol = COPY entry;
+END
+PUB STRUCT KeptEdgeLiveness {
+  by_object: {Int64}Occurrence,
+  counter: Int64,
+  last_position: {String}Int64
+}
+
+PUB STRUCT Occurrence {
+  position: Int64,
+  loop_depth: Int64
+}
+PUB FN keptEdgeLiveness__initialize(MUTABLE self: KeptEdgeLiveness, body: []Locatable) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.by_object = {};
+    rtoc_self_view.last_position = {};
+    rtoc_self_view.counter = 0;
+    FOR _ IN body DO
+    keptEdgeLiveness__index_node(&rtoc_self_view, _, 0);
+    END
+}
+END
+PUB FN keptEdgeLiveness__last_use?(self: KeptEdgeLiveness, arg: Identifier) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE occ: ?Occurrence = COPY rtoc_self_view.by_object[arg.object_id()];
+    IF occ EXISTS AS occ_value THEN
+      IF occ_value.loop_depth.positive?() THEN
+        RETURN FALSE;
+      END
+      RETURN ((rtoc_self_view.last_position[arg.name] OR_ELSE -1) <= occ_value.position);
+    ELSE
+      RETURN FALSE;
+    END
+}
+END
+PRIVATE FN keptEdgeLiveness__index_node(MUTABLE self: KeptEdgeLiveness, node: Locatable, loop_depth: Int64) RETURNS Void
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF node IS_A FunctionDef AS function_def THEN
+      RETURN;
+    END
+    IF node IS_A Identifier AS identifier THEN
+      rtoc_self_view.counter = (rtoc_self_view.counter + 1);
+      rtoc_self_view.by_object[identifier.object_id()] = Occurrence{ position: rtoc_self_view.counter, loop_depth: COPY loop_depth };
+      IF (rtoc_self_view.counter > (rtoc_self_view.last_position[identifier__name(identifier)] OR_ELSE -1)) THEN
+        rtoc_self_view.last_position[identifier__name(identifier)] = COPY rtoc_self_view.counter;
+      END
+    END
+    MUTABLE child_depth = IF aST__loop_node?(node) THEN
+      (loop_depth + 1)
+    ELSE
+      loop_depth
+    END;
+    aST__each_child_node(node, %(child: Locatable) USE(child_depth, MUTABLE rtoc_self_view) -> {
+    keptEdgeLiveness__index_node(&rtoc_self_view, child, child_depth);
+    rubyToClearVoid()
+    });
+}
+END
+PUB FN keptEdgeLiveness__new(body: []Locatable) RETURNS KeptEdgeLiveness@multiowned ->
+  MUTABLE self = KeptEdgeLiveness{ by_object: {}, counter: 0, last_position: {} };
+  keptEdgeLiveness__initialize(&self, body);
+  RETURN self @multiowned;
+END
+PUB FN escapeAnalysis__restamp_promoted_uses_mut(body: []Locatable, name: String, entry: SymbolEntry) RETURNS Void ->
+  FOR _ IN body DO
+  restamp_promoted_uses_in_node_mut(_, name, entry);
+  END
+END
+PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: String, entry: SymbolEntry) RETURNS !Void EFFECTS REENTRANT ->
+  IF node IS_A FunctionDef AS function_def THEN
+    RETURN;
+  END
+  IF (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == name) ELSE FALSE END) THEN
+    MUTABLE sym = node.symbol();
+    IF (!(sym IS_A SymbolEntry@multiowned) OR sym.equal?(entry)) THEN
+      MUTABLE stamp = (node.full_type() OR_ELSE NIL);
+      IF ((stamp IS_A Type AND !(stamp.equal?(symbolEntry__type(entry)))) AND !(TRY (type__any_rc?(stamp)))) THEN
+        TRY (type__set_ownership(&stamp, :multiowned));
+      END
+    END
+  END
+  aST__each_child_node(node, %(child: Locatable) USE(entry, name) -> {
+  restamp_promoted_uses_in_node_mut(child, name, entry);
+  rubyToClearVoid()
+  });
+END
+PUB FN escapeAnalysis__unify_caller_attr(sites: []CallSiteFact, idx: Int64, project: FN(SymbolEntry) -> ?String@symbol) RETURNS ?String@symbol ->
+  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND respondsTo?(arg, "symbol"))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol = arg.symbol(); (IF !(symbol IS_A SymbolEntry@multiowned) THEN NIL ELSE project(symbol) END) } END) };
+  IF (observed.length() == 0) THEN
+    RETURN NIL;
+  END
+  MUTABLE unique = CAST((observed |> DISTINCT _) AS []?String@symbol);
+  IF (((scopeBindings__length(unique) == 1) AND unique.first())) THEN
+    RETURN unique.first();
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN escapeAnalysis__param_sync_was_declared?(param: Param) RETURNS ?Bool ->
+  MUTABLE t = COPY param.type;
+  RETURN (TRUE AND type__any_sync?(t));
+END
+PUB FN escapeAnalysis__param_accepts_caller_sync?(fn_node: FunctionDef, param: Param, sync_value: String@symbol) RETURNS Bool ->
+  MUTABLE t = COPY param.type;
+  IF (TRUE AND ((type__shared?(t) OR type__any_sync?(t)))) THEN
+    RETURN TRUE;
+  END
+  IF !(symbolEntry__atomic_sync?(sync_value)) THEN
+    RETURN TRUE;
+  END
+  MUTABLE requires = fn_node.requires;
+  MUTABLE families = (TRUE AND requires[param.name]);
+  IF !(TRUE) THEN
+    RETURN FALSE;
+  END
+  RETURN (families.contains?(:ATOMIC) OR families.contains?(:SNAPSHOTTED));
+END
+PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, bg_heap: [Set]String, schema_lookup: ?Any) RETURNS !Void ->
+  MUTABLE context = EscapeContext{ fn: facts.fn, facts: COPY facts, fn_nodes: COPY fn_nodes, facts_by_name: COPY facts_by_name, bg_heap: COPY bg_heap, schema_lookup: schema_lookup };
+  FOR _ IN facts.escape_nodes DO
+  FOR _ IN escape_sinks DO
+  IF escapeSink__matches?(_, _) THEN
+    TRY (apply_escape_sink_mut(_, _, context));
+  END
+  END
+  END
+END
+PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, context: EscapeContext) RETURNS !Void ->
+  IF (sink.handler == symbol("apply_return_escape_sink!")) THEN
+    TRY (apply_return_escape_sink_mut(castLocatableToReturnNode(node), context));
+  ELSE_IF (sink.handler == symbol("apply_assignment_escape_sink!")) THEN
+    TRY (apply_assignment_escape_sink_mut(castLocatableToAssignment(node), context));
+  ELSE_IF (sink.handler == symbol("apply_binding_escape_sink!")) THEN
+    TRY (apply_binding_escape_sink_mut(CAST(node AS Any@multiowned), context));
+  ELSE_IF (sink.handler == symbol("apply_destructuring_escape_sink!")) THEN
+    TRY (apply_destructuring_escape_sink_mut(castLocatableToDestructuringAssignment(node), context));
+  ELSE_IF (sink.handler == symbol("apply_execution_boundary_escape_sink!")) THEN
+    apply_execution_boundary_escape_sink_mut(CAST(node AS Any@multiowned), context);
+  ELSE_IF (sink.handler == symbol("apply_lambda_escape_sink!")) THEN
+    TRY (apply_lambda_escape_sink_mut(castLocatableToLambdaLit(node), context));
+  ELSE_IF (sink.handler == symbol("apply_func_call_escape_sink!")) THEN
+    apply_func_call_escape_sink_mut(castLocatableToFuncCall(node), context);
+  ELSE_IF (sink.handler == symbol("apply_method_call_escape_sink!")) THEN
+    TRY (apply_method_call_escape_sink_mut(CAST(node AS MethodCall), context));
+  ELSE
+    panic("BUG: unknown escape sink {}");
+  END
+  NIL;
+END
+PUB FN escapeAnalysis__apply_return_escape_sink_mut(node: ReturnNode, context: EscapeContext) RETURNS !Void ->
+  MUTABLE value = node.value;
+  IF !(value) THEN
+    RETURN;
+  END
+  IF !(TRY (owning_return_needs_heap_placement?(KEEP context.fn, &value, KEEP context.schema_lookup))) THEN
+    RETURN;
+  END
+  IF !(returned_call_result?(value)) THEN
+    TRY (mark_expr_identifiers_heap_mut(value));
+  END
+  IF context.facts EXISTS AS facts_value THEN
+    TRY (mark_heap_return_mut(facts_value, value));
+  END
+END
+PUB FN escapeAnalysis__apply_assignment_escape_sink_mut(node: Assignment, context: EscapeContext) RETURNS !Void ->
+  MUTABLE facts: ?FunctionFacts = COPY context.facts;
+  IF facts EXISTS AS facts_value THEN
+    MUTABLE target: AssignmentTarget = COPY castAssignmentNameToAssignmentTarget(node.name);
+    IF assignment_target_heap_destination?(facts_value, target, KEEP context.schema_lookup) THEN
+      TRY (mark_expr_identifiers_heap_mut(node.value));
+    END
+  ELSE
+    RETURN;
+  END
+END
+PUB FN escapeAnalysis__apply_binding_escape_sink_mut(node: Node, context: EscapeContext) RETURNS !Void ->
+  IF borrow_return_expr?(node.value()) THEN
+    mark_symbol_borrow_mut(node.symbol());
+  ELSE_IF TRY (call_result_is_heap?(node.value(), context.fn_nodes, KEEP context.schema_lookup, context.facts_by_name)) THEN
+    mark_symbol_heap_mut(node.symbol());
+  END
+END
+PUB FN escapeAnalysis__apply_destructuring_escape_sink_mut(node: DestructuringAssignment, context: EscapeContext) RETURNS !Void ->
+  IF !(node.value) THEN
+    RETURN;
+  END
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < node.targets.length() DO
+    IF (CAST((node.targets[rtoc_idx]?.name) AS String) == "_") THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE ti = TRY (type__from_node_mut(node.targets[rtoc_idx]?, "destructured target placement"));
+    IF !(TRY (type__needs_explicit_cleanup?(ti, :heap, KEEP context.schema_lookup))) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    mark_symbol_heap_mut(node.targets[rtoc_idx]?.symbol);
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN escapeAnalysis__propagate_value_block_placements_mut(facts: FunctionFacts) RETURNS Void ->
+  MUTABLE body = COPY facts.fn.body;
+  walk_body(body, %(node) -> {
+  IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
+      RETURN NIL;
+  END
+  IF !((IF node.symbol() != NIL THEN
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (node.symbol());
+  symbolEntry__heap_storage?(rtoc_local_receiver_8) }
+    ELSE
+      NIL
+    END)) THEN
+      RETURN NIL;
+  END
+  mark_value_position_heap_mut(node.value())
+  });
+END
+PUB FN escapeAnalysis__mark_value_position_heap_mut(expr: ?Locatable) RETURNS Void ->
+  MUTABLE node: ?DynamicValue = castOptionalLocatableToOptionalDynamicValue(COPY expr);
+  WHILE node DO
+    IF node? IS_A Locatable AS locatable THEN
+      MUTABLE locatable = unwrap_value(locatable);
+    END
+    IF (node IS_A Cast) THEN
+      node = node.value();
+    ELSE_IF (node IS_A BlockExpr) THEN
+      node = node.result();
+    ELSE_IF node IS_A Identifier AS identifier THEN
+      mark_node_symbol_heap_mut(identifier);
+      RETURN;
+    ELSE
+      RETURN;
+    END
+  END
+END
+PUB FN escapeAnalysis__apply_execution_boundary_escape_sink_mut(node: Node, context: EscapeContext) RETURNS Void ->
+  mark_capture_analysis_heap_mut(node.capture_analysis(), context.bg_heap);
+  IF node IS_A BgBlock AS bg_block THEN
+    mark_fsm_ctx_locals_heap_mut(bg_block, KEEP context.schema_lookup);
+  END
+END
+PUB FN escapeAnalysis__apply_lambda_escape_sink_mut(node: LambdaLit, context: EscapeContext) RETURNS !Void ->
+  TRY (mark_lambda_captures_heap_mut(node, context.bg_heap, context.facts));
+END
+PUB FN escapeAnalysis__apply_func_call_escape_sink_mut(node: FuncCall, context: EscapeContext) RETURNS Void ->
+  mark_takes_args_heap_mut(node.args, params_for_call(node, context.fn_nodes), KEEP context.schema_lookup);
+END
+PUB FN escapeAnalysis__apply_method_call_escape_sink_mut(node: MethodCall, context: EscapeContext) RETURNS !Void ->
+  TRY (mark_method_takes_heap_mut(node, params_for_method_call(node), context.fn_nodes, context.facts_by_name, KEEP context.schema_lookup));
+END
+PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatable) RETURNS !Void ->
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < nodes.length() DO
+    IF (nodes[rtoc_idx]? IS_A MethodCall) THEN
+        MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+        IF respondsTo?(nodes[rtoc_idx]?, "matched_signature") THEN
+          sig_branch_value = functionSignature__unwrap(nodes[rtoc_idx]?.matched_signature());
+        ELSE
+          sig_branch_value = NIL;
+        END
+        MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+        IF sig EXISTS AS sig_value THEN
+          MUTABLE sig_value_mutable = COPY sig_value;
+          IF !((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(&sig_value_mutable)))) THEN
+            rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+          END
+          MUTABLE root: ?Identifier = aST__root_identifier(nodes[rtoc_idx]?.object());
+        ELSE
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+        END
+    ELSE_IF nodes[rtoc_idx]? IS_A Assignment AS assignment THEN
+        IF !(assignment.name IS_A GetIndex) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+        END
+        MUTABLE root: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable(assignment.name));
+        MUTABLE ti: ?Type@multiowned = NIL;
+        IF root?.symbol != NIL THEN
+          ti = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_10 = ((root?.symbol)?);
+        symbolEntry__type(rtoc_local_receiver_10) };
+        END
+        IF !(((ti != NIL) AND type__collection?(ti))) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+        END
+    ELSE
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE sym = COPY root?.symbol;
+    IF !((IF sym != NIL THEN
+        symbolEntry__is_param(sym)
+      ELSE
+        NIL
+      END)) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    mark_symbol_heap_mut(sym);
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+  MUTABLE fn = COPY facts.fn;
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < fn.params.length() DO
+    IF !(aggregate_owner_requires_heap?(TRY (type__new(TypeConstructionInput{ Type: COPY fn.params[rtoc_idx]?.type })), schema_lookup)) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    mark_symbol_heap_mut(fn.params[rtoc_idx]?.symbol);
+  rtoc_idx = rtoc_idx + 1;
+  END
+  FOR rtoc_key IN facts.binding_values.keys() DO
+  MUTABLE values: []Locatable = COPY UNWRAP (facts.binding_values[rtoc_key]);
+  MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[rtoc_key];
+  IF !(sym) THEN
+      CONTINUE;
+  END
+  MUTABLE reg: ?SymbolEntryRegInput = COPY sym.reg;
+  IF !(((reg != NIL) AND (reg IS_A Locatable))) THEN
+      CONTINUE;
+  END
+  MUTABLE node: ?SymbolEntryRegInput = reg;
+  IF !(((((node != NIL) AND (node IS_A VarDecl)) OR ((node != NIL) AND (node IS_A DestructureTarget))) OR ((IF node? IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :decl) ELSE FALSE END)))) THEN
+      CONTINUE;
+  END
+  MUTABLE ti = &node.full_type_mut("recursive aggregate owner");
+  IF !((aggregate_owner_requires_heap?(ti, schema_lookup) OR (values |> ANY aggregate_contains_heap_owned_value?(_)))) THEN
+      CONTINUE;
+  END
+  mark_symbol_heap_mut(sym);
+  END
+END
+PUB FN escapeAnalysis__aggregate_contains_heap_owned_value?(node: ?Locatable) RETURNS Bool ->
+  IF node EXISTS AS node_value THEN
+    IF !(((((node_value IS_A StructLit OR node_value IS_A UnionVariantLit) OR node_value IS_A ListLit) OR node_value IS_A HashLit) OR node_value IS_A TupleLit)) THEN
+      RETURN FALSE;
+    END
+    MUTABLE pending: []Locatable = [node_value];
+    WHILE !((pending.length() == 0)) DO
+      MUTABLE current: ?Locatable = &pending.pop();
+      IF current EXISTS AS current_value THEN
+        IF (IF current_value IS_A Identifier AS identifier THEN ((identifier.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_11 = ((identifier.symbol)?);
+        symbolEntry__heap_storage?(rtoc_local_receiver_11) }) ELSE FALSE END) THEN
+          RETURN TRUE;
+        END
+        aST__each_child_node(current_value, %(child: Locatable) USE(MUTABLE pending) -> {
+  &pending.append(COPY child);
+  rubyToClearVoid()
+        });
+      ELSE
+        CONTINUE;
+      END
+    END
+    RETURN FALSE;
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN escapeAnalysis__aggregate_owner_requires_heap?(ti: ?Type, schema_lookup: ?Any) RETURNS !Bool ->
+  IF ti EXISTS AS ti_value THEN
+    MUTABLE t = TRY (type__value_payload_type(ti_value));
+    IF (type__rodata?(t) OR type__borrowed_reference?(t)) THEN
+      RETURN FALSE;
+    END
+    IF TRY (type__collection_value?(t)) THEN
+      RETURN TRY (type__needs_explicit_cleanup?(t, :frame, schema_lookup));
+    END
+    IF (TRY (type__string?(t)) OR TRY (type__heap_ptr?(t))) THEN
+      RETURN FALSE;
+    END
+    RETURN TRY (type__ownership_bearing?(t, schema_lookup));
+  ELSE
+    RETURN FALSE;
+  END
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__mark_loop_receiver_allocations_heap_mut(body: []Node) RETURNS !Void EFFECTS REENTRANT ->
+  FOR _ IN body DO
+  FOR _ IN (TRY (aST__child_bodies(castNodeToLocatable(_)))) DO
+  IF aST__loop_node?(castNodeToLocatable(_)) THEN
+      TRY (mark_receiver_allocations_in_loop_mut(_));
+  END
+  TRY (mark_loop_receiver_allocations_heap_mut(_));
+  END
+  END
+END
+PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETURNS !Void ->
+  IF !(TRY (loop_body_has_frame_allocation_candidate?(body))) THEN
+    RETURN;
+  END
+  MUTABLE declared_names = TRY (loop_body_declared_names(body));
+  TRY (each_loop_body_node(body, %(node) USE(declared_names) -> {
+  IF (node IS_A MethodCall) THEN
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature());
+      IF sig EXISTS AS sig_value THEN
+        MUTABLE sig_value_mutable = COPY sig_value;
+        IF !((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(&sig_value_mutable)))) THEN
+          RETURN NIL;
+        END
+        MUTABLE root: ?Identifier = aST__root_identifier(node.object());
+        MUTABLE value_params = (TRY (functionSignature__params(sig_value_mutable))) |> SKIP 1;
+      ELSE
+        RETURN NIL;
+      END
+  ELSE_IF (node IS_A Assignment) THEN
+      IF !(node.name() IS_A GetIndex) THEN
+        RETURN NIL;
+      END
+      MUTABLE root: ?Identifier = aST__root_identifier(node.name());
+      MUTABLE ti: ?Type@multiowned = NIL;
+      IF root?.symbol != NIL THEN
+        ti = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12 = ((root?.symbol)?);
+      symbolEntry__type(rtoc_local_receiver_12) };
+      END
+      IF !(((ti != NIL) AND type__collection?(ti))) THEN
+        RETURN NIL;
+      END
+      MUTABLE value_params = List[];
+  ELSE
+      RETURN NIL;
+  END
+  IF !(root?.symbol) THEN
+      RETURN NIL;
+  END
+  IF declared_names.contains?(CAST(root.name AS String)) THEN
+      RETURN NIL;
+  END
+  mark_symbol_heap_mut(root.symbol);
+  IF node IS_A MethodCall THEN
+    RETURN TRY (mark_loop_method_value_params_heap_mut(node, value_params));
+  END
+  NIL
+  }));
+END
+PUB FN escapeAnalysis__mark_loop_method_value_params_heap_mut(node: MethodCall, value_params: []Param) RETURNS !Void ->
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < value_params.length() DO
+    IF !((value_params[rtoc_idx]?.takes OR value_params[rtoc_idx]?.mutable)) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE arg: ?Locatable = COPY node.args[rtoc_idx];
+    IF arg EXISTS AS arg_value THEN
+        TRY (mark_expr_identifiers_heap_mut(arg_value));
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN escapeAnalysis__walk_body(body: []Node, blk: FN(Locatable) -> Void) RETURNS Void ->
+  aST__each_locatable(body, blk);
+END
+PUB FN escapeAnalysis__mark_expr_roots_heap_mut(expr: ?Locatable) RETURNS Void ->
+  MUTABLE unwrapped = unwrap_value(expr);
+  MUTABLE root_branch_value: ?Identifier = NIL;
+  IF unwrapped IS_A Locatable THEN
+    root_branch_value = aST__root_identifier(unwrapped);
+  ELSE
+    root_branch_value = NIL;
+  END
+  MUTABLE root: ?Identifier = root_branch_value;
+  IF root EXISTS AS root_value THEN
+    mark_node_symbol_heap_mut(root_value);
+    RETURN;
+  END
+  MUTABLE node = unwrapped;
+  IF node IS_A Identifier THEN
+    mark_node_symbol_heap_mut(node);
+  END
+END
+PUB FN escapeAnalysis__mark_expr_identifiers_heap_mut(expr: ?Locatable) RETURNS !Bool ->
+  MUTABLE changed: Bool = FALSE;
+  MUTABLE stack: []?Locatable = [expr];
+  WHILE !((stack.length() == 0)) DO
+    MUTABLE node: ?Locatable = &stack.pop();
+    IF (((node != NIL) AND (node IS_A CopyNode)) OR ((node != NIL) AND (node IS_A KeepNode))) THEN
+      CONTINUE;
+    END
+    node = unwrap_value(node);
+    IF !((node != NIL)) THEN
+      CONTINUE;
+    END
+    IF node? IS_A Identifier AS identifier THEN
+      IF mark_node_symbol_heap_mut(identifier) THEN
+        changed = TRUE;
+      END
+      CONTINUE;
+    END
+    IF ((node != NIL) AND (node IS_A BlockExpr)) THEN
+      IF node.result() THEN
+        &stack.append(node.result());
+      END
+      CONTINUE;
+    END
+    IF materializing_pipeline_expr?(node) THEN
+      CONTINUE;
+    END
+    MUTABLE root: ?Identifier = aST__root_identifier(UNWRAP (node));
+    IF root EXISTS AS root_value THEN
+      IF mark_node_symbol_heap_mut(root_value) THEN
+        changed = TRUE;
+      END
+      CONTINUE;
+    END
+    TRY (push_locatable_children_mut(node, &stack));
+  END
+  RETURN changed;
+END
+PUB FN escapeAnalysis__unwrap_value(node: ?DynamicValue) RETURNS ?DynamicValue ->
+  MUTABLE current: ?DynamicValue = COPY node;
+  WHILE ((current != NIL) AND (current IS_A Locatable)) DO
+    IF aST__recovery_wrapper?(castOptionalDynamicValueToOptionalLocatable(current)) THEN
+      current = castLocatableToOptionalDynamicValue(aST__recovery_payload(castOptionalDynamicValueToLocatable(current)));
+    ELSE_IF aST__ownership_wrapper?(castOptionalDynamicValueToOptionalLocatable(current)) THEN
+      MUTABLE wrapper: Any@multiowned = CAST(current AS Any@multiowned);
+      current = wrapper.value();
+    ELSE
+      BREAK;
+    END
+  END
+  RETURN current;
+END
+PUB FN escapeAnalysis__push_locatable_children_mut(node: Locatable, MUTABLE stack: []?Locatable) RETURNS !Void ->
+  FOR _ IN (TRY (aST__wrapped_children(node))) DO
+  &stack.append(_);
+  END
+  FOR _ IN node.class().members() DO
+  MUTABLE value = COPY node.substr(_, 1);
+  END
+END
+PUB FN escapeAnalysis__mark_capture_analysis_heap_mut(analysis: ?CaptureAnalysis, MUTABLE bg_heap: [Set]String) RETURNS Void ->
+  IF analysis EXISTS AS analysis_value THEN
+    MUTABLE analysis_value_mutable = COPY analysis_value;
+    FOR rtoc_key IN analysis_value_mutable.capture_symbols.keys() DO
+  MUTABLE sym: SymbolEntry@multiowned = COPY UNWRAP (analysis_value_mutable.capture_symbols[rtoc_key]);
+    mark_symbol_heap_mut(sym, &bg_heap, rtoc_key);
+    END
+  ELSE
+    RETURN;
+  END
+END
+PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup: ?Any) RETURNS !Void ->
+  IF !((node.spawn_form == :fsm)) THEN
+    RETURN;
+  END
+  walk_body(node.body, %(child) USE(schema_lookup) -> {
+  IF !((child IS_A VarDecl OR ((child IS_A BindExpr AND (child.mode() == :decl))))) THEN
+      RETURN NIL;
+  END
+  MUTABLE ti = TRY (type__success_type((&child.full_type_mut({:context: "FSM context local"}))));
+  IF !(((IF ti != NIL THEN
+      TRY (type__heap_ptr?(ti))
+    ELSE
+      NIL
+    END) OR_ELSE (IF ti != NIL THEN
+      TRY (type__recursive_cleanup_shape?(ti, schema_lookup))
+    ELSE
+      NIL
+    END))) THEN
+      RETURN NIL;
+  END
+  mark_symbol_heap_mut(child.symbol())
+  });
+END
+PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Param, schema_lookup: ?Any) RETURNS Void ->
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < params.length() DO
+    MUTABLE arg: ?Locatable = COPY args[rtoc_idx];
+    IF !((params[rtoc_idx]?.takes OR escapeAnalysis__symbol_heap?(params[rtoc_idx]?.symbol))) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE arg_type = IF (arg != NIL) THEN
+        &arg.full_type_mut("TAKES argument")
+      ELSE
+        NIL
+      END;
+    IF !((ownership_bearing_transfer_expr?(&arg, schema_lookup) OR type_requires_owned_storage?(arg_type, schema_lookup))) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    mark_expr_roots_heap_mut(arg);
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN escapeAnalysis__mark_method_takes_heap_mut(call: MethodCall, params: []Param, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+  MUTABLE receiver_param: ?Param = COPY params.first();
+  IF (receiver_is_param?(call.object) AND escapeAnalysis__symbol_heap?(receiver_param?.symbol)) THEN
+    mark_expr_roots_heap_mut(call.object);
+  END
+  MUTABLE value_params = params |> SKIP 1;
+  mark_takes_args_heap_mut(call.args, value_params, schema_lookup);
+  TRY (mark_receiver_for_owned_sink_mut(call.object, call.args, value_params, fn_nodes, facts_by_name, schema_lookup));
+  TRY (mark_receiver_scope_escapes_mut(call.object, call.args, value_params));
+END
+PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, args: []Locatable, params: []Param, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+  MUTABLE receiver_root: ?Identifier = aST__root_identifier(receiver);
+  MUTABLE receiver_sym: ?SymbolEntry = NIL;
+  IF receiver_root != NIL THEN
+    receiver_sym = COPY (receiver_root?).symbol;
+  END
+  IF receiver_sym EXISTS AS receiver_sym_value THEN
+    MUTABLE receiver_sym_value_mutable = COPY receiver_sym_value;
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < params.length() DO
+    IF !(params[rtoc_idx]?.takes) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE arg: ?Locatable = COPY args[rtoc_idx];
+    IF !(arg) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF !((ownership_bearing_transfer_expr?(&arg, schema_lookup) OR TRY (call_result_is_heap?(arg, fn_nodes, schema_lookup, facts_by_name)))) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    mark_symbol_heap_mut(receiver_sym_value_mutable);
+    RETURN;
+  rtoc_idx = rtoc_idx + 1;
+    END
+  ELSE
+    RETURN;
+  END
+END
+PUB FN escapeAnalysis__loop_body_has_frame_allocation_candidate?(body: []Node) RETURNS !Bool ->
+  MUTABLE found: Bool = FALSE;
+  TRY (localBindingAnalysis__each_direct_loop_node(body, %(node: Locatable) USE(MUTABLE found) -> {
+  IF found THEN
+      RETURN;
+  END
+  IF loop_binding_frame_allocation_candidate?(&node) THEN
+      found = TRUE;
+  END
+  rubyToClearVoid()
+  }));
+  RETURN found;
+END
+PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Locatable) RETURNS !Bool ->
+  IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
+    RETURN FALSE;
+  END
+  IF (respondsTo?(node, "symbol") AND ((node.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_13 = ((node.symbol())?);
+  symbolEntry__heap_storage?(rtoc_local_receiver_13) })) THEN
+    RETURN FALSE;
+  END
+  MUTABLE value = IF respondsTo?(node, "value") THEN
+    node.value()
+  ELSE
+    NIL
+  END;
+  MUTABLE unwrapped = unwrap_value(value);
+  IF (unwrapped IS_A Locatable AND string_concat_expr?(unwrapped)) THEN
+    RETURN TRUE;
+  END
+  MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
+  IF (((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_14 = (entry?);
+  cleanupEntry__present?(rtoc_local_receiver_14) }) AND cleanupEntry__frame?(entry)) THEN
+    RETURN TRUE;
+  END
+  MUTABLE ti = &node.full_type_mut("loop receiver heap promotion");
+  RETURN (ti.needs_cleanup?() AND (TRY (type__cleanup_allocator(ti)) == :frame));
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__loop_body_declared_names(body: []Node) RETURNS ![Set]String ->
+  MUTABLE names: [Set]String = Set[];
+  TRY (each_loop_body_node(body, %(node) USE(MUTABLE names) -> {
+  MUTABLE name: ?String = localBindingAnalysis__binding_decl_name(node);
+  IF name THEN
+    RETURN &names.insert(UNWRAP (name));
+  END
+  NIL
+  }));
+  RETURN names;
+END
+PUB FN escapeAnalysis__each_loop_body_node(body: []Node, block: FN(Locatable) -> Void) RETURNS !Void ->
+  MUTABLE stack: []Locatable = body.reverse();
+  WHILE !((stack.length() == 0)) DO
+    MUTABLE node: ?Locatable = &stack.pop();
+    IF !((node != NIL)) THEN
+      CONTINUE;
+    END
+    block(node);
+    IF (((((node != NIL) AND (node IS_A FunctionDef)) OR ((node != NIL) AND (node IS_A LambdaLit))) OR ((node != NIL) AND (node IS_A BgBlock))) OR ((node != NIL) AND (node IS_A BgStreamBlock))) THEN
+      CONTINUE;
+    END
+    MUTABLE rtoc_reverse_items_15: [List, List]Node = (TRY (aST__child_bodies(UNWRAP (node))));
+    MUTABLE rtoc_reverse_i_16 = rtoc_reverse_items_15.length() - 1;
+    WHILE rtoc_reverse_i_16 >= 0 DO
+  MUTABLE rtoc_reverse_items_17: []Node = ((rtoc_reverse_items_15[rtoc_reverse_i_16])?);
+  MUTABLE rtoc_reverse_i_18 = rtoc_reverse_items_17.length() - 1;
+  WHILE rtoc_reverse_i_18 >= 0 DO
+    &stack.append(castNodeToLocatable(COPY (rtoc_reverse_items_17[rtoc_reverse_i_18])?));
+    rtoc_reverse_i_18 = rtoc_reverse_i_18 - 1;
+  END
+  rtoc_reverse_i_16 = rtoc_reverse_i_16 - 1;
+    END
+  END
+  NIL;
+END
+PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable, schema_lookup: ?Any) RETURNS Bool ->
+  IF arg? IS_A MoveNode AS move_node THEN
+    RETURN type_requires_owned_storage?(&move_node.value.full_type_mut("moved transfer value"), schema_lookup);
+  END
+  IF heap_owned_transfer_source?(arg) THEN
+    RETURN TRUE;
+  END
+  IF ((ownership_transferring_expr?(arg, TRUE) AND (arg != NIL)) AND type_requires_owned_storage?(&arg.full_type_mut("ownership transfer expression"), schema_lookup)) THEN
+    RETURN TRUE;
+  END
+  RETURN FALSE;
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__heap_owned_transfer_source?(arg: ?Locatable) RETURNS Bool ->
+  IF (((arg != NIL) AND (arg IS_A CopyNode)) OR ((arg != NIL) AND (arg IS_A KeepNode))) THEN
+    RETURN FALSE;
+  END
+  MUTABLE unwrapped = unwrap_value(arg);
+  MUTABLE root_branch_value: ?Identifier = NIL;
+  IF unwrapped IS_A Locatable THEN
+    root_branch_value = aST__root_identifier(unwrapped);
+  ELSE
+    root_branch_value = NIL;
+  END
+  MUTABLE root: ?Identifier = root_branch_value;
+  MUTABLE sym: ?SymbolEntry = NIL;
+  IF root != NIL THEN
+    sym = COPY (root?).symbol;
+  END
+  RETURN escapeAnalysis__symbol_heap?(sym);
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__mark_receiver_scope_escapes_mut(receiver: Locatable, args: []Locatable, params: []Param) RETURNS !Void ->
+  MUTABLE receiver_root: ?Identifier = aST__root_identifier(receiver);
+  MUTABLE receiver_depth: ?Int64 = receiver_root?.symbol?.scope_depth;
+  IF !((receiver_depth != NIL)) THEN
+    RETURN;
+  END
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < params.length() DO
+    IF !((params[rtoc_idx]?.takes OR params[rtoc_idx]?.mutable)) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE arg: ?Locatable = COPY args[rtoc_idx];
+    IF !(arg) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE arg_root: ?Identifier = aST__root_identifier(UNWRAP (arg));
+    MUTABLE arg_depth: ?Int64 = arg_root?.symbol?.scope_depth;
+    IF !(((arg_depth != NIL) AND (arg_depth > receiver_depth))) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    TRY (mark_expr_identifiers_heap_mut(arg));
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN escapeAnalysis__propagate_hoist_dependencies_mut(facts: FunctionFacts) RETURNS !Void ->
+  MUTABLE changed: Bool = TRUE;
+  WHILE changed DO
+    changed = FALSE;
+    FOR rtoc_key IN facts.binding_values.keys() DO
+  MUTABLE values: []Locatable = COPY UNWRAP (facts.binding_values[rtoc_key]);
+  MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[rtoc_key];
+  IF !(escapeAnalysis__symbol_heap?(sym)) THEN
+        CONTINUE;
+  END
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < values.length() DO
+      IF !(heap_binding_carries_sources?(values[rtoc_idx]?)) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      IF TRY (mark_expr_identifiers_heap_mut(values[rtoc_idx]?)) THEN
+            changed = TRUE;
+      END
+    rtoc_idx = rtoc_idx + 1;
+  END
+    END
+  END
+END
+PUB FN escapeAnalysis__heap_binding_carries_sources?(value: Locatable) RETURNS Bool ->
+  MUTABLE node = COPY value;
+  IF (node IS_A CopyNode OR node IS_A KeepNode) THEN
+    RETURN FALSE;
+  END
+  node = unwrap_value(node);
+  IF node IS_A Identifier AS identifier THEN
+    RETURN TRUE;
+  END
+  IF ((((node IS_A StructLit OR node IS_A UnionVariantLit) OR node IS_A ListLit) OR node IS_A HashLit) OR node IS_A TupleLit) THEN
+    RETURN TRUE;
+  END
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__propagate_assignment_ownership_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+  MUTABLE changed: Bool = TRUE;
+  WHILE changed DO
+    changed = FALSE;
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < facts.assignment_nodes.length() DO
+    MUTABLE target = assigned_binding_name(facts.assignment_nodes[rtoc_idx]?);
+    IF !(target) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[target];
+    IF !(sym) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF !(TRY (assignment_value_is_owned?(facts.assignment_nodes[rtoc_idx]?, fn_nodes, facts_by_name, schema_lookup))) THEN
+          rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    IF mark_reassigned_symbol_heap_mut(sym) THEN
+          changed = TRUE;
+    END
+  rtoc_idx = rtoc_idx + 1;
+    END
+  END
+END
+PUB FN escapeAnalysis__assigned_binding_name(node: AssignmentNode) RETURNS ?String ->
+  IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
+    RETURN COPY CAST(node.name() AS String);
+  END
+  IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
+    RETURN NIL;
+  END
+  IF node IS_A Assignment AS assignment THEN
+    MUTABLE target = unwrap_value(assignment.name);
+    IF (target IS_A String OR target IS_A String@symbol) THEN
+      RETURN COPY CAST(target AS String);
+    END
+    IF target IS_A Identifier THEN
+      RETURN COPY CAST(target.name() AS String);
+    END
+    RETURN NIL;
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?Any) RETURNS !Bool ->
+  IF !(respondsTo?(node, "value")) THEN
+    RETURN FALSE;
+  END
+  MUTABLE value = node.value();
+  IF ownership_transferring_expr?(value, FALSE) THEN
+    RETURN TRUE;
+  END
+  MUTABLE unwrapped = unwrap_value(value);
+  IF (unwrapped IS_A Locatable AND string_concat_expr?(unwrapped)) THEN
+    RETURN FALSE;
+  END
+  IF expr_has_owned_inline_value?(value) THEN
+    RETURN TRUE;
+  END
+  RETURN TRY (call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name));
+END
+PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_allocating_expr: Bool) RETURNS !Bool ->
+  MUTABLE value = unwrap_value(expr);
+  IF (value IS_A BinaryOp AND (value.op() == symbol("OR_ELSE"))) THEN
+    value = unwrap_value(value.left());
+  END
+  IF (value IS_A CopyNode OR value IS_A KeepNode) THEN
+    RETURN TRUE;
+  END
+  IF (value IS_A Locatable AND expr_has_heap_identifier?(value)) THEN
+    RETURN TRUE;
+  END
+  IF ((include_allocating_expr AND value IS_A Locatable) AND string_concat_expr?(value)) THEN
+    RETURN TRUE;
+  END
+  IF (TRUE AND symbolEntry__heap_storage?(value)) THEN
+    RETURN TRUE;
+  END
+  IF (respondsTo?(value, "symbol") AND ((value.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = ((value.symbol())?);
+  symbolEntry__heap_storage?(rtoc_local_receiver_19) })) THEN
+    RETURN TRUE;
+  END
+  IF !(value IS_A Locatable) THEN
+    RETURN FALSE;
+  END
+  MUTABLE ti = &value.full_type_mut({:context: "ownership transferring expression"});
+  RETURN !(!(((((!(TRY (type__string?(ti))) AND !(ti.rodata?())) AND (ti.provenance() != :borrow)) AND TRY (type__heap_ptr?(ti))))));
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__string_concat_expr?(expr: ?Locatable) RETURNS Bool ->
+  RETURN (((expr != NIL) AND (expr IS_A StringConcat)) OR ((IF expr? IS_A BinaryOp AS binary_op THEN (binary_op.string_concat == TRUE) ELSE FALSE END)));
+END
+PUB FN escapeAnalysis__type_requires_owned_storage?(ti: ?Type, schema_lookup: ?Any) RETURNS !Bool ->
+  IF ti EXISTS AS ti_value THEN
+    MUTABLE t = TRY (type__value_payload_type(ti_value));
+    IF (type__rodata?(t) OR type__borrowed_reference?(t)) THEN
+      RETURN FALSE;
+    END
+    RETURN TRY (type__ownership_bearing?(t, schema_lookup));
+  ELSE
+    RETURN FALSE;
+  END
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__borrow_return_expr?(expr: ?Locatable) RETURNS !Bool ->
+  MUTABLE call = unwrap_value(expr);
+  IF !((call IS_A FuncCall OR call IS_A MethodCall)) THEN
+    RETURN FALSE;
+  END
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF respondsTo?(call, "matched_signature") THEN
+    sig_branch_value = functionSignature__unwrap(call.matched_signature());
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  RETURN (!(!(sig)) AND !(((TRY (functionSignature__return_lifetime(sig))).length() == 0)));
+END
+PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool ->
+  MUTABLE found: Bool = FALSE;
+  aST__each_locatable(expr, %(raw: Locatable) -> {
+  MUTABLE node = unwrap_value(raw);
+  IF node IS_A Identifier THEN
+      IF escapeAnalysis__symbol_heap?(node.symbol()) THEN
+        found = TRUE;
+      END
+  END
+  rubyToClearVoid()
+  });
+  RETURN found;
+END
+PUB FN escapeAnalysis__expr_has_owned_inline_value?(expr: ?Locatable) RETURNS !Bool ->
+  MUTABLE root = unwrap_value(expr);
+  aST__each_locatable(expr, %(raw: Locatable) USE(root) -> {
+  MUTABLE node = unwrap_value(raw);
+  IF !(node IS_A Locatable) THEN
+      RETURN;
+  END
+  MUTABLE is_root = node.equal?(root);
+  IF !((is_root OR node IS_A Identifier)) THEN
+      IF node IS_A Literal THEN
+      IF node.value() IS_A String THEN
+        RETURN TRUE;
+      END
+      END
+      MUTABLE ti = &node.full_type_mut({:context: "owned inline value"});
+      IF ((!(ti.rodata?()) AND (ti.provenance() != :borrow)) AND TRY (type__heap_ptr?(ti))) THEN
+        RETURN TRUE;
+      END
+  END
+  rubyToClearVoid()
+  });
+  RETURN FALSE;
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__symbol_for_name(facts: FunctionFacts, name: String) RETURNS ?SymbolEntry@multiowned ->
+  RETURN KEEP facts.symbols[name];
+END
+PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionBodySummary = NIL, hoist_bindings: []VarDecl) RETURNS !FunctionFacts ->
+  MUTABLE symbols: {String}SymbolEntry@multiowned = {};
+  MUTABLE binding_values: {String}[]Locatable = {};
+  MUTABLE return_values: []Locatable = ( { MUTABLE rtoc_empty_list_20: []Locatable = List[]; rtoc_empty_list_20 } );
+  MUTABLE assignment_nodes: []AssignmentNode = ( { MUTABLE rtoc_empty_list_21: []AssignmentNode = List[]; rtoc_empty_list_21 } );
+  MUTABLE escape_nodes: []Locatable = ( { MUTABLE rtoc_empty_list_22: []Locatable = List[]; rtoc_empty_list_22 } );
+  FOR _ IN fn_value.params DO
+  MUTABLE sym: ?SymbolEntry = COPY _.symbol;
+  IF sym EXISTS AS sym_value THEN
+      symbols[_.name] = sym_value;
+  END
+  END
+  IF summary EXISTS AS summary_value THEN
+    MUTABLE summary_value_mutable = COPY summary_value;
+    FOR _ IN summary_value_mutable.binding_nodes DO
+    record_binding_fact_mut(_, symbols, binding_values);
+    END
+    FOR _ IN summary_value_mutable.assignment_nodes DO
+  IF _ IS_A BindExpr AS bind_expr THEN
+        MUTABLE bind_expr_mutable = COPY bind_expr;
+        record_symbol_fact_mut(bind_expr_mutable, &symbols);
+  END
+  &assignment_nodes.append(COPY _);
+    END
+    FOR _ IN hoist_bindings DO
+    record_binding_fact_mut(_, symbols, binding_values);
+    END
+    FOR _ IN summary_value_mutable.return_nodes DO
+    IF _.value THEN
+      &return_values.append(_.value);
+    END
+    END
+    escape_nodes = ruby_array_concat_Locatable(escape_nodes, summary_value_mutable.escape_nodes);
+    escape_nodes = ruby_array_concat_Locatable(escape_nodes, CAST(hoist_bindings AS []Locatable));
+    RETURN FunctionFacts{ fn: fn_value, symbols: symbols, binding_values: COPY binding_values, return_values: COPY return_values, assignment_nodes: COPY assignment_nodes, escape_nodes: COPY escape_nodes, lambda_body_identifier_refs: COPY summary_value_mutable.lambda_body_identifier_refs };
+  END
+  walk_body(fn_value.body, %(node) USE(MUTABLE assignment_nodes, binding_values, MUTABLE escape_nodes, MUTABLE return_values, symbols) -> {
+  IF node IS_A Locatable THEN
+      &escape_nodes.append(node);
+  END
+  IF (node IS_A ReturnNode AND node.value()) THEN
+      &return_values.append(node.value());
+  END
+  IF (node IS_A Assignment OR node IS_A DestructuringAssignment) THEN
+      &assignment_nodes.append(COPY node);
+  END
+  IF (node IS_A VarDecl) THEN
+      record_binding_fact_mut(node, symbols, binding_values);
+  ELSE_IF (node IS_A BindExpr) THEN
+      IF (node.mode() == :assign) THEN
+        &assignment_nodes.append(COPY node);
+      ELSE
+        record_binding_fact_mut(node, symbols, binding_values);
+      END
+  ELSE_IF (node IS_A DestructuringAssignment) THEN
+      MUTABLE rtoc_each_items_23 = node.targets();
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < rtoc_each_items_23.length() DO
+      IF (rtoc_each_items_23[rtoc_idx].name() == "_") THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      IF (IF rtoc_each_items_23[rtoc_idx].symbol() != NIL THEN
+            (rtoc_each_items_23[rtoc_idx].symbol()).reg()
+          ELSE
+            NIL
+          END).equal?(rtoc_each_items_23[rtoc_idx]) THEN
+            record_binding_fact_mut(rtoc_each_items_23[rtoc_idx], symbols, binding_values);
+      END
+    rtoc_idx = rtoc_idx + 1;
+      END
+  END
+  NIL
+  });
+  RETURN FunctionFacts{ fn: fn_value, symbols: symbols, binding_values: COPY binding_values, return_values: COPY return_values, assignment_nodes: COPY assignment_nodes, escape_nodes: COPY escape_nodes, lambda_body_identifier_refs: COPY TRY (collect_lambda_identifier_refs(fn_value.body)) };
+END
+PUB FN escapeAnalysis__record_symbol_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry) RETURNS Void ->
+  MUTABLE sym = symbol_for_binding_node(node);
+  IF sym THEN
+    symbols[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
+  END
+END
+PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry, binding_values: {String}[]Locatable) RETURNS Void ->
+  record_symbol_fact_mut(node, &symbols);
+  MUTABLE value: ?Locatable = NIL;
+  IF (node IS_A VarDecl OR node IS_A BindExpr) THEN
+    value = node.value();
+  END
+  IF !((value != NIL)) THEN
+    RETURN;
+  END
+  IF binding_values[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] == NIL THEN
+    binding_values[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = List[];
+  END
+  (binding_values[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)])?.append(value);
+END
+PUB FN escapeAnalysis__receiver_is_param?(receiver: Locatable) RETURNS Bool ->
+  MUTABLE root: ?Identifier = aST__root_identifier(receiver);
+  MUTABLE sym: ?SymbolEntry = NIL;
+  IF root != NIL THEN
+    sym = COPY (root?).symbol;
+  END
+  RETURN !(!(((((sym != NIL) AND TRUE) AND symbolEntry__is_param(sym)))));
+END
+PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg_heap: [Set]String, facts: ?FunctionFacts) RETURNS !Void ->
+  MUTABLE names: [Set]String = Set[];
+  FOR _ IN node.captures DO
+  &names.insert(COPY CAST(_.name() AS String));
+  END
+  IF names.empty?() THEN
+    RETURN;
+  END
+  MUTABLE identifiers: ?[]Identifier = NIL;
+  IF facts?.lambda_body_identifier_refs != NIL THEN
+    identifiers = COPY ((facts?.lambda_body_identifier_refs)?[node.object_id()] OR_ELSE NIL);
+  END
+  identifiers = (identifiers OR_ELSE TRY (collect_lambda_body_identifiers(node)));
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < identifiers.length() DO
+    IF !(names.contains?(CAST(identifiers[rtoc_idx].name() AS String))) THEN
+      rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    mark_symbol_heap_mut(identifiers[rtoc_idx].symbol(), &bg_heap, CAST(identifiers[rtoc_idx].name() AS String));
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{Int64}[]Identifier ->
+  MUTABLE refs: {Int64}[]Identifier = {};
+  aST__each_locatable(body, FALSE, %(node: Locatable) USE(MUTABLE refs) -> {
+  IF !(node IS_A LambdaLit) THEN
+      RETURN;
+  END
+  refs[node.object_id()] = TRY (collect_lambda_body_identifiers(node));
+  rubyToClearVoid()
+  });
+  RETURN refs;
+END
+PUB FN escapeAnalysis__collect_lambda_body_identifiers(node: LambdaLit) RETURNS ![]Identifier ->
+  MUTABLE out: []Identifier = ( { MUTABLE rtoc_empty_list_24: []Identifier = List[]; rtoc_empty_list_24 } );
+  MUTABLE stack: []Locatable = (TRY (aST__lambda_body_nodes(node.body))).reverse();
+  WHILE !((stack.length() == 0)) DO
+    MUTABLE current = unwrap_value(&stack.pop());
+    IF !(current IS_A Locatable) THEN
+      CONTINUE;
+    END
+    IF current IS_A Identifier THEN
+      &out.append(current);
+      CONTINUE;
+    END
+    IF (current IS_A FunctionDef OR current IS_A LambdaLit) THEN
+      CONTINUE;
+    END
+    MUTABLE rtoc_reverse_items_25: []Locatable = (TRY (aST__expression_children(current)));
+    MUTABLE rtoc_reverse_i_26 = rtoc_reverse_items_25.length() - 1;
+    WHILE rtoc_reverse_i_26 >= 0 DO
+  &stack.append(COPY (rtoc_reverse_items_25[rtoc_reverse_i_26])?);
+  rtoc_reverse_i_26 = rtoc_reverse_i_26 - 1;
+    END
+    MUTABLE rtoc_reverse_items_27: [List, List]Node = (TRY (aST__child_bodies(current)));
+    MUTABLE rtoc_reverse_i_28 = rtoc_reverse_items_27.length() - 1;
+    WHILE rtoc_reverse_i_28 >= 0 DO
+  MUTABLE rtoc_reverse_items_29: []Node = ((rtoc_reverse_items_27[rtoc_reverse_i_28])?);
+  MUTABLE rtoc_reverse_i_30 = rtoc_reverse_items_29.length() - 1;
+  WHILE rtoc_reverse_i_30 >= 0 DO
+    &stack.append(castNodeToLocatable(COPY (rtoc_reverse_items_29[rtoc_reverse_i_30])?));
+    rtoc_reverse_i_30 = rtoc_reverse_i_30 - 1;
+  END
+  rtoc_reverse_i_28 = rtoc_reverse_i_28 - 1;
+    END
+  END
+  RETURN out;
+END
+PUB FN escapeAnalysis__params_for_call(call: FuncCall, fn_nodes: {String}FunctionDef) RETURNS ![]Param ->
+  MUTABLE fn: ?FunctionDef = COPY fn_nodes[CAST(call.name AS String)];
+  IF fn EXISTS AS fn_value THEN
+    RETURN COPY fn_value.params;
+  END
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF TRUE THEN
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_signature));
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  IF sig EXISTS AS sig_value THEN
+    RETURN TRY (functionSignature__params(sig_value));
+  ELSE
+    RETURN CAST(( { MUTABLE rtoc_empty_list_31: []Param = List[]; rtoc_empty_list_31 } ) AS []Param);
+  END
+END
+PUB FN escapeAnalysis__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF TRUE THEN
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_signature));
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  IF sig EXISTS AS sig_value THEN
+    RETURN TRY (functionSignature__params(sig_value));
+  ELSE
+    RETURN CAST(( { MUTABLE rtoc_empty_list_32: []Param = List[]; rtoc_empty_list_32 } ) AS []Param);
+  END
+END
+PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) RETURNS !Bool ->
+  IF !(fn_value.return_lifetime) THEN
+    RETURN FALSE;
+  END
+  MUTABLE returned: [Set]String = Set[];
+  TRY (collect_identifier_names_mut(expr, &returned));
+  IF (fn_value.return_lifetime == :wildcard) THEN
+    MUTABLE param_names: [Set]String = Set[];
+    FOR _ IN fn_value.params DO
+    &param_names.insert(COPY _.name);
+    END
+    RETURN !((ruby_set_intersection_String_set(returned, param_names)).empty?());
+  END
+  MUTABLE borrowed: [Set]String = Set[];
+  FOR _ IN fn_value.return_lifetime DO
+  IF respondsTo?(_, "name") THEN
+    &borrowed.insert(COPY CAST(_.name() AS String));
+  END
+  END
+  RETURN !((ruby_set_intersection_String_set(returned, borrowed)).empty?());
+END
+PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef, MUTABLE expr: Locatable, schema_lookup: ?Any) RETURNS !Bool ->
+  IF TRY (borrowed_return?(fn_value, expr)) THEN
+    RETURN FALSE;
+  END
+  MUTABLE ti = owning_return_type(fn_value, &expr);
+  IF !(ti) THEN
+    RETURN FALSE;
+  END
+  MUTABLE top_heap_ptr = TRY (type__heap_ptr?(ti));
+  ti = TRY (type__value_payload_type(ti));
+  IF !(ti) THEN
+    RETURN FALSE;
+  END
+  IF ((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) THEN
+    RETURN FALSE;
+  END
+  IF (IF expr IS_A Identifier AS identifier THEN escapeAnalysis__symbol_heap?(identifier.symbol) ELSE FALSE END) THEN
+    IF ((TRY (type__string?(ti)) OR TRY (type__heap_ptr?(ti))) OR TRY (type__recursive_cleanup_shape?(ti, schema_lookup))) THEN
+      RETURN TRUE;
+    END
+  END
+  MUTABLE expr_t = &expr.full_type_mut("escaping expression");
+  IF (!(expr IS_A Identifier) AND ((expr_t != NIL) AND (expr_t?).rodata?())) THEN
+    RETURN FALSE;
+  END
+  IF (ti.rodata?() OR type__borrowed_reference?(ti)) THEN
+    RETURN FALSE;
+  END
+  RETURN (((top_heap_ptr OR (type__ownership(ti) != :affine)) OR TRY (type__ownership_bearing?(ti, schema_lookup))) OR TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup)));
+END
+PUB FN escapeAnalysis__owning_return_type(fn_value: FunctionDef, MUTABLE expr: Locatable) RETURNS ?Type ->
+  MUTABLE declared = functionDef__declared_return_type(fn_value);
+  RETURN (declared OR (&expr.full_type_mut("owning return expression")));
+END
+PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatable) RETURNS !Void ->
+  MUTABLE fn = COPY facts.fn;
+  IF !(fn.return_lifetime.empty?()) THEN
+    RETURN;
+  END
+  MUTABLE ret = functionDef__declared_return_type(fn);
+  IF ret THEN
+    ret = TRY (type__value_payload_type(ret));
+  END
+  IF ret THEN
+    type__mark_heap_allocated_mut(&ret);
+  END
+  fn.heap_carry_return = TRUE;
+  MUTABLE names: [Set]String = Set[];
+  IF !((returned_call_result?(expr) OR materializing_pipeline_expr?(expr))) THEN
+    TRY (collect_identifier_names_mut(expr, &names));
+  END
+  &names.delete_if(%(name) USE(facts) -> (((facts.symbols[name]?.reg) != NIL) AND ((facts.symbols[name]?.reg) IS_A Param)));
+  IF names.empty?() THEN
+    RETURN;
+  END
+  fn.heap_carry_return_vars = (fn.heap_carry_return_vars OR_ELSE Set[]);
+  FOR _ IN names DO
+  &fn.heap_carry_return_vars.append(COPY _);
+  END
+  mark_decl_symbols_heap_by_name_mut(facts, names);
+END
+PUB FN escapeAnalysis__materializing_pipeline_expr?(expr: Locatable) RETURNS Bool ->
+  MUTABLE node = unwrap_value(expr);
+  IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
+    node = unwrap_value(node.left());
+  END
+  RETURN ((node IS_A BinaryOp AND node.smooth?()) AND !(node.right() IS_A SkipOp));
+END
+PUB FN escapeAnalysis__returned_call_result?(expr: Locatable) RETURNS Bool ->
+  MUTABLE node = unwrap_value(expr);
+  IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
+    node = unwrap_value(node.left());
+  END
+  RETURN !(!(((node IS_A Locatable AND aST__call?(node)))));
+END
+PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, names: [Set]String) RETURNS Void ->
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < names.length() DO
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[names[rtoc_idx]];
+    IF !(sym) THEN
+        rtoc_idx = rtoc_idx + 1;
+  CONTINUE;
+    END
+    MUTABLE changed = mark_symbol_heap_mut(sym);
+    MUTABLE decl: ?SymbolEntryRegInput = COPY sym.reg;
+    IF (changed AND respondsTo?(decl, "container_borrow=")) THEN
+        decl.container_borrow = FALSE;
+    END
+  rtoc_idx = rtoc_idx + 1;
+  END
+END
+PUB FN escapeAnalysis__mark_heap_return_facts_mut(facts: FunctionFacts, schema_lookup: ?Any) RETURNS !Void ->
+  FOR _ IN facts.return_values DO
+  MUTABLE rtoc_mutable_block_param_33 = COPY _;
+  IF TRY (owning_return_needs_heap_placement?(facts.fn, &rtoc_mutable_block_param_33, schema_lookup)) THEN
+    TRY (mark_heap_return_mut(facts, rtoc_mutable_block_param_33));
+  END
+  END
+END
+PUB FN escapeAnalysis__collect_identifier_names_mut(expr: Locatable, MUTABLE names: [Set]String) RETURNS !Void ->
+  MUTABLE stack: []Locatable = [expr];
+  WHILE !((stack.length() == 0)) DO
+    MUTABLE node = unwrap_value(&stack.pop());
+    IF !(node IS_A Locatable) THEN
+      CONTINUE;
+    END
+    IF node IS_A Identifier THEN
+      &names.insert(COPY CAST(node.name() AS String));
+      CONTINUE;
+    END
+    IF node IS_A BlockExpr THEN
+      IF node.result() THEN
+        &stack.append(node.result());
+      END
+      CONTINUE;
+    END
+    TRY (push_locatable_children_mut(node, &stack));
+  END
+END
+PUB FN escapeAnalysis__assignment_target_heap_destination?(facts: FunctionFacts, target: AssignmentTarget, schema_lookup: ?Any) RETURNS Bool ->
+  RETURN PARTIAL MATCH target START
+    AssignmentTarget.StringValue AS string -> escapeAnalysis__symbol_heap?(symbol_for_name(facts, string)),
+    AssignmentTarget.SymbolValue AS string_symbol -> escapeAnalysis__symbol_heap?(symbol_for_name(facts, CAST(string_symbol AS String))),
+    DEFAULT -> heap_destination?(facts, target, schema_lookup)
+  END;
+END
+PUB FN escapeAnalysis__heap_destination?(facts: FunctionFacts, target: Locatable, schema_lookup: ?Any) RETURNS !Bool ->
+  MUTABLE root: ?Identifier = aST__root_identifier(target);
+  IF root EXISTS AS root_value THEN
+    MUTABLE root_value_mutable = COPY root_value;
+    IF escapeAnalysis__symbol_heap?(root_value_mutable.symbol) THEN
+      RETURN TRUE;
+    END
+    MUTABLE sym = symbol_for_name(facts, root_value_mutable.name);
+    IF escapeAnalysis__symbol_heap?(sym) THEN
+      RETURN TRUE;
+    END
+    IF target IS_A Identifier AS identifier THEN
+      RETURN FALSE;
+    END
+    MUTABLE ti = &root_value_mutable.full_type_mut("escape destination allocator");
+    RETURN (TRY (type__cleanup_allocator(ti, schema_lookup)) == :heap);
+  ELSE
+    RETURN FALSE;
+  END
+CATCH Transient, Input, System, NotFound, Permission, Canceled
+  RETURN FALSE;
+END
+PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: ?Any, facts_by_name: {String}FunctionFacts) RETURNS !Bool ->
+  MUTABLE call = unwrap_value(value);
+  IF (call IS_A BinaryOp AND (call.op() == symbol("OR_ELSE"))) THEN
+    call = unwrap_value(call.left());
+  END
+  IF !((call IS_A Locatable AND aST__call?(call))) THEN
+    RETURN FALSE;
+  END
+  MUTABLE callee: ?FunctionDef = COPY fn_nodes[CAST(call.name() AS String)];
+  IF ((callee != NIL) AND function_def_has_return_lifetime?(callee)) THEN
+    RETURN FALSE;
+  END
+  MUTABLE callee_facts: ?FunctionFacts = COPY facts_by_name[CAST(call.name() AS String)];
+  IF callee EXISTS AS callee_value THEN
+    RETURN TRY (call_result_is_heap_for_callee?(call, callee_value, schema_lookup, callee_facts));
+  END
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
+  IF respondsTo?(call, "matched_signature") THEN
+    sig_branch_value = functionSignature__unwrap(call.matched_signature());
+  ELSE
+    sig_branch_value = NIL;
+  END
+  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  IF sig EXISTS AS sig_value THEN
+    MUTABLE sig_value_mutable = COPY sig_value;
+    IF !(((TRY (functionSignature__return_lifetime(sig_value_mutable))).length() == 0)) THEN
+      RETURN FALSE;
+    END
+    MUTABLE dep = TRY (signature_heap_return_from_args?(call, sig_value_mutable));
+    IF !((dep == NIL)) THEN
+      RETURN dep;
+    END
+    IF (TRUE AND (functionSignature__heap_carry_return(sig_value_mutable) == TRUE)) THEN
+      RETURN TRUE;
+    END
+    IF TRY (functionSignature__heap_return_alloc?(&sig_value_mutable)) THEN
+      RETURN TRUE;
+    END
+    RETURN FALSE;
+  ELSE
+    RETURN FALSE;
+  END
+END
+PUB FN escapeAnalysis__call_result_is_heap_for_callee?(call: EscapeAnalysisCall, callee: FunctionDef, schema_lookup: ?Any, facts: ?FunctionFacts = NIL) RETURNS !Bool ->
+  MUTABLE dep = TRY (heap_return_from_args?((MATCH call START EscapeAnalysisCall.FuncCall AS item -> item.args, EscapeAnalysisCall.MethodCall AS item -> item.args END), callee.params, callee.heap_carry_return_vars, callee.return_type, schema_lookup));
+  IF !((dep == NIL)) THEN
+    RETURN dep;
+  END
+  MUTABLE callee_facts = (facts OR_ELSE TRY (function_facts(callee)));
+  RETURN (((callee.heap_carry_return == TRUE) OR TRY (function_facts_have_owned_return_value?(callee_facts, schema_lookup))) OR function_facts_have_heap_return_binding?(callee_facts));
+END
+PUB FN escapeAnalysis__signature_heap_return_from_args?(call: EscapeAnalysisCall, sig_obj: FunctionSignature) RETURNS !?Bool ->
+  RETURN TRY (heap_return_from_args?((MATCH call START EscapeAnalysisCall.FuncCall AS item -> item.args, EscapeAnalysisCall.MethodCall AS item -> item.args END), TRY (functionSignature__params(sig_obj)), TRY (functionSignature__heap_carry_return_vars(sig_obj)), functionSignature__return_type(sig_obj), NIL));
+END
+PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param, returned_names: ?[Set]String, return_type: ?TypeTypeInput = NIL, schema_lookup: ?Any = NIL) RETURNS !?Bool ->
+  IF returned_names EXISTS AS returned_names_value THEN
+    IF !(returned_names_value.empty?()) THEN
+      MUTABLE by_name: {String}Int64 = {};
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < params.length() DO
+  by_name[(params[rtoc_idx]?.name)] = rtoc_idx;
+  rtoc_idx = rtoc_idx + 1;
+      END
+      MUTABLE has_param_return: Bool = FALSE;
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < returned_names_value.length() DO
+    MUTABLE idx: ?Int64 = by_name[CAST(returned_names_value[rtoc_idx] AS String)];
+    IF !(idx) THEN
+            RETURN TRUE;
+    END
+    has_param_return = TRUE;
+    MUTABLE arg: ?Locatable = COPY args[idx];
+    IF expr_produces_heap?(arg) THEN
+            RETURN TRUE;
+    END
+  rtoc_idx = rtoc_idx + 1;
+      END
+      IF has_param_return THEN
+        MUTABLE ret: ?Type = TRY (type__from_node(return_type));
+        IF ret EXISTS AS ret_value THEN
+          MUTABLE ret_value = TRY (type__success_type(ret_value));
+        END
+        IF (IF (IF ret != NIL THEN
+          TRY (type__string?(ret))
+        ELSE
+          NIL
+        END) != NIL THEN (IF ret != NIL THEN
+          TRY (type__string?(ret))
+        ELSE
+          NIL
+        END) ELSE (IF ret != NIL THEN
+          TRY (type__recursive_cleanup_shape?(ret, schema_lookup))
+        ELSE
+          NIL
+        END) END) THEN
+          RETURN TRUE;
+        END
+        RETURN FALSE;
+      END
+      RETURN NIL;
+    ELSE
+      RETURN NIL;
+    END
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
+  MUTABLE node = unwrap_value(expr);
+  IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
+    node = unwrap_value(node.left());
+  END
+  IF (respondsTo?(node, "storage") AND ([:rodata, :borrow]).contains?(node.storage())) THEN
+    RETURN FALSE;
+  END
+  IF (TRUE AND symbolEntry__rodata_provenance?(node)) THEN
+    RETURN FALSE;
+  END
+  IF (TRUE AND symbolEntry__borrow_provenance?(node)) THEN
+    RETURN FALSE;
+  END
+  IF (TRUE AND symbolEntry__heap_storage?(node)) THEN
+    RETURN TRUE;
+  END
+  IF (respondsTo?(node, "symbol") AND ((node.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_34 = ((node.symbol())?);
+  symbolEntry__heap_storage?(rtoc_local_receiver_34) })) THEN
+    RETURN TRUE;
+  END
+  IF node IS_A StringConcat THEN
+    RETURN TRUE;
+  END
+  IF (node IS_A BinaryOp AND node.string_concat()) THEN
+    RETURN TRUE;
+  END
+  IF !(node IS_A Locatable) THEN
+    RETURN FALSE;
+  END
+  MUTABLE ti = &node.full_type_mut({:context: "heap-producing expression"});
+  RETURN (TRY (type__heap_ptr?(ti)) OR TRY (type__recursive_cleanup_shape?(ti, NIL)));
+END
+PUB FN escapeAnalysis__function_def_has_return_lifetime?(fn_value: FunctionDef) RETURNS Bool ->
+  MUTABLE rl = fn_value.return_lifetime;
+  IF (rl == NIL) THEN
+    RETURN FALSE;
+  END
+  IF (rl == :wildcard) THEN
+    RETURN TRUE;
+  END
+  RETURN !(rl.empty?());
+END
+PUB FN escapeAnalysis__function_facts_have_owned_return_value?(facts: FunctionFacts, schema_lookup: ?Any) RETURNS !Bool ->
+  RETURN facts.return_values |> ANY { MUTABLE rtoc_mutable_block_param_35 = COPY _;
+  TRY (owning_return_needs_heap_placement?(facts.fn, &rtoc_mutable_block_param_35, schema_lookup)) };
+END
+PUB FN escapeAnalysis__function_facts_have_heap_return_binding?(facts: FunctionFacts) RETURNS Bool ->
+  RETURN facts.return_values |> ANY expr_has_heap_identifier?(_);
+END
+PUB FN escapeAnalysis__symbol_for_binding_node(node: BindingNode) RETURNS ?SymbolEntry@multiowned ->
+  MUTABLE rtoc_owned_return_36: ?SymbolEntry@multiowned = node.symbol();
+  RETURN rtoc_owned_return_36;
+END
+PUB FN escapeAnalysis__mark_symbol_heap_mut(sym: ?SymbolEntry, MUTABLE names: ?[Set]String = NIL, name: ?String = NIL) RETURNS Bool ->
+  MUTABLE sym_entry = canonical_symbol(sym);
+  IF !(sym_entry) THEN
+    RETURN FALSE;
+  END
+  IF (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?(sym_entry)) THEN
+    RETURN FALSE;
+  END
+  sym_entry.storage = :heap;
+  IF ((names != NIL) AND (name != NIL)) THEN
+    &names.insert(COPY name);
+  END
+  RETURN TRUE;
+END
+PUB FN escapeAnalysis__mark_node_symbol_heap_mut(node: Any) RETURNS Bool ->
+  MUTABLE changed = mark_symbol_heap_mut(IF respondsTo?(node, "symbol") THEN
+    node.symbol()
+  ELSE
+    NIL
+  END);
+  MUTABLE decl = IF respondsTo?(node, "symbol") THEN
+    (IF node.symbol() != NIL THEN
+    (node.symbol()).reg()
+  ELSE
+    NIL
+  END)
+  ELSE
+    NIL
+  END;
+  IF (changed AND respondsTo?(decl, "container_borrow=")) THEN
+    decl.container_borrow = FALSE;
+  END
+  RETURN changed;
+END
+PUB FN escapeAnalysis__mark_symbol_borrow_mut(sym: ?SymbolEntry) RETURNS Bool ->
+  MUTABLE sym_entry = canonical_symbol(sym);
+  IF !(sym_entry) THEN
+    RETURN FALSE;
+  END
+  IF (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?(sym_entry)) THEN
+    RETURN FALSE;
+  END
+  sym_entry.storage = :borrow;
+  RETURN TRUE;
+END
+PUB FN escapeAnalysis__mark_reassigned_symbol_heap_mut(sym: ?SymbolEntry) RETURNS Bool ->
+  MUTABLE sym_entry = canonical_symbol(sym);
+  IF !(sym_entry) THEN
+    RETURN FALSE;
+  END
+  IF symbolEntry__heap_storage?(sym_entry) THEN
+    RETURN FALSE;
+  END
+  sym_entry.storage = :heap;
+  RETURN TRUE;
+END
+PUB FN escapeAnalysis__canonical_symbol(sym: ?SymbolEntry) RETURNS ?SymbolEntry@multiowned ->
+  IF sym EXISTS AS sym_value THEN
+    MUTABLE decl_branch_value: ?SymbolEntryRegInput = NIL;
+    IF TRUE THEN
+      decl_branch_value = COPY sym_value.reg;
+    ELSE
+      decl_branch_value = NIL;
+    END
+    MUTABLE decl: ?SymbolEntryRegInput = decl_branch_value;
+    RETURN (((((decl != NIL) AND respondsTo?(decl, "symbol")) AND decl.symbol())) OR sym_value);
+  ELSE
+    RETURN NIL;
+  END
+END
+PUB FN escapeAnalysis__symbol_heap?(sym: ?SymbolEntry) RETURNS Bool ->
+  RETURN ((canonical_symbol(sym) != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_37 = ((canonical_symbol(sym))?);
+  symbolEntry__heap_storage?(rtoc_local_receiver_37) } == TRUE));
+END
+# End Ruby module EscapeAnalysis
+FN castAssignmentNameToAssignmentTarget(value: AssignmentName) RETURNS AssignmentTarget ->
+  PARTIAL MATCH value START
+    AssignmentName.StringValue AS cast_payload -> RETURN AssignmentTarget{ StringValue: COPY cast_payload };,
+    AssignmentName.Identifier AS cast_payload -> RETURN AssignmentTarget{ Identifier: COPY cast_payload };,
+    AssignmentName.GetField AS cast_payload -> RETURN AssignmentTarget{ GetField: COPY cast_payload };,
+    AssignmentName.GetIndex AS cast_payload -> RETURN AssignmentTarget{ GetIndex: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to AssignmentTarget");
+  END
+  panic("Invalid cast to AssignmentTarget");
+END
+FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    AssignmentName.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castLocatableToAssignment(value: Locatable) RETURNS Assignment ->
+  IF value IS_A Assignment AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to Assignment");
+END
+FN castLocatableToDestructuringAssignment(value: Locatable) RETURNS DestructuringAssignment ->
+  IF value IS_A DestructuringAssignment AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to DestructuringAssignment");
+END
+FN castLocatableToFuncCall(value: Locatable) RETURNS FuncCall ->
+  IF value IS_A FuncCall AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to FuncCall");
+END
+FN castLocatableToLambdaLit(value: Locatable) RETURNS LambdaLit ->
+  IF value IS_A LambdaLit AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to LambdaLit");
+END
+FN castLocatableToOptionalDynamicValue(value: Locatable) RETURNS ?DynamicValue ->
+  PARTIAL MATCH value START
+    Locatable.MIRProgram AS cast_payload -> RETURN DynamicValue{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN DynamicValue{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN DynamicValue{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN DynamicValue{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN DynamicValue{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN DynamicValue{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN DynamicValue{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN DynamicValue{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN DynamicValue{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN DynamicValue{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN DynamicValue{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN DynamicValue{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN DynamicValue{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN DynamicValue{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN DynamicValue{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN DynamicValue{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN DynamicValue{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN DynamicValue{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN DynamicValue{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN DynamicValue{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN DynamicValue{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN DynamicValue{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN DynamicValue{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN DynamicValue{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN DynamicValue{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN DynamicValue{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN DynamicValue{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN DynamicValue{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN DynamicValue{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN DynamicValue{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN DynamicValue{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN DynamicValue{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN DynamicValue{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN DynamicValue{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN DynamicValue{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN DynamicValue{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN DynamicValue{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN DynamicValue{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN DynamicValue{ Assert: COPY cast_payload };,
+    Locatable.TenseRecoveryRaise AS cast_payload -> RETURN DynamicValue{ TenseRecoveryRaise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN DynamicValue{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN DynamicValue{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN DynamicValue{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN DynamicValue{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN DynamicValue{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN DynamicValue{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN DynamicValue{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN DynamicValue{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN DynamicValue{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN DynamicValue{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN DynamicValue{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN DynamicValue{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN DynamicValue{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN DynamicValue{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN DynamicValue{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN DynamicValue{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN DynamicValue{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN DynamicValue{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN DynamicValue{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN DynamicValue{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN DynamicValue{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN DynamicValue{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN DynamicValue{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN DynamicValue{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN DynamicValue{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN DynamicValue{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN DynamicValue{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN DynamicValue{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN DynamicValue{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN DynamicValue{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN DynamicValue{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN DynamicValue{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN DynamicValue{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN DynamicValue{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN DynamicValue{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN DynamicValue{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN DynamicValue{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN DynamicValue{ MutableBorrow: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseRaise AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseExit AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePass AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePrune AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseBreak AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN DynamicValue{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN DynamicValue{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN DynamicValue{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN DynamicValue{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN DynamicValue{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN DynamicValue{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN DynamicValue{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN DynamicValue{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN DynamicValue{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN DynamicValue{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN DynamicValue{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN DynamicValue{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN DynamicValue{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN DynamicValue{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN DynamicValue{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN DynamicValue{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN DynamicValue{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN DynamicValue{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN DynamicValue{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN DynamicValue{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN DynamicValue{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN DynamicValue{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN DynamicValue{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN DynamicValue{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN DynamicValue{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN DynamicValue{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN DynamicValue{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN DynamicValue{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN DynamicValue{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN DynamicValue{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN DynamicValue{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN DynamicValue{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN DynamicValue{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN DynamicValue{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN DynamicValue{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN DynamicValue{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN DynamicValue{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN DynamicValue{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN DynamicValue{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN DynamicValue{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN DynamicValue{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN DynamicValue{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN DynamicValue{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN DynamicValue{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN DynamicValue{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?DynamicValue");
+  END
+  panic("Invalid cast to ?DynamicValue");
+END
+FN castLocatableToReturnNode(value: Locatable) RETURNS ReturnNode ->
+  IF value IS_A ReturnNode AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to ReturnNode");
+END
+FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    Node.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    Node.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    Node.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    Node.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    Node.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    Node.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Node.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    Node.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    Node.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Node.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    Node.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    Node.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    Node.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    Node.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Node.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    Node.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    Node.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    Node.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    Node.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    Node.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    Node.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    Node.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    Node.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    Node.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    Node.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    Node.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    Node.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    Node.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    Node.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    Node.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    Node.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    Node.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Node.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    Node.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    Node.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Node.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    Node.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    Node.TenseRecoveryRaise AS cast_payload -> RETURN Locatable{ TenseRecoveryRaise: COPY cast_payload };,
+    Node.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    Node.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    Node.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    Node.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    Node.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Node.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    Node.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    Node.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    Node.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    Node.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    Node.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    Node.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    Node.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    Node.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    Node.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    Node.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    Node.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    Node.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    Node.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    Node.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    Node.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    Node.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    Node.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    Node.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    Node.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    Node.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    Node.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    Node.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    Node.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    Node.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    Node.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    Node.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    Node.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    Node.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    Node.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    Node.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Node.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    Node.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    Node.TenseOperationKindOrElseRaise AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    Node.TenseOperationKindOrElseExit AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    Node.TenseOperationKindOrElsePass AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    Node.TenseOperationKindOrElsePrune AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    Node.TenseOperationKindOrElseBreak AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    Node.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    Node.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    Node.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Node.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    Node.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    Node.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    Node.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    Node.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    Node.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    Node.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    Node.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    Node.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    Node.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    Node.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    Node.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    Node.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    Node.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    Node.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Node.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    Node.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    Node.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    Node.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Node.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Node.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    Node.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    Node.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    Node.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    Node.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    Node.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    Node.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    Node.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    Node.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    Node.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    Node.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    Node.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    Node.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    Node.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    Node.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    Node.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    Node.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    Node.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    Node.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    Node.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    Node.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    Node.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castOptionalDynamicValueToLocatable(value: ?DynamicValue) RETURNS Locatable ->
+  IF value == NIL THEN
+    panic("Invalid cast to Locatable");
+  END
+  PARTIAL MATCH value? START
+    DynamicValue.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    DynamicValue.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    DynamicValue.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    DynamicValue.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    DynamicValue.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    DynamicValue.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    DynamicValue.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    DynamicValue.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    DynamicValue.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    DynamicValue.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    DynamicValue.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    DynamicValue.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    DynamicValue.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    DynamicValue.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    DynamicValue.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    DynamicValue.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    DynamicValue.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    DynamicValue.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    DynamicValue.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    DynamicValue.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    DynamicValue.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    DynamicValue.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    DynamicValue.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    DynamicValue.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    DynamicValue.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    DynamicValue.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    DynamicValue.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    DynamicValue.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    DynamicValue.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    DynamicValue.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    DynamicValue.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    DynamicValue.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    DynamicValue.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    DynamicValue.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    DynamicValue.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    DynamicValue.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    DynamicValue.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    DynamicValue.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    DynamicValue.TenseRecoveryRaise AS cast_payload -> RETURN Locatable{ TenseRecoveryRaise: COPY cast_payload };,
+    DynamicValue.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    DynamicValue.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    DynamicValue.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    DynamicValue.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    DynamicValue.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    DynamicValue.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    DynamicValue.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    DynamicValue.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    DynamicValue.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    DynamicValue.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    DynamicValue.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    DynamicValue.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    DynamicValue.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    DynamicValue.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    DynamicValue.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    DynamicValue.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    DynamicValue.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    DynamicValue.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    DynamicValue.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElseRaise AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElseExit AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElsePass AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElsePrune AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElseBreak AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    DynamicValue.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    DynamicValue.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    DynamicValue.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    DynamicValue.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    DynamicValue.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    DynamicValue.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    DynamicValue.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    DynamicValue.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    DynamicValue.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    DynamicValue.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    DynamicValue.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    DynamicValue.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    DynamicValue.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    DynamicValue.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    DynamicValue.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    DynamicValue.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    DynamicValue.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    DynamicValue.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    DynamicValue.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    DynamicValue.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    DynamicValue.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    DynamicValue.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    DynamicValue.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    DynamicValue.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    DynamicValue.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    DynamicValue.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    DynamicValue.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    DynamicValue.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    DynamicValue.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    DynamicValue.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    DynamicValue.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    DynamicValue.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    DynamicValue.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    DynamicValue.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    DynamicValue.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    DynamicValue.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    DynamicValue.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    DynamicValue.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    DynamicValue.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    DynamicValue.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    DynamicValue.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DynamicValue.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    DynamicValue.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    DynamicValue.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    DynamicValue.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    DynamicValue.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    DynamicValue.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    DynamicValue.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    DynamicValue.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    DynamicValue.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    DynamicValue.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    DynamicValue.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    DynamicValue.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    DynamicValue.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    DynamicValue.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    DynamicValue.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    DynamicValue.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    DynamicValue.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    DynamicValue.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    DynamicValue.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    DynamicValue.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    DynamicValue.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    DynamicValue.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    DynamicValue.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    DynamicValue.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castOptionalDynamicValueToOptionalLocatable(value: ?DynamicValue) RETURNS ?Locatable ->
+  IF value == NIL THEN
+    panic("Invalid cast to ?Locatable");
+  END
+  PARTIAL MATCH value? START
+    DynamicValue.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    DynamicValue.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    DynamicValue.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    DynamicValue.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    DynamicValue.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    DynamicValue.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    DynamicValue.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    DynamicValue.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    DynamicValue.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    DynamicValue.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    DynamicValue.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    DynamicValue.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    DynamicValue.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    DynamicValue.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    DynamicValue.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    DynamicValue.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    DynamicValue.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    DynamicValue.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    DynamicValue.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    DynamicValue.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    DynamicValue.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    DynamicValue.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    DynamicValue.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    DynamicValue.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    DynamicValue.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    DynamicValue.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    DynamicValue.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    DynamicValue.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    DynamicValue.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    DynamicValue.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    DynamicValue.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    DynamicValue.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    DynamicValue.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    DynamicValue.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    DynamicValue.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    DynamicValue.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    DynamicValue.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    DynamicValue.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    DynamicValue.TenseRecoveryRaise AS cast_payload -> RETURN Locatable{ TenseRecoveryRaise: COPY cast_payload };,
+    DynamicValue.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    DynamicValue.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    DynamicValue.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    DynamicValue.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    DynamicValue.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    DynamicValue.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    DynamicValue.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    DynamicValue.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    DynamicValue.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    DynamicValue.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    DynamicValue.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    DynamicValue.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    DynamicValue.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    DynamicValue.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    DynamicValue.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    DynamicValue.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    DynamicValue.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    DynamicValue.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    DynamicValue.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElseRaise AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElseExit AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElsePass AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElsePrune AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    DynamicValue.TenseOperationKindOrElseBreak AS cast_payload -> RETURN Locatable{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    DynamicValue.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    DynamicValue.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    DynamicValue.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    DynamicValue.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    DynamicValue.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    DynamicValue.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    DynamicValue.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    DynamicValue.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    DynamicValue.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    DynamicValue.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    DynamicValue.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    DynamicValue.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    DynamicValue.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    DynamicValue.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    DynamicValue.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    DynamicValue.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    DynamicValue.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    DynamicValue.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    DynamicValue.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    DynamicValue.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    DynamicValue.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    DynamicValue.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    DynamicValue.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    DynamicValue.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    DynamicValue.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    DynamicValue.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    DynamicValue.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    DynamicValue.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    DynamicValue.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    DynamicValue.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    DynamicValue.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    DynamicValue.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    DynamicValue.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    DynamicValue.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    DynamicValue.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    DynamicValue.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    DynamicValue.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    DynamicValue.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    DynamicValue.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    DynamicValue.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    DynamicValue.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DynamicValue.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    DynamicValue.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    DynamicValue.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    DynamicValue.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    DynamicValue.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    DynamicValue.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    DynamicValue.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    DynamicValue.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    DynamicValue.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    DynamicValue.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    DynamicValue.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    DynamicValue.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    DynamicValue.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    DynamicValue.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    DynamicValue.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    DynamicValue.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    DynamicValue.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    DynamicValue.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    DynamicValue.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    DynamicValue.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    DynamicValue.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    DynamicValue.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    DynamicValue.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    DynamicValue.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?Locatable");
+  END
+  panic("Invalid cast to ?Locatable");
+END
+FN castOptionalLocatableToOptionalDynamicValue(value: ?Locatable) RETURNS ?DynamicValue ->
+  IF value == NIL THEN
+    panic("Invalid cast to ?DynamicValue");
+  END
+  PARTIAL MATCH value? START
+    Locatable.MIRProgram AS cast_payload -> RETURN DynamicValue{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN DynamicValue{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN DynamicValue{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN DynamicValue{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN DynamicValue{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN DynamicValue{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN DynamicValue{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN DynamicValue{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN DynamicValue{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN DynamicValue{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN DynamicValue{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN DynamicValue{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN DynamicValue{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN DynamicValue{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN DynamicValue{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN DynamicValue{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN DynamicValue{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN DynamicValue{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN DynamicValue{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN DynamicValue{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN DynamicValue{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN DynamicValue{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN DynamicValue{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN DynamicValue{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN DynamicValue{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN DynamicValue{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN DynamicValue{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN DynamicValue{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN DynamicValue{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN DynamicValue{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN DynamicValue{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN DynamicValue{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN DynamicValue{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN DynamicValue{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN DynamicValue{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN DynamicValue{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN DynamicValue{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN DynamicValue{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN DynamicValue{ Assert: COPY cast_payload };,
+    Locatable.TenseRecoveryRaise AS cast_payload -> RETURN DynamicValue{ TenseRecoveryRaise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN DynamicValue{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN DynamicValue{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN DynamicValue{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN DynamicValue{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN DynamicValue{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN DynamicValue{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN DynamicValue{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN DynamicValue{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN DynamicValue{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN DynamicValue{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN DynamicValue{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN DynamicValue{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN DynamicValue{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN DynamicValue{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN DynamicValue{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN DynamicValue{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN DynamicValue{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN DynamicValue{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN DynamicValue{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN DynamicValue{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN DynamicValue{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN DynamicValue{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN DynamicValue{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN DynamicValue{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN DynamicValue{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN DynamicValue{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN DynamicValue{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN DynamicValue{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN DynamicValue{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN DynamicValue{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN DynamicValue{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN DynamicValue{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN DynamicValue{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN DynamicValue{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN DynamicValue{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN DynamicValue{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN DynamicValue{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN DynamicValue{ MutableBorrow: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseRaise AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseExit AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePass AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePrune AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseBreak AS cast_payload -> RETURN DynamicValue{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN DynamicValue{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN DynamicValue{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN DynamicValue{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN DynamicValue{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN DynamicValue{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN DynamicValue{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN DynamicValue{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN DynamicValue{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN DynamicValue{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN DynamicValue{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN DynamicValue{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN DynamicValue{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN DynamicValue{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN DynamicValue{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN DynamicValue{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN DynamicValue{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN DynamicValue{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN DynamicValue{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN DynamicValue{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN DynamicValue{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN DynamicValue{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN DynamicValue{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN DynamicValue{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN DynamicValue{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN DynamicValue{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN DynamicValue{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN DynamicValue{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN DynamicValue{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN DynamicValue{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN DynamicValue{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN DynamicValue{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN DynamicValue{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN DynamicValue{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN DynamicValue{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN DynamicValue{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN DynamicValue{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN DynamicValue{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN DynamicValue{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN DynamicValue{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN DynamicValue{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN DynamicValue{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN DynamicValue{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN DynamicValue{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN DynamicValue{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN DynamicValue{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?DynamicValue");
+  END
+  panic("Invalid cast to ?DynamicValue");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END
+FN ruby_array_concat_Locatable(left: []Locatable, right: []Locatable) RETURNS []Locatable ->
+  MUTABLE result: []Locatable = [];
+  left |> EACH { &result.append(COPY _); };
+  right |> EACH { &result.append(COPY _); };
+  RETURN result;
+END
+FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
+  MUTABLE result: [Set]String = [];
+  left |> EACH {
+    IF right.contains?(_) AND !(result.contains?(_)) THEN
+      &result.insert(COPY _);
+    END
+  };
+  RETURN result;
+END
+FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+  IF value EXISTS AS optional_payload THEN
+    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
+  END
+  NIL;
+END

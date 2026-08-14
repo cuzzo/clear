@@ -1,0 +1,552 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+PUB UNION Slot { Int64Value: Int64, StringValue: String }
+PUB STRUCT OwnershipTransportPlan {
+  action: String@symbol,
+  source: String,
+  destination: String,
+  alias_root: String,
+  last_alias_use: ?Identifier,
+  conflicting_mutation: ?Locatable,
+  hidden_cost: ?String@symbol
+}
+PUB STRUCT OwnershipTransportFacts {
+  alias_roots: {Int64}Tuple<Int64, String>,
+  aliases: []Alias,
+  mutations: []Event,
+  ordinal: Int64,
+  parameter_ids: [Set]Int64,
+  reads: []Event,
+  transfers: []Transfer
+}
+
+PUB STRUCT Event {
+  node: Locatable,
+  binding_id: Int64,
+  ordinal: Int64,
+  ancestors: []Locatable,
+  escape: Bool
+}
+PUB STRUCT Alias {
+  declaration: Any@multiowned,
+  source: Locatable,
+  source_id: Int64,
+  destination_id: Int64,
+  source_name: String,
+  destination_name: String,
+  root_id: Int64,
+  root_name: String,
+  ordinal: Int64,
+  ancestors: []Locatable,
+  whole_binding: Bool
+}
+PUB STRUCT Decision {
+  alias_fact: Alias,
+  plan: OwnershipTransportPlan
+}
+PUB STRUCT Transfer {
+  container: Locatable,
+  slot: Any@multiowned,
+  source: Identifier,
+  source_id: Int64,
+  ordinal: Int64
+}
+PUB STRUCT TransferDecision {
+  transfer: Transfer,
+  materialize: Bool
+}
+PUB FN ownershipTransportFacts__initialize(MUTABLE self: OwnershipTransportFacts, parameter_ids: [Set]Int64 = Set[]) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.parameter_ids = COPY parameter_ids;
+    rtoc_self_view.reads = List[];
+    rtoc_self_view.mutations = List[];
+    rtoc_self_view.aliases = List[];
+    rtoc_self_view.transfers = List[];
+    rtoc_self_view.alias_roots = {};
+    rtoc_self_view.ordinal = 0;
+}
+END
+PUB FN ownershipTransportFacts__source?(node: Locatable) RETURNS Bool ->
+  RETURN ((node IS_A Identifier OR node IS_A GetField) OR node IS_A GetIndex);
+END
+PUB FN ownershipTransportFacts__source_display(node: Locatable) RETURNS String EFFECTS REENTRANT ->
+  IF node IS_A Identifier AS identifier THEN
+    RETURN COPY identifier__name(identifier);
+  ELSE_IF node IS_A GetField AS get_field THEN
+    RETURN "${ownershipTransportFacts__source_display(get_field.target)}.${get_field.field}";
+  ELSE_IF node IS_A GetIndex AS get_index THEN
+    RETURN "${ownershipTransportFacts__source_display(get_index.target)}[...]";
+  ELSE
+    RETURN "value";
+  END
+END
+PUB FN ownershipTransportFacts__next_ordinal(MUTABLE self: OwnershipTransportFacts) RETURNS Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE value = rtoc_self_view.ordinal;
+    rtoc_self_view.ordinal = (rtoc_self_view.ordinal + 1);
+    RETURN value;
+}
+END
+PUB FN ownershipTransportFacts__record_read(MUTABLE self: OwnershipTransportFacts, node: Identifier, ancestors: []Locatable) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, node);
+    IF id EXISTS AS id_value THEN
+      MUTABLE id_value_mutable = COPY id_value;
+      &rtoc_self_view.reads.append(COPY Event{ node: Locatable{ Identifier: COPY node }, binding_id: id_value_mutable, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, escape: ancestors |> ANY ownershipTransportFacts__escape_ancestor?(rtoc_self_view, _) });
+    ELSE
+      RETURN;
+    END
+}
+END
+PUB FN ownershipTransportFacts__record_mutation(MUTABLE self: OwnershipTransportFacts, node: Locatable, identifier: Identifier, ancestors: []Locatable) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, identifier);
+    IF id EXISTS AS id_value THEN
+      MUTABLE id_value_mutable = COPY id_value;
+      ownershipTransportFacts__record_mutation_id(&rtoc_self_view, node, id_value_mutable, ancestors);
+    ELSE
+      RETURN;
+    END
+}
+END
+PUB FN ownershipTransportFacts__record_mutation_id(MUTABLE self: OwnershipTransportFacts, node: Locatable, binding_id: Int64, ancestors: []Locatable) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.mutations.append(COPY Event{ node: COPY node, binding_id: COPY binding_id, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, escape: FALSE });
+}
+END
+PUB FN ownershipTransportFacts__record_alias(MUTABLE self: OwnershipTransportFacts, node: Node, ancestors: []Locatable) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE source: Locatable = castNodeToLocatable(COPY node);
+    MUTABLE symbol: ?SymbolEntry@multiowned = NIL;
+    IF node IS_A VarDecl AS var_decl THEN
+      source = CAST(var_decl.value AS Locatable);
+      symbol = var_decl.symbol;
+    ELSE_IF node IS_A BindExpr AS bind_expr THEN
+      source = CAST(bind_expr.value AS Locatable);
+      symbol = bind_expr.symbol;
+    END
+    IF !(ownershipTransportFacts__source?(source)) THEN
+      RETURN;
+    END
+    IF !((symbol != NIL)) THEN
+      RETURN;
+    END
+    MUTABLE root: ?Identifier = ownershipTransportFacts__source_root_identifier(rtoc_self_view, source);
+    IF root EXISTS AS root_value THEN
+      MUTABLE root_value_mutable = COPY root_value;
+      MUTABLE source_id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, root_value_mutable);
+      IF source_id EXISTS AS source_id_value THEN
+        MUTABLE source_id_value_mutable = COPY source_id_value;
+        MUTABLE source_name = ownershipTransportFacts__source_display(source);
+        MUTABLE fallback_root: Tuple<Int64, String> = [source_id_value_mutable, source_name];
+        MUTABLE root_id, root_name = (rtoc_self_view.alias_roots[source_id_value_mutable] OR_ELSE fallback_root);
+        MUTABLE destination_name: String = "";
+        IF node IS_A VarDecl AS var_decl THEN
+          destination_name = COPY CAST(var_decl.name AS String);
+        ELSE_IF node IS_A BindExpr AS bind_expr THEN
+          destination_name = COPY CAST(bind_expr.name AS String);
+        END
+        MUTABLE fact = Alias{ declaration: node, source: COPY source, source_id: source_id_value_mutable, destination_id: symbol.binding_id, source_name: COPY source_name, destination_name: COPY destination_name, root_id: root_id, root_name: COPY root_name, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, whole_binding: source IS_A Identifier };
+        &rtoc_self_view.aliases.append(COPY fact);
+        rtoc_self_view.alias_roots[symbol.binding_id] = CAST(Tuple{root_id, root_name} AS Tuple<Int64, String>);
+      ELSE
+        RETURN;
+      END
+    ELSE
+      RETURN;
+    END
+}
+END
+PUB FN ownershipTransportFacts__record_transfer(MUTABLE self: OwnershipTransportFacts, container: Locatable, slot: Slot, source: Identifier) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, source);
+    IF id EXISTS AS id_value THEN
+      MUTABLE id_value_mutable = COPY id_value;
+      &rtoc_self_view.transfers.append(COPY Transfer{ container: COPY container, slot: slot, source: COPY source, source_id: id_value_mutable, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view) });
+    ELSE
+      RETURN;
+    END
+}
+END
+PUB FN ownershipTransportFacts__decisions(self: OwnershipTransportFacts) RETURNS ![]Decision
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.aliases |> SELECT {
+    MUTABLE source_reads = TRY (ownershipTransportFacts__source_reads_after(rtoc_self_view, _));
+    MUTABLE destination_reads = TRY (ownershipTransportFacts__destination_reads_after(rtoc_self_view, _));
+    MUTABLE mutations = TRY (ownershipTransportFacts__mutations_after(rtoc_self_view, _));
+    MUTABLE conflict: ?Event = ownershipTransportFacts__conflict_for(rtoc_self_view, _, source_reads, destination_reads, mutations);
+    MUTABLE last_alias: ?Locatable = NIL;
+    IF destination_reads.last() != NIL THEN
+        last_alias = COPY ((destination_reads.last())?).node;
+      END
+    MUTABLE escapes = destination_reads |> ANY _.escape;
+    MUTABLE action =   IF (((_.whole_binding AND (source_reads.length() == 0)) AND !(rtoc_self_view.parameter_ids.contains?(_.source_id))) AND !(rtoc_self_view.alias_roots.contains?(_.source_id))) THEN
+        :move
+      ELSE_IF escapes THEN
+        :materialize
+      ELSE
+        :borrow
+      END;
+    Decision{ alias_fact: COPY _, plan: COPY OwnershipTransportPlan{ action: COPY action, source: COPY _.source_name, destination: COPY _.destination_name, alias_root: COPY _.root_name, last_alias_use: castOptionalLocatableToOptionalIdentifier(COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_1: ?Locatable = NIL;
+      IF ((last_alias != NIL) AND (last_alias IS_A Identifier)) THEN
+        rtoc_ternary_value_1 = last_alias;
+      ELSE
+        rtoc_ternary_value_1 = NIL;
+      END
+      rtoc_ternary_value_1 }), conflicting_mutation: COPY conflict?.node, hidden_cost: IF (action == :materialize) THEN
+        :copy_or_retain
+      ELSE
+        NIL
+      END } }
+    };
+}
+END
+PUB FN ownershipTransportFacts__source_reads_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.reads |> WHERE ((_.ordinal > fact.ordinal) AND (((_.binding_id == fact.source_id) OR (_.binding_id == fact.root_id))));
+}
+END
+PUB FN ownershipTransportFacts__destination_reads_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.reads |> WHERE ((_.ordinal > fact.ordinal) AND (_.binding_id == fact.destination_id));
+}
+END
+PUB FN ownershipTransportFacts__mutations_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.mutations |> WHERE ((_.ordinal > fact.ordinal) AND ([fact.source_id, fact.root_id, fact.destination_id]).contains?(_.binding_id));
+}
+END
+PUB FN ownershipTransportFacts__conflict_for(self: OwnershipTransportFacts, fact: Alias, source_reads: []Event, destination_reads: []Event, mutations: []Event) RETURNS ?Event
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mutations |> FIND ownershipTransportFacts__mutation_conflicts?(rtoc_self_view, fact, source_reads, destination_reads, _);
+}
+END
+PUB FN ownershipTransportFacts__mutation_conflicts?(self: OwnershipTransportFacts, fact: Alias, source_reads: []Event, destination_reads: []Event, mutation: Event) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE counterpart_reads: []Event = List[];
+    IF (mutation.binding_id == fact.destination_id) THEN
+      counterpart_reads = COPY source_reads;
+    ELSE
+      counterpart_reads = COPY destination_reads;
+    END
+    RETURN counterpart_reads |> ANY ownershipTransportFacts__conflicting_use?(rtoc_self_view, fact, mutation, _);
+}
+END
+PUB FN ownershipTransportFacts__conflicting_use?(self: OwnershipTransportFacts, fact: Alias, mutation: Event, use_value: Event) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (((((use_value.ordinal > mutation.ordinal)) OR ownershipTransportFacts__loop_backedge_reaches?(rtoc_self_view, fact, mutation, use_value))) AND !(ownershipTransportFacts__mutually_exclusive?(rtoc_self_view, mutation, use_value)));
+}
+END
+PUB FN ownershipTransportFacts__transfer_decisions(self: OwnershipTransportFacts) RETURNS ![]TransferDecision
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.transfers |> SELECT {
+    MUTABLE later_read = ownershipTransportFacts__later_read_after_transfer?(rtoc_self_view, _);
+    MUTABLE borrowed_parameter = ownershipTransportFacts__borrowed_parameter_transfer?(rtoc_self_view, _);
+    TransferDecision{ transfer: COPY _, materialize: (later_read OR borrowed_parameter) }
+    };
+}
+END
+PUB FN ownershipTransportFacts__later_read_after_transfer?(self: OwnershipTransportFacts, transfer: Transfer) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN rtoc_self_view.reads |> ANY ((_.ordinal > transfer.ordinal) AND (_.binding_id == transfer.source_id));
+}
+END
+PUB FN ownershipTransportFacts__borrowed_parameter_transfer?(self: OwnershipTransportFacts, transfer: Transfer) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (rtoc_self_view.parameter_ids.contains?(transfer.source_id) AND ((transfer.source.symbol == NIL) OR ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = ((transfer.source.symbol)?);
+    symbolEntry__takes(rtoc_local_receiver_2) } != TRUE)));
+}
+END
+PRIVATE FN ownershipTransportFacts__binding_id(self: OwnershipTransportFacts, node: Identifier) RETURNS ?Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    IF node.symbol != NIL THEN
+    RETURN ((node.symbol)?).ownership_binding_id;
+    ELSE
+    RETURN NIL;
+    END
+}
+END
+PRIVATE FN ownershipTransportFacts__source_root_identifier(self: OwnershipTransportFacts, node: Locatable) RETURNS ?Identifier
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE root: ?Identifier = aST__root_identifier(node);
+    IF (root != NIL) THEN
+      RETURN root;
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN ownershipTransportFacts__escape_ancestor?(self: OwnershipTransportFacts, node: Locatable) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (((node IS_A ReturnNode OR node IS_A BgBlock) OR node IS_A BgStreamBlock) OR node IS_A LambdaLit);
+}
+END
+PRIVATE FN ownershipTransportFacts__mutually_exclusive?(self: OwnershipTransportFacts, left: Event, right: Event) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < left.ancestors.length() DO
+      IF !(left.ancestors[rtoc_idx]? IS_A IfStatement) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE conditional = COPY left.ancestors[rtoc_idx]?;
+      MUTABLE left_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, left, castLocatableToIfStatement(conditional));
+      MUTABLE right_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, right, castLocatableToIfStatement(conditional));
+      IF (((left_side != NIL) AND (right_side != NIL)) AND (left_side != right_side)) THEN
+          RETURN TRUE;
+      END
+    rtoc_idx = rtoc_idx + 1;
+    END
+    RETURN FALSE;
+}
+END
+PRIVATE FN ownershipTransportFacts__conditional_side(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS ?String@symbol
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE index: ?Int64 = ownershipTransportFacts__conditional_index(rtoc_self_view, event, conditional);
+    IF index EXISTS AS index_value THEN
+      MUTABLE child: Locatable = COPY event.node;
+      MUTABLE child_index = (index_value + 1);
+      IF (child_index < event.ancestors.length()) THEN
+        child = COPY UNWRAP (event.ancestors[child_index]);
+      END
+      IF conditional.then_branch.contains?(child) THEN
+        RETURN :then;
+      END
+      MUTABLE else_branch: ?[]Locatable = COPY conditional.else_branch;
+      IF else_branch EXISTS AS else_branch_value THEN
+        IF else_branch_value.contains?(child) THEN
+          RETURN :else;
+        END
+      END
+      RETURN NIL;
+    ELSE
+      RETURN NIL;
+    END
+}
+END
+PRIVATE FN ownershipTransportFacts__conditional_index(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS ?Int64
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE index: Int64 = 0;
+    WHILE (index < event.ancestors.length()) DO
+      MUTABLE candidate = COPY UNWRAP (event.ancestors[index]);
+      IF candidate IS_A IfStatement AS if_statement THEN
+        MUTABLE narrowed = if_statement;
+        IF (narrowed == conditional) THEN
+          RETURN index;
+        END
+      END
+      index = (index + 1);
+    END
+    RETURN NIL;
+}
+END
+PRIVATE FN ownershipTransportFacts__loop_backedge_reaches?(self: OwnershipTransportFacts, declaration: Alias, mutation: Event, use_value: Event) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN mutation.ancestors |> ANY {
+    MUTABLE loop_node = (((_ IS_A WhileLoop OR _ IS_A WhileBindLoop) OR _ IS_A ForRange) OR _ IS_A ForEach);
+    ((loop_node AND use_value.ancestors.contains?(_)) AND !(declaration.ancestors.contains?(_)))
+    };
+}
+END
+PUB FN ownershipTransportFacts__new(parameter_ids: [Set]Int64 = Set[]) RETURNS OwnershipTransportFacts@multiowned ->
+  MUTABLE self = OwnershipTransportFacts{ alias_roots: {}, aliases: List[], mutations: List[], ordinal: 0, parameter_ids: COPY parameter_ids, reads: List[], transfers: List[] };
+  ownershipTransportFacts__initialize(&self, parameter_ids);
+  RETURN self @multiowned;
+END
+FN castLocatableToIfStatement(value: Locatable) RETURNS IfStatement ->
+  IF value IS_A IfStatement AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to IfStatement");
+END
+FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    Node.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
+    Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    Node.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    Node.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    Node.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    Node.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    Node.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
+    Node.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    Node.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    Node.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
+    Node.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    Node.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    Node.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    Node.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    Node.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
+    Node.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    Node.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    Node.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    Node.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    Node.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    Node.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    Node.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    Node.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    Node.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    Node.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    Node.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    Node.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    Node.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    Node.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    Node.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    Node.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    Node.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    Node.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
+    Node.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    Node.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    Node.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
+    Node.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    Node.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    Node.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
+    Node.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    Node.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    Node.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    Node.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    Node.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
+    Node.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    Node.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    Node.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    Node.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    Node.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    Node.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    Node.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    Node.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    Node.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    Node.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    Node.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    Node.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    Node.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    Node.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    Node.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    Node.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    Node.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    Node.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    Node.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    Node.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    Node.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    Node.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    Node.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    Node.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    Node.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    Node.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    Node.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    Node.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    Node.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    Node.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    Node.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
+    Node.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    Node.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    Node.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
+    Node.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
+    Node.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
+    Node.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
+    Node.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
+    Node.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    Node.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    Node.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
+    Node.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    Node.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    Node.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    Node.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    Node.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    Node.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    Node.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    Node.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    Node.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    Node.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    Node.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    Node.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
+    Node.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    Node.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    Node.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
+    Node.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    Node.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    Node.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    Node.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
+    Node.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
+    Node.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    Node.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    Node.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    Node.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    Node.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    Node.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    Node.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    Node.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    Node.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    Node.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    Node.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    Node.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    Node.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    Node.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    Node.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    Node.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    Node.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    Node.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    Node.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    Node.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    Node.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    Node.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castOptionalLocatableToOptionalIdentifier(value: ?Locatable) RETURNS ?Identifier ->
+  IF value != NIL THEN
+    IF value IS_A Identifier AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN NIL;
+END
