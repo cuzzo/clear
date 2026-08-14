@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_6173742f6572726f725f72656769737472792e636c656172" AS error_registry
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
 REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
 REQUIRE "pkg:rtoc_73656d616e7469632f73656d616e7469635f6964732e636c656172" AS semantic_ids
@@ -51,7 +52,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE bound_params = withMatchCheck__collect_bound_param_names(with_blocks[rtoc_idx]?, param_names);
+    MUTABLE bound_params = TRY (withMatchCheck__collect_bound_param_names(with_blocks[rtoc_idx]?, param_names));
     IF !(with_blocks[rtoc_idx]?.arms) THEN
         TRY (withMatchCheck__enforce_polymorphic_iff_rule_mut(with_blocks[rtoc_idx]?, bound_params, requires_map, fn_value, error_handler));
     END
@@ -66,7 +67,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
       IF with_blocks[rtoc_idx]?.polymorphic THEN
         requires_bound_params = bound_params;
       ELSE
-        requires_bound_params = withMatchCheck__collect_sync_bound_param_names(with_blocks[rtoc_idx]?, param_names);
+        requires_bound_params = TRY (withMatchCheck__collect_sync_bound_param_names(with_blocks[rtoc_idx]?, param_names));
       END
     MUTABLE rtoc_req_idx = 0;
     WHILE rtoc_req_idx < requires_bound_params.length() DO
@@ -139,7 +140,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
   END
   NIL;
 END
-PUB FN withMatchCheck__collect_bound_param_names(with_node: WithBlock, param_names: [Set]String) RETURNS [Set]String ->
+PUB FN withMatchCheck__collect_bound_param_names(with_node: WithBlock, param_names: [Set]String) RETURNS ![Set]String ->
   MUTABLE out: [Set]String = Set[];
   MUTABLE rtoc_each_items_2 = ((TRY (capabilityPlan__require_for(with_node))).all);
   MUTABLE rtoc_idx = 0;
@@ -156,7 +157,7 @@ PUB FN withMatchCheck__collect_bound_param_names(with_node: WithBlock, param_nam
   END
   RETURN out;
 END
-PUB FN withMatchCheck__collect_sync_bound_param_names(with_node: WithBlock, param_names: [Set]String) RETURNS [Set]String ->
+PUB FN withMatchCheck__collect_sync_bound_param_names(with_node: WithBlock, param_names: [Set]String) RETURNS ![Set]String ->
   MUTABLE out: [Set]String = Set[];
   MUTABLE rtoc_each_items_3 = (TRY (withCapabilityPlan__sync_constrained((TRY (capabilityPlan__require_for(with_node))))));
   MUTABLE rtoc_idx = 0;
