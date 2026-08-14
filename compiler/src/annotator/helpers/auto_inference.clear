@@ -564,7 +564,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen: []AutoConstraintCollectorObservedType = ( { MUTABLE rtoc_empty_list_11: []AutoConstraintCollectorObservedType = List[]; rtoc_empty_list_11 } );
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < slot.sources.length() DO
-      MUTABLE t: ?AutoConstraintCollectorObservedType = rtoc_self_view.type_of(slot.sources[rtoc_idx]?);
+      MUTABLE type_of_fn = rtoc_self_view.type_of;
+      MUTABLE t: ?AutoConstraintCollectorObservedType = type_of_fn(UNWRAP (slot.sources[rtoc_idx]));
       IF (t == NIL) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
