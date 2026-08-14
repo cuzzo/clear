@@ -151,8 +151,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_self_view.slots[autoSlotId__param(_, rtoc_idx)] = COPY Slot{ kind: :param, fn_name: COPY _, index: rtoc_idx, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } ), auto_token: KEEP param__type(fn_value.params[rtoc_idx]?).auto_token, shape: NIL, resolved_scalar: NIL };
       rtoc_idx = rtoc_idx + 1;
     END
-    IF autoConstraintCollector__auto?(rtoc_self_view, functionSignature__return_type(fn_value)) THEN
-        rtoc_self_view.slots[autoSlotId__return(_)] = COPY Slot{ kind: :return, fn_name: COPY _, index: NIL, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } ), auto_token: KEEP functionSignature__return_type(fn_value).auto_token, shape: NIL, resolved_scalar: NIL };
+    IF autoConstraintCollector__auto?(rtoc_self_view, fn_value.return_type) THEN
+        rtoc_self_view.slots[autoSlotId__return(_)] = COPY Slot{ kind: :return, fn_name: COPY _, index: NIL, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } ), auto_token: KEEP fn_value.return_type.auto_token, shape: NIL, resolved_scalar: NIL };
     END
     };
     RETURN COPY rtoc_self_view.slots;
