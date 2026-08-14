@@ -7568,7 +7568,7 @@ PUB FN aST__node__symbol(node: Locatable) RETURNS ?SymbolEntry@multiowned ->
   RETURN NIL;
 END
 
-PUB FN aST__node__set_symbol(MUTABLE node: Locatable, value: ?SymbolEntry@multiowned) RETURNS Void ->
+PUB FN aST__node__set_symbol(MUTABLE node: Locatable, value: ?SymbolEntry) RETURNS Void ->
   MATCH node START
     Locatable.Program AS MUTABLE item -> item.symbol = COPY value;,
     Locatable.RequireNode AS MUTABLE item -> item.symbol = COPY value;,
@@ -7835,7 +7835,7 @@ PUB FN aST__node__matched_signature(node: Locatable) RETURNS ?FunctionSignature@
   RETURN NIL;
 END
 
-PUB FN aST__node__set_matched_signature(MUTABLE node: Locatable, value: ?FunctionSignature@multiowned) RETURNS Void ->
+PUB FN aST__node__set_matched_signature(MUTABLE node: Locatable, value: ?FunctionSignature) RETURNS Void ->
   MATCH node START
     Locatable.Program AS MUTABLE item -> item.matched_signature = COPY value;,
     Locatable.RequireNode AS MUTABLE item -> item.matched_signature = COPY value;,
