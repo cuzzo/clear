@@ -547,13 +547,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       };
     END
     MUTABLE unresolved: {AutoSlotId@multiowned}Slot@multiowned = {};
-    rtoc_self_view.slots.keys() |> EACH {
-    MUTABLE slot: Slot@multiowned = (rtoc_self_view.slots[_] OR_ELSE CAST(panic("missing hash key") AS Slot));
-    IF (resolved.contains?(_) OR ambiguous.contains?(_)) THEN
-      CONTINUE;
+    FOR rtoc_slot_key IN rtoc_self_view.slots.keys() DO
+      IF (resolved.contains?(rtoc_slot_key) OR ambiguous.contains?(rtoc_slot_key)) THEN
+        CONTINUE;
+      END
+      MUTABLE slot: Slot@multiowned = (rtoc_self_view.slots[rtoc_slot_key] OR_ELSE CAST(panic("missing hash key") AS Slot));
+      unresolved[rtoc_slot_key] = KEEP slot;
     END
-    unresolved[_] = COPY slot;
-    };
     RETURN Result{ resolved: COPY resolved, ambiguous: COPY ambiguous, unresolved: COPY unresolved };
 }
 END
