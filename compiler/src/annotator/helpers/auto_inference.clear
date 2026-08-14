@@ -298,7 +298,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__return(current_fn.name)];
     IF slot EXISTS AS slot_value THEN
-      &slot_value.sources.append(COPY return_node.value);
+      MUTABLE return_slot = KEEP slot_value;
+      &return_slot.sources.append(COPY return_node.value);
     END
 }
 END
