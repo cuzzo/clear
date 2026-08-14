@@ -6773,7 +6773,11 @@ end
         return "(IF #{code} THEN \"true\" ELSE \"false\" END)"
       end
       if source_type.to_s.match?(/\A(?:U?Int\d*|Byte\d*|Float\d*)\z/)
-        return "#{code}.toString()"
+        # `x?` is CLEAR's postfix unwrap, but `x?.m()` reads as SAFE NAVIGATION
+        # and hands back an optional -- which the interpolation then rejects
+        # ("$+ requires String operands, got ?String"). Parenthesize so the
+        # call applies to the unwrapped value.
+        return "#{method_receiver_code(code)}.toString()"
       end
 
       code
