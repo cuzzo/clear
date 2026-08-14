@@ -38,7 +38,7 @@ UNION NamedMirFieldValue { StringValue: String, SymbolValue: String@symbol, Emit
 UNION StructInitFieldValue { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
 UNION StructInitFieldInput { StructInitField: StructInitField, HashMapValue: {String@symbol}NamedMirFieldValue }
 STRUCT FnDef {
-  name: Any@multiowned,
+  name: String,
   params: []MIRParam,
   ret_type: Any@multiowned,
   body: []Emittable,
@@ -120,7 +120,7 @@ FN fnDef__stmt?(self: FnDef) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT MIRParam {
-  name: Any@multiowned,
+  name: String,
   zig_type: Any@multiowned,
   pointer_passed: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -201,7 +201,7 @@ FN param__owned_effect_for_alloc(self: MIRParam, alloc: ?String@symbol, cleanup_
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT MIRStructDef {
-  name: Any@multiowned,
+  name: String,
   fields: Any@multiowned,
   methods: Any@multiowned,
   visibility: Any@multiowned,
@@ -303,7 +303,7 @@ FN structDef__stmt?(self: MIRStructDef) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT FieldDef {
-  name: Any@multiowned,
+  name: String,
   zig_type: Any@multiowned,
   default: Any@multiowned,
   boxed_capture: Any@multiowned,
@@ -369,7 +369,7 @@ FN fieldDef__owned_effect_for_alloc(self: FieldDef, alloc: ?String@symbol, clean
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT MIREnumDef {
-  name: Any@multiowned,
+  name: String,
   variants: Any@multiowned,
   visibility: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -461,7 +461,7 @@ FN enumDef__stmt?(self: MIREnumDef) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT UnionTypeDef {
-  name: Any@multiowned,
+  name: String,
   variants: Any@multiowned,
   visibility: Any@multiowned,
   methods: Any@multiowned,
@@ -599,7 +599,7 @@ FN import__stmt?(self: Import) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT TypeAlias {
-  name: Any@multiowned,
+  name: String,
   target: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -668,7 +668,7 @@ FN typeAlias__stmt?(self: TypeAlias) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT CExternFnDecl {
-  name: Any@multiowned,
+  name: String,
   params: Any@multiowned,
   return_type: Any@multiowned,
   library: Any@multiowned,
@@ -740,7 +740,7 @@ FN cExternFnDecl__stmt?(self: CExternFnDecl) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT CExternStructDef {
-  name: Any@multiowned,
+  name: String,
   fields: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -809,7 +809,7 @@ FN cExternStructDef__stmt?(self: CExternStructDef) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT ModuleNamespace {
-  name: Any@multiowned,
+  name: String,
   items: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -874,7 +874,7 @@ FN moduleNamespace__stmt?(self: ModuleNamespace) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT TestDef {
-  name: Any@multiowned,
+  name: String,
   body: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   needs_scheduler: ?Bool,
@@ -1112,7 +1112,7 @@ FN set__stmt?(self: Set) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT MIRDestructureTarget {
-  name: Any@multiowned,
+  name: String,
   declaration_kind: Any@multiowned,
   annotation: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -1258,7 +1258,7 @@ FN destructureSet__stmt?(self: DestructureSet) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT ReassignWithCleanup {
-  name: Any@multiowned,
+  name: String,
   value: Emittable,
   zig_type: Any@multiowned,
   alloc: Any@multiowned,
@@ -4701,7 +4701,7 @@ FN comment__stmt?(self: Comment) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT Suppress {
-  name: Any@multiowned,
+  name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -4766,7 +4766,7 @@ FN suppress__stmt?(self: Suppress) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT PubConst {
-  name: Any@multiowned,
+  name: String,
   value: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -4832,7 +4832,7 @@ FN pubConst__stmt?(self: PubConst) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT ModuleVar {
-  name: Any@multiowned,
+  name: String,
   zig_type: Any@multiowned,
   visibility: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -4899,7 +4899,7 @@ FN moduleVar__stmt?(self: ModuleVar) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT ModuleConstFree {
-  name: Any@multiowned,
+  name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -5296,7 +5296,7 @@ FN destroyPtr__expr?(self: DestroyPtr) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT Cleanup {
-  name: Any@multiowned,
+  name: String,
   cleanup_entry: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -5362,7 +5362,7 @@ FN cleanup__stmt?(self: Cleanup) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT ErrCleanup {
-  name: Any@multiowned,
+  name: String,
   cleanup_entry: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -5428,7 +5428,7 @@ FN errCleanup__stmt?(self: ErrCleanup) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT MoveMark {
-  name: Any@multiowned,
+  name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -7322,7 +7322,7 @@ FN ownedDestroy__owned_effect_for_alloc(self: OwnedDestroy, alloc: ?String@symbo
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT OwnedTransfer {
-  name: Any@multiowned,
+  name: String,
   target: Any@multiowned,
   source: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -7389,7 +7389,7 @@ FN ownedTransfer__owned_effect_for_alloc(self: OwnedTransfer, alloc: ?String@sym
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 STRUCT OwnedBorrow {
-  name: Any@multiowned,
+  name: String,
   source: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -7526,7 +7526,7 @@ FN ownedStore__owned_effect_for_alloc(self: OwnedStore, alloc: ?String@symbol, c
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT OwnedReturn {
-  name: Any@multiowned,
+  name: String,
   source: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -9164,7 +9164,7 @@ FN tupleLiteral__expr?(self: TupleLiteral) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT FnRef {
-  name: Any@multiowned,
+  name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
