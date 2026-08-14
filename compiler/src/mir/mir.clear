@@ -13061,10 +13061,10 @@ STRUCT ProtocolRequirementAdapter {
   return_type: String
 }
 STRUCT ProtocolAdapterDef {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
-  source_column: Any,
-  source_line: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64,
   protocol: String,
   associated_types: []String,
   requirements: []ProtocolRequirementAdapter,
@@ -13226,10 +13226,10 @@ FN mutualThunkArm__fetch(self: MutualThunkArm, key: String@symbol) RETURNS !Mutu
   END
 END
 STRUCT ThunkTrampoline {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
-  source_column: Any,
-  source_line: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64,
   fn_name: String,
   return_type: Type,
   param_fields: []ThunkFrameField,
@@ -13299,10 +13299,10 @@ FN thunkTrampoline__stmt?(self: ThunkTrampoline) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT MutualThunkTrampoline {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
-  source_column: Any,
-  source_line: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64,
   fn_name: String,
   return_type: Type,
   variants: []ThunkVariant,
@@ -13549,8 +13549,8 @@ STRUCT BgStackfulPlan {
   run_body: []Emittable
 }
 STRUCT DirectTenseMap {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   source: Emittable,
   mapped: Emittable,
   layers: []String,
@@ -13615,8 +13615,8 @@ FN directTenseMap__expr?(self: DirectTenseMap) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT AsyncPayloadTake {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   source: Emittable,
   result_type: Type
 }
@@ -13752,8 +13752,8 @@ STRUCT CatchClauseMeta {
 PUB ENUM CatchDefaultAction { Body, Propagate, Unreachable }
 PUB ENUM FailureActionKind { Raise, Exit, Pass, Return, Block }
 STRUCT FailureAction {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   kind: FailureActionKind,
   error_type: String@symbol,
   error_kind: String@symbol,
@@ -13922,8 +13922,8 @@ FN runtimeCalls__atomic_reduce_init_spec(inner_zig: String) RETURNS !RuntimeCall
 END
 # End Ruby module MIR::RuntimeCalls
 STRUCT DefaultValue {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   kind: String@symbol,
   zig_type: ?String
 }
@@ -13986,8 +13986,8 @@ FN defaultValue__expr?(self: DefaultValue) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT EnumTag {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   variant: String
 }
 
@@ -14049,8 +14049,8 @@ FN enumTag__expr?(self: EnumTag) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT NextPromiseList {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   list_expr: Emittable,
   async_shape: AsyncResultShape,
   label: String,
@@ -14124,8 +14124,8 @@ STRUCT RegistryCallArg {
   coerce_type: ?String@symbol
 }
 STRUCT RegistryCall {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   entry: FunctionSignature@multiowned,
   args: []RegistryCallArg,
   reason: String,
@@ -14236,8 +14236,8 @@ FN registryCall__expr?(self: RegistryCall) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT IndexedStore {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   target: Emittable,
   index: Emittable,
   value: Emittable,
@@ -14341,8 +14341,8 @@ STRUCT ExternTrampolineArg {
   field_zig_type: ?String
 }
 STRUCT CFunctionAdapter {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   clear_function: Emittable,
   signature: FunctionType
 }
@@ -14404,8 +14404,8 @@ FN cFunctionAdapter__expr?(self: CFunctionAdapter) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT ExternTrampoline {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   id: Int64,
   callee_name: String,
   module_alias: ?String,
@@ -14495,8 +14495,8 @@ FN externTrampoline__expr?(self: ExternTrampoline) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT ObservableConsumerSpawn {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
   id: Int64,
   acc_name: String,
   source_name: String,
@@ -14568,10 +14568,10 @@ FN observableConsumerSpawn__expr?(self: ObservableConsumerSpawn) RETURNS Bool ->
   RETURN TRUE;
 END
 STRUCT ShardConcurrentEach {
-  lowered_node_id: Any,
-  ownership_consumption: Any,
-  source_column: Any,
-  source_line: Any,
+  lowered_node_id: ?LoweredNodeId,
+  ownership_consumption: ?OwnershipConsumptionFact,
+  source_column: ?Int64,
+  source_line: ?Int64,
   id: Int64,
   map_expr: Emittable,
   map_var_name: String,
