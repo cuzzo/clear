@@ -122,11 +122,12 @@ PUB FN packageSource__resolve_require_targets(target: String, member_dir: String
   IF target.startsWith?("pkg:") THEN
     MUTABLE resolved: ?ResolvePkgReturn = resolve_pkg(target.deletePrefix("pkg:"));
     IF resolved EXISTS AS resolved_value THEN
-      MUTABLE list =       IF resolved_value IS_A String THEN
-        resolved_value.split(",")
-      ELSE
-        resolved_value
-      END;
+      MUTABLE list: []String = ( { MUTABLE rtoc_split_list: []String = List[]; rtoc_split_list } );
+      IF resolved_value IS_A String AS resolved_text THEN
+        list = resolved_text.split(",");
+      ELSE_IF resolved_value IS_A []String AS resolved_list THEN
+        list = COPY resolved_list;
+      END
       MUTABLE expanded: []String = ( { MUTABLE rtoc_empty_list_6: []String = List[]; rtoc_empty_list_6 } );
       FOR _ IN list DO
       &expanded.append(expand(_.trim()));
