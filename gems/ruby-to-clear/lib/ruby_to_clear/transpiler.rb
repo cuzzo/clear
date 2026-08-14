@@ -6781,6 +6781,14 @@ end
       if source_type.to_s == "Bool"
         return "(IF #{code} THEN \"true\" ELSE \"false\" END)"
       end
+      # An OPTIONAL primitive still has to reach the interpolation as a String.
+      # CLEAR narrows bindings, not field paths, so a guarded `x.y` read is
+      # still optional here and needs the unwrap spelled out.
+      if source_type.to_s.match?(/\A\?(?:U?Int\d*|Byte\d*|Float\d*)\z/)
+        return "#{code}.toString()" if narrowed_binding_read?(code)
+
+        return "UNWRAP (#{code.to_s.strip.delete_suffix('?')}).toString()"
+      end
       if source_type.to_s.match?(/\A(?:U?Int\d*|Byte\d*|Float\d*)\z/)
         # `x?` is CLEAR's postfix unwrap, but a call on it -- even
         # parenthesized as `(x?).m()` -- still types as SAFE NAVIGATION and
