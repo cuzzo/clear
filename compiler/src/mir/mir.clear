@@ -8720,7 +8720,7 @@ FN tupleLiteral__child_exprs(self: TupleLiteral) RETURNS ![]Emittable EFFECTS RE
   RETURN tupleLiteral__compact_child_exprs(self, values);
 END
 FN tupleLiteral__ownership_effect(self: TupleLiteral) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_children(TRY (tupleLiteral__child_exprs(self)));
+  RETURN TRY (ownershipEffect__from_children(TRY (tupleLiteral__child_exprs(self))));
 END
 FN tupleLiteral__mir?(self: TupleLiteral) RETURNS Bool ->
   RETURN TRUE;
@@ -9032,7 +9032,7 @@ FN structInit__ownership_source_exprs(self: StructInit) RETURNS ![]Emittable ->
   RETURN structInit__child_exprs(self);
 END
 FN structInit__ownership_effect(self: StructInit) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_children(TRY (structInit__child_exprs(self)));
+  RETURN TRY (ownershipEffect__from_children(TRY (structInit__child_exprs(self))));
 END
 FN structInit__mir?(self: StructInit) RETURNS Bool ->
   RETURN TRUE;
@@ -9338,8 +9338,8 @@ END
 FN blockExpr__body(self: MIRBlockExpr) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
-FN blockExpr__ownership_effect(MUTABLE self: MIRBlockExpr) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_block_body(self.body, self.result_type, UNWRAP (self.borrowed_view));
+FN blockExpr__ownership_effect(MUTABLE self: MIRBlockExpr) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__from_block_body(self.body, self.result_type, UNWRAP (self.borrowed_view)));
 END
 FN blockExpr__mir?(self: MIRBlockExpr) RETURNS Bool ->
   RETURN TRUE;
@@ -9485,8 +9485,8 @@ END
 FN cast__owned_position_source_exprs(self: MIRCast) RETURNS ![]Emittable ->
   RETURN cast__child_exprs(self);
 END
-FN cast__ownership_effect(self: MIRCast) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__of(self.expr);
+FN cast__ownership_effect(self: MIRCast) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__of(self.expr));
 END
 FN cast__without_try(self: MIRCast) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -9547,8 +9547,8 @@ END
 FN tryExpr__owned_position_source_exprs(self: TryExpr) RETURNS ![]Emittable ->
   RETURN tryExpr__child_exprs(self);
 END
-FN tryExpr__ownership_effect(self: TryExpr) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__of(self.expr);
+FN tryExpr__ownership_effect(self: TryExpr) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__of(self.expr));
 END
 FN tryExpr__expr(self: TryExpr) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -9621,8 +9621,8 @@ END
 FN tryCatch__owned_position_source_exprs(self: TryCatch) RETURNS ![]Emittable ->
   RETURN tryCatch__child_exprs(self);
 END
-FN tryCatch__ownership_effect(MUTABLE self: TryCatch) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_try_fallback(ownershipEffect__of(self.expr), ownershipEffect__of(self.catch_body), self.result_type, self.catch_body IS_A Lit, tryCatch__call_never_success?(self, self.expr));
+FN tryCatch__ownership_effect(MUTABLE self: TryCatch) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN ownershipEffect__from_try_fallback(TRY (ownershipEffect__of(self.expr)), TRY (ownershipEffect__of(self.catch_body)), self.result_type, self.catch_body IS_A Lit, tryCatch__call_never_success?(self, self.expr));
 END
 FN tryCatch__expr(self: TryCatch) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -9697,8 +9697,8 @@ END
 FN orelse__owned_position_source_exprs(self: Orelse) RETURNS ![]Emittable ->
   RETURN orelse__child_exprs(self);
 END
-FN orelse__ownership_effect(MUTABLE self: Orelse) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_optional_fallback(ownershipEffect__of(self.expr), ownershipEffect__of(self.fallback), self.result_type);
+FN orelse__ownership_effect(MUTABLE self: Orelse) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN ownershipEffect__from_optional_fallback(TRY (ownershipEffect__of(self.expr)), TRY (ownershipEffect__of(self.fallback)), self.result_type);
 END
 FN orelse__expr(self: Orelse) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -9833,8 +9833,8 @@ END
 FN ifOptional__owned_position_source_exprs(self: IfOptional) RETURNS ![]Emittable ->
   RETURN ifOptional__ownership_source_exprs(self);
 END
-FN ifOptional__ownership_effect(MUTABLE self: IfOptional) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_optional_fallback(ownershipEffect__of(self.then_expr), ownershipEffect__of(self.else_expr), self.result_type);
+FN ifOptional__ownership_effect(MUTABLE self: IfOptional) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN ownershipEffect__from_optional_fallback(TRY (ownershipEffect__of(self.then_expr)), TRY (ownershipEffect__of(self.else_expr)), self.result_type);
 END
 FN ifOptional__mir?(self: IfOptional) RETURNS Bool ->
   RETURN TRUE;
@@ -10634,8 +10634,8 @@ END
 FN optionalUnwrap__owned_position_source_exprs(self: MIROptionalUnwrap) RETURNS ![]Emittable ->
   RETURN optionalUnwrap__child_exprs(self);
 END
-FN optionalUnwrap__ownership_effect(self: MIROptionalUnwrap) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__of(self.expr);
+FN optionalUnwrap__ownership_effect(self: MIROptionalUnwrap) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__of(self.expr));
 END
 FN optionalUnwrap__expr(self: MIROptionalUnwrap) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -10696,8 +10696,8 @@ END
 FN tryOptional__owned_position_source_exprs(self: TryOptional) RETURNS ![]Emittable ->
   RETURN tryOptional__child_exprs(self);
 END
-FN tryOptional__ownership_effect(self: TryOptional) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__of(self.expr);
+FN tryOptional__ownership_effect(self: TryOptional) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__of(self.expr));
 END
 FN tryOptional__expr(self: TryOptional) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -11229,8 +11229,8 @@ END
 FN pipeline__owned_position_source_exprs(self: Pipeline) RETURNS ![]Emittable ->
   RETURN pipeline__child_exprs(self);
 END
-FN pipeline__ownership_effect(self: Pipeline) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_pipeline(self.sink_alloc, self.inner);
+FN pipeline__ownership_effect(self: Pipeline) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__from_pipeline(self.sink_alloc, self.inner));
 END
 FN pipeline__mir?(self: Pipeline) RETURNS Bool ->
   RETURN TRUE;
@@ -11297,11 +11297,11 @@ FN inlineBc__ownership_effect(self: InlineBc) RETURNS !OwnershipEffect EFFECTS R
         NIL
       END);
     END
-    RETURN ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) == TRUE), &heap_return, (TRY (functionSignature__fixed_return?(sig_value_mutable)) AND type__void?(functionSignature__return_type(sig_value_mutable))), (TRY (functionSignature__mutates_receiver?(&sig_value_mutable)) AND !(heap_return)), NIL, CAST(functionSignature__return_type(sig_value_mutable) AS ?Type), IF heap_return THEN
+    RETURN TRY (ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) == TRUE), &heap_return, (TRY (functionSignature__fixed_return?(sig_value_mutable)) AND type__void?(functionSignature__return_type(sig_value_mutable))), (TRY (functionSignature__mutates_receiver?(&sig_value_mutable)) AND !(heap_return)), NIL, CAST(functionSignature__return_type(sig_value_mutable) AS ?Type), IF heap_return THEN
       :heap
     ELSE
       NIL
-    END, NIL);
+    END, NIL));
   ELSE
     RETURN ownershipEffect__none();
   END
@@ -11460,11 +11460,11 @@ END
 FN shardedMapPut__ownership_effect(self: ShardedMapPut) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE rtoc_sig = COPY self.stdlib_def;
   MUTABLE heap_return = (TRY (functionSignature__heap_return_alloc?(&rtoc_sig)) == TRUE);
-  RETURN ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&rtoc_sig)) == TRUE), &heap_return, !(!((((TRY (functionSignature__fixed_return?(self.stdlib_def)) AND type__void?(functionSignature__return_type(self.stdlib_def))) AND !(shardedMapPut__has_alloc_metadata?(self)))))), (shardedMapPut__mutating_receiver_allocator_op?(self) AND !(heap_return)), NIL, CAST(functionSignature__return_type(self.stdlib_def) AS ?Type), IF heap_return THEN
+  RETURN TRY (ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&rtoc_sig)) == TRUE), &heap_return, !(!((((TRY (functionSignature__fixed_return?(self.stdlib_def)) AND type__void?(functionSignature__return_type(self.stdlib_def))) AND !(shardedMapPut__has_alloc_metadata?(self)))))), (shardedMapPut__mutating_receiver_allocator_op?(self) AND !(heap_return)), NIL, CAST(functionSignature__return_type(self.stdlib_def) AS ?Type), IF heap_return THEN
     :heap
   ELSE
     TRY (inlineAllocMetadata__single_alloc(self.resolved_allocs))
-  END, NIL);
+  END, NIL));
 END
 FN shardedMapPut__mir?(self: ShardedMapPut) RETURNS Bool ->
   RETURN TRUE;
@@ -11743,7 +11743,7 @@ END
 FN ownershipEffect__owned(alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform, requires_hoist: Bool = TRUE, target_var: ?String = NIL) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN OwnershipEffect{ produces_owned: TRUE, alloc: COPY alloc, cleanup_kind: COPY cleanup_kind, requires_hoist: COPY requires_hoist, target_var: COPY target_var };
 END
-FN ownershipEffect__from_callable_facts(emits_allocating: Bool, MUTABLE heap_return_alloc: Bool, fixed_void_without_alloc_metadata: Bool, mutates_receiver_without_heap_return: Bool, result_owns: ?Bool, result_type: ?Type, alloc: ?String@symbol, target_var: ?String) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+FN ownershipEffect__from_callable_facts(emits_allocating: Bool, MUTABLE heap_return_alloc: Bool, fixed_void_without_alloc_metadata: Bool, mutates_receiver_without_heap_return: Bool, result_owns: ?Bool, result_type: ?Type, alloc: ?String@symbol, target_var: ?String) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE active = (emits_allocating OR heap_return_alloc);
   MUTABLE explicitly_not_owned = (heap_return_alloc AND (result_owns == FALSE));
   MUTABLE unknown_owned_result = FALSE;
@@ -11897,48 +11897,48 @@ END
 # Ruby module MIR::NamedEmittable
 # Ruby module MIR::Stmt
 # Ruby module MIR::Expr
-FN ownershipEffect__of(node: ?Emittable) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+FN ownershipEffect__of(node: ?Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   IF node EXISTS AS node_value THEN
-    RETURN emittable__ownership_effect(node_value);
+    RETURN TRY (emittable__ownership_effect(node_value));
   END
   RETURN ownershipEffect__none();
 END
-FN ownershipEffect__hoistable_owned_result?(node: ?Emittable) RETURNS Bool ->
-  MUTABLE effect = ownershipEffect__of(node);
+FN ownershipEffect__hoistable_owned_result?(node: ?Emittable) RETURNS !Bool ->
+  MUTABLE effect = TRY (ownershipEffect__of(node));
   RETURN (effect.produces_owned AND effect.requires_hoist);
 END
-FN ownershipEffect__alloc_of(node: ?Emittable) RETURNS ?String@symbol EFFECTS REENTRANT ->
-  RETURN ownershipEffect__of(node).alloc;
+FN ownershipEffect__alloc_of(node: ?Emittable) RETURNS !?String@symbol EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__of(node)).alloc;
 END
-FN ownershipEffect__from_effects(effects_value: []OwnershipEffect) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+FN ownershipEffect__from_effects(effects_value: []OwnershipEffect) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE owned: []OwnershipEffect = [];
   FOR effect IN effects_value DO
     IF effect.produces_owned THEN
       &owned.append(COPY effect);
     END
   END
-  RETURN ownershipEffect__effect_when(!((owned.length() == 0)), ownershipEffect__owned(ownershipEffect__converged_effect_alloc(owned), :uniform));
+  RETURN TRY (ownershipEffect__effect_when(!((owned.length() == 0)), ownershipEffect__owned(ownershipEffect__converged_effect_alloc(owned), :uniform)));
 END
-FN ownershipEffect__from_children(children: []Emittable) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+FN ownershipEffect__from_children(children: []Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE child_effects: []OwnershipEffect = [];
   FOR child IN children DO
     &child_effects.append(TRY (emittable__ownership_effect(child)));
   END
   RETURN ownershipEffect__from_effects(child_effects);
 END
-FN ownershipEffect__from_try_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type, fallback_is_literal: Bool, left_never_success: Bool) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{ownershipEffect__owned_cleanup_result?(left, result_type), left}, Tuple{(left.produces_owned AND fallback_is_literal), left}, Tuple{(right.produces_owned AND left_never_success), right}]);
+FN ownershipEffect__from_try_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type, fallback_is_literal: Bool, left_never_success: Bool) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(left, result_type)), left}, Tuple{(left.produces_owned AND fallback_is_literal), left}, Tuple{(right.produces_owned AND left_never_success), right}]));
 END
-FN ownershipEffect__from_optional_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{ownershipEffect__owned_cleanup_result?(left, result_type), left}, Tuple{ownershipEffect__owned_cleanup_result?(right, result_type), right}]);
+FN ownershipEffect__from_optional_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(left, result_type)), left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(right, result_type)), right}]));
 END
-FN ownershipEffect__from_required_branch_pair(left: OwnershipEffect, right: OwnershipEffect) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__effect_when(ownershipEffect__same_owned_alloc?(left, right), left);
+FN ownershipEffect__from_required_branch_pair(left: OwnershipEffect, right: OwnershipEffect) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__effect_when(ownershipEffect__same_owned_alloc?(left, right), left));
 END
-FN ownershipEffect__from_pipeline(sink_alloc: ?String@symbol, inner: ?Emittable) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__first_active_effect([Tuple{!((sink_alloc == NIL)), ownershipEffect__owned(sink_alloc)}, Tuple{TRUE, ownershipEffect__of(inner)}]);
+FN ownershipEffect__from_pipeline(sink_alloc: ?String@symbol, inner: ?Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__first_active_effect([Tuple{!((sink_alloc == NIL)), ownershipEffect__owned(sink_alloc)}, Tuple{TRUE, TRY (ownershipEffect__of(inner))}]));
 END
-FN ownershipEffect__from_block_body(body: []Emittable, result_type: ?Type, borrowed_view: Bool = FALSE) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+FN ownershipEffect__from_block_body(body: []Emittable, result_type: ?Type, borrowed_view: Bool = FALSE) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE stmts = COPY body;
   MUTABLE value: ?Emittable = NIL;
   MUTABLE idx: Int64 = (stmts.length() - 1);
@@ -11950,12 +11950,12 @@ FN ownershipEffect__from_block_body(body: []Emittable, result_type: ?Type, borro
       idx = (idx - 1);
     END
   END
-  RETURN ownershipEffect__first_active_effect([
+  RETURN TRY (ownershipEffect__first_active_effect([
     Tuple{TRUE, ownershipEffect__transferred_break_ident_effect(stmts, value)},
-    Tuple{TRUE, ownershipEffect__of(value)},
+    Tuple{TRUE, TRY (ownershipEffect__of(value))},
     Tuple{TRUE, ownershipEffect__block_result_transfer_effect(stmts, value)},
-    Tuple{(ownershipEffect__cleanup_result_type?(result_type) AND !((borrowed_view OR ownershipEffect__borrowed_break_value?(value)))), ownershipEffect__owned(NIL, :uniform)}
-  ]);
+    Tuple{(TRY (ownershipEffect__cleanup_result_type?(result_type)) AND !((borrowed_view OR ownershipEffect__borrowed_break_value?(value)))), ownershipEffect__owned(NIL, :uniform)}
+  ]));
 END
 PRIVATE FN ownershipEffect__borrowed_break_value?(value: ?Emittable) RETURNS Bool ->
   RETURN ((value != NIL) AND (value IS_A SliceExpr));
@@ -11981,10 +11981,10 @@ FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS Bool ->
   END
   RETURN FALSE;
 END
-PRIVATE FN ownershipEffect__effect_when(active: Bool, effect: OwnershipEffect) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__first_active_effect([CAST(Tuple{active, effect} AS Tuple<Bool, OwnershipEffect>)]);
+PRIVATE FN ownershipEffect__effect_when(active: Bool, effect: OwnershipEffect) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__first_active_effect([CAST(Tuple{active, effect} AS Tuple<Bool, OwnershipEffect>)]));
 END
-PRIVATE FN ownershipEffect__first_active_effect(candidates: []Tuple<Bool, OwnershipEffect>) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+PRIVATE FN ownershipEffect__first_active_effect(candidates: []Tuple<Bool, OwnershipEffect>) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   FOR candidate IN candidates DO
     IF (candidate._0 AND candidate._1.produces_owned) THEN
       RETURN COPY candidate._1;
@@ -12018,8 +12018,8 @@ END
 PRIVATE FN ownershipEffect__same_owned_alloc?(left: OwnershipEffect, right: OwnershipEffect) RETURNS Bool ->
   RETURN ((left.produces_owned AND right.produces_owned) AND (left.alloc == right.alloc));
 END
-PRIVATE FN ownershipEffect__owned_cleanup_result?(effect: OwnershipEffect, result_type: ?Type) RETURNS Bool ->
-  RETURN (((effect.produces_owned AND ownershipEffect__cleanup_result_type?(result_type))) == TRUE);
+PRIVATE FN ownershipEffect__owned_cleanup_result?(effect: OwnershipEffect, result_type: ?Type) RETURNS !Bool ->
+  RETURN (((effect.produces_owned AND TRY (ownershipEffect__cleanup_result_type?(result_type)))) == TRUE);
 END
 PRIVATE FN ownershipEffect__cleanup_result_type?(result_type: ?Type) RETURNS !Bool ->
   IF result_type EXISTS AS result_type_value THEN
@@ -12028,7 +12028,7 @@ PRIVATE FN ownershipEffect__cleanup_result_type?(result_type: ?Type) RETURNS !Bo
     RETURN FALSE;
   END
 END
-PRIVATE FN ownershipEffect__transferred_break_ident_effect(stmts: []Emittable, value: ?Emittable) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+PRIVATE FN ownershipEffect__transferred_break_ident_effect(stmts: []Emittable, value: ?Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE name: String = "";
   IF value EXISTS AS value_node THEN
     IF value_node IS_A Ident AS ident THEN
@@ -12051,7 +12051,7 @@ PRIVATE FN ownershipEffect__transferred_break_ident_effect(stmts: []Emittable, v
       END
     ELSE_IF stmt IS_A Let AS let_stmt THEN
       IF (let_stmt.name == name) THEN
-        init_effect = ownershipEffect__of(let_stmt.init);
+        init_effect = TRY (ownershipEffect__of(let_stmt.init));
       END
     END
   END
@@ -12062,9 +12062,9 @@ PRIVATE FN ownershipEffect__transferred_break_ident_effect(stmts: []Emittable, v
     END
   END
   MUTABLE active = ((!((name.length() == 0)) AND has_mark) AND has_transfer);
-  RETURN ownershipEffect__effect_when(active, ownershipEffect__owned(mark_alloc, cleanup_kind, TRUE, name));
+  RETURN TRY (ownershipEffect__effect_when(active, ownershipEffect__owned(mark_alloc, cleanup_kind, TRUE, name)));
 END
-PRIVATE FN ownershipEffect__block_result_transfer_effect(stmts: []Emittable, value: ?Emittable) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+PRIVATE FN ownershipEffect__block_result_transfer_effect(stmts: []Emittable, value: ?Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE result_names = TRY (ownershipEffect__ident_names_in_expr(value));
   IF result_names.empty?() THEN
     RETURN ownershipEffect__none();
@@ -12081,7 +12081,7 @@ PRIVATE FN ownershipEffect__block_result_transfer_effect(stmts: []Emittable, val
       END
     END
   END
-  RETURN ownershipEffect__effect_when(!(transferred_allocs.empty?()), ownershipEffect__owned(ownershipEffect__unique_symbol_or_nil(transferred_allocs), :uniform));
+  RETURN TRY (ownershipEffect__effect_when(!(transferred_allocs.empty?()), ownershipEffect__owned(ownershipEffect__unique_symbol_or_nil(transferred_allocs), :uniform)));
 END
 PRIVATE FN ownershipEffect__ident_names_in_expr(value: ?Emittable) RETURNS ![]String EFFECTS REENTRANT ->
   MUTABLE names: []String = [];
@@ -12153,11 +12153,11 @@ FN mIR__struct_init_field_alloc(field: StructInitFieldInput) RETURNS ?String@sym
   END
   RETURN NIL;
 END
-FN mIR__each_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS Void ->
-  mIR__each_node_inner(root, FALSE, NIL, blk);
+FN mIR__each_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
+  TRY (mIR__each_node_inner(root, FALSE, NIL, blk));
 END
-FN mIR__each_node_until(root: ?NodeRoot, stop: FN(Emittable) -> Bool, blk: FN(Emittable) -> Void) RETURNS Void ->
-  mIR__each_node_inner(root, FALSE, stop, blk);
+FN mIR__each_node_until(root: ?NodeRoot, stop: FN(Emittable) -> Bool, blk: FN(Emittable) -> Void) RETURNS !Void ->
+  TRY (mIR__each_node_inner(root, FALSE, stop, blk));
 END
 FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_197: []Emittable = List[]; rtoc_empty_list_197 } );
@@ -12167,8 +12167,8 @@ FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   });
   RETURN out;
 END
-FN mIR__each_surface_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS Void ->
-  mIR__each_surface_node_inner(UNWRAP (root), blk);
+FN mIR__each_surface_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
+  TRY (mIR__each_surface_node_inner(UNWRAP (root), blk));
 END
 FN mIR__surface_nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_198: []Emittable = List[]; rtoc_empty_list_198 } );
@@ -12182,7 +12182,7 @@ FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emi
   IF root EXISTS AS root_value THEN
     IF root_value IS_A []Emittable AS array THEN
       FOR _ IN array DO
-      mIR__each_node_inner(NodeRoot{ Emittable: COPY _ }, stop_at_block_expr, stop, blk);
+      TRY (mIR__each_node_inner(NodeRoot{ Emittable: COPY _ }, stop_at_block_expr, stop, blk));
       END
       RETURN;
     END
@@ -12206,10 +12206,10 @@ FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emi
       END
     END
     FOR _ IN TRY (emittable__child_exprs(node_value)) DO
-    mIR__each_node_inner(NodeRoot{ Emittable: COPY _ }, stop_at_block_expr, stop, blk);
+    TRY (mIR__each_node_inner(NodeRoot{ Emittable: COPY _ }, stop_at_block_expr, stop, blk));
     END
     FOR _ IN TRY (emittable__body_slots(node_value)) DO
-    mIR__each_node_inner(NodeRoot{ ArrayValue: COPY _.body }, stop_at_block_expr, stop, blk);
+    TRY (mIR__each_node_inner(NodeRoot{ ArrayValue: COPY _.body }, stop_at_block_expr, stop, blk));
     END
     NIL;
   ELSE
@@ -12220,7 +12220,7 @@ FN mIR__each_surface_node_inner(root: ?NodeRoot, blk: FN(Emittable) -> Void) RET
   IF root EXISTS AS root_value THEN
     IF root_value IS_A []Emittable AS array THEN
       FOR _ IN array DO
-      mIR__each_surface_node_inner(NodeRoot{ Emittable: COPY _ }, blk);
+      TRY (mIR__each_surface_node_inner(NodeRoot{ Emittable: COPY _ }, blk));
       END
       RETURN;
     END
@@ -12237,7 +12237,7 @@ FN mIR__each_surface_node_inner(root: ?NodeRoot, blk: FN(Emittable) -> Void) RET
       RETURN;
     END
     FOR _ IN TRY (emittable__child_exprs(node_value)) DO
-    mIR__each_surface_node_inner(NodeRoot{ Emittable: COPY _ }, blk);
+    TRY (mIR__each_surface_node_inner(NodeRoot{ Emittable: COPY _ }, blk));
     END
     NIL;
   ELSE
@@ -13052,8 +13052,8 @@ END
 FN directTenseMap__owned_position_source_exprs(self: DirectTenseMap) RETURNS ![]Emittable ->
   RETURN CAST([self.mapped] AS []Emittable);
 END
-FN directTenseMap__ownership_effect(self: DirectTenseMap) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__of(self.mapped);
+FN directTenseMap__ownership_effect(self: DirectTenseMap) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__of(self.mapped));
 END
 FN directTenseMap__mir?(self: DirectTenseMap) RETURNS Bool ->
   RETURN TRUE;
@@ -13112,8 +13112,8 @@ END
 FN asyncPayloadTake__owned_position_source_exprs(self: AsyncPayloadTake) RETURNS ![]Emittable ->
   RETURN CAST([self.source] AS []Emittable);
 END
-FN asyncPayloadTake__ownership_effect(self: AsyncPayloadTake) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__of(self.source);
+FN asyncPayloadTake__ownership_effect(self: AsyncPayloadTake) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN TRY (ownershipEffect__of(self.source));
 END
 FN asyncPayloadTake__mir?(self: AsyncPayloadTake) RETURNS Bool ->
   RETURN TRUE;
@@ -13654,9 +13654,9 @@ FN registryCall__ownership_effect(self: RegistryCall) RETURNS !OwnershipEffect E
   MUTABLE fixed_void = !(!((((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_216 = (KEEP self.entry);
   TRY (functionSignature__fixed_return?(rtoc_local_receiver_216)) } == TRUE) AND type__void?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = (KEEP self.entry);
   functionSignature__return_type(rtoc_local_receiver_217) }))) AND !(registryCall__has_alloc_metadata?(self))))));
-  RETURN ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_218 = (KEEP self.entry);
+  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_218 = (KEEP self.entry);
   TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_218)) } == TRUE), !((result_alloc == NIL)), fixed_void, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_219 = (KEEP self.entry);
-  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_219)) } AND (result_alloc == NIL)), self.result_ownership_bearing, self.result_type, alloc, self.target_var);
+  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_219)) } AND (result_alloc == NIL)), self.result_ownership_bearing, self.result_type, alloc, self.target_var));
 END
 FN registryCall__without_try(self: RegistryCall) RETURNS RegistryCall ->
   RETURN RegistryCall{ entry: KEEP self.entry, args: COPY self.args, reason: COPY self.reason, ownership_contract: KEEP self.ownership_contract, allocs: KEEP self.allocs, owned_result_alloc: COPY self.owned_result_alloc, target_var: COPY self.target_var, result_type: COPY self.result_type, result_ownership_bearing: self.result_ownership_bearing, key_type: COPY self.key_type, value_type: COPY self.value_type, suppress_try: TRUE };
@@ -13745,7 +13745,7 @@ FN indexedStore__ownership_effect(self: IndexedStore) RETURNS !OwnershipEffect E
   MUTABLE fixed_void = !(!((((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_225 = (KEEP self.entry);
   TRY (functionSignature__fixed_return?(rtoc_local_receiver_225)) } == TRUE) AND type__void?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_226 = (KEEP self.entry);
   functionSignature__return_type(rtoc_local_receiver_226) }))) AND !(indexedStore__has_alloc_metadata?(self))))));
-  RETURN ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_227 = (KEEP self.entry);
+  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_227 = (KEEP self.entry);
   TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_227)) } == TRUE), &heap_return, fixed_void, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_228 = (KEEP self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_228)) } AND !(heap_return)), NIL, CAST({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_229 = (KEEP self.entry);
   functionSignature__return_type(rtoc_local_receiver_229) } AS ?Type), IF heap_return THEN
@@ -13753,7 +13753,7 @@ FN indexedStore__ownership_effect(self: IndexedStore) RETURNS !OwnershipEffect E
   ELSE
     { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_230 = (KEEP self.allocs);
   TRY (inlineAllocMetadata__single_alloc(rtoc_local_receiver_230)) }
-  END, self.target_var);
+  END, self.target_var));
 END
 FN indexedStore__mir?(self: IndexedStore) RETURNS Bool ->
   RETURN TRUE;
@@ -13900,10 +13900,10 @@ FN externTrampoline__ownership_effect(self: ExternTrampoline) RETURNS !Ownership
   IF type__resource?(actual_return) THEN
     RETURN ownershipEffect__owned(self.alloc_kind, :resource, FALSE);
   END
-  RETURN ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_235 = (KEEP self.stdlib_def);
+  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_235 = (KEEP self.stdlib_def);
   TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_235)) } == TRUE), &heap_return, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_236 = (KEEP self.stdlib_def);
   TRY (functionSignature__fixed_return?(rtoc_local_receiver_236)) } AND type__void?(actual_return)), ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_237 = (KEEP self.stdlib_def);
-  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_237)) } AND !(heap_return)), NIL, self.return_type, self.alloc_kind, NIL);
+  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_237)) } AND !(heap_return)), NIL, self.return_type, self.alloc_kind, NIL));
 END
 FN externTrampoline__mir?(self: ExternTrampoline) RETURNS Bool ->
   RETURN TRUE;
@@ -15160,10 +15160,10 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECT
     RETURN fsmStructure__ownership_effect(payload);
   END
   IF value IS_A DirectTenseMap AS payload THEN
-    RETURN directTenseMap__ownership_effect(payload);
+    RETURN TRY (directTenseMap__ownership_effect(payload));
   END
   IF value IS_A AsyncPayloadTake AS payload THEN
-    RETURN asyncPayloadTake__ownership_effect(payload);
+    RETURN TRY (asyncPayloadTake__ownership_effect(payload));
   END
   IF value IS_A FsmIoBody AS payload THEN
     RETURN fsmIoBody__ownership_effect(payload);
@@ -15418,22 +15418,22 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECT
     RETURN concatStr__ownership_effect(payload);
   END
   IF value IS_A TryExpr AS payload THEN
-    RETURN tryExpr__ownership_effect(payload);
+    RETURN TRY (tryExpr__ownership_effect(payload));
   END
   IF value IS_A TryCatch AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN tryCatch__ownership_effect(&receiver);
+    RETURN TRY (tryCatch__ownership_effect(&receiver));
   END
   IF value IS_A Orelse AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN orelse__ownership_effect(&receiver);
+    RETURN TRY (orelse__ownership_effect(&receiver));
   END
   IF value IS_A Conditional AS payload THEN
     RETURN conditional__ownership_effect(payload);
   END
   IF value IS_A IfOptional AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN ifOptional__ownership_effect(&receiver);
+    RETURN TRY (ifOptional__ownership_effect(&receiver));
   END
   IF value IS_A Comptime AS payload THEN
     RETURN comptime__ownership_effect(payload);
@@ -15475,7 +15475,7 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECT
     RETURN iterRange__ownership_effect(payload);
   END
   IF value IS_A TryOptional AS payload THEN
-    RETURN tryOptional__ownership_effect(payload);
+    RETURN TRY (tryOptional__ownership_effect(payload));
   END
   IF value IS_A ForeignOwnedUnwrap AS payload THEN
     RETURN foreignOwnedUnwrap__ownership_effect(payload);
@@ -15496,19 +15496,19 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECT
     RETURN lambdaExpr__ownership_effect(payload);
   END
   IF value IS_A Pipeline AS payload THEN
-    RETURN pipeline__ownership_effect(payload);
+    RETURN TRY (pipeline__ownership_effect(payload));
   END
   IF value IS_A RegistryCall AS payload THEN
-    RETURN registryCall__ownership_effect(payload);
+    RETURN TRY (registryCall__ownership_effect(payload));
   END
   IF value IS_A IndexedStore AS payload THEN
-    RETURN indexedStore__ownership_effect(payload);
+    RETURN TRY (indexedStore__ownership_effect(payload));
   END
   IF value IS_A CFunctionAdapter AS payload THEN
     RETURN cFunctionAdapter__ownership_effect(payload);
   END
   IF value IS_A ExternTrampoline AS payload THEN
-    RETURN externTrampoline__ownership_effect(payload);
+    RETURN TRY (externTrampoline__ownership_effect(payload));
   END
   IF value IS_A ObservableConsumerSpawn AS payload THEN
     RETURN observableConsumerSpawn__ownership_effect(payload);
@@ -15517,13 +15517,13 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECT
     RETURN shardConcurrentEach__ownership_effect(payload);
   END
   IF value IS_A InlineBc AS payload THEN
-    RETURN inlineBc__ownership_effect(payload);
+    RETURN TRY (inlineBc__ownership_effect(payload));
   END
   IF value IS_A OrElseExitBcRewrite AS payload THEN
     RETURN orElseExitBcRewrite__ownership_effect(payload);
   END
   IF value IS_A ShardedMapPut AS payload THEN
-    RETURN shardedMapPut__ownership_effect(payload);
+    RETURN TRY (shardedMapPut__ownership_effect(payload));
   END
   IF value IS_A ShardedMapGet AS payload THEN
     RETURN shardedMapGet__ownership_effect(payload);
