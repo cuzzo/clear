@@ -1080,7 +1080,7 @@ FN build_auto_op_evidence_block(ops: [Set]String@symbol, candidates: []AutoCandi
   msg = (msg $+ "  Suggested fixes:\n");
   MUTABLE idx = 0;
   WHILE (idx < candidates.length()) DO
-    MUTABLE candidate: ?AnyCandidate = COPY candidates[idx];
+    MUTABLE candidate: ?AutoCandidate = COPY candidates[idx];
     MUTABLE type_sym = candidate.type_sym;
     MUTABLE note: ?String = candidate.note;
     MUTABLE label = "";
@@ -1192,7 +1192,7 @@ FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]St
   MUTABLE auto_tok = auto_token_for(slot);
   fixable_mut((auto_tok OR slot.decl_node), {:code: :AUTO_UNRESOLVED_TYPE, :detail: message, :category: :type, :level: :error, :fixes: fixes});
 END
-FN slot_id_for(slot: Slot) RETURNS ?AnySlotId@multiowned ->
+FN slot_id_for(slot: Slot) RETURNS ?AutoSlotId@multiowned ->
   MUTABLE kind = COPY slot.kind;
   IF ((kind == :param) AND !((((slot.fn_name != NIL) AND (slot.index != NIL))))) THEN
     RETURN NIL;
