@@ -752,6 +752,14 @@ module RubyToClear
       "FOR #{item} IN #{helper}(#{source}) DO\n#{lowering.effect_code}\nEND"
     end
 
+    # A key taken from `keys()` is always present, but CLEAR still types the
+    # index read as optional. `x OR_ELSE panic(...)` is rejected outright --
+    # the annotator has no operator entry for a NoReturn right operand -- so
+    # unwrap instead. COPY keeps a non-Copy value owned by the loop body.
+    def self.map_value_at(receiver, key_expr)
+      "COPY UNWRAP (#{receiver}[#{key_expr}])"
+    end
+
     def self.hash_each_effect_stage(context)
       receiver = context.receiver_code
       node = context.node
@@ -759,11 +767,11 @@ module RubyToClear
       receiver_type = transpiler.clear_type_for_receiver_node(node.receiver)
       key_type = transpiler.map_key_clear_type(receiver_type) || "Any"
       value_type = transpiler.map_value_clear_type(receiver_type) || "Any"
-      fallback = value_type == "Any" ? 'panic("missing hash key")' : "CAST(panic(\"missing hash key\") AS #{value_type})"
-      value_expr = "(#{receiver}[_] OR_ELSE #{fallback})"
+      # Hash#each is a statement, and CLEAR's EACH pipeline stage cannot take a
+      # body that returns, breaks, or is fallible -- a FOR loop always can.
+      key_expr = "rtoc_key"
+      value_expr = map_value_at(receiver, key_expr)
       nonlocal_return = node.block && block_contains_node_name?(node.block, "ReturnNode")
-      key_expr = nonlocal_return ? "rtoc_key" : "_"
-      value_expr = "(#{receiver}[#{key_expr}] OR_ELSE #{fallback})"
 
       lowering = lower_literal_block(
         node,
@@ -788,11 +796,7 @@ module RubyToClear
       value_name = lowering.parameter_names[1]
       lowering.effect_lines.unshift(indent_block_line("MUTABLE #{value_name}: #{value_type} = #{value_expr};"))
 
-      if nonlocal_return
-        return "FOR rtoc_key IN #{pipeline_source(receiver)}.keys() DO\n#{lowering.effect_code}\nEND"
-      end
-
-      "#{pipeline_source(receiver)}.keys() |> EACH #{render_effect_block(lowering)}"
+      "FOR rtoc_key IN #{pipeline_source(receiver)}.keys() DO\n#{lowering.effect_code}\nEND"
     end
 
     def self.hash_map_value_stage(context)
@@ -803,7 +807,7 @@ module RubyToClear
       key_type = transpiler.map_key_clear_type(receiver_type) || "Any"
       value_type = transpiler.map_value_clear_type(receiver_type) || "Any"
       fallback = value_type == "Any" ? 'panic("missing hash key")' : "CAST(panic(\"missing hash key\") AS #{value_type})"
-      value_expr = "(#{receiver}[_] OR_ELSE #{fallback})"
+      value_expr = map_value_at(receiver, "_")
 
       lowering = lower_literal_block(
         node,
@@ -949,7 +953,7 @@ module RubyToClear
       key_type = transpiler.map_key_clear_type(receiver_type) || "Any"
       value_type = transpiler.map_value_clear_type(receiver_type) || "Any"
       fallback = value_type == "Any" ? 'panic("missing hash key")' : "CAST(panic(\"missing hash key\") AS #{value_type})"
-      value_expr = "(#{receiver}[rtoc_key] OR_ELSE #{fallback})"
+      value_expr = map_value_at(receiver, "rtoc_key")
 
       new_value_code = hash_transform_placeholder_code(node, transpiler, "hash.transform_values", value_expr, value_type)
       return new_value_code if unsupported_result?(new_value_code)
@@ -978,7 +982,7 @@ module RubyToClear
       key_type = transpiler.map_key_clear_type(receiver_type) || "Any"
       value_type = transpiler.map_value_clear_type(receiver_type) || "Any"
       fallback = value_type == "Any" ? 'panic("missing hash key")' : "CAST(panic(\"missing hash key\") AS #{value_type})"
-      value_expr = "(#{receiver}[rtoc_key] OR_ELSE #{fallback})"
+      value_expr = map_value_at(receiver, "rtoc_key")
 
       new_key_code = hash_transform_placeholder_code(node, transpiler, "hash.transform_keys", "rtoc_key", key_type)
       return new_key_code if unsupported_result?(new_key_code)
@@ -1003,7 +1007,7 @@ module RubyToClear
       key_type = transpiler.map_key_clear_type(receiver_type) || "Any"
       value_type = transpiler.map_value_clear_type(receiver_type) || "Any"
       fallback = value_type == "Any" ? 'panic("missing hash key")' : "CAST(panic(\"missing hash key\") AS #{value_type})"
-      value_expr = "(#{source}[_] OR_ELSE #{fallback})"
+      value_expr = map_value_at(source, "_")
 
       lowering = lower_literal_block(
         select_node,
@@ -2474,7 +2478,7 @@ module RubyToClear
       fallback = value_type == "Any" ? 'panic("missing hash key")' : "CAST(panic(\"missing hash key\") AS #{value_type})"
       source = pipeline_source(context.receiver_code)
       tuple_type = "Tuple<#{key_type}, #{value_type}>"
-      value = "CAST(Tuple{COPY _, COPY (#{source}[_] OR_ELSE #{fallback})} AS #{tuple_type})"
+      value = "CAST(Tuple{COPY _, #{map_value_at(source, '_')}} AS #{tuple_type})"
       imperative_tuple_map_code("#{source}.keys()", value, tuple_type)
     end
 
@@ -2492,7 +2496,7 @@ module RubyToClear
         "CAST(panic(\"missing hash key\") AS #{value_type})"
       source = pipeline_source(context.receiver_code)
       right = pipeline_source(other)
-      "#{right}.keys() |> REDUCE(COPY #{source}) { acc[_] = COPY (#{right}[_] OR_ELSE #{fallback}); acc }"
+      "#{right}.keys() |> REDUCE(COPY #{source}) { acc[_] = #{map_value_at(right, '_')}; acc }"
     end
 
     register("replace") do |receiver, node, transpiler|

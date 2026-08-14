@@ -1604,16 +1604,16 @@ RSpec.describe RubyToClear::Transpiler do
         MUTABLE reg: {String}Raw = {};
         MUTABLE out: Any@multiowned = {};
         MUTABLE registry_map = {};
-        reg.keys() |> EACH {
-          MUTABLE entry: Raw = (reg[_] OR_ELSE CAST(panic("missing hash key") AS Raw));
-        out[_] = IF entry IS_A []Any THEN
-          entry |> SELECT convert_entry(_, _, registry_map)
+        FOR rtoc_key IN reg.keys() DO
+          MUTABLE entry: Raw = COPY UNWRAP (reg[rtoc_key]);
+        out[rtoc_key] = IF entry IS_A []Any THEN
+          entry |> SELECT convert_entry(rtoc_key, rtoc_key, registry_map)
         ELSE_IF entry IS_A {}Any THEN
-          convert_entry(_, entry, registry_map)
+          convert_entry(rtoc_key, entry, registry_map)
         ELSE
           NIL
         END;
-        };
+        END
       CLEAR
       expect_transpile(ruby_code, expected_clear)
     end
@@ -5973,7 +5973,7 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       expected_clear = <<~CLEAR
         FN pairs(items: {String}Int64) RETURNS ![]Tuple<String, Int64> ->
-          MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, Int64>); items.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{_, (items[_] OR_ELSE CAST(panic("missing hash key") AS Int64))} AS Tuple<String, Int64>)); }; rtoc_tuple_results } );
+          MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, Int64>); items.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{_, COPY UNWRAP (items[_])} AS Tuple<String, Int64>)); }; rtoc_tuple_results } );
           RETURN rtoc_tuple_return_1;
         END
       CLEAR
@@ -5989,7 +5989,7 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       expected_clear = <<~CLEAR
         FN keys_for_kind(items: {String@symbol}{String@symbol}Int64, kind: Int64) RETURNS ![]String@symbol ->
-          RETURN items.keys() |> WHERE ((items[_] OR_ELSE CAST(panic("missing hash key") AS {String@symbol}Int64))[:kind] == kind);
+          RETURN items.keys() |> WHERE ((COPY UNWRAP (items[_]))[:kind] == kind);
         END
       CLEAR
       expect_transpile(ruby_code, expected_clear)
@@ -6166,8 +6166,8 @@ RSpec.describe RubyToClear::Transpiler do
         end
       RUBY
       clear = RubyToClear.transpile(ruby_code)
-      expect(clear).to include("MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, Int64>); items.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{_, (items[_] OR_ELSE CAST(panic(\"missing hash key\") AS Int64))} AS Tuple<String, Int64>)); }; rtoc_tuple_results } );")
-      expect(clear).to include("MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, Int64>); items.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{_, (items[_] OR_ELSE CAST(panic(\"missing hash key\") AS Int64))} AS Tuple<String, Int64>)); }; rtoc_tuple_results } );")
+      expect(clear).to include("MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, Int64>); items.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{_, COPY UNWRAP (items[_])} AS Tuple<String, Int64>)); }; rtoc_tuple_results } );")
+      expect(clear).to include("MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, Int64>); items.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{_, COPY UNWRAP (items[_])} AS Tuple<String, Int64>)); }; rtoc_tuple_results } );")
     end
 
     it "allows next inside effect-only each blocks" do
@@ -6372,10 +6372,10 @@ RSpec.describe RubyToClear::Transpiler do
       expected_clear = <<~CLEAR
         FN copy_map(input: {String}[]String) RETURNS !{String}[]String ->
           MUTABLE copied: {String}[]String = {};
-          input.keys() |> EACH {
-          MUTABLE values: []String = (input[_] OR_ELSE CAST(panic("missing hash key") AS []String));
-          copied[_] = COPY values;
-          };
+          FOR rtoc_key IN input.keys() DO
+          MUTABLE values: []String = COPY UNWRAP (input[rtoc_key]);
+          copied[rtoc_key] = COPY values;
+          END
           RETURN copied;
         END
       CLEAR
@@ -7081,7 +7081,7 @@ RSpec.describe RubyToClear::Transpiler do
         end
       RUBY
       clear = RubyToClear.transpile(ruby_code)
-      expect(clear).to include("MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, Int64>); entries.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{COPY _, COPY (entries[_] OR_ELSE CAST(panic(\"missing hash key\") AS Int64))} AS Tuple<String, Int64>)); }; rtoc_tuple_results } );")
+      expect(clear).to include("MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, Int64>); entries.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{COPY _, COPY UNWRAP (entries[_])} AS Tuple<String, Int64>)); }; rtoc_tuple_results } );")
     end
 
     it "uses set insertion in generated set union helpers" do
@@ -7561,7 +7561,7 @@ RSpec.describe RubyToClear::Transpiler do
         "h = {a: 1, b: 2}; h.transform_values { |v| v + 1 }",
         'MUTABLE h = {:a: 1, :b: 2};' + "\n( { MUTABLE rtoc_transform_values_result_1: {Any}Any = {}; " \
           "FOR rtoc_key IN h.keys() DO rtoc_transform_values_result_1[rtoc_key] = { MUTABLE rtoc_value_block_marker = 0;\n" \
-          "  MUTABLE v: Any = (h[rtoc_key] OR_ELSE panic(\"missing hash key\"));\n(v + 1)\n" \
+          "  MUTABLE v: Any = COPY UNWRAP (h[rtoc_key]);\n(v + 1)\n" \
           '}; END rtoc_transform_values_result_1 } );'
       )
 
@@ -7572,7 +7572,7 @@ RSpec.describe RubyToClear::Transpiler do
         'h = {a: "x", b: "yy"}; h.transform_values(&:size)',
         'MUTABLE h = {:a: "x", :b: "yy"};' + "\n( { MUTABLE rtoc_transform_values_result_1: {Any}Any = {}; " \
           'FOR rtoc_key IN h.keys() DO rtoc_transform_values_result_1[rtoc_key] = ' \
-          '(h[rtoc_key] OR_ELSE panic("missing hash key")).size(); END rtoc_transform_values_result_1 } );'
+          'COPY UNWRAP (h[rtoc_key]).size(); END rtoc_transform_values_result_1 } );'
       )
     end
 
@@ -7594,7 +7594,7 @@ RSpec.describe RubyToClear::Transpiler do
       clear = RubyToClear.transpile(ruby_code)
       expect(clear).to include("FN build(h: {String@symbol}Int64) RETURNS !{String@symbol}String ->")
       expect(clear).to include("MUTABLE rtoc_transform_values_result_1: {String@symbol}String = {};")
-      expect(clear).to include("MUTABLE v: Int64 = (h[rtoc_key] OR_ELSE CAST(panic(\"missing hash key\") AS Int64));")
+      expect(clear).to include("MUTABLE v: Int64 = COPY UNWRAP (h[rtoc_key]);")
       expect(clear).to include("v.toString()")
     end
 
@@ -7604,7 +7604,7 @@ RSpec.describe RubyToClear::Transpiler do
         'MUTABLE h = {:a: 1, :b: 2};' + "\n( { MUTABLE rtoc_transform_keys_result_1: {String}Any = {}; " \
           "FOR rtoc_key IN h.keys() DO rtoc_transform_keys_result_1[{ MUTABLE rtoc_value_block_marker = 0;\n" \
           "  MUTABLE k: Any = rtoc_key;\nCAST(k AS String)\n}] = " \
-          '(h[rtoc_key] OR_ELSE panic("missing hash key")); END rtoc_transform_keys_result_1 } );'
+          'COPY UNWRAP (h[rtoc_key]); END rtoc_transform_keys_result_1 } );'
       )
     end
 
@@ -7634,7 +7634,7 @@ RSpec.describe RubyToClear::Transpiler do
 
       expect_transpile(
         "pairs = {a: 1}; pairs.each_pair { |key, value| puts value }",
-        'MUTABLE pairs = {:a: 1};' + "\npairs.keys() |> EACH {\n  MUTABLE value: Any = (pairs[_] OR_ELSE panic(\"missing hash key\"));\nputs(value);\n};"
+        'MUTABLE pairs = {:a: 1};' + "\nFOR rtoc_key IN pairs.keys() DO\n  MUTABLE value: Any = COPY UNWRAP (pairs[rtoc_key]);\nputs(value);\nEND"
       )
 
       expect_transpile(
@@ -11643,7 +11643,7 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
 
       clear, = transpile_with_ir(source)
-      expect(clear).to include("MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, String>); values.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{COPY _, COPY (values[_] OR_ELSE CAST(panic(\"missing hash key\") AS String))} AS Tuple<String, String>)); }; rtoc_tuple_results } );")
+      expect(clear).to include("MUTABLE rtoc_tuple_return_1 = ( { MUTABLE rtoc_tuple_results = CAST([] AS []Tuple<String, String>); values.keys() |> EACH { &rtoc_tuple_results.append(COPY CAST(Tuple{COPY _, COPY UNWRAP (values[_])} AS Tuple<String, String>)); }; rtoc_tuple_results } );")
       expect(clear).to include("rtoc_tuple_results.append(COPY CAST(")
       expect(clear).to include("MUTABLE rtoc_tuple_return")
       expect(clear).not_to include("|> SELECT CAST([")
