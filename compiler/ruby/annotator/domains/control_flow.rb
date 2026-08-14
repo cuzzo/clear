@@ -944,10 +944,26 @@ module Annotator
         end
 
         payload_type = match_payload_binding_type(plan, variant_name, T.unsafe(raw_payload), match_case)
-        current_scope.declare(binding, match_case, payload_type, false, false, nil, :stack)
+        # `AS MUTABLE x` binds the arm payload by mutable reference, so writes
+        # through it land on the matched union rather than on a copy.
+        mutable_binding = match_case.binding_mutable == true
+        verify_mutable_match_subject!(node) if mutable_binding
+        current_scope.declare(binding, match_case, payload_type, mutable_binding, false, nil, :stack)
         og_declare(binding, match_case, payload_type)
         classify_ownership!(current_scope.local_entry!(binding))
         borrow_match_payload_binding!(binding) unless node.takes
+      end
+
+      # A mutable arm binding writes through to the subject, so the subject
+      # itself has to be a mutable binding.
+      sig { params(node: AST::MatchStatement).void }
+      def verify_mutable_match_subject!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        subject = node.expr
+        return unless subject.is_a?(AST::Identifier)
+        entry = current_scope.resolve_entry(subject.name)
+        return if entry.nil? || entry.mutable
+        error!(node, :ASSIGN_VAR_IMMUTABLE, name: subject.name)
       end
 
       sig { params(plan: MatchSubjectPlan, variant_name: String, raw_payload: MatchPayload, match_case: AST::MatchCase).returns(Type) }

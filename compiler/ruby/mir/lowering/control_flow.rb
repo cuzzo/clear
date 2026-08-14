@@ -26,6 +26,7 @@ module MIRLoweringControlFlow
     const :variant, String
     const :body, MatchBody
     const :payload_name, T.nilable(String)
+    const :pointer_payload, T::Boolean, default: false
   end
 
   class ForEachPlan < T::Struct
@@ -1016,7 +1017,8 @@ module MIRLoweringControlFlow
     default = union_match_default_body(node, facts, arms)
     default = hoist_unhoisted_return_allocs(default, node.default_case || []) if default
     MIR::UnionMatchStmt.new(facts.subject, arms.map { |arm|
-      MIR::UnionMatchArm.new(variant: arm.variant, payload: arm.payload_name, body: arm.body)
+      MIR::UnionMatchArm.new(variant: arm.variant, payload: arm.payload_name, body: arm.body,
+                             pointer_payload: arm.pointer_payload)
     }, default)
   end
 
@@ -1043,7 +1045,8 @@ module MIRLoweringControlFlow
     variants.map do |variant|
       payload_name = "__match_payload_#{lowering_counters.next_tmp_id}"
       arm_body = union_match_payload_bindings(c, payload_name, node) + body.dup
-      UnionMatchArmPlan.new(variant: variant, body: arm_body, payload_name: payload_name)
+      UnionMatchArmPlan.new(variant: variant, body: arm_body, payload_name: payload_name,
+                            pointer_payload: c.binding_mutable == true)
     end
   end
 
@@ -1069,7 +1072,7 @@ module MIRLoweringControlFlow
 
   sig { params(c: AST::MatchCase, payload_name: String, node: AST::MatchStatement).returns(MatchBody) }
   def union_match_payload_bindings(c, payload_name, node)
-    is_mutable = node.expr.is_a?(AST::Identifier) && node.expr.was_moved == true
+    is_mutable = (node.expr.is_a?(AST::Identifier) && node.expr.was_moved == true) || c.binding_mutable == true
     payload = MIR::Ident.new(payload_name)
     payload = MIR::Deref.new(payload) if c.indirect_payload_as
     if c.binding

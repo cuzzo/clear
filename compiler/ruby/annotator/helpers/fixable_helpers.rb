@@ -1703,7 +1703,10 @@ module FixableHelper
     # point a MUTABLE insertion at the signature.
     tok = nil
     decl = info.reg
-    if decl && decl.token
+    # Not every declaring node is a token-bearing declaration: a MATCH arm
+    # binds its payload through an AST::MatchCase, which has no token to
+    # anchor the insertion on.
+    if decl.respond_to?(:token) && decl.token
       tok = decl.token
     elsif info.is_param && info.param_decl_token
       tok = info.param_decl_token

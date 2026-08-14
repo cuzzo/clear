@@ -250,7 +250,7 @@ module AST
     def storage=(val); self[:storage] = val; end
   end
 
-  MatchCase = Struct.new(:kind, :value, :body, :binding, :destructure, :extra_values,
+  MatchCase = Struct.new(:kind, :value, :body, :binding, :binding_mutable, :destructure, :extra_values,
                          :indirect_payload_as,
                          keyword_init: true) do
     extend T::Sig

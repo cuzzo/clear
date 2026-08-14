@@ -673,8 +673,10 @@ class ClearParser
     end
 
     binding = T.let(nil, T.nilable(String))
+    binding_mutable = T.let(false, T::Boolean)
     destructure = T.let(nil, T.nilable(AST::StructPattern))
     if match!(:KEYWORD, 'AS')
+      binding_mutable = match!(:KEYWORD, 'MUTABLE') ? true : false
       binding = consume(:VAR_ID).text!
     elsif match?(:CHAR, '{')
       destructure = parse_struct_pattern
@@ -685,6 +687,7 @@ class ClearParser
       value: first_pattern,
       extra_values: extra_patterns,
       binding: binding,
+      binding_mutable: binding_mutable,
       destructure: destructure,
     )
   end
@@ -696,6 +699,7 @@ class ClearParser
       value: arm.value,
       body: body,
       binding: arm.binding,
+      binding_mutable: arm.binding_mutable,
       destructure: arm.destructure,
       extra_values: arm.extra_values,
     )

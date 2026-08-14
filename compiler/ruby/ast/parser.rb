@@ -129,6 +129,7 @@ class ClearParser
     const :value, AST::Node
     const :extra_values, T::Array[AST::Node]
     const :binding, T.nilable(String), default: nil
+    const :binding_mutable, T::Boolean, default: false
     const :destructure, T.nilable(AST::StructPattern), default: nil
   end
 
