@@ -701,7 +701,13 @@ module RubyToClear
       return "FunctionValue" if text.start_with?("FN(") || text.include?(" -> ")
       return "OptionalValue" if text.start_with?("?")
 
-      raw_name = text.split(".").last
+      # A member type renamed to avoid a collision (AST::Program emitted as
+      # ASTProgram) carries that emitted name in the union's variant list, so
+      # the arm has to use it too or the MATCH names a variant the union does
+      # not have.
+      raw_name = clear_constant_type_name(text).to_s.delete_prefix("?")
+      raw_name = text if raw_name.empty?
+      raw_name = raw_name.split(".").last
       return raw_name if raw_name.match?(/\A[A-Za-z_]\w*\z/)
 
       camel_type_name(raw_name)
