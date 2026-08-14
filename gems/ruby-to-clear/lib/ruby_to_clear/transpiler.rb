@@ -2839,6 +2839,18 @@ end
       body.body.first
     end
 
+    # CLEAR rejects Auto in a field outright ("Cross-callsite field inference is
+    # not supported"), so an unresolved container type must not reach a struct
+    # declaration. `Auto[]T` is an inferred container around a KNOWN element;
+    # keep the element and let the array be the container.
+    def struct_field_type(type, owner)
+      text = break_self_reference(type.to_s, owner)
+      return text unless text.match?(/\bAuto\b/)
+
+      text = text.sub(/\AAuto(\[\].+)\z/, '\\1')
+      text.gsub(/\bAuto\b/, "Any")
+    end
+
     def concrete_struct_type(type)
       res = expand_non_emitted_type_alias(type.to_s.gsub(/\bAuto\b/, "Any"))
       if res.to_s.match?(/\A\??[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)+\z/)
@@ -4879,6 +4891,15 @@ end
     # A direct Rc/Arc carrier is distinct from an aggregate containing retained
     # elements. `[]Item@multiowned` is a plain list whose Item elements are
     # retained; only `Item@multiowned` itself can be duplicated with KEEP.
+    # Types CLEAR copies implicitly, so a bare read can leave a function.
+    def implicitly_copyable_clear_type?(type)
+      normalized = expand_clear_type_alias(type.to_s).to_s
+      return true if normalized == "String@symbol"
+
+      bare = normalized.delete_prefix("?").sub(/@.*\z/, "")
+      bare.match?(/\A(?:Bool|U?Int\d*|Float\d*|Byte\d*|Void|Nil|String)\z/)
+    end
+
     def direct_retained_carrier_type?(type)
       normalized = expand_clear_type_alias(type.to_s).to_s.delete_prefix("?")
       return false if normalized.empty?
@@ -5015,7 +5036,7 @@ end
 
         field_decls = all_fields.map do |field|
           type = @class_instance_field_types[metadata_name][field] || "Any"
-          emitted_type = break_self_reference(concrete_struct_type(type), emitted_name)
+          emitted_type = struct_field_type(concrete_struct_type(type), emitted_name)
           require_type_dependency(emitted_type)
           "  #{field}: #{emitted_type}"
         end.join(",\n")
@@ -5023,7 +5044,18 @@ end
         mapped_getters = if emitted_name != name
           all_fields.map do |field|
             type = concrete_struct_type(@class_instance_field_types[metadata_name][field] || "Any")
-            value = direct_retained_carrier_type?(type) ? "KEEP self.#{field}" : "self.#{field}"
+            value = if direct_retained_carrier_type?(type)
+              "KEEP self.#{field}"
+            elsif implicitly_copyable_clear_type?(type)
+              "self.#{field}"
+            else
+              # A getter hands the field OUT of the struct, so a non-Copy field
+              # has to leave as an owned value: CLEAR rejects
+              # "Cannot return borrowed value without COPY or a lifetime
+              # annotation" otherwise. The explicit-RETURN path already does
+              # this; the synthesized getter used to skip it.
+              "COPY self.#{field}"
+            end
             getter = "#{class_function_prefix(emitted_name)}__#{emitted_field_identity(field)}"
             "PUB FN #{getter}(self: #{emitted_name}) RETURNS #{type} ->\n  #{value};\nEND"
           end.join("\n")
@@ -6856,7 +6888,7 @@ end
         all_field_types = mixin_fields.merge(local_field_types)
         register_constructor_fields([], @current_class, all_field_types.keys, {}, all_field_types)
         field_decls = all_field_types.map do |field, type|
-          "  #{field}: #{break_self_reference(type, class_name)}"
+          "  #{field}: #{struct_field_type(type, class_name)}"
         end.join(",\n")
         body_without_fields = body_nodes.reject { |stmt| t_struct_field(stmt) }
         old_instance_field_names = @current_instance_field_names
