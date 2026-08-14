@@ -18119,7 +18119,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((expected != NIL)) THEN
       RETURN;
     END
-    MUTABLE empty_list = ((IF rhs IS_A ListLit AS list_lit THEN list_lit.items.empty?() ELSE FALSE END) AND !(rhs.collection_constructor?()));
+    MUTABLE empty_list = (IF rhs IS_A ListLit AS list_lit THEN (list_lit.items.empty?() AND (list_lit.constructor_options == NIL)) ELSE FALSE END);
     MUTABLE empty_hash = (IF rhs IS_A HashLit AS hash_lit THEN hash_lit.pairs.empty?() ELSE FALSE END);
     IF !((empty_list OR empty_hash)) THEN
       RETURN;

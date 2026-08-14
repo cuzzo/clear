@@ -401,14 +401,24 @@ PRIVATE FN autoConstraintCollector__empty_list_lit?(self: AutoConstraintCollecto
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((((IF node? IS_A ListLit AS list_lit THEN list_lit.items.empty?() ELSE FALSE END) AND !(node.collection_constructor?()))) == TRUE);
+    IF node EXISTS AS node_value THEN
+      IF node_value IS_A ListLit AS list_lit THEN
+        RETURN (list_lit.items.empty?() AND (list_lit.constructor_options == NIL));
+      END
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN autoConstraintCollector__empty_hash_lit?(self: AutoConstraintCollector, node: ?Locatable) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (IF node? IS_A HashLit AS hash_lit THEN (hash_lit.pairs.length() == 0) ELSE FALSE END);
+    IF node EXISTS AS node_value THEN
+      IF node_value IS_A HashLit AS hash_lit THEN
+        RETURN (hash_lit.pairs.length() == 0);
+      END
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN autoConstraintCollector__register_list_shape_slot(MUTABLE self: AutoConstraintCollector, decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Void
