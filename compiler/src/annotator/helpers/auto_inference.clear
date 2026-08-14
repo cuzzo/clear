@@ -643,7 +643,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (slot.shape == :list_element) THEN
       MUTABLE element_sym = type__resolved(resolved_type);
       MUTABLE rtoc_writer_receiver_14: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node);
-      rtoc_writer_receiver_14.type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${element_sym}[]") }));
+      declNode__set_type(&rtoc_writer_receiver_14, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${element_sym}[]") })));
       RETURN;
     ELSE_IF (slot.shape == :map_key) OR (slot.shape == :map_value) THEN
       slot.resolved_scalar = resolved_type;
@@ -657,7 +657,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_writer_receiver_15.return_type = resolved_type;
     ELSE_IF (slot.kind == :local) THEN
       MUTABLE rtoc_writer_receiver_16: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node);
-      rtoc_writer_receiver_16.type = resolved_type;
+      declNode__set_type(&rtoc_writer_receiver_16, resolved_type);
     END
 }
 END
@@ -11229,4 +11229,11 @@ FN rtocChildrenOfAutoInferenceWalkNodeYieldExpr(v: YieldExpr) RETURNS []AutoInfe
 END
 FN rubyToClearVoid() RETURNS Void ->
   RETURN;
+END
+
+PUB FN declNode__set_type(MUTABLE node: AutoConstraintCollectorDeclarationNode, value: ?Type) RETURNS Void ->
+  MATCH node START
+    AutoConstraintCollectorDeclarationNode.VarDecl AS MUTABLE item -> item.type = COPY value;,
+    AutoConstraintCollectorDeclarationNode.BindExpr AS MUTABLE item -> item.type = COPY value;
+  END
 END

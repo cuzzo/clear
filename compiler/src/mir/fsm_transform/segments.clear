@@ -35,7 +35,7 @@ PUB FN ioSuspend__result_type(self: IoSuspend) RETURNS !?Type ->
     RETURN NIL;
   END
   MUTABLE node = self.call_node;
-  MUTABLE type_object = node.type_object();
+  MUTABLE type_object = aST__node_type_object(node);
   IF !(type_object) THEN
     panic("FSM IO suspend result: missing type info");
   END
@@ -65,7 +65,7 @@ PUB FN nextSuspend__result_type(self: NextSuspend) RETURNS !?Type ->
     RETURN NIL;
   END
   MUTABLE node = self.promise_ast;
-  MUTABLE type_object = node.type_object();
+  MUTABLE type_object = aST__node_type_object(node);
   IF !(type_object) THEN
     panic("FSM NEXT suspend result: missing type info");
   END

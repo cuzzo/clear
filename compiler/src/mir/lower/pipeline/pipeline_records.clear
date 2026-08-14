@@ -14,7 +14,10 @@ PUB STRUCT PipelineSourceShape {
 }
 
 PUB FN pipelineSourceShape__element_type(self: PipelineSourceShape) RETURNS !Type EFFECTS REENTRANT ->
-  MUTABLE elem_type: ?Type = (IF TRY (type__runtime_stream_storage_element_type(self.type)) != NIL THEN TRY (type__runtime_stream_storage_element_type(self.type)) ELSE TRY (type__element_type(self.type)) END);
+  MUTABLE elem_type: ?Type = TRY (type__runtime_stream_storage_element_type(self.type));
+  IF (elem_type == NIL) THEN
+    elem_type = TRY (type__element_type(self.type));
+  END
   IF elem_type EXISTS AS elem_type_value THEN
     RETURN elem_type_value;
   ELSE
