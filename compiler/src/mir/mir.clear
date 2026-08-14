@@ -9,9 +9,10 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f636f6e
 REQUIRE "pkg:rtoc_6d69722f616c6c6f632e636c656172"
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572655f72657475726e732e636c656172"
 REQUIRE "pkg:rtoc_6173742f6173796e635f726573756c745f73686170652e636c656172"
-empty_child_exprs: [0]Emittable = List[];
-legacy_ownership_node_names: [3]String = ["MIR::ReassignCleanup", "MIR::FieldCleanup", "MIR::ReassignPlan"];
-empty_body_slots: [0]MIRBodySlot = List[];
+# The Ruby lists MIR node CLASS OBJECTS here for its checker's reflection
+# (OWNERSHIP_SIGNIFICANT_NODE_TYPES). CLEAR has no class objects, and a
+# module-scope owned list has no lifetime to be freed in, so the lists are
+# dropped; nothing in the CLEAR tree reads them.
 EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_regex";
 PUB UNION Alloc { SymbolValue: String@symbol, Emittable: Emittable }
 UNION CExternFnDeclReturnValue { StringValue: String, SymbolValue: String@symbol }
@@ -75,12 +76,15 @@ FN fnDef__ownership_effect(self: FnDef) RETURNS OwnershipEffect EFFECTS REENTRAN
   RETURN ownershipEffect__none();
 END
 FN fnDef__child_exprs(self: FnDef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fnDef__ownership_source_exprs(self: FnDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fnDef__owned_position_source_exprs(self: FnDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fnDef__without_try(self: FnDef) RETURNS Emittable ->
@@ -152,15 +156,19 @@ FN param__ownership_effect(self: MIRParam) RETURNS OwnershipEffect EFFECTS REENT
   RETURN ownershipEffect__none();
 END
 FN param__child_exprs(self: MIRParam) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN param__ownership_source_exprs(self: MIRParam) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN param__owned_position_source_exprs(self: MIRParam) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN param__body_slots(self: MIRParam) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN param__without_try(self: MIRParam) RETURNS Emittable ->
@@ -230,6 +238,7 @@ END
 
 FN structDef__body_slots(MUTABLE self: MIRStructDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF !(self.methods) THEN
+    MUTABLE empty_body_slots: []MIRBodySlot = [];
     RETURN empty_body_slots;
   END
   RETURN CAST([structDef__body_slot(self, :methods, self.methods, %(new_methods: []Emittable) USE(MUTABLE self) -> {
@@ -250,12 +259,15 @@ FN structDef__ownership_effect(self: MIRStructDef) RETURNS OwnershipEffect EFFEC
   RETURN ownershipEffect__none();
 END
 FN structDef__child_exprs(self: MIRStructDef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN structDef__ownership_source_exprs(self: MIRStructDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN structDef__owned_position_source_exprs(self: MIRStructDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN structDef__without_try(self: MIRStructDef) RETURNS Emittable ->
@@ -312,15 +324,19 @@ FN fieldDef__ownership_effect(self: FieldDef) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN fieldDef__child_exprs(self: FieldDef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fieldDef__ownership_source_exprs(self: FieldDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fieldDef__owned_position_source_exprs(self: FieldDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fieldDef__body_slots(self: FieldDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fieldDef__without_try(self: FieldDef) RETURNS Emittable ->
@@ -397,15 +413,19 @@ FN enumDef__ownership_effect(self: MIREnumDef) RETURNS OwnershipEffect EFFECTS R
   RETURN ownershipEffect__none();
 END
 FN enumDef__child_exprs(self: MIREnumDef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN enumDef__ownership_source_exprs(self: MIREnumDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN enumDef__owned_position_source_exprs(self: MIREnumDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN enumDef__body_slots(self: MIREnumDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN enumDef__without_try(self: MIREnumDef) RETURNS Emittable ->
@@ -464,15 +484,19 @@ FN unionTypeDef__ownership_effect(self: UnionTypeDef) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN unionTypeDef__child_exprs(self: UnionTypeDef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionTypeDef__ownership_source_exprs(self: UnionTypeDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionTypeDef__owned_position_source_exprs(self: UnionTypeDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionTypeDef__body_slots(self: UnionTypeDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN unionTypeDef__without_try(self: UnionTypeDef) RETURNS Emittable ->
@@ -527,15 +551,19 @@ FN import__ownership_effect(self: Import) RETURNS OwnershipEffect EFFECTS REENTR
   RETURN ownershipEffect__none();
 END
 FN import__child_exprs(self: Import) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN import__ownership_source_exprs(self: Import) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN import__owned_position_source_exprs(self: Import) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN import__body_slots(self: Import) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN import__without_try(self: Import) RETURNS Emittable ->
@@ -592,15 +620,19 @@ FN typeAlias__ownership_effect(self: TypeAlias) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN typeAlias__child_exprs(self: TypeAlias) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeAlias__ownership_source_exprs(self: TypeAlias) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeAlias__owned_position_source_exprs(self: TypeAlias) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeAlias__body_slots(self: TypeAlias) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN typeAlias__without_try(self: TypeAlias) RETURNS Emittable ->
@@ -660,15 +692,19 @@ FN cExternFnDecl__ownership_effect(self: CExternFnDecl) RETURNS OwnershipEffect 
   RETURN ownershipEffect__none();
 END
 FN cExternFnDecl__child_exprs(self: CExternFnDecl) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cExternFnDecl__ownership_source_exprs(self: CExternFnDecl) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cExternFnDecl__owned_position_source_exprs(self: CExternFnDecl) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cExternFnDecl__body_slots(self: CExternFnDecl) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN cExternFnDecl__without_try(self: CExternFnDecl) RETURNS Emittable ->
@@ -725,15 +761,19 @@ FN cExternStructDef__ownership_effect(self: CExternStructDef) RETURNS OwnershipE
   RETURN ownershipEffect__none();
 END
 FN cExternStructDef__child_exprs(self: CExternStructDef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cExternStructDef__ownership_source_exprs(self: CExternStructDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cExternStructDef__owned_position_source_exprs(self: CExternStructDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cExternStructDef__body_slots(self: CExternStructDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN cExternStructDef__without_try(self: CExternStructDef) RETURNS Emittable ->
@@ -790,12 +830,15 @@ FN moduleNamespace__ownership_effect(self: ModuleNamespace) RETURNS OwnershipEff
   RETURN ownershipEffect__none();
 END
 FN moduleNamespace__ownership_source_exprs(self: ModuleNamespace) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moduleNamespace__owned_position_source_exprs(self: ModuleNamespace) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moduleNamespace__body_slots(self: ModuleNamespace) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN moduleNamespace__without_try(self: ModuleNamespace) RETURNS Emittable ->
@@ -868,12 +911,15 @@ FN testDef__ownership_effect(self: TestDef) RETURNS OwnershipEffect EFFECTS REEN
   RETURN ownershipEffect__none();
 END
 FN testDef__child_exprs(self: TestDef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN testDef__ownership_source_exprs(self: TestDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN testDef__owned_position_source_exprs(self: TestDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN testDef__without_try(self: TestDef) RETURNS Emittable ->
@@ -959,12 +1005,15 @@ FN let__ownership_effect(self: Let) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__none();
 END
 FN let__ownership_source_exprs(self: Let) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN let__owned_position_source_exprs(self: Let) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN let__body_slots(self: Let) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN let__without_try(self: Let) RETURNS Emittable ->
@@ -1019,12 +1068,15 @@ FN set__ownership_effect(self: Set) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__none();
 END
 FN set__ownership_source_exprs(self: Set) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN set__owned_position_source_exprs(self: Set) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN set__body_slots(self: Set) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN set__without_try(self: Set) RETURNS Emittable ->
@@ -1093,15 +1145,19 @@ FN destructureTarget__ownership_effect(self: MIRDestructureTarget) RETURNS Owner
   RETURN ownershipEffect__none();
 END
 FN destructureTarget__child_exprs(self: MIRDestructureTarget) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN destructureTarget__ownership_source_exprs(self: MIRDestructureTarget) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN destructureTarget__owned_position_source_exprs(self: MIRDestructureTarget) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN destructureTarget__body_slots(self: MIRDestructureTarget) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN destructureTarget__without_try(self: MIRDestructureTarget) RETURNS Emittable ->
@@ -1158,12 +1214,15 @@ FN destructureSet__ownership_effect(self: DestructureSet) RETURNS OwnershipEffec
   RETURN ownershipEffect__none();
 END
 FN destructureSet__ownership_source_exprs(self: DestructureSet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN destructureSet__owned_position_source_exprs(self: DestructureSet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN destructureSet__body_slots(self: DestructureSet) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN destructureSet__without_try(self: DestructureSet) RETURNS Emittable ->
@@ -1222,12 +1281,15 @@ FN reassignWithCleanup__ownership_effect(self: ReassignWithCleanup) RETURNS Owne
   RETURN ownershipEffect__none();
 END
 FN reassignWithCleanup__ownership_source_exprs(self: ReassignWithCleanup) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN reassignWithCleanup__owned_position_source_exprs(self: ReassignWithCleanup) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN reassignWithCleanup__body_slots(self: ReassignWithCleanup) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN reassignWithCleanup__without_try(self: ReassignWithCleanup) RETURNS Emittable ->
@@ -1284,12 +1346,15 @@ FN resourceClose__ownership_effect(self: ResourceClose) RETURNS OwnershipEffect 
   RETURN ownershipEffect__none();
 END
 FN resourceClose__ownership_source_exprs(self: ResourceClose) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN resourceClose__owned_position_source_exprs(self: ResourceClose) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN resourceClose__body_slots(self: ResourceClose) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN resourceClose__without_try(self: ResourceClose) RETURNS Emittable ->
@@ -1361,9 +1426,11 @@ FN ifStmt__ownership_effect(self: IfStmt) RETURNS OwnershipEffect EFFECTS REENTR
   RETURN ownershipEffect__none();
 END
 FN ifStmt__ownership_source_exprs(self: IfStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ifStmt__owned_position_source_exprs(self: IfStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ifStmt__without_try(self: IfStmt) RETURNS Emittable ->
@@ -1443,9 +1510,11 @@ FN ifBindStmt__ownership_effect(self: IfBindStmt) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN ifBindStmt__ownership_source_exprs(self: IfBindStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ifBindStmt__owned_position_source_exprs(self: IfBindStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ifBindStmt__without_try(self: IfBindStmt) RETURNS Emittable ->
@@ -1515,9 +1584,11 @@ FN whileStmt__ownership_effect(self: WhileStmt) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN whileStmt__ownership_source_exprs(self: WhileStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN whileStmt__owned_position_source_exprs(self: WhileStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN whileStmt__without_try(self: WhileStmt) RETURNS Emittable ->
@@ -1587,9 +1658,11 @@ FN forStmt__ownership_effect(self: ForStmt) RETURNS OwnershipEffect EFFECTS REEN
   RETURN ownershipEffect__none();
 END
 FN forStmt__ownership_source_exprs(self: ForStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN forStmt__owned_position_source_exprs(self: ForStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN forStmt__without_try(self: ForStmt) RETURNS Emittable ->
@@ -1651,12 +1724,15 @@ FN scopeBlock__ownership_effect(self: ScopeBlock) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN scopeBlock__child_exprs(self: ScopeBlock) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN scopeBlock__ownership_source_exprs(self: ScopeBlock) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN scopeBlock__owned_position_source_exprs(self: ScopeBlock) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN scopeBlock__without_try(self: ScopeBlock) RETURNS Emittable ->
@@ -1744,9 +1820,11 @@ FN switchStmt__ownership_effect(self: SwitchStmt) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN switchStmt__ownership_source_exprs(self: SwitchStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN switchStmt__owned_position_source_exprs(self: SwitchStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN switchStmt__without_try(self: SwitchStmt) RETURNS Emittable ->
@@ -1827,9 +1905,11 @@ FN unionMatchStmt__ownership_effect(self: UnionMatchStmt) RETURNS OwnershipEffec
   RETURN ownershipEffect__none();
 END
 FN unionMatchStmt__ownership_source_exprs(self: UnionMatchStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionMatchStmt__owned_position_source_exprs(self: UnionMatchStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionMatchStmt__without_try(self: UnionMatchStmt) RETURNS Emittable ->
@@ -1910,9 +1990,11 @@ FN ifChain__ownership_effect(self: IfChain) RETURNS OwnershipEffect EFFECTS REEN
   RETURN ownershipEffect__none();
 END
 FN ifChain__ownership_source_exprs(self: IfChain) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ifChain__owned_position_source_exprs(self: IfChain) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ifChain__without_try(self: IfChain) RETURNS Emittable ->
@@ -1968,12 +2050,15 @@ FN returnStmt__ownership_effect(self: ReturnStmt) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN returnStmt__ownership_source_exprs(self: ReturnStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN returnStmt__owned_position_source_exprs(self: ReturnStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN returnStmt__body_slots(self: ReturnStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN returnStmt__without_try(self: ReturnStmt) RETURNS Emittable ->
@@ -2030,12 +2115,15 @@ FN breakStmt__ownership_effect(self: BreakStmt) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN breakStmt__ownership_source_exprs(self: BreakStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN breakStmt__owned_position_source_exprs(self: BreakStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN breakStmt__body_slots(self: BreakStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN breakStmt__without_try(self: BreakStmt) RETURNS Emittable ->
@@ -2096,6 +2184,7 @@ FN breakExpr__ownership_effect(self: BreakExpr) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN breakExpr__body_slots(self: BreakExpr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN breakExpr__without_try(self: BreakExpr) RETURNS Emittable ->
@@ -2148,15 +2237,19 @@ FN continueStmt__ownership_effect(self: ContinueStmt) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN continueStmt__child_exprs(self: ContinueStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN continueStmt__ownership_source_exprs(self: ContinueStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN continueStmt__owned_position_source_exprs(self: ContinueStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN continueStmt__body_slots(self: ContinueStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN continueStmt__without_try(self: ContinueStmt) RETURNS Emittable ->
@@ -2209,15 +2302,19 @@ FN panic__ownership_effect(self: Panic) RETURNS OwnershipEffect EFFECTS REENTRAN
   RETURN ownershipEffect__none();
 END
 FN panic__child_exprs(self: Panic) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN panic__ownership_source_exprs(self: Panic) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN panic__owned_position_source_exprs(self: Panic) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN panic__body_slots(self: Panic) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN panic__without_try(self: Panic) RETURNS Emittable ->
@@ -2274,12 +2371,15 @@ FN assertStmt__ownership_effect(self: AssertStmt) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN assertStmt__ownership_source_exprs(self: AssertStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN assertStmt__owned_position_source_exprs(self: AssertStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN assertStmt__body_slots(self: AssertStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN assertStmt__without_try(self: AssertStmt) RETURNS Emittable ->
@@ -2341,12 +2441,15 @@ FN assertRaisesCheck__ownership_effect(self: AssertRaisesCheck) RETURNS Ownershi
   RETURN ownershipEffect__none();
 END
 FN assertRaisesCheck__ownership_source_exprs(self: AssertRaisesCheck) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN assertRaisesCheck__owned_position_source_exprs(self: AssertRaisesCheck) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN assertRaisesCheck__body_slots(self: AssertRaisesCheck) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN assertRaisesCheck__without_try(self: AssertRaisesCheck) RETURNS Emittable ->
@@ -2399,15 +2502,19 @@ FN testPreamble__ownership_effect(self: TestPreamble) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN testPreamble__child_exprs(self: TestPreamble) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN testPreamble__ownership_source_exprs(self: TestPreamble) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN testPreamble__owned_position_source_exprs(self: TestPreamble) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN testPreamble__body_slots(self: TestPreamble) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN testPreamble__without_try(self: TestPreamble) RETURNS Emittable ->
@@ -2469,12 +2576,15 @@ FN debugOnly__ownership_effect(self: DebugOnly) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN debugOnly__child_exprs(self: DebugOnly) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN debugOnly__ownership_source_exprs(self: DebugOnly) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN debugOnly__owned_position_source_exprs(self: DebugOnly) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN debugOnly__without_try(self: DebugOnly) RETURNS Emittable ->
@@ -2534,12 +2644,15 @@ FN sort__ownership_effect(self: Sort) RETURNS OwnershipEffect EFFECTS REENTRANT 
   RETURN ownershipEffect__none();
 END
 FN sort__ownership_source_exprs(self: Sort) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN sort__owned_position_source_exprs(self: Sort) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN sort__body_slots(self: Sort) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN sort__without_try(self: Sort) RETURNS Emittable ->
@@ -2591,15 +2704,19 @@ FN soaFieldAccess__ownership_effect(self: SoaFieldAccess) RETURNS OwnershipEffec
   RETURN ownershipEffect__none();
 END
 FN soaFieldAccess__child_exprs(self: SoaFieldAccess) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN soaFieldAccess__ownership_source_exprs(self: SoaFieldAccess) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN soaFieldAccess__owned_position_source_exprs(self: SoaFieldAccess) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN soaFieldAccess__body_slots(self: SoaFieldAccess) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN soaFieldAccess__without_try(self: SoaFieldAccess) RETURNS Emittable ->
@@ -2654,15 +2771,19 @@ FN tryOrPanic__ownership_effect(self: TryOrPanic) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN tryOrPanic__child_exprs(self: TryOrPanic) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN tryOrPanic__ownership_source_exprs(self: TryOrPanic) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN tryOrPanic__owned_position_source_exprs(self: TryOrPanic) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN tryOrPanic__body_slots(self: TryOrPanic) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN tryOrPanic__without_try(self: TryOrPanic) RETURNS Emittable ->
@@ -2723,12 +2844,15 @@ FN indexInsert__ownership_effect(self: IndexInsert) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN indexInsert__ownership_source_exprs(self: IndexInsert) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN indexInsert__owned_position_source_exprs(self: IndexInsert) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN indexInsert__body_slots(self: IndexInsert) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN indexInsert__without_try(self: IndexInsert) RETURNS Emittable ->
@@ -2793,9 +2917,11 @@ FN batchWindowPush__ownership_effect(self: BatchWindowPush) RETURNS OwnershipEff
   RETURN ownershipEffect__none();
 END
 FN batchWindowPush__ownership_source_exprs(self: BatchWindowPush) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN batchWindowPush__body_slots(self: BatchWindowPush) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN batchWindowPush__without_try(self: BatchWindowPush) RETURNS Emittable ->
@@ -2859,9 +2985,11 @@ FN batchWindowFlush__ownership_effect(self: BatchWindowFlush) RETURNS OwnershipE
   RETURN ownershipEffect__none();
 END
 FN batchWindowFlush__ownership_source_exprs(self: BatchWindowFlush) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN batchWindowFlush__body_slots(self: BatchWindowFlush) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN batchWindowFlush__without_try(self: BatchWindowFlush) RETURNS Emittable ->
@@ -2953,9 +3081,11 @@ FN deferStmt__ownership_effect(self: MIRDeferStmt) RETURNS OwnershipEffect EFFEC
   RETURN ownershipEffect__none();
 END
 FN deferStmt__ownership_source_exprs(self: MIRDeferStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN deferStmt__owned_position_source_exprs(self: MIRDeferStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN deferStmt__without_try(self: MIRDeferStmt) RETURNS Emittable ->
@@ -3031,9 +3161,11 @@ FN errDeferStmt__ownership_effect(self: ErrDeferStmt) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN errDeferStmt__ownership_source_exprs(self: ErrDeferStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN errDeferStmt__owned_position_source_exprs(self: ErrDeferStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN errDeferStmt__without_try(self: ErrDeferStmt) RETURNS Emittable ->
@@ -3100,12 +3232,15 @@ FN exprStmt__ownership_effect(self: ExprStmt) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN exprStmt__ownership_source_exprs(self: ExprStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN exprStmt__owned_position_source_exprs(self: ExprStmt) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN exprStmt__body_slots(self: ExprStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN exprStmt__without_try(self: ExprStmt) RETURNS Emittable ->
@@ -3163,12 +3298,15 @@ FN discardOwned__ownership_effect(self: DiscardOwned) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN discardOwned__ownership_source_exprs(self: DiscardOwned) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN discardOwned__owned_position_source_exprs(self: DiscardOwned) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN discardOwned__body_slots(self: DiscardOwned) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN discardOwned__without_try(self: DiscardOwned) RETURNS Emittable ->
@@ -3292,12 +3430,15 @@ FN bgBlock__mir?(self: MIRBgBlock) RETURNS Bool ->
   RETURN TRUE;
 END
 FN bgBlock__child_exprs(self: MIRBgBlock) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN bgBlock__ownership_source_exprs(self: MIRBgBlock) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN bgBlock__owned_position_source_exprs(self: MIRBgBlock) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN bgBlock__without_try(self: MIRBgBlock) RETURNS Emittable ->
@@ -3371,12 +3512,15 @@ FN streamSpawn__ownership_effect(self: StreamSpawn) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN streamSpawn__child_exprs(self: StreamSpawn) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN streamSpawn__ownership_source_exprs(self: StreamSpawn) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN streamSpawn__owned_position_source_exprs(self: StreamSpawn) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN streamSpawn__without_try(self: StreamSpawn) RETURNS Emittable ->
@@ -3476,15 +3620,19 @@ FN fsmStructure__ownership_effect(self: FsmStructure) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN fsmStructure__child_exprs(self: FsmStructure) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmStructure__ownership_source_exprs(self: FsmStructure) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmStructure__owned_position_source_exprs(self: FsmStructure) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmStructure__body_slots(self: FsmStructure) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fsmStructure__without_try(self: FsmStructure) RETURNS Emittable ->
@@ -3536,15 +3684,19 @@ FN fsmIoBody__ownership_effect(self: FsmIoBody) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN fsmIoBody__child_exprs(self: FsmIoBody) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmIoBody__ownership_source_exprs(self: FsmIoBody) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmIoBody__owned_position_source_exprs(self: FsmIoBody) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmIoBody__body_slots(self: FsmIoBody) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fsmIoBody__without_try(self: FsmIoBody) RETURNS Emittable ->
@@ -3600,12 +3752,15 @@ FN streamYield__ownership_effect(self: StreamYield) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN streamYield__ownership_source_exprs(self: StreamYield) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN streamYield__owned_position_source_exprs(self: StreamYield) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN streamYield__body_slots(self: StreamYield) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN streamYield__without_try(self: StreamYield) RETURNS Emittable ->
@@ -3660,15 +3815,19 @@ FN fsmB1Body__ownership_effect(self: FsmB1Body) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN fsmB1Body__child_exprs(self: FsmB1Body) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmB1Body__ownership_source_exprs(self: FsmB1Body) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmB1Body__owned_position_source_exprs(self: FsmB1Body) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmB1Body__body_slots(self: FsmB1Body) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fsmB1Body__without_try(self: FsmB1Body) RETURNS Emittable ->
@@ -3729,15 +3888,19 @@ FN fsmGenericBody__ownership_effect(self: FsmGenericBody) RETURNS OwnershipEffec
   RETURN ownershipEffect__none();
 END
 FN fsmGenericBody__child_exprs(self: FsmGenericBody) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmGenericBody__ownership_source_exprs(self: FsmGenericBody) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmGenericBody__owned_position_source_exprs(self: FsmGenericBody) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fsmGenericBody__body_slots(self: FsmGenericBody) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fsmGenericBody__without_try(self: FsmGenericBody) RETURNS Emittable ->
@@ -3937,12 +4100,15 @@ FN capabilityLockTarget__ownership_effect(self: CapabilityLockTarget) RETURNS Ow
   RETURN ownershipEffect__none();
 END
 FN capabilityLockTarget__ownership_source_exprs(self: CapabilityLockTarget) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN capabilityLockTarget__owned_position_source_exprs(self: CapabilityLockTarget) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN capabilityLockTarget__body_slots(self: CapabilityLockTarget) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN capabilityLockTarget__without_try(self: CapabilityLockTarget) RETURNS Emittable ->
@@ -3997,12 +4163,15 @@ FN capabilityLockAddress__ownership_effect(self: CapabilityLockAddress) RETURNS 
   RETURN ownershipEffect__none();
 END
 FN capabilityLockAddress__ownership_source_exprs(self: CapabilityLockAddress) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN capabilityLockAddress__owned_position_source_exprs(self: CapabilityLockAddress) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN capabilityLockAddress__body_slots(self: CapabilityLockAddress) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN capabilityLockAddress__without_try(self: CapabilityLockAddress) RETURNS Emittable ->
@@ -4081,9 +4250,11 @@ FN sortedLockAcquire__ownership_effect(self: SortedLockAcquire) RETURNS Ownershi
   RETURN ownershipEffect__none();
 END
 FN sortedLockAcquire__ownership_source_exprs(self: SortedLockAcquire) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN sortedLockAcquire__owned_position_source_exprs(self: SortedLockAcquire) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN sortedLockAcquire__without_try(self: SortedLockAcquire) RETURNS Emittable ->
@@ -4151,9 +4322,11 @@ FN fallibleLockBinding__ownership_effect(self: FallibleLockBinding) RETURNS Owne
   RETURN ownershipEffect__none();
 END
 FN fallibleLockBinding__ownership_source_exprs(self: FallibleLockBinding) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fallibleLockBinding__owned_position_source_exprs(self: FallibleLockBinding) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fallibleLockBinding__without_try(self: FallibleLockBinding) RETURNS Emittable ->
@@ -4211,7 +4384,7 @@ END
 FN catchWrapper__clause_bodies(self: CatchWrapper) RETURNS ![][]Emittable ->
   MUTABLE bodies: [][]Emittable = (self.clauses) |> SELECT COPY _.body;
   IF catchWrapper__has_default(self) THEN
-    &bodies.append(COPY self.default_body);
+    &bodies.append(KEEP self.default_body);
   END
   RETURN bodies;
 END
@@ -4251,9 +4424,11 @@ FN catchWrapper__ownership_effect(self: CatchWrapper) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN catchWrapper__ownership_source_exprs(self: CatchWrapper) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN catchWrapper__owned_position_source_exprs(self: CatchWrapper) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN catchWrapper__without_try(self: CatchWrapper) RETURNS Emittable ->
@@ -4352,12 +4527,15 @@ FN doBlock__ownership_effect(self: MIRDoBlock) RETURNS OwnershipEffect EFFECTS R
   RETURN ownershipEffect__none();
 END
 FN doBlock__child_exprs(self: MIRDoBlock) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN doBlock__ownership_source_exprs(self: MIRDoBlock) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN doBlock__owned_position_source_exprs(self: MIRDoBlock) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN doBlock__without_try(self: MIRDoBlock) RETURNS Emittable ->
@@ -4410,15 +4588,19 @@ FN noop__ownership_effect(self: Noop) RETURNS OwnershipEffect EFFECTS REENTRANT 
   RETURN ownershipEffect__none();
 END
 FN noop__child_exprs(self: Noop) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN noop__ownership_source_exprs(self: Noop) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN noop__owned_position_source_exprs(self: Noop) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN noop__body_slots(self: Noop) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN noop__without_try(self: Noop) RETURNS Emittable ->
@@ -4471,15 +4653,19 @@ FN comment__ownership_effect(self: Comment) RETURNS OwnershipEffect EFFECTS REEN
   RETURN ownershipEffect__none();
 END
 FN comment__child_exprs(self: Comment) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN comment__ownership_source_exprs(self: Comment) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN comment__owned_position_source_exprs(self: Comment) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN comment__body_slots(self: Comment) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN comment__without_try(self: Comment) RETURNS Emittable ->
@@ -4532,15 +4718,19 @@ FN suppress__ownership_effect(self: Suppress) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN suppress__child_exprs(self: Suppress) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN suppress__ownership_source_exprs(self: Suppress) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN suppress__owned_position_source_exprs(self: Suppress) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN suppress__body_slots(self: Suppress) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN suppress__without_try(self: Suppress) RETURNS Emittable ->
@@ -4594,15 +4784,19 @@ FN pubConst__ownership_effect(self: PubConst) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN pubConst__child_exprs(self: PubConst) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN pubConst__ownership_source_exprs(self: PubConst) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN pubConst__owned_position_source_exprs(self: PubConst) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN pubConst__body_slots(self: PubConst) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN pubConst__without_try(self: PubConst) RETURNS Emittable ->
@@ -4657,15 +4851,19 @@ FN moduleVar__ownership_effect(self: ModuleVar) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN moduleVar__child_exprs(self: ModuleVar) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moduleVar__ownership_source_exprs(self: ModuleVar) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moduleVar__owned_position_source_exprs(self: ModuleVar) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moduleVar__body_slots(self: ModuleVar) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN moduleVar__without_try(self: ModuleVar) RETURNS Emittable ->
@@ -4718,15 +4916,19 @@ FN moduleConstFree__ownership_effect(self: ModuleConstFree) RETURNS OwnershipEff
   RETURN ownershipEffect__none();
 END
 FN moduleConstFree__child_exprs(self: ModuleConstFree) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moduleConstFree__ownership_source_exprs(self: ModuleConstFree) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moduleConstFree__owned_position_source_exprs(self: ModuleConstFree) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moduleConstFree__body_slots(self: ModuleConstFree) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN moduleConstFree__without_try(self: ModuleConstFree) RETURNS Emittable ->
@@ -4789,9 +4991,11 @@ FN heapCreate__stmt?(self: HeapCreate) RETURNS Bool ->
   RETURN FALSE;
 END
 FN heapCreate__owned_position_source_exprs(self: HeapCreate) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN heapCreate__body_slots(self: HeapCreate) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN heapCreate__without_try(self: HeapCreate) RETURNS Emittable ->
@@ -4849,12 +5053,15 @@ FN dupeSlice__stmt?(self: DupeSlice) RETURNS Bool ->
   RETURN FALSE;
 END
 FN dupeSlice__ownership_source_exprs(self: DupeSlice) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN dupeSlice__owned_position_source_exprs(self: DupeSlice) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN dupeSlice__body_slots(self: DupeSlice) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN dupeSlice__without_try(self: DupeSlice) RETURNS Emittable ->
@@ -4913,12 +5120,15 @@ FN allocSlice__stmt?(self: AllocSlice) RETURNS Bool ->
   RETURN FALSE;
 END
 FN allocSlice__ownership_source_exprs(self: AllocSlice) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN allocSlice__owned_position_source_exprs(self: AllocSlice) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN allocSlice__body_slots(self: AllocSlice) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN allocSlice__without_try(self: AllocSlice) RETURNS Emittable ->
@@ -4976,12 +5186,15 @@ FN freeSlice__ownership_effect(self: FreeSlice) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN freeSlice__ownership_source_exprs(self: FreeSlice) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN freeSlice__owned_position_source_exprs(self: FreeSlice) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN freeSlice__body_slots(self: FreeSlice) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN freeSlice__without_try(self: FreeSlice) RETURNS Emittable ->
@@ -5039,12 +5252,15 @@ FN destroyPtr__ownership_effect(self: DestroyPtr) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN destroyPtr__ownership_source_exprs(self: DestroyPtr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN destroyPtr__owned_position_source_exprs(self: DestroyPtr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN destroyPtr__body_slots(self: DestroyPtr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN destroyPtr__without_try(self: DestroyPtr) RETURNS Emittable ->
@@ -5098,15 +5314,19 @@ FN cleanup__ownership_effect(self: Cleanup) RETURNS OwnershipEffect EFFECTS REEN
   RETURN ownershipEffect__none();
 END
 FN cleanup__child_exprs(self: Cleanup) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cleanup__ownership_source_exprs(self: Cleanup) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cleanup__owned_position_source_exprs(self: Cleanup) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cleanup__body_slots(self: Cleanup) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN cleanup__without_try(self: Cleanup) RETURNS Emittable ->
@@ -5160,15 +5380,19 @@ FN errCleanup__ownership_effect(self: ErrCleanup) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN errCleanup__child_exprs(self: ErrCleanup) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN errCleanup__ownership_source_exprs(self: ErrCleanup) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN errCleanup__owned_position_source_exprs(self: ErrCleanup) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN errCleanup__body_slots(self: ErrCleanup) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN errCleanup__without_try(self: ErrCleanup) RETURNS Emittable ->
@@ -5221,15 +5445,19 @@ FN moveMark__ownership_effect(self: MoveMark) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN moveMark__child_exprs(self: MoveMark) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moveMark__ownership_source_exprs(self: MoveMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moveMark__owned_position_source_exprs(self: MoveMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN moveMark__body_slots(self: MoveMark) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN moveMark__without_try(self: MoveMark) RETURNS Emittable ->
@@ -5299,12 +5527,15 @@ FN deepCopy__stmt?(self: DeepCopy) RETURNS Bool ->
   RETURN FALSE;
 END
 FN deepCopy__ownership_source_exprs(self: DeepCopy) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN deepCopy__owned_position_source_exprs(self: DeepCopy) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN deepCopy__body_slots(self: DeepCopy) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN deepCopy__without_try(self: DeepCopy) RETURNS Emittable ->
@@ -5364,12 +5595,15 @@ FN containerInit__stmt?(self: ContainerInit) RETURNS Bool ->
   RETURN FALSE;
 END
 FN containerInit__ownership_source_exprs(self: ContainerInit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN containerInit__owned_position_source_exprs(self: ContainerInit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN containerInit__body_slots(self: ContainerInit) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN containerInit__without_try(self: ContainerInit) RETURNS Emittable ->
@@ -5440,9 +5674,11 @@ FN capWrap__stmt?(self: CapWrap) RETURNS Bool ->
   RETURN FALSE;
 END
 FN capWrap__owned_position_source_exprs(self: CapWrap) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN capWrap__body_slots(self: CapWrap) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN capWrap__without_try(self: CapWrap) RETURNS Emittable ->
@@ -5504,9 +5740,11 @@ FN sharePromote__stmt?(self: SharePromote) RETURNS Bool ->
   RETURN FALSE;
 END
 FN sharePromote__owned_position_source_exprs(self: SharePromote) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN sharePromote__body_slots(self: SharePromote) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN sharePromote__without_try(self: SharePromote) RETURNS Emittable ->
@@ -5562,12 +5800,15 @@ FN rcRetain__stmt?(self: RcRetain) RETURNS Bool ->
   RETURN FALSE;
 END
 FN rcRetain__ownership_source_exprs(self: RcRetain) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rcRetain__owned_position_source_exprs(self: RcRetain) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rcRetain__body_slots(self: RcRetain) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN rcRetain__without_try(self: RcRetain) RETURNS Emittable ->
@@ -5621,12 +5862,15 @@ FN comptimeCarrierPayload__ownership_effect(self: ComptimeCarrierPayload) RETURN
   RETURN ownershipEffect__none();
 END
 FN comptimeCarrierPayload__ownership_source_exprs(self: ComptimeCarrierPayload) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN comptimeCarrierPayload__owned_position_source_exprs(self: ComptimeCarrierPayload) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN comptimeCarrierPayload__body_slots(self: ComptimeCarrierPayload) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN comptimeCarrierPayload__without_try(self: ComptimeCarrierPayload) RETURNS Emittable ->
@@ -5682,12 +5926,15 @@ FN monomorphicKeep__stmt?(self: MonomorphicKeep) RETURNS Bool ->
   RETURN FALSE;
 END
 FN monomorphicKeep__ownership_source_exprs(self: MonomorphicKeep) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN monomorphicKeep__owned_position_source_exprs(self: MonomorphicKeep) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN monomorphicKeep__body_slots(self: MonomorphicKeep) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN monomorphicKeep__without_try(self: MonomorphicKeep) RETURNS Emittable ->
@@ -5744,12 +5991,15 @@ FN rcRelease__ownership_effect(self: RcRelease) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN rcRelease__ownership_source_exprs(self: RcRelease) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rcRelease__owned_position_source_exprs(self: RcRelease) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rcRelease__body_slots(self: RcRelease) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN rcRelease__without_try(self: RcRelease) RETURNS Emittable ->
@@ -5802,15 +6052,19 @@ FN rcDowngrade__stmt?(self: RcDowngrade) RETURNS Bool ->
   RETURN FALSE;
 END
 FN rcDowngrade__child_exprs(self: RcDowngrade) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rcDowngrade__ownership_source_exprs(self: RcDowngrade) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rcDowngrade__owned_position_source_exprs(self: RcDowngrade) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rcDowngrade__body_slots(self: RcDowngrade) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN rcDowngrade__without_try(self: RcDowngrade) RETURNS Emittable ->
@@ -5863,15 +6117,19 @@ FN weakUpgrade__stmt?(self: WeakUpgrade) RETURNS Bool ->
   RETURN FALSE;
 END
 FN weakUpgrade__child_exprs(self: WeakUpgrade) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN weakUpgrade__ownership_source_exprs(self: WeakUpgrade) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN weakUpgrade__owned_position_source_exprs(self: WeakUpgrade) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN weakUpgrade__body_slots(self: WeakUpgrade) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN weakUpgrade__without_try(self: WeakUpgrade) RETURNS Emittable ->
@@ -5922,15 +6180,19 @@ FN allocatorRef__ownership_effect(self: AllocatorRef) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN allocatorRef__child_exprs(self: AllocatorRef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN allocatorRef__ownership_source_exprs(self: AllocatorRef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN allocatorRef__owned_position_source_exprs(self: AllocatorRef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN allocatorRef__body_slots(self: AllocatorRef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN allocatorRef__without_try(self: AllocatorRef) RETURNS Emittable ->
@@ -5995,9 +6257,11 @@ FN freezeExpr__stmt?(self: FreezeExpr) RETURNS Bool ->
   RETURN FALSE;
 END
 FN freezeExpr__owned_position_source_exprs(self: FreezeExpr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN freezeExpr__body_slots(self: FreezeExpr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN freezeExpr__without_try(self: FreezeExpr) RETURNS Emittable ->
@@ -6060,9 +6324,11 @@ FN makeList__stmt?(self: MakeList) RETURNS Bool ->
   RETURN FALSE;
 END
 FN makeList__owned_position_source_exprs(self: MakeList) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN makeList__body_slots(self: MakeList) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN makeList__without_try(self: MakeList) RETURNS Emittable ->
@@ -6115,15 +6381,19 @@ FN frameSave__ownership_effect(self: FrameSave) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN frameSave__child_exprs(self: FrameSave) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN frameSave__ownership_source_exprs(self: FrameSave) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN frameSave__owned_position_source_exprs(self: FrameSave) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN frameSave__body_slots(self: FrameSave) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN frameSave__without_try(self: FrameSave) RETURNS Emittable ->
@@ -6176,15 +6446,19 @@ FN frameRestore__ownership_effect(self: FrameRestore) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN frameRestore__child_exprs(self: FrameRestore) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN frameRestore__ownership_source_exprs(self: FrameRestore) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN frameRestore__owned_position_source_exprs(self: FrameRestore) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN frameRestore__body_slots(self: FrameRestore) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN frameRestore__without_try(self: FrameRestore) RETURNS Emittable ->
@@ -6238,12 +6512,15 @@ FN capabilityUnwrap__ownership_effect(self: CapabilityUnwrap) RETURNS OwnershipE
   RETURN ownershipEffect__none();
 END
 FN capabilityUnwrap__ownership_source_exprs(self: CapabilityUnwrap) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN capabilityUnwrap__owned_position_source_exprs(self: CapabilityUnwrap) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN capabilityUnwrap__body_slots(self: CapabilityUnwrap) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN capabilityUnwrap__without_try(self: CapabilityUnwrap) RETURNS Emittable ->
@@ -6315,9 +6592,11 @@ FN snapshotRead__ownership_effect(self: SnapshotRead) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN snapshotRead__ownership_source_exprs(self: SnapshotRead) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN snapshotRead__owned_position_source_exprs(self: SnapshotRead) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN snapshotRead__without_try(self: SnapshotRead) RETURNS Emittable ->
@@ -6399,9 +6678,11 @@ FN snapshotTransaction__ownership_effect(self: SnapshotTransaction) RETURNS Owne
   RETURN ownershipEffect__none();
 END
 FN snapshotTransaction__ownership_source_exprs(self: SnapshotTransaction) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN snapshotTransaction__owned_position_source_exprs(self: SnapshotTransaction) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN snapshotTransaction__without_try(self: SnapshotTransaction) RETURNS Emittable ->
@@ -6481,9 +6762,11 @@ FN snapshotMultiTxn__ownership_effect(self: SnapshotMultiTxn) RETURNS OwnershipE
   RETURN ownershipEffect__none();
 END
 FN snapshotMultiTxn__ownership_source_exprs(self: SnapshotMultiTxn) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN snapshotMultiTxn__owned_position_source_exprs(self: SnapshotMultiTxn) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN snapshotMultiTxn__without_try(self: SnapshotMultiTxn) RETURNS Emittable ->
@@ -6552,9 +6835,11 @@ FN polymorphicMutate__ownership_effect(self: PolymorphicMutate) RETURNS Ownershi
   RETURN ownershipEffect__none();
 END
 FN polymorphicMutate__ownership_source_exprs(self: PolymorphicMutate) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN polymorphicMutate__owned_position_source_exprs(self: PolymorphicMutate) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN polymorphicMutate__without_try(self: PolymorphicMutate) RETURNS Emittable ->
@@ -6633,9 +6918,11 @@ FN polymorphicMutateFlow__ownership_effect(self: PolymorphicMutateFlow) RETURNS 
   RETURN ownershipEffect__none();
 END
 FN polymorphicMutateFlow__ownership_source_exprs(self: PolymorphicMutateFlow) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN polymorphicMutateFlow__owned_position_source_exprs(self: PolymorphicMutateFlow) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN polymorphicMutateFlow__without_try(self: PolymorphicMutateFlow) RETURNS Emittable ->
@@ -6689,12 +6976,15 @@ FN polymorphicFlowSignal__ownership_effect(self: PolymorphicFlowSignal) RETURNS 
   RETURN ownershipEffect__none();
 END
 FN polymorphicFlowSignal__ownership_source_exprs(self: PolymorphicFlowSignal) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN polymorphicFlowSignal__owned_position_source_exprs(self: PolymorphicFlowSignal) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN polymorphicFlowSignal__body_slots(self: PolymorphicFlowSignal) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN polymorphicFlowSignal__without_try(self: PolymorphicFlowSignal) RETURNS Emittable ->
@@ -6774,9 +7064,11 @@ FN withMatchDispatch__ownership_effect(self: WithMatchDispatch) RETURNS Ownershi
   RETURN ownershipEffect__none();
 END
 FN withMatchDispatch__ownership_source_exprs(self: WithMatchDispatch) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN withMatchDispatch__owned_position_source_exprs(self: WithMatchDispatch) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN withMatchDispatch__without_try(self: WithMatchDispatch) RETURNS Emittable ->
@@ -6844,15 +7136,19 @@ FN allocMark__ownership_effect(self: AllocMark) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN allocMark__child_exprs(self: AllocMark) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN allocMark__ownership_source_exprs(self: AllocMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN allocMark__owned_position_source_exprs(self: AllocMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN allocMark__body_slots(self: AllocMark) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN allocMark__without_try(self: AllocMark) RETURNS Emittable ->
@@ -6911,15 +7207,19 @@ FN ownedCreate__ownership_effect(self: OwnedCreate) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN ownedCreate__child_exprs(self: OwnedCreate) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedCreate__ownership_source_exprs(self: OwnedCreate) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedCreate__owned_position_source_exprs(self: OwnedCreate) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedCreate__body_slots(self: OwnedCreate) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ownedCreate__without_try(self: OwnedCreate) RETURNS Emittable ->
@@ -6977,15 +7277,19 @@ FN ownedDestroy__ownership_effect(self: OwnedDestroy) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN ownedDestroy__child_exprs(self: OwnedDestroy) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedDestroy__ownership_source_exprs(self: OwnedDestroy) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedDestroy__owned_position_source_exprs(self: OwnedDestroy) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedDestroy__body_slots(self: OwnedDestroy) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ownedDestroy__without_try(self: OwnedDestroy) RETURNS Emittable ->
@@ -7040,15 +7344,19 @@ FN ownedTransfer__ownership_effect(self: OwnedTransfer) RETURNS OwnershipEffect 
   RETURN ownershipEffect__none();
 END
 FN ownedTransfer__child_exprs(self: OwnedTransfer) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedTransfer__ownership_source_exprs(self: OwnedTransfer) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedTransfer__owned_position_source_exprs(self: OwnedTransfer) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedTransfer__body_slots(self: OwnedTransfer) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ownedTransfer__without_try(self: OwnedTransfer) RETURNS Emittable ->
@@ -7102,15 +7410,19 @@ FN ownedBorrow__ownership_effect(self: OwnedBorrow) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN ownedBorrow__child_exprs(self: OwnedBorrow) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedBorrow__ownership_source_exprs(self: OwnedBorrow) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedBorrow__owned_position_source_exprs(self: OwnedBorrow) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedBorrow__body_slots(self: OwnedBorrow) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ownedBorrow__without_try(self: OwnedBorrow) RETURNS Emittable ->
@@ -7169,15 +7481,19 @@ FN ownedStore__ownership_effect(self: OwnedStore) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN ownedStore__child_exprs(self: OwnedStore) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedStore__ownership_source_exprs(self: OwnedStore) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedStore__owned_position_source_exprs(self: OwnedStore) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedStore__body_slots(self: OwnedStore) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ownedStore__without_try(self: OwnedStore) RETURNS Emittable ->
@@ -7231,15 +7547,19 @@ FN ownedReturn__ownership_effect(self: OwnedReturn) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN ownedReturn__child_exprs(self: OwnedReturn) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedReturn__ownership_source_exprs(self: OwnedReturn) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedReturn__owned_position_source_exprs(self: OwnedReturn) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedReturn__body_slots(self: OwnedReturn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ownedReturn__without_try(self: OwnedReturn) RETURNS Emittable ->
@@ -7292,15 +7612,19 @@ FN returnMark__ownership_effect(self: ReturnMark) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN returnMark__child_exprs(self: ReturnMark) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN returnMark__ownership_source_exprs(self: ReturnMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN returnMark__owned_position_source_exprs(self: ReturnMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN returnMark__body_slots(self: ReturnMark) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN returnMark__without_try(self: ReturnMark) RETURNS Emittable ->
@@ -7358,15 +7682,19 @@ FN transferMark__ownership_effect(self: TransferMark) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN transferMark__child_exprs(self: TransferMark) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN transferMark__ownership_source_exprs(self: TransferMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN transferMark__owned_position_source_exprs(self: TransferMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN transferMark__body_slots(self: TransferMark) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN transferMark__without_try(self: TransferMark) RETURNS Emittable ->
@@ -7423,15 +7751,19 @@ FN reassignMark__ownership_effect(self: ReassignMark) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN reassignMark__child_exprs(self: ReassignMark) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN reassignMark__ownership_source_exprs(self: ReassignMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN reassignMark__owned_position_source_exprs(self: ReassignMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN reassignMark__body_slots(self: ReassignMark) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN reassignMark__without_try(self: ReassignMark) RETURNS Emittable ->
@@ -7489,15 +7821,19 @@ FN fieldCleanupMark__ownership_effect(self: FieldCleanupMark) RETURNS OwnershipE
   RETURN ownershipEffect__none();
 END
 FN fieldCleanupMark__child_exprs(self: FieldCleanupMark) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fieldCleanupMark__ownership_source_exprs(self: FieldCleanupMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fieldCleanupMark__owned_position_source_exprs(self: FieldCleanupMark) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fieldCleanupMark__body_slots(self: FieldCleanupMark) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fieldCleanupMark__without_try(self: FieldCleanupMark) RETURNS Emittable ->
@@ -7604,12 +7940,15 @@ FN call__stmt?(self: Call) RETURNS Bool ->
   RETURN FALSE;
 END
 FN call__ownership_source_exprs(self: Call) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN call__owned_position_source_exprs(self: Call) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN call__body_slots(self: Call) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN call__compact_child_exprs(self: Call, values: []Any) RETURNS ![]Emittable ->
@@ -7677,12 +8016,15 @@ FN runtimeCall__stmt?(self: RuntimeCall) RETURNS Bool ->
   RETURN FALSE;
 END
 FN runtimeCall__ownership_source_exprs(self: RuntimeCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN runtimeCall__owned_position_source_exprs(self: RuntimeCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN runtimeCall__body_slots(self: RuntimeCall) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN runtimeCall__without_try(self: RuntimeCall) RETURNS Emittable ->
@@ -7745,12 +8087,15 @@ FN tailCall__ownership_effect(self: TailCall) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN tailCall__ownership_source_exprs(self: TailCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN tailCall__owned_position_source_exprs(self: TailCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN tailCall__body_slots(self: TailCall) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN tailCall__without_try(self: TailCall) RETURNS Emittable ->
@@ -7868,12 +8213,15 @@ FN methodCall__stmt?(self: MIRMethodCall) RETURNS Bool ->
   RETURN FALSE;
 END
 FN methodCall__ownership_source_exprs(self: MIRMethodCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN methodCall__owned_position_source_exprs(self: MIRMethodCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN methodCall__body_slots(self: MIRMethodCall) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN methodCall__compact_child_exprs(self: MIRMethodCall, values: []Any) RETURNS ![]Emittable ->
@@ -7922,12 +8270,15 @@ FN fieldGet__ownership_effect(self: FieldGet) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN fieldGet__ownership_source_exprs(self: FieldGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fieldGet__owned_position_source_exprs(self: FieldGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fieldGet__body_slots(self: FieldGet) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fieldGet__without_try(self: FieldGet) RETURNS Emittable ->
@@ -7982,12 +8333,15 @@ FN unionPayloadGet__ownership_effect(self: UnionPayloadGet) RETURNS OwnershipEff
   RETURN ownershipEffect__none();
 END
 FN unionPayloadGet__ownership_source_exprs(self: UnionPayloadGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionPayloadGet__owned_position_source_exprs(self: UnionPayloadGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionPayloadGet__body_slots(self: UnionPayloadGet) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN unionPayloadGet__without_try(self: UnionPayloadGet) RETURNS Emittable ->
@@ -8042,12 +8396,15 @@ FN indexGet__ownership_effect(self: IndexGet) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN indexGet__ownership_source_exprs(self: IndexGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN indexGet__owned_position_source_exprs(self: IndexGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN indexGet__body_slots(self: IndexGet) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN indexGet__without_try(self: IndexGet) RETURNS Emittable ->
@@ -8104,12 +8461,15 @@ FN protocolCall__ownership_effect(self: ProtocolCall) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN protocolCall__ownership_source_exprs(self: ProtocolCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN protocolCall__owned_position_source_exprs(self: ProtocolCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN protocolCall__body_slots(self: ProtocolCall) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN protocolCall__without_try(self: ProtocolCall) RETURNS Emittable ->
@@ -8181,12 +8541,15 @@ FN binOp__ownership_effect(self: MIRBinOp) RETURNS OwnershipEffect EFFECTS REENT
   RETURN ownershipEffect__none();
 END
 FN binOp__ownership_source_exprs(self: MIRBinOp) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN binOp__owned_position_source_exprs(self: MIRBinOp) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN binOp__body_slots(self: MIRBinOp) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN binOp__without_try(self: MIRBinOp) RETURNS Emittable ->
@@ -8254,12 +8617,15 @@ FN unaryOp__ownership_effect(self: MIRUnaryOp) RETURNS OwnershipEffect EFFECTS R
   RETURN ownershipEffect__none();
 END
 FN unaryOp__ownership_source_exprs(self: MIRUnaryOp) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unaryOp__owned_position_source_exprs(self: MIRUnaryOp) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unaryOp__body_slots(self: MIRUnaryOp) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN unaryOp__without_try(self: MIRUnaryOp) RETURNS Emittable ->
@@ -8313,12 +8679,15 @@ FN fallibleOk__ownership_effect(self: FallibleOk) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN fallibleOk__ownership_source_exprs(self: FallibleOk) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fallibleOk__owned_position_source_exprs(self: FallibleOk) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fallibleOk__body_slots(self: FallibleOk) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fallibleOk__without_try(self: FallibleOk) RETURNS Emittable ->
@@ -8372,12 +8741,15 @@ FN futureReady__ownership_effect(self: FutureReady) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN futureReady__ownership_source_exprs(self: FutureReady) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN futureReady__owned_position_source_exprs(self: FutureReady) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN futureReady__body_slots(self: FutureReady) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN futureReady__without_try(self: FutureReady) RETURNS Emittable ->
@@ -8428,15 +8800,19 @@ FN lit__ownership_effect(self: Lit) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__none();
 END
 FN lit__child_exprs(self: Lit) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN lit__ownership_source_exprs(self: Lit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN lit__owned_position_source_exprs(self: Lit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN lit__body_slots(self: Lit) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN lit__without_try(self: Lit) RETURNS Emittable ->
@@ -8487,15 +8863,19 @@ FN symbolLit__ownership_effect(self: SymbolLit) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN symbolLit__child_exprs(self: SymbolLit) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN symbolLit__ownership_source_exprs(self: SymbolLit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN symbolLit__owned_position_source_exprs(self: SymbolLit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN symbolLit__body_slots(self: SymbolLit) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN symbolLit__without_try(self: SymbolLit) RETURNS Emittable ->
@@ -8545,15 +8925,19 @@ FN voidLiteral__ownership_effect(self: VoidLiteral) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN voidLiteral__child_exprs(self: VoidLiteral) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN voidLiteral__ownership_source_exprs(self: VoidLiteral) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN voidLiteral__owned_position_source_exprs(self: VoidLiteral) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN voidLiteral__body_slots(self: VoidLiteral) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN voidLiteral__without_try(self: VoidLiteral) RETURNS Emittable ->
@@ -8607,12 +8991,15 @@ FN enumOrdinal__ownership_effect(self: EnumOrdinal) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN enumOrdinal__ownership_source_exprs(self: EnumOrdinal) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN enumOrdinal__owned_position_source_exprs(self: EnumOrdinal) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN enumOrdinal__body_slots(self: EnumOrdinal) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN enumOrdinal__without_try(self: EnumOrdinal) RETURNS Emittable ->
@@ -8663,15 +9050,19 @@ FN ident__ownership_effect(self: Ident) RETURNS OwnershipEffect EFFECTS REENTRAN
   RETURN ownershipEffect__none();
 END
 FN ident__child_exprs(self: Ident) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ident__ownership_source_exprs(self: Ident) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ident__owned_position_source_exprs(self: Ident) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ident__body_slots(self: Ident) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ident__without_try(self: Ident) RETURNS Emittable ->
@@ -8729,12 +9120,15 @@ FN tupleLiteral__stmt?(self: TupleLiteral) RETURNS Bool ->
   RETURN FALSE;
 END
 FN tupleLiteral__ownership_source_exprs(self: TupleLiteral) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN tupleLiteral__owned_position_source_exprs(self: TupleLiteral) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN tupleLiteral__body_slots(self: TupleLiteral) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN tupleLiteral__without_try(self: TupleLiteral) RETURNS Emittable ->
@@ -8785,15 +9179,19 @@ FN fnRef__ownership_effect(self: FnRef) RETURNS OwnershipEffect EFFECTS REENTRAN
   RETURN ownershipEffect__none();
 END
 FN fnRef__child_exprs(self: FnRef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fnRef__ownership_source_exprs(self: FnRef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fnRef__owned_position_source_exprs(self: FnRef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN fnRef__body_slots(self: FnRef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN fnRef__without_try(self: FnRef) RETURNS Emittable ->
@@ -8849,12 +9247,15 @@ FN lockAcquire__ownership_effect(self: LockAcquire) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN lockAcquire__ownership_source_exprs(self: LockAcquire) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN lockAcquire__owned_position_source_exprs(self: LockAcquire) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN lockAcquire__body_slots(self: LockAcquire) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN lockAcquire__without_try(self: LockAcquire) RETURNS Emittable ->
@@ -8911,12 +9312,15 @@ FN typeOf__ownership_effect(self: TypeOf) RETURNS OwnershipEffect EFFECTS REENTR
   RETURN ownershipEffect__none();
 END
 FN typeOf__ownership_source_exprs(self: TypeOf) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeOf__owned_position_source_exprs(self: TypeOf) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeOf__body_slots(self: TypeOf) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN typeOf__without_try(self: TypeOf) RETURNS Emittable ->
@@ -8971,12 +9375,15 @@ FN typeEq__ownership_effect(self: TypeEq) RETURNS OwnershipEffect EFFECTS REENTR
   RETURN ownershipEffect__none();
 END
 FN typeEq__ownership_source_exprs(self: TypeEq) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeEq__owned_position_source_exprs(self: TypeEq) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeEq__body_slots(self: TypeEq) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN typeEq__without_try(self: TypeEq) RETURNS Emittable ->
@@ -9041,9 +9448,11 @@ FN structInit__stmt?(self: StructInit) RETURNS Bool ->
   RETURN FALSE;
 END
 FN structInit__owned_position_source_exprs(self: StructInit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN structInit__body_slots(self: StructInit) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN structInit__without_try(self: StructInit) RETURNS Emittable ->
@@ -9102,9 +9511,11 @@ FN arrayInit__ownership_effect(self: ArrayInit) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN arrayInit__owned_position_source_exprs(self: ArrayInit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN arrayInit__body_slots(self: ArrayInit) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN arrayInit__without_try(self: ArrayInit) RETURNS Emittable ->
@@ -9171,9 +9582,11 @@ FN arrayDefaultInit__stmt?(self: ArrayDefaultInit) RETURNS Bool ->
   RETURN FALSE;
 END
 FN arrayDefaultInit__owned_position_source_exprs(self: ArrayDefaultInit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN arrayDefaultInit__body_slots(self: ArrayDefaultInit) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN arrayDefaultInit__without_try(self: ArrayDefaultInit) RETURNS Emittable ->
@@ -9230,12 +9643,15 @@ FN sliceExpr__ownership_effect(self: SliceExpr) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN sliceExpr__ownership_source_exprs(self: SliceExpr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN sliceExpr__owned_position_source_exprs(self: SliceExpr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN sliceExpr__body_slots(self: SliceExpr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN sliceExpr__without_try(self: SliceExpr) RETURNS Emittable ->
@@ -9348,12 +9764,15 @@ FN blockExpr__stmt?(self: MIRBlockExpr) RETURNS Bool ->
   RETURN FALSE;
 END
 FN blockExpr__child_exprs(self: MIRBlockExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN blockExpr__ownership_source_exprs(self: MIRBlockExpr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN blockExpr__owned_position_source_exprs(self: MIRBlockExpr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN blockExpr__without_try(self: MIRBlockExpr) RETURNS Emittable ->
@@ -9412,12 +9831,15 @@ FN concatStr__stmt?(self: ConcatStr) RETURNS Bool ->
   RETURN FALSE;
 END
 FN concatStr__ownership_source_exprs(self: ConcatStr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN concatStr__owned_position_source_exprs(self: ConcatStr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN concatStr__body_slots(self: ConcatStr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN concatStr__without_try(self: ConcatStr) RETURNS Emittable ->
@@ -9501,6 +9923,7 @@ FN cast__stmt?(self: MIRCast) RETURNS Bool ->
   RETURN FALSE;
 END
 FN cast__body_slots(self: MIRCast) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN cast__explicit_ownership_contract(self: MIRCast) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
@@ -9560,6 +9983,7 @@ FN tryExpr__stmt?(self: TryExpr) RETURNS Bool ->
   RETURN FALSE;
 END
 FN tryExpr__body_slots(self: TryExpr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN tryExpr__without_try(self: TryExpr) RETURNS Emittable ->
@@ -9637,6 +10061,7 @@ PRIVATE FN tryCatch__stmt?(self: TryCatch) RETURNS Bool ->
   RETURN FALSE;
 END
 PRIVATE FN tryCatch__body_slots(self: TryCatch) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 PRIVATE FN tryCatch__without_try(self: TryCatch) RETURNS Emittable ->
@@ -9710,6 +10135,7 @@ FN orelse__stmt?(self: Orelse) RETURNS Bool ->
   RETURN FALSE;
 END
 FN orelse__body_slots(self: Orelse) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN orelse__without_try(self: Orelse) RETURNS Emittable ->
@@ -9771,6 +10197,7 @@ FN conditional__ownership_effect(self: Conditional) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN conditional__body_slots(self: Conditional) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN conditional__without_try(self: Conditional) RETURNS Emittable ->
@@ -9843,6 +10270,7 @@ FN ifOptional__stmt?(self: IfOptional) RETURNS Bool ->
   RETURN FALSE;
 END
 FN ifOptional__body_slots(self: IfOptional) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ifOptional__without_try(self: IfOptional) RETURNS Emittable ->
@@ -9905,6 +10333,7 @@ FN comptime__ownership_effect(self: Comptime) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN comptime__body_slots(self: Comptime) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN comptime__without_try(self: Comptime) RETURNS Emittable ->
@@ -9960,12 +10389,15 @@ FN unionVariantGet__ownership_effect(self: UnionVariantGet) RETURNS OwnershipEff
   RETURN ownershipEffect__none();
 END
 FN unionVariantGet__ownership_source_exprs(self: UnionVariantGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionVariantGet__owned_position_source_exprs(self: UnionVariantGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN unionVariantGet__body_slots(self: UnionVariantGet) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN unionVariantGet__without_try(self: UnionVariantGet) RETURNS Emittable ->
@@ -10019,12 +10451,15 @@ FN listItems__ownership_effect(self: ListItems) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN listItems__ownership_source_exprs(self: ListItems) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN listItems__owned_position_source_exprs(self: ListItems) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN listItems__body_slots(self: ListItems) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN listItems__without_try(self: ListItems) RETURNS Emittable ->
@@ -10081,12 +10516,15 @@ FN listLength__ownership_effect(self: ListLength) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN listLength__ownership_source_exprs(self: ListLength) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN listLength__owned_position_source_exprs(self: ListLength) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN listLength__body_slots(self: ListLength) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN listLength__without_try(self: ListLength) RETURNS Emittable ->
@@ -10143,12 +10581,15 @@ FN addressOf__ownership_effect(self: AddressOf) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN addressOf__ownership_source_exprs(self: AddressOf) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN addressOf__owned_position_source_exprs(self: AddressOf) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN addressOf__body_slots(self: AddressOf) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN addressOf__without_try(self: AddressOf) RETURNS Emittable ->
@@ -10205,12 +10646,15 @@ FN deref__ownership_effect(self: Deref) RETURNS OwnershipEffect EFFECTS REENTRAN
   RETURN ownershipEffect__none();
 END
 FN deref__ownership_source_exprs(self: Deref) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN deref__owned_position_source_exprs(self: Deref) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN deref__body_slots(self: Deref) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN deref__without_try(self: Deref) RETURNS Emittable ->
@@ -10268,12 +10712,15 @@ FN pointerCast__ownership_effect(self: PointerCast) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN pointerCast__ownership_source_exprs(self: PointerCast) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN pointerCast__owned_position_source_exprs(self: PointerCast) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN pointerCast__body_slots(self: PointerCast) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN pointerCast__without_try(self: PointerCast) RETURNS Emittable ->
@@ -10330,12 +10777,15 @@ FN constCast__ownership_effect(self: ConstCast) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN constCast__ownership_source_exprs(self: ConstCast) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN constCast__owned_position_source_exprs(self: ConstCast) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN constCast__body_slots(self: ConstCast) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN constCast__without_try(self: ConstCast) RETURNS Emittable ->
@@ -10389,12 +10839,15 @@ FN defaultStreamCapacity__ownership_effect(self: DefaultStreamCapacity) RETURNS 
   RETURN ownershipEffect__none();
 END
 FN defaultStreamCapacity__ownership_source_exprs(self: DefaultStreamCapacity) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN defaultStreamCapacity__owned_position_source_exprs(self: DefaultStreamCapacity) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN defaultStreamCapacity__body_slots(self: DefaultStreamCapacity) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN defaultStreamCapacity__without_try(self: DefaultStreamCapacity) RETURNS Emittable ->
@@ -10445,15 +10898,19 @@ FN undef__ownership_effect(self: Undef) RETURNS OwnershipEffect EFFECTS REENTRAN
   RETURN ownershipEffect__none();
 END
 FN undef__child_exprs(self: Undef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN undef__ownership_source_exprs(self: Undef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN undef__owned_position_source_exprs(self: Undef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN undef__body_slots(self: Undef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN undef__without_try(self: Undef) RETURNS Emittable ->
@@ -10505,15 +10962,19 @@ FN typeSentinel__ownership_effect(self: TypeSentinel) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN typeSentinel__child_exprs(self: TypeSentinel) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeSentinel__ownership_source_exprs(self: TypeSentinel) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeSentinel__owned_position_source_exprs(self: TypeSentinel) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN typeSentinel__body_slots(self: TypeSentinel) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN typeSentinel__without_try(self: TypeSentinel) RETURNS Emittable ->
@@ -10566,15 +11027,19 @@ FN iterRange__ownership_effect(self: IterRange) RETURNS OwnershipEffect EFFECTS 
   RETURN ownershipEffect__none();
 END
 FN iterRange__child_exprs(self: IterRange) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN iterRange__ownership_source_exprs(self: IterRange) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN iterRange__owned_position_source_exprs(self: IterRange) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN iterRange__body_slots(self: IterRange) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN iterRange__without_try(self: IterRange) RETURNS Emittable ->
@@ -10647,6 +11112,7 @@ FN optionalUnwrap__stmt?(self: MIROptionalUnwrap) RETURNS Bool ->
   RETURN FALSE;
 END
 FN optionalUnwrap__body_slots(self: MIROptionalUnwrap) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN optionalUnwrap__without_try(self: MIROptionalUnwrap) RETURNS Emittable ->
@@ -10709,6 +11175,7 @@ FN tryOptional__stmt?(self: TryOptional) RETURNS Bool ->
   RETURN FALSE;
 END
 FN tryOptional__body_slots(self: TryOptional) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN tryOptional__without_try(self: TryOptional) RETURNS Emittable ->
@@ -10765,9 +11232,11 @@ FN foreignOwnedUnwrap__ownership_effect(self: ForeignOwnedUnwrap) RETURNS Owners
   RETURN ownershipEffect__none();
 END
 FN foreignOwnedUnwrap__owned_position_source_exprs(self: ForeignOwnedUnwrap) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN foreignOwnedUnwrap__body_slots(self: ForeignOwnedUnwrap) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN foreignOwnedUnwrap__without_try(self: ForeignOwnedUnwrap) RETURNS Emittable ->
@@ -10822,12 +11291,15 @@ FN foreignSliceView__ownership_effect(self: ForeignSliceView) RETURNS OwnershipE
   RETURN ownershipEffect__none();
 END
 FN foreignSliceView__ownership_source_exprs(self: ForeignSliceView) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN foreignSliceView__owned_position_source_exprs(self: ForeignSliceView) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN foreignSliceView__body_slots(self: ForeignSliceView) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN foreignSliceView__without_try(self: ForeignSliceView) RETURNS Emittable ->
@@ -10912,12 +11384,15 @@ FN rangeLit__stmt?(self: MIRRangeLit) RETURNS Bool ->
   RETURN FALSE;
 END
 FN rangeLit__ownership_source_exprs(self: MIRRangeLit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rangeLit__owned_position_source_exprs(self: MIRRangeLit) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN rangeLit__body_slots(self: MIRRangeLit) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN rangeLit__without_try(self: MIRRangeLit) RETURNS Emittable ->
@@ -10975,12 +11450,15 @@ FN hasField__ownership_effect(self: HasField) RETURNS OwnershipEffect EFFECTS RE
   RETURN ownershipEffect__none();
 END
 FN hasField__ownership_source_exprs(self: HasField) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN hasField__owned_position_source_exprs(self: HasField) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN hasField__body_slots(self: HasField) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN hasField__without_try(self: HasField) RETURNS Emittable ->
@@ -11041,9 +11519,11 @@ FN itemsAccess__ownership_effect(self: ItemsAccess) RETURNS OwnershipEffect EFFE
   RETURN ownershipEffect__none();
 END
 FN itemsAccess__owned_position_source_exprs(self: ItemsAccess) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN itemsAccess__body_slots(self: ItemsAccess) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN itemsAccess__without_try(self: ItemsAccess) RETURNS Emittable ->
@@ -11107,9 +11587,11 @@ FN ownedSlice__stmt?(self: OwnedSlice) RETURNS Bool ->
   RETURN FALSE;
 END
 FN ownedSlice__owned_position_source_exprs(self: OwnedSlice) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN ownedSlice__body_slots(self: OwnedSlice) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN ownedSlice__without_try(self: OwnedSlice) RETURNS Emittable ->
@@ -11161,15 +11643,19 @@ FN lambdaExpr__ownership_effect(self: LambdaExpr) RETURNS OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 FN lambdaExpr__child_exprs(self: LambdaExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN lambdaExpr__ownership_source_exprs(self: LambdaExpr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN lambdaExpr__owned_position_source_exprs(self: LambdaExpr) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN lambdaExpr__body_slots(self: LambdaExpr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN lambdaExpr__without_try(self: LambdaExpr) RETURNS Emittable ->
@@ -11236,6 +11722,7 @@ FN pipeline__mir?(self: Pipeline) RETURNS Bool ->
   RETURN TRUE;
 END
 FN pipeline__body_slots(self: Pipeline) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN pipeline__without_try(self: Pipeline) RETURNS Emittable ->
@@ -11316,12 +11803,15 @@ FN inlineBc__stmt?(self: InlineBc) RETURNS Bool ->
   RETURN FALSE;
 END
 FN inlineBc__ownership_source_exprs(self: InlineBc) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN inlineBc__owned_position_source_exprs(self: InlineBc) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN inlineBc__body_slots(self: InlineBc) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN inlineBc__explicit_ownership_contract(self: InlineBc) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
@@ -11380,12 +11870,15 @@ FN orElseExitBcRewrite__ownership_effect(self: OrElseExitBcRewrite) RETURNS Owne
   RETURN ownershipEffect__none();
 END
 FN orElseExitBcRewrite__ownership_source_exprs(self: OrElseExitBcRewrite) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN orElseExitBcRewrite__owned_position_source_exprs(self: OrElseExitBcRewrite) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN orElseExitBcRewrite__body_slots(self: OrElseExitBcRewrite) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN orElseExitBcRewrite__without_try(self: OrElseExitBcRewrite) RETURNS Emittable ->
@@ -11470,12 +11963,15 @@ FN shardedMapPut__mir?(self: ShardedMapPut) RETURNS Bool ->
   RETURN TRUE;
 END
 FN shardedMapPut__ownership_source_exprs(self: ShardedMapPut) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN shardedMapPut__owned_position_source_exprs(self: ShardedMapPut) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN shardedMapPut__body_slots(self: ShardedMapPut) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN shardedMapPut__without_try(self: ShardedMapPut) RETURNS Emittable ->
@@ -11538,12 +12034,15 @@ FN shardedMapGet__ownership_effect(self: ShardedMapGet) RETURNS OwnershipEffect 
   RETURN ownershipEffect__none();
 END
 FN shardedMapGet__ownership_source_exprs(self: ShardedMapGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN shardedMapGet__owned_position_source_exprs(self: ShardedMapGet) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN shardedMapGet__body_slots(self: ShardedMapGet) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN shardedMapGet__without_try(self: ShardedMapGet) RETURNS Emittable ->
@@ -11578,8 +12077,6 @@ END
 FN shardedMapGet__expr?(self: ShardedMapGet) RETURNS Bool ->
   RETURN TRUE;
 END
-legacy_ownership_node_types: []@multiowned Any = [ReassignCleanup, FieldCleanup, ReassignPlan];
-ownership_significant_node_types: []@multiowned Any = ([OwnedCreate, OwnedDestroy, OwnedTransfer, OwnedBorrow, OwnedStore, OwnedReturn, AllocMark, Cleanup, ErrCleanup, TransferMark, MoveMark, ReassignMark, FieldCleanupMark, ReassignWithCleanup] + legacy_ownership_node_types + [ReturnMark, DiscardOwned, RegistryCall, IndexedStore, ExternTrampoline, ObservableConsumerSpawn, Call, TailCall, MIRMethodCall, HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr, DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain, RcRelease, ComptimeCarrierPayload, MonomorphicKeep, RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice, NextPromiseList, IndexInsert, BatchWindowPush, BatchWindowFlush, SnapshotTransaction, SnapshotMultiTxn, ShardedMapPut, ShardedMapGet]);
 FN mIR__const_u8_literal_cast?(node: ?Emittable) RETURNS Bool ->
   IF node? IS_A MIRCast AS mir_cast THEN
     RETURN !(!(((((mir_cast.method == :as) AND (mir_cast.target_type == "[]const u8")) AND cast__expr(mir_cast) IS_A Lit))));
@@ -12178,7 +12675,7 @@ FN mIR__surface_nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   });
   RETURN out;
 END
-FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emittable) -> Bool = NIL, blk: FN(Emittable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emittable) -> Bool = NIL, blk: FN(Emittable) -> Void) RETURNS !Void EFFECTS REENTRANT ->
   IF root EXISTS AS root_value THEN
     IF root_value IS_A []Emittable AS array THEN
       FOR _ IN array DO
@@ -12216,7 +12713,7 @@ FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emi
     RETURN;
   END
 END
-FN mIR__each_surface_node_inner(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+FN mIR__each_surface_node_inner(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void EFFECTS REENTRANT ->
   IF root EXISTS AS root_value THEN
     IF root_value IS_A []Emittable AS array THEN
       FOR _ IN array DO
@@ -12464,6 +12961,7 @@ FN program__child_exprs(self: MIRProgram) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE empty_child_exprs: []Emittable = [];
     RETURN empty_child_exprs;
 }
 END
@@ -12471,6 +12969,7 @@ FN program__ownership_source_exprs(self: MIRProgram) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE empty_child_exprs: []Emittable = [];
     RETURN empty_child_exprs;
 }
 END
@@ -12478,6 +12977,7 @@ FN program__owned_position_source_exprs(self: MIRProgram) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE empty_child_exprs: []Emittable = [];
     RETURN empty_child_exprs;
 }
 END
@@ -12485,6 +12985,7 @@ FN program__body_slots(self: MIRProgram) RETURNS ![]MIRBodySlot
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE empty_body_slots: []MIRBodySlot = [];
     RETURN empty_body_slots;
 }
 END
@@ -12580,15 +13081,19 @@ FN protocolAdapterDef__ownership_effect(self: ProtocolAdapterDef) RETURNS Owners
   RETURN ownershipEffect__none();
 END
 FN protocolAdapterDef__child_exprs(self: ProtocolAdapterDef) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN protocolAdapterDef__ownership_source_exprs(self: ProtocolAdapterDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN protocolAdapterDef__owned_position_source_exprs(self: ProtocolAdapterDef) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN protocolAdapterDef__body_slots(self: ProtocolAdapterDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN protocolAdapterDef__without_try(self: ProtocolAdapterDef) RETURNS Emittable ->
@@ -12746,15 +13251,19 @@ FN thunkTrampoline__ownership_effect(self: ThunkTrampoline) RETURNS OwnershipEff
   RETURN ownershipEffect__none();
 END
 FN thunkTrampoline__child_exprs(self: ThunkTrampoline) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN thunkTrampoline__ownership_source_exprs(self: ThunkTrampoline) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN thunkTrampoline__owned_position_source_exprs(self: ThunkTrampoline) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN thunkTrampoline__body_slots(self: ThunkTrampoline) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN thunkTrampoline__without_try(self: ThunkTrampoline) RETURNS Emittable ->
@@ -12813,15 +13322,19 @@ FN mutualThunkTrampoline__ownership_effect(self: MutualThunkTrampoline) RETURNS 
   RETURN ownershipEffect__none();
 END
 FN mutualThunkTrampoline__child_exprs(self: MutualThunkTrampoline) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN mutualThunkTrampoline__ownership_source_exprs(self: MutualThunkTrampoline) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN mutualThunkTrampoline__owned_position_source_exprs(self: MutualThunkTrampoline) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN mutualThunkTrampoline__body_slots(self: MutualThunkTrampoline) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN mutualThunkTrampoline__without_try(self: MutualThunkTrampoline) RETURNS Emittable ->
@@ -13062,9 +13575,11 @@ FN directTenseMap__stmt?(self: DirectTenseMap) RETURNS Bool ->
   RETURN FALSE;
 END
 FN directTenseMap__ownership_source_exprs(self: DirectTenseMap) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN directTenseMap__body_slots(self: DirectTenseMap) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN directTenseMap__without_try(self: DirectTenseMap) RETURNS Emittable ->
@@ -13122,9 +13637,11 @@ FN asyncPayloadTake__stmt?(self: AsyncPayloadTake) RETURNS Bool ->
   RETURN FALSE;
 END
 FN asyncPayloadTake__ownership_source_exprs(self: AsyncPayloadTake) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN asyncPayloadTake__body_slots(self: AsyncPayloadTake) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN asyncPayloadTake__without_try(self: AsyncPayloadTake) RETURNS Emittable ->
@@ -13281,9 +13798,11 @@ FN failureAction__ownership_effect(self: FailureAction) RETURNS OwnershipEffect 
   RETURN ownershipEffect__none();
 END
 FN failureAction__ownership_source_exprs(self: FailureAction) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN failureAction__owned_position_source_exprs(self: FailureAction) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN failureAction__without_try(self: FailureAction) RETURNS Emittable ->
@@ -13419,15 +13938,19 @@ FN defaultValue__ownership_effect(self: DefaultValue) RETURNS OwnershipEffect EF
   RETURN ownershipEffect__none();
 END
 FN defaultValue__child_exprs(self: DefaultValue) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN defaultValue__ownership_source_exprs(self: DefaultValue) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN defaultValue__owned_position_source_exprs(self: DefaultValue) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN defaultValue__body_slots(self: DefaultValue) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN defaultValue__without_try(self: DefaultValue) RETURNS Emittable ->
@@ -13478,15 +14001,19 @@ FN enumTag__ownership_effect(self: EnumTag) RETURNS OwnershipEffect EFFECTS REEN
   RETURN ownershipEffect__none();
 END
 FN enumTag__child_exprs(self: EnumTag) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN enumTag__ownership_source_exprs(self: EnumTag) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN enumTag__owned_position_source_exprs(self: EnumTag) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN enumTag__body_slots(self: EnumTag) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN enumTag__without_try(self: EnumTag) RETURNS Emittable ->
@@ -13549,12 +14076,15 @@ FN nextPromiseList__stmt?(self: NextPromiseList) RETURNS Bool ->
   RETURN FALSE;
 END
 FN nextPromiseList__ownership_source_exprs(self: NextPromiseList) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN nextPromiseList__owned_position_source_exprs(self: NextPromiseList) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN nextPromiseList__body_slots(self: NextPromiseList) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN nextPromiseList__without_try(self: NextPromiseList) RETURNS Emittable ->
@@ -13668,12 +14198,15 @@ FN registryCall__stmt?(self: RegistryCall) RETURNS Bool ->
   RETURN FALSE;
 END
 FN registryCall__ownership_source_exprs(self: RegistryCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN registryCall__owned_position_source_exprs(self: RegistryCall) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN registryCall__body_slots(self: RegistryCall) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN registryCall__compact_child_exprs(self: RegistryCall, values: []Any) RETURNS ![]Emittable ->
@@ -13762,12 +14295,15 @@ FN indexedStore__stmt?(self: IndexedStore) RETURNS Bool ->
   RETURN FALSE;
 END
 FN indexedStore__ownership_source_exprs(self: IndexedStore) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN indexedStore__owned_position_source_exprs(self: IndexedStore) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN indexedStore__body_slots(self: IndexedStore) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN indexedStore__without_try(self: IndexedStore) RETURNS Emittable ->
@@ -13824,12 +14360,15 @@ FN cFunctionAdapter__ownership_effect(self: CFunctionAdapter) RETURNS OwnershipE
   RETURN ownershipEffect__none();
 END
 FN cFunctionAdapter__ownership_source_exprs(self: CFunctionAdapter) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cFunctionAdapter__owned_position_source_exprs(self: CFunctionAdapter) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN cFunctionAdapter__body_slots(self: CFunctionAdapter) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN cFunctionAdapter__without_try(self: CFunctionAdapter) RETURNS Emittable ->
@@ -13912,12 +14451,15 @@ FN externTrampoline__stmt?(self: ExternTrampoline) RETURNS Bool ->
   RETURN FALSE;
 END
 FN externTrampoline__ownership_source_exprs(self: ExternTrampoline) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN externTrampoline__owned_position_source_exprs(self: ExternTrampoline) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN externTrampoline__body_slots(self: ExternTrampoline) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 FN externTrampoline__without_try(self: ExternTrampoline) RETURNS Emittable ->
@@ -13985,12 +14527,15 @@ FN observableConsumerSpawn__ownership_effect(self: ObservableConsumerSpawn) RETU
   RETURN ownershipEffect__none();
 END
 FN observableConsumerSpawn__child_exprs(self: ObservableConsumerSpawn) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN observableConsumerSpawn__ownership_source_exprs(self: ObservableConsumerSpawn) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN observableConsumerSpawn__owned_position_source_exprs(self: ObservableConsumerSpawn) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN observableConsumerSpawn__without_try(self: ObservableConsumerSpawn) RETURNS Emittable ->
@@ -14073,9 +14618,11 @@ FN shardConcurrentEach__ownership_effect(self: ShardConcurrentEach) RETURNS Owne
   RETURN ownershipEffect__none();
 END
 FN shardConcurrentEach__ownership_source_exprs(self: ShardConcurrentEach) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN shardConcurrentEach__owned_position_source_exprs(self: ShardConcurrentEach) RETURNS ![]Emittable ->
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
 FN shardConcurrentEach__without_try(self: ShardConcurrentEach) RETURNS Emittable ->
@@ -15020,6 +15567,7 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
     MUTABLE receiver = COPY payload;
     RETURN TRY (shardedMapGet__body_slots(receiver));
   END
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
   RETURN empty_body_slots;
 END
 
@@ -16033,5 +16581,6 @@ FN emittable__child_exprs(value: Emittable) RETURNS ![]Emittable EFFECTS REENTRA
   IF value IS_A ShardedMapGet AS payload THEN
     RETURN TRY (shardedMapGet__child_exprs(payload));
   END
+  MUTABLE empty_child_exprs: []Emittable = [];
   RETURN empty_child_exprs;
 END
