@@ -6765,6 +6765,15 @@ end
       string_embeddable_code(code, inferred_clear_type(expression))
     end
 
+    # `x?` -> `UNWRAP (x)`: same unwrap, but one a method call can be applied to.
+    def unwrapped_receiver_code(code)
+      text = code.to_s.strip
+      inner = text.sub(/\A\((.*)\)\z/m, '\\1').strip
+      return method_receiver_code(text) unless inner.end_with?("?")
+
+      "UNWRAP (#{inner.delete_suffix('?')})"
+    end
+
     def string_embeddable_code(code, source_type)
       cast = union_payload_cast_code(code, source_type, "String")
       return cast if cast
@@ -6773,11 +6782,12 @@ end
         return "(IF #{code} THEN \"true\" ELSE \"false\" END)"
       end
       if source_type.to_s.match?(/\A(?:U?Int\d*|Byte\d*|Float\d*)\z/)
-        # `x?` is CLEAR's postfix unwrap, but `x?.m()` reads as SAFE NAVIGATION
-        # and hands back an optional -- which the interpolation then rejects
-        # ("$+ requires String operands, got ?String"). Parenthesize so the
-        # call applies to the unwrapped value.
-        return "#{method_receiver_code(code)}.toString()"
+        # `x?` is CLEAR's postfix unwrap, but a call on it -- even
+        # parenthesized as `(x?).m()` -- still types as SAFE NAVIGATION and
+        # hands back an optional, which the interpolation rejects ("$+
+        # requires String operands, got ?String"). UNWRAP binds to the
+        # parenthesized operand and leaves a definite value to call.
+        return "#{unwrapped_receiver_code(code)}.toString()"
       end
 
       code
