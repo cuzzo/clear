@@ -397,8 +397,8 @@ PUB FN ownershipDataflow__state_from_names(state: {String}OwnerEntry) RETURNS !{
   RETURN entries;
 END
 PUB FN ownershipDataflow__place_for_binding_node(name: String, node: Node) RETURNS PlaceId ->
-  MUTABLE sym = IF respondsTo?(node, "symbol") THEN
-    node.symbol()
+  MUTABLE sym = IF TRUE THEN
+    aST__node__symbol(node)
   ELSE
     NIL
   END;
@@ -1874,8 +1874,8 @@ PUB FN loopFrameAnalysis__expression_allocates_frame_value?(MUTABLE node: Locata
     END
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF respondsTo?(node, "matched_signature") THEN
-    sig_branch_value = functionSignature__unwrap(node.matched_signature());
+  IF TRUE THEN
+    sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(node));
   ELSE
     sig_branch_value = NIL;
   END
@@ -1907,8 +1907,8 @@ PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_n
     RETURN FALSE;
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF respondsTo?(node, "matched_signature") THEN
-    sig_branch_value = functionSignature__unwrap(node.matched_signature());
+  IF TRUE THEN
+    sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(node));
   ELSE
     sig_branch_value = NIL;
   END
@@ -1942,7 +1942,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !(node IS_A MethodCall) THEN
       RETURN;
   END
-  MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature());
+  MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(aST__node__matched_signature(node));
   IF !(sig) THEN
       RETURN;
   END

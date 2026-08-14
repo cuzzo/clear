@@ -14,7 +14,7 @@ PUB FN mIRHoistFacts__container_borrow_expr?(ast_node: ?Locatable) RETURNS Bool 
     IF (IF ast_node_value IS_A BinaryOp AS binary_op THEN (((binary_op.op == symbol("OR")) OR (binary_op.op == symbol("OR_ELSE")))) ELSE FALSE END) THEN
       RETURN mIRHoistFacts__container_borrow_expr?(ast_node_value.left());
     END
-    RETURN (respondsTo?(ast_node_value, "container_borrow") AND (ast_node_value.container_borrow() == TRUE));
+    RETURN (TRUE AND (aST__node__container_borrow(ast_node_value) == TRUE));
   ELSE
     RETURN FALSE;
   END
@@ -381,10 +381,10 @@ PRIVATE FN hoist__empty_list_literal?(node: ?Locatable) RETURNS Bool ->
   RETURN (IF node? IS_A ListLit AS list_lit THEN list_lit.items.empty?() ELSE FALSE END);
 END
 PRIVATE FN hoist__callee_param_type(call: Locatable, idx: Int64) RETURNS !?Type ->
-  IF !(respondsTo?(call, "matched_signature")) THEN
+  IF !(TRUE) THEN
     RETURN NIL;
   END
-  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(call.matched_signature());
+  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(aST__node__matched_signature(call));
   IF signature != NIL THEN
   IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = (signature?);
   TRY (functionSignature__params(rtoc_local_receiver_9)) } != NIL THEN
@@ -426,8 +426,8 @@ PRIVATE FN hoist__concat?(node: ?Locatable) RETURNS Bool ->
   RETURN (((node != NIL) AND (node IS_A StringConcat)) OR ((IF node? IS_A BinaryOp AS binary_op THEN !(!(binary_op.string_concat)) ELSE FALSE END)));
 END
 PRIVATE FN hoist__make_temp_mut(concat: Locatable, MUTABLE hoists: []VarDecl, name: String, moved: Bool = TRUE, expected_type: ?TypeTypeInput = NIL, schema_lookup: ?Any = NIL) RETURNS !Identifier ->
-  MUTABLE tok = IF respondsTo?(concat, "token") THEN
-    concat.token()
+  MUTABLE tok = IF TRUE THEN
+    aST__node__token(concat)
   ELSE
     NIL
   END;
@@ -443,7 +443,7 @@ PRIVATE FN hoist__make_temp_mut(concat: Locatable, MUTABLE hoists: []VarDecl, na
   END;
   MUTABLE storage =   IF TRY (hoist__owned_fallback_temp?(concat, schema_lookup)) THEN
     :heap
-  ELSE_IF (hoist__ast_borrow_expr?(concat, moved) OR ((respondsTo?(concat, "container_borrow") AND concat.container_borrow()))) THEN
+  ELSE_IF (hoist__ast_borrow_expr?(concat, moved) OR ((TRUE AND aST__node__container_borrow(concat)))) THEN
     :borrow
   ELSE_IF (moved AND TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup))) THEN
     :heap

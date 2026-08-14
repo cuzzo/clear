@@ -448,8 +448,8 @@ PRIVATE FN capabilityAuditSession__diagnostic_token(self: CapabilityAuditSession
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token = IF respondsTo?(node_or_token, "token") THEN
-      node_or_token.token()
+    MUTABLE token = IF TRUE THEN
+      aST__node__token(node_or_token)
     ELSE
       node_or_token
     END;
@@ -778,10 +778,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END))?).reg;
         END
         src = capabilityAuditSession__source_code(rtoc_self_view);
-        IF (((decl != NIL) AND decl.token()) AND (src != NIL)) THEN
-          MUTABLE dline = decl.token().line();
+        IF (((decl != NIL) AND aST__node__token(decl)) AND (src != NIL)) THEN
+          MUTABLE dline = aST__node__token(decl).line();
           MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
-          MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (decl.token().column() - 1));
+          MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column() - 1));
           IF semi_idx EXISTS AS semi_idx_value THEN
             MUTABLE insert_col = (semi_idx_value + 1);
             FOR _ IN candidate_caps DO
@@ -1450,8 +1450,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
-      MUTABLE token = IF respondsTo?(decl, "token") THEN
-        decl.token()
+      MUTABLE token = IF TRUE THEN
+        aST__node__token(decl)
       ELSE
         NIL
       END;
@@ -1619,13 +1619,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END))?).reg;
     END
-    IF !((((decl != NIL) AND respondsTo?(decl, "token")) AND decl.token())) THEN
+    IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = decl.token().line();
+      MUTABLE dline = aST__node__token(decl).line();
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
-      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (decl.token().column() - 1));
+      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column() - 1));
       IF semi_idx EXISTS AS semi_idx_value THEN
         IF line_text.contains?(sigil) THEN
           RETURN NIL;
@@ -1659,11 +1659,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END))?).reg;
     END
-    IF !((((decl != NIL) AND respondsTo?(decl, "token")) AND decl.token())) THEN
+    IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = decl.token().line();
+      MUTABLE dline = aST__node__token(decl).line();
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE idx: ?Int64 = line_text.indexOf(old_sigil);
       IF idx EXISTS AS idx_value THEN
@@ -1704,8 +1704,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF info EXISTS AS info_value THEN
       MUTABLE tok = NIL;
       MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
-      IF ((decl != NIL) AND decl.token()) THEN
-        tok = decl.token();
+      IF ((decl != NIL) AND aST__node__token(decl)) THEN
+        tok = aST__node__token(decl);
       ELSE_IF (symbolEntry__is_param(info_value) AND (KEEP info_value.param_decl_token != NIL)) THEN
         tok = COPY KEEP info_value.param_decl_token;
       END

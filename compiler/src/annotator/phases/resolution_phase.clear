@@ -218,7 +218,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       sources = [CAST(lifetime AS Any)];
     END
-    MUTABLE paths = sources |> SELECT:? (IF !(respondsTo?(_, "token")) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE path = TRY (scope__get_path_to_root(rtoc_self_view.root_scope, CAST(_ AS Locatable))); (IF !((path.length() == 0)) THEN
+    MUTABLE paths = sources |> SELECT:? (IF !(TRUE) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE path = TRY (scope__get_path_to_root(rtoc_self_view.root_scope, CAST(_ AS Locatable))); (IF !((path.length() == 0)) THEN
       path.join(".")
     ELSE
       NIL
@@ -501,8 +501,8 @@ PRIVATE FN resolutionSession__diagnostic_token(self: ResolutionSession, node_or_
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token = IF respondsTo?(node_or_token, "token") THEN
-      node_or_token.token()
+    MUTABLE token = IF TRUE THEN
+      aST__node__token(node_or_token)
     ELSE
       node_or_token
     END;
