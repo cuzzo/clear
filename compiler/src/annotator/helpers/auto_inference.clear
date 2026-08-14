@@ -33,16 +33,16 @@ PUB FN autoSlotId__return(fn_name: String) RETURNS AutoSlotId@multiowned ->
   RETURN autoSlotId__new(:return, fn_name);
 END
 PUB FN autoSlotId__local(decl_node: Locatable) RETURNS AutoSlotId@multiowned ->
-  RETURN autoSlotId__new(:local, NIL, NIL, decl_node.object_id());
+  RETURN autoSlotId__new(:local, NIL, NIL, aST__node_identity(decl_node));
 END
 FN autoSlotId__list_element(decl_node: Locatable) RETURNS AutoSlotId@multiowned ->
-  RETURN autoSlotId__new(:list_element, NIL, NIL, decl_node.object_id());
+  RETURN autoSlotId__new(:list_element, NIL, NIL, aST__node_identity(decl_node));
 END
 FN autoSlotId__map_key(decl_node: Locatable) RETURNS AutoSlotId@multiowned ->
-  RETURN autoSlotId__new(:map_key, NIL, NIL, decl_node.object_id());
+  RETURN autoSlotId__new(:map_key, NIL, NIL, aST__node_identity(decl_node));
 END
 FN autoSlotId__map_value(decl_node: Locatable) RETURNS AutoSlotId@multiowned ->
-  RETURN autoSlotId__new(:map_value, NIL, NIL, decl_node.object_id());
+  RETURN autoSlotId__new(:map_value, NIL, NIL, aST__node_identity(decl_node));
 END
 FN autoSlotId__hash(self: AutoSlotId) RETURNS Int64
   REQUIRES self: LOCAL
@@ -613,16 +613,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(((_.slot.shape == :map_key) OR (_.slot.shape == :map_value))) THEN
       CONTINUE;
     END
-    IF by_decl[_.slot.decl_node.object_id()] == NIL THEN
-        by_decl[_.slot.decl_node.object_id()] = mapPairResolution__new();
+    IF by_decl[aST__node_identity(_.slot.decl_node)] == NIL THEN
+        by_decl[aST__node_identity(_.slot.decl_node)] = mapPairResolution__new();
       END
-    MUTABLE pair = COPY UNWRAP (by_decl[_.slot.decl_node.object_id()]);
+    MUTABLE pair = COPY UNWRAP (by_decl[aST__node_identity(_.slot.decl_node)]);
     IF (_.slot.shape == :map_key) THEN
         pair.key = COPY _;
-        by_decl[_.slot.decl_node.object_id()] = COPY pair;
+        by_decl[aST__node_identity(_.slot.decl_node)] = COPY pair;
     ELSE
         pair.value = COPY _;
-        by_decl[_.slot.decl_node.object_id()] = COPY pair;
+        by_decl[aST__node_identity(_.slot.decl_node)] = COPY pair;
     END
     END
     by_decl.keys() |> EACH {

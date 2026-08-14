@@ -3661,8 +3661,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (blessed.length() == 0) THEN
       RETURN FALSE;
     END
-    MUTABLE blessed_ids = (blessed |> SELECT _.object_id()) |> DISTINCT _;
-    RETURN all |> ALL blessed_ids.contains?(_.object_id());
+    MUTABLE blessed_ids = (blessed |> SELECT aST__node_identity(_)) |> DISTINCT _;
+    RETURN all |> ALL blessed_ids.contains?(aST__node_identity(_));
 }
 END
 PRIVATE FN capabilityAuditSession__validate_predicate_purity_mut(self: CapabilityAuditSession) RETURNS Void

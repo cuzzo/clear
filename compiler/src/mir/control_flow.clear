@@ -653,11 +653,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE name = COPY CAST(node.name() AS String);
     &pairs.append(CleanupEntryPair{ place: COPY ownershipDataflow__place_for_binding_node(name, node), name: COPY name, entry: entry });
-    &seen.insert(entry.object_id());
+    &seen.insert(aST__node_identity(entry));
     rubyToClearVoid()
     });
     frozenCleanupFacts__each_entry(facts, %(place: PlaceId, entry: CleanupEntry) USE(MUTABLE pairs, seen) -> {
-    IF seen.contains?(entry.object_id()) THEN
+    IF seen.contains?(aST__node_identity(entry)) THEN
         RETURN;
     END
     &pairs.append(CleanupEntryPair{ place: COPY place, name: COPY place.path, entry: entry });
@@ -1819,7 +1819,7 @@ PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names
   MUTABLE seen: [Set]Int64 = Set[];
   WHILE !((stack.length() == 0)) DO
     MUTABLE node = UNWRAP (&stack.pop());
-    IF !(seen.add?(node.object_id())) THEN
+    IF !(seen.add?(aST__node_identity(node))) THEN
       CONTINUE;
     END
     block(node);
@@ -1979,7 +1979,7 @@ PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema
 END
 PUB FN loopFrameAnalysis__walk_all_nodes(nodes: ?ControlFlowNodeInput, visited: [Set]Int64 = Set[], block: FN(Locatable) -> Void) RETURNS Void ->
   aST__each_locatable(nodes, TRUE, %(node: Locatable) USE(visited) -> {
-  IF !(visited.add?(node.object_id())) THEN
+  IF !(visited.add?(aST__node_identity(node))) THEN
       RETURN;
   END
   block(node);

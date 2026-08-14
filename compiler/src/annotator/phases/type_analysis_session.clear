@@ -1144,10 +1144,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((respondsTo?(slot, "shape") AND slot.shape)) THEN
         CONTINUE;
     END
-    IF seen[slot.decl_node.object_id()] THEN
+    IF seen[aST__node_identity(slot.decl_node)] THEN
         CONTINUE;
     END
-    seen[slot.decl_node.object_id()] = TRUE;
+    seen[aST__node_identity(slot.decl_node)] = TRUE;
     typeAnalysisSession__emit_auto_shape_resolved_finding_mut(rtoc_self_view, slot.decl_node, slot);
     END
     RETURN NIL;
@@ -9096,13 +9096,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         NIL
       END)
     } |> WHERE _ != NIL;
-    MUTABLE blessed_ids = (blessed |> SELECT _.object_id()) |> DISTINCT _;
+    MUTABLE blessed_ids = (blessed |> SELECT aST__node_identity(_)) |> DISTINCT _;
     IF (blessed.length() == 0) THEN
       typeAnalysisSession__error_mut(rtoc_self_view, fn_node, TypeAnalysisCodeOrMessage{ SymbolValue: :TAIL_CALL_NEEDS_RECURSIVE }, [], {:fn: fn_name});
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < all_self_calls.length() DO
-      IF blessed_ids.contains?(all_self_calls[rtoc_idx].object_id()) THEN
+      IF blessed_ids.contains?(aST__node_identity(all_self_calls[rtoc_idx])) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -9207,8 +9207,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (blessed.length() == 0) THEN
       RETURN FALSE;
     END
-    MUTABLE blessed_ids = (blessed |> SELECT _.object_id()) |> DISTINCT _;
-    RETURN all |> ALL blessed_ids.contains?(_.object_id());
+    MUTABLE blessed_ids = (blessed |> SELECT aST__node_identity(_)) |> DISTINCT _;
+    RETURN all |> ALL blessed_ids.contains?(aST__node_identity(_));
 }
 END
 PRIVATE FN typeAnalysisSession__cap_var_sync(self: TypeAnalysisSession, MUTABLE var_node: Locatable) RETURNS ?String@symbol
@@ -11077,7 +11077,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE test_body_summaries: {Int64}BodyScanSummary = {};
     FOR _ IN node.tests DO
     typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(MUTABLE test_body_summaries, _, MUTABLE rtoc_self_view) -> {
-    test_body_summaries[_.object_id()] = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(_, MUTABLE rtoc_self_view) -> {
+    test_body_summaries[aST__node_identity(_)] = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(_, MUTABLE rtoc_self_view) -> {
       typeAnalysisSession__visit_TestThat(&rtoc_self_view, _);
       rubyToClearVoid()
     });
@@ -11091,7 +11091,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         NIL
       END) |> WHERE _ != NIL) |> DISTINCT _;
       FOR _ IN node.tests DO
-      typeAnalysisSession__validate_strict_io_mut(rtoc_self_view, _, stubbed_fns, UNWRAP (test_body_summaries[_.object_id()]));
+      typeAnalysisSession__validate_strict_io_mut(rtoc_self_view, _, stubbed_fns, UNWRAP (test_body_summaries[aST__node_identity(_)]));
       END
     END
     FOR _ IN node.benchmarks DO
@@ -11663,8 +11663,8 @@ PRIVATE FN typeAnalysisSession__current_body_fact_scope_nodes(self: TypeAnalysis
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE frame: ?BodyFactFrame = COPY typeAnalysisSession__body_fact_frames(rtoc_self_view).last();
     IF frame EXISTS AS frame_value THEN
-      IF frame_value.summary.with_scope_nodes[node.object_id()] != NIL THEN
-    RETURN COPY (frame_value.summary.with_scope_nodes[node.object_id()])?;
+      IF frame_value.summary.with_scope_nodes[aST__node_identity(node)] != NIL THEN
+    RETURN COPY (frame_value.summary.with_scope_nodes[aST__node_identity(node)])?;
       ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_276: []Locatable = List[]; rtoc_empty_list_276 } ) AS []Locatable);
       END
@@ -11682,7 +11682,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE suspends = typeAnalysisSession__with_block_suspends?(rtoc_self_view, node);
       MUTABLE summary = COPY frame_value.summary;
       &summary.with_blocks.append(node);
-      summary.with_scope_nodes[node.object_id()] = (summary.with_scope_nodes[node.object_id()] OR_ELSE List[]);
+      summary.with_scope_nodes[aST__node_identity(node)] = (summary.with_scope_nodes[aST__node_identity(node)] OR_ELSE List[]);
       IF suspends THEN
         &summary.suspend_points.append(COPY SuspendPointFact{ id: COPY SuspendPointId{ value: summary.suspend_points.length() }, kind: :lock, node: Locatable{ WithBlock: COPY node } });
       END
@@ -11780,20 +11780,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &summary.escape_nodes.append(COPY node);
         IF _.track_with_scope_stack THEN
           FOR _ IN _.with_scope_stack DO
-          IF summary.with_scope_nodes[_.object_id()] == NIL THEN
-            summary.with_scope_nodes[_.object_id()] = List[];
+          IF summary.with_scope_nodes[aST__node_identity(_)] == NIL THEN
+            summary.with_scope_nodes[aST__node_identity(_)] = List[];
           END
-          (summary.with_scope_nodes[_.object_id()])?.append(node);
+          (summary.with_scope_nodes[aST__node_identity(_)])?.append(node);
           END
         END
     END
     IF node IS_A Identifier AS identifier THEN
         MUTABLE lambda_node: ?LambdaLit = COPY _.lambda_body_stack.last();
         IF lambda_node EXISTS AS lambda_node_value THEN
-          IF summary.lambda_body_identifier_refs[lambda_node_value.object_id()] == NIL THEN
-            summary.lambda_body_identifier_refs[lambda_node_value.object_id()] = List[];
+          IF summary.lambda_body_identifier_refs[aST__node_identity(lambda_node_value)] == NIL THEN
+            summary.lambda_body_identifier_refs[aST__node_identity(lambda_node_value)] = List[];
           END
-          (summary.lambda_body_identifier_refs[lambda_node_value.object_id()])?.append(identifier);
+          (summary.lambda_body_identifier_refs[aST__node_identity(lambda_node_value)])?.append(identifier);
         END
     END
     IF suspend_kind EXISTS AS suspend_kind_value THEN

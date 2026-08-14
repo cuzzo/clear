@@ -57,7 +57,7 @@ PUB FN annotationTypeInventory__scan(program: Program) RETURNS !AnnotationTypeIn
   MUTABLE typed_node_count = 0;
   MUTABLE violations: []Violation = ( { MUTABLE rtoc_empty_list_1: []Violation = List[]; rtoc_empty_list_1 } );
   aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(node: Locatable) USE(ignored_node_ids, MUTABLE violations) -> {
-  IF ignored_node_ids.contains?(node.object_id()) THEN
+  IF ignored_node_ids.contains?(aST__node_identity(node)) THEN
       RETURN;
   END
   MUTABLE node_type = TRY (annotationTypeInventory__node_type(&node));
@@ -86,7 +86,7 @@ END
 PRIVATE FN annotationTypeInventory__add_lifetime_metadata_node_ids_mut(MUTABLE ignored: [Set]Int64, value: ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata) RETURNS Void EFFECTS REENTRANT ->
   IF (value IS_A Locatable) THEN
     aST__each_locatable(value, TRUE, %(node: Locatable) USE(MUTABLE ignored) -> {
-  &ignored.insert(node.object_id());
+  &ignored.insert(aST__node_identity(node));
   rubyToClearVoid()
     });
   ELSE_IF value IS_A []AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem AS array THEN

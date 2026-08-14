@@ -19,7 +19,7 @@ PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, sche
   MUTABLE live_param_syms = TRY (scope__live_param_syms(fn_value));
   TRY (aST__each_capture_analysis(fn_value.body, %(a: CaptureAnalysisValue) USE(MUTABLE analyses, live_param_syms, schema_lookup, fn_value) -> {
     TRY (bgCaptureClassifier__classify_one_mut(&a, live_param_syms, schema_lookup));
-    analyses["${fn_value.name}:${a.object_id()}"] = a;
+    analyses["${fn_value.name}:${aST__node_identity(a)}"] = a;
     rubyToClearVoid()
   }));
   END
