@@ -53,10 +53,10 @@ PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS ?Pla
   END
   MUTABLE final = COPY UNWRAP (stmts.last());
   IF final IS_A ReturnNode AS return_node THEN
-    MUTABLE final_value = return_node.value;
-    IF !(final_value) THEN
+    IF return_node.value == NIL THEN
       RETURN NIL;
     END
+    MUTABLE final_value: Locatable = COPY UNWRAP (return_node.value);
     MUTABLE combine: ?RecursiveCombine = recursiveSplitter__match_recursive_combine(final_value, fn_name);
     IF combine EXISTS AS combine_value THEN
       RETURN Plan{ base_cases: COPY base_cases, combine_lhs: COPY combine_value.lhs, combine_op: COPY combine_value.op, recurse_args: COPY combine_value.args, final_return: COPY return_node };
@@ -87,8 +87,8 @@ PUB FN recursiveSplitter__split_mutual(body: []Locatable, fn_name: String, partn
   END
   MUTABLE final = COPY UNWRAP (stmts.last());
   IF final IS_A ReturnNode AS return_node THEN
-  IF return_node.value THEN
-      MUTABLE target: ?MutualTailCall = recursiveSplitter__match_tail_mutual_call(return_node.value, partner_names);
+  IF return_node.value EXISTS AS return_value THEN
+      MUTABLE target: ?MutualTailCall = recursiveSplitter__match_tail_mutual_call(return_value, partner_names);
       IF target EXISTS AS target_value THEN
         RETURN MutualPlan{ base_cases: COPY base_cases, target_fn: COPY target_value.name, target_args: COPY target_value.args, final_return: COPY return_node };
       ELSE
@@ -112,17 +112,19 @@ PRIVATE FN recursiveSplitter__match_mutual_base_case(stmt: Locatable, cycle_name
       IF (then_b_value.length() != 1) THEN
         RETURN NIL;
       END
-      MUTABLE ret = then_b_value.first();
-      IF !((ret IS_A ReturnNode AND ret.value())) THEN
-        RETURN NIL;
+      MUTABLE ret: Locatable = COPY UNWRAP (then_b_value.first());
+      IF ret IS_A ReturnNode AS ret_node THEN
+        IF ret_node.value EXISTS AS ret_value THEN
+          IF recursiveSplitter__contains_any_call?(castLocatableToOptionalThunkScanNode(if_statement.condition), cycle_names) THEN
+            RETURN NIL;
+          END
+          IF recursiveSplitter__contains_any_call?(castLocatableToOptionalThunkScanNode(ret_value), cycle_names) THEN
+            RETURN NIL;
+          END
+          RETURN BaseCase{ cond_ast: COPY if_statement.condition, value_ast: COPY ret_value };
+        END
       END
-      IF recursiveSplitter__contains_any_call?(castLocatableToOptionalThunkScanNode(if_statement.condition), cycle_names) THEN
-        RETURN NIL;
-      END
-      IF recursiveSplitter__contains_any_call?(ret.value(), cycle_names) THEN
-        RETURN NIL;
-      END
-      RETURN BaseCase{ cond_ast: COPY if_statement.condition, value_ast: COPY ret.value() };
+      RETURN NIL;
     ELSE
       RETURN NIL;
     END
@@ -187,17 +189,19 @@ PRIVATE FN recursiveSplitter__match_base_case(stmt: Locatable, fn_name: String) 
       IF (then_b_value.length() != 1) THEN
         RETURN NIL;
       END
-      MUTABLE ret = then_b_value.first();
-      IF !((ret IS_A ReturnNode AND ret.value())) THEN
-        RETURN NIL;
+      MUTABLE ret: Locatable = COPY UNWRAP (then_b_value.first());
+      IF ret IS_A ReturnNode AS ret_node THEN
+        IF ret_node.value EXISTS AS ret_value THEN
+          IF recursiveSplitter__contains_self_call?(castLocatableToOptionalThunkScanNode(if_statement.condition), fn_name) THEN
+            RETURN NIL;
+          END
+          IF recursiveSplitter__contains_self_call?(castLocatableToOptionalThunkScanNode(ret_value), fn_name) THEN
+            RETURN NIL;
+          END
+          RETURN BaseCase{ cond_ast: COPY if_statement.condition, value_ast: COPY ret_value };
+        END
       END
-      IF recursiveSplitter__contains_self_call?(castLocatableToOptionalThunkScanNode(if_statement.condition), fn_name) THEN
-        RETURN NIL;
-      END
-      IF recursiveSplitter__contains_self_call?(ret.value(), fn_name) THEN
-        RETURN NIL;
-      END
-      RETURN BaseCase{ cond_ast: COPY if_statement.condition, value_ast: COPY ret.value() };
+      RETURN NIL;
     ELSE
       RETURN NIL;
     END

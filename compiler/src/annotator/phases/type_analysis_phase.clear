@@ -56,7 +56,7 @@ PUB FN annotationTypeInventory__scan(program: Program) RETURNS !AnnotationTypeIn
   MUTABLE ignored_node_ids = TRY (annotationTypeInventory__ignored_node_ids(program));
   MUTABLE typed_node_count = 0;
   MUTABLE violations: []Violation = ( { MUTABLE rtoc_empty_list_1: []Violation = List[]; rtoc_empty_list_1 } );
-  aST__each_locatable(program, TRUE, %(node: Locatable) USE(ignored_node_ids, MUTABLE violations) -> {
+  aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(node: Locatable) USE(ignored_node_ids, MUTABLE violations) -> {
   IF ignored_node_ids.contains?(node.object_id()) THEN
       RETURN;
   END

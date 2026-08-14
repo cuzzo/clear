@@ -66,7 +66,7 @@ PRIVATE FN declarationIndexer__union_methods?(node: UnionDef) RETURNS Bool ->
 END
 PRIVATE FN declarationIndexer__collect_error_type_registrations(program: Program) RETURNS ![]ErrorTypeRegistration ->
   MUTABLE registrations: []ErrorTypeRegistration = ( { MUTABLE rtoc_empty_list_9: []ErrorTypeRegistration = List[]; rtoc_empty_list_9 } );
-  aST__each_locatable(program, TRUE, %(node: Locatable) USE(MUTABLE registrations) -> {
+  aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(node: Locatable) USE(MUTABLE registrations) -> {
   IF node IS_A Raise AS raise THEN
       IF raise.kind EXISTS AS kind THEN
         IF raise.error_name EXISTS AS type_name THEN

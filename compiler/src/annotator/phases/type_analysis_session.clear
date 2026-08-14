@@ -777,7 +777,7 @@ PUB FN typeAnalysisSession__validate_copy_linear_resource_facts_mut(self: TypeAn
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    aST__each_locatable(program, TRUE, %(node: Locatable) USE(facts, rtoc_self_view) -> {
+    aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(node: Locatable) USE(facts, rtoc_self_view) -> {
     IF !(node IS_A CopyNode) THEN
         RETURN;
     END
@@ -11364,7 +11364,7 @@ PRIVATE FN typeAnalysisSession__restamp_stale_auto_nodes_mut(self: TypeAnalysisS
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE nodes: []Locatable = ( { MUTABLE rtoc_empty_list_258: []Locatable = List[]; rtoc_empty_list_258 } );
-    aST__each_locatable(program, TRUE, %(node: Locatable) USE(MUTABLE nodes) -> {
+    aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(node: Locatable) USE(MUTABLE nodes) -> {
     &nodes.append(COPY node);
     rubyToClearVoid()
     });
