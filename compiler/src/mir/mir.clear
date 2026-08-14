@@ -942,9 +942,9 @@ END
 FN let__child_exprs(self: Let) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN let__compact_child_exprs(self, [CAST(self.init AS Any)]);
 END
-FN let__explicit_ownership_contract(self: Let) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
+FN let__explicit_ownership_contract(self: Let) RETURNS !?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF TRUE THEN
-    RETURN emittable__explicit_ownership_contract(self.init);
+    RETURN TRY (emittable__explicit_ownership_contract(self.init));
   ELSE
     RETURN NIL;
   END
@@ -3080,9 +3080,9 @@ PUB STRUCT ExprStmt {
 FN exprStmt__child_exprs(self: ExprStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN exprStmt__compact_child_exprs(self, [CAST(self.expr AS Any)]);
 END
-FN exprStmt__explicit_ownership_contract(self: ExprStmt) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
+FN exprStmt__explicit_ownership_contract(self: ExprStmt) RETURNS !?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF TRUE THEN
-    RETURN emittable__explicit_ownership_contract(self.expr);
+    RETURN TRY (emittable__explicit_ownership_contract(self.expr));
   ELSE
     RETURN NIL;
   END
@@ -8719,7 +8719,7 @@ FN tupleLiteral__child_exprs(self: TupleLiteral) RETURNS ![]Emittable EFFECTS RE
   END
   RETURN tupleLiteral__compact_child_exprs(self, values);
 END
-FN tupleLiteral__ownership_effect(self: TupleLiteral) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+FN tupleLiteral__ownership_effect(self: TupleLiteral) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__from_children(TRY (tupleLiteral__child_exprs(self)));
 END
 FN tupleLiteral__mir?(self: TupleLiteral) RETURNS Bool ->
@@ -9031,8 +9031,8 @@ END
 FN structInit__ownership_source_exprs(self: StructInit) RETURNS ![]Emittable ->
   RETURN structInit__child_exprs(self);
 END
-FN structInit__ownership_effect(self: StructInit) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_children(structInit__child_exprs(self));
+FN structInit__ownership_effect(self: StructInit) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+  RETURN ownershipEffect__from_children(TRY (structInit__child_exprs(self)));
 END
 FN structInit__mir?(self: StructInit) RETURNS Bool ->
   RETURN TRUE;
@@ -14177,7 +14177,7 @@ FN ruby_wrap_optional_String_symbol_StructInitFieldValue(value: ?String@symbol) 
   RETURN NIL;
 END
 
-FN emittable__explicit_ownership_contract(value: Emittable) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
+FN emittable__explicit_ownership_contract(value: Emittable) RETURNS !?OwnershipContract@multiowned EFFECTS REENTRANT ->
   PARTIAL MATCH value START
     Emittable.FnDef AS payload -> RETURN fnDef__explicit_ownership_contract(payload);,
     Emittable.ProtocolAdapterDef AS payload -> RETURN protocolAdapterDef__explicit_ownership_contract(payload);,
@@ -14189,7 +14189,7 @@ FN emittable__explicit_ownership_contract(value: Emittable) RETURNS ?OwnershipCo
     Emittable.CExternStructDef AS payload -> RETURN cExternStructDef__explicit_ownership_contract(payload);,
     Emittable.ModuleNamespace AS payload -> RETURN moduleNamespace__explicit_ownership_contract(payload);,
     Emittable.TestDef AS payload -> RETURN testDef__explicit_ownership_contract(payload);,
-    Emittable.Let AS payload -> RETURN let__explicit_ownership_contract(payload);,
+    Emittable.Let AS payload -> RETURN TRY (let__explicit_ownership_contract(payload));,
     Emittable.Set AS payload -> RETURN set__explicit_ownership_contract(payload);,
     Emittable.DestructureSet AS payload -> RETURN destructureSet__explicit_ownership_contract(payload);,
     Emittable.ReassignWithCleanup AS payload -> RETURN reassignWithCleanup__explicit_ownership_contract(payload);,
@@ -14218,7 +14218,7 @@ FN emittable__explicit_ownership_contract(value: Emittable) RETURNS ?OwnershipCo
     Emittable.BatchWindowPush AS payload -> RETURN batchWindowPush__explicit_ownership_contract(payload);,
     Emittable.BatchWindowFlush AS payload -> RETURN batchWindowFlush__explicit_ownership_contract(payload);,
     Emittable.ErrDeferStmt AS payload -> RETURN errDeferStmt__explicit_ownership_contract(payload);,
-    Emittable.ExprStmt AS payload -> RETURN exprStmt__explicit_ownership_contract(payload);,
+    Emittable.ExprStmt AS payload -> RETURN TRY (exprStmt__explicit_ownership_contract(payload));,
     Emittable.DiscardOwned AS payload -> RETURN discardOwned__explicit_ownership_contract(payload);,
     Emittable.ThunkTrampoline AS payload -> RETURN thunkTrampoline__explicit_ownership_contract(payload);,
     Emittable.MutualThunkTrampoline AS payload -> RETURN mutualThunkTrampoline__explicit_ownership_contract(payload);,
@@ -14344,7 +14344,7 @@ FN emittable__explicit_ownership_contract(value: Emittable) RETURNS ?OwnershipCo
     Emittable.ShardConcurrentEach AS payload -> RETURN shardConcurrentEach__explicit_ownership_contract(payload);,
     Emittable.InlineBc AS payload -> RETURN inlineBc__explicit_ownership_contract(payload);,
     Emittable.OrElseExitBcRewrite AS payload -> RETURN orElseExitBcRewrite__explicit_ownership_contract(payload);,
-    Emittable.ShardedMapPut AS payload -> RETURN shardedMapPut__explicit_ownership_contract(payload);,
+    Emittable.ShardedMapPut AS payload -> RETURN TRY (shardedMapPut__explicit_ownership_contract(payload));,
     Emittable.ShardedMapGet AS payload -> RETURN shardedMapGet__explicit_ownership_contract(payload);,
   END
   RETURN NIL;
@@ -15388,7 +15388,7 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECT
     RETURN ident__ownership_effect(payload);
   END
   IF value IS_A TupleLiteral AS payload THEN
-    RETURN tupleLiteral__ownership_effect(payload);
+    RETURN TRY (tupleLiteral__ownership_effect(payload));
   END
   IF value IS_A FnRef AS payload THEN
     RETURN fnRef__ownership_effect(payload);
@@ -15403,7 +15403,7 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECT
     RETURN typeEq__ownership_effect(payload);
   END
   IF value IS_A StructInit AS payload THEN
-    RETURN structInit__ownership_effect(payload);
+    RETURN TRY (structInit__ownership_effect(payload));
   END
   IF value IS_A ArrayInit AS payload THEN
     RETURN arrayInit__ownership_effect(payload);
@@ -16003,4 +16003,35 @@ FN emittable__child_exprs(value: Emittable) RETURNS ![]Emittable EFFECTS REENTRA
   IF value IS_A Pipeline AS payload THEN
     RETURN TRY (pipeline__child_exprs(payload));
   END
-  IF value IS_A
+  IF value IS_A RegistryCall AS payload THEN
+    RETURN TRY (registryCall__child_exprs(payload));
+  END
+  IF value IS_A IndexedStore AS payload THEN
+    RETURN TRY (indexedStore__child_exprs(payload));
+  END
+  IF value IS_A CFunctionAdapter AS payload THEN
+    RETURN TRY (cFunctionAdapter__child_exprs(payload));
+  END
+  IF value IS_A ExternTrampoline AS payload THEN
+    RETURN TRY (externTrampoline__child_exprs(payload));
+  END
+  IF value IS_A ObservableConsumerSpawn AS payload THEN
+    RETURN TRY (observableConsumerSpawn__child_exprs(payload));
+  END
+  IF value IS_A ShardConcurrentEach AS payload THEN
+    RETURN TRY (shardConcurrentEach__child_exprs(payload));
+  END
+  IF value IS_A InlineBc AS payload THEN
+    RETURN TRY (inlineBc__child_exprs(payload));
+  END
+  IF value IS_A OrElseExitBcRewrite AS payload THEN
+    RETURN TRY (orElseExitBcRewrite__child_exprs(payload));
+  END
+  IF value IS_A ShardedMapPut AS payload THEN
+    RETURN TRY (shardedMapPut__child_exprs(payload));
+  END
+  IF value IS_A ShardedMapGet AS payload THEN
+    RETURN TRY (shardedMapGet__child_exprs(payload));
+  END
+  RETURN empty_child_exprs;
+END

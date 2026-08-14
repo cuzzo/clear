@@ -428,7 +428,7 @@ PUB STRUCT Resolution {
 }
 PUB STRUCT Ambiguity {
   slot: Slot,
-  observed_types: Auto[]ConstraintCollectorObservedType,
+  observed_types: []ConstraintCollectorObservedType,
   sources: []Locatable
 }
 STRUCT MapPairResolution {
