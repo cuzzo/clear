@@ -7415,7 +7415,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((token != NIL) AND (token IS_A Token)) THEN
       RETURN COPY token;
     END
-    IF !((((token != NIL) AND respondsTo?(token, "line")) AND respondsTo?(token, "column"))) THEN
+    IF !((token != NIL)) THEN
       RETURN NIL;
     END
     RETURN Token{ type: :ANCHOR, value: NIL, line: token.line(), column: token.column(), file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
@@ -20482,11 +20482,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_517 = TRY (type__new(castTypeTypeInputToTypeConstructionInput(type_info)));
     END
     rtoc_ternary_value_517? };
-    MUTABLE line = IF respondsTo?(node, "line") THEN
-      node.line()
-    ELSE
-      NIL
-    END;
+    MUTABLE line: ?Int64 = aST__node__token(node).line;
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_518 = typeAnalysisSession__ownership_graph(rtoc_self_view);
     TRY (ownershipGraph__declare(&rtoc_mutable_receiver_518, name, kind, ti, typeAnalysisSession__ownership_graph(rtoc_self_view).scope_depth, line)) };
 }

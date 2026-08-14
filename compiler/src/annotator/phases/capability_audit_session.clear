@@ -463,7 +463,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((token != NIL) AND (token IS_A Token)) THEN
       RETURN COPY token;
     END
-    IF !((((token != NIL) AND respondsTo?(token, "line")) AND respondsTo?(token, "column"))) THEN
+    IF !((token != NIL)) THEN
       RETURN NIL;
     END
     RETURN Token{ type: :ANCHOR, value: NIL, line: token.line(), column: token.column(), file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
