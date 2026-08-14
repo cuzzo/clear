@@ -4799,11 +4799,42 @@ end
       return false if value_node.arguments && !value_node.arguments.arguments.empty?
 
       rec_type = clear_type_for_receiver_node(value_node.receiver)
-      return false unless rec_type && struct_field_reader?(rec_type, value_node.name.to_s)
+      return false unless rec_type
+
+      unless struct_field_reader?(rec_type, value_node.name.to_s)
+        # A reader called on a UNION-typed receiver reads a field of whichever
+        # variant the narrowing picked. The union itself declares no fields, so
+        # the struct lookup misses and the read leaves the function borrowed:
+        # "Cannot return borrowed value without COPY". Resolve it through the
+        # variants instead.
+        field_type = union_variant_field_type(rec_type, value_node.name.to_s)
+        return false if field_type.to_s.empty?
+        # Only the reads CLEAR actually rejects: a type it copies implicitly
+        # leaves the function fine as a bare read, and wrapping it would add a
+        # deep copy the Ruby never had.
+        return false if implicitly_copyable_clear_type?(field_type)
+
+        return copyable_storage_type?(field_type)
+      end
 
       field_type = class_instance_field_type(rec_type, value_node.name.to_s)
       field_type = inferred_clear_type(value_node) if field_type.to_s.empty?
       copyable_storage_type?(field_type)
+    end
+
+    # The declared type of `field` on any variant of `union_type` that has it.
+    def union_variant_field_type(union_type, field)
+      base = expand_clear_type_alias(union_type.to_s).to_s.delete_prefix("?").split("@").first.to_s
+      variants = @union_types[base]
+      return "" unless variants
+
+      variants.each do |variant|
+        next unless struct_field_reader?(variant, field)
+
+        found = class_instance_field_type(variant, field)
+        return found unless found.to_s.empty?
+      end
+      ""
     end
 
     def copyable_local_read_source?(node, explicit_type_annotation = nil)
@@ -4892,12 +4923,13 @@ end
     # elements. `[]Item@multiowned` is a plain list whose Item elements are
     # retained; only `Item@multiowned` itself can be duplicated with KEEP.
     # Types CLEAR copies implicitly, so a bare read can leave a function.
+    # An OPTIONAL is never one of them, whatever it wraps.
     def implicitly_copyable_clear_type?(type)
       normalized = expand_clear_type_alias(type.to_s).to_s
+      return false if normalized.start_with?("?")
       return true if normalized == "String@symbol"
 
-      bare = normalized.delete_prefix("?").sub(/@.*\z/, "")
-      bare.match?(/\A(?:Bool|U?Int\d*|Float\d*|Byte\d*|Void|Nil|String)\z/)
+      normalized.sub(/@.*\z/, "").match?(/\A(?:Bool|U?Int\d*|Float\d*|Byte\d*|Void|Nil|String)\z/)
     end
 
     def direct_retained_carrier_type?(type)
