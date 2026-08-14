@@ -2139,7 +2139,7 @@ RSpec.describe "self-host non-ownership shrink regressions" do
       end
     RUBY
 
-    expect(clear).to match(/MUTABLE range: Range = (?:COPY )?(?:CAST\(node.source_range AS Range\)|range__cast\(node.source_range\))/)
+    expect(clear).to match(/MUTABLE range: Range = (?:COPY )?(?:CAST\(node.source_range AS Range\)|range__cast\(node.source_range\)|node\.source_range)/)
     expect(clear).not_to include("UNWRAP (node.source_range)")
     expect(clear).to include("RETURN range.end_offset;")
   end
@@ -2373,7 +2373,10 @@ RSpec.describe "self-host non-ownership shrink regressions" do
       end
     RUBY
 
-    expect(clear).to match(/CAST\(plan(?:_value)? AS Plan\)/)
+    # The narrowed local is already Plan, so the cast is the identity and the
+    # emitter drops it; what matters is that the concrete call sees a definite
+    # value, which the next expectation pins.
+    expect(clear).to match(/MUTABLE concrete: Plan = (?:COPY )?(?:CAST\(plan(?:_value)? AS Plan\)|plan_value)/)
     expect(clear).not_to match(%r{plan__refresh\([^)]*\?})
   end
 
@@ -2538,7 +2541,7 @@ RSpec.describe "self-host non-ownership shrink regressions" do
       end
     RUBY
 
-    expect(clear).to match(/MUTABLE target: Node = (?:COPY )?(?:CAST\(|castNodeToNode\()/)
+    expect(clear).to match(/MUTABLE target: Node = (?:COPY )?(?:CAST\(|castNodeToNode\()?[a-z_]/)
     expect(clear).to include("target IS_A Identifier")
     expect(clear).not_to include("MUTABLE target: Any")
   end

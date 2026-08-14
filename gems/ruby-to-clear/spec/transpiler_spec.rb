@@ -6152,8 +6152,8 @@ RSpec.describe RubyToClear::Transpiler do
         end
       RUBY
       clear = RubyToClear.transpile(ruby_code)
-      expect(clear).to include("RETURN (items |> SELECT CAST(Tuple{CAST(_ AS String), 1} AS Tuple<String, Int64>)) |> ORDER_BY _._1;")
-      expect(clear).to include("RETURN (items |> SELECT CAST(Tuple{CAST(_ AS String), 1} AS Tuple<String, Int64>)) |> ORDER_BY _._1;")
+      expect(clear).to include("RETURN (items |> SELECT CAST(Tuple{_, 1} AS Tuple<String, Int64>)) |> ORDER_BY _._1;")
+      expect(clear).to include("RETURN (items |> SELECT CAST(Tuple{_, 1} AS Tuple<String, Int64>)) |> ORDER_BY _._1;")
     end
 
     it "retains typed hash constant shapes for method dispatch" do

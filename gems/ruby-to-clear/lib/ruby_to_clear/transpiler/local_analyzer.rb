@@ -1298,6 +1298,11 @@ module RubyToClear
       optional_source = source_text.start_with?("?")
       source_union = source_text.delete_prefix("?")
       target_union = target_text.delete_prefix("?")
+      # Same type on both sides: the cast is the identity, and emitting one
+      # gives every unit that needs it a castXToX definition -- duplicate
+      # function declarations once two of them share a compile. Optionality
+      # must match too; String -> ?String is a widening, not an identity.
+      return source_code if source_text == target_text
       source_members = @union_types[source_union]
       target_members = @union_types[target_union]
       return nil unless source_members && target_members
