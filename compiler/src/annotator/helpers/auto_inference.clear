@@ -256,7 +256,11 @@ PRIVATE FN autoConstraintCollector__record_call_site(self: AutoConstraintCollect
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE callee: ?FunctionDef@multiowned = COPY rtoc_self_view.fn_nodes[call_node.name];
+    MUTABLE callee_name: String = "";
+    IF call_node.name IS_A String AS call_name_text THEN
+      callee_name = COPY call_name_text;
+    END
+    MUTABLE callee: ?FunctionDef@multiowned = COPY rtoc_self_view.fn_nodes[callee_name];
     IF callee EXISTS AS callee_value THEN
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < callee_value.params.length() DO
