@@ -1884,7 +1884,7 @@ module RubyToClear
     end
 
     def indexed_enumerator_with_object(node)
-      return nil unless node.name.to_s == "with_object" && node.block
+      return nil unless node.name.to_s == "with_object" && node.block.is_a?(Prism::BlockNode)
 
       enumerator = node.receiver
       return nil unless enumerator.is_a?(Prism::CallNode) && enumerator.name.to_s == "each_with_index"
@@ -1940,7 +1940,7 @@ module RubyToClear
     end
 
     def each_with_object_expression(node)
-      return nil unless node.name.to_s == "each_with_object" && node.receiver && node.block
+      return nil unless node.name.to_s == "each_with_object" && node.receiver && node.block.is_a?(Prism::BlockNode)
 
       initial_node = node.arguments&.arguments&.first
       return unsupported_expression(node, "each_with_object requires one accumulator") unless initial_node
