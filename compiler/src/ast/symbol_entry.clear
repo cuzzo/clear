@@ -477,7 +477,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN symbolEntry__locked_sync?(symbolEntry__sync(rtoc_self_view));
 }
 END
-FN symbolEntry__local?(self: SymbolEntry) RETURNS Bool
+PUB FN symbolEntry__local?(self: SymbolEntry) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -540,7 +540,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (((!((symbolEntry__sync(rtoc_self_view) == NIL)) OR symbolEntry__rc_stored?(rtoc_self_view)) OR symbolEntry__local_storage?(rtoc_self_view)) OR symbolEntry__heap_storage?(rtoc_self_view));
 }
 END
-FN symbolEntry__plain_local_family?(self: SymbolEntry) RETURNS Bool
+PUB FN symbolEntry__plain_local_family?(self: SymbolEntry) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

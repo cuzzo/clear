@@ -244,7 +244,7 @@ PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_look
                 IF identifier.symbol EXISTS AS sym THEN
                   MUTABLE sym_mutable = COPY sym;
                   IF !(symbolEntry__with_match_capability_family?(sym_mutable)) THEN
-                    IF (sym_mutable.mutable OR_ELSE FALSE) THEN
+                    IF sym_mutable.mutable THEN
                       symbolEntry__mark_poly_borrow_target_mut(&sym_mutable);
                     END
                   END
@@ -279,78 +279,101 @@ PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_look
   RETURN;
 END
 PUB FN withMatchCheck__family_of_arg(arg: Locatable) RETURNS ?String@symbol ->
-  MUTABLE sym = withMatchCheck__capability_argument_symbol(arg);
-  MUTABLE sync: ?String@symbol = sym.sync();
-  IF ((sync != NIL) AND ((([:locked, :write_locked, :always_mutable]) |> DISTINCT _).contains?(sync))) THEN
+  MUTABLE sym_opt: ?SymbolEntry@multiowned = withMatchCheck__capability_argument_symbol(arg);
+  IF sym_opt == NIL THEN
+    RETURN NIL;
+  END
+  MUTABLE sym: SymbolEntry@multiowned = COPY KEEP UNWRAP (sym_opt);
+  MUTABLE sync: ?String@symbol = symbolEntry__sync(sym);
+  IF ((sync != NIL) AND ([:locked, :write_locked, :always_mutable]).contains?(sync)) THEN
     RETURN :LOCKED;
   END
-  IF ((sync != NIL) AND ((([:versioned]) |> DISTINCT _).contains?(sync))) THEN
+  IF ((sync != NIL) AND ([:versioned]).contains?(sync)) THEN
     RETURN :VERSIONED;
   END
-  IF ((sync != NIL) AND ((([:atomic]) |> DISTINCT _).contains?(sync))) THEN
+  IF ((sync != NIL) AND ([:atomic]).contains?(sync)) THEN
     RETURN :ATOMIC;
   END
-  IF sym.local?() THEN
+  IF symbolEntry__local?(sym) THEN
     RETURN :LOCAL;
   END
-  IF ((sym.sync() == NIL) AND (sym.storage() == :multiowned)) THEN
+  IF ((symbolEntry__sync(sym) == NIL) AND (symbolEntry__storage(sym) == :multiowned)) THEN
     RETURN :LOCAL;
   END
-  IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_6 = CAST(sym AS SymbolEntry);
-  symbolEntry__plain_local_family?(rtoc_local_receiver_6) } THEN
+  IF symbolEntry__plain_local_family?(sym) THEN
     RETURN :LOCAL;
   END
   RETURN NIL;
 END
-PRIVATE FN withMatchCheck__capability_argument_symbol(arg: Any) RETURNS Any@multiowned ->
-  MUTABLE current: Any = arg;
-  WHILE current DO
-    MUTABLE symbol = current.symbol();
-    IF symbol THEN
-      RETURN symbol;
-    END
-    current =     IF (current IS_A GetField OR current IS_A GetIndex) THEN
-      current.target()
-    ELSE_IF (respondsTo?(current, "value") AND current.value() IS_A Locatable) THEN
-      current.value()
-    ELSE
-      NIL
-    END;
+# Ruby walks `.symbol` up through GetField/GetIndex/value wrappers; the AST
+# already exposes that walk as root_identifier, whose symbol is the one the
+# capability check wants.
+PRIVATE FN withMatchCheck__capability_argument_symbol(arg: Locatable) RETURNS ?SymbolEntry@multiowned ->
+  IF aST__root_identifier(arg) EXISTS AS identifier THEN
+    RETURN COPY KEEP identifier.symbol;
   END
   RETURN NIL;
 END
 PUB FN withMatchCheck__disjunction_admits?(disjunction: [Set]String@symbol, arg_family: String@symbol) RETURNS Bool ->
   RETURN (disjunction) |> ANY (IF (_ == arg_family) THEN TRUE ELSE (IF ((_ == :SNAPSHOTTED) AND (((arg_family == :VERSIONED) OR (arg_family == :ATOMIC)))) THEN TRUE ELSE FALSE END) END);
 END
-PUB FN withMatchCheck__family_of_arg_set(arg: Any) RETURNS ![Set]String@symbol ->
-  MUTABLE sym = withMatchCheck__capability_argument_symbol(arg);
-  MUTABLE families = sym.sync_families();
-  IF (families AND (families.length() > 1)) THEN
-    RETURN TRY (withMatchCheck__expand_snapshotted(families));
-  END
-  IF (families AND (families.size() == 1)) THEN
-    MUTABLE single = families.first();
-    IF (single == :SNAPSHOTTED) THEN
-      RETURN COPY [:VERSIONED, :ATOMIC] |> DISTINCT _;
+PUB FN withMatchCheck__family_of_arg_set(arg: Locatable) RETURNS ![Set]String@symbol ->
+  MUTABLE sym_opt: ?SymbolEntry@multiowned = withMatchCheck__capability_argument_symbol(arg);
+  IF sym_opt EXISTS AS sym_value THEN
+    MUTABLE sym: SymbolEntry@multiowned = COPY KEEP sym_value;
+    MUTABLE families: [Set]String@symbol = Set[];
+    IF sym.sync_families EXISTS AS declared_sync_families THEN
+      families = COPY declared_sync_families;
+    END
+    IF (families.length() > 1) THEN
+      RETURN TRY (withMatchCheck__expand_snapshotted(families));
+    END
+    IF (families.length() == 1) THEN
+      FOR single IN families DO
+        IF (single == :SNAPSHOTTED) THEN
+          MUTABLE snapshot_families: [Set]String@symbol = Set[];
+          &snapshot_families.insert(:VERSIONED);
+          &snapshot_families.insert(:ATOMIC);
+          RETURN snapshot_families;
+        END
+      END
     END
   END
   MUTABLE fam: ?String@symbol = withMatchCheck__family_of_arg(arg);
   IF fam EXISTS AS fam_value THEN
-    RETURN COPY [fam_value] |> DISTINCT _;
-  ELSE
-    RETURN Set[];
+    MUTABLE single_family: [Set]String@symbol = Set[];
+    &single_family.insert(COPY fam_value);
+    RETURN single_family;
   END
+  MUTABLE no_family: [Set]String@symbol = Set[];
+  RETURN no_family;
 END
 PUB FN withMatchCheck__expand_snapshotted(family_set: [Set]String@symbol) RETURNS ![Set]String@symbol ->
   IF !(family_set.contains?(:SNAPSHOTTED)) THEN
     RETURN COPY family_set;
   END
-  MUTABLE out = (family_set - [:SNAPSHOTTED]);
-  (&out.append(:VERSIONED)).append(:ATOMIC);
+  MUTABLE out: [Set]String@symbol = Set[];
+  FOR family IN family_set DO
+    IF (family != :SNAPSHOTTED) THEN
+      &out.insert(COPY family);
+    END
+  END
+  &out.insert(:VERSIONED);
+  &out.insert(:ATOMIC);
   RETURN out;
 END
 PUB FN withMatchCheck__errors_for_requires(family_set: ?[Set]String@symbol) RETURNS ![Set]String@symbol ->
-  RETURN (TRY (withMatchCheck__admissible_axes(family_set))) |> UNNEST ((((CAST({:locked: [:LockTimeout] |> DISTINCT _, :write_locked: [:LockTimeout] |> DISTINCT _, :versioned: [:MvccConflict] |> DISTINCT _, :atomic: [:AtomicConflict] |> DISTINCT _} AS {String@symbol}[Set]String@symbol))[_]) OR_ELSE Set[])).to_a() |> DISTINCT _;
+  MUTABLE errors: [Set]String@symbol = Set[];
+  FOR axis IN (TRY (withMatchCheck__admissible_axes(family_set))) DO
+    IF ((axis == :locked) OR (axis == :write_locked)) THEN
+      &errors.insert(:LockTimeout);
+    ELSE_IF (axis == :versioned) THEN
+      &errors.insert(:MvccConflict);
+    ELSE_IF (axis == :atomic) THEN
+      &errors.insert(:AtomicConflict);
+    END
+  END
+  RETURN errors;
 END
 PUB FN withMatchCheck__warn_polymorphic_unhandled_errors_mut(node: WithBlock, bound_params: [Set]String, requires_map: {String}[Set]String@symbol, policy_handlers: []ErrorClause, warn_handler: Any) RETURNS !?[Set]String ->
   IF !(((warn_handler != NIL) AND (node.polymorphic OR_ELSE FALSE))) THEN
