@@ -313,7 +313,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_select_prune(self: Pip
   MUTABLE res_zig = pipelineConcurrentLowerer__transpile_type_call(self, CAST((type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(smooth_node)))))))) AS String));
   MUTABLE alloc = pipelineConcurrentLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE expr_mir = pipelineConcurrentLowerer__visit_mir_with_placeholder_call(self, inner_expr, "it");
-  RETURN self.pipeline_block(lhs, %(items, label) USE(alloc, expr_mir, res_zig) -> {
+  RETURN pipelineConcurrentLowerer__pipeline_block_call(self, lhs, %(items, label) USE(alloc, expr_mir, res_zig) -> {
   rtoc_lambda_result_5 = CAST(Tuple{Let{ name: COPY "res_list", init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY res_zig, items: ( { MUTABLE rtoc_empty_list_4: []Emittable = List[]; rtoc_empty_list_4 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: COPY CAST(Tuple{Let{ name: COPY "__cv", init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: Emittable{ InlineBc: COPY InlineBc{ op: :is_error, args: [Emittable{ Ident: COPY Ident{ name: "__cv", lowered_node_id: NIL, ownership_consumption: NIL } }], stdlib_def: {:bc: TRUE}, suppress_try: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [ExprStmt{ expr: Emittable{ MethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(Ident{ name: "__cv", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }} AS Tuple<Let, IfStmt>), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt, BreakStmt>);
   rtoc_lambda_result_5
   });
@@ -323,7 +323,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_where_prune(self: Pipe
   MUTABLE elem_zig = pipelineConcurrentLowerer__transpile_type_call(self, elem_type);
   MUTABLE alloc = pipelineConcurrentLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE pred_mir = pipelineConcurrentLowerer__visit_mir_with_placeholder_call(self, inner_expr, "it");
-  RETURN self.pipeline_block(lhs, %(items, label) USE(alloc, elem_zig, pred_mir) -> {
+  RETURN pipelineConcurrentLowerer__pipeline_block_call(self, lhs, %(items, label) USE(alloc, elem_zig, pred_mir) -> {
   rtoc_lambda_result_7 = CAST(Tuple{Let{ name: COPY "res_list", init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: ( { MUTABLE rtoc_empty_list_6: []Emittable = List[]; rtoc_empty_list_6 } ), alloc: COPY alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: COPY CAST(Tuple{Let{ name: COPY "__cv", init: COPY pred_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, IfStmt{ cond: COPY BinOp{ op: "and", left: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: Emittable{ InlineBc: COPY InlineBc{ op: :is_error, args: [Emittable{ Ident: COPY Ident{ name: "__cv", lowered_node_id: NIL, ownership_consumption: NIL } }], stdlib_def: {:bc: TRUE}, suppress_try: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "__cv", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }, then_body: [ExprStmt{ expr: Emittable{ MethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(Ident{ name: "it", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }} AS Tuple<Let, IfStmt>), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt, BreakStmt>);
   rtoc_lambda_result_7
   });
@@ -454,7 +454,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_plan(self: PipelineConcurrentLowe
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_with_optional_binding(self: PipelineConcurrentLowerer, binding_name: ?String, item_name: String, work: FN() -> PipelineConcurrentResult) RETURNS PipelineConcurrentResult ->
   IF binding_name EXISTS AS binding_name_value THEN
-    RETURN self.with_optional_named_binding(binding_name_value, item_name, work);
+    RETURN pipelineConcurrentLowerer__with_optional_named_binding_call(self, binding_name_value, item_name, work);
   END
   RETURN work();
 END
@@ -1442,4 +1442,12 @@ END
 PUB FN pipelineConcurrentLowerer__task_config_variant_call(self: PipelineConcurrentLowerer, arg0: ?String@symbol) RETURNS String ->
   MUTABLE fn_value = self.task_config_variant;
   RETURN fn_value(arg0);
+END
+PUB FN pipelineConcurrentLowerer__pipeline_block_call(self: PipelineConcurrentLowerer, arg0: Locatable, arg1: FN(String, String) -> !Emittable[]) RETURNS MIRBlockExpr ->
+  MUTABLE fn_value = self.pipeline_block;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN pipelineConcurrentLowerer__with_optional_named_binding_call(self: PipelineConcurrentLowerer, arg0: ?String, arg1: String, arg2: FN() -> PipelineConcurrentResult) RETURNS PipelineConcurrentResult ->
+  MUTABLE fn_value = self.with_optional_named_binding;
+  RETURN fn_value(arg0, arg1, arg2);
 END

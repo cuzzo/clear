@@ -112,7 +112,7 @@ PUB FN pipelineBindingChainLowerer__lower(self: PipelineBindingChainLowerer, cha
   IF inner_name EXISTS AS inner_name_value THEN
     bindings[inner_name_value] = inner_zig;
   END
-  RETURN self.with_named_bindings(bindings, %() USE(chain, inner_zig, label, names, outer_zig, MUTABLE smooth_node, self) -> {
+  RETURN pipelineBindingChainLowerer__with_named_bindings_call(self, bindings, %() USE(chain, inner_zig, label, names, outer_zig, MUTABLE smooth_node, self) -> {
   MUTABLE source_mir = pipelineBindingChainLowerer__visit_mir_call(self, chain.source);
   MUTABLE unnest_mir = pipelineBindingChainLowerer__visit_mir_call(self, chain.unnest_expr);
   MUTABLE fold_plan = TRY (pipelineBindingChainLowerer__lower_binding_fold(self, chain.fold, chain.stages, inner_zig, &smooth_node, names));
@@ -356,4 +356,8 @@ END
 PUB FN pipelineBindingChainLowerer__transpile_type_call(self: PipelineBindingChainLowerer, arg0: PipelineTypeInput) RETURNS String ->
   MUTABLE fn_value = self.transpile_type;
   RETURN fn_value(arg0);
+END
+PUB FN pipelineBindingChainLowerer__with_named_bindings_call(self: PipelineBindingChainLowerer, arg0: {String}String, arg1: FN() -> MIRBlockExpr) RETURNS MIRBlockExpr ->
+  MUTABLE fn_value = self.with_named_bindings;
+  RETURN fn_value(arg0, arg1);
 END

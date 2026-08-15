@@ -81,7 +81,7 @@ PUB FN runtimeHost__materializer_schema_lookup(self: RuntimeHost) RETURNS FN(MIR
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.schema_lookup();
+    RETURN runtimeHost__schema_lookup_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__materializer_next_label(self: RuntimeHost) RETURNS String
@@ -570,4 +570,8 @@ END
 PUB FN runtimeHost__set_current_label_call(self: RuntimeHost, arg0: String) RETURNS Void ->
   MUTABLE fn_value = self.set_current_label;
   RETURN fn_value(arg0);
+END
+PUB FN runtimeHost__schema_lookup_call(self: RuntimeHost) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult ->
+  MUTABLE fn_value = self.schema_lookup;
+  RETURN fn_value();
 END

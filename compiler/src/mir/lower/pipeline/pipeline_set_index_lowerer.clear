@@ -56,7 +56,7 @@ PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, li
     RETURN TRY (pipelineSetIndexLowerer__lower_range_distinct(self, range_chain_value_mutable, &smooth_node, distinct_node, set_zig, alloc));
   END
   MUTABLE insert_body = TRY (pipelineSetIndexLowerer__distinct_insert_body(self, expr_mir, distinct_node.expression, elem_type, elem_zig, alloc, TRUE));
-  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, insert_body, set_zig, MUTABLE smooth_node, self) -> {
+  RETURN pipelineSetIndexLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, insert_body, set_zig, MUTABLE smooth_node, self) -> {
   rtoc_lambda_result_1 = (TRY (pipelineSetIndexLowerer__distinct_set_alloc_stmts(self, &smooth_node, set_zig, alloc)) + [ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: Body{ ArrayValue: insert_body |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + TRY (pipelineSetIndexLowerer__distinct_set_transfer_marks(self, alloc)) + [BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]);
   rtoc_lambda_result_1
   });
@@ -77,7 +77,7 @@ PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTAB
   elem_zig = pipelineSetIndexLowerer__transpile_type_call(self, CAST(type__resolved(elem_type) AS String));
   MUTABLE expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, expr_node, "it");
   MUTABLE map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(${elem_zig}))";
-  RETURN self.pipeline_block(list_node, %(items, label) USE(alloc, elem_type, expr_mir, expr_node, map_type, self) -> {
+  RETURN pipelineSetIndexLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, elem_type, expr_mir, expr_node, map_type, self) -> {
   rtoc_lambda_result_2 = CAST(Tuple{TRY (pipelineSetIndexLowerer__index_result_let(self, map_type, alloc)), ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: Body{ ArrayValue: TRY (pipelineSetIndexLowerer__build_index_gop_body(self, expr_mir, alloc, "it", expr_node, CAST(elem_type AS ?Type), PipelineIndexValueOwnership.Borrowed)) |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt, BreakStmt>);
   rtoc_lambda_result_2
   });
@@ -85,14 +85,14 @@ END
 PRIVATE FN pipelineSetIndexLowerer__lower_observable_distinct(self: PipelineSetIndexLowerer, list_node: Locatable, smooth_node: BinaryOp, distinct_node: DistinctOp) RETURNS ?MIRBlockExpr ->
   MUTABLE range_chain: ?PipelineRangeChain = pipelineSetIndexLowerer__range_chain_call(self, list_node);
   IF range_chain EXISTS AS range_chain_value THEN
-    MUTABLE prefix = self.lazy_range_prefix(range_chain_value.source, range_chain_value.stages, NIL, TRUE);
+    MUTABLE prefix = pipelineSetIndexLowerer__lazy_range_prefix_call(self, range_chain_value.source, range_chain_value.stages, NIL, TRUE);
     RETURN pipelineSetIndexLowerer__range_fold_observable_distinct_call(self, prefix, distinct_node, smooth_node, pipelineSetIndexLowerer__next_label_call(self), range_chain_value.source);
   ELSE
     RETURN NIL;
   END
 END
 PRIVATE FN pipelineSetIndexLowerer__lower_range_distinct(self: PipelineSetIndexLowerer, range_chain: PipelineRangeChain, MUTABLE smooth_node: BinaryOp, distinct_node: DistinctOp, set_zig: String, alloc: String@symbol) RETURNS !MIRBlockExpr ->
-  MUTABLE prefix = self.lazy_range_prefix(range_chain.source, range_chain.stages, NIL, FALSE);
+  MUTABLE prefix = pipelineSetIndexLowerer__lazy_range_prefix_call(self, range_chain.source, range_chain.stages, NIL, FALSE);
   MUTABLE item_var = COPY prefix.item_var;
   MUTABLE key_expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, distinct_node.expression, item_var);
   MUTABLE label = pipelineSetIndexLowerer__next_label_call(self);
@@ -176,7 +176,7 @@ PRIVATE FN pipelineSetIndexLowerer__lower_stream_index(self: PipelineSetIndexLow
   rtoc_lambda_result_3 = [ExprStmt{ expr: Emittable{ Call: COPY Call{ callee: "CheatLib.cleanup", args: [Emittable{ Ident: COPY Ident{ name: COPY elem_zig, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }];
   rtoc_lambda_result_3
   };
-  MUTABLE prefix = self.lazy_range_prefix(range_chain.source, range_chain.stages, on_skip, FALSE);
+  MUTABLE prefix = pipelineSetIndexLowerer__lazy_range_prefix_call(self, range_chain.source, range_chain.stages, on_skip, FALSE);
   MUTABLE item_var = COPY prefix.item_var;
   MUTABLE expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, expr_node, item_var);
   MUTABLE label = pipelineSetIndexLowerer__next_label_call(self);
@@ -349,4 +349,12 @@ END
 PUB FN pipelineSetIndexLowerer__pipeline_alloc_mark_fact_call(self: PipelineSetIndexLowerer, arg0: Emittable, arg1: String, arg2: String@symbol, arg3: ?Locatable, arg4: String, arg5: Bool) RETURNS ?PipelineIndexAllocationFact ->
   MUTABLE fn_value = self.pipeline_alloc_mark_fact;
   RETURN fn_value(arg0, arg1, arg2, arg3, arg4, arg5);
+END
+PUB FN pipelineSetIndexLowerer__pipeline_block_call(self: PipelineSetIndexLowerer, arg0: Locatable, arg1: FN(String, String) -> !Emittable[]) RETURNS MIRBlockExpr ->
+  MUTABLE fn_value = self.pipeline_block;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN pipelineSetIndexLowerer__lazy_range_prefix_call(self: PipelineSetIndexLowerer, arg0: Locatable, arg1: Locatable[], arg2: ?(FN(String) -> !Emittable[]), arg3: Bool) RETURNS PipelineLazyRangePrefix ->
+  MUTABLE fn_value = self.lazy_range_prefix;
+  RETURN fn_value(arg0, arg1, arg2, arg3);
 END

@@ -180,7 +180,7 @@ PUB FN runtimeHost__range_with_fiber_rt<U>(self: RuntimeHost, rt_name: String, b
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.with_fiber_rt(rt_name, blk);
+    RETURN runtimeHost__with_fiber_rt_call(rtoc_self_view, rt_name, blk);
 }
 END
 PUB FN runtimeHost__range_visit_pipeline_body_mir(self: RuntimeHost, body_stmts: []Locatable, placeholder: String) RETURNS ![]Emittable
@@ -222,7 +222,7 @@ PUB FN runtimeHost__range_schema_lookup(self: RuntimeHost) RETURNS FN(MIRLowerin
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.schema_lookup();
+    RETURN runtimeHost__schema_lookup_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__range_runtime_name(self: RuntimeHost) RETURNS String
@@ -1056,4 +1056,8 @@ END
 PUB FN runtimeHost__transpile_type_call(self: RuntimeHost, arg0: PipelineRangeTypeInput) RETURNS String ->
   MUTABLE fn_value = self.transpile_type;
   RETURN fn_value(arg0);
+END
+PUB FN runtimeHost__with_fiber_rt_call(self: RuntimeHost, arg0: String, arg1: FN() -> Any@multiowned) RETURNS Any@multiowned ->
+  MUTABLE fn_value = self.with_fiber_rt;
+  RETURN fn_value(arg0, arg1);
 END
