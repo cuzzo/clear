@@ -241,14 +241,14 @@ PUB FN localBindingAnalysis__each_direct_loop_node(body: []Locatable, block: FN(
 END
 PUB FN localBindingAnalysis__binding_decl_name(node: Locatable) RETURNS ?String ->
   IF node IS_A VarDecl AS var_decl THEN
-    IF var_decl.name IS_A String THEN
+    IF TRUE THEN
       RETURN var_decl.name;
     ELSE
       RETURN NIL;
     END
   ELSE_IF node IS_A BindExpr AS bind_expr THEN
     IF (bind_expr.mode == :decl) THEN
-    IF bind_expr.name IS_A String THEN
+    IF TRUE THEN
       RETURN bind_expr.name;
     ELSE
       RETURN NIL;
