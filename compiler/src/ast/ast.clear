@@ -8856,3 +8856,19 @@ END
 PUB FN unnestOp__expression(self: UnnestOp) RETURNS ?Locatable ->
   RETURN COPY self.expression;
 END
+PUB FN aST__node_right(node: Locatable) RETURNS ?Locatable ->
+  PARTIAL MATCH node START
+    Locatable.BinaryOp AS item -> RETURN COPY item.right;,
+    Locatable.IsA AS item -> RETURN COPY item.right;,
+    Locatable.UnaryOp AS item -> RETURN COPY item.right;
+  END
+  RETURN NIL;
+END
+PUB FN unnestRightName(node: Locatable) RETURNS String ->
+  IF aST__node_right(node) EXISTS AS right_node THEN
+    IF right_node IS_A Identifier AS identifier THEN
+      RETURN COPY identifier.name;
+    END
+  END
+  RETURN "";
+END
