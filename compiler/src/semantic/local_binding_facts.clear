@@ -42,51 +42,205 @@ PUB FN localBindingAnalysis__direct_loop_body_facts(body: []LocalBindingBodyItem
   }));
   RETURN LocalBindingFacts{ names: COPY names, entries: entries, frame_decls: COPY frame_decls, iteration_frame_decls: COPY iteration_frame_decls };
 END
+FN castLocalBindingBodyItemToLocatable(value: LocalBindingBodyItem) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    LocalBindingBodyItem.MIRProgram AS item -> RETURN Locatable{ MIRProgram: COPY item };,
+    LocalBindingBodyItem.RequireNode AS item -> RETURN Locatable{ RequireNode: COPY item };,
+    LocalBindingBodyItem.ProtocolRequirement AS item -> RETURN Locatable{ ProtocolRequirement: COPY item };,
+    LocalBindingBodyItem.ProtocolDef AS item -> RETURN Locatable{ ProtocolDef: COPY item };,
+    LocalBindingBodyItem.FunctionDefMultiowned AS item -> RETURN Locatable{ FunctionDef: COPY item };,
+    LocalBindingBodyItem.ImplementationDef AS item -> RETURN Locatable{ ImplementationDef: COPY item };,
+    LocalBindingBodyItem.ConformanceDef AS item -> RETURN Locatable{ ConformanceDef: COPY item };,
+    LocalBindingBodyItem.MIRStructDef AS item -> RETURN Locatable{ MIRStructDef: COPY item };,
+    LocalBindingBodyItem.VarDecl AS item -> RETURN Locatable{ VarDecl: COPY item };,
+    LocalBindingBodyItem.Assignment AS item -> RETURN Locatable{ Assignment: COPY item };,
+    LocalBindingBodyItem.MIRDestructureTarget AS item -> RETURN Locatable{ MIRDestructureTarget: COPY item };,
+    LocalBindingBodyItem.DestructuringAssignment AS item -> RETURN Locatable{ DestructuringAssignment: COPY item };,
+    LocalBindingBodyItem.BindExpr AS item -> RETURN Locatable{ BindExpr: COPY item };,
+    LocalBindingBodyItem.BinaryOp AS item -> RETURN Locatable{ BinaryOp: COPY item };,
+    LocalBindingBodyItem.IsA AS item -> RETURN Locatable{ IsA: COPY item };,
+    LocalBindingBodyItem.MIRUnaryOp AS item -> RETURN Locatable{ MIRUnaryOp: COPY item };,
+    LocalBindingBodyItem.CallSiteOverride AS item -> RETURN Locatable{ CallSiteOverride: COPY item };,
+    LocalBindingBodyItem.Identifier AS item -> RETURN Locatable{ Identifier: COPY item };,
+    LocalBindingBodyItem.Literal AS item -> RETURN Locatable{ Literal: COPY item };,
+    LocalBindingBodyItem.ListLit AS item -> RETURN Locatable{ ListLit: COPY item };,
+    LocalBindingBodyItem.TupleLit AS item -> RETURN Locatable{ TupleLit: COPY item };,
+    LocalBindingBodyItem.DefaultArrayLit AS item -> RETURN Locatable{ DefaultArrayLit: COPY item };,
+    LocalBindingBodyItem.HashLit AS item -> RETURN Locatable{ HashLit: COPY item };,
+    LocalBindingBodyItem.DefaultLit AS item -> RETURN Locatable{ DefaultLit: COPY item };,
+    LocalBindingBodyItem.StructLit AS item -> RETURN Locatable{ StructLit: COPY item };,
+    LocalBindingBodyItem.LambdaLit AS item -> RETURN Locatable{ LambdaLit: COPY item };,
+    LocalBindingBodyItem.IfStatement AS item -> RETURN Locatable{ IfStatement: COPY item };,
+    LocalBindingBodyItem.IfBind AS item -> RETURN Locatable{ IfBind: COPY item };,
+    LocalBindingBodyItem.WhileLoop AS item -> RETURN Locatable{ WhileLoop: COPY item };,
+    LocalBindingBodyItem.WhileBindLoop AS item -> RETURN Locatable{ WhileBindLoop: COPY item };,
+    LocalBindingBodyItem.BreakNode AS item -> RETURN Locatable{ BreakNode: COPY item };,
+    LocalBindingBodyItem.ContinueNode AS item -> RETURN Locatable{ ContinueNode: COPY item };,
+    LocalBindingBodyItem.FuncCall AS item -> RETURN Locatable{ FuncCall: COPY item };,
+    LocalBindingBodyItem.MIRMethodCall AS item -> RETURN Locatable{ MIRMethodCall: COPY item };,
+    LocalBindingBodyItem.GetField AS item -> RETURN Locatable{ GetField: COPY item };,
+    LocalBindingBodyItem.GetIndex AS item -> RETURN Locatable{ GetIndex: COPY item };,
+    LocalBindingBodyItem.MIRCast AS item -> RETURN Locatable{ MIRCast: COPY item };,
+    LocalBindingBodyItem.ReturnNode AS item -> RETURN Locatable{ ReturnNode: COPY item };,
+    LocalBindingBodyItem.Assert AS item -> RETURN Locatable{ Assert: COPY item };,
+    LocalBindingBodyItem.Raise AS item -> RETURN Locatable{ Raise: COPY item };,
+    LocalBindingBodyItem.ThrowNode AS item -> RETURN Locatable{ ThrowNode: COPY item };,
+    LocalBindingBodyItem.DieNode AS item -> RETURN Locatable{ DieNode: COPY item };,
+    LocalBindingBodyItem.Slice AS item -> RETURN Locatable{ Slice: COPY item };,
+    LocalBindingBodyItem.Require AS item -> RETURN Locatable{ Require: COPY item };,
+    LocalBindingBodyItem.MIRDeferStmt AS item -> RETURN Locatable{ MIRDeferStmt: COPY item };,
+    LocalBindingBodyItem.WithBlock AS item -> RETURN Locatable{ WithBlock: COPY item };,
+    LocalBindingBodyItem.SyncPolicyDecl AS item -> RETURN Locatable{ SyncPolicyDecl: COPY item };,
+    LocalBindingBodyItem.SelectOpMultiowned AS item -> RETURN Locatable{ SelectOp: COPY item };,
+    LocalBindingBodyItem.WhereOpMultiowned AS item -> RETURN Locatable{ WhereOp: COPY item };,
+    LocalBindingBodyItem.IndexOpMultiowned AS item -> RETURN Locatable{ IndexOp: COPY item };,
+    LocalBindingBodyItem.ReduceOpMultiowned AS item -> RETURN Locatable{ ReduceOp: COPY item };,
+    LocalBindingBodyItem.OrderByOpMultiowned AS item -> RETURN Locatable{ OrderByOp: COPY item };,
+    LocalBindingBodyItem.LimitOp AS item -> RETURN Locatable{ LimitOp: COPY item };,
+    LocalBindingBodyItem.UnnestOpMultiowned AS item -> RETURN Locatable{ UnnestOp: COPY item };,
+    LocalBindingBodyItem.DistinctOpMultiowned AS item -> RETURN Locatable{ DistinctOp: COPY item };,
+    LocalBindingBodyItem.EachOp AS item -> RETURN Locatable{ EachOp: COPY item };,
+    LocalBindingBodyItem.TapOp AS item -> RETURN Locatable{ TapOp: COPY item };,
+    LocalBindingBodyItem.SkipOp AS item -> RETURN Locatable{ SkipOp: COPY item };,
+    LocalBindingBodyItem.CollectOp AS item -> RETURN Locatable{ CollectOp: COPY item };,
+    LocalBindingBodyItem.TakeWhileOpMultiowned AS item -> RETURN Locatable{ TakeWhileOp: COPY item };,
+    LocalBindingBodyItem.WindowOpMultiowned AS item -> RETURN Locatable{ WindowOp: COPY item };,
+    LocalBindingBodyItem.BatchWindowOpMultiowned AS item -> RETURN Locatable{ BatchWindowOp: COPY item };,
+    LocalBindingBodyItem.JoinOp AS item -> RETURN Locatable{ JoinOp: COPY item };,
+    LocalBindingBodyItem.FindOpMultiowned AS item -> RETURN Locatable{ FindOp: COPY item };,
+    LocalBindingBodyItem.AnyOpMultiowned AS item -> RETURN Locatable{ AnyOp: COPY item };,
+    LocalBindingBodyItem.AllOpMultiowned AS item -> RETURN Locatable{ AllOp: COPY item };,
+    LocalBindingBodyItem.CountOpMultiowned AS item -> RETURN Locatable{ CountOp: COPY item };,
+    LocalBindingBodyItem.SumOpMultiowned AS item -> RETURN Locatable{ SumOp: COPY item };,
+    LocalBindingBodyItem.AverageOpMultiowned AS item -> RETURN Locatable{ AverageOp: COPY item };,
+    LocalBindingBodyItem.MinOpMultiowned AS item -> RETURN Locatable{ MinOp: COPY item };,
+    LocalBindingBodyItem.MaxOpMultiowned AS item -> RETURN Locatable{ MaxOp: COPY item };,
+    LocalBindingBodyItem.ShardOp AS item -> RETURN Locatable{ ShardOp: COPY item };,
+    LocalBindingBodyItem.ConcurrentOp AS item -> RETURN Locatable{ ConcurrentOp: COPY item };,
+    LocalBindingBodyItem.Placeholder AS item -> RETURN Locatable{ Placeholder: COPY item };,
+    LocalBindingBodyItem.Copy AS item -> RETURN Locatable{ Copy: COPY item };,
+    LocalBindingBodyItem.MIROptionalUnwrap AS item -> RETURN Locatable{ MIROptionalUnwrap: COPY item };,
+    LocalBindingBodyItem.TenseNavigation AS item -> RETURN Locatable{ TenseNavigation: COPY item };,
+    LocalBindingBodyItem.MutableBorrow AS item -> RETURN Locatable{ MutableBorrow: COPY item };,
+    LocalBindingBodyItem.OrElseRaise AS item -> RETURN Locatable{ OrElseRaise: COPY item };,
+    LocalBindingBodyItem.OrElseExit AS item -> RETURN Locatable{ OrElseExit: COPY item };,
+    LocalBindingBodyItem.OrElsePass AS item -> RETURN Locatable{ OrElsePass: COPY item };,
+    LocalBindingBodyItem.OrElsePrune AS item -> RETURN Locatable{ OrElsePrune: COPY item };,
+    LocalBindingBodyItem.OrElseBreak AS item -> RETURN Locatable{ OrElseBreak: COPY item };,
+    LocalBindingBodyItem.CatchBlock AS item -> RETURN Locatable{ CatchBlock: COPY item };,
+    LocalBindingBodyItem.RecoverOp AS item -> RETURN Locatable{ RecoverOp: COPY item };,
+    LocalBindingBodyItem.MIRBlockExpr AS item -> RETURN Locatable{ MIRBlockExpr: COPY item };,
+    LocalBindingBodyItem.StringConcat AS item -> RETURN Locatable{ StringConcat: COPY item };,
+    LocalBindingBodyItem.CapabilityWrap AS item -> RETURN Locatable{ CapabilityWrap: COPY item };,
+    LocalBindingBodyItem.MoveNode AS item -> RETURN Locatable{ MoveNode: COPY item };,
+    LocalBindingBodyItem.CopyNode AS item -> RETURN Locatable{ CopyNode: COPY item };,
+    LocalBindingBodyItem.KeepNode AS item -> RETURN Locatable{ KeepNode: COPY item };,
+    LocalBindingBodyItem.ShareNode AS item -> RETURN Locatable{ ShareNode: COPY item };,
+    LocalBindingBodyItem.LinkNode AS item -> RETURN Locatable{ LinkNode: COPY item };,
+    LocalBindingBodyItem.ResolveNode AS item -> RETURN Locatable{ ResolveNode: COPY item };,
+    LocalBindingBodyItem.FreezeNode AS item -> RETURN Locatable{ FreezeNode: COPY item };,
+    LocalBindingBodyItem.PassStmt AS item -> RETURN Locatable{ PassStmt: COPY item };,
+    LocalBindingBodyItem.StructPattern AS item -> RETURN Locatable{ StructPattern: COPY item };,
+    LocalBindingBodyItem.MIRRangeLit AS item -> RETURN Locatable{ MIRRangeLit: COPY item };,
+    LocalBindingBodyItem.ExternFnDecl AS item -> RETURN Locatable{ ExternFnDecl: COPY item };,
+    LocalBindingBodyItem.ExternStructDecl AS item -> RETURN Locatable{ ExternStructDecl: COPY item };,
+    LocalBindingBodyItem.MIREnumDef AS item -> RETURN Locatable{ MIREnumDef: COPY item };,
+    LocalBindingBodyItem.UnionDef AS item -> RETURN Locatable{ UnionDef: COPY item };,
+    LocalBindingBodyItem.UnionVariantLit AS item -> RETURN Locatable{ UnionVariantLit: COPY item };,
+    LocalBindingBodyItem.StaticCall AS item -> RETURN Locatable{ StaticCall: COPY item };,
+    LocalBindingBodyItem.MIRDoBlock AS item -> RETURN Locatable{ MIRDoBlock: COPY item };,
+    LocalBindingBodyItem.MIRBgBlock AS item -> RETURN Locatable{ MIRBgBlock: COPY item };,
+    LocalBindingBodyItem.ThenChain AS item -> RETURN Locatable{ ThenChain: COPY item };,
+    LocalBindingBodyItem.BgStreamBlock AS item -> RETURN Locatable{ BgStreamBlock: COPY item };,
+    LocalBindingBodyItem.YieldExpr AS item -> RETURN Locatable{ YieldExpr: COPY item };,
+    LocalBindingBodyItem.CloseStream AS item -> RETURN Locatable{ CloseStream: COPY item };,
+    LocalBindingBodyItem.NextExpr AS item -> RETURN Locatable{ NextExpr: COPY item };,
+    LocalBindingBodyItem.MatchStatement AS item -> RETURN Locatable{ MatchStatement: COPY item };,
+    LocalBindingBodyItem.ForRange AS item -> RETURN Locatable{ ForRange: COPY item };,
+    LocalBindingBodyItem.ForEach AS item -> RETURN Locatable{ ForEach: COPY item };,
+    LocalBindingBodyItem.TestBlock AS item -> RETURN Locatable{ TestBlock: COPY item };,
+    LocalBindingBodyItem.WhenBlock AS item -> RETURN Locatable{ WhenBlock: COPY item };,
+    LocalBindingBodyItem.LetBinding AS item -> RETURN Locatable{ LetBinding: COPY item };,
+    LocalBindingBodyItem.TestThat AS item -> RETURN Locatable{ TestThat: COPY item };,
+    LocalBindingBodyItem.AssertRaisesMultiowned AS item -> RETURN Locatable{ AssertRaises: COPY item };,
+    LocalBindingBodyItem.BenchmarkStmtMultiowned AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
+    LocalBindingBodyItem.SmashStmtMultiowned AS item -> RETURN Locatable{ SmashStmt: COPY item };,
+    LocalBindingBodyItem.ProfileStmtMultiowned AS item -> RETURN Locatable{ ProfileStmt: COPY item };,
+    LocalBindingBodyItem.StubDecl AS item -> RETURN Locatable{ StubDecl: COPY item };,
+    LocalBindingBodyItem.Drop AS item -> RETURN Locatable{ Drop: COPY item };,
+    LocalBindingBodyItem.SuppressCleanup AS item -> RETURN Locatable{ SuppressCleanup: COPY item };,
+    LocalBindingBodyItem.Return AS item -> RETURN Locatable{ Return: COPY item };,
+    LocalBindingBodyItem.ReassignCleanup AS item -> RETURN Locatable{ ReassignCleanup: COPY item };,
+    LocalBindingBodyItem.FieldCleanup AS item -> RETURN Locatable{ FieldCleanup: COPY item };,
+    LocalBindingBodyItem.Struct AS item -> RETURN Locatable{ Struct: COPY item };,
+    LocalBindingBodyItem.FunctionDef AS item -> RETURN Locatable{ FunctionDef: COPY item };,
+    LocalBindingBodyItem.SelectOp AS item -> RETURN Locatable{ SelectOp: COPY item };,
+    LocalBindingBodyItem.WhereOp AS item -> RETURN Locatable{ WhereOp: COPY item };,
+    LocalBindingBodyItem.IndexOp AS item -> RETURN Locatable{ IndexOp: COPY item };,
+    LocalBindingBodyItem.ReduceOp AS item -> RETURN Locatable{ ReduceOp: COPY item };,
+    LocalBindingBodyItem.OrderByOp AS item -> RETURN Locatable{ OrderByOp: COPY item };,
+    LocalBindingBodyItem.UnnestOp AS item -> RETURN Locatable{ UnnestOp: COPY item };,
+    LocalBindingBodyItem.DistinctOp AS item -> RETURN Locatable{ DistinctOp: COPY item };,
+    LocalBindingBodyItem.TakeWhileOp AS item -> RETURN Locatable{ TakeWhileOp: COPY item };,
+    LocalBindingBodyItem.WindowOp AS item -> RETURN Locatable{ WindowOp: COPY item };,
+    LocalBindingBodyItem.BatchWindowOp AS item -> RETURN Locatable{ BatchWindowOp: COPY item };,
+    LocalBindingBodyItem.FindOp AS item -> RETURN Locatable{ FindOp: COPY item };,
+    LocalBindingBodyItem.AnyOp AS item -> RETURN Locatable{ AnyOp: COPY item };,
+    LocalBindingBodyItem.AllOp AS item -> RETURN Locatable{ AllOp: COPY item };,
+    LocalBindingBodyItem.CountOp AS item -> RETURN Locatable{ CountOp: COPY item };,
+    LocalBindingBodyItem.SumOp AS item -> RETURN Locatable{ SumOp: COPY item };,
+    LocalBindingBodyItem.AverageOp AS item -> RETURN Locatable{ AverageOp: COPY item };,
+    LocalBindingBodyItem.MinOp AS item -> RETURN Locatable{ MinOp: COPY item };,
+    LocalBindingBodyItem.MaxOp AS item -> RETURN Locatable{ MaxOp: COPY item };,
+    LocalBindingBodyItem.AssertRaises AS item -> RETURN Locatable{ AssertRaises: COPY item };,
+    LocalBindingBodyItem.BenchmarkStmt AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
+    LocalBindingBodyItem.SmashStmt AS item -> RETURN Locatable{ SmashStmt: COPY item };,
+    LocalBindingBodyItem.ProfileStmt AS item -> RETURN Locatable{ ProfileStmt: COPY item };
+  END
+  RETURN CAST(panic("unreachable body item") AS Locatable);
+END
 PUB FN localBindingAnalysis__each_direct_loop_node(body: []LocalBindingBodyItem, block: FN(Locatable) -> Void) RETURNS !Void EFFECTS REENTRANT ->
   IF !(TRUE) THEN
     panic("body must be an Array");
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < body.length() DO
-    IF !(body[rtoc_idx]? IS_A Locatable) THEN
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    block(body[rtoc_idx]?);
-    IF body[rtoc_idx]? IS_A WhileLoop AS while_loop THEN
+    MUTABLE item: LocalBindingBodyItem = COPY UNWRAP (body[rtoc_idx]);
+    block(castLocalBindingBodyItemToLocatable(item));
+    IF item IS_A WhileLoop AS while_loop THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
-    ELSE_IF body[rtoc_idx]? IS_A WhileBindLoop AS while_bind_loop THEN
+    ELSE_IF item IS_A WhileBindLoop AS while_bind_loop THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
-    ELSE_IF body[rtoc_idx]? IS_A ForRange AS for_range THEN
+    ELSE_IF item IS_A ForRange AS for_range THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
-    ELSE_IF body[rtoc_idx]? IS_A ForEach AS for_each THEN
+    ELSE_IF item IS_A ForEach AS for_each THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
-    ELSE_IF body[rtoc_idx]? IS_A FunctionDef@multiowned AS function_def_multiowned THEN
+    ELSE_IF item IS_A FunctionDef@multiowned AS function_def_multiowned THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
-    ELSE_IF body[rtoc_idx]? IS_A LambdaLit AS lambda_lit THEN
+    ELSE_IF item IS_A LambdaLit AS lambda_lit THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
-    ELSE_IF body[rtoc_idx]? IS_A IfStatement AS if_statement THEN
+    ELSE_IF item IS_A IfStatement AS if_statement THEN
         TRY (localBindingAnalysis__each_direct_loop_node(if_statement.then_branch, block));
         TRY (localBindingAnalysis__each_direct_loop_node(if_statement.else_branch, block));
-    ELSE_IF body[rtoc_idx]? IS_A IfBind AS if_bind THEN
+    ELSE_IF item IS_A IfBind AS if_bind THEN
         TRY (localBindingAnalysis__each_direct_loop_node(if_bind.then_branch, block));
         TRY (localBindingAnalysis__each_direct_loop_node(if_bind.else_branch, block));
-    ELSE_IF body[rtoc_idx]? IS_A MatchStatement AS match_statement THEN
+    ELSE_IF item IS_A MatchStatement AS match_statement THEN
         FOR _ IN match_statement.cases DO
         TRY (localBindingAnalysis__each_direct_loop_node(matchCase__body(_), block));
         END
         IF match_statement.default_case THEN
           TRY (localBindingAnalysis__each_direct_loop_node(match_statement.default_case, block));
         END
-    ELSE_IF body[rtoc_idx]? IS_A WithBlock AS with_block THEN
+    ELSE_IF item IS_A WithBlock AS with_block THEN
         TRY (localBindingAnalysis__each_direct_loop_node(with_block.body, block));
-    ELSE_IF (body[rtoc_idx]? IS_A DoBlock) THEN
+    ELSE_IF (item IS_A DoBlock) THEN
         FOR _ IN (body[rtoc_idx]?.branches()) DO
         TRY (localBindingAnalysis__each_direct_loop_node(_.body(), block));
         END
