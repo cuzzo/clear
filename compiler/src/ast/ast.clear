@@ -6322,7 +6322,7 @@ PUB FN aST__inline_union_constructor_target?(node: ?Locatable) RETURNS Bool ->
     RETURN FALSE;
   END
 END
-FN aST__soa_placeholder_field?(node: ?Locatable) RETURNS Bool ->
+PUB FN aST__soa_placeholder_field?(node: ?Locatable) RETURNS Bool ->
   IF node? IS_A GetField AS get_field THEN
     MUTABLE target: Locatable = castLocatableToLocatable(get_field.target);
     RETURN !(!(((IF target IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END))));
@@ -6330,7 +6330,7 @@ FN aST__soa_placeholder_field?(node: ?Locatable) RETURNS Bool ->
     RETURN FALSE;
   END
 END
-FN aST__soa_placeholder_assignment?(node: ?Locatable) RETURNS Bool ->
+PUB FN aST__soa_placeholder_assignment?(node: ?Locatable) RETURNS Bool ->
   IF node? IS_A BindExpr AS bind_expr THEN
     # BindExpr#name is always Identifier#name, i.e. a String, so the Ruby
     # soa_placeholder_field? call can never match a GetField.
