@@ -260,7 +260,11 @@ PUB FN localBindingAnalysis__binding_decl_name(node: Locatable) RETURNS ?String 
     RETURN NIL;
   END
 END
-PUB FN localBindingAnalysis__binding_entry(node: ?Locatable) RETURNS ?CleanupEntry@multiowned ->
+PUB FN localBindingAnalysis__binding_entry(node_opt: ?Locatable) RETURNS ?CleanupEntry@multiowned ->
+  IF (node_opt == NIL) THEN
+    RETURN NIL;
+  END
+  MUTABLE node: Locatable = COPY UNWRAP (node_opt);
   IF node IS_A VarDecl AS var_decl THEN
     RETURN var_decl.mir_binding_entry;
   ELSE_IF node IS_A BindExpr AS bind_expr THEN
