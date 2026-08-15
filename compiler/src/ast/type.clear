@@ -218,7 +218,7 @@ END
 FN typeShape__capacity(self: TypeShape) RETURNS ?TypeArrayCapacity ->
   MUTABLE linear: ?LinearTypeExpression = typeShape__linear_expression(self);
   IF linear EXISTS AS linear_value THEN
-    IF (linear_value.dimensions.length > 1) THEN
+    IF (linear_value.dimensions.length() > 1) THEN
       IF !(linear_value.dimensions |> ALL _ IS_A Int64) THEN
         RETURN NIL;
       END
@@ -310,7 +310,7 @@ FN typeShape__generic_base_raw(self: TypeShape) RETURNS ?String@symbol ->
   END
   IF structural IS_A NamedTypeExpression THEN
     MUTABLE named: NamedTypeExpression = UNWRAP (typeExpressionKind__named(structural));
-    IF !((named.arguments.length == 0)) THEN
+    IF !((named.arguments.length() == 0)) THEN
       RETURN named.name;
     END
   END
@@ -903,7 +903,7 @@ END
 PUB FN type__generic_instance_of(base: String@symbol, args: []TypeTypeInput) RETURNS !Type ->
   MUTABLE arguments: []TypeExpression = ( { MUTABLE rtoc_empty_list_3: []TypeExpression = List[]; rtoc_empty_list_3 } );
   MUTABLE index: Int64 = 0;
-  WHILE (index < args.length) DO
+  WHILE (index < args.length()) DO
     MUTABLE argument = TRY (type__from_input(UNWRAP (args[index])));
     &arguments.append(typeExpressionTree__with_root_capabilities(argument.shape.expression, argument.capabilities));
     index = (index + 1);
@@ -916,7 +916,7 @@ END
 PUB FN type__function_type_from_parts(param_types: []Type, return_type: Type, reentrant: Bool, source_signature: ?TypeSourceSignature, abi_value: String@symbol = :clear) RETURNS !Type ->
   MUTABLE params: []FunctionTypeParam = ( { MUTABLE rtoc_empty_list_4: []FunctionTypeParam = List[]; rtoc_empty_list_4 } );
   MUTABLE i: Int64 = 0;
-  WHILE (i < param_types.length) DO
+  WHILE (i < param_types.length()) DO
     &params.append(FunctionTypeParam{ type: COPY TRY (type__copy_type(UNWRAP (param_types[i]))) });
     i = (i + 1);
   END
@@ -1984,11 +1984,11 @@ PUB FN type__accepts?(self: Type, other_type: Type) RETURNS !Bool EFFECTS REENTR
   IF (((((type__generic_instance?(self) AND type__generic_instance?(other_type)) AND (type__generic_base(self) == type__generic_base(other_type))) AND (type__ownership(self) == type__ownership(other_type))) AND (type__sync(self) == type__sync(other_type))) AND (type__layout(self) == type__layout(other_type))) THEN
     MUTABLE expected_args = TRY (type__generic_args(self));
     MUTABLE actual_args = TRY (type__generic_args(other_type));
-    IF !((expected_args.length == actual_args.length)) THEN
+    IF !((expected_args.length() == actual_args.length())) THEN
       RETURN FALSE;
     END
     MUTABLE index: Int64 = 0;
-    WHILE (index < expected_args.length) DO
+    WHILE (index < expected_args.length()) DO
       IF !(TRY (type__accepts?((UNWRAP (expected_args[index])), UNWRAP (actual_args[index])))) THEN
         RETURN FALSE;
       END
@@ -2137,7 +2137,7 @@ END
 PUB FN type__fixed_position_type(self: Type, index_value: Int64) RETURNS !?Type ->
   IF type__tuple?(self) THEN
     MUTABLE args = TRY (type__generic_args(self));
-    IF (index_value.negative?() OR (index_value >= args.length)) THEN
+    IF (index_value.negative?() OR (index_value >= args.length())) THEN
       RETURN NIL;
     END
     RETURN COPY args[index_value];
@@ -2666,7 +2666,7 @@ PUB FN type__generic_args(self: Type) RETURNS ![]Type ->
   END
   MUTABLE args: []Type = ( { MUTABLE rtoc_empty_list_7: []Type = List[]; rtoc_empty_list_7 } );
   MUTABLE index: Int64 = 0;
-  WHILE (index < items.length) DO
+  WHILE (index < items.length()) DO
     &args.append(TRY (type__from_child_expression(UNWRAP (items[index]))));
     index = (index + 1);
   END
@@ -3079,13 +3079,13 @@ PUB FN type__slot_size(self: Type, lookup_arg: ?FN(String@symbol) -> ?TypeSchema
     MUTABLE schema: ?TypeSchemaLookupResult = resolver(type__resolved(self));
     IF schema EXISTS AS schema_value THEN
       IF schema_value IS_A StructSchema AS struct_schema THEN
-        IF !((struct_schema.type_params.length == 0)) THEN
+        IF !((struct_schema.type_params.length() == 0)) THEN
           RETURN 1;
         END
         MUTABLE total: Int64 = 0;
-        MUTABLE fields: []StructField@multiowned = struct_schema.fields.values;
+        MUTABLE fields: []StructField@multiowned = struct_schema.fields.values();
         MUTABLE i: Int64 = 0;
-        WHILE (i < fields.length) DO
+        WHILE (i < fields.length()) DO
           MUTABLE field = COPY UNWRAP (fields[i]);
           total = (total + TRY (type__slot_size(field.type, resolver)));
           i = (i + 1);
@@ -3198,9 +3198,9 @@ PUB FN type__copyable?(self: Type, lookup_arg: ?FN(String@symbol) -> ?TypeSchema
     MUTABLE schema: ?TypeSchemaLookupResult = resolver_fn(type__resolved(self));
     IF schema EXISTS AS schema_value THEN
       IF schema_value IS_A StructSchema AS struct_schema THEN
-        MUTABLE fields: []StructField@multiowned = struct_schema.fields.values;
+        MUTABLE fields: []StructField@multiowned = struct_schema.fields.values();
         MUTABLE i: Int64 = 0;
-        WHILE (i < fields.length) DO
+        WHILE (i < fields.length()) DO
           IF !(TRY (type__copyable?((TRY (type__from_input(TypeTypeInput{ Type: COPY structField__type((UNWRAP (fields[i]))) }))), resolver_fn))) THEN
             RETURN FALSE;
           END
@@ -3235,7 +3235,7 @@ PUB FN type__bg_capture_is_value_copy?(self: Type, lookup_arg: ?FN(String@symbol
         RETURN TRUE;
       END
       IF schema_value IS_A UnionSchema AS union_schema THEN
-        MUTABLE has_heap = union_schema.variants.values |> ANY TRY (type__variant_has_heap?(_));
+        MUTABLE has_heap = union_schema.variants.values() |> ANY TRY (type__variant_has_heap?(_));
         RETURN !(has_heap);
       END
       RETURN FALSE;
@@ -3291,11 +3291,11 @@ PUB FN type__implicitly_copyable?(self: Type, lookup_arg: ?FN(String@symbol) -> 
         RETURN TRUE;
       END
       IF schema_value IS_A UnionSchema AS union_schema THEN
-        MUTABLE has_heap = union_schema.variants.values |> ANY TRY (type__variant_has_heap?(_));
+        MUTABLE has_heap = union_schema.variants.values() |> ANY TRY (type__variant_has_heap?(_));
         RETURN !(has_heap);
       END
       IF schema_value IS_A StructSchema AS struct_schema THEN
-        MUTABLE raw_field_types = struct_schema.fields.values |> SELECT COPY structField__type(_);
+        MUTABLE raw_field_types = struct_schema.fields.values() |> SELECT COPY structField__type(_);
         MUTABLE field_types = raw_field_types |> SELECT TRY (type__substitute_generic_schema_field_type(self, TypeTypeInput{ Type: COPY _ }, Schema{ StructSchemaMultiowned: COPY struct_schema }));
         MUTABLE all_copy = field_types |> ALL TRY (type__implicitly_copyable?(_, resolver_fn));
         IF all_copy THEN
@@ -3351,7 +3351,7 @@ PUB FN type__recursive_cleanup_shape?(self: Type, schema_lookup: ?FN(String@symb
   IF type__tuple?(self) THEN
     MUTABLE args = TRY (type__generic_args(self));
     MUTABLE index: Int64 = 0;
-    WHILE (index < args.length) DO
+    WHILE (index < args.length()) DO
       IF TRY (type__recursive_cleanup_shape?((UNWRAP (args[index])), schema_lookup, seen_set)) THEN
         RETURN TRUE;
       END
@@ -3378,15 +3378,15 @@ PUB FN type__recursive_cleanup_shape?(self: Type, schema_lookup: ?FN(String@symb
         RETURN TRUE;
       END
       IF schema_value IS_A UnionSchema AS union_schema THEN
-        MUTABLE values: []?SchemasUnionSchemaVariantValue = union_schema.variants.values;
+        MUTABLE values: []?SchemasUnionSchemaVariantValue = union_schema.variants.values();
         MUTABLE union_index: Int64 = 0;
-        WHILE (union_index < values.length) DO
+        WHILE (union_index < values.length()) DO
           MUTABLE vt: ?SchemasUnionSchemaVariantValue = COPY values[union_index];
           IF vt EXISTS AS vt_value THEN
             IF vt_value IS_A InlineStructVariant AS inline_struct_variant THEN
-              MUTABLE field_values = inline_struct_variant.fields.values;
+              MUTABLE field_values = inline_struct_variant.fields.values();
               MUTABLE field_index: Int64 = 0;
-              WHILE (field_index < field_values.length) DO
+              WHILE (field_index < field_values.length()) DO
                 IF TRY (type__recursive_cleanup_shape?((TRY (type__from_input(UNWRAP (field_values[field_index])))), lookup, seen_set)) THEN
                   RETURN TRUE;
                 END
@@ -3406,9 +3406,9 @@ PUB FN type__recursive_cleanup_shape?(self: Type, schema_lookup: ?FN(String@symb
         RETURN FALSE;
       END
       IF schema_value IS_A StructSchema AS struct_schema THEN
-        MUTABLE struct_fields: []StructField@multiowned = struct_schema.fields.values;
+        MUTABLE struct_fields: []StructField@multiowned = struct_schema.fields.values();
         MUTABLE struct_index: Int64 = 0;
-        WHILE (struct_index < struct_fields.length) DO
+        WHILE (struct_index < struct_fields.length()) DO
           MUTABLE struct_field = COPY UNWRAP (struct_fields[struct_index]);
           IF structField__borrowed(struct_field) THEN
             struct_index = (struct_index + 1);
@@ -3493,7 +3493,7 @@ PUB FN type__needs_cleanup?(self: Type, schema_lookup: ?FN(String@symbol) -> ?Ty
   IF type__tuple?(self) THEN
     MUTABLE args = TRY (type__generic_args(self));
     MUTABLE index: Int64 = 0;
-    WHILE (index < args.length) DO
+    WHILE (index < args.length()) DO
       IF TRY (type__needs_cleanup?((UNWRAP (args[index])), schema_lookup, seen_set)) THEN
         RETURN TRUE;
       END
@@ -3571,7 +3571,7 @@ PUB FN type__parallel_boundary_forbidden_reason(self: Type, schema_lookup: ?FN(S
   &child_types.append(COPY _);
   END
   MUTABLE child_index: Int64 = 0;
-  WHILE (child_index < child_types.length) DO
+  WHILE (child_index < child_types.length()) DO
     MUTABLE reason: ?String@symbol = TRY (type__parallel_boundary_forbidden_reason((UNWRAP (child_types[child_index])), schema_lookup, seen));
     IF reason EXISTS AS reason_value THEN
       RETURN COPY reason_value;
@@ -3589,26 +3589,26 @@ PUB FN type__parallel_boundary_forbidden_reason(self: Type, schema_lookup: ?FN(S
       MUTABLE next_seen = COPY seen_types;
       &next_seen.insert(schema_key);
       IF schema_value IS_A StructSchema AS struct_schema THEN
-        FOR rtoc_each_item_9 IN struct_schema.fields.values DO
+        FOR rtoc_each_item_9 IN struct_schema.fields.values() DO
   MUTABLE struct_reason: ?String@symbol = TRY (type__parallel_boundary_forbidden_reason((TRY (type__from_input(TypeTypeInput{ Type: COPY structField__type(rtoc_each_item_9) }))), schema_lookup_value, next_seen));
   IF struct_reason EXISTS AS struct_reason_value THEN
             RETURN COPY struct_reason_value;
   END
         END
       ELSE_IF schema_value IS_A ResourceSchema AS resource_schema THEN
-        FOR rtoc_each_item_10 IN resource_schema.fields.values DO
+        FOR rtoc_each_item_10 IN resource_schema.fields.values() DO
   MUTABLE resource_reason: ?String@symbol = TRY (type__parallel_boundary_forbidden_reason((TRY (type__from_input(TypeTypeInput{ Type: COPY structField__type(rtoc_each_item_10) }))), schema_lookup_value, next_seen));
   IF resource_reason EXISTS AS resource_reason_value THEN
             RETURN COPY resource_reason_value;
   END
         END
       ELSE_IF schema_value IS_A UnionSchema AS union_schema THEN
-        FOR rtoc_each_item_11 IN union_schema.variants.values DO
+        FOR rtoc_each_item_11 IN union_schema.variants.values() DO
   IF (rtoc_each_item_11 == NIL) THEN
     CONTINUE;
   END
   IF rtoc_each_item_11? IS_A InlineStructVariant AS inline_struct_variant THEN
-            FOR rtoc_each_item_12 IN inline_struct_variant.fields.values DO
+            FOR rtoc_each_item_12 IN inline_struct_variant.fields.values() DO
     MUTABLE inline_reason: ?String@symbol = TRY (type__parallel_boundary_forbidden_reason((TRY (type__from_input(rtoc_each_item_12))), schema_lookup_value, next_seen));
     IF inline_reason EXISTS AS inline_reason_value THEN
                 RETURN COPY inline_reason_value;
@@ -3672,7 +3672,7 @@ PUB FN type__needs_explicit_cleanup?(self: Type, allocator: String@symbol, schem
     MUTABLE schema: ?TypeSchemaLookupResult = lookup(type__resolved(self));
     IF schema EXISTS AS schema_value THEN
       IF schema_value IS_A UnionSchema AS union_schema THEN
-        RETURN union_schema.variants.values |> ANY TRY (type__variant_has_heap?(_));
+        RETURN union_schema.variants.values() |> ANY TRY (type__variant_has_heap?(_));
       ELSE_IF schema_value IS_A StructSchema AS struct_schema THEN
         RETURN TRY (type__schema_struct_has_heap_internals?(self, struct_schema));
       END
@@ -3691,7 +3691,7 @@ PUB FN type__elem_has_heap_internals?(self: Type, schema_lookup: ?FN(String@symb
       MUTABLE schema: ?TypeSchemaLookupResult = lookup(type__resolved(et_value));
       IF schema EXISTS AS schema_value THEN
         IF schema_value IS_A UnionSchema AS union_schema THEN
-          RETURN union_schema.variants.values |> ANY TRY (type__variant_has_heap?(_));
+          RETURN union_schema.variants.values() |> ANY TRY (type__variant_has_heap?(_));
         ELSE_IF schema_value IS_A StructSchema AS struct_schema THEN
           RETURN TRY (type__schema_struct_any?(self, struct_schema, %(ft: Type) -> {
   rtoc_lambda_result_14 = (((TRY (type__any_rc?(ft)) OR type__link?(ft)) OR type__any_sync?(ft)) OR type__resource?(ft));
@@ -3721,7 +3721,7 @@ PUB FN type__cleanup_allocator(self: Type, schema_lookup: ?FN(String@symbol) -> 
           RETURN :heap;
         END
       ELSE_IF schema_value IS_A UnionSchema AS union_schema THEN
-        IF union_schema.variants.values |> ANY TRY (type__variant_has_heap?(_)) THEN
+        IF union_schema.variants.values() |> ANY TRY (type__variant_has_heap?(_)) THEN
           RETURN :heap;
         END
       END
@@ -3744,7 +3744,7 @@ PUB FN type__variant_has_heap?(vt: ?SchemasUnionSchemaVariantValue) RETURNS !Boo
       MUTABLE fields = inline_struct_variant.fields;
       MUTABLE keys = fields.keys();
       MUTABLE i: Int64 = 0;
-      WHILE (i < keys.length) DO
+      WHILE (i < keys.length()) DO
         MUTABLE field_type = TRY (type__from_input(fields[UNWRAP (keys[i])]?));
         IF (TRY (type__heap_ptr?(field_type)) AND !(type__symbol?(field_type))) THEN
           RETURN TRUE;
@@ -3847,14 +3847,14 @@ PRIVATE FN type__substitute_generic_schema_field_type(self: Type, field_type: Ty
     params = resource_schema.type_params;
   END
   MUTABLE args = TRY (type__generic_args(self));
-  IF ((params.length == 0) OR (args.length == 0)) THEN
+  IF ((params.length() == 0) OR (args.length() == 0)) THEN
     RETURN normalized_field_type;
   END
   MUTABLE subst: {String@symbol}Type = {};
-  MUTABLE limit = IF (params.length < args.length) THEN
-    params.length
+  MUTABLE limit = IF (params.length() < args.length()) THEN
+    params.length()
   ELSE
-    args.length
+    args.length()
   END;
   MUTABLE i: Int64 = 0;
   WHILE (i < limit) DO
@@ -3870,9 +3870,9 @@ PRIVATE FN type__substitute_generic_schema_field_type(self: Type, field_type: Ty
   END
 END
 PRIVATE FN type__schema_union_needs_promotion?(self: Type, schema: UnionSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, seen: [Set]String) RETURNS !Bool EFFECTS REENTRANT ->
-  MUTABLE values: []?SchemasUnionSchemaVariantValue = schema.variants.values;
+  MUTABLE values: []?SchemasUnionSchemaVariantValue = schema.variants.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE vt: ?SchemasUnionSchemaVariantValue = COPY values[i];
     IF vt EXISTS AS vt_value THEN
       IF vt_value IS_A InlineStructVariant AS inline_struct_variant THEN
@@ -3893,9 +3893,9 @@ PRIVATE FN type__schema_union_needs_promotion?(self: Type, schema: UnionSchema, 
   RETURN FALSE;
 END
 PRIVATE FN type__inline_variant_needs_promotion?(self: Type, variant: InlineStructVariant, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, seen: [Set]String) RETURNS !Bool EFFECTS REENTRANT ->
-  MUTABLE values = variant.fields.values;
+  MUTABLE values = variant.fields.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE field_type = TRY (type__from_input(UNWRAP (values[i])));
     IF TRY (type__needs_promotion?(field_type, schema_lookup, seen)) THEN
       RETURN TRUE;
@@ -3905,9 +3905,9 @@ PRIVATE FN type__inline_variant_needs_promotion?(self: Type, variant: InlineStru
   RETURN FALSE;
 END
 PRIVATE FN type__schema_struct_needs_promotion?(self: Type, schema: StructSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, seen: [Set]String) RETURNS !Bool EFFECTS REENTRANT ->
-  MUTABLE values: []StructField@multiowned = schema.fields.values;
+  MUTABLE values: []StructField@multiowned = schema.fields.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE field = COPY UNWRAP (values[i]);
     MUTABLE t = COPY field.type;
     IF field.borrowed THEN
@@ -3922,9 +3922,9 @@ PRIVATE FN type__schema_struct_needs_promotion?(self: Type, schema: StructSchema
   RETURN FALSE;
 END
 PRIVATE FN type__schema_union_needs_cleanup?(self: Type, schema: UnionSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, seen: [Set]String) RETURNS !Bool EFFECTS REENTRANT ->
-  MUTABLE values: []?SchemasUnionSchemaVariantValue = schema.variants.values;
+  MUTABLE values: []?SchemasUnionSchemaVariantValue = schema.variants.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE vt: ?SchemasUnionSchemaVariantValue = COPY values[i];
     IF vt EXISTS AS vt_value THEN
       IF vt_value IS_A InlineStructVariant AS inline_struct_variant THEN
@@ -3945,9 +3945,9 @@ PRIVATE FN type__schema_union_needs_cleanup?(self: Type, schema: UnionSchema, sc
   RETURN FALSE;
 END
 PRIVATE FN type__inline_variant_needs_cleanup?(self: Type, variant: InlineStructVariant, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, seen: [Set]String) RETURNS !Bool EFFECTS REENTRANT ->
-  MUTABLE values = variant.fields.values;
+  MUTABLE values = variant.fields.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE field_type = TRY (type__from_input(UNWRAP (values[i])));
     IF TRY (type__needs_cleanup?(field_type, schema_lookup, seen)) THEN
       RETURN TRUE;
@@ -3958,9 +3958,9 @@ PRIVATE FN type__inline_variant_needs_cleanup?(self: Type, variant: InlineStruct
 END
 PRIVATE FN type__schema_struct_needs_cleanup?(self: Type, schema: StructSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, seen: [Set]String) RETURNS !Bool EFFECTS REENTRANT ->
   MUTABLE fields = COPY schema.fields;
-  MUTABLE values: []StructField@multiowned = fields.values;
+  MUTABLE values: []StructField@multiowned = fields.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE field = COPY UNWRAP (values[i]);
     MUTABLE t = COPY field.type;
     IF field.borrowed THEN
@@ -3976,9 +3976,9 @@ PRIVATE FN type__schema_struct_needs_cleanup?(self: Type, schema: StructSchema, 
 END
 PRIVATE FN type__schema_struct_has_heap_internals?(self: Type, schema: StructSchema) RETURNS !Bool EFFECTS REENTRANT ->
   MUTABLE fields = COPY schema.fields;
-  MUTABLE values: []StructField@multiowned = fields.values;
+  MUTABLE values: []StructField@multiowned = fields.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE field = COPY UNWRAP (values[i]);
     MUTABLE t = COPY field.type;
     IF field.borrowed THEN
@@ -3994,9 +3994,9 @@ PRIVATE FN type__schema_struct_has_heap_internals?(self: Type, schema: StructSch
   RETURN FALSE;
 END
 PRIVATE FN type__schema_struct_any?(self: Type, schema: StructSchema, blk: FN(Type) -> Bool) RETURNS !Bool EFFECTS REENTRANT ->
-  MUTABLE values: []StructField@multiowned = schema.fields.values;
+  MUTABLE values: []StructField@multiowned = schema.fields.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE v = COPY UNWRAP (values[i]);
     MUTABLE t = TRY (type__from_input(TypeTypeInput{ Type: COPY v.type }));
     IF v.borrowed THEN
@@ -4011,9 +4011,9 @@ PRIVATE FN type__schema_struct_any?(self: Type, schema: StructSchema, blk: FN(Ty
   RETURN FALSE;
 END
 PRIVATE FN type__schema_union_any?(self: Type, schema: UnionSchema, blk: FN(Type) -> Bool) RETURNS !Bool EFFECTS REENTRANT ->
-  MUTABLE values: []?SchemasUnionSchemaVariantValue = schema.variants.values;
+  MUTABLE values: []?SchemasUnionSchemaVariantValue = schema.variants.values();
   MUTABLE i: Int64 = 0;
-  WHILE (i < values.length) DO
+  WHILE (i < values.length()) DO
     MUTABLE vt: ?SchemasUnionSchemaVariantValue = COPY values[i];
     IF vt EXISTS AS vt_value THEN
       IF vt_value IS_A InlineStructVariant AS inline_struct_variant THEN
@@ -4046,14 +4046,14 @@ PRIVATE FN type__accepts_fn_type?(self: Type, other_type: Type) RETURNS !Bool EF
   END
   MUTABLE self_params = COPY self_raw.params;
   MUTABLE other_params = COPY other_raw.params;
-  IF !((self_params.length == other_params.length)) THEN
+  IF !((self_params.length() == other_params.length())) THEN
     RETURN FALSE;
   END
   IF !(TRY (type__accepts?(self_raw.return_type, other_raw.return_type))) THEN
     RETURN FALSE;
   END
   MUTABLE i: Int64 = 0;
-  WHILE (i < self_params.length) DO
+  WHILE (i < self_params.length()) DO
     MUTABLE sp = COPY UNWRAP (self_params[i]);
     MUTABLE op = COPY UNWRAP (other_params[i]);
     MUTABLE sp_t = COPY sp.type;
@@ -4467,7 +4467,7 @@ PRIVATE FN type__compute_zig_type(self: Type, MUTABLE is_param: Bool = FALSE, MU
     MUTABLE fn_raw = UNWRAP (type__function_type(self));
     MUTABLE param_types_zig: []String = ( { MUTABLE rtoc_empty_list_17: []String = List[]; rtoc_empty_list_17 } );
     MUTABLE i: Int64 = 0;
-    WHILE (i < fn_raw.params.length) DO
+    WHILE (i < fn_raw.params.length()) DO
       MUTABLE p = COPY UNWRAP (fn_raw.params[i]);
       MUTABLE t = COPY p.type;
       &param_types_zig.append(TRY (type__zig_type(t, TRUE)));
@@ -4575,7 +4575,7 @@ PRIVATE FN type__generic_instance_zig_type(self: Type) RETURNS !?String EFFECTS 
   MUTABLE args_zig_parts: []String = ( { MUTABLE rtoc_empty_list_18: []String = List[]; rtoc_empty_list_18 } );
   MUTABLE args = TRY (type__generic_args(self));
   MUTABLE i: Int64 = 0;
-  WHILE (i < args.length) DO
+  WHILE (i < args.length()) DO
     MUTABLE arg_type = COPY UNWRAP (args[i]);
     &args_zig_parts.append(TRY (type__nested_zig_type(arg_type)));
     i = (i + 1);

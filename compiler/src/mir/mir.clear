@@ -1793,7 +1793,7 @@ END
 FN switchStmt__body_slots(MUTABLE self: SwitchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_25: []MIRBodySlot = List[]; rtoc_empty_list_25 } );
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < self.arms.length DO
+  WHILE rtoc_idx < self.arms.length() DO
   &slots.append(switchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (self.arms[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
     MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
     rtoc_slot_arm.body = new_body;
@@ -1877,7 +1877,7 @@ FN unionMatchStmt__body_slots(MUTABLE self: UnionMatchStmt) RETURNS ![]MIRBodySl
   IF TRUE THEN
       MUTABLE rtoc_each_items_28 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < rtoc_each_items_28.length DO
+      WHILE rtoc_idx < rtoc_each_items_28.length() DO
       &slots.append(unionMatchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_28[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
         MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
         rtoc_slot_arm.body = new_body;
@@ -1963,7 +1963,7 @@ END
 FN ifChain__body_slots(MUTABLE self: IfChain) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_30: []MIRBodySlot = List[]; rtoc_empty_list_30 } );
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < self.branches.length DO
+  WHILE rtoc_idx < self.branches.length() DO
   &slots.append(ifChain__body_slot(self, symbol("branches_${rtoc_idx.toString()}"), UNWRAP (self.branches[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
     MUTABLE rtoc_slot_arm = COPY UNWRAP (self.branches[rtoc_idx]);
     rtoc_slot_arm.body = new_body;
@@ -4397,7 +4397,7 @@ END
 FN catchWrapper__body_slots(MUTABLE self: CatchWrapper) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_68: []MIRBodySlot = List[]; rtoc_empty_list_68 } );
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < self.clauses.length DO
+  WHILE rtoc_idx < self.clauses.length() DO
   &slots.append(catchWrapper__body_slot(self, symbol("clauses_${rtoc_idx.toString()}"), UNWRAP (self.clauses[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
     MUTABLE rtoc_slot_arm = COPY UNWRAP (self.clauses[rtoc_idx]);
     rtoc_slot_arm.body = new_body;
@@ -4508,7 +4508,7 @@ END
 FN doBlock__body_slots(MUTABLE self: MIRDoBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_70: []MIRBodySlot = List[]; rtoc_empty_list_70 } );
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < self.branch_bodies.length DO
+  WHILE rtoc_idx < self.branch_bodies.length() DO
   &slots.append(doBlock__body_slot(self, symbol("branch_bodies_${rtoc_idx.toString()}"), self.branch_bodies[rtoc_idx]?, %(new_body: []Emittable) USE(rtoc_idx, MUTABLE self) -> {
     self.branch_bodies[rtoc_idx] = COPY new_body;
     rubyToClearVoid()
@@ -7042,7 +7042,7 @@ FN withMatchDispatch__body_slots(self: WithMatchDispatch) RETURNS ![]MIRBodySlot
   IF TRUE THEN
       MUTABLE rtoc_each_items_109 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < rtoc_each_items_109.length DO
+      WHILE rtoc_idx < rtoc_each_items_109.length() DO
       &slots.append(withMatchDispatch__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_109[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
         MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
         rtoc_slot_arm.body = new_body;
@@ -12143,7 +12143,7 @@ FN ownershipContract__owned_operand_names(self: OwnershipContract) RETURNS ![]St
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_188: []String = List[]; rtoc_empty_list_188 } );
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_self_view.operands.length DO
+    WHILE rtoc_idx < rtoc_self_view.operands.length() DO
       IF rtoc_self_view.operands[rtoc_idx]?.borrowed THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -12154,7 +12154,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       IF name EXISTS AS string_name THEN
-        IF !((string_name.length == 0)) THEN
+        IF !((string_name.length() == 0)) THEN
           &names.append(COPY string_name);
         END
       END
@@ -12174,7 +12174,7 @@ FN ownershipContract__empty?(MUTABLE self: OwnershipContract) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((((rtoc_self_view.operands.length == 0) AND (rtoc_self_view.produces.length == 0)) AND (rtoc_self_view.borrows.length == 0)) AND !(rtoc_self_view.covers_consuming_params));
+    RETURN ((((rtoc_self_view.operands.length() == 0) AND (rtoc_self_view.produces.length() == 0)) AND (rtoc_self_view.borrows.length() == 0)) AND !(rtoc_self_view.covers_consuming_params));
 }
 END
 PRIVATE FN ownershipContract__normalize_names(self: OwnershipContract, names: []String) RETURNS ![]String
@@ -12414,7 +12414,7 @@ FN ownershipEffect__from_effects(effects_value: []OwnershipEffect) RETURNS !Owne
       &owned.append(COPY effect);
     END
   END
-  RETURN TRY (ownershipEffect__effect_when(!((owned.length == 0)), ownershipEffect__owned(ownershipEffect__converged_effect_alloc(owned), :uniform)));
+  RETURN TRY (ownershipEffect__effect_when(!((owned.length() == 0)), ownershipEffect__owned(ownershipEffect__converged_effect_alloc(owned), :uniform)));
 END
 FN ownershipEffect__from_children(children: []Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE child_effects: []OwnershipEffect = [];
@@ -12438,7 +12438,7 @@ END
 FN ownershipEffect__from_block_body(body: []Emittable, result_type: ?Type, borrowed_view: Bool = FALSE) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE stmts = COPY body;
   MUTABLE value: ?Emittable = NIL;
-  MUTABLE idx: Int64 = (stmts.length - 1);
+  MUTABLE idx: Int64 = (stmts.length() - 1);
   WHILE (idx >= 0) DO
     IF UNWRAP (stmts[idx]) IS_A BreakStmt AS break_stmt THEN
       value = COPY break_stmt.value;
@@ -12464,7 +12464,7 @@ FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS Bool ->
         RETURN TRUE;
       END
       MUTABLE value: ?Emittable = NIL;
-      MUTABLE idx: Int64 = (block.body.length - 1);
+      MUTABLE idx: Int64 = (block.body.length() - 1);
       WHILE (idx >= 0) DO
         IF UNWRAP (block.body[idx]) IS_A BreakStmt AS break_stmt THEN
           value = COPY break_stmt.value;
@@ -12507,7 +12507,7 @@ PRIVATE FN ownershipEffect__unique_symbol_or_nil(symbols: []String@symbol) RETUR
       &unique.append(COPY symbol_value);
     END
   END
-  IF (unique.length == 1) THEN
+  IF (unique.length() == 1) THEN
     RETURN COPY symbols.first();
   END
   RETURN NIL;
@@ -12558,7 +12558,7 @@ PRIVATE FN ownershipEffect__transferred_break_ident_effect(stmts: []Emittable, v
       cleanup_kind = COPY init_cleanup_kind;
     END
   END
-  MUTABLE active = ((!((name.length == 0)) AND has_mark) AND has_transfer);
+  MUTABLE active = ((!((name.length() == 0)) AND has_mark) AND has_transfer);
   RETURN TRY (ownershipEffect__effect_when(active, ownershipEffect__owned(mark_alloc, cleanup_kind, TRUE, name)));
 END
 PRIVATE FN ownershipEffect__block_result_transfer_effect(stmts: []Emittable, value: ?Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
@@ -12770,7 +12770,7 @@ FN inlineAllocMetadata__empty?(self: InlineAllocMetadata) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.slots.count == 0);
+    RETURN (rtoc_self_view.slots.count() == 0);
 }
 END
 FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS Void
@@ -12790,7 +12790,7 @@ PRIVATE FN inlineAllocMetadata__values(self: InlineAllocMetadata) RETURNS ![]Str
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.slots.values;
+    RETURN rtoc_self_view.slots.values();
 }
 END
 PUB FN inlineAllocMetadata__slot(self: InlineAllocMetadata, key: String@symbol) RETURNS ?String@symbol
@@ -12856,7 +12856,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &uniq.append(COPY alloc_value);
       END
     END
-    IF (uniq.length == 1) THEN
+    IF (uniq.length() == 1) THEN
       RETURN uniq.first();
     ELSE
       RETURN NIL;

@@ -87,7 +87,7 @@ PRIVATE FN pipelineListLowerer__lower_select(self: PipelineListLowerer, site: Pi
   MUTABLE res = pipelineListLowerer__result_binding_name(self, label);
   MUTABLE raw_it = COPY CAST(label AS String);
   WHILE raw_it.startsWith?("_") DO
-      raw_it = raw_it.substr(1, (raw_it.length - 1));
+      raw_it = raw_it.substr(1, (raw_it.length() - 1));
   END
   MUTABLE it_name = "it_${raw_it}";
   MUTABLE head = pipelineListLowerer__visit_expr_head_call(self, expr_node, it_name, alloc);
@@ -124,13 +124,13 @@ END
 PRIVATE FN pipelineListLowerer__result_binding_name(self: PipelineListLowerer, label: String) RETURNS String ->
   MUTABLE raw = COPY label;
   WHILE raw.startsWith?("_") DO
-    raw = raw.substr(1, (raw.length - 1));
+    raw = raw.substr(1, (raw.length() - 1));
   END
   RETURN "res_list_${raw}";
 END
 PRIVATE FN pipelineListLowerer__select_result_type(self: PipelineListLowerer, MUTABLE expr_node: Locatable) RETURNS !Type ->
-  MUTABLE retained_error =   IF ((respondsTo?(expr_node, "retain_error_channel") AND (expr_node.retain_error_channel == TRUE)) AND respondsTo?(expr_node, "error_union_type")) THEN
-    expr_node.error_union_type
+  MUTABLE retained_error =   IF ((respondsTo?(expr_node, "retain_error_channel") AND (expr_node.retain_error_channel() == TRUE)) AND respondsTo?(expr_node, "error_union_type")) THEN
+    expr_node.error_union_type()
   ELSE
     NIL
   END;
@@ -245,11 +245,11 @@ END
 PRIVATE FN pipelineListLowerer__lower_join(self: PipelineListLowerer, site: PipelineSite, join_node: JoinOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE left_type_info = (TRY (aST__full_type_mut(list_node))).element_type();
-  MUTABLE left_zig = pipelineListLowerer__transpile_type_call(self, CAST(left_type_info.resolved AS String));
+  MUTABLE left_zig = pipelineListLowerer__transpile_type_call(self, CAST(left_type_info.resolved() AS String));
   MUTABLE right_src_mir = pipelineListLowerer__visit_mir_call(self, join_node.right_source);
   MUTABLE right_type_info = &join_node.right_source.full_type_mut();
-  MUTABLE right_element_type = right_type_info.element_type;
-  MUTABLE right_zig = pipelineListLowerer__transpile_type_call(self, CAST(right_element_type.resolved AS String));
+  MUTABLE right_element_type = right_type_info.element_type();
+  MUTABLE right_zig = pipelineListLowerer__transpile_type_call(self, CAST(right_element_type.resolved() AS String));
   MUTABLE result_zig = "struct { left: ${left_zig}, right: ?${right_zig} }";
   MUTABLE alloc = pipelineListLowerer__pipeline_result_alloc_call(self);
   MUTABLE left_owns = pipelineListLowerer__cleanup_bearing_type_call(self, left_type_info);
@@ -295,11 +295,11 @@ END
 PRIVATE FN pipelineListLowerer__join_predicate_mir(self: PipelineListLowerer, list_node: Locatable, join_node: JoinOp) RETURNS Emittable ->
   MUTABLE key_expr = join_node.key_expr;
   IF key_expr IS_A LambdaLit THEN
-    MUTABLE params = key_expr.params;
+    MUTABLE params = key_expr.params();
     MUTABLE left_param = params[0].name();
     MUTABLE right_param = params[1].name();
     MUTABLE join_params: {String}String = CAST({left_param: "__jl", right_param: "__jr"} AS {String}String);
-    RETURN pipelineListLowerer__visit_join_lambda_call(self, CAST(key_expr.body AS Locatable), join_params);
+    RETURN pipelineListLowerer__visit_join_lambda_call(self, CAST(key_expr.body() AS Locatable), join_params);
   END
   MUTABLE left_key_mir = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "__jl");
   MUTABLE right_key_mir = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "__jr");

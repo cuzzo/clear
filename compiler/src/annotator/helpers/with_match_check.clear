@@ -47,7 +47,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
   END
   MUTABLE param_names = (fn_value.params |> SELECT _.name) |> DISTINCT _;
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < with_blocks.length DO
+  WHILE rtoc_idx < with_blocks.length() DO
     IF with_blocks[rtoc_idx]?.view_kind THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -70,7 +70,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
         requires_bound_params = TRY (withMatchCheck__collect_sync_bound_param_names(with_blocks[rtoc_idx]?, param_names));
       END
     MUTABLE rtoc_req_idx = 0;
-    WHILE rtoc_req_idx < requires_bound_params.length DO
+    WHILE rtoc_req_idx < requires_bound_params.length() DO
       MUTABLE pname: String = COPY UNWRAP (requires_bound_params[rtoc_req_idx]);
       IF requires_map.contains?(pname) THEN
         rtoc_req_idx = rtoc_req_idx + 1;
@@ -144,7 +144,7 @@ PUB FN withMatchCheck__collect_bound_param_names(with_node: WithBlock, param_nam
   MUTABLE out: [Set]String = Set[];
   MUTABLE rtoc_each_items_2 = ((TRY (capabilityPlan__require_for(with_node))).all);
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_2.length DO
+  WHILE rtoc_idx < rtoc_each_items_2.length() DO
     MUTABLE vn: ?Locatable = COPY rtoc_each_items_2[rtoc_idx]?.var_node;
     IF vn EXISTS AS vn_value THEN
       IF vn_value IS_A Identifier AS identifier THEN
@@ -161,7 +161,7 @@ PUB FN withMatchCheck__collect_sync_bound_param_names(with_node: WithBlock, para
   MUTABLE out: [Set]String = Set[];
   MUTABLE rtoc_each_items_3 = (TRY (withCapabilityPlan__sync_constrained((TRY (capabilityPlan__require_for(with_node))))));
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_3.length DO
+  WHILE rtoc_idx < rtoc_each_items_3.length() DO
     MUTABLE vn: ?Locatable = COPY rtoc_each_items_3[rtoc_idx]?.var_node;
     IF vn EXISTS AS vn_value THEN
       IF vn_value IS_A Identifier AS identifier THEN
@@ -202,10 +202,10 @@ PUB FN withMatchCheck__enforce_polymorphic_iff_rule_mut(node: WithBlock, bound_p
     MUTABLE example_fams: String = "";
     FOR bound_param IN bound_params DO
       IF requires_map[bound_param] EXISTS AS declared_families THEN
-        IF (TRY (withMatchCheck__poly_requires?(declared_families)) AND (example.length == 0)) THEN
+        IF (TRY (withMatchCheck__poly_requires?(declared_families)) AND (example.length() == 0)) THEN
           example = COPY bound_param;
           FOR family IN declared_families DO
-            IF (example_fams.length == 0) THEN
+            IF (example_fams.length() == 0) THEN
               example_fams = "${family}";
             ELSE
               example_fams = "${example_fams} | ${family}";
@@ -229,10 +229,10 @@ PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_look
       MUTABLE requires_map = TRY (functionSignature__requires(sig_mutable));
       MUTABLE params = TRY (functionSignature__params(sig_mutable));
       MUTABLE idx: Int64 = 0;
-      WHILE (idx < params.length) DO
+      WHILE (idx < params.length()) DO
         MUTABLE param_name: String = COPY UNWRAP (params[idx]).name;
         MUTABLE arg: ?Locatable = NIL;
-        IF (idx < call_site.args.length) THEN
+        IF (idx < call_site.args.length()) THEN
           arg = COPY call_site.args[idx];
         END
         MUTABLE families: ?[Set]String@symbol = COPY requires_map[param_name];
@@ -256,7 +256,7 @@ PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_look
             IF arg EXISTS AS arg_value THEN
               MUTABLE family_names: String = "";
               FOR family IN declared_families DO
-                IF (family_names.length == 0) THEN
+                IF (family_names.length() == 0) THEN
                   family_names = "${family}";
                 ELSE
                   family_names = "${family_names} | ${family}";
@@ -326,10 +326,10 @@ PUB FN withMatchCheck__family_of_arg_set(arg: Locatable) RETURNS ![Set]String@sy
     IF sym.sync_families EXISTS AS declared_sync_families THEN
       families = COPY declared_sync_families;
     END
-    IF (families.length > 1) THEN
+    IF (families.length() > 1) THEN
       RETURN TRY (withMatchCheck__expand_snapshotted(families));
     END
-    IF (families.length == 1) THEN
+    IF (families.length() == 1) THEN
       FOR single IN families DO
         IF (single == :SNAPSHOTTED) THEN
           MUTABLE snapshot_families: [Set]String@symbol = Set[];
@@ -387,7 +387,7 @@ PUB FN withMatchCheck__warn_polymorphic_unhandled_errors_mut(node: WithBlock, bo
         MUTABLE possible = TRY (withMatchCheck__errors_for_requires(fams));
         MUTABLE family_names: String = "";
         FOR family IN fams DO
-          IF (family_names.length == 0) THEN
+          IF (family_names.length() == 0) THEN
             family_names = "${family}";
           ELSE
             family_names = "${family_names} | ${family}";

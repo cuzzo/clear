@@ -419,7 +419,7 @@ FN symbolEntry__lifetime_self_only?(self: SymbolEntry) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((rtoc_self_view.lifetime.length == 1)) THEN
+    IF !((rtoc_self_view.lifetime.length() == 1)) THEN
       RETURN FALSE;
     END
     MUTABLE source: ?SymbolEntry@multiowned = COPY rtoc_self_view.lifetime.first();

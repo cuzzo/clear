@@ -10,7 +10,7 @@ REQUIRE "../ast/param.clear"
 # Ruby module ConcurrencyChecks
 UNION SigLookupReturn { FunctionSignatureMultiowned: FunctionSignature@multiowned, TypeMultiowned: Type@multiowned, Type: Type }
 FN concurrencyChecks__check_all_mut(fn_nodes: {String}FunctionDef, sig_lookup: FN(String) -> ?SigLookupReturn, error_handler: FN(Locatable, String) -> Void, body_summaries: {String}FunctionBodySummary, lock_ranks: {String@symbol}Int64) RETURNS !Void ->
-  FOR _ IN fn_nodes.values DO
+  FOR _ IN fn_nodes.values() DO
   IF !(_?.body) THEN
     CONTINUE;
   END
@@ -28,7 +28,7 @@ PRIVATE FN concurrencyChecks__check_hold_across_yield_mut(fn_value: FunctionDef,
       RETURN;
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < scope.length DO
+  WHILE rtoc_idx < scope.length() DO
       MUTABLE offender_token = NIL;
       MUTABLE reason = NIL;
       IF (scope[rtoc_idx]? IS_A BgBlock) THEN
@@ -51,7 +51,7 @@ PRIVATE FN concurrencyChecks__check_hold_across_yield_mut(fn_value: FunctionDef,
       IF !(offender_token) THEN
           RETURN;
       END
-      error_handler(with_block, "Hold-lock-across-yield: ${reason} at line ${offender_token.line} executes inside the WITH at line ${(IF with_block.token != NIL THEN
+      error_handler(with_block, "Hold-lock-across-yield: ${reason} at line ${offender_token.line()} executes inside the WITH at line ${(IF with_block.token != NIL THEN
           with_block.token.line
         ELSE
           NIL
@@ -71,7 +71,7 @@ PRIVATE FN concurrencyChecks__check_naked_nested_with_mut(with_blocks: []WithBlo
       RETURN;
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < outer_scope.length DO
+  WHILE rtoc_idx < outer_scope.length() DO
       IF !(outer_scope[rtoc_idx]? IS_A WithBlock) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -96,7 +96,7 @@ PRIVATE FN concurrencyChecks__check_naked_nested_with_mut(with_blocks: []WithBlo
   });
 END
 PRIVATE FN concurrencyChecks__any_lock_rank?(with_block: WithBlock, lock_ranks: {String@symbol}Int64) RETURNS !Bool ->
-  IF (lock_ranks.count == 0) THEN
+  IF (lock_ranks.count() == 0) THEN
     RETURN FALSE;
   END
   RETURN (TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_block)))))) |> ANY {
@@ -118,7 +118,7 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
       RETURN;
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < scope.length DO
+  WHILE rtoc_idx < scope.length() DO
       IF !((IF scope[rtoc_idx]? IS_A FuncCall AS func_call THEN TRUE ELSE FALSE END)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -129,7 +129,7 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
       END
       MUTABLE rtoc_each_items_1 = (TRY (functionSignature__params(sig)));
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < rtoc_each_items_1.length DO
+      WHILE rtoc_idx < rtoc_each_items_1.length() DO
           MUTABLE pname = COPY CAST((rtoc_each_items_1[rtoc_idx]?.name) AS String);
           IF !((TRY (functionSignature__requires(sig))).contains?(pname)) THEN
               RETURN;
@@ -139,7 +139,7 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
               RETURN;
           END
           MUTABLE arg_name = IF respondsTo?(arg, "name") THEN
-              arg.name
+              arg.name()
             ELSE
               NIL
             END;

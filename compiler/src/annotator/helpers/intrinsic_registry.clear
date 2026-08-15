@@ -42,7 +42,7 @@ END
 # definition -- callers that want them all ask for overloads.
 PUB FN intrinsicRegistry__lookup_single(registry: String@symbol, name: String) RETURNS !?FunctionSignature@multiowned ->
   MUTABLE all = TRY (intrinsicRegistry__overloads(registry, name));
-  IF (all.length != 1) THEN
+  IF (all.length() != 1) THEN
     RETURN NIL;
   END
   RETURN COPY UNWRAP (all[0]);
@@ -62,7 +62,7 @@ PUB FN intrinsicRegistry__collection_element_evidence_method?(name: Name, arity:
   MUTABLE method_name = intrinsicRegistry__name_string(name);
   registries: [3]String@symbol = [:std_lib, :pool_methods, :set_methods];
   MUTABLE i: Int64 = 0;
-  WHILE (i < registries.length) DO
+  WHILE (i < registries.length()) DO
     MUTABLE found: ?FunctionSignature@multiowned = TRY (intrinsicRegistry__lookup_single(registries[i], method_name));
     IF found EXISTS AS found_value THEN
       MUTABLE found_mutable = COPY found_value;
@@ -96,7 +96,7 @@ PUB FN intrinsicRegistry__collection_value_store_method?(name: Name, arity: Int6
   MUTABLE method_name = intrinsicRegistry__name_string(name);
   registries: [4]String@symbol = [:std_lib, :pool_methods, :set_methods, :map_methods];
   MUTABLE i: Int64 = 0;
-  WHILE (i < registries.length) DO
+  WHILE (i < registries.length()) DO
     MUTABLE found: ?FunctionSignature@multiowned = TRY (intrinsicRegistry__lookup_single(registries[i], method_name));
     IF found EXISTS AS found_value THEN
       MUTABLE found_mutable = COPY found_value;

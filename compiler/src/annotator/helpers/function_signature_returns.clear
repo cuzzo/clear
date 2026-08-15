@@ -31,7 +31,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE specs = TRY (functionSignature__intrinsic_arg_specs(rtoc_self_view));
     MUTABLE validation_params: []Param = ( { MUTABLE rtoc_empty_list_2: []Param = List[]; rtoc_empty_list_2 } );
     MUTABLE index: Int64 = 0;
-    WHILE (index < specs.length) DO
+    WHILE (index < specs.length()) DO
       MUTABLE arg_spec = COPY UNWRAP (specs[index]);
       MUTABLE contract_param: ?Param = COPY (TRY (functionSignature__params(rtoc_self_view)))[index];
       &validation_params.append(Param{ name: (arg_spec.name OR_ELSE "arg${index.toString()}"), type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: COPY arg_spec.type })), required: TRUE, mutable: ( { MUTABLE rtoc_optional_or_source_3: ?Bool = arg_spec.mutable; MUTABLE rtoc_optional_or_result_4: ?Bool = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = ((contract_param != NIL) AND (contract_param.mutable == TRUE)); END rtoc_optional_or_result_4 } ), takes: ( { MUTABLE rtoc_optional_or_source_5: ?Bool = arg_spec.takes; MUTABLE rtoc_optional_or_result_6: ?Bool = NIL; IF rtoc_optional_or_source_5 != NIL THEN rtoc_optional_or_result_6 = COPY rtoc_optional_or_source_5; ELSE rtoc_optional_or_result_6 = ((contract_param != NIL) AND (contract_param.takes == TRUE)); END rtoc_optional_or_result_6 } ), default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: :polymorphic });

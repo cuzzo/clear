@@ -44,7 +44,7 @@ PUB FN pipelineContextState__active?(self: PipelineContextState) RETURNS Bool ->
   IF self.soa_rewrite_active THEN
     RETURN TRUE;
   END
-  RETURN !((self.named_bindings.count == 0));
+  RETURN !((self.named_bindings.count() == 0));
 END
 PUB FN pipelineContextState__replacement_for_identifier(self: PipelineContextState, name: String) RETURNS ?String ->
   IF ((name == "_") AND (self.placeholder_name != NIL)) THEN
@@ -479,7 +479,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE arms_value_mutable = COPY arms_value;
       MUTABLE rewritten_arms: []WithMatchArm = ( { MUTABLE rtoc_empty_list_1: []WithMatchArm = List[]; rtoc_empty_list_1 } );
       MUTABLE arm_index = 0;
-      WHILE (arm_index < arms_value_mutable.length) DO
+      WHILE (arm_index < arms_value_mutable.length()) DO
         MUTABLE arm = UNWRAP (arms_value_mutable[arm_index]);
         MUTABLE arm_body: []Locatable = TRY (withMatchArm__body_nodes(arm));
         MUTABLE new_arm_body = TRY (pipelinePlaceholderRewriter__substitute_body(&rtoc_self_view, arm_body));
@@ -520,7 +520,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_body(MUTABLE self: PipelinePl
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result: []Locatable = ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } );
     MUTABLE index = 0;
-    WHILE (index < body.length) DO
+    WHILE (index < body.length()) DO
       &result.append(TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, UNWRAP (body[index]))));
       index = (index + 1);
     END
@@ -536,7 +536,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_fields: {String}Locatable = {};
     MUTABLE keys = fields.keys();
     MUTABLE index = 0;
-    WHILE (index < keys.length) DO
+    WHILE (index < keys.length()) DO
       MUTABLE key = COPY UNWRAP (keys[index]);
       new_fields[key] = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, fields[key]?));
       index = (index + 1);
@@ -618,7 +618,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body: []Locatable = COPY node.body;
     MUTABLE new_body: []Locatable = ( { MUTABLE rtoc_empty_list_3: []Locatable = List[]; rtoc_empty_list_3 } );
     MUTABLE index = 0;
-    WHILE (index < body.length) DO
+    WHILE (index < body.length()) DO
       &new_body.append(TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, UNWRAP (body[index]))));
       index = (index + 1);
     END

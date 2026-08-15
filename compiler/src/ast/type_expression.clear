@@ -309,20 +309,20 @@ PUB FN typeExpressionTree__with_nominal_arguments(expression: TypeExpression, na
       RETURN COPY expression;
     END
     MUTABLE key_branch_value: ?TypeExpression = NIL;
-    IF (arguments.length == 1) THEN
+    IF (arguments.length() == 1) THEN
       key_branch_value = map_type_expression.key;
     ELSE
       key_branch_value = COPY UNWRAP (arguments[0]);
     END
     MUTABLE key: TypeExpression = key_branch_value?;
     MUTABLE value_branch_value: ?TypeExpression = NIL;
-    IF (arguments.length == 1) THEN
+    IF (arguments.length() == 1) THEN
       value_branch_value = COPY UNWRAP (arguments[0]);
     ELSE
       value_branch_value = COPY UNWRAP (arguments[1]);
     END
     MUTABLE value: TypeExpression = value_branch_value?;
-    RETURN TypeExpression{ kind: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY key, value: COPY value, key_implicit: (arguments.length == 1), legacy_separator: COPY map_type_expression.legacy_separator } }, capabilities: COPY cap };
+    RETURN TypeExpression{ kind: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY key, value: COPY value, key_implicit: (arguments.length() == 1), legacy_separator: COPY map_type_expression.legacy_separator } }, capabilities: COPY cap };
   ELSE
     RETURN COPY expression;
   END
@@ -399,7 +399,7 @@ END
 PUB FN typeExpressionTree__each_node(expression: TypeExpression) RETURNS ![]TypeExpression ->
   MUTABLE found: []TypeExpression = ( { MUTABLE rtoc_empty_list_1: []TypeExpression = List[]; rtoc_empty_list_1 } );
   MUTABLE pending: []TypeExpression = [expression];
-  WHILE !((pending.length == 0)) DO
+  WHILE !((pending.length() == 0)) DO
     MUTABLE node = UNWRAP (&pending.pop());
     MUTABLE node_children = TRY (typeExpressionTree__children(node));
     &found.append(node);
@@ -479,7 +479,7 @@ PUB FN typeExpressionParser__parse(raw: Raw) RETURNS !TypeExpression EFFECTS REE
     IF !((closing == NIL)) THEN
       MUTABLE marker = COPY (source.substr(2, (closing - 2)));
       MUTABLE cardinality_branch_value: ?TypeExpressionDimension = NIL;
-      IF (marker.length == 0) THEN
+      IF (marker.length() == 0) THEN
         cardinality_branch_value = TypeExpressionDimension{ SymbolValue: :FINITE };
       ELSE_IF (marker == "INF") THEN
         cardinality_branch_value = TypeExpressionDimension{ SymbolValue: :INF };
@@ -490,8 +490,8 @@ PUB FN typeExpressionParser__parse(raw: Raw) RETURNS !TypeExpression EFFECTS REE
       END
       MUTABLE cardinality: ?TypeExpressionDimension = cardinality_branch_value;
       IF !((cardinality == NIL)) THEN
-        MUTABLE item_source = COPY (source.substr(((closing + 1)), (source.length - ((closing + 1)))));
-        IF !((item_source.length == 0)) THEN
+        MUTABLE item_source = COPY (source.substr(((closing + 1)), (source.length() - ((closing + 1)))));
+        IF !((item_source.length() == 0)) THEN
           RETURN typeExpression__of(TypeExpressionKind{ StreamTypeExpression: COPY StreamTypeExpression{ cardinality: COPY cardinality, item: COPY TRY (typeExpressionParser__parse(Raw{ StringValue: COPY item_source })) } });
         END
       END
@@ -501,7 +501,7 @@ PUB FN typeExpressionParser__parse(raw: Raw) RETURNS !TypeExpression EFFECTS REE
 END
 PRIVATE FN typeExpressionParser__parse_source(source: String) RETURNS !TypeExpression EFFECTS REENTRANT ->
   MUTABLE normalized = source.trim();
-  IF (normalized.length == 0) THEN
+  IF (normalized.length() == 0) THEN
     panic("empty type expression");
   END
   MUTABLE prefixed: ?TypeExpression = TRY (typeExpressionParser__parse_prefixed_source(normalized));
@@ -528,7 +528,7 @@ PRIVATE FN typeExpressionParser__parse_prefixed_source(source: String) RETURNS !
     END
     panic("unsupported tense order {}");
   END
-  MUTABLE inner_source = COPY (source.substr(1, (source.length - 1)));
+  MUTABLE inner_source = COPY (source.substr(1, (source.length() - 1)));
   IF (prefix == "~") THEN
     IF inner_source.startsWith?("~") THEN
       panic("double future type is not allowed");
@@ -547,7 +547,7 @@ PRIVATE FN typeExpressionParser__parse_optional_source(inner_source: String) RET
     panic("double optional type is not allowed");
   END
   IF typeExpressionParser__grouped_type?(inner_source) THEN
-    RETURN typeExpression__of(TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY TRY (typeExpressionParser__parse_source((inner_source.substr(1, (((inner_source.length - 2) - 1) + 1))))) } });
+    RETURN typeExpression__of(TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY TRY (typeExpressionParser__parse_source((inner_source.substr(1, (((inner_source.length() - 2) - 1) + 1))))) } });
   END
   MUTABLE optional_array_parts: ?Tuple<String, ?TypeExpressionDimension> = typeExpressionParser__split_array_suffix(inner_source);
   IF optional_array_parts EXISTS AS optional_array_pair THEN
@@ -591,10 +591,10 @@ PRIVATE FN typeExpressionParser__parse_generic_or_named_source(source: String) R
   IF !((generic == NIL)) THEN
     MUTABLE arguments = generic.arguments |> SELECT TRY (typeExpressionParser__parse_source(_));
     IF (generic.base == "HashMap") THEN
-      IF (arguments.length == 1) THEN
+      IF (arguments.length() == 1) THEN
         RETURN typeExpression__of(TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY typeExpression__of(TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: :String, arguments: List[] } }), value: COPY UNWRAP (arguments.first()), key_implicit: TRUE, legacy_separator: "," } });
       END
-      IF (arguments.length == 2) THEN
+      IF (arguments.length() == 2) THEN
         MUTABLE key = COPY UNWRAP (arguments.first());
         MUTABLE value = COPY UNWRAP (arguments.last());
         RETURN typeExpression__of(TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY key, value: COPY value, legacy_separator: COPY typeExpressionParser__top_level_argument_separator(source), key_implicit: FALSE } });
@@ -618,7 +618,7 @@ PRIVATE FN typeExpressionParser__split_legacy_capability_suffix(source: String) 
       MUTABLE ownership: ?String@symbol = :affine;
       MUTABLE sync: ?String@symbol = NIL;
       MUTABLE layout: ?String@symbol = NIL;
-      FOR _ IN (source.substr(marker_value, (source.length - marker_value))).split("@") |> WHERE !(_.empty?()) |> UNNEST _.split(":") DO
+      FOR _ IN (source.substr(marker_value, (source.length() - marker_value))).split("@") |> WHERE !(_.empty?()) |> UNNEST _.split(":") DO
       IF (_ == "shared") THEN
         ownership = :shared;
       ELSE_IF (_ == "multiowned") OR (_ == "multiOwned") THEN
@@ -657,7 +657,7 @@ PRIVATE FN typeExpressionParser__grouped_type?(source: String) RETURNS Bool ->
   END
   MUTABLE depth: Int64 = 0;
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < source.length DO
+  WHILE rtoc_idx < source.length() DO
     IF (source.substr(rtoc_idx, 1) == "(") THEN
         depth = (depth + 1);
     END
@@ -686,10 +686,10 @@ PRIVATE FN typeExpressionParser__split_array_suffix(source: String) RETURNS !?Tu
       depth = (depth - 1);
       IF depth.zero?() THEN
         MUTABLE item_source = source.substr(0, (index - 0));
-        IF (FALSE OR (item_source.length == 0)) THEN
+        IF (FALSE OR (item_source.length() == 0)) THEN
           RETURN NIL;
         END
-        MUTABLE dimension_source = COPY (source.substr(((index + 1)), ((source.length - 1) - ((index + 1)))));
+        MUTABLE dimension_source = COPY (source.substr(((index + 1)), ((source.length() - 1) - ((index + 1)))));
         MUTABLE dimension_branch_value: ?TypeExpressionDimension = NIL;
         PARTIAL MATCH dimension_source START
           "" ->
@@ -724,7 +724,7 @@ PRIVATE FN typeExpressionParser__split_generic(source: String) RETURNS !?Generic
       IF !(regexMatch?(base, "\\A[A-Z]\\w*\\z")) THEN
         RETURN NIL;
       END
-      MUTABLE inner = COPY (source.substr(((opening_value + 1)), ((source.length - 1) - ((opening_value + 1)))));
+      MUTABLE inner = COPY (source.substr(((opening_value + 1)), ((source.length() - 1) - ((opening_value + 1)))));
       RETURN GenericParts{ base: COPY base, arguments: COPY TRY (typeExpressionParser__split_arguments(inner)) };
     END
   ELSE
@@ -736,7 +736,7 @@ PRIVATE FN typeExpressionParser__split_arguments(source: String) RETURNS ![]Stri
   MUTABLE start: Int64 = 0;
   MUTABLE depth: Int64 = 0;
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < source.length DO
+  WHILE rtoc_idx < source.length() DO
   IF (source.substr(rtoc_idx, 1) == "<") OR (source.substr(rtoc_idx, 1) == "(") OR (source.substr(rtoc_idx, 1) == "[") OR (source.substr(rtoc_idx, 1) == "{") THEN
       depth = (depth + 1);
   ELSE_IF (source.substr(rtoc_idx, 1) == ">") OR (source.substr(rtoc_idx, 1) == ")") OR (source.substr(rtoc_idx, 1) == "]") OR (source.substr(rtoc_idx, 1) == "}") THEN
@@ -751,7 +751,7 @@ PRIVATE FN typeExpressionParser__split_arguments(source: String) RETURNS ![]Stri
   END
   rtoc_idx = rtoc_idx + 1;
   END
-  &arguments.append((source.substr(start, (source.length - start))).trim());
+  &arguments.append((source.substr(start, (source.length() - start))).trim());
   RETURN arguments;
 END
 PRIVATE FN typeExpressionParser__top_level_argument_separator(source: String) RETURNS String ->
@@ -766,7 +766,7 @@ PRIVATE FN typeExpressionParser__top_level_argument_separator(source: String) RE
       depth = (depth - 1);
     ELSE_IF (character == ",") THEN
       IF depth.zero?() THEN
-        MUTABLE following = COPY (source.substr(((index + 1)), (source.length - ((index + 1)))));
+        MUTABLE following = COPY (source.substr(((index + 1)), (source.length() - ((index + 1)))));
         IF following.startsWith?(" ") THEN
           RETURN ", ";
         ELSE
@@ -821,7 +821,7 @@ END
 PUB FN typeExpressionPrinter__semantic(expression: TypeExpression) RETURNS !String EFFECTS REENTRANT ->
   MUTABLE kind = COPY expression.kind;
   IF kind IS_A NamedTypeExpression AS named_type_expression THEN
-    IF (named_type_expression.arguments.length == 0) THEN
+    IF (named_type_expression.arguments.length() == 0) THEN
       RETURN "${named_type_expression.name}";
     END
     RETURN "${named_type_expression.name}<${(named_type_expression.arguments |> SELECT TRY (typeExpressionPrinter__semantic(_))).join(",")}>";
@@ -866,7 +866,7 @@ PUB FN typeExpressionPrinter__legacy(expression: TypeExpression) RETURNS !String
   MUTABLE cap = COPY expression.capabilities;
   IF kind IS_A NamedTypeExpression AS named_type_expression THEN
     MUTABLE base: String = "";
-    IF (named_type_expression.arguments.length == 0) THEN
+    IF (named_type_expression.arguments.length() == 0) THEN
       base = "${named_type_expression.name}";
     ELSE
       base = "${named_type_expression.name}<${(named_type_expression.arguments |> SELECT TRY (typeExpressionPrinter__legacy(_))).join(",")}>";
@@ -923,7 +923,7 @@ PUB FN typeExpressionPrinter__inline(expression: TypeExpression) RETURNS !String
   MUTABLE cap = COPY expression.capabilities;
   IF kind IS_A NamedTypeExpression AS named_type_expression THEN
     MUTABLE base: String = "";
-    IF (named_type_expression.arguments.length == 0) THEN
+    IF (named_type_expression.arguments.length() == 0) THEN
       base = "${named_type_expression.name}";
     ELSE
       base = "${named_type_expression.name}<${(named_type_expression.arguments |> SELECT TRY (typeExpressionPrinter__inline(_))).join(", ")}>";
@@ -944,14 +944,14 @@ PUB FN typeExpressionPrinter__inline(expression: TypeExpression) RETURNS !String
   ELSE_IF kind IS_A LinearTypeExpression AS linear_type_expression THEN
     MUTABLE prefix = typeExpressionPrinter__inline_linear_prefix(linear_type_expression);
     MUTABLE caps = typeExpressionPrinter__capability_suffix(cap, FALSE);
-    RETURN "${prefix}${IF (caps.length == 0) THEN
+    RETURN "${prefix}${IF (caps.length() == 0) THEN
       ""
     ELSE
       "${caps} "
     END}${TRY (typeExpressionPrinter__inline(linear_type_expression.item))}";
   ELSE_IF kind IS_A MapTypeExpression AS map_type_expression THEN
     MUTABLE caps = typeExpressionPrinter__capability_suffix(cap);
-    RETURN "{${TRY (typeExpressionPrinter__inline(map_type_expression.key))}}${IF (caps.length == 0) THEN
+    RETURN "{${TRY (typeExpressionPrinter__inline(map_type_expression.key))}}${IF (caps.length() == 0) THEN
       ""
     ELSE
       "${caps} "
@@ -965,7 +965,7 @@ PUB FN typeExpressionPrinter__inline(expression: TypeExpression) RETURNS !String
       marker = COPY typeExpressionPrinter__dimension_text(cardinality);
     END
     MUTABLE caps = typeExpressionPrinter__capability_suffix(cap);
-    RETURN "[~${marker}]${IF (caps.length == 0) THEN
+    RETURN "[~${marker}]${IF (caps.length() == 0) THEN
       ""
     ELSE
       "${caps} "
@@ -1028,14 +1028,14 @@ PRIVATE FN typeExpressionPrinter__capability_suffix(capabilities: TypeCapabiliti
   IF (include_collection AND !((capabilities.collection == NIL))) THEN
     &parts.append("@${UNWRAP capabilities.collection}");
   END
-  IF (parts.length == 0) THEN
+  IF (parts.length() == 0) THEN
     RETURN "";
   END
   RETURN ((parts.first() OR_ELSE "") $+ (((parts |> SKIP 1) |> SELECT ":${rtoc_delete_prefix(_, "@")}").join("")));
 END
 FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
   IF s.startsWith?(affix) THEN
-    RETURN s.substr(affix.length, (s.length - affix.length));
+    RETURN s.substr(affix.length(), (s.length() - affix.length()));
   END
   RETURN COPY s;
 END

@@ -36,7 +36,7 @@ FN linearResourceFacts__empty() RETURNS LinearResourceFacts@multiowned ->
 END
 FN linearResourceFacts__build(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !LinearResourceFacts@multiowned ->
   MUTABLE inventory = TRY (lifecycleRegistry__type_inventory(program, schema_lookup));
-  RETURN TRY (linearResourceFacts__build_types(inventory.values, schema_lookup));
+  RETURN TRY (linearResourceFacts__build_types(inventory.values(), schema_lookup));
 END
 FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !LinearResourceFacts@multiowned ->
   MUTABLE key: String = "";
@@ -45,7 +45,7 @@ FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@symb
   MUTABLE edges: {String}[]String = {};
   MUTABLE pending: []Type = COPY roots;
   MUTABLE index: Int64 = 0;
-  WHILE (index < pending.length) DO
+  WHILE (index < pending.length()) DO
     MUTABLE type_info = COPY UNWRAP (pending[index]);
     index = (index + 1);
     key = linearResourceFacts__fact_key(type_info);
@@ -84,7 +84,7 @@ FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@symb
   MUTABLE linear: {String}Bool = {};
   MUTABLE queue: []String = seeds.keys();
   MUTABLE cursor: Int64 = 0;
-  WHILE (cursor < queue.length) DO
+  WHILE (cursor < queue.length()) DO
     key = COPY UNWRAP (queue[cursor]);
     cursor = (cursor + 1);
     IF linear.contains?(key) THEN
@@ -162,10 +162,10 @@ PRIVATE FN linearResourceFacts__resource_seed_and_dependencies(type_info: Type, 
     END
     END
   ELSE_IF schema? IS_A UnionSchema AS union_schema THEN
-    FOR variant_slot IN union_schema.variants.values DO
+    FOR variant_slot IN union_schema.variants.values() DO
     IF variant_slot EXISTS AS variant_value THEN
     IF variant_value IS_A InlineStructVariant AS inline_variant THEN
-      FOR _ IN inline_variant.fields.values DO
+      FOR _ IN inline_variant.fields.values() DO
       &dependencies.append(CAST(TRY (lifecycleRegistry__concrete_schema_type(type_info, _, union_schema.type_params)) AS Type));
       END
     ELSE
@@ -324,7 +324,7 @@ FN lifecycleRegistry__concrete_schema_type(owner: Type, raw_type: TypeTypeInput,
   # zip, so walk the shorter of the two by index.
   MUTABLE generic_args = TRY (type__generic_args(owner));
   MUTABLE pair_index: Int64 = 0;
-  WHILE ((pair_index < type_params.length) AND (pair_index < generic_args.length)) DO
+  WHILE ((pair_index < type_params.length()) AND (pair_index < generic_args.length())) DO
     MUTABLE param_name = COPY UNWRAP (type_params[pair_index]);
     MUTABLE argument = COPY UNWRAP (generic_args[pair_index]);
     subst[param_name] = TRY (type__new(TypeConstructionInput{ Type: COPY argument }));
@@ -358,7 +358,7 @@ FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -
   IF linear_resource_facts EXISTS AS given_facts THEN
     resource_facts = COPY given_facts;
   ELSE
-    resource_facts = TRY (linearResourceFacts__build_types(types.values, schema_lookup));
+    resource_facts = TRY (linearResourceFacts__build_types(types.values(), schema_lookup));
   END
   MUTABLE plans: {String}LifecyclePlan = {};
   FOR type_key IN types.keys() DO
@@ -382,7 +382,7 @@ FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -
   rubyToClearVoid()
   });
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < inventoried_bindings.length DO
+  WHILE rtoc_idx < inventoried_bindings.length() DO
     MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
       IF TRUE THEN
         MATCH inventoried_bindings[rtoc_idx]? START SemanticLifecycleRegistryBindingNode.VarDecl AS item -> symbol_branch_value = item.symbol;, SemanticLifecycleRegistryBindingNode.BindExpr AS item -> symbol_branch_value = item.symbol;, SemanticLifecycleRegistryBindingNode.DestructureTarget AS item -> symbol_branch_value = item.symbol; END
@@ -454,7 +454,7 @@ FN lifecycleRegistry__add_monomorphic_carrier_plans_mut(MUTABLE plans: {String}L
     rtoc_each_items_5 = COPY function_def.params;
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_5.length DO
+  WHILE rtoc_idx < rtoc_each_items_5.length() DO
       MUTABLE current_param: Param = COPY UNWRAP (rtoc_each_items_5[rtoc_idx]);
       MUTABLE param_takes = FALSE;
       IF current_param.takes EXISTS AS takes_value THEN
@@ -586,20 +586,20 @@ PRIVATE FN lifecycleRegistry__add_declaration_types_mut(MUTABLE types: {String}T
   aST__each_locatable(CAST(program AS Locatable), TRUE, %(statement: Locatable) USE(MUTABLE types) -> {
   IF statement IS_A StructDef AS struct_def THEN
       MUTABLE struct_def_mutable = COPY struct_def;
-      FOR _ IN struct_def_mutable.field_decls.values DO
+      FOR _ IN struct_def_mutable.field_decls.values() DO
       TRY (lifecycleRegistry__add_type_mut(&types, _.type));
       END
   ELSE_IF statement IS_A ExternStructDecl AS extern_struct_decl THEN
       MUTABLE extern_struct_decl_mutable = COPY extern_struct_decl;
-      FOR _ IN extern_struct_decl_mutable.field_decls.values DO
+      FOR _ IN extern_struct_decl_mutable.field_decls.values() DO
       TRY (lifecycleRegistry__add_type_mut(&types, _.type));
       END
   ELSE_IF statement IS_A UnionDef AS union_def THEN
       MUTABLE union_def_mutable = COPY union_def;
-      FOR variant_slot IN union_def_mutable.variants.values DO
+      FOR variant_slot IN union_def_mutable.variants.values() DO
       IF variant_slot EXISTS AS variant_value THEN
         IF variant_value IS_A InlineStructVariant AS inline_variant THEN
-          FOR field_input IN inline_variant.fields.values DO
+          FOR field_input IN inline_variant.fields.values() DO
           TRY (lifecycleRegistry__add_type_mut(&types, TRY (type__from_input(field_input))));
           END
         ELSE
@@ -621,14 +621,14 @@ PRIVATE FN lifecycleRegistry__add_declaration_types_mut(MUTABLE types: {String}T
 END
 PRIVATE FN lifecycleRegistry__expand_schema_fields_mut(MUTABLE types: {String}Type, pending: []Type, owner: Type, fields: {String}StructField, type_params: []String@symbol) RETURNS ![]Type EFFECTS REENTRANT ->
   MUTABLE grown: []Type = COPY pending;
-  FOR field IN fields.values DO
+  FOR field IN fields.values() DO
     MUTABLE concrete = TRY (lifecycleRegistry__concrete_schema_type(owner, TypeTypeInput{ Type: COPY field.type }, type_params));
-    MUTABLE before = types.count;
+    MUTABLE before = types.count();
     TRY (lifecycleRegistry__add_type_mut(&types, concrete));
-    IF (types.count > before) THEN
-      MUTABLE all_types = COPY types.values;
+    IF (types.count() > before) THEN
+      MUTABLE all_types = COPY types.values();
       MUTABLE grow_idx: Int64 = before;
-      WHILE (grow_idx < all_types.length) DO
+      WHILE (grow_idx < all_types.length()) DO
         &grown.append(COPY UNWRAP (all_types[grow_idx]));
         grow_idx = (grow_idx + 1);
       END
@@ -637,9 +637,9 @@ PRIVATE FN lifecycleRegistry__expand_schema_fields_mut(MUTABLE types: {String}Ty
   RETURN COPY grown;
 END
 PRIVATE FN lifecycleRegistry__add_instantiated_schema_types_mut(MUTABLE types: {String}Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
-  MUTABLE pending: []Type = COPY types.values;
+  MUTABLE pending: []Type = COPY types.values();
   MUTABLE index: Int64 = 0;
-  WHILE (index < pending.length) DO
+  WHILE (index < pending.length()) DO
     MUTABLE type_info = COPY UNWRAP (pending[index]);
     index = (index + 1);
     IF !(type__generic_instance?(type_info)) THEN

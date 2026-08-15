@@ -148,7 +148,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE structs = TRY (translator__translate_structs(&rtoc_self_view));
     MUTABLE functions = TRY (translator__translate_functions(&rtoc_self_view));
     MUTABLE declarations = (structs + functions);
-    IF (declarations.length == 0) THEN
+    IF (declarations.length() == 0) THEN
       RAISE Input, Error, "C header {} contains no ABI declarations CLEAR can import";
     END
     RETURN ((declarations + [""])).join("\n");
@@ -160,7 +160,7 @@ PRIVATE FN translator__collect_aliases_mut(MUTABLE self: Translator) RETURNS Voi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_9 = rtoc_self_view.zig_source.split("\n");
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_9.length DO
+    WHILE rtoc_idx < rtoc_each_items_9.length() DO
       MUTABLE match: ?CompilerRegexScanner = compilerRegexMatchData(rtoc_each_items_9[rtoc_idx]?, compilerRegexCompile("^pub const ([A-Za-z_]\\w*) = (.+);$"));
       IF !(match) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -191,7 +191,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE fields: []String = ( { MUTABLE rtoc_empty_list_12: []String = List[]; rtoc_empty_list_12 } );
           MUTABLE rtoc_each_items_13 = (CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).split("\n");
           MUTABLE rtoc_idx = 0;
-          WHILE rtoc_idx < rtoc_each_items_13.length DO
+          WHILE rtoc_idx < rtoc_each_items_13.length() DO
               MUTABLE match: ?CompilerRegexScanner = compilerRegexMatchData(rtoc_each_items_13[rtoc_idx]?, compilerRegexCompile("^\\s*([A-Za-z_]\\w*):\\s*(.+?)(?:\\s*=\\s*.+)?,$"));
               IF !(match) THEN
                   rtoc_idx = rtoc_idx + 1;
@@ -206,7 +206,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               &fields.append("${compilerRegexCapture(UNWRAP (match), 1)}: ${field_type_value}");
             rtoc_idx = rtoc_idx + 1;
           END
-          IF ((fields.length == 0) AND !(((CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).trim().length() == 0))) THEN
+          IF ((fields.length() == 0) AND !(((CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).trim().length() == 0))) THEN
               CONTINUE;
           END
           &output.append("EXTERN STRUCT ${clear_name} { ${fields.join(", ")} } AS \"${c_name}\" FROM \"${rtoc_self_view.library}\" ABI C HEADER \"${rtoc_self_view.header}\";");
@@ -218,7 +218,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     };
     MUTABLE alias_names = rtoc_self_view.aliases.keys();
     MUTABLE alias_index: Int64 = 0;
-    WHILE (alias_index < alias_names.length) DO
+    WHILE (alias_index < alias_names.length()) DO
       MUTABLE name = COPY UNWRAP (alias_names[alias_index]);
       MUTABLE rhs = COPY rtoc_self_view.aliases[name]?;
       IF ((rtoc_self_view.allowed_names.contains?(name) AND rhs.startsWith?("struct_")) AND compilerRegexMatch(rtoc_self_view.zig_source, compilerRegexCompile("^pub const ${compilerRegexEscape(rhs)} = opaque \\{"))) THEN
@@ -236,7 +236,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE output: []String = ( { MUTABLE rtoc_empty_list_14: []String = List[]; rtoc_empty_list_14 } );
     MUTABLE rtoc_each_items_15 = rtoc_self_view.zig_source.split("\n");
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_15.length DO
+    WHILE rtoc_idx < rtoc_each_items_15.length() DO
       MUTABLE parsed: ?Tuple<String, String, String> = translator__parse_function_line(rtoc_self_view, rtoc_each_items_15[rtoc_idx]?);
       IF !(parsed) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -256,7 +256,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE params: []CHeaderImporterParam = ( { MUTABLE rtoc_empty_list_16: []CHeaderImporterParam = List[]; rtoc_empty_list_16 } );
       MUTABLE valid_params: Bool = TRUE;
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < raw_param_parts.length DO
+      WHILE rtoc_idx < raw_param_parts.length() DO
         IF (raw_param_parts[rtoc_idx]?.trim() == "...") THEN
             valid_params = FALSE;
             BREAK;
@@ -311,7 +311,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE depth = 0;
       MUTABLE close_index: ?Int64 = NIL;
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < line.length DO
+      WHILE rtoc_idx < line.length() DO
       IF (rtoc_idx < open_index_value) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -330,11 +330,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF close_index EXISTS AS close_index_value THEN
         MUTABLE params = line.substr(((open_index_value + 1)), (close_index_value - ((open_index_value + 1))));
-        MUTABLE result = (line.substr(((close_index_value + 1)), (line.length - ((close_index_value + 1))))).trim();
+        MUTABLE result = (line.substr(((close_index_value + 1)), (line.length() - ((close_index_value + 1))))).trim();
         IF !(result.endsWith?(";")) THEN
           RETURN NIL;
         END
-        RETURN [name, params, result.substr(0, ((result.length - 1) - 0))];
+        RETURN [name, params, result.substr(0, ((result.length() - 1) - 0))];
       ELSE
         RETURN NIL;
       END
@@ -494,7 +494,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           &params.append(mapped_value);
     END
       END
-      IF !((params.length == raw_params.length)) THEN
+      IF !((params.length() == raw_params.length())) THEN
         RETURN NIL;
       END
       MUTABLE result: ?String = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 2), :return));
@@ -562,7 +562,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE words: []String = ( { MUTABLE rtoc_empty_list_19: []String = List[]; rtoc_empty_list_19 } );
     MUTABLE rtoc_each_items_20 = (compilerRegexReplaceFirst(c_name, compilerRegexCompile("^struct_"), "")).split("_");
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_20.length DO
+    WHILE rtoc_idx < rtoc_each_items_20.length() DO
       IF (rtoc_each_items_20[rtoc_idx]?.length() == 0) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -588,7 +588,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE start = 0;
     MUTABLE parts: []String = ( { MUTABLE rtoc_empty_list_22: []String = List[]; rtoc_empty_list_22 } );
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < text.length DO
+    WHILE rtoc_idx < text.length() DO
       IF (["(", "[", "{"]).contains?(text.substr(rtoc_idx, 1)) THEN
           depth = (depth + 1);
       END
@@ -603,7 +603,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       start = (rtoc_idx + 1);
     rtoc_idx = rtoc_idx + 1;
     END
-    &parts.append((text.substr(start, (text.length - start))).trim());
+    &parts.append((text.substr(start, (text.length() - start))).trim());
     RETURN parts;
 }
 END

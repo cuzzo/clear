@@ -38,7 +38,7 @@ PRIVATE FN signatureRegistry__extern_lifetime_paths(node: ExternFnDecl) RETURNS 
   MUTABLE paths: []FunctionSignatureLifetimeSource = ( { MUTABLE rtoc_empty_list_6: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_6 } );
   MUTABLE rtoc_each_items_7 = (CAST(lifetime AS []Locatable));
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_7.length DO
+  WHILE rtoc_idx < rtoc_each_items_7.length() DO
     MUTABLE lifetime_item: Locatable = COPY UNWRAP (rtoc_each_items_7[rtoc_idx]);
     IF lifetime_item IS_A Identifier AS identifier THEN
       &paths.append(FunctionSignatureLifetimeSource{ StringValue: COPY identifier.name });

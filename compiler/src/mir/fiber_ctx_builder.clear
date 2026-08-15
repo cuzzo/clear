@@ -71,7 +71,7 @@ PUB FN captureSpec__finalizer_mir_for(self: CaptureSpec, receiver: String) RETUR
   RETURN Emittable{ RcRelease: COPY RcRelease{ source: Emittable{ FieldGet: COPY captured_field }, zig_base: payload_type_zig, func: captureRcKind__release_func(rc_kind), alloc: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY receiver_expr }, field: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
 END
 PUB FN captureSpec__requires_setup?(self: CaptureSpec) RETURNS Bool ->
-  RETURN !((self.setup_mir.length == 0));
+  RETURN !((self.setup_mir.length() == 0));
 END
 PUB FN captureSpec__needs_moved_guard?(self: CaptureSpec) RETURNS Bool ->
   RETURN captureCleanupPlan__guarded?(self.cleanup_plan);
@@ -140,7 +140,7 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
   MUTABLE ti: Type = ti_branch_value?;
     MUTABLE sym = analysis?.capture_symbols[_];
     MUTABLE atomic_ptr_capture = type__atomic_ptr?(ti);
-    MUTABLE shared_capture = ((atomic_ptr_capture OR type__shared?(ti)) OR ((sym != NIL) AND (sym.storage == :shared)));
+    MUTABLE shared_capture = ((atomic_ptr_capture OR type__shared?(ti)) OR ((sym != NIL) AND (sym.storage() == :shared)));
     MUTABLE rc_kind =   IF atomic_ptr_capture THEN
       CaptureRcKind.AtomicPtr
     ELSE_IF shared_capture THEN

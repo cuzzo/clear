@@ -143,7 +143,7 @@ PRIVATE FN pipelineHost__apply_named_bindings(MUTABLE self: PipelineHost, entrie
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF (index_value >= entries.length) THEN
+    IF (index_value >= entries.length()) THEN
       RETURN blk();
     END
     MUTABLE entry = COPY UNWRAP (entries[index_value]);
@@ -424,10 +424,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF (context.soa_rewrite_active AND aST__soa_placeholder_assignment?(node)) THEN
       MUTABLE assignment: Any@multiowned = COPY CAST(node AS Any@multiowned);
-      MUTABLE target: GetField = CAST(assignment.name AS GetField);
+      MUTABLE target: GetField = CAST(assignment.name() AS GetField);
       MUTABLE field = target.field;
       &context.soa_needed_fields.insert(COPY field);
-      MUTABLE value: String = castPipelineHostReturnValueToString(pipelineHost__visit(rtoc_self_view, CAST(assignment.value AS Locatable)));
+      MUTABLE value: String = castPipelineHostReturnValueToString(pipelineHost__visit(rtoc_self_view, CAST(assignment.value() AS Locatable)));
       RETURN PipelineHostReturnValue{ StringValue: COPY "__soa_${field}[__soa_i] = ${value};" };
     END
     MUTABLE substituted = pipelineHost__substitute_placeholders(rtoc_self_view, node);
@@ -660,15 +660,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF tenseSelectorPlan__asynchronous?(tense_plan) THEN
       MUTABLE promise_name = "__select_promise${id.toString()}";
       MUTABLE expression_type_branch_value: ?Type = NIL;
-      IF (respondsTo?(op.expression, "error_union_type") AND op.expression.error_union_type) THEN
-        expression_type_branch_value = TRY (type__new(op.expression.error_union_type));
+      IF (respondsTo?(op.expression, "error_union_type") AND op.expression.error_union_type()) THEN
+        expression_type_branch_value = TRY (type__new(op.expression.error_union_type()));
       ELSE
         expression_type_branch_value = TRY (type__new(&op.expression.full_type_mut()));
       END
       MUTABLE expression_type: Type = expression_type_branch_value?;
       MUTABLE outer_fallible = tenseEnvelope__split_future(tense_plan.envelope).outer |> ANY (_.kind == TenseLayerKind.Fallible);
       MUTABLE promise_source =     IF selector IS_A TryExpr THEN
-        selector.expr.without_try()
+        selector.expr().without_try()
       ELSE
         selector.without_try()
       END;
@@ -706,7 +706,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE ident_mutable = COPY ident;
         transfer_name = COPY ident_mutable.name;
         MUTABLE rtoc_idx = 0;
-        WHILE rtoc_idx < selector_prefix.length DO
+        WHILE rtoc_idx < selector_prefix.length() DO
       IF !((((selector_prefix[rtoc_idx]? IS_A Cleanup OR selector_prefix[rtoc_idx]? IS_A ErrCleanup)) AND (CAST((selector_prefix[rtoc_idx]?.name()) AS String) == transfer_name))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -736,7 +736,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source_item_type: ?Type = TRY (type__runtime_stream_storage_element_type(source_type));
     IF ((!(type__array?(source_type)) AND (source_item_type != NIL)) AND !(pipelinePlaceholderUsage__identity_placeholder?(op.expression))) THEN
       MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(rtoc_self_view.range_lowerer, "__select_item", source_item_type));
-      IF !((owned_stmts.length == 0)) THEN
+      IF !((owned_stmts.length() == 0)) THEN
         item_body = (owned_stmts + item_body);
       END
     END
@@ -1010,7 +1010,7 @@ PRIVATE FN pipelineHost__pipeline_alloc(self: PipelineHost, smooth_node: BinaryO
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (smooth_node.storage == :heap) THEN
+    IF (smooth_node.storage() == :heap) THEN
       RETURN :heap;
     END
     RETURN pipelineHost__pipeline_result_alloc(rtoc_self_view);

@@ -104,7 +104,7 @@ PUB STRUCT LocalFunctionFacts {
 }
 
 PUB FN localFunctionFacts__from_summary(summary: FunctionBodySummary) RETURNS LocalFunctionFacts ->
-  RETURN LocalFunctionFacts{ name: COPY summary.name, definition_id: summary.definition_id.value, body_id: summary.body_id.value, callees: COPY (summary.callees |> SELECT COPY _) |> ORDER_BY _, propagating_callees: COPY (summary.propagating_callees |> SELECT COPY _) |> ORDER_BY _, has_function_pointer_call: summary.has_fnptr_call, raises_directly: summary.raises_directly, local_count: summary.local_facts.length, call_site_count: summary.call_site_facts.length, suspend_kinds: COPY (summary.suspend_points |> SELECT CAST(_.kind AS String)) |> ORDER_BY _ };
+  RETURN LocalFunctionFacts{ name: COPY summary.name, definition_id: summary.definition_id.value, body_id: summary.body_id.value, callees: COPY (summary.callees |> SELECT COPY _) |> ORDER_BY _, propagating_callees: COPY (summary.propagating_callees |> SELECT COPY _) |> ORDER_BY _, has_function_pointer_call: summary.has_fnptr_call, raises_directly: summary.raises_directly, local_count: summary.local_facts.length(), call_site_count: summary.call_site_facts.length(), suspend_kinds: COPY (summary.suspend_points |> SELECT CAST(_.kind AS String)) |> ORDER_BY _ };
 END
 # Ruby module Annotator::Phases::BodyAnalysis
 # End Ruby module Annotator::Phases

@@ -193,7 +193,7 @@ PRIVATE FN clearParser__build_refined_if_tree(self: ClearParser, if_token: Token
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE body: []Locatable = COPY then_branch;
-    MUTABLE index = (steps.length - 1);
+    MUTABLE index = (steps.length() - 1);
     WHILE (index >= 0) DO
       MUTABLE step = COPY UNWRAP (steps[index]);
       MUTABLE nested_branch_value: ?Locatable = NIL;

@@ -26,30 +26,30 @@ PUB UNION ContextInitInput { StructInitField: StructInitField, ArrayValue: []Con
 PUB UNION PromotedDeclInput { Emittable: Emittable, ArrayValue: []PromotedDeclListItem }
 PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?TransformValue, lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
   MUTABLE block_source = COPY bg_block;
-  MUTABLE suspend_points = (block_source.fsm_suspend_points OR List[]);
-  MUTABLE need_conservative = TRY (fsmTransform__body_needs_conservative?(block_source.body));
+  MUTABLE suspend_points = (block_source.fsm_suspend_points() OR List[]);
+  MUTABLE need_conservative = TRY (fsmTransform__body_needs_conservative?(block_source.body()));
   MUTABLE all_locals = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_2: ?[]PromotedLocalFact = NIL;
   IF need_conservative THEN
-    rtoc_ternary_value_2 = TRY (fsmTransform__collect_body_locals(block_source.body));
+    rtoc_ternary_value_2 = TRY (fsmTransform__collect_body_locals(block_source.body()));
   ELSE
     rtoc_ternary_value_2 = List[];
   END
   rtoc_ternary_value_2? };
-  MUTABLE promoted_names = all_locals |> SELECT _.name;
-  MUTABLE field_locals = all_locals |> WHERE !(_.is_suspend_result);
+  MUTABLE promoted_names = all_locals |> SELECT _.name();
+  MUTABLE field_locals = all_locals |> WHERE !(_.is_suspend_result());
   MUTABLE captured = (castOptionalTransformValueToOptionalHashMapStringType(ctx[:captured]) OR_ELSE {});
   MUTABLE captured_map = captured.keys().to_a();
   MUTABLE ctx_id: Int64 = COPY castOptionalTransformValueToInt64(ctx[:id]);
   MUTABLE promo_capture_map = ((captured_map + promoted_names)).to_h(%(n) USE(ctx_id) -> [n, "__ctx_${ctx_id.toString()}.${n}"]);
-  MUTABLE rec_segs = mIRLowering__with_fiber_capture_map(lowering, promo_capture_map, {:rt_override: castOptionalTransformValueToString(ctx[:bg_rt])}, %() USE(block_source, ctx, lowering) -> RecursiveSplitter.split(block_source.body, lowering, {:ctx: ctx}));
+  MUTABLE rec_segs = mIRLowering__with_fiber_capture_map(lowering, promo_capture_map, {:rt_override: castOptionalTransformValueToString(ctx[:bg_rt])}, %() USE(block_source, ctx, lowering) -> RecursiveSplitter.split(block_source.body(), lowering, {:ctx: ctx}));
   IF (rec_segs == NIL) THEN
     RETURN NIL;
   END
-  MUTABLE segments = rec_segs.segments;
+  MUTABLE segments = rec_segs.segments();
   MUTABLE expected = scopeBindings__length(suspend_points);
-  MUTABLE io_next_count = segments |> COUNT (_.tail IS_A IoSuspend OR _.tail IS_A NextSuspend);
-  MUTABLE lock_with_nodes = (segments |> SELECT:? (IF _.tail IS_A LockSuspend THEN
-    _.tail.with_node()
+  MUTABLE io_next_count = segments |> COUNT (_.tail() IS_A IoSuspend OR _.tail() IS_A NextSuspend);
+  MUTABLE lock_with_nodes = (segments |> SELECT:? (IF _.tail() IS_A LockSuspend THEN
+    _.tail().with_node()
   ELSE
     NIL
   END) |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
@@ -58,7 +58,7 @@ PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?Tran
     RETURN NIL;
   END
   MUTABLE liveness = Liveness.analyze(segments, ctx);
-  MUTABLE ext_ctx = (TRY (fsmTransform__coerce_context_fields(ctx[:extra_ctx_fields])) + (field_locals |> SELECT ContextFieldDecl{ name: COPY _.name, type_zig: COPY _.type_zig, default_value: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } } }));
+  MUTABLE ext_ctx = (TRY (fsmTransform__coerce_context_fields(ctx[:extra_ctx_fields])) + (field_locals |> SELECT ContextFieldDecl{ name: COPY _.name(), type_zig: COPY _.type_zig(), default_value: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } } }));
   MUTABLE raw_ctx = COPY ctx;
   MUTABLE emit_ctx = FsmEmitContext{ id: castOptionalTransformValueToInt64(raw_ctx[:id]?), bg_rt: COPY castOptionalTransformValueToString(raw_ctx[:bg_rt]?), blk_label: COPY castOptionalTransformValueToString(raw_ctx[:blk_label]?), ctx_type: COPY castOptionalTransformValueToString(raw_ctx[:ctx_type]?), promise_zig: COPY castOptionalTransformValueToString(raw_ctx[:promise_zig]?), async_result_shape: COPY castOptionalTransformValueToAsyncResultShape(raw_ctx[:async_result_shape]?), capture_fields: COPY TRY (fsmTransform__coerce_context_fields(raw_ctx[:capture_fields]?)), alloc_var: COPY castOptionalTransformValueToString(raw_ctx[:alloc_var]?), promise_var: COPY castOptionalTransformValueToString(raw_ctx[:promise_var]?), ctx_var: COPY castOptionalTransformValueToString(raw_ctx[:ctx_var]?), rt_name: COPY castOptionalTransformValueToString(raw_ctx[:rt_name]?), promoted_decls: COPY TRY (fsmTransform__coerce_promoted_decls(PromotedDeclInput{ Emittable: castOptionalTransformValueToEmittable(raw_ctx[:promoted_decls]) })), capture_inits: COPY TRY (fsmTransform__coerce_context_inits(raw_ctx[:capture_inits])), captured: COPY castTransformValueToHashMapStringType((raw_ctx[:captured] OR_ELSE {})), capture_close_plans: COPY castTransformValueToHashMapStringResourceClosePlan((raw_ctx[:capture_close_plans] OR_ELSE {})), pointer_captures: COPY CAST((raw_ctx[:pointer_captures] OR_ELSE Set[]) AS [Set]String), extra_ctx_fields: COPY ext_ctx, recursive_promoted_names: COPY promoted_names, fresh_heap_cleanup_names: COPY castTransformValueToString((raw_ctx[:fresh_heap_cleanup_names] OR_ELSE List[])), capture_finalizers: COPY castTransformValueToEmittable((raw_ctx[:capture_finalizers] OR_ELSE List[])), arena_init_flag: ruby_union_scalar_equal_optional_TransformValue_Bool(raw_ctx[:arena_init_flag], TRUE), is_void: ruby_union_scalar_equal_optional_TransformValue_Bool(raw_ctx[:is_void], TRUE), pin_mode: CAST(raw_ctx[:pin_mode] AS ?Any@multiowned), parallel: ruby_union_scalar_equal_optional_TransformValue_Bool(raw_ctx[:parallel], TRUE), profile_site_id: COPY castOptionalTransformValueToOptionalInt64(raw_ctx[:profile_site_id]), profile_line: COPY castOptionalTransformValueToOptionalInt64(raw_ctx[:profile_line]), profile_column: COPY castOptionalTransformValueToOptionalInt64(raw_ctx[:profile_column]), destroy_actions: List[] };
   RETURN Emit.build_recursive(emit_ctx, rec_segs, liveness, lowering);
@@ -190,7 +190,7 @@ PRIVATE FN fsmTransform__suspend_value?(value: Locatable) RETURNS !Bool ->
   IF !(aST__call?(value)) THEN
     RETURN FALSE;
   END
-  MUTABLE md = value.matched_stdlib_def;
+  MUTABLE md = value.matched_stdlib_def();
   RETURN !(!(((((md != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_9 = (md?);
   TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_9)) }) AND ((TRY (functionSignature__intrinsic_contract(&md))).behavior).fsm_setup_present))));
 END

@@ -35,13 +35,13 @@ PUB STRUCT MutualThunkPlan {
 }
 supported_ops = [:ADD, :SUB, :MUL, :DIV];
 PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS ?Plan ->
-  IF (body.length == 0) THEN
+  IF (body.length() == 0) THEN
     RETURN NIL;
   END
   MUTABLE stmts = COPY body;
   MUTABLE base_cases = List[];
   MUTABLE i = 0;
-  WHILE (i < (stmts.length - 1)) DO
+  WHILE (i < (stmts.length() - 1)) DO
     MUTABLE stmt = COPY UNWRAP (stmts[i]);
     MUTABLE bc: ?BaseCase = recursiveSplitter__match_base_case(stmt, fn_name);
     IF bc EXISTS AS bc_value THEN
@@ -68,14 +68,14 @@ PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS ?Pla
   END
 END
 PUB FN recursiveSplitter__split_mutual(body: []Locatable, fn_name: String, partner_names: []String) RETURNS ?MutualPlan ->
-  IF (body.length == 0) THEN
+  IF (body.length() == 0) THEN
     RETURN NIL;
   END
   MUTABLE cycle = ((partner_names + [fn_name])) |> SELECT _.toString() |> DISTINCT _;
   MUTABLE stmts = COPY body;
   MUTABLE base_cases = List[];
   MUTABLE i = 0;
-  WHILE (i < (stmts.length - 1)) DO
+  WHILE (i < (stmts.length() - 1)) DO
     MUTABLE stmt = COPY UNWRAP (stmts[i]);
     MUTABLE bc: ?BaseCase = recursiveSplitter__match_mutual_base_case(stmt, cycle);
     IF bc EXISTS AS bc_value THEN
@@ -109,7 +109,7 @@ PRIVATE FN recursiveSplitter__match_mutual_base_case(stmt: Locatable, cycle_name
     MUTABLE then_b: ?[]Locatable = CAST(if_statement.then_branch AS ?[]Locatable);
     IF then_b EXISTS AS then_b_value THEN
       MUTABLE then_b_value = COPY then_b_value;
-      IF (then_b_value.length != 1) THEN
+      IF (then_b_value.length() != 1) THEN
         RETURN NIL;
       END
       MUTABLE ret: Locatable = COPY UNWRAP (then_b_value.first());
@@ -149,7 +149,7 @@ PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set
     MUTABLE stack: []Locatable = ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } );
     IF node_value IS_A []Node AS array THEN
       MUTABLE rtoc_reverse_items_2: []Node = array;
-      MUTABLE rtoc_reverse_i_3 = rtoc_reverse_items_2.length - 1;
+      MUTABLE rtoc_reverse_i_3 = rtoc_reverse_items_2.length() - 1;
       WHILE rtoc_reverse_i_3 >= 0 DO
   &stack.append(COPY (rtoc_reverse_items_2[rtoc_reverse_i_3])?);
   rtoc_reverse_i_3 = rtoc_reverse_i_3 - 1;
@@ -157,7 +157,7 @@ PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set
     ELSE
       &stack.append(castThunkScanNodeToLocatable(COPY node_value));
     END
-    WHILE !((stack.length == 0)) DO
+    WHILE !((stack.length() == 0)) DO
       MUTABLE current = UNWRAP (&stack.pop());
       IF (current IS_A FunctionDef OR current IS_A LambdaLit) THEN
         CONTINUE;
@@ -186,7 +186,7 @@ PRIVATE FN recursiveSplitter__match_base_case(stmt: Locatable, fn_name: String) 
     MUTABLE then_b: ?[]Locatable = CAST(if_statement.then_branch AS ?[]Locatable);
     IF then_b EXISTS AS then_b_value THEN
       MUTABLE then_b_value = COPY then_b_value;
-      IF (then_b_value.length != 1) THEN
+      IF (then_b_value.length() != 1) THEN
         RETURN NIL;
       END
       MUTABLE ret: Locatable = COPY UNWRAP (then_b_value.first());

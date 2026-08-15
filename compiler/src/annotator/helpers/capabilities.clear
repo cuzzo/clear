@@ -18,17 +18,17 @@ PUB FN capabilities__errors_for(type: Type) RETURNS ![]String ->
   MUTABLE errors = List[];
   MUTABLE caps = TRY (capabilities__active_capabilities(type));
   FOR _ IN conflicts DO
-  MUTABLE has_a = _.set_a |> ANY caps.contains?(_);
-  MUTABLE has_b = _.set_b |> ANY caps.contains?(_);
+  MUTABLE has_a = _.set_a() |> ANY caps.contains?(_);
+  MUTABLE has_b = _.set_b() |> ANY caps.contains?(_);
   IF (has_a AND has_b) THEN
-      &errors.append(_.message);
+      &errors.append(_.message());
   END
   END
   RETURN errors;
 END
 PUB FN capabilities__validate_mut(node: Locatable, type: Type, error_handler: ?FN(Locatable, String) -> Void = NIL) RETURNS !Void ->
   MUTABLE errs = TRY (capabilities__errors_for(type));
-  IF (errs.length == 0) THEN
+  IF (errs.length() == 0) THEN
     RETURN;
   END
   IF error_handler EXISTS AS error_handler_value THEN

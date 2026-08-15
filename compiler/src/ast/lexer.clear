@@ -553,7 +553,7 @@ PRIVATE FN lexer__current_offset(self: Lexer) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.base_offset + rtoc_self_view.s.pos);
+    RETURN (rtoc_self_view.base_offset + rtoc_self_view.s.pos());
 }
 END
 PRIVATE FN lexer__source_token(self: Lexer, type: String@symbol, value: ?TokenValue, line: Int64, column: Int64, start_offset: Int64, end_line: Int64, end_column: Int64, end_offset: Int64) RETURNS Token
@@ -571,7 +571,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (newlines > 0) THEN
       rtoc_self_view.line = (rtoc_self_view.line + newlines);
       MUTABLE line_parts = str.split("\n");
-      MUTABLE trailing = (line_parts[(line_parts.length - 1)] OR_ELSE "").codepointCount();
+      MUTABLE trailing = (line_parts[(line_parts.length() - 1)] OR_ELSE "").codepointCount();
       rtoc_self_view.column = (trailing + 1);
       RETURN (trailing + 1);
     ELSE
@@ -696,7 +696,7 @@ PUB FN lexer__new(source: String, interpolation_depth: Int64 = 0, file: ?String 
 END
 FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
   IF s.startsWith?(affix) THEN
-    RETURN s.substr(affix.length, (s.length - affix.length));
+    RETURN s.substr(affix.length(), (s.length() - affix.length()));
   END
   RETURN COPY s;
 END

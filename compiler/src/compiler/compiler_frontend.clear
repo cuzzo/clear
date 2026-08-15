@@ -67,16 +67,16 @@ PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImpor
   TRY (preMirTypeCheck__verify_mut(ast));
   MUTABLE lifecycle_registry = COPY KEEP (UNWRAP ((KEEP annotator.annotation_products).typed_program)).lifecycle_registry;
   MUTABLE derived_program = COPY KEEP (UNWRAP ((KEEP annotator.annotation_products).capability_audit)).derived_program;
-  MUTABLE mir_pass = mIRPass__new(fn_nodes, schema_lookup, lifecycle_registry, TRY (semanticIndex__body_summaries(UNWRAP (annotator.semantic_index))), hoist_result.bindings_by_function);
+  MUTABLE mir_pass = mIRPass__new(fn_nodes, schema_lookup, lifecycle_registry, TRY (semanticIndex__body_summaries(UNWRAP (annotator.semantic_index))), hoist_result.bindings_by_function());
   TRY (mIRPass__transform_mut(&mir_pass, ast));
   MUTABLE struct_schemas: {String@symbol}StructSchema@multiowned = {};
   MUTABLE enum_schemas: {String@symbol}[]MIRLoweringSchemasEnumVariantsItem = {};
   MUTABLE union_schemas: {String@symbol}UnionSchema@multiowned = {};
   FOR _ IN ast.statements DO
   IF (_ IS_A StructDef) THEN
-    struct_schemas[type__to_sym(_.name)] = TRY (structSchema__new(_.field_decls, ( { MUTABLE rtoc_empty_list_10: []String@symbol = List[]; rtoc_empty_list_10 } ), ( { MUTABLE rtoc_empty_list_11: []GenericParamDecl = List[]; rtoc_empty_list_11 } ), {}, {}));
+    struct_schemas[type__to_sym(_.name())] = TRY (structSchema__new(_.field_decls(), ( { MUTABLE rtoc_empty_list_10: []String@symbol = List[]; rtoc_empty_list_10 } ), ( { MUTABLE rtoc_empty_list_11: []GenericParamDecl = List[]; rtoc_empty_list_11 } ), {}, {}));
   ELSE_IF (_ IS_A EnumDef) THEN
-    enum_schemas[type__to_sym(_.name)] = _.variants;
+    enum_schemas[type__to_sym(_.name())] = _.variants();
   ELSE_IF _ IS_A UnionDef AS union_def THEN
     union_schemas[type__to_sym(union_def.name)] = TRY (unionSchema__new(union_def.variants, unionDef__type_params(union_def) |> SELECT symbol(_), (functionSignature__visibility(union_def) OR :package)));
   END
@@ -95,18 +95,18 @@ PUB FN compilerFrontend__synthesize_test_body_wrappers_mut(ast: Program, MUTABLE
   MUTABLE wrappers: []FunctionDef = ( { MUTABLE rtoc_empty_list_12: []FunctionDef = List[]; rtoc_empty_list_12 } );
   MUTABLE counter = 0;
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < ast.statements.length DO
+  WHILE rtoc_idx < ast.statements.length() DO
     IF !(ast.statements[rtoc_idx] IS_A TestBlock) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
     IF ast.statements[rtoc_idx].whens() != NIL THEN
           FOR _ IN (ast.statements[rtoc_idx].whens()) DO
-          IF _.tests != NIL THEN
-              FOR _ IN (_.tests) DO
+          IF _.tests() != NIL THEN
+              FOR _ IN (_.tests()) DO
               counter = (counter + 1);
               MUTABLE synth_name = "__test_body_${counter.toString()}";
-              MUTABLE synth_fn = FunctionDef{ token: COPY _.token, name: synth_name, params: ( { MUTABLE rtoc_empty_list_13: []Param = List[]; rtoc_empty_list_13 } ), captures: NIL, return_type: Type{ SymbolValue: :Void }, return_lifetime: NIL, body: COPY _.body, catch_clauses: List[], default_catch: NIL, visibility: :pub, deferred_drops: NIL, uses_frame: FALSE, explicit_return_type: NIL, type_params: NIL, tail_call: NIL, requires: NIL, arrow_token: NIL, name_token: NIL, effects_decl: NIL, effects_span: NIL, max_depth_n: NIL, tight_reentrance: NIL, requires_clauses: NIL, return_type_token: NIL, pre_clauses: NIL, post_clauses: NIL, is_method: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, effect_set: NIL, inferred_effects: NIL, reentrance_kind: NIL, thunk_plan: NIL, mutual_thunk_plan: NIL, needs_rt: NIL, fn_value_ref: NIL, alloc_fault: NIL, error_fallible: NIL, uses_heap: NIL, uses_alloc: NIL, uses_rt: NIL, effects: NIL, snapshot_types: NIL, stack_tier: NIL, stack_vars_bytes: NIL, moved_guard_info: NIL, cleanup_bindings: NIL, heap_carry_return: NIL, heap_carry_return_vars: NIL, fsm_eligible: NIL, fsm_ineligible_reason: NIL, fsm_suspend_points: NIL, conformance_protocol: NIL, generic_params: List[], implementation_owner: NIL, semantic_with_blocks: List[], source_name: "" };
+              MUTABLE synth_fn = FunctionDef{ token: COPY _.token(), name: synth_name, params: ( { MUTABLE rtoc_empty_list_13: []Param = List[]; rtoc_empty_list_13 } ), captures: NIL, return_type: Type{ SymbolValue: :Void }, return_lifetime: NIL, body: COPY _.body(), catch_clauses: List[], default_catch: NIL, visibility: :pub, deferred_drops: NIL, uses_frame: FALSE, explicit_return_type: NIL, type_params: NIL, tail_call: NIL, requires: NIL, arrow_token: NIL, name_token: NIL, effects_decl: NIL, effects_span: NIL, max_depth_n: NIL, tight_reentrance: NIL, requires_clauses: NIL, return_type_token: NIL, pre_clauses: NIL, post_clauses: NIL, is_method: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, effect_set: NIL, inferred_effects: NIL, reentrance_kind: NIL, thunk_plan: NIL, mutual_thunk_plan: NIL, needs_rt: NIL, fn_value_ref: NIL, alloc_fault: NIL, error_fallible: NIL, uses_heap: NIL, uses_alloc: NIL, uses_rt: NIL, effects: NIL, snapshot_types: NIL, stack_tier: NIL, stack_vars_bytes: NIL, moved_guard_info: NIL, cleanup_bindings: NIL, heap_carry_return: NIL, heap_carry_return_vars: NIL, fsm_eligible: NIL, fsm_ineligible_reason: NIL, fsm_suspend_points: NIL, conformance_protocol: NIL, generic_params: List[], implementation_owner: NIL, semantic_with_blocks: List[], source_name: "" };
               fn_nodes[synth_name] = synth_fn;
               &wrappers.append(synth_fn);
               _.synthetic_fn = synth_fn;

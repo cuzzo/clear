@@ -59,10 +59,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE parameter: ?GenericParamDecl = COPY parameters[CAST(projection.owner AS String)];
     IF parameter EXISTS AS parameter_value THEN
       MUTABLE bounds = parameter_value.bounds |> SELECT protocolProjectionResolver__protocol_base_name(rtoc_self_view, _.type);
-      IF (bounds.length == 0) THEN
+      IF (bounds.length() == 0) THEN
         MUTABLE suggestions = (TRY (protocolProjectionResolver__all_protocol_names(rtoc_self_view))) |> WHERE (TRY (protocolProjectionResolver__associated_types(rtoc_self_view, _))).contains?(projection.member);
         MUTABLE suggested: String = "";
-        IF (suggestions.length == 1) THEN
+        IF (suggestions.length() == 1) THEN
           suggested = COPY UNWRAP (suggestions.first());
         ELSE
           suggested = "a protocol declaring ${projection.member}";
@@ -71,7 +71,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN NIL;
       END
       MUTABLE matching = bounds |> WHERE (TRY (protocolProjectionResolver__associated_types(rtoc_self_view, _))).contains?(projection.member);
-      IF (matching.length == 0) THEN
+      IF (matching.length() == 0) THEN
         MUTABLE available = (bounds |> UNNEST TRY (protocolProjectionResolver__associated_types(rtoc_self_view, _))) |> DISTINCT _ |> SELECT COPY _;
       MUTABLE available_text: String = "none";
       IF !(available.empty?()) THEN
@@ -80,7 +80,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_UNKNOWN_ASSOCIATED_TYPE, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocol: Values{ StringValue: COPY bounds.join(" & ") }, :available: Values{ StringValue: COPY available_text }}));
         RETURN NIL;
       END
-      IF (matching.length > 1) THEN
+      IF (matching.length() > 1) THEN
         &issues.append(protocolProjectionResolver__issue(rtoc_self_view, :GENERIC_AMBIGUOUS_ASSOCIATED_TYPE, {:owner: Values{ SymbolValue: COPY projection.owner }, :member: Values{ SymbolValue: COPY projection.member }, :protocols: Values{ StringValue: COPY matching.join(", ") }}));
         RETURN NIL;
       END

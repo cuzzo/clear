@@ -198,7 +198,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         last_alias = COPY ((destination_reads.last())?).node;
       END
     MUTABLE escapes = destination_reads |> ANY _.escape;
-    MUTABLE action =   IF (((_.whole_binding AND (source_reads.length == 0)) AND !(rtoc_self_view.parameter_ids.contains?(_.source_id))) AND !(rtoc_self_view.alias_roots.contains?(_.source_id))) THEN
+    MUTABLE action =   IF (((_.whole_binding AND (source_reads.length() == 0)) AND !(rtoc_self_view.parameter_ids.contains?(_.source_id))) AND !(rtoc_self_view.alias_roots.contains?(_.source_id))) THEN
         :move
       ELSE_IF escapes THEN
         :materialize
@@ -328,7 +328,7 @@ PRIVATE FN ownershipTransportFacts__mutually_exclusive?(self: OwnershipTransport
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < left.ancestors.length DO
+    WHILE rtoc_idx < left.ancestors.length() DO
       IF !(left.ancestors[rtoc_idx]? IS_A IfStatement) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -352,7 +352,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF index EXISTS AS index_value THEN
       MUTABLE child: Locatable = COPY event.node;
       MUTABLE child_index = (index_value + 1);
-      IF (child_index < event.ancestors.length) THEN
+      IF (child_index < event.ancestors.length()) THEN
         child = COPY UNWRAP (event.ancestors[child_index]);
       END
       IF conditional.then_branch.contains?(child) THEN
@@ -375,7 +375,7 @@ PRIVATE FN ownershipTransportFacts__conditional_index(self: OwnershipTransportFa
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE index: Int64 = 0;
-    WHILE (index < event.ancestors.length) DO
+    WHILE (index < event.ancestors.length()) DO
       MUTABLE candidate = COPY UNWRAP (event.ancestors[index]);
       IF candidate IS_A IfStatement AS if_statement THEN
         MUTABLE narrowed = if_statement;

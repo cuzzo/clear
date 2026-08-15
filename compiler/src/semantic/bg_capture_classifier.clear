@@ -57,7 +57,7 @@ PUB FN bgCaptureClassifier__classify_one_mut(MUTABLE a: CaptureAnalysis, live_pa
   MUTABLE n = tuple_param_0._0;
   MUTABLE s = tuple_param_0._1;
   IF s IS_A FreshHeapCopy THEN
-    h[n] = s.alloc_sym;
+    h[n] = s.alloc_sym();
     RETURN NIL;
   END
   NIL

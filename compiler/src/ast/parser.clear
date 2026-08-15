@@ -213,7 +213,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF source_violation EXISTS AS source_violation_value THEN
       RAISE Input, ParserError, "Frontend ${source_violation_value.kind} resource limit exceeded (limit ${source_violation_value.limit.toString()})";
     END
-    MUTABLE token_violation: ?Exceeded@multiowned = frontendResourceBudget__tokens_violation(rtoc_self_view.budget, rtoc_self_view.tokens.length);
+    MUTABLE token_violation: ?Exceeded@multiowned = frontendResourceBudget__tokens_violation(rtoc_self_view.budget, rtoc_self_view.tokens.length());
     IF token_violation EXISTS AS token_violation_value THEN
       RAISE Input, ParserError, "Frontend ${token_violation_value.kind} resource limit exceeded (limit ${token_violation_value.limit.toString()})";
     END
@@ -281,7 +281,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF best EXISTS AS best_value THEN
       &fixes.append(TRY (fix__new(TRY (diagnosticRegistry__fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: "${COPY name}", :best: "${best_value}", :label: "${fix_label}"})), [edit__new(span__new(NIL, token_line, token_column, name.codepointCount()), best_value)], :auto)));
     END
-    IF (fixes.length == 0) THEN
+    IF (fixes.length() == 0) THEN
       TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], {:detail: "${message}"}));
     END
     clearParser__fixable_mut(rtoc_self_view, token, category, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: "${message}"});
@@ -290,23 +290,23 @@ END
 PRIVATE FN clearParser__suggestion_levenshtein(self: ClearParser, left: String, right: String) RETURNS Int64
   REQUIRES self: LOCAL
 ->
-  IF (left.length == 0) THEN
+  IF (left.length() == 0) THEN
     RETURN right.codepointCount();
   END
-  IF (right.length == 0) THEN
+  IF (right.length() == 0) THEN
     RETURN left.codepointCount();
   END
   MUTABLE previous: []Int64 = List[];
   MUTABLE fill = 0;
-  WHILE fill <= right.length DO
+  WHILE fill <= right.length() DO
     &previous.append(fill);
     fill = fill + 1;
   END
   MUTABLE left_index = 0;
-  WHILE left_index < left.length DO
+  WHILE left_index < left.length() DO
     MUTABLE current: []Int64 = [(left_index + 1)];
     MUTABLE right_index = 0;
-    WHILE right_index < right.length DO
+    WHILE right_index < right.length() DO
       MUTABLE rtoc_lc = left.substr(left_index, 1);
       MUTABLE rtoc_rc = right.substr(right_index, 1);
       MUTABLE cost = IF (rtoc_lc == rtoc_rc) THEN

@@ -141,13 +141,13 @@ PUB FN segments__split(body_input: []Locatable, lowering: Any) RETURNS !?SplitRe
   FOR _ IN body DO
   MUTABLE suspend: ?SegmentTail = segments__classify_suspend(_);
   IF suspend EXISTS AS suspend_value THEN
-      &segments.append(Segment{ index: segments.length, stmts: current_stmts, tail: suspend_value });
+      &segments.append(Segment{ index: segments.length(), stmts: current_stmts, tail: suspend_value });
       current_stmts = ( { MUTABLE rtoc_empty_list_3: []Locatable = List[]; rtoc_empty_list_3 } );
   ELSE
       &current_stmts.append(COPY _);
   END
   END
-  &segments.append(Segment{ index: segments.length, stmts: current_stmts, tail: Done{ _: NIL } });
+  &segments.append(Segment{ index: segments.length(), stmts: current_stmts, tail: Done{ _: NIL } });
   RETURN SplitResult{ segments: COPY segments };
 END
 PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitResult ->
@@ -156,7 +156,7 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
   END
   MUTABLE loop_idx: ?Int64 = NIL;
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < body.length DO
+  WHILE rtoc_idx < body.length() DO
   IF body[rtoc_idx]? IS_A WhileLoop AS while_loop THEN
       IF segments__contains_suspend_anywhere?(while_loop.do_branch) THEN
         IF loop_idx EXISTS AS loop_idx_value THEN
@@ -176,16 +176,16 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
   END
   IF loop_idx EXISTS AS loop_idx_value THEN
     MUTABLE pre = TRY (segments__segment_slice(body, 0, loop_idx_value));
-    MUTABLE post = TRY (segments__segment_slice(body, (loop_idx_value + 1), body.length));
+    MUTABLE post = TRY (segments__segment_slice(body, (loop_idx_value + 1), body.length()));
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < pre.length DO
+    WHILE rtoc_idx < pre.length() DO
   IF segments__contains_suspend_anywhere?([pre[rtoc_idx]?]) THEN
         RETURN NIL;
   END
   rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < post.length DO
+    WHILE rtoc_idx < post.length() DO
   IF segments__contains_suspend_anywhere?([post[rtoc_idx]?]) THEN
         RETURN NIL;
   END
@@ -197,7 +197,7 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
       MUTABLE sus_idx: ?Int64 = NIL;
       MUTABLE sus_tail: ?SegmentTail = NIL;
       MUTABLE index = 0;
-      WHILE (index < loop_body_value.length) DO
+      WHILE (index < loop_body_value.length()) DO
         MUTABLE s = UNWRAP (loop_body_value[index]);
         MUTABLE sus: ?SegmentTail = segments__classify_suspend(s);
         IF (sus == NIL) THEN
@@ -215,16 +215,16 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
       END
       IF sus_idx EXISTS AS sus_idx_value THEN
         MUTABLE loop_pre = TRY (segments__segment_slice(loop_body_value, 0, sus_idx_value));
-        MUTABLE loop_post = TRY (segments__segment_slice(loop_body_value, (sus_idx_value + 1), loop_body_value.length));
+        MUTABLE loop_post = TRY (segments__segment_slice(loop_body_value, (sus_idx_value + 1), loop_body_value.length()));
         MUTABLE rtoc_idx = 0;
-        WHILE rtoc_idx < loop_pre.length DO
+        WHILE rtoc_idx < loop_pre.length() DO
   IF segments__contains_suspend_anywhere?([loop_pre[rtoc_idx]?]) THEN
             RETURN NIL;
   END
   rtoc_idx = rtoc_idx + 1;
         END
         MUTABLE rtoc_idx = 0;
-        WHILE rtoc_idx < loop_post.length DO
+        WHILE rtoc_idx < loop_post.length() DO
   IF segments__contains_suspend_anywhere?([loop_post[rtoc_idx]?]) THEN
             RETURN NIL;
   END
@@ -308,7 +308,7 @@ PRIVATE FN segments__contains_suspend_anywhere?(stmts: ?[]Locatable) RETURNS Boo
   IF stmts EXISTS AS stmts_value THEN
     MUTABLE items = COPY stmts_value;
     MUTABLE index = 0;
-    WHILE (index < items.length) DO
+    WHILE (index < items.length()) DO
       MUTABLE stmt = UNWRAP (items[index]);
       IF stmt IS_A WhileLoop AS while_loop THEN
         IF segments__contains_suspend_anywhere?(while_loop.do_branch) THEN
@@ -408,17 +408,17 @@ PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable
   MUTABLE pipe_counter = 0;
   FOR _ IN body DO
   MUTABLE rtoc_mutable_block_param_8 = COPY _;
-  IF ((IF rtoc_mutable_block_param_8 IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND segments__io_suspending_call?(rtoc_mutable_block_param_8.left)) THEN
+  IF ((IF rtoc_mutable_block_param_8 IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND segments__io_suspending_call?(rtoc_mutable_block_param_8.left())) THEN
     MUTABLE synth_name = "__pipe_v_${pipe_counter.toString()}";
     pipe_counter = (pipe_counter + 1);
-    MUTABLE tok = rtoc_mutable_block_param_8.left.token();
-    MUTABLE bind = BindExpr{ token: COPY tok, name: synth_name, type: NIL, value: rtoc_mutable_block_param_8.left, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL };
+    MUTABLE tok = rtoc_mutable_block_param_8.left().token();
+    MUTABLE bind = BindExpr{ token: COPY tok, name: synth_name, type: NIL, value: rtoc_mutable_block_param_8.left(), compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL };
     bind.mode = :decl;
-    TRY (aST__stamp_synthetic_type_mut(Locatable{ BindExpr: COPY bind }, rtoc_mutable_block_param_8.left.full_type_mut({:context: "FSM pipeline split"}), "synthetic AST type"));
+    TRY (aST__stamp_synthetic_type_mut(Locatable{ BindExpr: COPY bind }, rtoc_mutable_block_param_8.left().full_type_mut({:context: "FSM pipeline split"}), "synthetic AST type"));
     &out.append(bind);
     MUTABLE ident = Identifier{ token: COPY tok, name: COPY synth_name, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
-    TRY (aST__stamp_synthetic_type_mut(Locatable{ Identifier: COPY ident }, rtoc_mutable_block_param_8.left.full_type_mut({:context: "FSM pipeline split"}), "synthetic AST type"));
-    MUTABLE rewritten = BinaryOp{ token: COPY rtoc_mutable_block_param_8.token, left: Locatable{ Identifier: COPY ident }, op: COPY rtoc_mutable_block_param_8.op, right: COPY rtoc_mutable_block_param_8.right, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
+    TRY (aST__stamp_synthetic_type_mut(Locatable{ Identifier: COPY ident }, rtoc_mutable_block_param_8.left().full_type_mut({:context: "FSM pipeline split"}), "synthetic AST type"));
+    MUTABLE rewritten = BinaryOp{ token: COPY rtoc_mutable_block_param_8.token(), left: Locatable{ Identifier: COPY ident }, op: COPY rtoc_mutable_block_param_8.op(), right: COPY rtoc_mutable_block_param_8.right(), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
     TRY (aST__stamp_synthetic_type_mut(Locatable{ BinaryOp: COPY rewritten }, &rtoc_mutable_block_param_8.full_type_mut("FSM pipeline split"), "synthetic AST type"));
     &out.append(rewritten);
   ELSE

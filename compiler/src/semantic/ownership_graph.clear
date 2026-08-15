@@ -196,7 +196,7 @@ FN ownershipGraph__edge_index_in(self: OwnershipGraph, edges: []Edge, edge: Edge
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE index: Int64 = 0;
-    WHILE (index < edges.length) DO
+    WHILE (index < edges.length()) DO
       MUTABLE candidate = COPY UNWRAP (edges[index]);
       IF (((candidate.from == edge.from) AND (candidate.to == edge.to)) AND (candidate.kind == edge.kind)) THEN
         RETURN index;
@@ -299,7 +299,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ownershipNode__live?(node_value_mutable) THEN
         MUTABLE owned: []String = ( { MUTABLE rtoc_empty_list_3: []String = List[]; rtoc_empty_list_3 } );
         MUTABLE rtoc_reverse_items_4: []String = (TRY (ownershipGraph__owned_children(rtoc_self_view, path)));
-        MUTABLE rtoc_reverse_i_5 = rtoc_reverse_items_4.length - 1;
+        MUTABLE rtoc_reverse_i_5 = rtoc_reverse_items_4.length() - 1;
         WHILE rtoc_reverse_i_5 >= 0 DO
     &owned.append(COPY (rtoc_reverse_items_4[rtoc_reverse_i_5])?);
     rtoc_reverse_i_5 = rtoc_reverse_i_5 - 1;
@@ -345,7 +345,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &places.append(COPY rtoc_each_key);
     END
     END
-    IF (places.length == 0) THEN
+    IF (places.length() == 0) THEN
       RETURN 0;
     END
     IF archive THEN
@@ -373,7 +373,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR parent IN rtoc_self_view.children.keys() DO
       MUTABLE parent_children_count = 0;
       IF rtoc_self_view.children[parent] EXISTS AS parent_children THEN
-        parent_children_count = parent_children.length;
+        parent_children_count = parent_children.length();
       END
       IF (place_set.contains?(parent) OR (parent_children_count == 0)) THEN
         &doomed_parents.append(COPY parent);
@@ -382,7 +382,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR parent IN doomed_parents DO
       &rtoc_self_view.children.delete(parent);
     END
-    RETURN places.length;
+    RETURN places.length();
 }
 END
 FN ownershipGraph__can_write?(self: OwnershipGraph, path: String) RETURNS !Bool
@@ -452,7 +452,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         move_actions[rtoc_each_key] = move_action_value;
     END
     END
-    RETURN LightweightSnapshot{ states: COPY states, move_lines: COPY move_lines, move_cols: COPY move_cols, move_actions: COPY move_actions, edge_count: rtoc_self_view.edges.length };
+    RETURN LightweightSnapshot{ states: COPY states, move_lines: COPY move_lines, move_cols: COPY move_cols, move_actions: COPY move_actions, edge_count: rtoc_self_view.edges.length() };
 }
 END
 FN ownershipGraph__restore_lightweight(MUTABLE self: OwnershipGraph, snapshot_value: LightweightSnapshot) RETURNS !Void
@@ -471,7 +471,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rubyToClearVoid()
     });
     MUTABLE target_count = snapshot_value.edge_count;
-    WHILE (rtoc_self_view.edges.length > target_count) DO
+    WHILE (rtoc_self_view.edges.length() > target_count) DO
       MUTABLE rtoc_mutable_alias_arg_9 = COPY UNWRAP (rtoc_self_view.edges.last());
       TRY (ownershipGraph__remove_edge(&rtoc_self_view, rtoc_mutable_alias_arg_9));
     END
@@ -486,7 +486,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE other_nodes = COPY other.nodes;
     MUTABLE all_paths = ((own_nodes.keys() + other_nodes.keys())) |> DISTINCT _ |> SELECT COPY _;
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < all_paths.length DO
+    WHILE rtoc_idx < all_paths.length() DO
       MUTABLE current_path: PlaceId = COPY UNWRAP (all_paths[rtoc_idx]);
       MUTABLE mine: ?OwnershipNode = COPY own_nodes[current_path];
       MUTABLE theirs: ?OwnershipNode = COPY other_nodes[current_path];

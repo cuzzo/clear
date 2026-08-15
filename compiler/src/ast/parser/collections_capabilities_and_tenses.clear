@@ -101,7 +101,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         normalized_value = "@${TRY (token__text_mut(tok))}";
       END
-      IF (!((allowed_values.length == 0)) AND !(allowed_values.contains?(normalized_value))) THEN
+      IF (!((allowed_values.length() == 0)) AND !(allowed_values.contains?(normalized_value))) THEN
         MUTABLE cap_label: String = "capability";
         IF cap_tok EXISTS AS cap_token THEN
           MUTABLE cap_token_mutable = COPY cap_token;
@@ -486,7 +486,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       &arms.append(WithMatchArm{ family: COPY family, body: COPY body, lock_error_clauses: COPY lock_error_clauses, token: when_tok });
     END
-    IF (arms.length == 0) THEN
+    IF (arms.length() == 0) THEN
       clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :WITH_MATCH_NO_WHEN });
     END
     RETURN arms;
@@ -507,7 +507,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         &handlers.append(COPY clause_value);
       END
     END
-    IF (handlers.length == 0) THEN
+    IF (handlers.length() == 0) THEN
       clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :SYNC_POLICY_NO_HANDLER });
     END
     clearParser__consume(&rtoc_self_view, :KEYWORD, "END");

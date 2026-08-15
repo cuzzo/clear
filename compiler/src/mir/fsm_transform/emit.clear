@@ -71,7 +71,7 @@ PUB STRUCT ExpandedLockSegment {
 PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []FsmSegmentSpec, promoted_field_decls_input: []ContextFieldDecl, lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
   MUTABLE promoted_field_decls = COPY promoted_field_decls_input;
   MUTABLE segment_specs = COPY segment_specs_input;
-  IF (segment_specs.length == 0) THEN
+  IF (segment_specs.length() == 0) THEN
     RETURN NIL;
   END
   MUTABLE id = ctx.id;
@@ -80,7 +80,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   segment_specs = TRY (emit__materialize_fsm_segment_facts(segment_specs, id, TRY (emit__fsm_destroy_cleanup_names(destroy_actions))));
   MUTABLE bind_for_index: {Int64}[]FsmBodyItem = {};
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < segment_specs.length DO
+  WHILE rtoc_idx < segment_specs.length() DO
     MUTABLE d: ?SuspendDescriptor = COPY segment_specs[rtoc_idx]?.descriptor;
     IF !(((d != NIL) AND !(d.bind_stmts.empty?()))) THEN
         rtoc_idx = rtoc_idx + 1;
@@ -105,7 +105,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   MUTABLE dispatch = FsmDispatch{ ctx_id: id, arms: arms, uses_loop_label: TRUE };
   MUTABLE extra_field_decls = [emit__ctx_field_decl("step", "u8", Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } })];
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < segment_specs.length DO
+  WHILE rtoc_idx < segment_specs.length() DO
     MUTABLE d: ?SuspendDescriptor = COPY segment_specs[rtoc_idx]?.descriptor;
     IF !(d) THEN
         rtoc_idx = rtoc_idx + 1;
@@ -156,7 +156,7 @@ PRIVATE FN emit__ordered_fsm_destroy_actions(ctx: FsmEmitContext) RETURNS ![]Fsm
   MUTABLE rtoc_indexed_items_3: []FsmDestroyAction = TRY (emit__fsm_destroy_actions(ctx));
   MUTABLE rtoc_indexed_output_5 = [];
   MUTABLE rtoc_indexed_i_4 = 0;
-  WHILE rtoc_indexed_i_4 < rtoc_indexed_items_3.length DO
+  WHILE rtoc_indexed_i_4 < rtoc_indexed_items_3.length() DO
     &rtoc_indexed_output_5.append(Tuple{COPY rtoc_indexed_items_3[rtoc_indexed_i_4], [rtoc_indexed_items_3[rtoc_indexed_i_4].destroy_order_bucket(), rtoc_indexed_items_3[rtoc_indexed_i_4].destroy_order_index(rtoc_indexed_i_4)]});
     rtoc_indexed_i_4 = rtoc_indexed_i_4 + 1;
   END
@@ -190,13 +190,13 @@ PRIVATE FN emit__build_fsm_segment_facts(spec: FsmSegmentSpec, id: Int64, cleanu
   MUTABLE nodes = TRY (emit__collect_fsm_nodes(TRY (emit__fsm_segment_fact_roots(spec))));
   MUTABLE result_names = TRY (emit__collect_result_names(nodes, id));
   MUTABLE result_facts = result_names |> SELECT FsmOwnershipFact{ name: COPY _, target: :result, target_alloc: :heap, move_guarded: TRUE };
-  MUTABLE structured_facts = spec.fsm_result_transfer_facts |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE guard_name = emit__fsm_fact_guard_name(_.name); (IF (guard_name.length == 0) THEN NIL ELSE FsmOwnershipFact{ name: COPY guard_name, target: :result, target_alloc: COPY _.target_alloc, move_guarded: _.move_guarded } END) } |> WHERE _ != NIL;
+  MUTABLE structured_facts = spec.fsm_result_transfer_facts |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE guard_name = emit__fsm_fact_guard_name(_.name); (IF (guard_name.length() == 0) THEN NIL ELSE FsmOwnershipFact{ name: COPY guard_name, target: :result, target_alloc: COPY _.target_alloc, move_guarded: _.move_guarded } END) } |> WHERE _ != NIL;
   RETURN FsmSegmentFacts{ ctx_reads: COPY TRY (emit__collect_ctx_field_reads(nodes, id)), required_move_guards: COPY TRY (emit__collect_required_move_guards(nodes, id, cleanup_names)), move_guard_writes: COPY TRY (emit__collect_move_guard_writes(nodes, id)), result_names: COPY result_names, ownership_facts: COPY TRY (emit__unique_fsm_ownership_facts((structured_facts + result_facts))) };
 END
 PRIVATE FN emit__fsm_segment_fact_roots(spec: FsmSegmentSpec) RETURNS ![]Emittable ->
   MUTABLE roots: []Emittable = ( { MUTABLE rtoc_empty_list_6: []Emittable = List[]; rtoc_empty_list_6 } );
   roots = ruby_array_concat_Emittable(roots, TRY (emit__fsm_body_mir_nodes(spec.prologue_stmts)));
-  roots = ruby_array_concat_Emittable(roots, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_7: ?[]Emittable = NIL; IF (spec.structure_stmts.length == 0) THEN rtoc_ternary_value_7 = TRY (emit__fsm_body_mir_nodes(spec.body_stmts)); ELSE rtoc_ternary_value_7 = spec.structure_stmts; END rtoc_ternary_value_7? });
+  roots = ruby_array_concat_Emittable(roots, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_7: ?[]Emittable = NIL; IF (spec.structure_stmts.length() == 0) THEN rtoc_ternary_value_7 = TRY (emit__fsm_body_mir_nodes(spec.body_stmts)); ELSE rtoc_ternary_value_7 = spec.structure_stmts; END rtoc_ternary_value_7? });
   MUTABLE descriptor: ?SuspendDescriptor = COPY spec.descriptor;
   IF descriptor EXISTS AS descriptor_value THEN
     roots = ruby_array_concat_Emittable(roots, CAST(descriptor_value.setup_stmts AS []Emittable));
@@ -217,7 +217,7 @@ PRIVATE FN emit__fsm_body_emit_values(items: []FsmBodyItem) RETURNS ![]Emittable
   RETURN items |> SELECT fsmBodyItem__emit_value(_);
 END
 PRIVATE FN emit__mir_nodes_reference_ident?(nodes: []Emittable, name: String) RETURNS !Bool ->
-  RETURN (TRY (mIR__nodes(NodeRoot{ ArrayValue: COPY nodes }))).grep(MIR.Ident) |> ANY (_.name == name);
+  RETURN (TRY (mIR__nodes(NodeRoot{ ArrayValue: COPY nodes }))).grep(MIR.Ident) |> ANY (_.name() == name);
 END
 PRIVATE FN emit__prior_lock_release_stmts(ctx_id: Int64, lock_index: Int64, lock_ref: String, unlock_method: String) RETURNS ![]Emittable ->
   RETURN CAST([Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${lock_index.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: COPY lock_ref, lowered_node_id: NIL, ownership_consumption: NIL }, method: COPY unlock_method, args: ( { MUTABLE rtoc_empty_list_9: []Any = List[]; rtoc_empty_list_9 } ), try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
@@ -226,7 +226,7 @@ PUB FN emit__unique_fsm_ownership_facts(facts: []FsmOwnershipFact) RETURNS ![]Fs
   RETURN facts |> DISTINCT CAST(Tuple{_.name, _.target, _.target_alloc, _.move_guarded} AS Tuple<String, String@symbol, ?String@symbol, Bool>);
 END
 PRIVATE FN emit__collect_required_move_guards(nodes: []Emittable, id: Int64, cleanup_names: []String) RETURNS ![]String ->
-  RETURN CAST((((nodes |> SELECT:? (IF !(_ IS_A TransferMark) THEN NIL ELSE (IF !(((_.target == :owned_sink) OR (_.target == :return))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = emit__normalized_ctx_field_name(CAST(_.name AS String), id); (IF cleanup_names.contains?(name) THEN
+  RETURN CAST((((nodes |> SELECT:? (IF !(_ IS_A TransferMark) THEN NIL ELSE (IF !(((_.target() == :owned_sink) OR (_.target() == :return))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = emit__normalized_ctx_field_name(CAST(_.name() AS String), id); (IF cleanup_names.contains?(name) THEN
     name
   ELSE
     NIL
@@ -237,7 +237,7 @@ PRIVATE FN emit__collect_move_guard_writes(nodes: []Emittable, id: Int64) RETURN
     MUTABLE name = COPY CAST(move_mark.name AS String);
     MUTABLE normalized = emit__normalized_ctx_field_name(name, id);
     CONTINUE;
-  END (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__true_literal?(_.value)) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE field: ?String = emit__ctx_field_name(_.target, id); (IF !((IF field != NIL THEN
+  END (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__true_literal?(_.value())) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE field: ?String = emit__ctx_field_name(_.target(), id); (IF !((IF field != NIL THEN
     field.endsWith?("_moved")
   ELSE
     NIL
@@ -247,7 +247,7 @@ PUB FN emit__normalized_ctx_field_name(name: String, id: Int64) RETURNS String -
   RETURN name.deletePrefix("__ctx_${id.toString()}.");
 END
 PRIVATE FN emit__collect_result_names(nodes: []Emittable, id: Int64) RETURNS ![]String ->
-  RETURN CAST(((nodes |> SELECT:? (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__ctx_inner_result_target?(_.target, id)) THEN NIL ELSE emit__result_source_name(_.value, id) END) END) |> WHERE _ != NIL) |> DISTINCT _) AS []String);
+  RETURN CAST(((nodes |> SELECT:? (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__ctx_inner_result_target?(_.target(), id)) THEN NIL ELSE emit__result_source_name(_.value(), id) END) END) |> WHERE _ != NIL) |> DISTINCT _) AS []String);
 END
 PRIVATE FN emit__fsm_fact_guard_name(name: String) RETURNS String ->
   IF emit__fsm_ctx_name?(name) THEN
@@ -276,13 +276,13 @@ PRIVATE FN emit__fsm_ctx_field_prefix(name: String) RETURNS ?String ->
     IF !(emit__decimal_digits?(ctx_id)) THEN
       RETURN NIL;
     END
-    RETURN COPY name.substr(((dot_index_value + 1)), (name.length - ((dot_index_value + 1))));
+    RETURN COPY name.substr(((dot_index_value + 1)), (name.length() - ((dot_index_value + 1))));
   ELSE
     RETURN NIL;
   END
 END
 PRIVATE FN emit__decimal_digits?(value: String) RETURNS Bool ->
-  IF (value.length == 0) THEN
+  IF (value.length() == 0) THEN
     RETURN FALSE;
   END
   RETURN value.each_char() |> ALL ((_ >= "0") AND (_ <= "9"));
@@ -376,9 +376,9 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
       MUTABLE target_step = explicit_next;
       MUTABLE desc_tail = desc_value.tail;
       IF (desc_tail IS_A FsmTailYield) THEN
-        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: desc_tail.yield_reason } };
+        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: desc_tail.yield_reason() } };
       ELSE_IF (desc_tail IS_A FsmTailRegisterYield) THEN
-        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: desc_tail.register_expr, yield_reason: desc_tail.yield_reason } };
+        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: desc_tail.register_expr(), yield_reason: desc_tail.yield_reason() } };
       ELSE
         panic("Unsupported descriptor tail {} in segment {}");
       END
@@ -391,9 +391,9 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
       MUTABLE target_step = explicit_next;
       MUTABLE desc_tail = desc_value.tail;
       IF (desc_tail IS_A FsmTailYield) THEN
-        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: desc_tail.yield_reason } };
+        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: desc_tail.yield_reason() } };
       ELSE_IF (desc_tail IS_A FsmTailRegisterYield) THEN
-        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: desc_tail.register_expr, yield_reason: desc_tail.yield_reason } };
+        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: desc_tail.register_expr(), yield_reason: desc_tail.yield_reason() } };
       ELSE
         panic("Unsupported descriptor tail {} in segment {}");
       END
@@ -406,7 +406,7 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
 END
 PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentList, liveness: Result, lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
   MUTABLE segment_nodes = COPY segment_list.segments;
-  IF (segment_nodes.length == 0) THEN
+  IF (segment_nodes.length() == 0) THEN
     RETURN NIL;
   END
   MUTABLE id = ctx.id;
@@ -431,11 +431,11 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE result_seg_indices = (%(rtoc_indexed_items_11: []Segment) -> {
   MUTABLE rtoc_indexed_acc_13 = Set[];
   MUTABLE rtoc_indexed_i_12 = 0;
-  WHILE rtoc_indexed_i_12 < rtoc_indexed_items_11.length DO
+  WHILE rtoc_indexed_i_12 < rtoc_indexed_items_11.length() DO
     IF rtoc_indexed_items_11[rtoc_indexed_i_12].stmts.empty?() THEN
         CONTINUE;
     END
-    IF (rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Done OR ((rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Goto AND (rtoc_indexed_items_11[rtoc_indexed_i_12].tail.target_index == done_idx)))) THEN
+    IF (rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Done OR ((rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Goto AND (rtoc_indexed_items_11[rtoc_indexed_i_12].tail.target_index() == done_idx)))) THEN
         &rtoc_indexed_acc_13.append(rtoc_indexed_items_11[rtoc_indexed_i_12].indexOf());
     END
     rtoc_indexed_i_12 = rtoc_indexed_i_12 + 1;
@@ -450,7 +450,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE rtoc_indexed_items_16: []Segment = segment_nodes;
   MUTABLE rtoc_indexed_output_20 = [];
   MUTABLE rtoc_indexed_i_17 = 0;
-  WHILE rtoc_indexed_i_17 < rtoc_indexed_items_16.length DO
+  WHILE rtoc_indexed_i_17 < rtoc_indexed_items_16.length() DO
     &rtoc_indexed_output_20.append({
   MUTABLE mir_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_18: []Emittable = List[]; rtoc_empty_list_18 } );
   MUTABLE ast_stmts: []Locatable = ( { MUTABLE rtoc_empty_list_19: []Locatable = List[]; rtoc_empty_list_19 } );
@@ -461,7 +461,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
       &ast_stmts.append(COPY CAST(_ AS Locatable));
   END
   END
-  (  IF (ast_stmts.length == 0) THEN
+  (  IF (ast_stmts.length() == 0) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
     seg_mir_codes[rtoc_indexed_i_17] = mir_stmts;
@@ -530,7 +530,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE rtoc_indexed_items_22: []Segment = segment_nodes;
   MUTABLE rtoc_indexed_output_31 = [];
   MUTABLE rtoc_indexed_i_23 = 0;
-  WHILE rtoc_indexed_i_23 < rtoc_indexed_items_22.length DO
+  WHILE rtoc_indexed_i_23 < rtoc_indexed_items_22.length() DO
     &rtoc_indexed_output_31.append({
   MUTABLE tail = rtoc_indexed_items_22[rtoc_indexed_i_23].tail;
   MUTABLE descriptor_branch_value: ?SuspendDescriptor = NIL;
@@ -551,7 +551,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
       &parts.append(emit__fsm_body_mir_item(Emittable{ Set: COPY arena_init_stmt }));
   END
     ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_29: ?Void = NIL;
-    IF (parts.length == 0) THEN
+    IF (parts.length() == 0) THEN
       rtoc_ternary_value_29 = NIL;
     ELSE
       rtoc_ternary_value_29 = parts;
@@ -586,17 +586,17 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE segment_specs = rtoc_indexed_result_21?;
   TRY (emit__register_owned_suspend_result_cleanups_mut(segment_specs, ctx, id));
   MUTABLE lock_extra_fields: []ContextFieldDecl = ( { MUTABLE rtoc_empty_list_32: []ContextFieldDecl = List[]; rtoc_empty_list_32 } );
-  MUTABLE next_lock_segment_index = segment_specs.length;
+  MUTABLE next_lock_segment_index = segment_specs.length();
   MUTABLE expanded_specs: []FsmSegmentSpec = ( { MUTABLE rtoc_empty_list_33: []FsmSegmentSpec = List[]; rtoc_empty_list_33 } );
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < segment_specs.length DO
+  WHILE rtoc_idx < segment_specs.length() DO
   IF (segment_specs[rtoc_idx]?.tail) IS_A LockSuspend THEN
       MUTABLE out: ?ExpandedLockSegment = TRY (emit__expand_lock_segment(segment_specs[rtoc_idx]?, ctx, capture_map, lowering, next_lock_segment_index));
       IF out EXISTS AS out_value THEN
         &expanded_specs.append(COPY out_value.lock_try_spec);
         expanded_specs = ruby_array_concat_FsmSegmentSpec(expanded_specs, out_value.appended_specs);
         lock_extra_fields = ruby_array_concat_ContextFieldDecl(lock_extra_fields, out_value.extra_fields);
-        next_lock_segment_index = (next_lock_segment_index + out_value.appended_specs.length);
+        next_lock_segment_index = (next_lock_segment_index + out_value.appended_specs.length());
       ELSE
         RETURN NIL;
       END
@@ -612,7 +612,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE suspend_result_vars = segment_nodes |> SELECT:? {
   MUTABLE tail = _.tail;
   (IF (tail IS_A IoSuspend OR tail IS_A NextSuspend) THEN
-      tail.result_var
+      tail.result_var()
     ELSE
       NIL
     END)
@@ -622,7 +622,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   acc
   };
   MUTABLE promoted_value_decls = ((liveness.cross_segment_vars |> WHERE !((suspend_result_vars.contains?(_._0) OR conservative_names.contains?(_._0))))) |> SELECT {
-  MUTABLE type_info = _._1.type_info;
+  MUTABLE type_info = _._1.type_info();
   emit__ctx_field_decl(CAST(_._0 AS String), IF type_info THEN
       TRY (type__zig_type(type_info))
     ELSE
@@ -646,13 +646,13 @@ PRIVATE FN emit__build_recursive_capture_map(ctx: FsmEmitContext, segments: []Se
   capture_map[_] = (capture_map[_] OR_ELSE "__ctx_${id.toString()}.${_}");
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < segments.length DO
+  WHILE rtoc_idx < segments.length() DO
     MUTABLE tail = segments[rtoc_idx]?.tail;
     IF !((tail IS_A IoSuspend OR tail IS_A NextSuspend)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE rv = tail.result_var;
+    MUTABLE rv = tail.result_var();
     IF (rv AND (rv != "_")) THEN
         capture_map[rv] = (capture_map[rv] OR_ELSE "__ctx_${id.toString()}.${rv}");
     END
@@ -675,7 +675,7 @@ PRIVATE FN emit__register_recursive_destroy_actions_mut(MUTABLE ctx: FsmEmitCont
   (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :fresh_heap, name: COPY _, target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, _) }, cleanup_entry: cleanupEntry__build(:uniform, :heap, TRUE), allocator: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, "alloc") }, guard: NIL } });
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < ctx.capture_finalizers.length DO
+  WHILE rtoc_idx < ctx.capture_finalizers.length() DO
     MUTABLE name: ?String = emit__fsm_destroy_finalizer_name(ctx.capture_finalizers[rtoc_idx]?);
     IF !(name) THEN
         rtoc_idx = rtoc_idx + 1;
@@ -687,7 +687,7 @@ PRIVATE FN emit__register_recursive_destroy_actions_mut(MUTABLE ctx: FsmEmitCont
 END
 PRIVATE FN emit__dedupe_context_fields(fields: []ContextFieldDecl) RETURNS ![]ContextFieldDecl ->
   MUTABLE seen_names: {String}Bool = {};
-  RETURN fields |> WHERE !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE name = COPY _.name; (IF (name.length == 0) THEN FALSE ELSE   IF seen_names[name] THEN
+  RETURN fields |> WHERE !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE name = COPY _.name; (IF (name.length() == 0) THEN FALSE ELSE   IF seen_names[name] THEN
     TRUE
   ELSE
     {
@@ -705,15 +705,15 @@ PRIVATE FN emit__rewrite_promoted_fsm_node(MUTABLE node: PromotableFsmValue, pro
     MUTABLE array_mutable = COPY array;
     RETURN PromotableFsmValue{ ArrayValue: COPY array_mutable |> SELECT castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(PromotableFsmValue{ Emittable: COPY _ }, promoted_names, id)) };
   ELSE_IF (node IS_A Let) THEN
-    MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(node.name AS String), promoted_names);
-    MUTABLE rewritten_init: Emittable = castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(node.init, promoted_names, id));
+    MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(node.name() AS String), promoted_names);
+    MUTABLE rewritten_init: Emittable = castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(node.init(), promoted_names, id));
     IF promoted_name EXISTS AS promoted_name_value THEN
       RETURN PromotableFsmValue{ Emittable: COPY CAST(Set{ target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, promoted_name_value) }, value: COPY rewritten_init, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
     END
     node.init = rewritten_init;
     RETURN COPY node;
   ELSE_IF (node IS_A Ident) THEN
-    MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(node.name AS String), promoted_names);
+    MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(node.name() AS String), promoted_names);
     IF promoted_name EXISTS AS promoted_name_value THEN
       RETURN PromotableFsmValue{ Emittable: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, promoted_name_value) } };
     END
@@ -728,9 +728,9 @@ PRIVATE FN emit__rewrite_promoted_fsm_struct_fields_mut(MUTABLE node: Emittable,
   IF !(node IS_A Struct) THEN
     RETURN;
   END
-  MUTABLE rtoc_each_items_35 = node.members;
+  MUTABLE rtoc_each_items_35 = node.members();
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_35.length DO
+  WHILE rtoc_idx < rtoc_each_items_35.length() DO
     MUTABLE value = node[rtoc_each_items_35[rtoc_idx]];
     IF !((value IS_A Emittable OR (((value IS_A Any[]@multiowned AND (value |> ALL _ IS_A Emittable)))))) THEN
         rtoc_idx = rtoc_idx + 1;
@@ -761,7 +761,7 @@ PUB FN emit__promoted_fsm_field_name(name: String, promoted_names: []String) RET
     RETURN COPY name;
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < promoted_names.length DO
+  WHILE rtoc_idx < promoted_names.length() DO
     MUTABLE local_prefix = "${promoted_names[rtoc_idx]?}_L";
     IF name.startsWith?(local_prefix) THEN
         MUTABLE suffix = name.deletePrefix(local_prefix);
@@ -787,9 +787,9 @@ END
 PRIVATE FN emit__lift_ctx_cleanups_to_destroy_mut(body: []Emittable, promoted_names: []String, ctx_ref: String, ctx: FsmEmitContext) RETURNS ![]Emittable ->
   RETURN body |> SELECT:? {
   IF (_ IS_A Cleanup OR _ IS_A ErrCleanup) THEN
-      MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(_.name AS String), promoted_names);
+      MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(_.name() AS String), promoted_names);
       IF promoted_name EXISTS AS promoted_name_value THEN
-        (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :body, name: COPY promoted_name_value, target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY ctx_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY promoted_name_value, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: _.cleanup_entry, guard: NIL, allocator: NIL } });
+        (TRY (emit__fsm_destroy_actions(ctx))).append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :body, name: COPY promoted_name_value, target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY ctx_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY promoted_name_value, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: _.cleanup_entry(), guard: NIL, allocator: NIL } });
         CONTINUE;
       END
   END
@@ -799,18 +799,18 @@ END
 PRIVATE FN emit__fsm_owned_result_guards(segments: []Segment, lowering: MIRLowering) RETURNS !{String}String ->
   MUTABLE guards = {};
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < segments.length DO
+  WHILE rtoc_idx < segments.length() DO
     MUTABLE tail = segments[rtoc_idx]?.tail;
     IF !((tail IS_A IoSuspend OR tail IS_A NextSuspend)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE result_var = tail.result_var;
+    MUTABLE result_var = tail.result_var();
     IF !((result_var AND (result_var != "_"))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE result_type = tail.result_type;
+    MUTABLE result_type = tail.result_type();
     IF !(SuspendResolvers.ownership_bearing_result_type?(result_type, lowering)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -823,7 +823,7 @@ END
 PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []FsmSegmentSpec, ctx: FsmEmitContext, id: Int64) RETURNS !Void ->
   MUTABLE seen = Set[];
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < segment_specs.length DO
+  WHILE rtoc_idx < segment_specs.length() DO
     MUTABLE desc: ?SuspendDescriptor = COPY segment_specs[rtoc_idx]?.descriptor;
     IF !((((desc != NIL) AND desc.result_needs_cleanup) AND desc.result_var)) THEN
         rtoc_idx = rtoc_idx + 1;
@@ -848,12 +848,12 @@ PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segme
     RETURN;
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < seg_codes.length DO
+  WHILE rtoc_idx < seg_codes.length() DO
   mIR__each_node(NodeRoot{ ArrayValue: COPY seg_codes[rtoc_idx]? }, %(node: Emittable) USE(forbidden_set, segments, rtoc_idx) -> {
     IF !((node IS_A Cleanup OR node IS_A ErrCleanup)) THEN
         RETURN;
     END
-    MUTABLE name = COPY CAST(node.name AS String);
+    MUTABLE name = COPY CAST(node.name() AS String);
     IF !(forbidden_set.contains?(name)) THEN
         RETURN;
     END
@@ -908,21 +908,21 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, ctx: FsmEmitContext, 
   MUTABLE rtoc_indexed_items_38: []{String@symbol}FsmCapMetadataValue = prior_meta;
   MUTABLE rtoc_indexed_output_40 = [];
   MUTABLE rtoc_indexed_i_39 = 0;
-  WHILE rtoc_indexed_i_39 < rtoc_indexed_items_38.length DO
+  WHILE rtoc_indexed_i_39 < rtoc_indexed_items_38.length() DO
     &rtoc_indexed_output_40.append(TRY (emit__prior_lock_release_stmts(id, CAST(tail.prior_lock_indices[rtoc_indexed_i_39] AS Int64), CAST(rtoc_indexed_items_38[rtoc_indexed_i_39][:lock_field_ref] AS String), CAST(rtoc_indexed_items_38[rtoc_indexed_i_39][:unlock_method] AS String))));
     rtoc_indexed_i_39 = rtoc_indexed_i_39 + 1;
   END
   rtoc_indexed_output_40
   }).reverse().flatten();
-  MUTABLE fail_body_stmts = (prior_release_stmts + err.body_stmts);
+  MUTABLE fail_body_stmts = (prior_release_stmts + err.body_stmts());
   MUTABLE fail_tail = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?Done = NIL;
-  IF (err.exit_kind == :done) THEN
+  IF (err.exit_kind() == :done) THEN
     rtoc_ternary_value_42 = Done{ _: NIL };
   ELSE
     rtoc_ternary_value_42 = Goto{ target_index: after_idx };
   END
   rtoc_ternary_value_42? };
-  MUTABLE has_step_work = (!((spec.prologue_stmts.length == 0)) OR !((spec.body_stmts.length == 0)));
+  MUTABLE has_step_work = (!((spec.prologue_stmts.length() == 0)) OR !((spec.body_stmts.length() == 0)));
   MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: SegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: COPY meta[:try_method], lock_field_ref: COPY meta[:lock_field_ref], ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
     spec.fn_name
   ELSE
@@ -979,17 +979,17 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
         counter = (counter + 1);
       END
       IF (seg_value.tail IS_A Goto) OR (seg_value.tail IS_A LoopBack) THEN
-        &stack.push(seg_value.tail.target_index);
+        &stack.push(seg_value.tail.target_index());
       ELSE_IF (seg_value.tail IS_A CondBranch) THEN
-        &stack.push(seg_value.tail.then_index);
-        &stack.push(seg_value.tail.else_index);
+        &stack.push(seg_value.tail.then_index());
+        &stack.push(seg_value.tail.else_index());
       ELSE_IF (seg_value.tail IS_A LockSuspend) THEN
-        IF seg_value.tail.next_index THEN
-          &stack.push(seg_value.tail.next_index);
+        IF seg_value.tail.next_index() THEN
+          &stack.push(seg_value.tail.next_index());
         END
       ELSE
-        IF (Segments.suspend_tail?(seg_value.tail) AND seg_value.tail.next_index) THEN
-          &stack.push(seg_value.tail.next_index);
+        IF (Segments.suspend_tail?(seg_value.tail) AND seg_value.tail.next_index()) THEN
+          &stack.push(seg_value.tail.next_index());
         END
       END
     ELSE
@@ -997,7 +997,7 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
     END
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < segments.length DO
+  WHILE rtoc_idx < segments.length() DO
     IF out.contains?(segments[rtoc_idx]?.index) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -1085,7 +1085,7 @@ FN castSegmentTailToLockSuspend(value: SegmentTail) RETURNS LockSuspend ->
 END
 FN rtoc_delete_suffix(s: String, affix: String) RETURNS String ->
   IF s.endsWith?(affix) THEN
-    RETURN s.substr(0, (s.length - affix.length));
+    RETURN s.substr(0, (s.length() - affix.length()));
   END
   RETURN COPY s;
 END

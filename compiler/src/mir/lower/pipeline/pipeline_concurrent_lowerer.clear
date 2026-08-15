@@ -216,7 +216,7 @@ PRIVATE FN pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self: Pip
 END
 PUB FN pipelineConcurrentLowerer__lower_sharded_each(self: PipelineConcurrentLowerer, MUTABLE list_node: Locatable, MUTABLE each_op: EachOp) RETURNS !ScopeBlock ->
   MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
-  MUTABLE item_t = TRY (type__new(lhs_type.element_type.resolved()));
+  MUTABLE item_t = TRY (type__new(lhs_type.element_type().resolved()));
   MUTABLE shard_count = type__shard_count(lhs_type);
   MUTABLE conc = ConcurrentOp{ token: COPY each_op.token, op: COPY each_op, options: {}, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, shard_context: NIL, capture_analysis: NIL };
   TRY (aST__stamp_synthetic_type_mut(Locatable{ ConcurrentOp: COPY conc }, SyntheticTypeInput{ Type: COPY &each_op.full_type_mut("sharded EACH result") }, "synthetic AST type"));
@@ -372,7 +372,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__bounded_concurrent_task_cfg_mir(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS StructInit ->
   MUTABLE size_node: ?Locatable = pipelineConcurrentLowerer__concurrent_option(self, conc_op, "size");
   MUTABLE size_name: ?String@symbol = IF ((size_node != NIL) AND (size_node IS_A Identifier)) THEN
-    type__to_sym(size_node.name.downcase())
+    type__to_sym(size_node.name().downcase())
   ELSE
     NIL
   END;
@@ -411,7 +411,7 @@ PRIVATE FN pipelineConcurrentLowerer__bounded_stream_source_move(self: PipelineC
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: :owned_sink, target_alloc: :heap, move_guarded: TRUE })));
 END
 PRIVATE FN pipelineConcurrentLowerer__bounded_result_break_stmts(self: PipelineConcurrentLowerer, label: String, result_var: String, result_type: Type, source: PipelineConcurrentSourcePointer, call: Emittable, source_move: []Emittable) RETURNS ![]Emittable ->
-  IF (source_move.length == 0) THEN
+  IF (source_move.length() == 0) THEN
     RETURN CAST((COPY source.setup + CAST([Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY call, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)) AS []Emittable);
   END
   RETURN CAST((COPY source.setup + CAST([Emittable{ Let: COPY Let{ name: COPY result_var, init: COPY call, mutable: FALSE, annotation: COPY result_type, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable) + COPY source_move + CAST([Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: COPY result_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)) AS []Emittable);
@@ -639,7 +639,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_stream_each(self: Pipelin
 END
 PRIVATE FN pipelineConcurrentLowerer__concurrent_list_item_type(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable) RETURNS !Type ->
   IF lhs IS_A RangeLit THEN
-    MUTABLE elem = lhs.start.full_type_mut();
+    MUTABLE elem = lhs.start().full_type_mut();
     IF TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))) != NIL THEN
       elem = type__resolved(((TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))))?));
     END
@@ -658,8 +658,8 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_select(self: Pipelin
 END
 PRIVATE FN pipelineConcurrentLowerer__concurrent_select_result_type(self: PipelineConcurrentLowerer, inner: SelectOp) RETURNS !Type ->
   MUTABLE expression = COPY inner.expression;
-  IF (((((inner.effect_mode == :fallible) OR (inner.effect_mode == :fallible_optional))) AND respondsTo?(expression, "error_union_type")) AND expression.error_union_type) THEN
-    RETURN TRY (type__new(expression.error_union_type));
+  IF (((((inner.effect_mode == :fallible) OR (inner.effect_mode == :fallible_optional))) AND respondsTo?(expression, "error_union_type")) AND expression.error_union_type()) THEN
+    RETURN TRY (type__new(expression.error_union_type()));
   END
   RETURN &expression.full_type_mut("CONCURRENT SELECT result");
 END
@@ -729,7 +729,7 @@ PRIVATE FN pipelineConcurrentLowerer__build_bounded_concurrent_callback_pointer(
 END
 PRIVATE FN pipelineConcurrentLowerer__unwrap_binding_source(self: PipelineConcurrentLowerer, lhs: Locatable) RETURNS Tuple<?String, Locatable> ->
   IF (IF lhs IS_A BinaryOp AS binary_op THEN (binary_op.op == :BIND_VAR) ELSE FALSE END) THEN
-    RETURN CAST(Tuple{(CAST(lhs.right AS Identifier)).name, CAST(lhs.left AS Locatable)} AS Tuple<?String, Locatable>);
+    RETURN CAST(Tuple{(CAST(lhs.right() AS Identifier)).name, CAST(lhs.left() AS Locatable)} AS Tuple<?String, Locatable>);
   ELSE
     RETURN CAST(Tuple{NIL, lhs} AS Tuple<?String, Locatable>);
   END
@@ -779,7 +779,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__shard_task_config_variant(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS String ->
   MUTABLE size_node: ?Locatable = pipelineConcurrentLowerer__concurrent_option(self, conc_op, "size");
   MUTABLE size_name: ?String@symbol = IF ((size_node != NIL) AND (size_node IS_A Identifier)) THEN
-    type__to_sym(size_node.name.downcase())
+    type__to_sym(size_node.name().downcase())
   ELSE
     NIL
   END;
@@ -833,7 +833,7 @@ PRIVATE FN pipelineConcurrentLowerer__struct_name_hint_for_sym(self: PipelineCon
 END
 PRIVATE FN pipelineConcurrentLowerer__callback_prelude(self: PipelineConcurrentLowerer, specs: []CaptureSpec) RETURNS ![]Emittable ->
   MUTABLE body: []Emittable = [Emittable{ Suppress: COPY Suppress{ name: "__rt", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
-  IF (specs.length == 0) THEN
+  IF (specs.length() == 0) THEN
     &body.append(Emittable{ Suppress: COPY Suppress{ name: "raw_ctx", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
   ELSE
     MUTABLE ctx_cast = PointerCast{ expr: Emittable{ MIROptionalUnwrap: COPY MIROptionalUnwrap{ expr: Emittable{ Ident: COPY Ident{ name: "raw_ctx", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "*@This()", lowered_node_id: NIL, ownership_consumption: NIL };
@@ -862,7 +862,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__callback_expression(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS !Locatable ->
   MUTABLE op = COPY conc_op.op;
   IF (op IS_A AverageOp) OR (op IS_A CountOp) OR (op IS_A MaxOp) OR (op IS_A MinOp) OR (op IS_A SelectOp) OR (op IS_A SumOp) OR (op IS_A WhereOp) THEN
-    RETURN op.expression;
+    RETURN op.expression();
   ELSE
     panic("concurrent callback expression expected expression op, got {}");
   END
@@ -918,7 +918,7 @@ PRIVATE FN pipelineConcurrentLowerer__assignment_targets_placeholder?(self: Pipe
     RETURN pipelineConcurrentLowerer__target_rooted_at_placeholder?(self, castAssignmentNameToLocatable(assignment.name));
   END
   IF node IS_A Struct AS struct THEN
-    RETURN struct.members |> ANY (IF ([:token, :location]).contains?(_) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE value = COPY struct[_]; (    IF value IS_A []@multiowned Any THEN
+    RETURN struct.members() |> ANY (IF ([:token, :location]).contains?(_) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE value = COPY struct[_]; (    IF value IS_A []@multiowned Any THEN
       value |> ANY (_ IS_A Struct AND pipelineConcurrentLowerer__assignment_targets_placeholder?(self, _))
     ELSE_IF value IS_A Struct THEN
       pipelineConcurrentLowerer__assignment_targets_placeholder?(self, value)

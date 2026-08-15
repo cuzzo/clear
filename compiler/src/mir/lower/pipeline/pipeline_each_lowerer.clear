@@ -95,7 +95,7 @@ PRIVATE FN pipelineEachLowerer__each_source_kind(self: PipelineEachLowerer, list
 END
 PRIVATE FN pipelineEachLowerer__range_chain_usable?(self: PipelineEachLowerer, list_node: Locatable, range_chain: ?PipelineRangeChain, bc_target: Bool) RETURNS Bool ->
   IF range_chain EXISTS AS range_chain_value THEN
-    RETURN !((((bc_target AND list_node IS_A RangeLit) AND (range_chain_value.stages.length == 0))));
+    RETURN !((((bc_target AND list_node IS_A RangeLit) AND (range_chain_value.stages.length() == 0))));
   ELSE
     RETURN FALSE;
   END

@@ -25,29 +25,29 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
     panic("IoSuspend missing stdlib_def");
   END
   MUTABLE id = ctx.id;
-  MUTABLE em = stdlib_def.emit;
+  MUTABLE em = stdlib_def.emit();
   MUTABLE setup_ops: []Any = List[];
   IF em != NIL THEN
-    setup_ops = COPY em.fsm_setup;
+    setup_ops = COPY em.fsm_setup();
   END
   MUTABLE finish_block: []Any = List[];
   IF em != NIL THEN
-    finish_block = COPY em.fsm_finish_block;
+    finish_block = COPY em.fsm_finish_block();
   END
   MUTABLE finish_value = (IF em != NIL THEN
-    em.fsm_finish_value
+    em.fsm_finish_value()
   ELSE
     NIL
   END);
   MUTABLE state_decls: []Any = List[];
   IF em != NIL THEN
-    state_decls = COPY em.fsm_state_decls;
+    state_decls = COPY em.fsm_state_decls();
   END
   MUTABLE state_finalize: []Any = List[];
   IF em != NIL THEN
-    state_finalize = COPY em.fsm_state_finalize;
+    state_finalize = COPY em.fsm_state_finalize();
   END
-  MUTABLE arg_mirs = io_tail.call_node.args |> SELECT mIRLowering__lower(lowering, _);
+  MUTABLE arg_mirs = io_tail.call_node.args() |> SELECT mIRLowering__lower(lowering, _);
   MUTABLE lowerer = lowerer__new(id, arg_mirs);
   MUTABLE setup_mir = TRY (lowerer__lower_stmts(lowerer, setup_ops));
   MUTABLE state_finalize_m = TRY (lowerer__lower_stmts(lowerer, state_finalize));
@@ -100,8 +100,8 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
   MUTABLE captured_promise_guard_name: ?String = NIL;
   MUTABLE captured_names = ctx.captured.keys() |> SELECT _.toString();
   MUTABLE promise_root = (aST__root_identifier(next_tail.promise_ast) OR_ELSE NIL);
-  IF (promise_root AND captured_names.contains?(CAST(promise_root.name AS String))) THEN
-    captured_promise_guard_name = "${promise_root.name}_moved";
+  IF (promise_root AND captured_names.contains?(CAST(promise_root.name() AS String))) THEN
+    captured_promise_guard_name = "${promise_root.name()}_moved";
     &setup_stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: UNWRAP (COPY captured_promise_guard_name), lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
   END
   MUTABLE register_expr = MIRMethodCall{ receiver: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "wg", lowered_node_id: NIL, ownership_consumption: NIL }, method: "registerFsmWaiter", args: [CAST(FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: "task", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
