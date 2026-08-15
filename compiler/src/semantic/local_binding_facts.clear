@@ -33,9 +33,10 @@ PUB FN localBindingAnalysis__direct_loop_body_facts(body: []LocalBindingBodyItem
       RETURN;
   END
   &frame_decls.append(COPY node);
-  IF (((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = (entry?);
-  cleanupEntry__present?(rtoc_local_receiver_3) }) AND (cleanupEntry__scope(entry) == :iteration)) THEN
+  IF entry EXISTS AS iteration_entry THEN
+    IF (cleanupEntry__present?(iteration_entry) AND (cleanupEntry__scope(iteration_entry) == :iteration)) THEN
       &iteration_frame_decls.append(COPY node);
+    END
   END
   rubyToClearVoid()
   }));
