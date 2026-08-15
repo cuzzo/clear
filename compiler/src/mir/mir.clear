@@ -3797,7 +3797,7 @@ FN streamYield__stmt?(self: StreamYield) RETURNS Bool ->
 END
 PUB STRUCT FsmB1Body {
   blk_label: String,
-  ctx_struct: FsmCtxStruct,
+  ctx_struct: FsmB1CtxStruct,
   spawn_setup: FsmSpawnSetup,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -3870,7 +3870,7 @@ PUB STRUCT FsmB1CtxStruct {
 }
 PUB STRUCT FsmGenericBody {
   blk_label: String,
-  ctx_struct: FsmCtxStruct,
+  ctx_struct: FsmGenericCtxStruct,
   spawn_setup: FsmSpawnSetup,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
