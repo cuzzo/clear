@@ -62,13 +62,13 @@ END
 PUB FN bindingMaterialization__let_node(self: BindingMaterialization) RETURNS Let ->
   RETURN Let{ name: COPY self.name, init: COPY self.expr, mutable: self.mutable, annotation: COPY self.annotation, suppression: COPY self.suppression, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
 END
-PUB FN bindingMaterialization__cleanup_stmt(self: BindingMaterialization) RETURNS ?Stmt ->
+PUB FN bindingMaterialization__cleanup_stmt(self: BindingMaterialization) RETURNS ?Emittable ->
   MUTABLE entry: ?CleanupEntry@multiowned = COPY KEEP self.cleanup_entry;
   IF entry EXISTS AS entry_value THEN
     IF (self.cleanup_mode == :err) THEN
-      RETURN ErrCleanup{ name: COPY self.name, cleanup_entry: entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      RETURN Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY self.name, cleanup_entry: entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     ELSE
-      RETURN Cleanup{ name: COPY self.name, cleanup_entry: entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      RETURN Emittable{ Cleanup: COPY Cleanup{ name: COPY self.name, cleanup_entry: entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
   ELSE
     RETURN NIL;
