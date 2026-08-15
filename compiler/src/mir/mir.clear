@@ -9697,7 +9697,7 @@ PUB STRUCT MIRBlockExpr {
 }
 
 PUB FN mIRBlockExpr__label(self: MIRBlockExpr) RETURNS Any@multiowned ->
-  KEEP self.label;
+  COPY self.label;
 END
 PUB FN mIRBlockExpr__body(self: MIRBlockExpr) RETURNS []Emittable ->
   self.body;

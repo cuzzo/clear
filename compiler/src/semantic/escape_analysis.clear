@@ -339,7 +339,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
         END
         MUTABLE stamp_plan: FN(CallEdgeOwnershipPlan) -> Void = %(plan) USE(raw_arg, rtoc_idx, rtoc_key) -> {
           raw_arg.kept_edge_plan = plan;
-          MUTABLE call_node = KEEP _.call_site_facts[rtoc_idx].node;
+          MUTABLE call_node = COPY _.call_site_facts[rtoc_idx].node;
           call_node.kept_edge_plans = TRY (ownershipGraph__merge(((call_node.kept_edge_plans() OR {})), {rtoc_key: plan}));
           NIL
         };
@@ -662,7 +662,7 @@ PUB FN escapeAnalysis__apply_return_escape_sink_mut(node: ReturnNode, context: E
   IF !(value) THEN
     RETURN;
   END
-  IF !(TRY (owning_return_needs_heap_placement?(KEEP context.fn, &value, KEEP context.schema_lookup))) THEN
+  IF !(TRY (owning_return_needs_heap_placement?(COPY context.fn, &value, COPY context.schema_lookup))) THEN
     RETURN;
   END
   IF !(returned_call_result?(value)) THEN
@@ -676,7 +676,7 @@ PUB FN escapeAnalysis__apply_assignment_escape_sink_mut(node: Assignment, contex
   MUTABLE facts: ?FunctionFacts = COPY context.facts;
   IF facts EXISTS AS facts_value THEN
     MUTABLE target: AssignmentTarget = COPY castAssignmentNameToAssignmentTarget(node.name);
-    IF assignment_target_heap_destination?(facts_value, target, KEEP context.schema_lookup) THEN
+    IF assignment_target_heap_destination?(facts_value, target, COPY context.schema_lookup) THEN
       TRY (mark_expr_identifiers_heap_mut(node.value));
     END
   ELSE
@@ -686,7 +686,7 @@ END
 PUB FN escapeAnalysis__apply_binding_escape_sink_mut(node: Node, context: EscapeContext) RETURNS !Void ->
   IF borrow_return_expr?(node.value()) THEN
     mark_symbol_borrow_mut(node.symbol());
-  ELSE_IF TRY (call_result_is_heap?(node.value(), context.fn_nodes, KEEP context.schema_lookup, context.facts_by_name)) THEN
+  ELSE_IF TRY (call_result_is_heap?(node.value(), context.fn_nodes, COPY context.schema_lookup, context.facts_by_name)) THEN
     mark_symbol_heap_mut(node.symbol());
   END
 END
@@ -701,7 +701,7 @@ PUB FN escapeAnalysis__apply_destructuring_escape_sink_mut(node: DestructuringAs
   CONTINUE;
     END
     MUTABLE ti = TRY (type__from_node_mut(node.targets[rtoc_idx]?, "destructured target placement"));
-    IF !(TRY (type__needs_explicit_cleanup?(ti, :heap, KEEP context.schema_lookup))) THEN
+    IF !(TRY (type__needs_explicit_cleanup?(ti, :heap, COPY context.schema_lookup))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -747,17 +747,17 @@ END
 PUB FN escapeAnalysis__apply_execution_boundary_escape_sink_mut(node: Node, context: EscapeContext) RETURNS Void ->
   mark_capture_analysis_heap_mut(node.capture_analysis(), context.bg_heap);
   IF node IS_A BgBlock AS bg_block THEN
-    mark_fsm_ctx_locals_heap_mut(bg_block, KEEP context.schema_lookup);
+    mark_fsm_ctx_locals_heap_mut(bg_block, COPY context.schema_lookup);
   END
 END
 PUB FN escapeAnalysis__apply_lambda_escape_sink_mut(node: LambdaLit, context: EscapeContext) RETURNS !Void ->
   TRY (mark_lambda_captures_heap_mut(node, context.bg_heap, context.facts));
 END
 PUB FN escapeAnalysis__apply_func_call_escape_sink_mut(node: FuncCall, context: EscapeContext) RETURNS Void ->
-  mark_takes_args_heap_mut(node.args, params_for_call(node, context.fn_nodes), KEEP context.schema_lookup);
+  mark_takes_args_heap_mut(node.args, params_for_call(node, context.fn_nodes), COPY context.schema_lookup);
 END
 PUB FN escapeAnalysis__apply_method_call_escape_sink_mut(node: MethodCall, context: EscapeContext) RETURNS !Void ->
-  TRY (mark_method_takes_heap_mut(node, params_for_method_call(node), context.fn_nodes, context.facts_by_name, KEEP context.schema_lookup));
+  TRY (mark_method_takes_heap_mut(node, params_for_method_call(node), context.fn_nodes, context.facts_by_name, COPY context.schema_lookup));
 END
 PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatable) RETURNS !Void ->
   MUTABLE rtoc_idx = 0;

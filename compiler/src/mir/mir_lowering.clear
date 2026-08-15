@@ -3901,7 +3901,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN entries DO
     MUTABLE tmp = "__ci_${_.name}";
     ruby_array_concat_Emittable(raw, _.prelude);
-    &raw.append(Emittable{ AllocMark: COPY AllocMark{ name: COPY tmp, alloc: :heap, type_info: COPY KEEP _.type_info, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+    &raw.append(Emittable{ AllocMark: COPY AllocMark{ name: COPY tmp, alloc: :heap, type_info: COPY COPY _.type_info, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     &raw.append(Emittable{ Let: COPY Let{ name: COPY tmp, init: COPY _.init, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
     &raw.append(Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: tmp, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     ruby_array_concat_Emittable(raw, CAST(TRY (mIRLowering__ownership_transfer_marks(rtoc_self_view, tmp, :owned_sink, :heap)) AS []Emittable));
@@ -11673,7 +11673,7 @@ PRIVATE FN mIRLowering__lock_binding_plan(self: MIRLowering, context: WithCapabi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN LockBindingPlan{ guard_var: "__${context.var_name}_guard_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_434 = (CAST(rtoc_self_view AS MIRLowering@multiowned));
-    mIRLowering__stable_node_suffix(rtoc_local_receiver_434, Locatable{ WithBlock: COPY KEEP context.node }) }}", alias_name: COPY context.alias_name, lock_expr: COPY lock_expr, lock_sync: COPY lock_sync, clause: COPY context.clause, with_label: COPY context.with_label, with_node: KEEP context.node };
+    mIRLowering__stable_node_suffix(rtoc_local_receiver_434, Locatable{ WithBlock: COPY COPY context.node }) }}", alias_name: COPY context.alias_name, lock_expr: COPY lock_expr, lock_sync: COPY lock_sync, clause: COPY context.clause, with_label: COPY context.with_label, with_node: COPY context.node };
 }
 END
 PRIVATE FN mIRLowering__render_lock_binding(MUTABLE self: MIRLowering, plan: LockBindingPlan, acquire_call: Emittable) RETURNS ![]Emittable
@@ -11712,7 +11712,7 @@ PRIVATE FN mIRLowering__exclusive_lock_sync(self: MIRLowering, context: WithCapa
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE is_param = mIRLowering__with_cap_is_param?(rtoc_self_view, context.var_node);
-    IF ((KEEP context.node).polymorphic AND is_param) THEN
+    IF ((COPY context.node).polymorphic AND is_param) THEN
       RETURN NIL;
     ELSE
       RETURN context.var_sync;
@@ -11758,7 +11758,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_mir = mIRLowering__with_capability_source_mir(rtoc_self_view, context.var_node);
     MUTABLE is_param = mIRLowering__with_cap_is_param?(rtoc_self_view, context.var_node);
     MUTABLE safe_alias = mIRLowering__safe_with_capability_alias(rtoc_self_view, context.alias_name);
-    MUTABLE aliased_value =   IF (KEEP context.node).polymorphic THEN
+    MUTABLE aliased_value =   IF (COPY context.node).polymorphic THEN
       CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
     ELSE_IF mIRLowering__borrowed_const_param_alias?(rtoc_self_view, context, is_param) THEN
       Deref{ expr: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
@@ -11817,7 +11817,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE source_mir = mIRLowering__with_capability_source_mir(rtoc_self_view, context.var_node);
     MUTABLE safe_alias = mIRLowering__safe_with_capability_alias(rtoc_self_view, context.alias_name);
-    MUTABLE value =   IF (KEEP context.node).polymorphic THEN
+    MUTABLE value =   IF (COPY context.node).polymorphic THEN
       CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
     ELSE_IF mIRLowering__with_cap_is_param?(rtoc_self_view, context.var_node) THEN
       Deref{ expr: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
@@ -11890,13 +11890,13 @@ PRIVATE FN mIRLowering__snapshot_capability_binding(self: MIRLowering, context: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF TRY (withCapabilityPlan__mutable_snapshot?((TRY (capabilityPlan__require_for(CAST(COPY KEEP context.node AS WithBlock)))))) THEN
+    IF TRY (withCapabilityPlan__mutable_snapshot?((TRY (capabilityPlan__require_for(CAST(COPY COPY context.node AS WithBlock)))))) THEN
       RETURN NIL;
     END
     MUTABLE source_mir = mIRLowering__with_capability_source_mir(rtoc_self_view, context.var_node, TRUE);
     MUTABLE safe_alias = mIRLowering__safe_with_capability_alias(rtoc_self_view, context.alias_name);
     MUTABLE guard_var = "__${context.var_name}_snap_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_453 = (CAST(rtoc_self_view AS MIRLowering@multiowned));
-    mIRLowering__stable_node_suffix(rtoc_local_receiver_453, Locatable{ WithBlock: COPY KEEP context.node }) }}";
+    mIRLowering__stable_node_suffix(rtoc_local_receiver_453, Locatable{ WithBlock: COPY COPY context.node }) }}";
     RETURN SnapshotRead{ cell_unwrap: Emittable{ CapabilityUnwrap: COPY CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, rt: COPY context.rt_name, alias_name: safe_alias, guard_var: guard_var, body: COPY List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
@@ -12404,7 +12404,7 @@ PRIVATE FN mIRLowering__single_mutable_snapshot_txn(MUTABLE self: MIRLowering, p
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE conflict_action = mIRLowering__conflict_failure_action(&rtoc_self_view, (KEEP plan.node).lock_error_clause, plan.with_label, CAST(COPY KEEP plan.node AS WithBlock), cap.conflict_error);
+    MUTABLE conflict_action = mIRLowering__conflict_failure_action(&rtoc_self_view, (COPY plan.node).lock_error_clause, plan.with_label, CAST(COPY COPY plan.node AS WithBlock), cap.conflict_error);
     RETURN SnapshotTransaction{ cell_unwrap: Emittable{ CapabilityUnwrap: COPY CapabilityUnwrap{ source: COPY cap.source, lowered_node_id: NIL, ownership_consumption: NIL } }, rt: COPY plan.rt_name, alloc: COPY plan.alloc, alias_name: mIRLowering__safe_with_capability_alias(rtoc_self_view, cap.alias_name), bare_type: COPY cap.bare_type, body: Body{ ArrayValue: plan.body_mir |> SELECT castEmittableToLocatable(_) }, conflict_action: Emittable{ FailureAction: COPY conflict_action }, retries: plan.retries, with_label: COPY plan.with_label, is_atomic_ptr: (cap.conflict_error == :AtomicConflict), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
@@ -12412,7 +12412,7 @@ PRIVATE FN mIRLowering__multi_mutable_snapshot_txn(MUTABLE self: MIRLowering, pl
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE conflict_action = mIRLowering__conflict_failure_action(&rtoc_self_view, (KEEP plan.node).lock_error_clause, plan.with_label, CAST(COPY KEEP plan.node AS WithBlock), :MvccConflict);
+    MUTABLE conflict_action = mIRLowering__conflict_failure_action(&rtoc_self_view, (COPY plan.node).lock_error_clause, plan.with_label, CAST(COPY COPY plan.node AS WithBlock), :MvccConflict);
     RETURN SnapshotMultiTxn{ cells: COPY plan.capabilities |> SELECT _.source, rt: COPY plan.rt_name, alloc: COPY plan.alloc, aliases: plan.capabilities |> SELECT mIRLowering__safe_with_capability_alias(rtoc_self_view, _.alias_name), body: Body{ ArrayValue: plan.body_mir |> SELECT castEmittableToLocatable(_) }, conflict_action: Emittable{ FailureAction: COPY conflict_action }, retries: plan.retries, with_label: COPY plan.with_label, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END

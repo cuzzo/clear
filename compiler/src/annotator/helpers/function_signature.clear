@@ -81,7 +81,7 @@ PUB STRUCT AnalysisFacts {
 }
 
 FN analysisFacts__copy(self: AnalysisFacts) RETURNS !AnalysisFacts ->
-  RETURN AnalysisFacts{ needs_rt: self.needs_rt, can_fail: self.can_fail, alloc_fault: self.alloc_fault, error_fallible: self.error_fallible, effects: COPY self.effects, return_strategy: COPY self.return_strategy, stack_tier: COPY self.stack_tier, requires: COPY TRY (functionSignature__copy_requires_for_import(self.requires)), heap_carry_return: self.heap_carry_return, heap_carry_return_vars: COPY self.heap_carry_return_vars, arg_validator: KEEP self.arg_validator, intrinsic_arg_specs: COPY self.intrinsic_arg_specs, intrinsic_fixed_arg_list: self.intrinsic_fixed_arg_list, intrinsic_varargs: self.intrinsic_varargs, arity: self.arity, emit: COPY self.emit, return_def: KEEP self.return_def };
+  RETURN AnalysisFacts{ needs_rt: self.needs_rt, can_fail: self.can_fail, alloc_fault: self.alloc_fault, error_fallible: self.error_fallible, effects: COPY self.effects, return_strategy: COPY self.return_strategy, stack_tier: COPY self.stack_tier, requires: COPY TRY (functionSignature__copy_requires_for_import(self.requires)), heap_carry_return: self.heap_carry_return, heap_carry_return_vars: COPY self.heap_carry_return_vars, arg_validator: COPY self.arg_validator, intrinsic_arg_specs: COPY self.intrinsic_arg_specs, intrinsic_fixed_arg_list: self.intrinsic_fixed_arg_list, intrinsic_varargs: self.intrinsic_varargs, arity: self.arity, emit: COPY self.emit, return_def: KEEP self.return_def };
 END
 PUB FN functionSignature__visibility(self: FunctionSignature) RETURNS ?String@symbol
   REQUIRES self: LOCAL

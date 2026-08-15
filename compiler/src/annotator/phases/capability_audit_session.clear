@@ -1116,7 +1116,7 @@ PRIVATE FN capabilityAuditSession__emit_unexpected_mutable_argument_error_mut(se
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token: ?Token@multiowned = COPY KEEP facts.mutable_marker_token;
+    MUTABLE token: ?Token@multiowned = COPY COPY facts.mutable_marker_token;
     IF token EXISTS AS token_value THEN
       MUTABLE fix = TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_ARGUMENT_MARKER, {:param: DiagnosticKwValue{ StringValue: COPY facts.param.name }}), [edit__new(span__new(NIL, token_value.line, token_value.column, 1), "")], :auto));
       capabilityAuditSession__fixable_mut(rtoc_self_view, token_value, :mutability, [fix], NIL, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name});
@@ -1706,8 +1706,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
       IF ((decl != NIL) AND aST__node__token(decl)) THEN
         tok = aST__node__token(decl);
-      ELSE_IF (symbolEntry__is_param(info_value) AND (KEEP info_value.param_decl_token != NIL)) THEN
-        tok = COPY KEEP info_value.param_decl_token;
+      ELSE_IF (symbolEntry__is_param(info_value) AND (COPY info_value.param_decl_token != NIL)) THEN
+        tok = COPY COPY info_value.param_decl_token;
       END
       IF !(tok) THEN
         RETURN NIL;
@@ -2069,7 +2069,7 @@ PRIVATE FN capabilityAuditSession__auto_token_for(self: CapabilityAuditSession, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN CAST(COPY KEEP slot.auto_token AS ?Token);
+    RETURN CAST(COPY COPY slot.auto_token AS ?Token);
 }
 END
 PRIVATE FN capabilityAuditSession__build_auto_ambiguity_message(self: CapabilityAuditSession, label: String, observed_strs: []String, slot: Slot) RETURNS String
@@ -2722,7 +2722,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(capabilityAuditSession__fallible_call_site_fact?(rtoc_self_view, _)) THEN
           CONTINUE;
     END
-    MUTABLE range = (KEEP _.node).source_range();
+    MUTABLE range = (COPY _.node).source_range();
     IF ((token__start_line(range) <= 0) OR (span__end_line(range) <= 0)) THEN
           CONTINUE;
     END
@@ -2739,7 +2739,7 @@ PRIVATE FN capabilityAuditSession__fallible_call_site_fact?(self: CapabilityAudi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE node = COPY KEEP fact.node;
+    MUTABLE node = COPY COPY fact.node;
     IF (respondsTo?(node, "error_union_type") AND node.error_union_type()) THEN
       RETURN TRUE;
     END
@@ -3646,7 +3646,7 @@ PRIVATE FN capabilityAuditSession__thunk_all_self_calls_in_tail_position?(self: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE all = (MATCH body_facts START CapabilityAuditBodyFacts.BodyScanSummary AS item -> item.call_site_facts, CapabilityAuditBodyFacts.FunctionBodySummary AS item -> item.call_site_facts END) |> SELECT:? (  IF (_.callee_name == fn_node.name) THEN
-      KEEP _.node
+      COPY _.node
     ELSE
       NIL
     END) |> WHERE _ != NIL;
@@ -3853,7 +3853,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN sites DO
     FOR _ IN ((transitive_acquires[_.callee] OR Set[])) DO
     IF state.direct_edges[_] EXISTS AS rtoc_map_slot_28 THEN
-      &rtoc_map_slot_28.append(LockEdge{ held: COPY _.held, acquired: COPY _, site_token: KEEP _.site_token, fn_name: COPY _, opted_out: _.opted_out });
+      &rtoc_map_slot_28.append(LockEdge{ held: COPY _.held, acquired: COPY _, site_token: COPY _.site_token, fn_name: COPY _, opted_out: _.opted_out });
     ELSE
       panic("T.must: map slot is NIL");
     END
@@ -4028,7 +4028,7 @@ PRIVATE FN capabilityAuditSession__verify_handler_reachability_mut(self: Capabil
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE possible: [Set]String@symbol = Set[];
-    MUTABLE node = COPY KEEP site.node;
+    MUTABLE node = COPY COPY site.node;
     MUTABLE clause = node.lock_error_clause;
     IF !(clause) THEN
       RETURN;
@@ -4100,8 +4100,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sample: ?LockEdge = COPY participating.first();
     MUTABLE site_lines = (CAST(((participating |> SELECT {
     MUTABLE line: String = "?";
-    IF KEEP _.site_token != NIL THEN
-        line = ((KEEP _.site_token)?).line;
+    IF COPY _.site_token != NIL THEN
+        line = ((COPY _.site_token)?).line;
       END
     "  - ${_.fn_name} (line ${line}): holds :${_.held}, acquires :${_.acquired}"
     }) |> DISTINCT _) AS []String)).join("\n");
