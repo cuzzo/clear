@@ -77,7 +77,7 @@ PUB STRUCT Capture {
   comptime: Bool,
   name_token: ?Token,
   storage: ?String@symbol,
-  carrier_contract: String@symbol
+  carrier_contract: ?String@symbol
 }
 
 PUB FN capture__name(self: Capture) RETURNS String ->
