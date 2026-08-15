@@ -216,7 +216,7 @@ PRIVATE FN pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self: Pip
 END
 PUB FN pipelineConcurrentLowerer__lower_sharded_each(self: PipelineConcurrentLowerer, MUTABLE list_node: Locatable, MUTABLE each_op: EachOp) RETURNS !ScopeBlock ->
   MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
-  MUTABLE item_t = TRY (type__new(lhs_type.element_type().resolved()));
+  MUTABLE item_t = TRY (type__new(TRY (type__element_type(lhs_type)).resolved()));
   MUTABLE shard_count = type__shard_count(lhs_type);
   MUTABLE conc = ConcurrentOp{ token: COPY each_op.token, op: COPY each_op, options: {}, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, shard_context: NIL, capture_analysis: NIL };
   TRY (aST__stamp_synthetic_type_mut(Locatable{ ConcurrentOp: COPY conc }, SyntheticTypeInput{ Type: COPY &each_op.full_type_mut("sharded EACH result") }, "synthetic AST type"));

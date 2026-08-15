@@ -248,7 +248,7 @@ PRIVATE FN pipelineListLowerer__lower_join(self: PipelineListLowerer, site: Pipe
   MUTABLE left_zig = pipelineListLowerer__transpile_type_call(self, CAST(left_type_info.resolved() AS String));
   MUTABLE right_src_mir = pipelineListLowerer__visit_mir_call(self, join_node.right_source);
   MUTABLE right_type_info = &join_node.right_source.full_type_mut();
-  MUTABLE right_element_type = right_type_info.element_type();
+  MUTABLE right_element_type = TRY (type__element_type(right_type_info));
   MUTABLE right_zig = pipelineListLowerer__transpile_type_call(self, CAST(right_element_type.resolved() AS String));
   MUTABLE result_zig = "struct { left: ${left_zig}, right: ?${right_zig} }";
   MUTABLE alloc = pipelineListLowerer__pipeline_result_alloc_call(self);

@@ -5335,7 +5335,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END);
     IF (((lhs_t != NIL) AND type__observable?((lhs_t?))) AND ((inner != NIL) AND type__array?((inner?)))) THEN
-      MUTABLE elem_sym = type__to_sym(inner.element_type());
+      MUTABLE elem_sym = type__to_sym(TRY (type__element_type(inner)));
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${elem_sym}[]") }))));
       node.storage = :heap;
       RETURN :heap;
@@ -5656,11 +5656,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END) THEN
       item_type_branch_value = type__resolved((TRY (type__stream_element_type(left_ti))));
     ELSE_IF (IF left_ti != NIL THEN
-      left_ti.element_type()
+      TRY (type__element_type(left_ti))
     ELSE
       NIL
     END) THEN
-      item_type_branch_value = left_ti.element_type().resolved();
+      item_type_branch_value = TRY (type__element_type(left_ti)).resolved();
     ELSE
       item_type_branch_value = typeAnalysisSession__error_mut(rtoc_self_view, node.left, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_COLLECTION_INPUT });
     END
@@ -5695,7 +5695,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END))) THEN
       typeAnalysisSession__error_mut(rtoc_self_view, node.right.right_source(), TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_RIGHT_NEEDS_LIST }, [], {:got: node.right.right_source().resolved_type()});
     END
-    MUTABLE right_type = rhs_type_info.element_type().resolved();
+    MUTABLE right_type = TRY (type__element_type(rhs_type_info)).resolved();
     MUTABLE key_expr = node.right.key_expr();
     IF key_expr IS_A LambdaLit THEN
       MUTABLE params = key_expr.params();
@@ -10670,7 +10670,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE value_arg: ?Locatable = COPY node.args[value_index];
       IF value_arg EXISTS AS value_arg_value THEN
         MUTABLE value_arg_value_mutable = COPY value_arg_value;
-        MUTABLE element_type = receiver_type.element_type();
+        MUTABLE element_type = TRY (type__element_type(receiver_type));
         IF !(element_type) THEN
           RETURN;
         END
@@ -12165,7 +12165,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF typeAnalysisSession__resolve_collection_method(&rtoc_self_view, &node) THEN
       typeAnalysisSession__validate_indirect_collection_insertion_mut(rtoc_self_view, &node);
       MUTABLE receiver_type = &node.object.full_type_mut("@node collection receiver");
-      MUTABLE element_type = receiver_type.element_type();
+      MUTABLE element_type = TRY (type__element_type(receiver_type));
       IF ((((element_type != NIL) AND TRY (type__node_reference?((element_type?)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = &value_arg.full_type_mut("@node collection insertion");
@@ -12819,7 +12819,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         receiver_type
       END;
-      MUTABLE element_type = resolved_receiver_type.element_type();
+      MUTABLE element_type = TRY (type__element_type(resolved_receiver_type));
       IF ((((element_type != NIL) AND TRY (type__node_reference?((element_type?)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = &value_arg.full_type_mut("@node collection insertion");
@@ -15794,7 +15794,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF type__tuple?(value_type) THEN
       element_type_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
     ELSE
-      element_type_branch_value = ((value_type.element_type() OR TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }))));
+      element_type_branch_value = ((TRY (type__element_type(value_type)) OR TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }))));
     END
     MUTABLE element_type: Type = element_type_branch_value?;
     RETURN DestructureRhsFacts{ value_type: COPY value_type, element_type: COPY element_type };
@@ -15956,7 +15956,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           typeAnalysisSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_397, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_INDEX_INTEGER }, [], {:got: index_type.resolved()});
     END
       END
-      TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ GetIndex: COPY node }, target_type_info.element_type()));
+      TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ GetIndex: COPY node }, TRY (type__element_type(target_type_info))));
       node.container_borrow = TRUE;
       RETURN;
     END
@@ -16007,8 +16007,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ GetIndex: COPY node }, TRY (type__optional_of(castTypeToTypeTypeInput(TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${elem_t.resolved()}") })))))));
     ELSE_IF (TRY (type__string?(target_type_info)) AND !(type__raw?(target_type_info))) THEN
         typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STRING_INDEX_BY_INT });
-    ELSE_IF ((node.target.metatype() == :struct) AND target_type_info.element_type()) THEN
-        TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ GetIndex: COPY node }, target_type_info.element_type()));
+    ELSE_IF ((node.target.metatype() == :struct) AND TRY (type__element_type(target_type_info))) THEN
+        TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ GetIndex: COPY node }, TRY (type__element_type(target_type_info))));
         node.container_borrow = TRUE;
     ELSE
         typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :UNSUPPORTED_INDEX });
@@ -16214,7 +16214,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) THEN
-      MUTABLE element = target_type.element_type();
+      MUTABLE element = TRY (type__element_type(target_type));
       MUTABLE slice_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${element.resolved()}[]") }));
       TRY (type__set_elem_ownership(&slice_type, type__ownership(element)));
       TRY (type__set_elem_sync(&slice_type, element.sync()));

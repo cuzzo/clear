@@ -2051,7 +2051,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF (TRY (type__string?(field_type_info)) OR type__collection?(field_type_info)) THEN
       RETURN &entries.append(inlineStructDeinitEntry__uniform(field, TRY (type__zig_type(field_type_info))));
     ELSE_IF (type__array?(field_type_info) AND !(TRY (type__string?(field_type_info)))) THEN
-      MUTABLE elem_zig_type = TRY (type__zig_type((TRY (type__new(field_type_info.element_type())))));
+      MUTABLE elem_zig_type = TRY (type__zig_type((TRY (type__new(TRY (type__element_type(field_type_info)))))));
       RETURN &entries.append(inlineStructDeinitEntry__array(field, elem_zig_type));
     END
     NIL

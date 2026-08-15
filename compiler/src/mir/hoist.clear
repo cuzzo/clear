@@ -76,7 +76,7 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, counter: HoistCounte
     TRY (hoist__collect_stmt_hoists_mut(&stmt, &hoists, counter, schema_lookup, return_type));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < hoists.length() DO
-  &body.insert((i + rtoc_idx), hoists[rtoc_idx]?);
+  &body.insert((i + rtoc_idx), Locatable{ VarDecl: COPY UNWRAP (hoists[rtoc_idx]) });
   rtoc_idx = rtoc_idx + 1;
     END
     generated = ruby_array_concat_VarDecl(generated, hoists);

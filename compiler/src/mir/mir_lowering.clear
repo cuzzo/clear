@@ -4469,7 +4469,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF (type__fixed?(from_t) AND type__dynamic?(to_t)) THEN
       MUTABLE from_elem: ?Type = TRY (type__element_type(from_t));
-      MUTABLE to_elem = to_t.element_type();
+      MUTABLE to_elem = TRY (type__element_type(to_t));
       IF (((from_elem != NIL) AND to_elem) AND (TRY (type__surface_name(TypeTypeInput{ Type: COPY UNWRAP (from_elem) })) == TRY (type__surface_name(to_elem)))) THEN
         RETURN NIL;
       END
@@ -15637,7 +15637,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         elem_name = COPY type__to_s(elem_t);
       END
       MUTABLE pool_get_def = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_572 = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX(TRY (intrinsicRegistry__lookup({"insert": {:arity: 1, :tag: :pool_method, :allocates: TRUE, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :bc: TRUE, :takes_args: [0], :zig: "try {0}.insert({alloc}, {1})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
-    MUTABLE elem = obj_type.element_type();
+    MUTABLE elem = TRY (type__element_type(obj_type));
     MUTABLE arg_type = args[0].resolved_type();
     IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
           runtimeCallSpec__call(error_fn, node, "Pool.insert: argument type ${arg_type} does not match pool element type ${elem.resolved()}");
