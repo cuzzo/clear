@@ -141,9 +141,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(ownershipTransportFacts__source?(source)) THEN
       RETURN;
     END
-    IF !((symbol != NIL)) THEN
+    IF (symbol == NIL) THEN
       RETURN;
     END
+    MUTABLE symbol_value: SymbolEntry@multiowned = KEEP UNWRAP (symbol);
     MUTABLE root: ?Identifier = ownershipTransportFacts__source_root_identifier(rtoc_self_view, source);
     IF root EXISTS AS root_value THEN
       MUTABLE root_value_mutable = COPY root_value;
@@ -159,9 +160,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE_IF node IS_A BindExpr AS bind_expr THEN
           destination_name = COPY CAST(bind_expr.name AS String);
         END
-        MUTABLE fact = Alias{ declaration: node, source: COPY source, source_id: source_id_value_mutable, destination_id: symbol.binding_id, source_name: COPY source_name, destination_name: COPY destination_name, root_id: root_id, root_name: COPY root_name, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, whole_binding: source IS_A Identifier };
+        MUTABLE fact = Alias{ declaration: node, source: COPY source, source_id: source_id_value_mutable, destination_id: symbol_value.binding_id, source_name: COPY source_name, destination_name: COPY destination_name, root_id: root_id, root_name: COPY root_name, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, whole_binding: source IS_A Identifier };
         &rtoc_self_view.aliases.append(COPY fact);
-        rtoc_self_view.alias_roots[symbol.binding_id] = CAST(Tuple{root_id, root_name} AS Tuple<Int64, String>);
+        rtoc_self_view.alias_roots[symbol_value.binding_id] = CAST(Tuple{root_id, root_name} AS Tuple<Int64, String>);
       ELSE
         RETURN;
       END
