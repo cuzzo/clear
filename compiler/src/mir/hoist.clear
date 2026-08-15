@@ -44,19 +44,17 @@ PUB FN hoist__apply_mut(ast: Program, schema_lookup: ?FN(String@symbol) -> ?Type
   MUTABLE bindings_by_function: {String}[]VarDecl = {};
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < ast.statements.length() DO
-    IF !((ast.statements[rtoc_idx] IS_A FunctionDef AND ast.statements[rtoc_idx].body())) THEN
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    IF hoist__synthesized_body?(ast.statements[rtoc_idx]) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    MUTABLE counter = HoistCounter{ value: 0 };
-    MUTABLE generated: []VarDecl = ( { MUTABLE rtoc_empty_list_1: []VarDecl = List[]; rtoc_empty_list_1 } );
-    TRY (hoist__hoist_body_mut(ast.statements[rtoc_idx].body(), counter, schema_lookup, &generated, TypeTypeInput{ Type: COPY functionSignature__return_type(ast.statements[rtoc_idx]) }));
-    IF !((generated.length() == 0)) THEN
-        bindings_by_function[CAST(ast.statements[rtoc_idx].name() AS String)] = generated;
+    MUTABLE stmt: Locatable = COPY UNWRAP (ast.statements[rtoc_idx]);
+    IF stmt IS_A FunctionDef AS fn_stmt THEN
+      IF !(hoist__synthesized_body?(fn_stmt)) THEN
+        MUTABLE counter = HoistCounter{ value: 0 };
+        MUTABLE generated: []VarDecl = ( { MUTABLE rtoc_empty_list_1: []VarDecl = List[]; rtoc_empty_list_1 } );
+        MUTABLE fn_return: ?Type = COPY fn_stmt.return_type;
+        TRY (hoist__hoist_body_mut(fn_stmt.body, counter, schema_lookup, &generated, castTypeToOptionalTypeTypeInput(fn_return)));
+        IF !((generated.length() == 0)) THEN
+          bindings_by_function[fn_stmt.name] = generated;
+        END
+      END
     END
   rtoc_idx = rtoc_idx + 1;
   END
@@ -679,4 +677,10 @@ FN ruby_wrap_optional_Type_TypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
     RETURN TypeTypeInput{ Type: COPY optional_payload };
   END
   NIL;
+END
+FN castTypeToOptionalTypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
+  IF value EXISTS AS type_value THEN
+    RETURN TypeTypeInput{ Type: COPY type_value };
+  END
+  RETURN NIL;
 END
