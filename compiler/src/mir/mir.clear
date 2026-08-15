@@ -3865,8 +3865,8 @@ END
 PUB STRUCT FsmB1CtxStruct {
   type_name: String,
   promise_zig: String,
-  capture_fields: Any@multiowned,
-  run_body: Any@multiowned
+  capture_fields: []ContextFieldDecl,
+  run_body: FsmStep
 }
 PUB STRUCT FsmGenericBody {
   blk_label: String,
@@ -3938,7 +3938,7 @@ END
 PUB STRUCT FsmGenericCtxStruct {
   type_name: String,
   promise_zig: String,
-  capture_fields: Any@multiowned,
+  capture_fields: []ContextFieldDecl,
   extra_field_decls: Any@multiowned,
   promoted_field_decls: Any@multiowned,
   member_fns: Any@multiowned,
@@ -3956,12 +3956,12 @@ PUB STRUCT FsmMemberFn {
 PUB STRUCT FsmCtxStruct {
   type_name: String,
   promise_zig: String,
-  capture_fields: Any@multiowned,
-  state_decls: Any@multiowned,
-  promoted_field_decls: Any@multiowned,
-  step0: Any@multiowned,
-  step1: Any@multiowned,
-  resume_fn: Any@multiowned
+  capture_fields: []ContextFieldDecl,
+  state_decls: []StateFieldDecl,
+  promoted_field_decls: []String,
+  step0: FsmStep,
+  step1: FsmStep,
+  resume_fn: FsmDispatch
 }
 PUB STRUCT FsmStep {
   index: Any@multiowned,
