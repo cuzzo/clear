@@ -661,7 +661,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN slotDeclIdentity(decl_node: AutoConstraintCollectorSlotDeclNode) RETURNS Int64 ->
+PUB FN slotDeclIdentity(decl_node: AutoConstraintCollectorSlotDeclNode) RETURNS Int64 ->
   PARTIAL MATCH decl_node START
     AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> RETURN aST__node_identity(Locatable{ FunctionDef: COPY item });,
     AutoConstraintCollectorSlotDeclNode.FunctionDef AS item -> RETURN aST__node_identity(Locatable{ FunctionDef: COPY item });,

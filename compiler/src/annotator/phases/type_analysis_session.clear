@@ -1141,13 +1141,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen = {};
     FOR _ IN resolved_slots.values() DO
     MUTABLE slot = COPY _.slot;
-    IF !((respondsTo?(slot, "shape") AND slot.shape)) THEN
+    IF (slot.shape == NIL) THEN
         CONTINUE;
     END
-    IF seen[aST__node_identity(slot.decl_node)] THEN
+    MUTABLE decl_key: Int64 = slotDeclIdentity(slot.decl_node);
+    IF seen[decl_key] THEN
         CONTINUE;
     END
-    seen[aST__node_identity(slot.decl_node)] = TRUE;
+    seen[decl_key] = TRUE;
     typeAnalysisSession__emit_auto_shape_resolved_finding_mut(rtoc_self_view, slot.decl_node, slot);
     END
     RETURN NIL;
