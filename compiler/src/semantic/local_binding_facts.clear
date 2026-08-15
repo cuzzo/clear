@@ -17,18 +17,17 @@ PUB FN localBindingAnalysis__direct_loop_body_facts(body: []LocalBindingBodyItem
   MUTABLE frame_decls: []Locatable = ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } );
   MUTABLE iteration_frame_decls: []Locatable = ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } );
   TRY (localBindingAnalysis__each_direct_loop_node(body, %(node: Locatable) USE(MUTABLE entries, MUTABLE frame_decls, MUTABLE iteration_frame_decls, MUTABLE names) -> {
-  MUTABLE name: ?String = localBindingAnalysis__binding_decl_name(node);
-  IF !(name) THEN
+  MUTABLE name_opt: ?String = localBindingAnalysis__binding_decl_name(node);
+  IF name_opt == NIL THEN
       RETURN;
   END
-  &names.insert(UNWRAP (name));
+  MUTABLE name: String = COPY UNWRAP (name_opt);
+  &names.insert(COPY name);
   MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
-  IF (IF entry != NIL THEN
-      cleanupEntry__present?(entry)
-    ELSE
-      NIL
-    END) THEN
-      entries[name] = UNWRAP (entry);
+  IF entry EXISTS AS entry_value THEN
+    IF cleanupEntry__present?(entry_value) THEN
+      entries[name] = KEEP entry_value;
+    END
   END
   IF !(localBindingAnalysis__binding_frame_allocates?(node, entry)) THEN
       RETURN;
