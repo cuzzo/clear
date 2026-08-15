@@ -42,7 +42,7 @@ PUB STRUCT ArgRef {
   idx: Int64
 }
 PUB STRUCT StateField {
-  name: Any@multiowned
+  name: String
 }
 STRUCT SubField {
   base: StateField,
@@ -309,14 +309,14 @@ FN lowerer__new(ctx_id: Int64, arg_mirs: []Emittable) RETURNS Lowerer@multiowned
   RETURN self @multiowned;
 END
 FN fsmOps__referenced_state_fields(ops_or_expr: []OpsOrExprItem) RETURNS ![]String ->
-  MUTABLE out = List[];
+  MUTABLE out: []String = List[];
   fsmOps__walk(WalkValue{ OpsArrayValue: COPY ops_or_expr }, %(node: ?WalkValue) USE(MUTABLE out) -> {
   IF node? IS_A StateField AS state_field THEN
       &out.append(COPY state_field.name);
   END
   rubyToClearVoid()
   });
-  RETURN CAST((out |> DISTINCT _) AS []Any);
+  RETURN (out |> DISTINCT _);
 END
 FN fsmOps__alloc_state_fields(ops: []Stmt) RETURNS ![]String ->
   MUTABLE out = List[];
@@ -327,7 +327,7 @@ FN fsmOps__alloc_state_fields(ops: []Stmt) RETURNS ![]String ->
   END
   END
   END
-  RETURN CAST((out |> DISTINCT _) AS []Any);
+  RETURN (out |> DISTINCT _);
 END
 FN fsmOps__free_state_fields(ops: []Stmt) RETURNS ![]String ->
   MUTABLE out = List[];
@@ -338,7 +338,7 @@ FN fsmOps__free_state_fields(ops: []Stmt) RETURNS ![]String ->
     &out.append(COPY defer_free_field.field);
   END
   END
-  RETURN CAST((out |> DISTINCT _) AS []Any);
+  RETURN (out |> DISTINCT _);
 END
 FN fsmOps__finish_value_aliases_finalized_state?(expr: ?Expr, finalize_ops: []Stmt) RETURNS !Bool ->
   IF expr EXISTS AS expr_value THEN
