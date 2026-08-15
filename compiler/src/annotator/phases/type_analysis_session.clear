@@ -11734,8 +11734,8 @@ PRIVATE FN typeAnalysisSession__record_local_binding_fact_mut(self: TypeAnalysis
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE summary = COPY frame.summary;
-    frame.next_local_ordinal=((frame.next_local_ordinal() + 1));
-    frame.next_place_ordinal=((frame.next_place_ordinal() + 1));
+    frame.next_local_ordinal=((frame.next_local_ordinal + 1));
+    frame.next_place_ordinal=((frame.next_place_ordinal + 1));
     MUTABLE body_id_base = (summary.body_id.value * body_id_stride);
     MUTABLE place_id = (body_id_base + frame.next_place_ordinal);
     &summary.local_facts.append(COPY LocalFact{ id: COPY LocalId{ value: (body_id_base + frame.next_local_ordinal) }, place_id: COPY SemanticPlaceId{ value: place_id }, name: COPY name });

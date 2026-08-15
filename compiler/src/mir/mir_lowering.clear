@@ -17889,7 +17889,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE node: Locatable = COPY value;
     WHILE node IS_A Cast DO
-      node = node.value();
+      node = node.value;
     END
     IF (IF node IS_A Literal AS literal THEN (literal.type == symbol("NIL")) ELSE FALSE END) THEN
       RETURN TRUE;
@@ -20845,7 +20845,7 @@ PRIVATE FN mIRLowering__aggregate_return_literal?(self: MIRLowering, expr: Locat
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node: Locatable = COPY expr;
     WHILE node IS_A Cast DO
-      node = node.value();
+      node = node.value;
     END
     RETURN ((node IS_A StructLit OR node IS_A UnionVariantLit) OR node IS_A ListLit);
 }
@@ -20856,7 +20856,7 @@ PRIVATE FN mIRLowering__return_transfers_heap_binding?(self: MIRLowering, ast_no
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node: Locatable = COPY ast_node;
     WHILE (node IS_A Cast OR node IS_A MoveNode) DO
-      node = node.value();
+      node = node.value;
     END
     IF (node IS_A GetField OR node IS_A GetIndex) THEN
       RETURN FALSE;
