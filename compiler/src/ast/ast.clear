@@ -8864,6 +8864,9 @@ PUB FN aST__node_right(node: Locatable) RETURNS ?Locatable ->
   RETURN NIL;
 END
 PUB FN unnestRightName(node: Locatable) RETURNS String ->
+  IF node IS_A Identifier AS direct_identifier THEN
+    RETURN COPY direct_identifier.name;
+  END
   IF aST__node_right(node) EXISTS AS right_node THEN
     IF right_node IS_A Identifier AS identifier THEN
       RETURN COPY identifier.name;
