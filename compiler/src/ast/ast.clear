@@ -8859,7 +8859,6 @@ END
 PUB FN aST__node_right(node: Locatable) RETURNS ?Locatable ->
   PARTIAL MATCH node START
     Locatable.BinaryOp AS item -> RETURN COPY item.right;,
-    Locatable.IsA AS item -> RETURN COPY item.right;,
     Locatable.UnaryOp AS item -> RETURN COPY item.right;
   END
   RETURN NIL;
