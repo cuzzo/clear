@@ -856,9 +856,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE slots: ?AutoShapeSlots@multiowned = COPY name_map[identifier__name(identifier)];
       IF slots EXISTS AS slots_value THEN
         MUTABLE args = call.args;
-        IF ((slots_value.list != NIL) AND TRY (intrinsicRegistry__collection_element_evidence_method?(Name{ StringValue: COPY call.name }, args.length()))) THEN
-          ((UNWRAP ((slots_value.list)?)).sources).append(UNWRAP (COPY args[0]));
-        ELSE_IF TRY (intrinsicRegistry__map_pair_evidence_method?(Name{ StringValue: COPY call.name }, args.length())) THEN
+        IF slots_value.list EXISTS AS list_slot THEN
+          IF TRY (intrinsicRegistry__collection_element_evidence_method?(Name{ StringValue: COPY call.name }, args.length())) THEN
+            MUTABLE list_slot_mutable = KEEP list_slot;
+            &list_slot_mutable.sources.append(COPY UNWRAP (args[0]));
+          END
+        END
+        IF TRY (intrinsicRegistry__map_pair_evidence_method?(Name{ StringValue: COPY call.name }, args.length())) THEN
           shapeEvidenceCollector__record_map_pair_evidence(rtoc_self_view, slots_value, args);
         END
       ELSE
