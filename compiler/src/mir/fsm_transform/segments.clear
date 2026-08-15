@@ -71,7 +71,7 @@ PUB FN nextSuspend__result_type(self: NextSuspend) RETURNS !?Type ->
   IF type__untyped?(concrete_type) THEN
     panic("FSM NEXT suspend result: unresolved type info");
   END
-  MUTABLE pt = TRY (type__new(concrete_type));
+  MUTABLE pt: Type = COPY concrete_type;
   RETURN TRY (type__tense_type(pt));
 END
 PUB STRUCT LockSuspend {

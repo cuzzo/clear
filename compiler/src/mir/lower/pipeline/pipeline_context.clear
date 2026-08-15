@@ -138,7 +138,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN COPY node;
     ELSE_IF (node IS_A OptionalUnwrap) THEN
-      RETURN TRY (pipelinePlaceholderRewriter__substitute_optional_unwrap(&rtoc_self_view, node));
+      IF node IS_A OptionalUnwrap AS optional_unwrap THEN
+        MUTABLE optional_unwrap_mutable = COPY optional_unwrap;
+        RETURN TRY (pipelinePlaceholderRewriter__substitute_optional_unwrap(&rtoc_self_view, optional_unwrap_mutable));
+      END
+      RETURN COPY node;
     ELSE_IF node IS_A IsA AS is_a THEN
       MUTABLE is_a_mutable = COPY is_a;
       RETURN TRY (pipelinePlaceholderRewriter__substitute_is_a(&rtoc_self_view, &is_a_mutable));

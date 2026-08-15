@@ -23,7 +23,7 @@ PUB STRUCT Param {
   required: ?Bool,
   sync: ?String@symbol,
   symbol: ?String@symbol,
-  carrier_contract: String@symbol
+  carrier_contract: ?String@symbol
 }
 
 FN param__initialize(MUTABLE self: Param) RETURNS !Void ->
