@@ -110,8 +110,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A FuncCall AS func_call THEN
       MUTABLE func_call_mutable = COPY func_call;
       RETURN TRY (pipelinePlaceholderRewriter__substitute_func_call(&rtoc_self_view, func_call_mutable));
-    ELSE_IF (node IS_A MethodCall) THEN
-      RETURN TRY (pipelinePlaceholderRewriter__substitute_method_call(&rtoc_self_view, node));
+    ELSE_IF node IS_A MethodCall AS method_call THEN
+      MUTABLE method_call_mutable = COPY method_call;
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_method_call(&rtoc_self_view, method_call_mutable));
     ELSE_IF node IS_A BinaryOp AS binary_op THEN
       MUTABLE binary_op_mutable = COPY binary_op;
       RETURN TRY (pipelinePlaceholderRewriter__substitute_binary_op(&rtoc_self_view, binary_op_mutable));
