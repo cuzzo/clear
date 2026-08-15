@@ -174,7 +174,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE tuple_lit_mutable = COPY tuple_lit;
       RETURN TRY (pipelinePlaceholderRewriter__substitute_tuple_lit(&rtoc_self_view, tuple_lit_mutable));
     ELSE_IF (node IS_A Cast) THEN
-      RETURN TRY (pipelinePlaceholderRewriter__substitute_cast(&rtoc_self_view, node));
+      IF node IS_A Cast AS cast_node THEN
+        MUTABLE cast_node_mutable = COPY cast_node;
+        RETURN TRY (pipelinePlaceholderRewriter__substitute_cast(&rtoc_self_view, cast_node_mutable));
+      END
+      RETURN COPY node;
     ELSE_IF (node IS_A BlockExpr) THEN
       RETURN TRY (pipelinePlaceholderRewriter__substitute_block_expr(&rtoc_self_view, node));
     ELSE_IF node IS_A Assert AS assert THEN

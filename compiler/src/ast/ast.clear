@@ -8809,3 +8809,10 @@ PUB FN bodySlot__writer_call(self: BodySlot, arg0: Locatable[]) RETURNS Void ->
   MUTABLE fn_value = self.writer;
   RETURN fn_value(arg0);
 END
+PUB FN aST__pipeline_select_filter_op?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.SelectOp AS item -> RETURN TRUE;,
+    Locatable.WhereOp AS item -> RETURN TRUE;
+  END
+  RETURN FALSE;
+END
