@@ -890,22 +890,24 @@ PRIVATE FN shapeEvidenceCollector__record_index_assign(self: ShapeEvidenceCollec
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE target = COPY assign.name;
     IF target IS_A GetIndex AS get_index THEN
-      MUTABLE base = get_index.target;
-      IF !(base IS_A Identifier) THEN
-        RETURN;
-      END
-      MUTABLE slots: ?AutoShapeSlots@multiowned = COPY name_map[base.name()];
-      IF slots EXISTS AS slots_value THEN
-        IF slots_value.list EXISTS AS list_value THEN
-          ((UNWRAP (list_value)).sources).append(COPY assign.value);
-        ELSE
-        IF ((slots_value.key != NIL) AND (slots_value.value != NIL)) THEN
-            ((UNWRAP ((slots_value.key)?)).sources).append(get_index.indexOf());
-            ((UNWRAP ((slots_value.value)?)).sources).append(COPY assign.value);
+      MUTABLE base: Locatable = COPY get_index.target;
+      IF base IS_A Identifier AS base_identifier THEN
+        MUTABLE slots: ?AutoShapeSlots@multiowned = COPY name_map[base_identifier.name];
+        IF slots EXISTS AS slots_value THEN
+          IF slots_value.list EXISTS AS list_value THEN
+            MUTABLE list_mutable = COPY list_value;
+            &list_mutable.sources.append(COPY assign.value);
+          ELSE
+            IF slots_value.key EXISTS AS key_value THEN
+              IF slots_value.value EXISTS AS val_value THEN
+                MUTABLE key_mutable = COPY key_value;
+                MUTABLE val_mutable = COPY val_value;
+                &key_mutable.sources.append(COPY get_index.index);
+                &val_mutable.sources.append(COPY assign.value);
+              END
+            END
+          END
         END
-        END
-      ELSE
-        RETURN;
       END
     ELSE
       RETURN;
