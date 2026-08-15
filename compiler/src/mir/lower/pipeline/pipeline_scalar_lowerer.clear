@@ -108,7 +108,7 @@ PRIVATE FN pipelineScalarLowerer__lower_all(self: PipelineScalarLowerer, site: P
 END
 PRIVATE FN pipelineScalarLowerer__lower_find(self: PipelineScalarLowerer, site: PipelineSite, find_node: FindOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
-  MUTABLE elem_zig_type = self.transpile_type(CAST((TRY (aST__full_type_mut(list_node))).element_type().resolved() AS String));
+  MUTABLE elem_zig_type = pipelineScalarLowerer__transpile_type_call(self, CAST((TRY (aST__full_type_mut(list_node))).element_type().resolved() AS String));
   MUTABLE pred_mir = pipelineScalarLowerer__visit_pipeline_expr_mir(self, list_node, find_node.expression);
   RETURN self.pipeline_block(list_node, %(items, label) USE(elem_zig_type, pred_mir, self) -> {
   rtoc_lambda_result_10 = CAST(Tuple{Let{ name: COPY "find_result", init: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY elem_zig_type })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: COPY "find_found", init: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, TRY (pipelineScalarLowerer__scalar_loop(self, Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, "it", [Emittable{ Let: COPY Let{ name: COPY "find_matches", init: COPY pred_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ Ident: COPY Ident{ name: "find_matches", lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: CAST(Tuple{Set{ target: Emittable{ Ident: COPY Ident{ name: "find_result", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: "it", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, Set{ target: Emittable{ Ident: COPY Ident{ name: "find_found", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Set, Set, BreakStmt>), else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], NIL)), BreakStmt{ label: label, value: Emittable{ Conditional: COPY Conditional{ cond: Emittable{ Ident: COPY Ident{ name: "find_found", lowered_node_id: NIL, ownership_consumption: NIL } }, then_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ Ident: COPY Ident{ name: "find_result", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "?${elem_zig_type}", method: :as, lowered_node_id: NIL, ownership_consumption: NIL } }, else_val: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Let, ForStmt, BreakStmt>);
@@ -116,7 +116,7 @@ PRIVATE FN pipelineScalarLowerer__lower_find(self: PipelineScalarLowerer, site: 
   });
 END
 PRIVATE FN pipelineScalarLowerer__visit_pipeline_expr_mir(self: PipelineScalarLowerer, list_node: Locatable, expr_node: Locatable, placeholder: String = "it") RETURNS Emittable ->
-  RETURN self.visit_expr(list_node, expr_node, placeholder);
+  RETURN pipelineScalarLowerer__visit_expr_call(self, list_node, expr_node, placeholder);
 END
 PRIVATE FN pipelineScalarLowerer__scalar_loop(self: PipelineScalarLowerer, iter: Emittable, capture: String, body: []Emittable, mark: ?Bool = NIL) RETURNS !ForStmt ->
   RETURN ForStmt{ iter: COPY iter, capture: COPY capture, body: Body{ ArrayValue: TRY (pipelineScalarLowerer__with_iteration_rewind(self, body)) |> SELECT castEmittableToLocatable(_) }, index_capture: COPY mark, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
@@ -133,7 +133,7 @@ PRIVATE FN pipelineScalarLowerer__with_iteration_rewind(self: PipelineScalarLowe
   IF !(found) THEN
     RETURN COPY body;
   END
-  RETURN (COPY (TRY (self.loop_mark_stmts())) + body);
+  RETURN (COPY (TRY (pipelineScalarLowerer__loop_mark_stmts_call(self))) + body);
 END
 FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
@@ -156,4 +156,16 @@ FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
 END
 FN rubyToClearVoid() RETURNS Void ->
   RETURN;
+END
+PUB FN pipelineScalarLowerer__visit_expr_call(self: PipelineScalarLowerer, arg0: Locatable, arg1: Locatable, arg2: String) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_expr;
+  RETURN fn_value(arg0, arg1, arg2);
+END
+PUB FN pipelineScalarLowerer__transpile_type_call(self: PipelineScalarLowerer, arg0: PipelineTypeInput) RETURNS String ->
+  MUTABLE fn_value = self.transpile_type;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineScalarLowerer__loop_mark_stmts_call(self: PipelineScalarLowerer) RETURNS ![]Emittable ->
+  MUTABLE fn_value = self.loop_mark_stmts;
+  RETURN fn_value();
 END

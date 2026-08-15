@@ -16772,3 +16772,7 @@ PUB FN emittable__expr?(value: Emittable) RETURNS Bool ->
   END
   RETURN FALSE;
 END
+PUB FN mIRBodySlot__writer_call(self: MIRBodySlot, arg0: Emittable[]) RETURNS Void ->
+  MUTABLE fn_value = self.writer;
+  RETURN fn_value(arg0);
+END

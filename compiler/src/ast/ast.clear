@@ -8805,3 +8805,7 @@ END
 PUB FN whereOp__expression(self: WhereOp) RETURNS Locatable ->
   RETURN COPY self.expression;
 END
+PUB FN bodySlot__writer_call(self: BodySlot, arg0: Locatable[]) RETURNS Void ->
+  MUTABLE fn_value = self.writer;
+  RETURN fn_value(arg0);
+END

@@ -36,7 +36,7 @@ END
 PRIVATE FN pipelineBatchWindowLowerer__batch_window_plan(self: PipelineBatchWindowLowerer, MUTABLE list_node: Locatable, smooth_node: BinaryOp, bw_node: BatchWindowOp) RETURNS !PipelineBatchWindowPlan ->
   MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE placeholder_var = "__bw_batch";
-  RETURN PipelineBatchWindowPlan{ source_kind: COPY pipelineBatchWindowLowerer__source_kind_for(self, list_node, lhs_type), list_node: COPY list_node, smooth_node: COPY smooth_node, element_zig: COPY self.transpile_type(type__to_s((TRY (pipelineBatchWindowLowerer__batch_element_type(self, lhs_type))))), result_zig: COPY self.transpile_type(CAST((&bw_node.expression.full_type_mut()) AS String)), size_mir: COPY pipelineBatchWindowLowerer__batch_size_mir(self, bw_node), make_expr: COPY pipelineBatchWindowLowerer__batch_expr_builder(self, bw_node, placeholder_var), alloc: COPY self.pipeline_alloc(smooth_node), placeholder_var: COPY placeholder_var, timeout_ns: COPY pipelineBatchWindowLowerer__batch_window_timeout_ns(self, bw_node), stream_pop_method: COPY pipelineBatchWindowLowerer__runtime_stream_pop_method(self, lhs_type) };
+  RETURN PipelineBatchWindowPlan{ source_kind: COPY pipelineBatchWindowLowerer__source_kind_for(self, list_node, lhs_type), list_node: COPY list_node, smooth_node: COPY smooth_node, element_zig: COPY pipelineBatchWindowLowerer__transpile_type_call(self, type__to_s((TRY (pipelineBatchWindowLowerer__batch_element_type(self, lhs_type))))), result_zig: COPY pipelineBatchWindowLowerer__transpile_type_call(self, CAST((&bw_node.expression.full_type_mut()) AS String)), size_mir: COPY pipelineBatchWindowLowerer__batch_size_mir(self, bw_node), make_expr: COPY pipelineBatchWindowLowerer__batch_expr_builder(self, bw_node, placeholder_var), alloc: COPY pipelineBatchWindowLowerer__pipeline_alloc_call(self, smooth_node), placeholder_var: COPY placeholder_var, timeout_ns: COPY pipelineBatchWindowLowerer__batch_window_timeout_ns(self, bw_node), stream_pop_method: COPY pipelineBatchWindowLowerer__runtime_stream_pop_method(self, lhs_type) };
 END
 PRIVATE FN pipelineBatchWindowLowerer__lower_plan(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS !MIRBlockExpr ->
   RETURN TRY (pipelineBatchWindowLowerer__lower_source_plan(self, plan.source_kind, plan));
@@ -57,7 +57,7 @@ PRIVATE FN pipelineBatchWindowLowerer__lower_source_plan(self: PipelineBatchWind
   END
 END
 PRIVATE FN pipelineBatchWindowLowerer__source_kind_for(self: PipelineBatchWindowLowerer, list_node: Locatable, lhs_type: Type) RETURNS !PipelineBatchWindowSourceKind ->
-  IF self.bc_target() THEN
+  IF pipelineBatchWindowLowerer__bc_target_call(self) THEN
     IF (IF list_node IS_A Identifier AS identifier THEN TRY (type__inf_stream?(lhs_type)) ELSE FALSE END) THEN
       RETURN PipelineBatchWindowSourceKind.BcInfiniteStream;
     END
@@ -96,11 +96,11 @@ PRIVATE FN pipelineBatchWindowLowerer__batch_element_type(self: PipelineBatchWin
 END
 PRIVATE FN pipelineBatchWindowLowerer__batch_expr_builder(self: PipelineBatchWindowLowerer, bw_node: BatchWindowOp, placeholder_var: String) RETURNS FN() -> Emittable ->
   RETURN %() USE(bw_node, placeholder_var, self) -> {
-  MUTABLE head = self.visit_expr_head(bw_node.expression, placeholder_var);
+  MUTABLE head = pipelineBatchWindowLowerer__visit_expr_head_call(self, bw_node.expression, placeholder_var);
   IF ((head.pending.length() == 0) AND !(head.owned)) THEN
       RETURN head.value;
   END
-  MUTABLE label = self.next_label();
+  MUTABLE label = pipelineBatchWindowLowerer__next_label_call(self);
   MUTABLE block = MIRBlockExpr{ label: label, body: COPY (head.pending + [BreakStmt{ label: label, value: COPY head.value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
   block.lazy_boundary = TRUE;
   block
@@ -111,7 +111,7 @@ PRIVATE FN pipelineBatchWindowLowerer__batch_size_mir(self: PipelineBatchWindowL
   IF !(size) THEN
     RETURN Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } };
   END
-  RETURN self.visit_mir(size);
+  RETURN pipelineBatchWindowLowerer__visit_mir_call(self, size);
 END
 PRIVATE FN pipelineBatchWindowLowerer__batch_window_timeout_ns(self: PipelineBatchWindowLowerer, bw_node: BatchWindowOp) RETURNS String ->
   MUTABLE time: ?Literal = CAST(bw_node.options["time"] AS ?Literal);
@@ -152,9 +152,9 @@ PRIVATE FN pipelineBatchWindowLowerer__decimal_literal?(self: PipelineBatchWindo
   RETURN saw_digit;
 END
 PRIVATE FN pipelineBatchWindowLowerer__lower_bc_infinite_stream(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS !MIRBlockExpr ->
-  MUTABLE label = self.next_label();
-  self.set_current_label(label);
-  MUTABLE source_mir = self.visit_mir(plan.list_node);
+  MUTABLE label = pipelineBatchWindowLowerer__next_label_call(self);
+  pipelineBatchWindowLowerer__set_current_label_call(self, label);
+  MUTABLE source_mir = pipelineBatchWindowLowerer__visit_mir_call(self, plan.list_node);
   RETURN MIRBlockExpr{ label: label, body: COPY ([Let{ name: COPY "__bw_drained", init: Emittable{ MakeList: COPY MakeList{ elem_type: COPY plan.element_zig, items: ( { MUTABLE rtoc_empty_list_1: []Emittable = List[]; rtoc_empty_list_1 } ), alloc: COPY plan.alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: COPY source_mir, capture: "__bw_it", body: COPY [ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "__bw_drained", lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(Ident{ name: "__bw_it", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + TRY (pipelineBatchWindowLowerer__bc_materialized_window_stmts(self, plan, Emittable{ Ident: COPY Ident{ name: "__bw_drained", lowered_node_id: NIL, ownership_consumption: NIL } }, FALSE)) + [BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 END
 PRIVATE FN pipelineBatchWindowLowerer__lower_bc_materialized(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS !MIRBlockExpr ->
@@ -164,15 +164,15 @@ PRIVATE FN pipelineBatchWindowLowerer__lower_bc_materialized(self: PipelineBatch
   });
 END
 PRIVATE FN pipelineBatchWindowLowerer__lower_zig_runtime_stream(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS !MIRBlockExpr ->
-  MUTABLE label = self.next_label();
-  self.set_current_label(label);
-  MUTABLE source_mir = self.visit_mir(plan.list_node);
+  MUTABLE label = pipelineBatchWindowLowerer__next_label_call(self);
+  pipelineBatchWindowLowerer__set_current_label_call(self, label);
+  MUTABLE source_mir = pipelineBatchWindowLowerer__visit_mir_call(self, plan.list_node);
   RETURN MIRBlockExpr{ label: label, body: COPY ([Let{ name: COPY "__bw_src", init: COPY source_mir, mutable: TRUE, annotation: NIL, suppression: "_ = &__bw_src;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] + TRY (pipelineBatchWindowLowerer__batch_window_setup_stmts(self, plan)) + [WhileStmt{ cond: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "__bw_src", lowered_node_id: NIL, ownership_consumption: NIL }, method: COPY UNWRAP (plan.stream_pop_method), args: ( { MUTABLE rtoc_empty_list_3: []Any = List[]; rtoc_empty_list_3 } ), try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, body: COPY [pipelineBatchWindowLowerer__batch_window_push_stmt(self, plan, "__bw_item")], capture: "__bw_item", update: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, pipelineBatchWindowLowerer__batch_window_flush_stmt(self, plan), BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 END
 PRIVATE FN pipelineBatchWindowLowerer__lower_zig_bounded_stream(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS !MIRBlockExpr ->
-  MUTABLE label = self.next_label();
-  self.set_current_label(label);
-  MUTABLE source_mir = self.visit_mir(plan.list_node);
+  MUTABLE label = pipelineBatchWindowLowerer__next_label_call(self);
+  pipelineBatchWindowLowerer__set_current_label_call(self, label);
+  MUTABLE source_mir = pipelineBatchWindowLowerer__visit_mir_call(self, plan.list_node);
   RETURN MIRBlockExpr{ label: label, body: COPY ([Let{ name: COPY "__bw_bsrc", init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] + TRY (pipelineBatchWindowLowerer__batch_window_setup_stmts(self, plan)) + [ForStmt{ iter: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__bw_bsrc", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "items", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__bw_item", body: COPY [pipelineBatchWindowLowerer__batch_window_push_stmt(self, plan, "__bw_item")], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, pipelineBatchWindowLowerer__batch_window_flush_stmt(self, plan), BreakStmt{ label: label, value: Emittable{ Ident: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 END
 PRIVATE FN pipelineBatchWindowLowerer__lower_zig_materialized(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS !MIRBlockExpr ->
@@ -235,4 +235,36 @@ END
 PUB FN pipelineBatchWindowPlan__make_expr_call(self: PipelineBatchWindowPlan) RETURNS Emittable ->
   MUTABLE fn_value = self.make_expr;
   RETURN fn_value();
+END
+PUB FN pipelineBatchWindowLowerer__bc_target_call(self: PipelineBatchWindowLowerer) RETURNS Bool ->
+  MUTABLE fn_value = self.bc_target;
+  RETURN fn_value();
+END
+PUB FN pipelineBatchWindowLowerer__visit_mir_call(self: PipelineBatchWindowLowerer, arg0: Locatable) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineBatchWindowLowerer__visit_mir_with_placeholder_call(self: PipelineBatchWindowLowerer, arg0: Locatable, arg1: String) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir_with_placeholder;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN pipelineBatchWindowLowerer__visit_expr_head_call(self: PipelineBatchWindowLowerer, arg0: Locatable, arg1: String) RETURNS PipelineElementHead ->
+  MUTABLE fn_value = self.visit_expr_head;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN pipelineBatchWindowLowerer__next_label_call(self: PipelineBatchWindowLowerer) RETURNS String ->
+  MUTABLE fn_value = self.next_label;
+  RETURN fn_value();
+END
+PUB FN pipelineBatchWindowLowerer__set_current_label_call(self: PipelineBatchWindowLowerer, arg0: String) RETURNS Void ->
+  MUTABLE fn_value = self.set_current_label;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineBatchWindowLowerer__transpile_type_call(self: PipelineBatchWindowLowerer, arg0: PipelineBatchWindowTypeInput) RETURNS String ->
+  MUTABLE fn_value = self.transpile_type;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineBatchWindowLowerer__pipeline_alloc_call(self: PipelineBatchWindowLowerer, arg0: BinaryOp) RETURNS String@symbol ->
+  MUTABLE fn_value = self.pipeline_alloc;
+  RETURN fn_value(arg0);
 END

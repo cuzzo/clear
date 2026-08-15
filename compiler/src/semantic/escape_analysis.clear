@@ -2840,3 +2840,7 @@ FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@m
   END
   NIL;
 END
+PUB FN escapeContext__schema_lookup_call(self: EscapeContext, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
+  MUTABLE fn_value = UNWRAP (self.schema_lookup);
+  RETURN fn_value(arg0);
+END

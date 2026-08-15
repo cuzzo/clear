@@ -1032,3 +1032,7 @@ END
 FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
+PUB FN mIRPass__schema_lookup_call(self: MIRPass, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
+  MUTABLE fn_value = self.schema_lookup;
+  RETURN fn_value(arg0);
+END

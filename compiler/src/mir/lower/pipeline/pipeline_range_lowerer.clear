@@ -152,7 +152,7 @@ PUB FN runtimeHost__range_visit_mir(self: RuntimeHost, node: Locatable) RETURNS 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.visit_mir(node);
+    RETURN runtimeHost__visit_mir_call(rtoc_self_view, node);
 }
 END
 PUB FN runtimeHost__range_visit_mir_with_decl_alloc(self: RuntimeHost, node: Locatable, alloc: String@symbol) RETURNS Emittable
@@ -194,28 +194,28 @@ PUB FN runtimeHost__range_ast_stmts_use_placeholder?(self: RuntimeHost, body_stm
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.ast_stmts_use_placeholder(body_stmts);
+    RETURN runtimeHost__ast_stmts_use_placeholder_call(rtoc_self_view, body_stmts);
 }
 END
 PUB FN runtimeHost__range_bc_target?(self: RuntimeHost) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.bc_target();
+    RETURN runtimeHost__bc_target_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__range_next_label(self: RuntimeHost) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.next_label();
+    RETURN runtimeHost__next_label_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__range_transpile_type(self: RuntimeHost, type_info: PipelineRangeTypeInput) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.transpile_type(type_info);
+    RETURN runtimeHost__transpile_type_call(rtoc_self_view, type_info);
 }
 END
 PUB FN runtimeHost__range_schema_lookup(self: RuntimeHost) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
@@ -243,7 +243,7 @@ PUB FN runtimeHost__range_task_config_variant(self: RuntimeHost) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.task_config_variant();
+    RETURN runtimeHost__task_config_variant_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__new(visit_mir: FN(Locatable) -> Emittable, visit_mir_with_decl_alloc: FN(Locatable, String@symbol) -> Emittable, visit_mir_with_context: FN(Locatable, ?String, ?String) -> Emittable, lower_head_with_context: FN(Locatable, ?String) -> PipelineLowerHeadResult, with_fiber_rt: FN(String, FN() -> Any) -> Any, visit_pipeline_body_mir: FN(Locatable[], String) -> ![]Emittable, ast_stmts_use_placeholder: FN(Locatable[]) -> Bool, bc_target: FN() -> Bool, next_label: FN() -> String, transpile_type: FN(PipelineRangeTypeInput) -> String, schema_lookup: FN() -> FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult, runtime_name: FN() -> String, next_observable_id: FN() -> Int64, task_config_variant: FN() -> String) RETURNS RuntimeHost@multiowned ->
@@ -1044,4 +1044,16 @@ END
 PUB FN runtimeHost__visit_pipeline_body_mir_call(self: RuntimeHost, arg0: Locatable[], arg1: String) RETURNS ![]Emittable ->
   MUTABLE fn_value = self.visit_pipeline_body_mir;
   RETURN fn_value(arg0, arg1);
+END
+PUB FN runtimeHost__ast_stmts_use_placeholder_call(self: RuntimeHost, arg0: Locatable[]) RETURNS Bool ->
+  MUTABLE fn_value = self.ast_stmts_use_placeholder;
+  RETURN fn_value(arg0);
+END
+PUB FN runtimeHost__task_config_variant_call(self: RuntimeHost) RETURNS String ->
+  MUTABLE fn_value = self.task_config_variant;
+  RETURN fn_value();
+END
+PUB FN runtimeHost__transpile_type_call(self: RuntimeHost, arg0: PipelineRangeTypeInput) RETURNS String ->
+  MUTABLE fn_value = self.transpile_type;
+  RETURN fn_value(arg0);
 END

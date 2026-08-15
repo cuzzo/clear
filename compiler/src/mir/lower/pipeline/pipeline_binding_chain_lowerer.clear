@@ -105,16 +105,16 @@ PUB FN pipelineBindingChainLowerer__lower(self: PipelineBindingChainLowerer, cha
   ELSE
     inner_zig = "__bc_inner";
   END
-  MUTABLE label = self.next_label();
-  self.set_current_label(label);
+  MUTABLE label = pipelineBindingChainLowerer__next_label_call(self);
+  pipelineBindingChainLowerer__set_current_label_call(self, label);
   MUTABLE names = pipelineBindingChainLowerer__binding_names(self, label);
   MUTABLE bindings: {String}String = CAST({outer_name: outer_zig} AS {String}String);
   IF inner_name EXISTS AS inner_name_value THEN
     bindings[inner_name_value] = inner_zig;
   END
   RETURN self.with_named_bindings(bindings, %() USE(chain, inner_zig, label, names, outer_zig, MUTABLE smooth_node, self) -> {
-  MUTABLE source_mir = self.visit_mir(chain.source);
-  MUTABLE unnest_mir = self.visit_mir(chain.unnest_expr);
+  MUTABLE source_mir = pipelineBindingChainLowerer__visit_mir_call(self, chain.source);
+  MUTABLE unnest_mir = pipelineBindingChainLowerer__visit_mir_call(self, chain.unnest_expr);
   MUTABLE fold_plan = TRY (pipelineBindingChainLowerer__lower_binding_fold(self, chain.fold, chain.stages, inner_zig, &smooth_node, names));
   MUTABLE loop_body = TRY (pipelineBindingChainLowerer__binding_loop_body(self, chain, inner_zig, fold_plan.loop_body_stmts));
   MUTABLE inner_loop = ForStmt{ iter: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY Ident{ name: COPY names.unnest, lowered_node_id: NIL, ownership_consumption: NIL } }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: inner_zig, body: Body{ ArrayValue: loop_body |> SELECT castEmittableToLocatable(_) }, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
@@ -124,7 +124,7 @@ PUB FN pipelineBindingChainLowerer__lower(self: PipelineBindingChainLowerer, cha
 END
 PRIVATE FN pipelineBindingChainLowerer__binding_names(self: PipelineBindingChainLowerer, label: String) RETURNS PipelineBindingNames ->
   MUTABLE suffix: String = "";
-  IF self.bc_target() THEN
+  IF pipelineBindingChainLowerer__bc_target_call(self) THEN
     suffix = "_${compilerRegexReplaceFirst(label, compilerRegexCompile("__pblk"), "b")}";
   ELSE
     suffix = "";
@@ -227,7 +227,7 @@ PRIVATE FN pipelineBindingChainLowerer__lower_binding_fold(self: PipelineBinding
     MUTABLE result_ft = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }));
     MUTABLE find_zig: String = "";
     IF type__optional?(result_ft) THEN
-      find_zig = self.transpile_type(CAST((type__resolved(UNWRAP (TRY (type__wrapped_type(result_ft))))) AS String));
+      find_zig = pipelineBindingChainLowerer__transpile_type_call(self, CAST((type__resolved(UNWRAP (TRY (type__wrapped_type(result_ft))))) AS String));
     ELSE
       find_zig = COPY placeholder;
     END
@@ -286,7 +286,7 @@ PRIVATE FN pipelineBindingChainLowerer__wrap_stages(self: PipelineBindingChainLo
   RETURN body;
 END
 PRIVATE FN pipelineBindingChainLowerer__visit_placeholder_expr(self: PipelineBindingChainLowerer, expr: Locatable, placeholder: String) RETURNS Emittable ->
-  RETURN self.visit_mir_with_placeholder(expr, placeholder);
+  RETURN pipelineBindingChainLowerer__visit_mir_with_placeholder_call(self, expr, placeholder);
 END
 FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
@@ -331,5 +331,29 @@ PUB FN pipelineBindingChainLowerer__visit_mir_with_reduce_placeholders_call(self
 END
 PUB FN pipelineBindingChainLowerer__ast_uses_placeholder_call(self: PipelineBindingChainLowerer, arg0: Locatable) RETURNS Bool ->
   MUTABLE fn_value = self.ast_uses_placeholder;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineBindingChainLowerer__bc_target_call(self: PipelineBindingChainLowerer) RETURNS Bool ->
+  MUTABLE fn_value = self.bc_target;
+  RETURN fn_value();
+END
+PUB FN pipelineBindingChainLowerer__next_label_call(self: PipelineBindingChainLowerer) RETURNS String ->
+  MUTABLE fn_value = self.next_label;
+  RETURN fn_value();
+END
+PUB FN pipelineBindingChainLowerer__set_current_label_call(self: PipelineBindingChainLowerer, arg0: String) RETURNS Void ->
+  MUTABLE fn_value = self.set_current_label;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineBindingChainLowerer__visit_mir_call(self: PipelineBindingChainLowerer, arg0: Locatable) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineBindingChainLowerer__visit_mir_with_placeholder_call(self: PipelineBindingChainLowerer, arg0: Locatable, arg1: String) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir_with_placeholder;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN pipelineBindingChainLowerer__transpile_type_call(self: PipelineBindingChainLowerer, arg0: PipelineTypeInput) RETURNS String ->
+  MUTABLE fn_value = self.transpile_type;
   RETURN fn_value(arg0);
 END

@@ -3215,3 +3215,11 @@ END
 FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
+PUB FN ownershipDataflow__schema_lookup_call(self: OwnershipDataflow, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
+  MUTABLE fn_value = UNWRAP (self.schema_lookup);
+  RETURN fn_value(arg0);
+END
+PUB FN borrowChecker__schema_lookup_call(self: BorrowChecker, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
+  MUTABLE fn_value = UNWRAP (self.schema_lookup);
+  RETURN fn_value(arg0);
+END

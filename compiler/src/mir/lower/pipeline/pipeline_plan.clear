@@ -58,13 +58,13 @@ PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RET
     RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.SoaScalarFold, site, rhs, PipelineTerminalKind.ScalarFold, bc_target, PipelineSourceKind.Soa);
   END
   IF aST__pipeline_range_fold?(rhs) THEN
-    range_chain = self.range_chain(lhs);
+    range_chain = pipelinePlanBuilder__range_chain_call(self, lhs);
     IF range_chain EXISTS AS range_chain_value THEN
       RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.FusedRangeFold, site, rhs, PipelineTerminalKind.RangeFold, bc_target, PipelineSourceKind.RangeChain, range_chain_value);
     END
   END
   IF rhs IS_A ReduceOp AS reduce_op THEN
-    range_chain = self.range_chain(lhs);
+    range_chain = pipelinePlanBuilder__range_chain_call(self, lhs);
     IF range_chain EXISTS AS range_chain_value THEN
       RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.FusedRangeReduce, site, Locatable{ ReduceOp: COPY reduce_op }, PipelineTerminalKind.RangeReduce, bc_target, PipelineSourceKind.RangeChain, range_chain_value);
     END
@@ -302,5 +302,9 @@ PUB FN pipelinePlanBuilder__lowering_target_call(self: PipelinePlanBuilder) RETU
 END
 PUB FN pipelinePlanBuilder__binding_chain_call(self: PipelinePlanBuilder, arg0: BinaryOp) RETURNS ?PipelineBindingUnnestChain ->
   MUTABLE fn_value = self.binding_chain;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelinePlanBuilder__range_chain_call(self: PipelinePlanBuilder, arg0: Locatable) RETURNS ?PipelineRangeChain ->
+  MUTABLE fn_value = self.range_chain;
   RETURN fn_value(arg0);
 END

@@ -53,7 +53,7 @@ PUB FN runtimeHost__materializer_visit_mir(self: RuntimeHost, node: Locatable) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.visit_mir(node);
+    RETURN runtimeHost__visit_mir_call(rtoc_self_view, node);
 }
 END
 PUB FN runtimeHost__materializer_alloc_mark_fact(self: RuntimeHost, value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE) RETURNS ?AllocationFact
@@ -74,7 +74,7 @@ PUB FN runtimeHost__materializer_bc_target?(self: RuntimeHost) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.bc_target();
+    RETURN runtimeHost__bc_target_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__materializer_schema_lookup(self: RuntimeHost) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
@@ -88,7 +88,7 @@ PUB FN runtimeHost__materializer_next_label(self: RuntimeHost) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.next_label();
+    RETURN runtimeHost__next_label_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__materializer_set_current_label(MUTABLE self: RuntimeHost, label: String) RETURNS Void
@@ -96,7 +96,7 @@ PUB FN runtimeHost__materializer_set_current_label(MUTABLE self: RuntimeHost, la
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.current_label = COPY label;
-    rtoc_self_view.set_current_label(label);
+    runtimeHost__set_current_label_call(rtoc_self_view, label);
 }
 END
 PUB FN runtimeHost__materializer_current_label(self: RuntimeHost) RETURNS ?String
@@ -554,4 +554,20 @@ END
 PUB FN runtimeHost__result_alloc_call(self: RuntimeHost) RETURNS String@symbol ->
   MUTABLE fn_value = self.result_alloc;
   RETURN fn_value();
+END
+PUB FN runtimeHost__bc_target_call(self: RuntimeHost) RETURNS Bool ->
+  MUTABLE fn_value = self.bc_target;
+  RETURN fn_value();
+END
+PUB FN runtimeHost__next_label_call(self: RuntimeHost) RETURNS String ->
+  MUTABLE fn_value = self.next_label;
+  RETURN fn_value();
+END
+PUB FN runtimeHost__visit_mir_call(self: RuntimeHost, arg0: Locatable) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir;
+  RETURN fn_value(arg0);
+END
+PUB FN runtimeHost__set_current_label_call(self: RuntimeHost, arg0: String) RETURNS Void ->
+  MUTABLE fn_value = self.set_current_label;
+  RETURN fn_value(arg0);
 END
