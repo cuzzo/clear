@@ -3627,7 +3627,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     rubyToClearVoid()
     });
-    RETURN CAST((names |> DISTINCT _) AS []String);
+    RETURN dedupeStrings(names);
 }
 END
 FN mIRLowering__walk_ast_calls(self: MIRLowering, node: ?Locatable, blk: FN(Locatable) -> Void) RETURNS Void
@@ -6378,7 +6378,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             END
       END
     END
-    RETURN CAST((names |> DISTINCT _) AS []String);
+    RETURN dedupeStrings(names);
 }
 END
 PRIVATE FN mIRLowering__fsm_owned_transfer_identifier?(self: MIRLowering, MUTABLE node: Identifier) RETURNS Bool
@@ -8469,7 +8469,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &names.append(COPY _);
         END
         END
-        RETURN CAST((names |> DISTINCT _) AS []String);
+        RETURN dedupeStrings(names);
       ELSE
         RETURN CAST(( { MUTABLE rtoc_empty_list_289: []String = List[]; rtoc_empty_list_289 } ) AS []String);
       END
@@ -9568,7 +9568,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
       END
-      MUTABLE facts = CallOwnershipFacts{ takes_indices: COPY takes_indices, consumed_names: COPY CAST((consumed |> DISTINCT _) AS []String), consumed_operands: COPY operands };
+      MUTABLE facts = CallOwnershipFacts{ takes_indices: COPY takes_indices, consumed_names: COPY dedupeStrings(consumed), consumed_operands: COPY operands };
       RETURN callableContract__new(sig_value, TRY (callOwnershipFacts__ownership_contract(facts)), ast_args.length());
     ELSE
       RETURN NIL;
@@ -9677,7 +9677,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &operands.append(ownershipOperandFact__owned_binding(mIRLowering__transfer_binding_name(rtoc_self_view, UNWRAP (root)), arg_type, "call argument ${rtoc_idx}", sink_alloc));
     rtoc_idx = rtoc_idx + 1;
     END
-    RETURN CallOwnershipFacts{ takes_indices: COPY takes_indices, consumed_names: COPY CAST((consumed |> DISTINCT _) AS []String), consumed_operands: COPY operands };
+    RETURN CallOwnershipFacts{ takes_indices: COPY takes_indices, consumed_names: COPY dedupeStrings(consumed), consumed_operands: COPY operands };
 }
 END
 PRIVATE FN mIRLowering__borrowed_ownership_operand?(self: MIRLowering, arg: Locatable) RETURNS Bool

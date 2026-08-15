@@ -8768,3 +8768,14 @@ PUB FN aST__node__set_token(MUTABLE node: Locatable, value: Token) RETURNS Void 
     Locatable.FieldCleanup AS MUTABLE item -> item.token = COPY value;
   END
 END
+PUB FN dedupeStrings(values: []String) RETURNS []String ->
+  MUTABLE seen: [Set]String = Set[];
+  MUTABLE unique: []String = [];
+  FOR rtoc_dedupe_item IN values DO
+    IF !(seen.contains?(rtoc_dedupe_item)) THEN
+      &seen.insert(COPY rtoc_dedupe_item);
+      &unique.append(COPY rtoc_dedupe_item);
+    END
+  END
+  RETURN unique;
+END

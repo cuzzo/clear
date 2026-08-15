@@ -225,7 +225,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       alias_index = (alias_index + 1);
     END
-    RETURN CAST((output |> DISTINCT _) AS []String);
+    RETURN dedupeStrings(output);
 }
 END
 PRIVATE FN translator__translate_functions(MUTABLE self: Translator) RETURNS ![]String

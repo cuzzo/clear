@@ -16914,7 +16914,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &sources.append("FREEZE");
     END
     END
-    RETURN CAST((sources |> DISTINCT _) AS []String);
+    RETURN dedupeStrings(sources);
 }
 END
 PRIVATE FN typeAnalysisSession__retryable_with_call_fallible?(self: TypeAnalysisSession, node: Node) RETURNS Bool
