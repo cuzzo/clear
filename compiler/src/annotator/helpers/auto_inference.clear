@@ -661,6 +661,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
+FN slotDeclIdentity(decl_node: AutoConstraintCollectorSlotDeclNode) RETURNS Int64 ->
+  PARTIAL MATCH decl_node START
+    AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> RETURN aST__node_identity(Locatable{ FunctionDef: COPY item });,
+    AutoConstraintCollectorSlotDeclNode.FunctionDef AS item -> RETURN aST__node_identity(Locatable{ FunctionDef: COPY item });,
+    AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> RETURN aST__node_identity(Locatable{ VarDecl: COPY item });,
+    AutoConstraintCollectorSlotDeclNode.BindExpr AS item -> RETURN aST__node_identity(Locatable{ BindExpr: COPY item });
+  END
+  RETURN 0;
+END
 FN autoUnifier__stamp_map_pairs_mut(self: AutoUnifier, resolved_slots: {AutoSlotId@multiowned}Resolution) RETURNS !Void
   REQUIRES self: LOCAL
 ->
@@ -670,16 +679,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(((_.slot.shape == :map_key) OR (_.slot.shape == :map_value))) THEN
       CONTINUE;
     END
-    IF by_decl[aST__node_identity(_.slot.decl_node)] == NIL THEN
-        by_decl[aST__node_identity(_.slot.decl_node)] = mapPairResolution__new();
+    IF by_decl[slotDeclIdentity(_.slot.decl_node)] == NIL THEN
+        by_decl[slotDeclIdentity(_.slot.decl_node)] = mapPairResolution__new();
       END
-    MUTABLE pair = COPY UNWRAP (by_decl[aST__node_identity(_.slot.decl_node)]);
+    MUTABLE pair = COPY UNWRAP (by_decl[slotDeclIdentity(_.slot.decl_node)]);
     IF (_.slot.shape == :map_key) THEN
         pair.key = COPY _;
-        by_decl[aST__node_identity(_.slot.decl_node)] = COPY pair;
+        by_decl[slotDeclIdentity(_.slot.decl_node)] = COPY pair;
     ELSE
         pair.value = COPY _;
-        by_decl[aST__node_identity(_.slot.decl_node)] = COPY pair;
+        by_decl[slotDeclIdentity(_.slot.decl_node)] = COPY pair;
     END
     END
     by_decl.keys() |> EACH {
