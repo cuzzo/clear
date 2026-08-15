@@ -316,7 +316,7 @@ FN fsmOps__referenced_state_fields(ops_or_expr: []OpsOrExprItem) RETURNS ![]Stri
   END
   rubyToClearVoid()
   });
-  RETURN (out |> DISTINCT _);
+  RETURN CAST((out |> DISTINCT _) AS []String);
 END
 FN fsmOps__alloc_state_fields(ops: []Stmt) RETURNS ![]String ->
   MUTABLE out = List[];
@@ -327,7 +327,7 @@ FN fsmOps__alloc_state_fields(ops: []Stmt) RETURNS ![]String ->
   END
   END
   END
-  RETURN (out |> DISTINCT _);
+  RETURN CAST((out |> DISTINCT _) AS []String);
 END
 FN fsmOps__free_state_fields(ops: []Stmt) RETURNS ![]String ->
   MUTABLE out = List[];
@@ -338,7 +338,7 @@ FN fsmOps__free_state_fields(ops: []Stmt) RETURNS ![]String ->
     &out.append(COPY defer_free_field.field);
   END
   END
-  RETURN (out |> DISTINCT _);
+  RETURN CAST((out |> DISTINCT _) AS []String);
 END
 FN fsmOps__finish_value_aliases_finalized_state?(expr: ?Expr, finalize_ops: []Stmt) RETURNS !Bool ->
   IF expr EXISTS AS expr_value THEN
