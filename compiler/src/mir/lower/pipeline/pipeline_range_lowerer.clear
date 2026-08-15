@@ -159,21 +159,21 @@ PUB FN runtimeHost__range_visit_mir_with_decl_alloc(self: RuntimeHost, node: Loc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.visit_mir_with_decl_alloc(node, alloc);
+    RETURN runtimeHost__visit_mir_with_decl_alloc_call(rtoc_self_view, node, alloc);
 }
 END
 PUB FN runtimeHost__range_visit_mir_with_context(self: RuntimeHost, node: Locatable, placeholder: ?String, acc: ?String = NIL) RETURNS Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.visit_mir_with_context(node, placeholder, acc);
+    RETURN runtimeHost__visit_mir_with_context_call(rtoc_self_view, node, placeholder, acc);
 }
 END
 PUB FN runtimeHost__range_lower_head_with_context(self: RuntimeHost, node: Locatable, placeholder: ?String) RETURNS PipelineLowerHeadResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.lower_head_with_context(node, placeholder);
+    RETURN runtimeHost__lower_head_with_context_call(rtoc_self_view, node, placeholder);
 }
 END
 PUB FN runtimeHost__range_with_fiber_rt<U>(self: RuntimeHost, rt_name: String, blk: FN() -> U) RETURNS U
@@ -187,7 +187,7 @@ PUB FN runtimeHost__range_visit_pipeline_body_mir(self: RuntimeHost, body_stmts:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (rtoc_self_view.visit_pipeline_body_mir(body_stmts, placeholder));
+    RETURN TRY (runtimeHost__visit_pipeline_body_mir_call(rtoc_self_view, body_stmts, placeholder));
 }
 END
 PUB FN runtimeHost__range_ast_stmts_use_placeholder?(self: RuntimeHost, body_stmts: []Locatable) RETURNS Bool
@@ -229,14 +229,14 @@ PUB FN runtimeHost__range_runtime_name(self: RuntimeHost) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.runtime_name();
+    RETURN runtimeHost__runtime_name_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__range_next_observable_id(self: RuntimeHost) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.next_observable_id();
+    RETURN runtimeHost__next_observable_id_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__range_task_config_variant(self: RuntimeHost) RETURNS String
@@ -1020,4 +1020,28 @@ FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []
     &result.append(COPY rtoc_right_item);
   END
   RETURN result;
+END
+PUB FN runtimeHost__lower_head_with_context_call(self: RuntimeHost, arg0: Locatable, arg1: ?String) RETURNS PipelineLowerHeadResult ->
+  MUTABLE fn_value = self.lower_head_with_context;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN runtimeHost__next_observable_id_call(self: RuntimeHost) RETURNS Int64 ->
+  MUTABLE fn_value = self.next_observable_id;
+  RETURN fn_value();
+END
+PUB FN runtimeHost__runtime_name_call(self: RuntimeHost) RETURNS String ->
+  MUTABLE fn_value = self.runtime_name;
+  RETURN fn_value();
+END
+PUB FN runtimeHost__visit_mir_with_context_call(self: RuntimeHost, arg0: Locatable, arg1: ?String, arg2: ?String) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir_with_context;
+  RETURN fn_value(arg0, arg1, arg2);
+END
+PUB FN runtimeHost__visit_mir_with_decl_alloc_call(self: RuntimeHost, arg0: Locatable, arg1: String@symbol) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir_with_decl_alloc;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN runtimeHost__visit_pipeline_body_mir_call(self: RuntimeHost, arg0: Locatable[], arg1: String) RETURNS ![]Emittable ->
+  MUTABLE fn_value = self.visit_pipeline_body_mir;
+  RETURN fn_value(arg0, arg1);
 END

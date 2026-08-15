@@ -46,14 +46,14 @@ PRIVATE FN pipelineEachLowerer__lower_plan(self: PipelineEachLowerer, plan: Pipe
 END
 PRIVATE FN pipelineEachLowerer__lower_source_plan(self: PipelineEachLowerer, source_kind: PipelineEachSourceKind, plan: PipelineEachPlan) RETURNS !?PipelineEachResult ->
   IF (source_kind == PipelineEachSourceKind.Sharded) THEN
-    RETURN PipelineEachResult{ ScopeBlock: COPY self.lower_sharded_each(plan.list_node, plan.each_op) };
+    RETURN PipelineEachResult{ ScopeBlock: COPY pipelineEachLowerer__lower_sharded_each_call(self, plan.list_node, plan.each_op) };
   ELSE_IF (source_kind == PipelineEachSourceKind.Soa) THEN
     RETURN PipelineEachResult{ ScopeBlock: COPY pipelineEachLowerer__lower_soa_each(self, plan.list_node, plan.lhs_type, plan.each_op) };
   ELSE_IF (source_kind == PipelineEachSourceKind.Pool) THEN
     RETURN castPipelineEachLowererReturnValueToOptionalPipelineEachResult(TRY (pipelineEachLowerer__lower_pool_each(self, plan.list_node, plan.lhs_type, plan.each_op, plan.bc_target)));
   ELSE_IF (source_kind == PipelineEachSourceKind.RangeChain) THEN
     MUTABLE chain = COPY UNWRAP (plan.range_chain);
-    RETURN PipelineEachResult{ ScopeBlock: COPY self.lower_each_range(chain.source, chain.stages, plan.each_op) };
+    RETURN PipelineEachResult{ ScopeBlock: COPY pipelineEachLowerer__lower_each_range_call(self, chain.source, chain.stages, plan.each_op) };
   ELSE_IF (source_kind == PipelineEachSourceKind.List) THEN
     RETURN PipelineEachResult{ ScopeBlock: COPY TRY (pipelineEachLowerer__lower_list_each(self, &plan.list_node, plan.each_op, plan.bc_target)) };
   ELSE_IF (source_kind IS_A Set) THEN
@@ -102,7 +102,7 @@ PRIVATE FN pipelineEachLowerer__range_chain_usable?(self: PipelineEachLowerer, l
 END
 PRIVATE FN pipelineEachLowerer__lower_soa_each(self: PipelineEachLowerer, list_node: Locatable, lhs_type: Type, each_op: EachOp) RETURNS ScopeBlock ->
   MUTABLE source_mir = self.visit_mir(list_node);
-  MUTABLE soa = self.soa_body(each_op.body);
+  MUTABLE soa = pipelineEachLowerer__soa_body_call(self, each_op.body);
   MUTABLE alive_guard: []Emittable = ( { MUTABLE rtoc_empty_list_1: []Emittable = List[]; rtoc_empty_list_1 } );
   IF type__pool?(lhs_type) THEN
     &alive_guard.append(Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__soa_src", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "alive", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__soa_i", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [ContinueStmt{ unused: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } });
@@ -120,7 +120,7 @@ PRIVATE FN pipelineEachLowerer__lower_pool_each(self: PipelineEachLowerer, list_
   RETURN PipelineEachLowererReturnValue{ ScopeBlock: COPY ScopeBlock{ body: COPY CAST(Tuple{Let{ name: COPY "__each_src", init: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "&", operand: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL }, end_val: MIRCast{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__each_src", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "capacity", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__each_idx", body: COPY ([IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "__each_src", lowered_node_id: NIL, ownership_consumption: NIL }, method: "isAliveIndex", args: [CAST(Ident{ name: "__each_idx", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [ContinueStmt{ unused: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }, Let{ name: COPY "__each_item", init: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "&", operand: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__each_src", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "values", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__each_idx", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] + pool_body_mir), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, ForStmt>), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
 END
 PRIVATE FN pipelineEachLowerer__lower_bc_indexed_each(self: PipelineEachLowerer, list_node: Locatable, body_mir: []Emittable, skip_nil: Bool) RETURNS ForStmt ->
-  MUTABLE idx_name = self.next_index_name();
+  MUTABLE idx_name = pipelineEachLowerer__next_index_name_call(self);
   MUTABLE src_ident = Ident{ name: COPY castLocatableToIdentifier(list_node).name, lowered_node_id: NIL, ownership_consumption: NIL };
   MUTABLE body: []Emittable = [Emittable{ Let: COPY Let{ name: COPY "__each_item", init: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ Ident: COPY src_ident }, index: Emittable{ Ident: COPY Ident{ name: COPY idx_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
   IF skip_nil THEN
@@ -139,7 +139,7 @@ PRIVATE FN pipelineEachLowerer__lower_list_each(self: PipelineEachLowerer, MUTAB
   END
   END
   MUTABLE stmts: []Emittable = ( { MUTABLE rtoc_empty_list_2: []Emittable = List[]; rtoc_empty_list_2 } );
-  MUTABLE fact: ?Tuple<AllocMark, CleanupEntry@multiowned> = self.source_alloc_fact(source_mir, "__each_src", TRY (aST__full_type_mut(list_node)));
+  MUTABLE fact: ?Tuple<AllocMark, CleanupEntry@multiowned> = pipelineEachLowerer__source_alloc_fact_call(self, source_mir, "__each_src", TRY (aST__full_type_mut(list_node)));
   IF fact EXISTS AS fact_value THEN
     &stmts.append(COPY fact_value._0);
   END
@@ -238,4 +238,24 @@ FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []
     &result.append(COPY rtoc_right_item);
   END
   RETURN result;
+END
+PUB FN pipelineEachLowerer__soa_body_call(self: PipelineEachLowerer, arg0: Locatable[]) RETURNS PipelineEachSoaBody ->
+  MUTABLE fn_value = self.soa_body;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineEachLowerer__lower_each_range_call(self: PipelineEachLowerer, arg0: Locatable, arg1: Locatable[], arg2: EachOp) RETURNS ScopeBlock ->
+  MUTABLE fn_value = self.lower_each_range;
+  RETURN fn_value(arg0, arg1, arg2);
+END
+PUB FN pipelineEachLowerer__lower_sharded_each_call(self: PipelineEachLowerer, arg0: Locatable, arg1: EachOp) RETURNS ScopeBlock ->
+  MUTABLE fn_value = self.lower_sharded_each;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN pipelineEachLowerer__next_index_name_call(self: PipelineEachLowerer) RETURNS String ->
+  MUTABLE fn_value = self.next_index_name;
+  RETURN fn_value();
+END
+PUB FN pipelineEachLowerer__source_alloc_fact_call(self: PipelineEachLowerer, arg0: Emittable, arg1: String, arg2: Type) RETURNS ?Tuple<AllocMark, CleanupEntry@multiowned> ->
+  MUTABLE fn_value = self.source_alloc_fact;
+  RETURN fn_value(arg0, arg1, arg2);
 END

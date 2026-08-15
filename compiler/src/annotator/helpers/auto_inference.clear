@@ -11263,3 +11263,7 @@ FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
   END
   panic("Invalid cast to TypeTypeInput");
 END
+PUB FN autoUnifier__type_of_call(self: AutoUnifier, arg0: Locatable) RETURNS ?AutoConstraintCollectorObservedType ->
+  MUTABLE fn_value = self.type_of;
+  RETURN fn_value(arg0);
+END

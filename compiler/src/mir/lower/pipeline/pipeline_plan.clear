@@ -53,7 +53,7 @@ PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RET
   MUTABLE lhs: Locatable = COPY castLocatableToLocatable(node.left);
   MUTABLE rhs: Locatable = COPY castLocatableToLocatable(node.right);
   MUTABLE site = PipelineSite{ list: COPY lhs, options: COPY node };
-  MUTABLE bc_target = (self.lowering_target() == :bc);
+  MUTABLE bc_target = (pipelinePlanBuilder__lowering_target_call(self) == :bc);
   IF pipelinePlanBuilder__soa_scalar_fold?(self, &lhs, rhs) THEN
     RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.SoaScalarFold, site, rhs, PipelineTerminalKind.ScalarFold, bc_target, PipelineSourceKind.Soa);
   END
@@ -69,7 +69,7 @@ PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RET
       RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.FusedRangeReduce, site, Locatable{ ReduceOp: COPY reduce_op }, PipelineTerminalKind.RangeReduce, bc_target, PipelineSourceKind.RangeChain, range_chain_value);
     END
   END
-  MUTABLE binding_chain: ?PipelineBindingUnnestChain = self.binding_chain(node);
+  MUTABLE binding_chain: ?PipelineBindingUnnestChain = pipelinePlanBuilder__binding_chain_call(self, node);
   IF binding_chain EXISTS AS binding_chain_value THEN
     RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.BindingChain, site, rhs, PipelineTerminalKind.BindingChain, bc_target, PipelineSourceKind.BindingChain, NIL, binding_chain_value);
   END
@@ -82,7 +82,7 @@ PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RET
 END
 PRIVATE FN pipelinePlanBuilder__soa_scalar_fold?(self: PipelinePlanBuilder, MUTABLE lhs: Locatable, rhs: Locatable) RETURNS Bool ->
   MUTABLE lhs_type = TRY (aST__full_type_mut(lhs));
-  RETURN ((type__soa_linear_collection?(lhs_type) AND aST__pipeline_range_fold?(rhs)) AND (self.lowering_target() != :bc));
+  RETURN ((type__soa_linear_collection?(lhs_type) AND aST__pipeline_range_fold?(rhs)) AND (pipelinePlanBuilder__lowering_target_call(self) != :bc));
 END
 PRIVATE FN pipelinePlanBuilder__operation(self: PipelinePlanBuilder, execution: PipelineExecutionKind, site: PipelineSite, rhs: Locatable, terminal_kind: PipelineTerminalKind, bc_target: Bool, source_kind: PipelineSourceKind = PipelineSourceKind.Materialized, range_chain: ?PipelineRangeChain = NIL, binding_chain: ?PipelineBindingUnnestChain = NIL) RETURNS PipelineOperationPlan ->
   MUTABLE source = PipelineSourcePlan{ kind: COPY source_kind, node: COPY site.list, range_chain: COPY range_chain, binding_chain: COPY binding_chain };
@@ -295,4 +295,12 @@ FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
+END
+PUB FN pipelinePlanBuilder__lowering_target_call(self: PipelinePlanBuilder) RETURNS String@symbol ->
+  MUTABLE fn_value = self.lowering_target;
+  RETURN fn_value();
+END
+PUB FN pipelinePlanBuilder__binding_chain_call(self: PipelinePlanBuilder, arg0: BinaryOp) RETURNS ?PipelineBindingUnnestChain ->
+  MUTABLE fn_value = self.binding_chain;
+  RETURN fn_value(arg0);
 END

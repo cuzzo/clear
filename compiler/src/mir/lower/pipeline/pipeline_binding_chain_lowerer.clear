@@ -97,11 +97,11 @@ PUB FN pipelineBindingChainLowerer__unwrap_chain(self: PipelineBindingChainLower
 END
 PUB FN pipelineBindingChainLowerer__lower(self: PipelineBindingChainLowerer, chain: PipelineBindingUnnestChain, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
   MUTABLE outer_name = COPY chain.outer_binding;
-  MUTABLE outer_zig = self.pipe_binding_zig_name(outer_name);
+  MUTABLE outer_zig = pipelineBindingChainLowerer__pipe_binding_zig_name_call(self, outer_name);
   MUTABLE inner_name: ?String = COPY chain.inner_binding;
   MUTABLE inner_zig: String = "";
   IF inner_name EXISTS AS inner_name_value THEN
-    inner_zig = self.pipe_binding_zig_name(inner_name_value);
+    inner_zig = pipelineBindingChainLowerer__pipe_binding_zig_name_call(self, inner_name_value);
   ELSE
     inner_zig = "__bc_inner";
   END
@@ -142,10 +142,10 @@ PRIVATE FN pipelineBindingChainLowerer__inner_capture_required?(self: PipelineBi
     RETURN TRUE;
   END
   MUTABLE fold_expr: ?Locatable = pipelineBindingChainLowerer__fold_expression(self, chain.fold);
-  IF ((fold_expr != NIL) AND self.ast_uses_placeholder(fold_expr)) THEN
+  IF ((fold_expr != NIL) AND pipelineBindingChainLowerer__ast_uses_placeholder_call(self, fold_expr)) THEN
     RETURN TRUE;
   END
-  RETURN chain.stages |> ANY (IF _ IS_A WhereOp AS where_op THEN self.ast_uses_placeholder(whereOp__expression(where_op)) ELSE FALSE END);
+  RETURN chain.stages |> ANY (IF _ IS_A WhereOp AS where_op THEN pipelineBindingChainLowerer__ast_uses_placeholder_call(self, whereOp__expression(where_op)) ELSE FALSE END);
 END
 PRIVATE FN pipelineBindingChainLowerer__fold_expression(self: PipelineBindingChainLowerer, fold: PipelineBindingFoldOp) RETURNS ?Locatable ->
   IF fold IS_A SumOp@multiowned AS sum_op_multiowned THEN
@@ -320,4 +320,16 @@ FN castLocatableToPipelineBindingFoldOp(value: Locatable) RETURNS PipelineBindin
     DEFAULT -> panic("Invalid cast to PipelineBindingFoldOp");
   END
   panic("Invalid cast to PipelineBindingFoldOp");
+END
+PUB FN pipelineBindingChainLowerer__pipe_binding_zig_name_call(self: PipelineBindingChainLowerer, arg0: String) RETURNS String ->
+  MUTABLE fn_value = self.pipe_binding_zig_name;
+  RETURN fn_value(arg0);
+END
+PUB FN pipelineBindingChainLowerer__visit_mir_with_reduce_placeholders_call(self: PipelineBindingChainLowerer, arg0: Locatable, arg1: String, arg2: String) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir_with_reduce_placeholders;
+  RETURN fn_value(arg0, arg1, arg2);
+END
+PUB FN pipelineBindingChainLowerer__ast_uses_placeholder_call(self: PipelineBindingChainLowerer, arg0: Locatable) RETURNS Bool ->
+  MUTABLE fn_value = self.ast_uses_placeholder;
+  RETURN fn_value(arg0);
 END

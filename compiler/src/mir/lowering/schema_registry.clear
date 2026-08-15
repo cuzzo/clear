@@ -106,3 +106,7 @@ PUB FN mIRLoweringSchemas__new(struct_schemas: {String@symbol}StructSchema, enum
   mIRLoweringSchemas__initialize(&self, struct_schemas, enum_schemas, union_schemas);
   RETURN self @multiowned;
 END
+PUB FN mIRLoweringSchemas__lookup_proc_call(self: MIRLoweringSchemas, arg0: MIRLoweringSchemasSchemaName) RETURNS ?MIRLoweringSchemasSchemaLookupResult ->
+  MUTABLE fn_value = self.lookup_proc;
+  RETURN fn_value(arg0);
+END

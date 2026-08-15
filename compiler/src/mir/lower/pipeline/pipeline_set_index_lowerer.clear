@@ -86,7 +86,7 @@ PRIVATE FN pipelineSetIndexLowerer__lower_observable_distinct(self: PipelineSetI
   MUTABLE range_chain: ?PipelineRangeChain = self.range_chain(list_node);
   IF range_chain EXISTS AS range_chain_value THEN
     MUTABLE prefix = self.lazy_range_prefix(range_chain_value.source, range_chain_value.stages, NIL, TRUE);
-    RETURN self.range_fold_observable_distinct(prefix, distinct_node, smooth_node, self.next_label(), range_chain_value.source);
+    RETURN pipelineSetIndexLowerer__range_fold_observable_distinct_call(self, prefix, distinct_node, smooth_node, self.next_label(), range_chain_value.source);
   ELSE
     RETURN NIL;
   END
@@ -127,7 +127,7 @@ PRIVATE FN pipelineSetIndexLowerer__distinct_insert_body(self: PipelineSetIndexL
   ELSE
     DeepCopy{ source: COPY Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL }, zig_type: COPY elem_zig, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL }
   END;
-  MUTABLE temp_name = self.index_temp_name();
+  MUTABLE temp_name = pipelineSetIndexLowerer__index_temp_name_call(self);
   MUTABLE fact: ?PipelineIndexAllocationFact = self.pipeline_alloc_mark_fact(owned_value, temp_name, alloc, expr_node, "DISTINCT owned key", TRUE);
   IF fact EXISTS AS fact_value THEN
     fact_value.mark.scope = IF placement__heap?(fact_value.alloc) THEN
@@ -221,7 +221,7 @@ PRIVATE FN pipelineSetIndexLowerer__build_index_gop_body(self: PipelineSetIndexL
   MUTABLE elem_zig_type = "@TypeOf(${item_var})";
   MUTABLE prepared = TRY (pipelineSetIndexLowerer__index_prepared_value(self, item_var, elem_zig_type, alloc, item_type, value_ownership));
   MUTABLE insert = IndexInsert{ map: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, key_expr: Emittable{ Ident: COPY Ident{ name: "idx_key", lowered_node_id: NIL, ownership_consumption: NIL } }, value_expr: COPY prepared.value, key_zig_type: "u8", elem_zig_type: elem_zig_type, alloc: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-  MUTABLE owned_insert = self.pipeline_index_insert_with_ownership(insert, prepared.value, prepared.owns_heap, alloc);
+  MUTABLE owned_insert = pipelineSetIndexLowerer__pipeline_index_insert_with_ownership_call(self, insert, prepared.value, prepared.owns_heap, alloc);
   MUTABLE body: []Emittable = (CAST([Emittable{ Let: COPY Let{ name: COPY "idx_key", init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable) + COPY prepared.setup_stmts + CAST([Emittable{ IndexInsert: COPY owned_insert }] AS []Emittable));
   MUTABLE entry: ?CleanupEntry@multiowned = (KEEP self.pipeline_owned_cleanup_entry)(expr_mir, expr_node);
   IF entry EXISTS AS entry_value THEN
@@ -245,7 +245,7 @@ PRIVATE FN pipelineSetIndexLowerer__preserve_owned_index_item?(self: PipelineSet
   RETURN (item_owns AND (value_ownership == PipelineIndexValueOwnership.Owned));
 END
 PRIVATE FN pipelineSetIndexLowerer__copied_index_value(self: PipelineSetIndexLowerer, item_value: Emittable, alloc: String@symbol, item_owns: Bool) RETURNS PipelineIndexPreparedValue ->
-  MUTABLE fact: ?PipelineIndexAllocationFact = self.pipeline_alloc_mark_fact(item_value, self.index_temp_name(), alloc, NIL, "INDEX bucket item", TRUE);
+  MUTABLE fact: ?PipelineIndexAllocationFact = self.pipeline_alloc_mark_fact(item_value, pipelineSetIndexLowerer__index_temp_name_call(self), alloc, NIL, "INDEX bucket item", TRUE);
   IF fact EXISTS AS fact_value THEN
     MUTABLE value_name = COPY fact_value.mark.name;
     MUTABLE setup_stmts: []Emittable = [Emittable{ AllocMark: COPY fact_value.mark }, Emittable{ Let: COPY Let{ name: COPY value_name, init: COPY item_value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
@@ -293,4 +293,20 @@ FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []
     &result.append(COPY rtoc_right_item);
   END
   RETURN result;
+END
+PUB FN pipelineSetIndexLowerer__range_fold_observable_distinct_call(self: PipelineSetIndexLowerer, arg0: PipelineLazyRangePrefix, arg1: DistinctOp, arg2: BinaryOp, arg3: String, arg4: Locatable) RETURNS MIRBlockExpr ->
+  MUTABLE fn_value = self.range_fold_observable_distinct;
+  RETURN fn_value(arg0, arg1, arg2, arg3, arg4);
+END
+PUB FN pipelineSetIndexLowerer__pipeline_owned_cleanup_entry_call(self: PipelineSetIndexLowerer, arg0: Emittable, arg1: ?Locatable) RETURNS ?CleanupEntry@multiowned ->
+  MUTABLE fn_value = self.pipeline_owned_cleanup_entry;
+  RETURN fn_value(arg0, arg1);
+END
+PUB FN pipelineSetIndexLowerer__pipeline_index_insert_with_ownership_call(self: PipelineSetIndexLowerer, arg0: IndexInsert, arg1: Emittable, arg2: Bool, arg3: String@symbol) RETURNS IndexInsert ->
+  MUTABLE fn_value = self.pipeline_index_insert_with_ownership;
+  RETURN fn_value(arg0, arg1, arg2, arg3);
+END
+PUB FN pipelineSetIndexLowerer__index_temp_name_call(self: PipelineSetIndexLowerer) RETURNS String ->
+  MUTABLE fn_value = self.index_temp_name;
+  RETURN fn_value();
 END

@@ -60,14 +60,14 @@ PUB FN runtimeHost__materializer_alloc_mark_fact(self: RuntimeHost, value: Emitt
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.alloc_mark_fact(value, name, fallback_alloc, type_info, ast_node, context, known_allocating);
+    RETURN runtimeHost__alloc_mark_fact_call(rtoc_self_view, value, name, fallback_alloc, type_info, ast_node, context, known_allocating);
 }
 END
 PUB FN runtimeHost__materializer_result_alloc(self: RuntimeHost) RETURNS String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.result_alloc();
+    RETURN runtimeHost__result_alloc_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__materializer_bc_target?(self: RuntimeHost) RETURNS Bool
@@ -110,7 +110,7 @@ PUB FN runtimeHost__materializer_next_item_temp_name(self: RuntimeHost) RETURNS 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.next_item_temp_name();
+    RETURN runtimeHost__next_item_temp_name_call(rtoc_self_view);
 }
 END
 PUB FN runtimeHost__new(visit_mir: FN(Locatable) -> Emittable, alloc_mark_fact: FN(Emittable, String, String@symbol, ?Type, ?Locatable, String, Bool) -> ?AllocationFact, result_alloc: FN() -> String@symbol, bc_target: FN() -> Bool, schema_lookup: FN() -> FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult, next_label: FN() -> String, set_current_label: FN(String) -> Void, next_item_temp_name: FN() -> String) RETURNS RuntimeHost@multiowned ->
@@ -542,4 +542,16 @@ FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
+END
+PUB FN runtimeHost__alloc_mark_fact_call(self: RuntimeHost, arg0: Emittable, arg1: String, arg2: String@symbol, arg3: ?Type, arg4: ?Locatable, arg5: String, arg6: Bool) RETURNS ?AllocationFact ->
+  MUTABLE fn_value = self.alloc_mark_fact;
+  RETURN fn_value(arg0, arg1, arg2, arg3, arg4, arg5, arg6);
+END
+PUB FN runtimeHost__next_item_temp_name_call(self: RuntimeHost) RETURNS String ->
+  MUTABLE fn_value = self.next_item_temp_name;
+  RETURN fn_value();
+END
+PUB FN runtimeHost__result_alloc_call(self: RuntimeHost) RETURNS String@symbol ->
+  MUTABLE fn_value = self.result_alloc;
+  RETURN fn_value();
 END

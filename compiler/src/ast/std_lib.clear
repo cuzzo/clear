@@ -27,3 +27,7 @@ builtin_type_bindings: [4]StdLibTypeBinding = [StdLibTypeBinding{ name: :Range, 
   rtoc_lambda_result_12 = TRY (resourceSchema__new(resourceClosePlan__function("CheatLib.socketClose"), CAST({"connect": CAST({:args: SchemasResourceSchemaStaticMethodValue{ ArrayValue: COPY [:String, :Int64] }, :return: SchemasResourceSchemaStaticMethodValue{ SymbolValue: :TCPClient }, :zig: SchemasResourceSchemaStaticMethodValue{ StringValue: "try CheatLib.socketConnect({0}, @intCast({1}))" }, :can_fail: SchemasResourceSchemaStaticMethodValue{ BoolValue: TRUE }} AS {String@symbol}SchemasResourceSchemaStaticMethodValue)} AS {String}{String@symbol}SchemasResourceSchemaStaticMethodValue), {}, ( { MUTABLE rtoc_empty_list_11: []String@symbol = List[]; rtoc_empty_list_11 } ), NIL, NIL, :package, {}));
   rtoc_lambda_result_12
 } }];
+PUB FN stdLibTypeBinding__schema_factory_call(self: StdLibTypeBinding) RETURNS Any ->
+  MUTABLE fn_value = self.schema_factory;
+  RETURN fn_value();
+END
