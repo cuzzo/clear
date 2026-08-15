@@ -16,21 +16,21 @@ PUB FN ownedCompositeMaterialization__cleanup_entry(self: OwnedCompositeMaterial
 END
 PUB STRUCT MaterializationPacket {
   alloc_mark: ?AllocMark,
-  value_stmt: ?Stmt,
-  cleanup_stmt: ?Stmt
+  value_stmt: ?Emittable,
+  cleanup_stmt: ?Emittable
 }
 
-PUB FN materializationPacket__value_only(value_stmt: Stmt) RETURNS MaterializationPacket ->
+PUB FN materializationPacket__value_only(value_stmt: Emittable) RETURNS MaterializationPacket ->
   RETURN MaterializationPacket{ alloc_mark: NIL, value_stmt: COPY value_stmt, cleanup_stmt: NIL };
 END
-PUB FN materializationPacket__markers(alloc_mark: AllocMark, cleanup_stmt: ?Stmt = NIL) RETURNS MaterializationPacket ->
+PUB FN materializationPacket__markers(alloc_mark: AllocMark, cleanup_stmt: ?Emittable = NIL) RETURNS MaterializationPacket ->
   RETURN MaterializationPacket{ alloc_mark: COPY alloc_mark, value_stmt: NIL, cleanup_stmt: COPY cleanup_stmt };
 END
-PUB FN materializationPacket__owned(alloc_mark: AllocMark, value_stmt: Stmt, cleanup_stmt: ?Stmt = NIL) RETURNS MaterializationPacket ->
+PUB FN materializationPacket__owned(alloc_mark: AllocMark, value_stmt: Emittable, cleanup_stmt: ?Emittable = NIL) RETURNS MaterializationPacket ->
   RETURN MaterializationPacket{ alloc_mark: COPY alloc_mark, value_stmt: COPY value_stmt, cleanup_stmt: COPY cleanup_stmt };
 END
-PUB FN materializationPacket__statements(self: MaterializationPacket) RETURNS ![]Stmt ->
-  MUTABLE out: []Stmt = ( { MUTABLE rtoc_empty_list_2: []Stmt = List[]; rtoc_empty_list_2 } );
+PUB FN materializationPacket__statements(self: MaterializationPacket) RETURNS ![]Emittable ->
+  MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_2: []Emittable = List[]; rtoc_empty_list_2 } );
   IF self.alloc_mark EXISTS AS alloc_mark_value THEN
     &out.append(COPY alloc_mark_value);
   END
@@ -80,7 +80,7 @@ PUB FN bindingMaterialization__packet(self: BindingMaterialization) RETURNS Mate
   END
   RETURN materializationPacket__owned(bindingMaterialization__alloc_mark(self), bindingMaterialization__let_node(self), bindingMaterialization__cleanup_stmt(self));
 END
-PUB FN bindingMaterialization__statements(self: BindingMaterialization) RETURNS ![]Stmt EFFECTS REENTRANT ->
+PUB FN bindingMaterialization__statements(self: BindingMaterialization) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (materializationPacket__statements(bindingMaterialization__packet(self)));
 END
 # End Ruby module MIR

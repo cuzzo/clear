@@ -25,10 +25,11 @@ PUB FN signatureRegistry__extern_function_signature(node: ExternFnDecl) RETURNS 
   RETURN TRY (functionSignature__new(params |> SELECT signatureRegistry__extern_param(_), castTypeToTypeTypeInput(externFnDecl__annotation_return_type(node)), FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (signatureRegistry__extern_lifetime_paths(node)) }, :pub, COPY node.fn_type_params, {}, FALSE, TRUE, node.from_module, TRY (signatureRegistry__extern_effects(node)), node.extern_source, COPY node.fn_type_params, node.owner_type, COPY node.owner_type_params));
 END
 PRIVATE FN signatureRegistry__extern_lifetime_paths(node: ExternFnDecl) RETURNS ![]FunctionSignatureLifetimeSource ->
-  MUTABLE lifetime = node.return_lifetime;
-  IF (lifetime == NIL) THEN
+  MUTABLE lifetime_opt: ?ClearParserReturnLifetime = COPY node.return_lifetime;
+  IF (lifetime_opt == NIL) THEN
     RETURN CAST(( { MUTABLE rtoc_empty_list_5: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_5 } ) AS []FunctionSignatureLifetimeSource);
   END
+  MUTABLE lifetime: ClearParserReturnLifetime = COPY UNWRAP (lifetime_opt);
   IF (lifetime == :wildcard) THEN
     RETURN CAST([FunctionSignatureLifetimeSource{ SymbolValue: :wildcard }] AS []FunctionSignatureLifetimeSource);
   END
