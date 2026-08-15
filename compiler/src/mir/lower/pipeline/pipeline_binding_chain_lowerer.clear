@@ -86,7 +86,7 @@ PUB FN pipelineBindingChainLowerer__unwrap_chain(self: PipelineBindingChainLower
         END
         IF lhs IS_A BinaryOp AS binary_op THEN
         IF (binary_op.op == :BIND_VAR) THEN
-            RETURN PipelineBindingUnnestChain{ source: COPY binary_op.left, outer_binding: COPY CAST(binary_op.right.name() AS String), unnest_expr: COPY unnest_expr, inner_binding: COPY inner_binding, stages: COPY stages, fold: COPY castLocatableToPipelineBindingFoldOp(fold) };
+            RETURN PipelineBindingUnnestChain{ source: COPY binary_op.left, outer_binding: COPY unnestRightName(binary_op.right), unnest_expr: COPY unnest_expr, inner_binding: COPY inner_binding, stages: COPY stages, fold: COPY castLocatableToPipelineBindingFoldOp(fold) };
           ELSE
             RETURN NIL;
           END
