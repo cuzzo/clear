@@ -310,35 +310,29 @@ PRIVATE FN segments__contains_suspend_anywhere?(stmts: ?[]Locatable) RETURNS Boo
     MUTABLE index = 0;
     WHILE (index < items.length()) DO
       MUTABLE stmt = UNWRAP (items[index]);
-      IF (stmt IS_A WhileLoop) THEN
-        MUTABLE loop_stmt = stmt;
-        IF segments__contains_suspend_anywhere?(loop_stmt.do_branch()) THEN
+      IF stmt IS_A WhileLoop AS while_loop THEN
+        IF segments__contains_suspend_anywhere?(while_loop.do_branch) THEN
           RETURN TRUE;
         END
-      ELSE_IF (stmt IS_A WhileBindLoop) THEN
-        MUTABLE loop_stmt = stmt;
-        IF segments__contains_suspend_anywhere?(loop_stmt.do_branch()) THEN
+      ELSE_IF stmt IS_A WhileBindLoop AS while_bind_loop THEN
+        IF segments__contains_suspend_anywhere?(while_bind_loop.do_branch) THEN
           RETURN TRUE;
         END
-      ELSE_IF (stmt IS_A ForRange) THEN
-        MUTABLE range_stmt = stmt;
-        IF segments__contains_suspend_anywhere?(range_stmt.body()) THEN
+      ELSE_IF stmt IS_A ForRange AS for_range THEN
+        IF segments__contains_suspend_anywhere?(for_range.body) THEN
           RETURN TRUE;
         END
-      ELSE_IF (stmt IS_A ForEach) THEN
-        MUTABLE each_stmt = stmt;
-        IF segments__contains_suspend_anywhere?(each_stmt.body()) THEN
+      ELSE_IF stmt IS_A ForEach AS for_each THEN
+        IF segments__contains_suspend_anywhere?(for_each.body) THEN
           RETURN TRUE;
         END
       ELSE_IF (stmt IS_A WithBlock) OR (stmt IS_A CatchBlock) THEN
         RETURN TRUE;
-      ELSE_IF (stmt IS_A IfStatement) THEN
-        MUTABLE if_stmt = stmt;
-        IF segments__contains_suspend_anywhere?(if_stmt.then_branch()) THEN
+      ELSE_IF stmt IS_A IfStatement AS if_stmt THEN
+        IF segments__contains_suspend_anywhere?(if_stmt.then_branch) THEN
           RETURN TRUE;
         END
-        MUTABLE else_branch = if_stmt.else_branch();
-        IF !((else_branch == NIL)) THEN
+        IF if_stmt.else_branch EXISTS AS else_branch THEN
           IF segments__contains_suspend_anywhere?(else_branch) THEN
             RETURN TRUE;
           END
