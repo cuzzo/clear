@@ -2094,7 +2094,7 @@ FN returnStmt__stmt?(self: ReturnStmt) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT BreakStmt {
-  label: Any@multiowned,
+  label: String,
   value: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -2159,7 +2159,7 @@ FN breakStmt__stmt?(self: BreakStmt) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT BreakExpr {
-  label: Any@multiowned,
+  label: String,
   value: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -2892,7 +2892,7 @@ PUB STRUCT BatchWindowPush {
   item_expr: Emittable,
   batch_var: Any@multiowned,
   elem_zig: Any@multiowned,
-  result_var: Any@multiowned,
+  result_var: ?String,
   value_expr: Emittable,
   alloc: String@symbol,
   lowered_node_id: ?LoweredNodeId,
@@ -2960,7 +2960,7 @@ PUB STRUCT BatchWindowFlush {
   window: Any@multiowned,
   batch_var: Any@multiowned,
   elem_zig: Any@multiowned,
-  result_var: Any@multiowned,
+  result_var: ?String,
   value_expr: Emittable,
   alloc: String@symbol,
   lowered_node_id: ?LoweredNodeId,
@@ -3665,9 +3665,9 @@ FN fsmStructure__owned_effect_for_alloc(self: FsmStructure, alloc: ?String@symbo
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT FsmIoBody {
-  blk_label: Any@multiowned,
-  ctx_struct: Any@multiowned,
-  spawn_setup: Any@multiowned,
+  blk_label: String,
+  ctx_struct: FsmCtxStruct,
+  spawn_setup: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -3796,9 +3796,9 @@ FN streamYield__stmt?(self: StreamYield) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT FsmB1Body {
-  blk_label: Any@multiowned,
-  ctx_struct: Any@multiowned,
-  spawn_setup: Any@multiowned,
+  blk_label: String,
+  ctx_struct: FsmCtxStruct,
+  spawn_setup: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -3863,15 +3863,15 @@ FN fsmB1Body__stmt?(self: FsmB1Body) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT FsmB1CtxStruct {
-  type_name: Any@multiowned,
+  type_name: String,
   promise_zig: String,
   capture_fields: Any@multiowned,
   run_body: Any@multiowned
 }
 PUB STRUCT FsmGenericBody {
-  blk_label: Any@multiowned,
-  ctx_struct: Any@multiowned,
-  spawn_setup: Any@multiowned,
+  blk_label: String,
+  ctx_struct: FsmCtxStruct,
+  spawn_setup: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -3936,7 +3936,7 @@ FN fsmGenericBody__stmt?(self: FsmGenericBody) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT FsmGenericCtxStruct {
-  type_name: Any@multiowned,
+  type_name: String,
   promise_zig: String,
   capture_fields: Any@multiowned,
   extra_field_decls: Any@multiowned,
@@ -3954,7 +3954,7 @@ PUB STRUCT FsmMemberFn {
   extra_prologue_stmts: Any@multiowned
 }
 PUB STRUCT FsmCtxStruct {
-  type_name: Any@multiowned,
+  type_name: String,
   promise_zig: String,
   capture_fields: Any@multiowned,
   state_decls: Any@multiowned,
@@ -3975,7 +3975,7 @@ PUB STRUCT SuspendDescriptor {
   bind_stmts: Any@multiowned,
   tail: Any@multiowned,
   ctx_field_decls: Any@multiowned,
-  result_var: Any@multiowned,
+  result_var: ?String,
   result_zig_type: Any@multiowned,
   result_needs_cleanup: Any@multiowned
 }
@@ -6637,7 +6637,7 @@ PUB STRUCT SnapshotTransaction {
   body: []Emittable,
   conflict_action: Emittable,
   retries: ?Int64,
-  with_label: Any@multiowned,
+  with_label: String,
   is_atomic_ptr: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -6722,7 +6722,7 @@ PUB STRUCT SnapshotMultiTxn {
   body: []Emittable,
   conflict_action: Emittable,
   retries: ?Int64,
-  with_label: Any@multiowned,
+  with_label: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -9687,7 +9687,7 @@ FN sliceExpr__expr?(self: SliceExpr) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT MIRBlockExpr {
-  label: Any@multiowned,
+  label: String,
   body: []Emittable,
   borrowed_view: ?Bool,
   lazy_boundary: ?Bool,
