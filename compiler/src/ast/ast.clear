@@ -8823,3 +8823,36 @@ END
 PUB FN nextExpr__expr(self: NextExpr) RETURNS Locatable ->
   RETURN COPY self.expr;
 END
+PUB FN allOp__expression(self: AllOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN anyOp__expression(self: AnyOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN averageOp__expression(self: AverageOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN countOp__expression(self: CountOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN findOp__expression(self: FindOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN maxOp__expression(self: MaxOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN minOp__expression(self: MinOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN selectOp__capture_analysis(self: SelectOp) RETURNS ?PassStateValue ->
+  RETURN COPY self.capture_analysis;
+END
+PUB FN sumOp__expression(self: SumOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN takeWhileOp__expression(self: TakeWhileOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN unnestOp__expression(self: UnnestOp) RETURNS ?Locatable ->
+  RETURN COPY self.expression;
+END
