@@ -3474,7 +3474,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (mp == NIL) THEN
           RETURN FALSE;
       END
-      plans[concrete_cycle_fns[rtoc_idx]?.name] = UNWRAP (mp);
+      MUTABLE rtoc_key_1: String = COPY UNWRAP (concrete_cycle_fns[rtoc_idx]).name;
+      plans[rtoc_key_1] = UNWRAP (mp);
     rtoc_idx = rtoc_idx + 1;
     END
     FOR _ IN concrete_cycle_fns DO

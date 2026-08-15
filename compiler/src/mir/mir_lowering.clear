@@ -6226,7 +6226,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
           MUTABLE rtoc_mutable_receiver_197 = (body[rtoc_idx]?.cleanup_entry());
           cleanupEntry__mark_moved_guard_mut(&rtoc_mutable_receiver_197);
-          guarded_cleanup_names[facts[rtoc_idx]?.name] = TRUE;
+          MUTABLE rtoc_key_1: String = COPY UNWRAP (facts[rtoc_idx]).name;
+          guarded_cleanup_names[rtoc_key_1] = TRUE;
         rtoc_idx = rtoc_idx + 1;
       END
     rtoc_idx = rtoc_idx + 1;

@@ -172,7 +172,8 @@ PRIVATE FN liveness__collect_defs(MUTABLE stmt: Stmt, into: Any) RETURNS !Void -
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    into[rtoc_each_items_4[rtoc_idx]?.name] = (into[rtoc_each_items_4[rtoc_idx]?.name] OR_ELSE TRY (liveness__stmt_decl_type(BindingStmt{ DestructureTarget: COPY rtoc_each_items_4[rtoc_idx]? })));
+    MUTABLE rtoc_key_1: String = COPY UNWRAP (rtoc_each_items_4[rtoc_idx]).name;
+    into[rtoc_key_1] = (into[rtoc_each_items_4[rtoc_idx]?.name] OR_ELSE TRY (liveness__stmt_decl_type(BindingStmt{ DestructureTarget: COPY rtoc_each_items_4[rtoc_idx]? })));
   rtoc_idx = rtoc_idx + 1;
     END
   END
