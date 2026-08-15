@@ -13159,7 +13159,7 @@ STRUCT IfChainBranch {
   cond: Emittable,
   body: []Emittable
 }
-STRUCT ThunkBaseCase {
+PUB STRUCT ThunkBaseCase {
   cond: Emittable,
   value: Emittable
 }
