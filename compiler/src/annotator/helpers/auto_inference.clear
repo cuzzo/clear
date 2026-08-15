@@ -1024,7 +1024,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF node_value IS_A ReturnNode AS return_node THEN
         MUTABLE ret_slot = autoSlotId__return(fn_value.name);
         IF rtoc_self_view.slots.contains?(ret_slot) THEN
-        IF return_node.value IS_A BinaryOp THEN
+        MUTABLE ret_is_binop: Bool = FALSE;
+        IF return_node.value EXISTS AS return_value THEN
+          ret_is_binop = return_value IS_A BinaryOp;
+        END
+        IF ret_is_binop THEN
           IF rtoc_self_view.evidence[ret_slot] == NIL THEN
             rtoc_self_view.evidence[ret_slot] = Set[];
           END
