@@ -45,7 +45,8 @@ PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String
   MUTABLE _ = COPY fn_node;
   FOR rtoc_inner_key IN bindings.keys() DO
   MUTABLE entry: CleanupEntry = COPY UNWRAP (bindings[rtoc_inner_key]);
-  entries[placeId__from_path(rtoc_inner_key)] = (entries[placeId__from_path(rtoc_inner_key)] OR_ELSE entry);
+  MUTABLE place_key = placeId__from_path(Path{ StringValue: COPY rtoc_inner_key });
+  entries[place_key] = (entries[place_key] OR_ELSE entry);
   END
   RETURN frozenCleanupFacts__build(entries);
 END

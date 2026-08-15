@@ -961,7 +961,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_idx < fn_value.params.length() DO
       MUTABLE slot_id = autoSlotId__param(fn_value.name, rtoc_idx);
       IF rtoc_self_view.slots.contains?(slot_id) THEN
-          map[fn_value.params[rtoc_idx]?.name] = slot_id;
+          MUTABLE param_key: String = COPY UNWRAP (fn_value.params[rtoc_idx]).name;
+          map[param_key] = slot_id;
       END
     rtoc_idx = rtoc_idx + 1;
     END
