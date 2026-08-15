@@ -444,7 +444,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (mIREmitter__emit_future_map_plan(&rtoc_self_view, future_map_plan_mutable));
     END
     IF mIREmitter__fsm_bg_body_plan?(rtoc_self_view, plan) THEN
-      RETURN TRY (mIREmitter__emit_fsm_bg_body(rtoc_self_view, castBgBlockPlanToPlan(CAST(plan AS Auto))));
+      RETURN TRY (mIREmitter__emit_fsm_bg_body(rtoc_self_view, castBgBlockPlanToPlan(plan)));
     END
     panic("MIR::BgBlock must carry a structural emission plan, got {}");
 }
@@ -835,7 +835,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN mIREmitter__sharded_map_template(self: MIREmitter, node: MIREmitterShardedMapNode) RETURNS Auto
+FN mIREmitter__sharded_map_template(self: MIREmitter, node: MIREmitterShardedMapNode) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2519,7 +2519,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "{\nconst ${tmp} = ${val};\nCheatLib.cleanup(@TypeOf(${node.name}), ${alloc}, &${node.name});\n${node.name} = ${tmp};\n}";
 }
 END
-PRIVATE FN mIREmitter__reassign_success_only_expr(self: MIREmitter, node: ReassignWithCleanup) RETURNS Auto
+PRIVATE FN mIREmitter__reassign_success_only_expr(self: MIREmitter, node: ReassignWithCleanup) RETURNS ?Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
