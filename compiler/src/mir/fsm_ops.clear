@@ -312,7 +312,7 @@ FN fsmOps__referenced_state_fields(ops_or_expr: []OpsOrExprItem) RETURNS ![]Stri
   MUTABLE out = List[];
   fsmOps__walk(WalkValue{ OpsArrayValue: COPY ops_or_expr }, %(node: ?WalkValue) USE(MUTABLE out) -> {
   IF node? IS_A StateField AS state_field THEN
-      &out.append(KEEP state_field.name);
+      &out.append(COPY state_field.name);
   END
   rubyToClearVoid()
   });

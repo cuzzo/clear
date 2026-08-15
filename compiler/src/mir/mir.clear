@@ -128,19 +128,19 @@ STRUCT MIRParam {
 }
 
 PUB FN mIRParam__name(self: MIRParam) RETURNS Any@multiowned ->
-  KEEP self.name;
+  COPY self.name;
 END
 PUB FN mIRParam__zig_type(self: MIRParam) RETURNS Any@multiowned ->
-  KEEP self.zig_type;
+  COPY self.zig_type;
 END
 PUB FN mIRParam__pointer_passed(self: MIRParam) RETURNS Any@multiowned ->
   KEEP self.pointer_passed;
 END
 PUB FN mIRParam__lowered_node_id(self: MIRParam) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRParam__ownership_consumption(self: MIRParam) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 
 FN param__mir?(self: MIRParam) RETURNS Bool ->
@@ -212,7 +212,7 @@ PUB STRUCT MIRStructDef {
 }
 
 PUB FN mIRStructDef__name(self: MIRStructDef) RETURNS Any@multiowned ->
-  KEEP self.name;
+  COPY self.name;
 END
 PUB FN mIRStructDef__fields(self: MIRStructDef) RETURNS Any@multiowned ->
   KEEP self.fields;
@@ -221,19 +221,19 @@ PUB FN mIRStructDef__methods(self: MIRStructDef) RETURNS Any@multiowned ->
   KEEP self.methods;
 END
 PUB FN mIRStructDef__visibility(self: MIRStructDef) RETURNS Any@multiowned ->
-  KEEP self.visibility;
+  COPY self.visibility;
 END
 PUB FN mIRStructDef__lowered_node_id(self: MIRStructDef) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRStructDef__ownership_consumption(self: MIRStructDef) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 PUB FN mIRStructDef__source_column(self: MIRStructDef) RETURNS Any@multiowned ->
-  KEEP self.source_column;
+  COPY self.source_column;
 END
 PUB FN mIRStructDef__source_line(self: MIRStructDef) RETURNS Any@multiowned ->
-  KEEP self.source_line;
+  COPY self.source_line;
 END
 
 FN structDef__body_slots(MUTABLE self: MIRStructDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
@@ -379,25 +379,25 @@ PUB STRUCT MIREnumDef {
 }
 
 PUB FN mIREnumDef__name(self: MIREnumDef) RETURNS Any@multiowned ->
-  KEEP self.name;
+  COPY self.name;
 END
 PUB FN mIREnumDef__variants(self: MIREnumDef) RETURNS Any@multiowned ->
   KEEP self.variants;
 END
 PUB FN mIREnumDef__visibility(self: MIREnumDef) RETURNS Any@multiowned ->
-  KEEP self.visibility;
+  COPY self.visibility;
 END
 PUB FN mIREnumDef__lowered_node_id(self: MIREnumDef) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIREnumDef__ownership_consumption(self: MIREnumDef) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 PUB FN mIREnumDef__source_column(self: MIREnumDef) RETURNS Any@multiowned ->
-  KEEP self.source_column;
+  COPY self.source_column;
 END
 PUB FN mIREnumDef__source_line(self: MIREnumDef) RETURNS Any@multiowned ->
-  KEEP self.source_line;
+  COPY self.source_line;
 END
 
 FN enumDef__name(self: MIREnumDef) RETURNS EnumDefReturnValue ->
@@ -1120,7 +1120,7 @@ PUB STRUCT MIRDestructureTarget {
 }
 
 PUB FN mIRDestructureTarget__name(self: MIRDestructureTarget) RETURNS Any@multiowned ->
-  KEEP self.name;
+  COPY self.name;
 END
 PUB FN mIRDestructureTarget__declaration_kind(self: MIRDestructureTarget) RETURNS Any@multiowned ->
   KEEP self.declaration_kind;
@@ -1129,10 +1129,10 @@ PUB FN mIRDestructureTarget__annotation(self: MIRDestructureTarget) RETURNS Any@
   KEEP self.annotation;
 END
 PUB FN mIRDestructureTarget__lowered_node_id(self: MIRDestructureTarget) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRDestructureTarget__ownership_consumption(self: MIRDestructureTarget) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 
 FN destructureTarget__mir?(self: MIRDestructureTarget) RETURNS Bool ->
@@ -3036,16 +3036,16 @@ PUB FN mIRDeferStmt__body(self: MIRDeferStmt) RETURNS DeferBody ->
   self.body;
 END
 PUB FN mIRDeferStmt__lowered_node_id(self: MIRDeferStmt) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRDeferStmt__ownership_consumption(self: MIRDeferStmt) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 PUB FN mIRDeferStmt__source_column(self: MIRDeferStmt) RETURNS Any@multiowned ->
-  KEEP self.source_column;
+  COPY self.source_column;
 END
 PUB FN mIRDeferStmt__source_line(self: MIRDeferStmt) RETURNS Any@multiowned ->
-  KEEP self.source_line;
+  COPY self.source_line;
 END
 
 FN deferStmt__initialize(MUTABLE self: MIRDeferStmt, body: DeferBodyInput) RETURNS !Void ->
@@ -3370,19 +3370,19 @@ PUB FN mIRBgBlock__boundary_fact(self: MIRBgBlock) RETURNS ?ExecutionBoundaryFac
   self.boundary_fact;
 END
 PUB FN mIRBgBlock__lowered_node_id(self: MIRBgBlock) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRBgBlock__ownership_consumption(self: MIRBgBlock) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 PUB FN mIRBgBlock__result_type(self: MIRBgBlock) RETURNS ?Type ->
   self.result_type;
 END
 PUB FN mIRBgBlock__source_column(self: MIRBgBlock) RETURNS Any@multiowned ->
-  KEEP self.source_column;
+  COPY self.source_column;
 END
 PUB FN mIRBgBlock__source_line(self: MIRBgBlock) RETURNS Any@multiowned ->
-  KEEP self.source_line;
+  COPY self.source_line;
 END
 
 FN bgBlock__initialize(MUTABLE self: MIRBgBlock, code: BgBlockPlan, captures_value: {String}Type, run_body: []Emittable, fsm_structure: ?Emittable = NIL) RETURNS !Void ->
@@ -4483,16 +4483,16 @@ PUB FN mIRDoBlock__boundary_facts(self: MIRDoBlock) RETURNS []ExecutionBoundaryF
   self.boundary_facts;
 END
 PUB FN mIRDoBlock__lowered_node_id(self: MIRDoBlock) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRDoBlock__ownership_consumption(self: MIRDoBlock) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 PUB FN mIRDoBlock__source_column(self: MIRDoBlock) RETURNS Any@multiowned ->
-  KEEP self.source_column;
+  COPY self.source_column;
 END
 PUB FN mIRDoBlock__source_line(self: MIRDoBlock) RETURNS Any@multiowned ->
-  KEEP self.source_line;
+  COPY self.source_line;
 END
 
 FN doBlock__initialize(MUTABLE self: MIRDoBlock, code: DoBlockPlan, branch_bodies: [][]Emittable) RETURNS Void ->
@@ -8158,10 +8158,10 @@ PUB FN mIRMethodCall__owned_result_alloc(self: MIRMethodCall) RETURNS ?String@sy
   self.owned_result_alloc;
 END
 PUB FN mIRMethodCall__lowered_node_id(self: MIRMethodCall) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRMethodCall__ownership_consumption(self: MIRMethodCall) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 PUB FN mIRMethodCall__result_type(self: MIRMethodCall) RETURNS ?Type ->
   self.result_type;
@@ -8522,10 +8522,10 @@ PUB FN mIRBinOp__right(self: MIRBinOp) RETURNS Emittable ->
   self.right;
 END
 PUB FN mIRBinOp__lowered_node_id(self: MIRBinOp) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRBinOp__ownership_consumption(self: MIRBinOp) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 
 FN binOp__child_exprs(self: MIRBinOp) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -8598,10 +8598,10 @@ PUB FN mIRUnaryOp__operand(self: MIRUnaryOp) RETURNS Emittable ->
   self.operand;
 END
 PUB FN mIRUnaryOp__lowered_node_id(self: MIRUnaryOp) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRUnaryOp__ownership_consumption(self: MIRUnaryOp) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 
 FN unaryOp__child_exprs(self: MIRUnaryOp) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -9709,10 +9709,10 @@ PUB FN mIRBlockExpr__lazy_boundary(self: MIRBlockExpr) RETURNS ?Bool ->
   self.lazy_boundary;
 END
 PUB FN mIRBlockExpr__lowered_node_id(self: MIRBlockExpr) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRBlockExpr__ownership_consumption(self: MIRBlockExpr) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 PUB FN mIRBlockExpr__result_type(self: MIRBlockExpr) RETURNS ?Type ->
   self.result_type;
@@ -9892,10 +9892,10 @@ PUB FN mIRCast__method(self: MIRCast) RETURNS Any@multiowned ->
   KEEP self.method;
 END
 PUB FN mIRCast__lowered_node_id(self: MIRCast) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRCast__ownership_consumption(self: MIRCast) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 
 FN cast__child_exprs(self: MIRCast) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -11084,10 +11084,10 @@ PUB FN mIROptionalUnwrap__expr(self: MIROptionalUnwrap) RETURNS Emittable ->
   self.expr;
 END
 PUB FN mIROptionalUnwrap__lowered_node_id(self: MIROptionalUnwrap) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIROptionalUnwrap__ownership_consumption(self: MIROptionalUnwrap) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 
 FN optionalUnwrap__child_exprs(self: MIROptionalUnwrap) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -11353,10 +11353,10 @@ PUB FN mIRRangeLit__elem_type(self: MIRRangeLit) RETURNS Any@multiowned ->
   KEEP self.elem_type;
 END
 PUB FN mIRRangeLit__lowered_node_id(self: MIRRangeLit) RETURNS Any@multiowned ->
-  KEEP self.lowered_node_id;
+  COPY self.lowered_node_id;
 END
 PUB FN mIRRangeLit__ownership_consumption(self: MIRRangeLit) RETURNS Any@multiowned ->
-  KEEP self.ownership_consumption;
+  COPY self.ownership_consumption;
 END
 PUB FN mIRRangeLit__result_type(self: MIRRangeLit) RETURNS ?Type ->
   self.result_type;
