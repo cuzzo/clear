@@ -20,7 +20,7 @@ PRIVATE FN fsmWrapperEmitter__render_io_body(body: FsmIoBody) RETURNS !String ->
   MUTABLE mir_emitter = mIREmitter__new();
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
-  &parts.append(TRY (fsmWrapperEmitter__render_ctx_struct(body.ctx_struct, &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_ctx_struct(body.ctx_struct, mir_emitter)));
   &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
@@ -30,7 +30,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_body(body: FsmB1Body) RETURNS !String ->
   MUTABLE mir_emitter = mIREmitter__new();
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
-  &parts.append(TRY (fsmWrapperEmitter__render_b1_ctx_struct(body.ctx_struct, &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_b1_ctx_struct(body.ctx_struct, mir_emitter)));
   &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
@@ -43,12 +43,12 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, mir_emitte
   &parts.append("        rt: *Runtime,");
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
-  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, &mir_emitter));
+  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
   IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
   &parts.append("");
-  &parts.append(TRY (fsmWrapperEmitter__render_run_body(s.run_body, &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_run_body(s.run_body, mir_emitter)));
   &parts.append("");
   &parts.append(fsmWrapperEmitter__render_b1_resume_fn(s.run_body.ctx_id()));
   &parts.append("");
@@ -76,7 +76,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_resume_fn(ctx_id: Int64) RETURNS String 
   RETURN (("fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n    if (runBody(__ctx_${ctx_id.toString()})) |_| {} else |err| {\n        __ctx_${ctx_id.toString()}.inner.result = err;\n    }\n    __ctx_${ctx_id.toString()}.inner.wg.done();\n    return .{ .Done = {} };\n}\n".chomp()).split("\n") |> SELECT "        ${_}").join("").chomp();
 END
 PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions: []FsmDestroyAction, mir_emitter: MIREmitter) RETURNS String ->
-  MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, &mir_emitter);
+  MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, mir_emitter);
   MUTABLE extra: String = "";
   IF !(fsmWrapperEmitter__empty?(extra_zig)) THEN
     extra = (((extra_zig.split("\n") |> SELECT "    ${_.chomp()}").join("\n")) + "\n");
@@ -95,7 +95,7 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, mir_emitter: MI
   &parts.append("        rt: *Runtime,");
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
-  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, &mir_emitter));
+  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
   IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
@@ -108,9 +108,9 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, mir_emitter: MI
   &parts.append("        ${_}");
   END
   &parts.append("");
-  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step0, &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step0, mir_emitter)));
   &parts.append("");
-  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step1, &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step1, mir_emitter)));
   &parts.append("");
   &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_dispatch(s.resume_fn)), 8));
   &parts.append("");
@@ -145,7 +145,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_body(body: FsmGenericBody) RETURNS 
   MUTABLE mir_emitter = mIREmitter__new();
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
-  &parts.append(TRY (fsmWrapperEmitter__render_generic_ctx_struct(body.ctx_struct, &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_generic_ctx_struct(body.ctx_struct, mir_emitter)));
   &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
@@ -158,7 +158,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
   &parts.append("        rt: *Runtime,");
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
-  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, &mir_emitter));
+  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
   IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
@@ -172,7 +172,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
   END
   &parts.append("");
   FOR _ IN ((s.member_fns OR List[])) DO
-  &parts.append(TRY (fsmWrapperEmitter__render_member_fn(_, &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_member_fn(_, mir_emitter)));
   &parts.append("");
   END
   IF !(s.dispatch IS_A FsmDispatch) THEN
@@ -320,7 +320,7 @@ PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: St
     &parts.append("    ${s.ctx_var}_task.profile_dispatch = ${s.profile_dispatch_id};");
   END
   &parts.append("    ${s.ctx_var}.* = .{");
-  &parts.append(fsmWrapperEmitter__indent_block(fsmWrapperEmitter__render_struct_init_fields(s.ctx_init_fields, &mir_emitter), 8));
+  &parts.append(fsmWrapperEmitter__indent_block(fsmWrapperEmitter__render_struct_init_fields(s.ctx_init_fields, mir_emitter), 8));
   &parts.append("    };");
   &parts.append("    ${s.ctx_var}.task = ${s.ctx_var}_task;");
   &parts.append("    ${s.ctx_var}.rt = try CheatHeader.allocFsmTaskRuntime(${s.ctx_var}_task, ${s.rt_name});");
@@ -402,9 +402,9 @@ PRIVATE FN fsmWrapperEmitter__render_destroy_actions(ctx_id: Int64, destroy_acti
     RETURN "";
   END
   RETURN CAST(fsmWrapperEmitter__with_rt_name(&mir_emitter, "__ctx_${ctx_id.toString()}.rt", %() USE(ctx_id, destroy_actions, mir_emitter) -> ((destroy_actions |> SELECT PARTIAL MATCH _ START
-    FsmDestroyAction.FsmDestroyCleanup AS fsm_destroy_cleanup -> fsmWrapperEmitter__render_destroy_cleanup_action(fsm_destroy_cleanup, &mir_emitter),
-    FsmDestroyAction.FsmDestroyStmt AS fsm_destroy_stmt -> fsmWrapperEmitter__render_destroy_stmt_action(fsm_destroy_stmt, &mir_emitter),
-    FsmDestroyAction.FsmDestroyLockRelease AS fsm_destroy_lock_release -> fsmWrapperEmitter__render_destroy_lock_action(ctx_id, fsm_destroy_lock_release, &mir_emitter),
+    FsmDestroyAction.FsmDestroyCleanup AS fsm_destroy_cleanup -> fsmWrapperEmitter__render_destroy_cleanup_action(fsm_destroy_cleanup, mir_emitter),
+    FsmDestroyAction.FsmDestroyStmt AS fsm_destroy_stmt -> fsmWrapperEmitter__render_destroy_stmt_action(fsm_destroy_stmt, mir_emitter),
+    FsmDestroyAction.FsmDestroyLockRelease AS fsm_destroy_lock_release -> fsmWrapperEmitter__render_destroy_lock_action(ctx_id, fsm_destroy_lock_release, mir_emitter),
   END) |> WHERE _ != NIL).join("\n")) AS String);
 END
 PRIVATE FN fsmWrapperEmitter__render_destroy_cleanup_action(action: FsmDestroyCleanup, mir_emitter: MIREmitter) RETURNS !String ->

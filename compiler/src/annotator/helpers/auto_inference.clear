@@ -804,10 +804,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         FOR _ IN array DO
         shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(_), block);
         END
-      ELSE_IF (node_value == Hash) THEN
-        FOR _ IN node_value.values() DO
-        shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, _, block);
-        END
       ELSE
         FOR rtoc_walk_child_18 IN rtocChildrenAutoInferenceWalkNode(node_value) DO
         shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, rtoc_walk_child_18, block);
@@ -840,10 +836,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF node_value IS_A []Node AS array THEN
         FOR _ IN array DO
         TRY (shapeEvidenceCollector__walk(rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(_), name_map));
-        END
-      ELSE_IF (node_value == Hash) THEN
-        FOR _ IN node_value.values() DO
-        TRY (shapeEvidenceCollector__walk(rtoc_self_view, _, name_map));
         END
       ELSE
         FOR rtoc_walk_child_19 IN rtocChildrenAutoInferenceWalkNode(node_value) DO
@@ -1002,10 +994,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         FOR _ IN array DO
         operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(_), block);
         END
-      ELSE_IF (node_value == Hash) THEN
-        FOR _ IN node_value.values() DO
-        operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, _, block);
-        END
       ELSE
         FOR rtoc_walk_child_20 IN rtocChildrenAutoInferenceWalkNode(node_value) DO
         operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, rtoc_walk_child_20, block);
@@ -1044,10 +1032,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF node_value IS_A []Node AS array THEN
         FOR _ IN array DO
         operatorEvidenceCollector__walk_binops(rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(_), name_to_slot, fn_value);
-        END
-      ELSE_IF (node_value == Hash) THEN
-        FOR _ IN node_value.values() DO
-        operatorEvidenceCollector__walk_binops(rtoc_self_view, _, name_to_slot, fn_value);
         END
       ELSE
         FOR rtoc_walk_child_21 IN rtocChildrenAutoInferenceWalkNode(node_value) DO
