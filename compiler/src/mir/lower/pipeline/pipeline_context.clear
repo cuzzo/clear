@@ -80,8 +80,8 @@ PUB FN pipelineContextState__placeholder_identifier?(self: PipelineContextState,
     DEFAULT -> FALSE
   END;
 END
-PUB FN pipelineContextState__record_soa_field(MUTABLE self: PipelineContextState, field: Field) RETURNS Void ->
-  &self.soa_needed_fields.insert(castFieldToPipelineSoaFieldSetItem(COPY field));
+PUB FN pipelineContextState__record_soa_field(MUTABLE self: PipelineContextState, field: String) RETURNS Void ->
+  &self.soa_needed_fields.insert(PipelineSoaFieldSetItem{ StringValue: COPY field });
 END
 PUB STRUCT PipelinePlaceholderRewriter {
   context: PipelineContextState
