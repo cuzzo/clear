@@ -42,11 +42,8 @@ FN emit__build_trampoline(fn_node: FunctionDef, lowering: LoweringProtocol) RETU
   MUTABLE rtoc_indexed_i_2 = 0;
   WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length() DO
     &rtoc_indexed_output_3.append({
-  MUTABLE param: ?ThunkParamFact = COPY params[rtoc_indexed_i_2];
-  IF (param == NIL) THEN
-      panic("thunk arg/param count mismatch in '{}'");
-  END
-  emit__frame_init(param.name, emit__lower_frame_expr(rtoc_indexed_items_1[rtoc_indexed_i_2], lowering, context))
+  MUTABLE param: ThunkParamFact = COPY UNWRAP (params[rtoc_indexed_i_2]);
+  emit__frame_init(param.name, emit__lower_frame_expr(UNWRAP (rtoc_indexed_items_1[rtoc_indexed_i_2]), lowering, context))
   });
     rtoc_indexed_i_2 = rtoc_indexed_i_2 + 1;
   END
