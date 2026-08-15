@@ -22788,13 +22788,7 @@ FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   panic("Invalid cast to TypeConstructionInput");
 END
 FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN TypeTypeInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN TypeTypeInput{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN TypeTypeInput{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to TypeTypeInput");
-  END
-  panic("Invalid cast to TypeTypeInput");
+  RETURN TypeTypeInput{ Type: COPY value };
 END
 FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
   PARTIAL MATCH value START
