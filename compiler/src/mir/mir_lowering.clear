@@ -1387,12 +1387,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_owned = (claimed OR mIRLowering__owned_branch_source_owns?(rtoc_self_view, mir));
     MUTABLE source_cleanup = NIL;
     IF source_owned THEN
-      source_cleanup = cleanupEntry__build(:uniform, source_alloc, FALSE, {:zig_type: TRY (type__zig_type(type_info))});
+      source_cleanup = cleanupEntry__build(:uniform, source_alloc, FALSE, NIL, TRY (type__zig_type(type_info)));
       TRY (mIRLowering__build_drop_entry_mut(rtoc_self_view, &source_cleanup, type_info, NIL));
     END
     MUTABLE source = BindingMaterialization{ name: COPY source_name, expr: COPY mir, alloc: COPY source_alloc, type_info: COPY type_info, mutable: FALSE, cleanup_entry: source_cleanup, ownership_tracked: source_owned, annotation: NIL, suppression: NIL, cleanup_mode: :normal, scope: NIL };
     MUTABLE copied_expr = (TRY (mIRLowering__retain_handle_for_destination(rtoc_self_view, Emittable{ Ident: COPY Ident{ name: source_name, lowered_node_id: NIL, ownership_consumption: NIL } }, type_info)) OR_ELSE Emittable{ DeepCopy: COPY DeepCopy{ source: Emittable{ Ident: COPY Ident{ name: source_name, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_type: COPY TRY (type__zig_type(type_info)), elem_type: NIL, strategy: :full_value, alloc: COPY dest_alloc, copy_shape: COPY deepCopy__copy_shape_for_zig_type(TRY (type__zig_type(type_info))), type_info: COPY type_info, lowered_node_id: NIL, ownership_consumption: NIL } });
-    MUTABLE copy_cleanup = cleanupEntry__build(:uniform, dest_alloc, TRUE, {:zig_type: TRY (type__zig_type(type_info))});
+    MUTABLE copy_cleanup = cleanupEntry__build(:uniform, dest_alloc, TRUE, NIL, TRY (type__zig_type(type_info)));
     TRY (mIRLowering__build_drop_entry_mut(rtoc_self_view, &copy_cleanup, type_info, NIL));
     MUTABLE copied = BindingMaterialization{ name: COPY copy_name, expr: COPY copied_expr, alloc: COPY dest_alloc, type_info: COPY type_info, mutable: FALSE, cleanup_entry: copy_cleanup, cleanup_mode: :err, annotation: NIL, suppression: NIL, scope: NIL, ownership_tracked: TRUE };
     MUTABLE body: []Stmt = (TRY (bindingMaterialization__statements(source)) + TRY (bindingMaterialization__statements(copied)));
@@ -8115,14 +8115,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       panic("RC hoist cleanup: missing type info for {}")
     END;
     MUTABLE zig_t = TRY (type__zig_type(ti));
-    RETURN cleanupEntry__build(:rc, :heap, FALSE, {:zig_type: zig_t, :rc_variant: :standard, :rc_alloc: :heap});
+    MUTABLE rc_entry = cleanupEntry__build(:rc, :heap, FALSE, NIL, zig_t);
+    rc_entry.rc_variant = :standard;
+    rc_entry.rc_alloc = :heap;
+    RETURN rc_entry;
 }
 END
 PRIVATE FN mIRLowering__uniform_cleanup_entry(self: MIRLowering, zig_type: String, alloc: String@symbol = :heap) RETURNS CleanupEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN cleanupEntry__build(:uniform, alloc, FALSE, {:zig_type: zig_type});
+    RETURN cleanupEntry__build(:uniform, alloc, FALSE, NIL, zig_type);
 }
 END
 PRIVATE FN mIRLowering__heap_string_entry(self: MIRLowering, alloc: String@symbol = :heap) RETURNS CleanupEntry@multiowned
@@ -14709,7 +14712,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       :heap
     END)
     END;
-    MUTABLE collect_cleanup = cleanupEntry__build(:uniform, collect_source_alloc, FALSE, {:zig_type: acc_zig});
+    MUTABLE collect_cleanup = cleanupEntry__build(:uniform, collect_source_alloc, FALSE, NIL, acc_zig);
     RETURN MIRBlockExpr{ label: label, body: COPY CAST(Tuple{Let{ name: Name{ StringValue: COPY collect_var }, init: COPY left, mutable: FALSE, annotation: COPY ft, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Cleanup{ name: collect_var, cleanup_entry: collect_cleanup, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, Let{ name: Name{ StringValue: COPY val_var }, init: Emittable{ MIRMethodCall: COPY mIRLowering__smooth_collect_call(rtoc_self_view, Emittable{ Ident: COPY Ident{ name: collect_var, lowered_node_id: NIL, ownership_consumption: NIL } }, collect_method, collect_args, collect_type, collect_alloc_fact) }, mutable: FALSE, annotation: COPY collect_type, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: val_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Let, Cleanup, Let, BreakStmt>), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 }
 END
@@ -15237,7 +15240,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (lifecycle.drop_strategy == :resource_close) THEN
       entry_branch_value = cleanupEntry__build(:resource, :heap, FALSE, {:resource_close_plan: UNWRAP (lifecycle.resource_close_plan)});
     ELSE
-      entry_branch_value = cleanupEntry__build(:uniform, :heap, FALSE, {:zig_type: TRY (type__zig_type(type_info))});
+      entry_branch_value = cleanupEntry__build(:uniform, :heap, FALSE, NIL, TRY (type__zig_type(type_info)));
     END
     MUTABLE entry: CleanupEntry = entry_branch_value?;
     RETURN cleanupEntry__set_lifecycle_plan_mut(&entry, lifecycle);
@@ -19964,7 +19967,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE source_name = "__for_src_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_741 = mIRLowering__lowering_counters(rtoc_self_view);
       mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_741) }}";
       MUTABLE source_alloc = mIRLowering__for_each_owned_collection_source_alloc(rtoc_self_view, coll, ct);
-      MUTABLE entry = cleanupEntry__build(:uniform, source_alloc, FALSE, {:zig_type: TRY (type__zig_type(ct))});
+      MUTABLE entry = cleanupEntry__build(:uniform, source_alloc, FALSE, NIL, TRY (type__zig_type(ct)));
       collection_setup = ruby_array_concat_Emittable(collection_setup, CAST(TRY (bindingMaterialization__statements((BindingMaterialization{ name: COPY source_name, expr: COPY CAST(coll AS Emittable), alloc: COPY source_alloc, type_info: COPY ct, mutable: FALSE, cleanup_entry: entry, annotation: NIL, suppression: NIL, cleanup_mode: :normal, scope: NIL, ownership_tracked: TRUE }))) AS []Emittable));
       coll = Ident{ name: source_name, lowered_node_id: NIL, ownership_consumption: NIL };
     END

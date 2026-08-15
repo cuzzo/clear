@@ -193,7 +193,7 @@ PRIVATE FN pipelineListLowerer__lower_unnest(self: PipelineListLowerer, site: Pi
   MUTABLE inner_owned = (ownershipEffect__of(expr_mir).produces_owned OR expr_mir IS_A MakeList);
   MUTABLE inner_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } );
   IF inner_owned THEN
-    MUTABLE entry = cleanupEntry__build(:uniform, :heap, FALSE, {:zig_type: TRY (type__zig_type(inner_list_ti))});
+    MUTABLE entry = cleanupEntry__build(:uniform, :heap, FALSE, NIL, TRY (type__zig_type(inner_list_ti)));
     &inner_stmts.append(Emittable{ AllocMark: COPY AllocMark{ name: "unn_inner", alloc: :heap, type_info: COPY inner_list_ti, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     &inner_stmts.append(Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY "unn_inner" }, init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
     &inner_stmts.append(Emittable{ Cleanup: COPY Cleanup{ name: "unn_inner", cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
@@ -319,7 +319,7 @@ PRIVATE FN pipelineListLowerer__right_cleanup_stmts(self: PipelineListLowerer, r
   IF !(right_owns) THEN
     RETURN CAST(( { MUTABLE rtoc_empty_list_17: []Emittable = List[]; rtoc_empty_list_17 } ) AS []Emittable);
   END
-  RETURN CAST([Emittable{ ErrCleanup: COPY ErrCleanup{ name: "__match", cleanup_entry: COPY cleanupEntry__build(:uniform, alloc, TRUE, {:zig_type: "?${right_zig}"}), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
+  RETURN CAST([Emittable{ ErrCleanup: COPY ErrCleanup{ name: "__match", cleanup_entry: COPY cleanupEntry__build(:uniform, alloc, TRUE, NIL, "?${right_zig}"), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 END
 FN castEmittableToBreakStmt(value: Emittable) RETURNS BreakStmt ->
   IF value IS_A BreakStmt AS cast_payload THEN

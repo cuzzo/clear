@@ -10,7 +10,7 @@ PUB STRUCT OwnedCompositeMaterialization {
 }
 
 PUB FN ownedCompositeMaterialization__cleanup_entry(self: OwnedCompositeMaterialization) RETURNS !CleanupEntry@multiowned ->
-  RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_1 = (cleanupEntry__build(:uniform, self.alloc, FALSE, {:zig_type: TRY (type__zig_type(self.type_info))}));
+  RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_1 = (cleanupEntry__build(:uniform, self.alloc, FALSE, NIL, TRY (type__zig_type(self.type_info))));
   cleanupEntry__set_lifecycle_plan_mut(&rtoc_mutable_receiver_1, self.lifecycle_plan) };
 END
 PUB STRUCT MaterializationPacket {

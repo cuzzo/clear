@@ -182,7 +182,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fact = rtoc_self_view.host.materializer_alloc_mark_fact(source_mir, src_name, (forced_alloc OR_ELSE :heap), &list_node.full_type_mut(), NIL, "pipeline allocation", !((forced_alloc == NIL)));
     IF fact THEN
       &source_prefix.append(fact.mark());
-      source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, {:zig_type: TRY (type__zig_type((&list_node.full_type_mut())))}), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type((&list_node.full_type_mut())))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     rtoc_self_view.host.materializer_set_current_label(label);
     MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, &list_node.full_type_mut(), TRUE));
@@ -280,7 +280,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       :function
     END, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    MUTABLE entry = cleanupEntry__build(:uniform, alloc, TRUE, {:zig_type: zig_type});
+    MUTABLE entry = cleanupEntry__build(:uniform, alloc, TRUE, NIL, zig_type);
     RETURN CAST([Emittable{ AllocMark: COPY mark }, Emittable{ Let: COPY Let{ name: Name{ StringValue: COPY name }, init: Emittable{ DeepCopy: COPY DeepCopy{ source: COPY source, zig_type: COPY zig_type, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY zig_type })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 }
 END
@@ -297,11 +297,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         :iteration
       END;
       MUTABLE src_name = COPY CAST(fact.mark().name() AS String);
-      MUTABLE src_entry = cleanupEntry__build(:uniform, fact.alloc(), FALSE, {:zig_type: ((IF owned_type != NIL THEN
+      MUTABLE src_entry = cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, ((IF owned_type != NIL THEN
         TRY (type__zig_type(owned_type))
       ELSE
         NIL
-      END) OR_ELSE pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr))});
+      END) OR_ELSE pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr)));
       MUTABLE copy = DeepCopy{ source: Ident{ name: COPY src_name, lowered_node_id: NIL, ownership_consumption: NIL }, zig_type: ( { MUTABLE rtoc_optional_or_source_2: ?String = (IF owned_type != NIL THEN
         TRY (type__zig_type(owned_type))
       ELSE
@@ -316,11 +316,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         :function
       END;
       MUTABLE temp_name = COPY CAST(fact.mark().name() AS String);
-      MUTABLE entry = cleanupEntry__build(:uniform, fact.alloc(), TRUE, {:zig_type: ((IF owned_type != NIL THEN
+      MUTABLE entry = cleanupEntry__build(:uniform, fact.alloc(), TRUE, NIL, ((IF owned_type != NIL THEN
         TRY (type__zig_type(owned_type))
       ELSE
         NIL
-      END) OR_ELSE pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr))});
+      END) OR_ELSE pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr)));
       RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY ([fact.mark(), Let{ name: Name{ StringValue: COPY temp_name }, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, ErrCleanup{ name: COPY temp_name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(Ident{ name: COPY temp_name, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY temp_name, target: :owned_sink, target_alloc: COPY alloc, move_guarded: TRUE })))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(value_expr AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
@@ -342,7 +342,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fact = rtoc_self_view.host.materializer_alloc_mark_fact(source_mir, src_name, :heap, &lhs.full_type_mut());
     IF fact THEN
       &source_prefix.append(fact.mark());
-      source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, {:zig_type: TRY (type__zig_type(lhs_type))}), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type(lhs_type))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     rtoc_self_view.host.materializer_set_current_label(label);
     MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, lhs_type));

@@ -174,7 +174,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fact) THEN
         RETURN NIL;
     END
-    MUTABLE entry = cleanupEntry__build(:uniform, fact.alloc, FALSE, {:zig_type: TRY (type__zig_type(type_info))});
+    MUTABLE entry = cleanupEntry__build(:uniform, fact.alloc, FALSE, NIL, TRY (type__zig_type(type_info)));
     CAST(Tuple{fact.mark, entry} AS Tuple<AllocMark, CleanupEntry>)
     }, next_index_name: COPY %() USE(rtoc_self_view) -> {
     rtoc_self_view.each_idx_counter = (rtoc_self_view.each_idx_counter + 1);
@@ -718,7 +718,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         pushed = Emittable{ Ident: COPY ident_mutable };
       ELSE
         transfer_name = "__select_push${id.toString()}";
-        MUTABLE entry = (TRY (cleanupClassifier__owned_value_entry(item_type, pipelineHost__pipeline_schema_lookup(rtoc_self_view))) OR_ELSE cleanupEntry__build(:uniform, :heap, TRUE, {:zig_type: TRY (type__zig_type(item_type))}));
+        MUTABLE entry = (TRY (cleanupClassifier__owned_value_entry(item_type, pipelineHost__pipeline_schema_lookup(rtoc_self_view))) OR_ELSE cleanupEntry__build(:uniform, :heap, TRUE, NIL, TRY (type__zig_type(item_type))));
         entry = cleanupEntry__with_alloc(entry, :heap);
         cleanupEntry__mark_moved_guard_mut(&entry);
         &push_stmts.append(Emittable{ AllocMark: COPY AllocMark{ name: UNWRAP (COPY transfer_name), alloc: :heap, type_info: COPY item_type, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
