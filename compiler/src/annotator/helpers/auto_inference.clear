@@ -695,12 +695,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE pair: MapPairResolution@multiowned = (by_decl[rtoc_each_5] OR_ELSE CAST(panic("missing hash key") AS MapPairResolution@multiowned));
     MUTABLE key_res: ?Resolution = pair.key;
     MUTABLE val_res: ?Resolution = pair.value;
-    IF !(((key_res != NIL) AND (val_res != NIL))) THEN
+    IF ((key_res == NIL) OR (val_res == NIL)) THEN
         CONTINUE;
     END
-    MUTABLE decl: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(key_res.slot.decl_node);
-    MUTABLE key_type = key_res.type;
-    MUTABLE val_type = val_res.type;
+    MUTABLE key_resolution: Resolution = COPY UNWRAP (key_res);
+    MUTABLE val_resolution: Resolution = COPY UNWRAP (val_res);
+    MUTABLE decl: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(key_resolution.slot.decl_node);
+    MUTABLE key_type = key_resolution.type;
+    MUTABLE val_type = val_resolution.type;
     MUTABLE k_sym = type__resolved(key_type);
     MUTABLE v_sym = type__resolved(val_type);
     declNode__set_type(&decl, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${k_sym}, ${v_sym}>") })));
