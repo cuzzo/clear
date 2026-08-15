@@ -50,7 +50,7 @@ PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String
   END
   RETURN frozenCleanupFacts__build(entries);
 END
-PUB FN frozenCleanupFacts__build(entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
+PUB FN frozenCleanupFacts__build(MUTABLE entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
   RETURN FrozenCleanupFacts{ entries_by_place: entries };
 END
 PUB FN frozenCleanupFacts__empty?(self: FrozenCleanupFacts) RETURNS Bool EFFECTS REENTRANT ->
@@ -132,7 +132,7 @@ PUB STRUCT CleanupClassificationPlan {
 PUB FN cleanupClassificationPlan__from_bindings(function_name: String, bindings: {String}CleanupEntry) RETURNS CleanupClassificationPlan EFFECTS REENTRANT ->
   RETURN CleanupClassificationPlan{ function_name: COPY function_name, facts: COPY frozenCleanupFacts__from_bindings(bindings) };
 END
-PUB FN cleanupClassificationPlan__from_function(fn_node: FunctionDef, bindings: {String}CleanupEntry, entries: {PlaceId}CleanupEntry) RETURNS CleanupClassificationPlan EFFECTS REENTRANT ->
+PUB FN cleanupClassificationPlan__from_function(fn_node: FunctionDef, bindings: {String}CleanupEntry, MUTABLE entries: {PlaceId}CleanupEntry) RETURNS CleanupClassificationPlan EFFECTS REENTRANT ->
   RETURN CleanupClassificationPlan{ function_name: COPY CAST(fn_node.name AS String), facts: COPY frozenCleanupFacts__from_function(fn_node, bindings, &entries) };
 END
 PUB FN cleanupClassificationPlan__empty?(self: CleanupClassificationPlan) RETURNS Bool EFFECTS REENTRANT ->

@@ -73,7 +73,7 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, counter: HoistCounte
   WHILE (i < body.length()) DO
     MUTABLE stmt = COPY UNWRAP (body[i]);
     MUTABLE hoists: []VarDecl = ( { MUTABLE rtoc_empty_list_3: []VarDecl = List[]; rtoc_empty_list_3 } );
-    TRY (hoist__collect_stmt_hoists_mut(&stmt, hoists, counter, schema_lookup, return_type));
+    TRY (hoist__collect_stmt_hoists_mut(&stmt, &hoists, counter, schema_lookup, return_type));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < hoists.length() DO
   &body.insert((i + rtoc_idx), hoists[rtoc_idx]?);
