@@ -51,7 +51,7 @@ FN autoSlotId__hash(self: AutoSlotId) RETURNS Int64
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE combined: Int64 = (CAST(rtoc_self_view.kind AS String)).length();
     IF rtoc_self_view.fn_name EXISTS AS fn_name_value THEN
-      combined = ((combined * 31) + fn_name_value.length());
+      combined = ((combined * 31) + fn_name_value.length);
     END
     IF rtoc_self_view.index EXISTS AS index_value THEN
       combined = ((combined * 31) + index_value);
@@ -143,7 +143,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR rtoc_each_3 IN rtoc_self_view.fn_nodes.keys() DO
     MUTABLE fn_value: FunctionDef@multiowned = (rtoc_self_view.fn_nodes[rtoc_each_3] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < fn_value.params.length() DO
+    WHILE rtoc_idx < fn_value.params.length DO
         IF !(autoConstraintCollector__auto?(rtoc_self_view, param__type(fn_value.params[rtoc_idx]?))) THEN
           rtoc_idx = rtoc_idx + 1;
       CONTINUE;
@@ -263,13 +263,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE callee: ?FunctionDef@multiowned = COPY rtoc_self_view.fn_nodes[callee_name];
     IF callee EXISTS AS callee_value THEN
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < callee_value.params.length() DO
+      WHILE rtoc_idx < callee_value.params.length DO
       IF !(autoConstraintCollector__auto?(rtoc_self_view, callee_value.params[rtoc_idx]?.type)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE arg: ?Locatable = NIL;
-      IF (rtoc_idx < call_node.args.length()) THEN
+      IF (rtoc_idx < call_node.args.length) THEN
         arg = COPY call_node.args[rtoc_idx];
       END
       IF arg EXISTS AS arg_value THEN
@@ -415,7 +415,7 @@ PRIVATE FN autoConstraintCollector__empty_hash_lit?(self: AutoConstraintCollecto
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node EXISTS AS node_value THEN
       IF node_value IS_A HashLit AS hash_lit THEN
-        RETURN (hash_lit.pairs.length() == 0);
+        RETURN (hash_lit.pairs.length == 0);
       END
     END
     RETURN FALSE;
@@ -533,12 +533,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       CONTINUE;
     END
     MUTABLE observed = TRY (autoUnifier__collect_observed_types(rtoc_self_view, slot));
-    IF (observed.length() == 1) THEN
+    IF (observed.length == 1) THEN
           MUTABLE type = COPY UNWRAP (observed.first());
           TRY (autoUnifier__stamp_slot_mut(rtoc_self_view, &slot, type));
           resolved[rtoc_each_4] = Resolution{ slot: COPY slot, type: COPY type, sources: COPY slot.sources };
           progress = TRUE;
-    ELSE_IF (observed.length() == 0) THEN
+    ELSE_IF (observed.length == 0) THEN
   
     ELSE
           ambiguous[rtoc_each_4] = Ambiguity{ slot: COPY slot, observed_types: COPY observed, sources: COPY slot.sources };
@@ -563,7 +563,7 @@ PRIVATE FN autoUnifier__collect_observed_types(self: AutoUnifier, slot: Slot) RE
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen: []AutoConstraintCollectorObservedType = ( { MUTABLE rtoc_empty_list_11: []AutoConstraintCollectorObservedType = List[]; rtoc_empty_list_11 } );
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < slot.sources.length() DO
+    WHILE rtoc_idx < slot.sources.length DO
       MUTABLE type_of_fn = rtoc_self_view.type_of;
       MUTABLE t: ?AutoConstraintCollectorObservedType = type_of_fn(UNWRAP (slot.sources[rtoc_idx]));
       IF (t == NIL) THEN
@@ -690,7 +690,7 @@ FN autoUnifier__stamp_map_pairs_mut(self: AutoUnifier, resolved_slots: {AutoSlot
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE by_decl: {Int64}MapPairResolution@multiowned = {};
-    FOR _ IN resolved_slots.values() DO
+    FOR _ IN resolved_slots.values DO
     IF !(((_.slot.shape == :map_key) OR (_.slot.shape == :map_value))) THEN
       CONTINUE;
     END
@@ -744,7 +744,7 @@ FN shapeEvidenceCollector__collect_mut(self: ShapeEvidenceCollector) RETURNS !{A
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN rtoc_self_view.fn_nodes.values() DO
+    FOR _ IN rtoc_self_view.fn_nodes.values DO
     TRY (shapeEvidenceCollector__collect_in_function(rtoc_self_view, _));
     END
     RETURN COPY rtoc_self_view.slots;
@@ -755,7 +755,7 @@ PRIVATE FN shapeEvidenceCollector__collect_in_function(self: ShapeEvidenceCollec
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name_map = TRY (shapeEvidenceCollector__build_name_map(rtoc_self_view, fn_value));
-    IF (name_map.count() == 0) THEN
+    IF (name_map.count == 0) THEN
       RETURN;
     END
     TRY (shapeEvidenceCollector__walk(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode(_) }, name_map));
@@ -857,12 +857,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF slots EXISTS AS slots_value THEN
         MUTABLE args = call.args;
         IF slots_value.list EXISTS AS list_slot THEN
-          IF TRY (intrinsicRegistry__collection_element_evidence_method?(Name{ StringValue: COPY call.name }, args.length())) THEN
+          IF TRY (intrinsicRegistry__collection_element_evidence_method?(Name{ StringValue: COPY call.name }, args.length)) THEN
             MUTABLE list_slot_mutable = KEEP list_slot;
             &list_slot_mutable.sources.append(COPY UNWRAP (args[0]));
           END
         END
-        IF TRY (intrinsicRegistry__map_pair_evidence_method?(Name{ StringValue: COPY call.name }, args.length())) THEN
+        IF TRY (intrinsicRegistry__map_pair_evidence_method?(Name{ StringValue: COPY call.name }, args.length)) THEN
           shapeEvidenceCollector__record_map_pair_evidence(rtoc_self_view, slots_value, args);
         END
       ELSE
@@ -894,7 +894,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(base IS_A Identifier) THEN
         RETURN;
       END
-      MUTABLE slots: ?AutoShapeSlots@multiowned = COPY name_map[base.name()];
+      MUTABLE slots: ?AutoShapeSlots@multiowned = COPY name_map[base.name];
       IF slots EXISTS AS slots_value THEN
         IF slots_value.list EXISTS AS list_value THEN
           ((UNWRAP (list_value)).sources).append(COPY assign.value);
@@ -936,7 +936,7 @@ FN operatorEvidenceCollector__collect_mut(self: OperatorEvidenceCollector) RETUR
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN rtoc_self_view.fn_nodes.values() DO
+    FOR _ IN rtoc_self_view.fn_nodes.values DO
     TRY (operatorEvidenceCollector__collect_in_function(rtoc_self_view, _));
     END
     RETURN COPY rtoc_self_view.evidence;
@@ -956,7 +956,7 @@ PRIVATE FN operatorEvidenceCollector__build_name_map(self: OperatorEvidenceColle
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE map: {String}AutoSlotId@multiowned = {};
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < fn_value.params.length() DO
+    WHILE rtoc_idx < fn_value.params.length DO
       MUTABLE slot_id = autoSlotId__param(fn_value.name, rtoc_idx);
       IF rtoc_self_view.slots.contains?(slot_id) THEN
           map[fn_value.params[rtoc_idx]?.name] = slot_id;
@@ -1025,7 +1025,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF rtoc_self_view.evidence[ret_slot] == NIL THEN
             rtoc_self_view.evidence[ret_slot] = Set[];
           END
-          (rtoc_self_view.evidence[ret_slot])?.insert(return_node.value.op());
+          (rtoc_self_view.evidence[ret_slot])?.insert(return_node.value.op);
         END
         END
         operatorEvidenceCollector__walk_binops(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY return_node.value)] }, name_to_slot, fn_value);
@@ -1053,7 +1053,7 @@ PRIVATE FN operatorEvidenceCollector__record_binop(self: OperatorEvidenceCollect
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_22 = ([binop.left, binop.right]);
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_22.length() DO
+    WHILE rtoc_idx < rtoc_each_items_22.length DO
       IF !(rtoc_each_items_22[rtoc_idx] IS_A Identifier) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;

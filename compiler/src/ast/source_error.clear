@@ -40,7 +40,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE line_num = token_value.line;
         MUTABLE col_num = token_value.column;
         IF rtoc_self_view.source_code EXISTS AS source_code_value THEN
-          IF (source_code_value.length() == 0) THEN
+          IF (source_code_value.length == 0) THEN
             RETURN "[${sourceError__error_type(rtoc_self_view)}]${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (Line ${line_num.toString()})";
           ELSE
             MUTABLE lines = source_code_value.split("\n");

@@ -41,7 +41,7 @@ FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETURNS !
   MUTABLE rtoc_indexed_items_1: []Locatable = plan.recurse_args;
   MUTABLE rtoc_indexed_output_3 = [];
   MUTABLE rtoc_indexed_i_2 = 0;
-  WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length() DO
+  WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length DO
     &rtoc_indexed_output_3.append({
   MUTABLE param: ThunkParamFact = COPY UNWRAP (params[rtoc_indexed_i_2]);
   emit__frame_init(param.name, emit__lower_frame_expr(UNWRAP (rtoc_indexed_items_1[rtoc_indexed_i_2]), lowering, context))
@@ -168,7 +168,7 @@ PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan,
   MUTABLE target_fn = COPY own_plan.target_fn;
   MUTABLE target_args = COPY own_plan.target_args;
   MUTABLE target_params = TRY (emit__function_params(CAST(TRY (emit__find_cycle_member(cf, target_fn)) AS FunctionDef)));
-  IF (target_args.length() != target_params.length()) THEN
+  IF (target_args.length != target_params.length) THEN
     panic("thunk: target arg/param count mismatch for '{}' -> '{}'");
   END
   MUTABLE arg_inits = {
@@ -176,7 +176,7 @@ PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan,
   MUTABLE rtoc_indexed_items_4: []Locatable = target_args;
   MUTABLE rtoc_indexed_output_6 = [];
   MUTABLE rtoc_indexed_i_5 = 0;
-  WHILE rtoc_indexed_i_5 < rtoc_indexed_items_4.length() DO
+  WHILE rtoc_indexed_i_5 < rtoc_indexed_items_4.length DO
     &rtoc_indexed_output_6.append({
   MUTABLE target_param = COPY UNWRAP (target_params[rtoc_indexed_i_5]);
   emit__frame_init(target_param.name, emit__lower_frame_expr(rtoc_indexed_items_4[rtoc_indexed_i_5], lowering, context))

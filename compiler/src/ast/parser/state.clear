@@ -40,7 +40,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE opening_indices: []Int64 = List[];
     MUTABLE closings: []?Int64 = List[];
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < tokens.length() DO
+    WHILE rtoc_idx < tokens.length DO
       &closings.append(NIL);
       IF !((tokens[rtoc_idx]?.type == :CHAR)) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -50,7 +50,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF "([{".contains?(value) THEN
           &opening_chars.append(value);
           &opening_indices.append(COPY rtoc_idx);
-      ELSE_IF !((opening_chars.length() == 0)) THEN
+      ELSE_IF !((opening_chars.length == 0)) THEN
           MUTABLE opening = COPY UNWRAP (opening_chars.last());
           MUTABLE closing = ")]}".substr(UNWRAP ("([{".indexOf(opening)), 1);
           IF !((closing == value)) THEN

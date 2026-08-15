@@ -14,7 +14,7 @@ PUB FN unionPayloadCompatibility__unique_variant(expected_type: Type, actual_typ
     MUTABLE matches: []String@symbol = ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } );
     MUTABLE rtoc_each_items_2 = union_schema.variants.keys();
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_2.length() DO
+    WHILE rtoc_idx < rtoc_each_items_2.length DO
     MUTABLE payload: ?SchemasUnionSchemaVariantValue = COPY union_schema.variants[rtoc_each_items_2[rtoc_idx]?];
     IF !(payload) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -29,7 +29,7 @@ PUB FN unionPayloadCompatibility__unique_variant(expected_type: Type, actual_typ
     END
   rtoc_idx = rtoc_idx + 1;
     END
-    IF (matches.length() == 1) THEN
+    IF (matches.length == 1) THEN
       RETURN COPY ruby_wrap_optional_String_symbol_UnionPayloadCompatibilityReturnValue(matches.first());
     ELSE
       RETURN NIL;

@@ -28,7 +28,7 @@ PUB FN zigType__primitive_numeric_identifier?(name: String) RETURNS Bool ->
   IF !(((name.startsWith?("u") OR name.startsWith?("i")) OR name.startsWith?("f"))) THEN
     RETURN FALSE;
   END
-  RETURN zigType__digits_only?(name.substr(1, (name.length() - 1)));
+  RETURN zigType__digits_only?(name.substr(1, (name.length - 1)));
 END
 PUB FN zigType__float_identifier?(name: String) RETURNS Bool ->
   IF (name.codepointCount() < 2) THEN
@@ -37,7 +37,7 @@ PUB FN zigType__float_identifier?(name: String) RETURNS Bool ->
   IF !(name.startsWith?("f")) THEN
     RETURN FALSE;
   END
-  RETURN zigType__digits_only?(name.substr(1, (name.length() - 1)));
+  RETURN zigType__digits_only?(name.substr(1, (name.length - 1)));
 END
 PUB FN zigType__integer_identifier?(name: String) RETURNS Bool ->
   IF (name.codepointCount() < 2) THEN
@@ -46,7 +46,7 @@ PUB FN zigType__integer_identifier?(name: String) RETURNS Bool ->
   IF !((name.startsWith?("u") OR name.startsWith?("i"))) THEN
     RETURN FALSE;
   END
-  RETURN zigType__digits_only?(name.substr(1, (name.length() - 1)));
+  RETURN zigType__digits_only?(name.substr(1, (name.length - 1)));
 END
 PRIVATE FN zigType__digits_only?(value: String) RETURNS Bool ->
   RETURN regexMatch?(value, "\\A[0-9]+\\z");
@@ -93,7 +93,7 @@ PUB FN zigType__cast_target_type(self: ZigType) RETURNS String ->
 END
 PUB FN zigType__cleanup_storage_type(self: ZigType) RETURNS String ->
   IF zigType__inferred_error_union?(self) THEN
-    RETURN COPY self.source.substr(1, (self.source.length() - 1));
+    RETURN COPY self.source.substr(1, (self.source.length - 1));
   END
   RETURN COPY self.source;
 END

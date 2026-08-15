@@ -107,7 +107,7 @@ FN resourceClosePlan__for_field(self: ResourceClosePlan, field: String) RETURNS 
   RETURN ResourceClosePlan{ actions: COPY mapped_actions };
 END
 FN resourceClosePlan__empty?(self: ResourceClosePlan) RETURNS Bool EFFECTS REENTRANT ->
-  RETURN (self.actions.length() == 0);
+  RETURN (self.actions.length == 0);
 END
 PUB STRUCT ResourceSchema {
   as_type: ?String,
@@ -186,7 +186,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: {String}StructField = {};
     MUTABLE keys = fields.keys();
     MUTABLE i: Int64 = 0;
-    WHILE (i < keys.length()) DO
+    WHILE (i < keys.length) DO
       MUTABLE current_key: String = COPY UNWRAP (keys[i]);
       out[current_key] = CAST(resourceSchema__normalize_field(rtoc_self_view, UNWRAP (fields[current_key])) AS StructField);
       i = (i + 1);
@@ -316,7 +316,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: {String@symbol}TypeTypeInput = {};
     MUTABLE keys = fields.keys();
     MUTABLE i: Int64 = 0;
-    WHILE (i < keys.length()) DO
+    WHILE (i < keys.length) DO
       MUTABLE key: String = COPY UNWRAP (keys[i]);
       out[key] = COPY UNWRAP (fields[key]);
       i = (i + 1);
@@ -353,7 +353,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: {String@symbol}?SchemasUnionSchemaVariantValue = {};
     MUTABLE keys = variants.keys();
     MUTABLE i: Int64 = 0;
-    WHILE (i < keys.length()) DO
+    WHILE (i < keys.length) DO
       MUTABLE key: String = COPY UNWRAP (keys[i]);
       out[key] = unionSchema__normalize_variant(rtoc_self_view, variants[key]);
       i = (i + 1);
@@ -463,7 +463,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: {String}Locatable = {};
     MUTABLE keys = rtoc_self_view.fields.keys();
     MUTABLE i: Int64 = 0;
-    WHILE (i < keys.length()) DO
+    WHILE (i < keys.length) DO
       MUTABLE default_value: ?Locatable = COPY (UNWRAP (rtoc_self_view.fields[UNWRAP (keys[i])])).default;
       IF default_value EXISTS AS present_default THEN
         out[UNWRAP (keys[i])] = COPY present_default;
@@ -480,7 +480,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: [Set]String = Set[];
     MUTABLE keys = rtoc_self_view.fields.keys();
     MUTABLE i: Int64 = 0;
-    WHILE (i < keys.length()) DO
+    WHILE (i < keys.length) DO
       IF (UNWRAP (rtoc_self_view.fields[UNWRAP (keys[i])])).borrowed THEN
         &out.insert(COPY UNWRAP (keys[i]));
       END
@@ -531,7 +531,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: {String}StructField = {};
     MUTABLE keys = fields.keys();
     MUTABLE i: Int64 = 0;
-    WHILE (i < keys.length()) DO
+    WHILE (i < keys.length) DO
       MUTABLE current_key: String = COPY UNWRAP (keys[i]);
       out[current_key] = CAST(structSchema__normalize_field(rtoc_self_view, UNWRAP (fields[current_key])) AS StructField);
       i = (i + 1);

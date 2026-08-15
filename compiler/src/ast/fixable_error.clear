@@ -77,7 +77,7 @@ PUB FN fix__initialize(MUTABLE self: Fix, description: String, edits: []Edit, co
   self.description = COPY description;
   self.confidence = COPY confidence;
   self.edits = edits;
-  IF (self.edits.length() == 0) THEN
+  IF (self.edits.length == 0) THEN
     panic("Fix needs at least one edit");
   END
 END

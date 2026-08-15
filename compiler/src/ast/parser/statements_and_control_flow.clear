@@ -251,15 +251,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF (value == "(") OR (value == "[") OR (value == "{") OR (value == "<") THEN
           &delimiters.append(value);
         ELSE_IF (value == ")") OR (value == "]") OR (value == "}") OR (value == ">") THEN
-          IF !((delimiters.length() == 0)) THEN
+          IF !((delimiters.length == 0)) THEN
             &delimiters.pop();
           END
         ELSE_IF (value == ",") THEN
-          IF (delimiters.length() == 0) THEN
+          IF (delimiters.length == 0) THEN
             RETURN TRUE;
           END
         ELSE_IF (value == "=") OR (value == ";") THEN
-          IF (delimiters.length() == 0) THEN
+          IF (delimiters.length == 0) THEN
             RETURN FALSE;
           END
         END
@@ -373,7 +373,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       start
     END;
-    MUTABLE required_count = suffix.length();
+    MUTABLE required_count = suffix.length;
     MUTABLE terminal: ?Token = clearParser__peek_at(rtoc_self_view, required_count);
     IF !((((terminal != NIL) AND (terminal.type == :CHAR)) AND (token__text_is?(terminal, "=")))) THEN
       RETURN NIL;

@@ -10,12 +10,12 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f646572697665645f70726f677261
 PUB FN capabilityAuditPhase__run(typed_program: TypedProgramFacts, request: CapabilityAuditRequest) RETURNS !CapabilityAuditReport@multiowned ->
   MUTABLE session = capabilityAuditSession__new(typed_program, request.inputs, request.source_code, request.language_mode, request.strict_test);
   capabilityAuditSession__audit_mut(session);
-  IF !((request.inputs.deferred_with_validations.length() == 0)) THEN
+  IF !((request.inputs.deferred_with_validations.length == 0)) THEN
     panic("capability audit left deferred validations pending");
   END
   MUTABLE summaries = COPY typed_program.body_summaries;
   MUTABLE derived_program = TRY (derivedProgramFacts__capture(typed_program.resolution.function_registry.nodes));
-  RETURN capabilityAuditReport__new(typed_program, derived_program, summaries.keys(), summaries.values() |> SUM scopeBindings__length(_.call_site_facts()), summaries.values() |> SUM scopeBindings__length(_.with_blocks()), 0);
+  RETURN capabilityAuditReport__new(typed_program, derived_program, summaries.keys(), summaries.values |> SUM scopeBindings__length(_.call_site_facts), summaries.values |> SUM scopeBindings__length(_.with_blocks), 0);
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator

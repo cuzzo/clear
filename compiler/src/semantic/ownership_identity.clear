@@ -57,8 +57,8 @@ PUB FN placeId__parent(self: PlaceId) RETURNS ?PlaceId ->
   &parts.pop();
   MUTABLE parent_path: String = "";
   MUTABLE index: Int64 = 0;
-  WHILE (index < parts.length()) DO
-    IF !((parent_path.length() == 0)) THEN
+  WHILE (index < parts.length) DO
+    IF !((parent_path.length == 0)) THEN
       parent_path = "${parent_path}.";
     END
     parent_path = "${parent_path}${UNWRAP (parts[index])}";

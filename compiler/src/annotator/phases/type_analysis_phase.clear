@@ -32,20 +32,20 @@ PUB FN annotationTypeInventory__unresolved_node_count(self: AnnotationTypeInvent
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.violations.length();
+    RETURN rtoc_self_view.violations.length;
 }
 END
 PUB FN annotationTypeInventory__verify_resolved_mut(self: AnnotationTypeInventory) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (rtoc_self_view.violations.length() == 0) THEN
+    IF (rtoc_self_view.violations.length == 0) THEN
       RETURN;
     END
-    MUTABLE sample = (rtoc_self_view.violations.first(20) |> SELECT "  - ${_.class_name()} @ ${_.location()}: ${_.type_name()}").join("\n");
+    MUTABLE sample = (rtoc_self_view.violations.first(20) |> SELECT "  - ${_.class_name} @ ${_.location}: ${_.type_name}").join("\n");
     MUTABLE more: String = "";
-    IF (rtoc_self_view.violations.length() > 20) THEN
-      more = "\n  ... (+${(rtoc_self_view.violations.length() - 20)} more)";
+    IF (rtoc_self_view.violations.length > 20) THEN
+      more = "\n  ... (+${(rtoc_self_view.violations.length - 20)} more)";
     ELSE
       more = "";
     END
@@ -73,7 +73,7 @@ END
 PRIVATE FN annotationTypeInventory__ignored_node_ids(program: Program) RETURNS ![Set]Int64 ->
   MUTABLE ignored: [Set]Int64 = Set[];
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < program.statements.length() DO
+  WHILE rtoc_idx < program.statements.length DO
     IF !((program.statements[rtoc_idx] IS_A FunctionDef OR program.statements[rtoc_idx] IS_A ExternFnDecl)) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -106,11 +106,11 @@ PRIVATE FN annotationTypeInventory__class_name(node: Locatable) RETURNS String -
   RETURN (((node.class().name() OR CAST(node.class() AS String))).split("::").last() OR CAST(node.class() AS String));
 END
 PRIVATE FN annotationTypeInventory__location(node: Locatable) RETURNS String ->
-  MUTABLE token = node.token();
+  MUTABLE token = node.token;
   IF !(token) THEN
     RETURN "?";
   END
-  RETURN "${token.line()}:${token.column()}";
+  RETURN "${token.line}:${token.column}";
 END
 PUB FN annotationTypeInventory__new(typed_node_count: Int64, violations: []Violation) RETURNS AnnotationTypeInventory@multiowned ->
   MUTABLE self = AnnotationTypeInventory{ typed_node_count: typed_node_count, violations: List[] };

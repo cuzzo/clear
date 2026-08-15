@@ -61,7 +61,7 @@ PUB FN builder__stamp_overrides(MUTABLE self: Builder, idx: Int64) RETURNS Void
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF rtoc_self_view.current_alias_overrides EXISTS AS current_alias_overrides_value THEN
-      IF (current_alias_overrides_value.count() == 0) THEN
+      IF (current_alias_overrides_value.count == 0) THEN
         RETURN;
       ELSE
         rtoc_self_view.alias_overrides_for[idx] = UNWRAP (COPY current_alias_overrides_value);
@@ -85,7 +85,7 @@ PUB FN builder__reserve_index(MUTABLE self: Builder) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE idx = rtoc_self_view.segments.length();
+    MUTABLE idx = rtoc_self_view.segments.length;
     &rtoc_self_view.segments.append(SegmentSlot{ SymbolValue: :placeholder });
     RETURN idx;
 }
@@ -126,7 +126,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_items_1: []SegmentSlot = rtoc_self_view.segments;
     MUTABLE rtoc_indexed_output_3 = [];
     MUTABLE rtoc_indexed_i_2 = 0;
-    WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length() DO
+    WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length DO
       IF ruby_union_scalar_equal_SegmentSlot_String_symbol(rtoc_indexed_items_1[rtoc_indexed_i_2], :placeholder) THEN
         &rtoc_indexed_output_3.append(COPY rtoc_indexed_items_1[rtoc_indexed_i_2]);
       END
@@ -177,7 +177,7 @@ CATCH UnsupportedShape
   RETURN NIL;
 END
 PRIVATE FN recursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 EFFECTS REENTRANT ->
-  IF (FALSE OR (stmts.length() == 0)) THEN
+  IF (FALSE OR (stmts.length == 0)) THEN
     RETURN COPY after_idx;
   END
   MUTABLE pivot_idx = stmts.indexOf();
@@ -186,7 +186,7 @@ PRIVATE FN recursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int64,
   END
   MUTABLE pre = COPY UNWRAP (stmts.substr(0, (pivot_idx - 0)));
   MUTABLE pivot: ?SegmentStmt = COPY stmts[pivot_idx];
-  MUTABLE rest = (stmts.substr(((pivot_idx + 1)), (stmts.length() - ((pivot_idx + 1)))) OR_ELSE List[]);
+  MUTABLE rest = (stmts.substr(((pivot_idx + 1)), (stmts.length - ((pivot_idx + 1)))) OR_ELSE List[]);
   MUTABLE rest_entry = TRY (recursiveSplitter__emit_stmts(rest, after_idx, &builder, lowering, ctx));
   MUTABLE pivot_ast_branch_value: ?SegmentStmt = NIL;
   IF pivot? IS_A Locatable AS locatable THEN
@@ -239,7 +239,7 @@ PRIVATE FN recursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETURNS
 END
 PRIVATE FN recursiveSplitter__contains_suspend_anywhere?(stmts: ?Stmts) RETURNS !Bool EFFECTS REENTRANT ->
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < stmts.length() DO
+  WHILE rtoc_idx < stmts.length DO
     IF (stmts[rtoc_idx] IS_A Locatable AND Segments.classify_suspend(stmts[rtoc_idx])) THEN
         RETURN TRUE;
     END
@@ -267,18 +267,18 @@ PRIVATE FN recursiveSplitter__contains_unsupported?(body: ?Body) RETURNS !Bool E
   RETURN body |> ANY PARTIAL MATCH _ START
     AST.WithBlock -> TRY (recursiveSplitter__with_unsupported?(_)),
     AST.CatchBlock -> TRUE,
-    AST.WhileLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch())),
-    AST.WhileBindLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch())),
-    AST.ForRange -> TRY (recursiveSplitter__contains_unsupported?(_.body())),
-    AST.ForEach -> TRY (recursiveSplitter__contains_unsupported?(_.body())),
-    AST.IfStatement -> (TRY (recursiveSplitter__contains_unsupported?(_.then_branch())) OR TRY (recursiveSplitter__contains_unsupported?((_.else_branch() OR List[])))),
+    AST.WhileLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch)),
+    AST.WhileBindLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch)),
+    AST.ForRange -> TRY (recursiveSplitter__contains_unsupported?(_.body)),
+    AST.ForEach -> TRY (recursiveSplitter__contains_unsupported?(_.body)),
+    AST.IfStatement -> (TRY (recursiveSplitter__contains_unsupported?(_.then_branch)) OR TRY (recursiveSplitter__contains_unsupported?((_.else_branch OR List[])))),
     DEFAULT -> TRY (recursiveSplitter__stmt_unsupported_suspend?(_))
   END;
 END
 PRIVATE FN recursiveSplitter__with_unsupported?(with_node: WithBlock) RETURNS !Bool ->
   IF TRY (recursiveSplitter__with_lock_suspend?(with_node)) THEN
     MUTABLE with_plan = TRY (capabilityPlan__require_for(with_node));
-    IF !((with_plan.all.length() == (TRY (withCapabilityPlan__locks(with_plan))).length())) THEN
+    IF !((with_plan.all.length == (TRY (withCapabilityPlan__locks(with_plan))).length())) THEN
       RETURN TRUE;
     END
   END
@@ -293,7 +293,7 @@ PRIVATE FN recursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) RETU
   IF !(sus IS_A NextSuspend) THEN
     RETURN FALSE;
   END
-  MUTABLE pt = TRY (type__from_node_mut(sus.promise_ast(), "FSM suspend promise"));
+  MUTABLE pt = TRY (type__from_node_mut(sus.promise_ast, "FSM suspend promise"));
   IF !(type__future?(pt)) THEN
     RETURN TRUE;
   END
@@ -351,7 +351,7 @@ PRIVATE FN recursiveSplitter__emit_if_fragment(if_stmt: IfStatement, after_idx: 
 END
 PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
   MUTABLE caps = TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_stmt)))));
-  IF (caps.length() == 0) THEN
+  IF (caps.length == 0) THEN
     panic("WITH with no capabilities");
   END
   MUTABLE ctx_id_raw: ?TransformValue = COPY ctx[:id];
@@ -393,9 +393,9 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
   rtoc_lambda_result_14
       }) AS Int64);
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < caps.length() DO
+      WHILE rtoc_idx < caps.length DO
     MUTABLE post_acquire: Int64 = 0_i64;
-          IF (((rtoc_idx + 1) < caps.length())) THEN
+          IF (((rtoc_idx + 1) < caps.length)) THEN
             post_acquire = COPY UNWRAP (cap_indices[(rtoc_idx + 1)]);
           ELSE
             post_acquire = cs_entry;
@@ -410,7 +410,7 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
   MUTABLE rtoc_indexed_items_17: []{String@symbol}FsmCapMetadataValue = caps_meta;
   MUTABLE rtoc_indexed_output_19 = [];
   MUTABLE rtoc_indexed_i_18 = 0;
-  WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
+  WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length DO
     &rtoc_indexed_output_19.append(Tuple{COPY rtoc_indexed_items_17[rtoc_indexed_i_18], rtoc_indexed_i_18});
     rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
   END
@@ -421,7 +421,7 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
     MUTABLE rtoc_indexed_items_17: []{String@symbol}FsmCapMetadataValue = caps_meta;
     MUTABLE rtoc_indexed_output_19 = [];
     MUTABLE rtoc_indexed_i_18 = 0;
-    WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
+    WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length DO
       &rtoc_indexed_output_19.append(Tuple{COPY rtoc_indexed_items_17[rtoc_indexed_i_18], rtoc_indexed_i_18});
       rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
     END
@@ -445,7 +445,7 @@ PRIVATE FN recursiveSplitter__renumber_with_entry(segments: []Segment, entry: In
   MUTABLE mapping = {entry: 0};
   MUTABLE next_id = 1;
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < segments.length() DO
+  WHILE rtoc_idx < segments.length DO
     IF (rtoc_idx == entry) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;

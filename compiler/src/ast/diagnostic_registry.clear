@@ -56,9 +56,9 @@ PUB FN diagnosticRegistry__format_from_hash(code: String@symbol, args: Any[], kw
   END
 END
 FN diagnosticRegistry__template_from_entry(entry: {String@symbol}?DiagnosticEntryValue) RETURNS !String ->
-  MUTABLE rtoc_each_items_1 = entry.values();
+  MUTABLE rtoc_each_items_1 = entry.values;
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_1.length() DO
+  WHILE rtoc_idx < rtoc_each_items_1.length DO
   IF rtoc_each_items_1[rtoc_idx]? IS_A String AS string THEN
       RETURN COPY string;
   END
@@ -67,7 +67,7 @@ FN diagnosticRegistry__template_from_entry(entry: {String@symbol}?DiagnosticEntr
   panic("Internal Compiler Error: diagnostic entry has no template");
 END
 PUB FN diagnosticRegistry__format_template(template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String ->
-  IF (!((kwargs.count() == 0)) OR template.contains?("%{")) THEN
+  IF (!((kwargs.count == 0)) OR template.contains?("%{")) THEN
     IF (!(template.contains?("%{")) OR diagnosticRegistry__named_template_args_complete?(template, kwargs)) THEN
       RETURN compilerFormatTemplate(template);
     END
@@ -119,7 +119,7 @@ FN diagnosticRegistry__named_template_keys(template: String) RETURNS ![]String@s
   RETURN keys;
 END
 FN diagnosticRegistry__positional_template_args_complete?(template: String, args: Any[]) RETURNS Bool ->
-  RETURN (diagnosticRegistry__positional_placeholder_count(template) <= args.length());
+  RETURN (diagnosticRegistry__positional_placeholder_count(template) <= args.length);
 END
 FN diagnosticRegistry__positional_placeholder_count(template: String) RETURNS Int64 ->
   MUTABLE count: Int64 = 0;

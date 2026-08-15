@@ -244,11 +244,11 @@ FN capabilityPlan__transition_from(request: CapabilityRequest, target: Capabilit
 END
 FN capabilityPlan__refresh_function_plans_mut(fn_value: FunctionDef, with_blocks: []WithBlock) RETURNS !Void ->
   MUTABLE live_symbols = TRY (scope__live_param_syms(fn_value));
-  IF (live_symbols.count() == 0) THEN
+  IF (live_symbols.count == 0) THEN
     RETURN;
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < with_blocks.length() DO
+  WHILE rtoc_idx < with_blocks.length DO
     MUTABLE plan: ?WithCapabilityPlan = COPY with_blocks[rtoc_idx]?.capability_plan;
     IF !(plan) THEN
         rtoc_idx = rtoc_idx + 1;

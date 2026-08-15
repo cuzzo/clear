@@ -279,10 +279,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE stages: []Locatable = ( { MUTABLE rtoc_empty_list_5: []Locatable = List[]; rtoc_empty_list_5 } );
     MUTABLE cursor: Locatable = COPY node;
     WHILE (IF cursor IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) DO
-      MUTABLE rhs = cursor.right();
+      MUTABLE rhs = cursor.right;
       IF aST__pipeline_fusible_stage?(rhs) THEN
         &stages.unshift(rhs);
-        cursor = cursor.left();
+        cursor = cursor.left;
       ELSE
         RETURN NIL;
       END
@@ -312,11 +312,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (track_owned AND TRY (type__runtime_stream?(source_ti))) THEN
       MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(rtoc_self_view, initial_capture, elem_t));
       stage_stmts = ruby_array_concat_Emittable(stage_stmts, owned_stmts);
-      current_owned = !((owned_stmts.length() == 0));
+      current_owned = !((owned_stmts.length == 0));
     END
     MUTABLE lower_stages = %() USE(MUTABLE current_owned, MUTABLE current_type, initial_capture, item_counter, MUTABLE item_var, on_skip, MUTABLE outer_stmts, MUTABLE stage_stmts, stages, MUTABLE track_owned, MUTABLE owned_stmts, rtoc_self_view) -> {
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < stages.length() DO
+    WHILE rtoc_idx < stages.length DO
       IF stages[rtoc_idx]? IS_A SelectOp AS select_op THEN
           item_used = TRUE;
           IF pipelinePlaceholderUsage__identity_placeholder?(selectOp__expression(select_op)) THEN
@@ -325,8 +325,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           item_counter = (item_counter + 1);
           MUTABLE next_item = "__each_item_${item_counter.toString()}";
           MUTABLE head = runtimeHost__range_lower_head_with_context(rtoc_self_view.host, selectOp__expression(select_op), item_var);
-          stage_stmts = ruby_array_concat_Emittable(stage_stmts, CAST(head.pending() AS []Emittable));
-          &stage_stmts.append(Emittable{ Let: COPY Let{ name: COPY next_item, init: COPY head.value(), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
+          stage_stmts = ruby_array_concat_Emittable(stage_stmts, CAST(head.pending AS []Emittable));
+          &stage_stmts.append(Emittable{ Let: COPY Let{ name: COPY next_item, init: COPY head.value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           item_var = COPY next_item;
           current_type = TRY (type__new(selectOp__expression(select_op).full_type_mut()));
           IF (!(track_owned) OR pipelinePlaceholderUsage__placeholder_projection?(selectOp__expression(select_op))) THEN
@@ -334,9 +334,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           ELSE
             MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(rtoc_self_view, next_item, current_type));
             stage_stmts = ruby_array_concat_Emittable(stage_stmts, owned_stmts);
-            current_owned = !((owned_stmts.length() == 0));
+            current_owned = !((owned_stmts.length == 0));
             IF current_owned THEN
-              MUTABLE stage_value: Emittable = head.value();
+              MUTABLE stage_value: Emittable = head.value;
               MUTABLE fact_source = PARTIAL MATCH stage_value START
                 Emittable.Call AS call -> call.callee,
                 Emittable.MIRMethodCall AS mir_method_call -> mir_method_call.method,
@@ -408,9 +408,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF is_var_stream THEN
       MUTABLE resolved = runtimeHost__range_visit_mir(rtoc_self_view.host, source_node);
       IF resolved IS_A Ident THEN
-        source_name = COPY CAST(resolved.name() AS String);
+        source_name = COPY CAST(resolved.name AS String);
       ELSE
-        source_name = COPY CAST(source_node.name() AS String);
+        source_name = COPY CAST(source_node.name AS String);
       END
     ELSE
       source_name = "__range_src";
@@ -450,7 +450,7 @@ PUB FN pipelineRangeLowerer__range_literal_element_type(self: PipelineRangeLower
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE start_ft_branch_value: ?Type = NIL;
     IF source_node IS_A RangeLit THEN
-      start_ft_branch_value = source_node.start().full_type_mut({:context: "lazy range start"});
+      start_ft_branch_value = source_node.start.full_type_mut({:context: "lazy range start"});
     ELSE
       start_ft_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 }));
     END
@@ -534,7 +534,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE terminal: ?String@symbol = COPY (TRY (type__observable_terminals())).each_with_object({}, %(tuple_param_0, h) -> {
     MUTABLE sym = tuple_param_0._0;
     MUTABLE entry = tuple_param_0._1;
-    MUTABLE tag = entry.ast_class();
+    MUTABLE tag = entry.ast_class;
     IF !((tag == NIL)) THEN
           MUTABLE klass: ?Any@multiowned = (CAST({:sum: AST.SumOp, :count: AST.CountOp, :avg: AST.AverageOp, :max: AST.MaxOp, :min: AST.MinOp, :any: AST.AnyOp, :all: AST.AllOp, :find: AST.FindOp} AS {String@symbol}Any@multiowned))[tag];
           IF !((klass == NIL)) THEN
@@ -737,8 +737,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE spec = COPY (TRY (type__observable_terminals())).each_with_object({}, %(tuple_param_0, h) -> {
     MUTABLE sym = tuple_param_0._0;
     MUTABLE entry = tuple_param_0._1;
-    IF entry.publish() THEN
-      h[sym] = pipelinePublishSpec__from(entry.publish());
+    IF entry.publish THEN
+      h[sym] = pipelinePublishSpec__from(entry.publish);
       RETURN NIL;
     END
     NIL
@@ -774,7 +774,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (spec.transfers_item_on_success AND (published_item_type != NIL)) THEN
       callable_contract_branch_value = callableContract__new(TRY (functionSignature__new([Param{ name: "item", type: UNWRAP (COPY published_item_type), takes: TRUE, default: NIL, mutable: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }], TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_28: []String@symbol = List[]; rtoc_empty_list_28 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_29: []String@symbol = List[]; rtoc_empty_list_29 } ), NIL, ( { MUTABLE rtoc_empty_list_30: []String@symbol = List[]; rtoc_empty_list_30 } ))), TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(item, UNWRAP (published_item_type), "observable publish item", :heap)])), 1);
     ELSE
-      callable_contract_branch_value = TRY (callableContract__no_ownership(arg.length()));
+      callable_contract_branch_value = TRY (callableContract__no_ownership(arg.length));
     END
     MUTABLE callable_contract: CallableContract = callable_contract_branch_value?;
     MUTABLE call = ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: inner_recv, method: COPY spec.publish_method, args: COPY arg, try_wrap: FALSE, callable_contract: COPY callable_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
@@ -923,7 +923,7 @@ PUB FN pipelineRangeLowerer__observable_alloc_expr(self: PipelineRangeLowerer, t
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineRangeLowerer__observable_catch_unreachable(rtoc_self_view, Emittable{ Call: COPY Call{ callee: "${target}.${method_value}", args: COPY args, try_wrap: FALSE, owned_return: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(args.length())), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
+    RETURN pipelineRangeLowerer__observable_catch_unreachable(rtoc_self_view, Emittable{ Call: COPY Call{ callee: "${target}.${method_value}", args: COPY args, try_wrap: FALSE, owned_return: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(args.length)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
 }
 END
 PUB FN pipelineRangeLowerer__without_const_prefix(self: PipelineRangeLowerer, type_name: String) RETURNS String
@@ -934,7 +934,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(type_name.startsWith?(prefix)) THEN
       RETURN COPY type_name;
     END
-    RETURN type_name.substr(prefix.codepointCount(), (type_name.length() - prefix.codepointCount()));
+    RETURN type_name.substr(prefix.codepointCount(), (type_name.length - prefix.codepointCount()));
 }
 END
 PUB FN pipelineRangeLowerer__without_pointer_prefix(self: PipelineRangeLowerer, type_name: String) RETURNS String
@@ -944,14 +944,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(type_name.startsWith?("*")) THEN
       RETURN COPY type_name;
     END
-    RETURN type_name.substr(1, (type_name.length() - 1));
+    RETURN type_name.substr(1, (type_name.length - 1));
 }
 END
 PUB FN pipelineRangeLowerer__replace_zig_identifier(self: PipelineRangeLowerer, source: String, needle: String, replacement: String) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (needle.length() == 0) THEN
+    IF (needle.length == 0) THEN
       RETURN COPY source;
     END
     MUTABLE idx = 0;

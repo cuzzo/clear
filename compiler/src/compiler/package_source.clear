@@ -22,7 +22,7 @@ PUB FN packageSource__merge(member_paths: []String, resolve_pkg: FN(String) -> ?
   MUTABLE body_lines: []String = ( { MUTABLE rtoc_empty_list_3: []String = List[]; rtoc_empty_list_3 } );
   MUTABLE rtoc_each_items_4 = (TRY (read(_))).split("\n");
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_4.length() DO
+  WHILE rtoc_idx < rtoc_each_items_4.length DO
       MUTABLE line: String = COPY UNWRAP (rtoc_each_items_4[rtoc_idx]);
       MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(line, (compilerRegexCompile("\\A\\s*REQUIRE\\s+\"([^\"]+)\"(\\s+AS\\s+([A-Za-z_][A-Za-z0-9_]*))?\\s*;?\\s*\\z")));
       IF (m == NIL) THEN
@@ -70,7 +70,7 @@ PUB FN packageSource__dedupe_generated_functions(source: String) RETURNS String 
   MUTABLE lines = source.split("\n");
   MUTABLE i = 0;
   MUTABLE seen_extern: [Set]String = Set[];
-  WHILE (i < lines.length()) DO
+  WHILE (i < lines.length) DO
     MUTABLE line = COPY UNWRAP (lines[i]);
     MUTABLE stripped_line = line.trim();
     IF stripped_line.startsWith?("EXTERN ") THEN
@@ -88,7 +88,7 @@ PUB FN packageSource__dedupe_generated_functions(source: String) RETURNS String 
     IF m EXISTS AS m_value THEN
       MUTABLE block: []String = [COPY line];
       MUTABLE j = (i + 1);
-      WHILE (j < lines.length()) DO
+      WHILE (j < lines.length) DO
         MUTABLE block_line = COPY UNWRAP (lines[j]);
         IF ((block_line == "END\n") OR (block_line == "END")) THEN
           BREAK;
@@ -96,7 +96,7 @@ PUB FN packageSource__dedupe_generated_functions(source: String) RETURNS String 
         &block.append(COPY block_line);
         j = (j + 1);
       END
-      IF (j < lines.length()) THEN
+      IF (j < lines.length) THEN
         &block.append(COPY UNWRAP (lines[j]));
       END
       MUTABLE text = block.join("");

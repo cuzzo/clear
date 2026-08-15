@@ -246,7 +246,7 @@ FN lowerer__lower_expr(self: Lowerer, expr: Expr) RETURNS !Emittable
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF expr IS_A ArgRef AS arg_ref THEN
       MUTABLE idx = arg_ref.idx;
-      IF !(((idx >= 0) AND (idx < rtoc_self_view.arg_mirs.length()))) THEN
+      IF !(((idx >= 0) AND (idx < rtoc_self_view.arg_mirs.length))) THEN
         panic("FsmOps arg index {} out of range ({} args)");
       END
       RETURN COPY UNWRAP (rtoc_self_view.arg_mirs[idx]);
@@ -343,7 +343,7 @@ END
 FN fsmOps__finish_value_aliases_finalized_state?(expr: ?Expr, finalize_ops: []Stmt) RETURNS !Bool ->
   IF expr EXISTS AS expr_value THEN
     MUTABLE finalized = TRY (fsmOps__free_state_fields(finalize_ops));
-    IF (finalized.length() == 0) THEN
+    IF (finalized.length == 0) THEN
       RETURN FALSE;
     END
     MUTABLE refs = TRY (fsmOps__referenced_state_fields([castExprToOpsOrExprItem(expr_value)]));

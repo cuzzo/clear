@@ -36,14 +36,14 @@ PUB STRUCT HoistResult {
 }
 
 PUB FN result__empty?(self: HoistResult) RETURNS Bool EFFECTS REENTRANT ->
-  RETURN (self.bindings_by_function.count() == 0);
+  RETURN (self.bindings_by_function.count == 0);
 END
 PUB FN hoist__apply_mut(ast: Program, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !HoistResult ->
   MUTABLE hoist_pass_state = mIRPassState__for_mut(PassStateProgram{ Program: COPY ast });
   TRY (mIRPassState__require_mut(hoist_pass_state, :string_concat_rewritten, "Hoist"));
   MUTABLE bindings_by_function: {String}[]VarDecl = {};
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < ast.statements.length() DO
+  WHILE rtoc_idx < ast.statements.length DO
     IF !((ast.statements[rtoc_idx] IS_A FunctionDef AND ast.statements[rtoc_idx].body())) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -55,7 +55,7 @@ PUB FN hoist__apply_mut(ast: Program, schema_lookup: ?FN(String@symbol) -> ?Type
     MUTABLE counter = HoistCounter{ value: 0 };
     MUTABLE generated: []VarDecl = ( { MUTABLE rtoc_empty_list_1: []VarDecl = List[]; rtoc_empty_list_1 } );
     TRY (hoist__hoist_body_mut(ast.statements[rtoc_idx].body(), counter, schema_lookup, &generated, TypeTypeInput{ Type: COPY functionSignature__return_type(ast.statements[rtoc_idx]) }));
-    IF !((generated.length() == 0)) THEN
+    IF !((generated.length == 0)) THEN
         bindings_by_function[CAST(ast.statements[rtoc_idx].name() AS String)] = generated;
     END
   rtoc_idx = rtoc_idx + 1;
@@ -72,17 +72,17 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, counter: HoistCounte
     RETURN;
   END
   MUTABLE i = 0;
-  WHILE (i < body.length()) DO
+  WHILE (i < body.length) DO
     MUTABLE stmt = COPY UNWRAP (body[i]);
     MUTABLE hoists: []VarDecl = ( { MUTABLE rtoc_empty_list_3: []VarDecl = List[]; rtoc_empty_list_3 } );
     TRY (hoist__collect_stmt_hoists_mut(&stmt, hoists, counter, schema_lookup, return_type));
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < hoists.length() DO
+    WHILE rtoc_idx < hoists.length DO
   &body.insert((i + rtoc_idx), hoists[rtoc_idx]?);
   rtoc_idx = rtoc_idx + 1;
     END
     generated = ruby_array_concat_VarDecl(generated, hoists);
-    i = (i + hoists.length());
+    i = (i + hoists.length);
     FOR _ IN (TRY (hoist__child_bodies(stmt))) DO
   MUTABLE rtoc_mutable_block_param_4 = COPY _;
     TRY (hoist__hoist_body_mut(&rtoc_mutable_block_param_4, counter, schema_lookup, &generated, return_type));
@@ -93,7 +93,7 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, counter: HoistCounte
 END
 PUB FN hoist__child_bodies(stmt: Locatable) RETURNS ![][]Node ->
   IF (stmt IS_A ForRange) OR (stmt IS_A ForEach) OR (stmt IS_A WithBlock) OR (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
-    RETURN CAST([stmt.body()] AS [][]Node);
+    RETURN CAST([stmt.body] AS [][]Node);
   ELSE_IF stmt IS_A WhileLoop AS while_loop THEN
     RETURN CAST([while_loop.do_branch] AS [][]Node);
   ELSE_IF stmt IS_A WhileBindLoop AS while_bind_loop THEN
@@ -105,7 +105,7 @@ PUB FN hoist__child_bodies(stmt: Locatable) RETURNS ![][]Node ->
   ELSE_IF stmt IS_A MatchStatement AS match_statement THEN
     RETURN ((match_statement.cases |> SELECT matchCase__body(_)) + ([match_statement.default_case]));
   ELSE_IF (stmt IS_A DoBlock) THEN
-    RETURN stmt.branches() |> SELECT _.body();
+    RETURN stmt.branches |> SELECT _.body;
   ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_5: [][]Node = List[]; rtoc_empty_list_5 } ) AS [][]Node);
   END
@@ -117,7 +117,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
   END
   MUTABLE rtoc_each_items_6 = (MATCH call START CallLike.FuncCall AS item -> item.args, CallLike.MethodCall AS item -> item.args END);
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_6.length() DO
+  WHILE rtoc_idx < rtoc_each_items_6.length DO
       IF (rtoc_each_items_6[rtoc_idx] IS_A MoveNode AND rtoc_each_items_6[rtoc_idx].value() IS_A Identifier) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -150,7 +150,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
       RETURN;
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < call.args.length() DO
+  WHILE rtoc_idx < call.args.length DO
     IF hoist__concat?(call.args[rtoc_idx]) THEN
         call.args[rtoc_idx] = TRY (hoist__make_temp_mut(call.args[rtoc_idx], &hoists, hoistCounter__next_name(&counter)));
     ELSE
@@ -173,12 +173,12 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
     IF (((value_type != NIL) AND type__collection?((value_type?))) AND !(hoist__empty_list_literal?(return_node_mutable.value))) THEN
       expected = COPY value_type;
     END
-    IF (return_node_mutable.value IS_A BinaryOp AND (((return_node_mutable.value.op() == symbol("OR")) OR (return_node_mutable.value.op() == symbol("OR_ELSE"))))) THEN
+    IF (return_node_mutable.value IS_A BinaryOp AND (((return_node_mutable.value.op == symbol("OR")) OR (return_node_mutable.value.op == symbol("OR_ELSE"))))) THEN
       MUTABLE right_type_branch_value: ?Type = NIL;
-      IF return_node_mutable.value.right() IS_A Locatable THEN
-        right_type_branch_value = return_node_mutable.value.right().full_type_mut();
+      IF return_node_mutable.value.right IS_A Locatable THEN
+        right_type_branch_value = return_node_mutable.value.right.full_type_mut();
       ELSE
-        right_type_branch_value = TRY (type__from_node_mut(return_node_mutable.value.right(), "return OR right hoist"));
+        right_type_branch_value = TRY (type__from_node_mut(return_node_mutable.value.right, "return OR right hoist"));
       END
       MUTABLE right_type: Type = right_type_branch_value?;
       IF type__collection?(right_type) THEN
@@ -302,7 +302,7 @@ PRIVATE FN hoist__each_call_like_child(child: Any, matches: FN(Locatable) -> Boo
     TRY (hoist__each_call_like_child(_, matches, blk));
     END
   ELSE_IF (child == Hash) THEN
-    FOR _ IN child.values() DO
+    FOR _ IN child.values DO
     TRY (hoist__each_call_like_child(_, matches, blk));
     END
   ELSE_IF (child IS_A Locatable) THEN
@@ -317,13 +317,13 @@ PRIVATE FN hoist__non_body_exprs(node: Locatable) RETURNS ![]Any@multiowned ->
     RETURN CAST(( { MUTABLE rtoc_empty_list_7: []Any@multiowned = List[]; rtoc_empty_list_7 } ) AS []Any@multiowned);
   END
   RETURN PARTIAL MATCH node START
-    Locatable.IfStatement AS if_statement -> [node.condition()],
-    Locatable.WhileLoop AS while_loop -> [node.condition()],
-    Locatable.WhileBindLoop AS while_bind_loop -> [node.condition()],
+    Locatable.IfStatement AS if_statement -> [node.condition],
+    Locatable.WhileLoop AS while_loop -> [node.condition],
+    Locatable.WhileBindLoop AS while_bind_loop -> [node.condition],
     Locatable.IfBind AS if_bind -> if_bind.bindings |> SELECT binding__expr(_),
-    Locatable.ForRange AS for_range -> [node.start_expr(), node.end_expr()],
-    Locatable.ForEach AS for_each -> [node.collection()],
-    Locatable.MatchStatement AS match_statement -> [node.expr()],
+    Locatable.ForRange AS for_range -> [node.start_expr, node.end_expr],
+    Locatable.ForEach AS for_each -> [node.collection],
+    Locatable.MatchStatement AS match_statement -> [node.expr],
     DEFAULT -> ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_8: ?[]Any@multiowned = NIL;
       IF node IS_A Struct THEN
         rtoc_ternary_value_8 = CAST(node.to_a() AS []Any@multiowned);
@@ -406,7 +406,7 @@ PRIVATE FN hoist__collection_value_store_call?(call: MethodCall) RETURNS !Bool -
   MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_stdlib_def));
   sig = (sig OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_signature)));
   IF !((((((sig != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_10 = (sig?);
-  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_10)) }) AND TRY (functionSignature__takes_ownership?(&sig)))) OR TRY (intrinsicRegistry__collection_value_store_method?(Name{ StringValue: COPY call.name }, call.args.length())))) THEN
+  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_10)) }) AND TRY (functionSignature__takes_ownership?(&sig)))) OR TRY (intrinsicRegistry__collection_value_store_method?(Name{ StringValue: COPY call.name }, call.args.length)))) THEN
     RETURN FALSE;
   END
   MUTABLE ti = TRY (type__from_node_mut(call.object, "collection value-store receiver"));
@@ -416,9 +416,9 @@ PUB FN hoist__noreturn_value?(node: ?Locatable) RETURNS Bool ->
   IF !(respondsTo?(node, "resolved_type")) THEN
     RETURN FALSE;
   END
-  MUTABLE resolved = node.resolved_type();
+  MUTABLE resolved = node.resolved_type;
   IF resolved IS_A Type THEN
-    resolved = resolved.resolved();
+    resolved = resolved.resolved;
   END
   RETURN (resolved == :NoReturn);
 END
@@ -448,7 +448,7 @@ PRIVATE FN hoist__make_temp_mut(concat: Locatable, MUTABLE hoists: []VarDecl, na
   ELSE_IF (moved AND TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup))) THEN
     :heap
   ELSE
-    (((respondsTo?(concat, "storage") AND concat.storage())) OR :frame)
+    (((respondsTo?(concat, "storage") AND concat.storage)) OR :frame)
   END;
   MUTABLE decl = VarDecl{ token: COPY tok, name: COPY name, type: NIL, value: COPY concat, mutable: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
   TRY (aST__stamp_synthetic_type_mut(Locatable{ VarDecl: COPY decl }, ti, "synthetic AST type"));
@@ -463,7 +463,7 @@ PRIVATE FN hoist__make_temp_mut(concat: Locatable, MUTABLE hoists: []VarDecl, na
   TRY (aST__stamp_synthetic_type_mut(Locatable{ Identifier: COPY ident }, ti, "synthetic AST type"));
   ident.symbol = sym;
   ident.was_moved = COPY moved;
-  IF (respondsTo?(concat, "needs_heap_create") AND concat.needs_heap_create()) THEN
+  IF (respondsTo?(concat, "needs_heap_create") AND concat.needs_heap_create) THEN
     ident.needs_heap_create = TRUE;
   END
   RETURN ident;
@@ -498,7 +498,7 @@ END
 PRIVATE FN hoist__ast_access_path?(ast_node: Locatable) RETURNS Bool ->
   MUTABLE node = COPY ast_node;
   IF (IF node IS_A BinaryOp AS binary_op THEN (((binary_op.op == symbol("OR")) OR (binary_op.op == symbol("OR_ELSE")))) ELSE FALSE END) THEN
-    node = node.left();
+    node = node.left;
   END
   RETURN (node IS_A GetField OR node IS_A GetIndex);
 END

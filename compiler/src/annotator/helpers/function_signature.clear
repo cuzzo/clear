@@ -688,7 +688,7 @@ PUB FN functionSignature__adopt_param_symbols_mut(self: FunctionSignature, fn_va
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_self_view.contract.params.length() DO
+    WHILE rtoc_idx < rtoc_self_view.contract.params.length DO
       MUTABLE src: ?Param = COPY fn_value.params[rtoc_idx];
       IF rtoc_self_view.contract.params[rtoc_idx] != NIL THEN
           MUTABLE rtoc_field_slot_8 = COPY UNWRAP (rtoc_self_view.contract.params[rtoc_idx]);
@@ -729,7 +729,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE out: []FunctionSignatureLifetimeSource = ( { MUTABLE rtoc_empty_list_11: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_11 } );
       MUTABLE i: Int64 = 0;
-      WHILE (i < raw.length()) DO
+      WHILE (i < raw.length) DO
         MUTABLE item = COPY UNWRAP (raw[i]);
         IF item IS_A String@symbol AS string_symbol THEN
           &out.append(FunctionSignatureLifetimeSource{ StringValue: COPY CAST(string_symbol AS String) });

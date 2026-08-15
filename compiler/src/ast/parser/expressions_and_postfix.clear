@@ -511,11 +511,11 @@ PRIVATE FN clearParser__parse_tense_navigation_suffix(MUTABLE self: ClearParser,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token = clearParser__current(rtoc_self_view);
     MUTABLE markers = UNWRAP (clearParser__tense_navigation_marker_run(rtoc_self_view));
-    IF !((typeExpression__valid_tense_order?(markers) AND !((markers.length() == 0)))) THEN
+    IF !((typeExpression__valid_tense_order?(markers) AND !((markers.length == 0)))) THEN
       clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TENSE_NAVIGATION_ORDER }, [], {:markers: "${COPY markers}"});
     END
     MUTABLE marker_index = 0;
-    WHILE marker_index < markers.length() DO
+    WHILE marker_index < markers.length DO
       clearParser__consume(&rtoc_self_view, :CHAR, markers.charAt(marker_index));
       marker_index = marker_index + 1;
     END
@@ -540,7 +540,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         BREAK;
       END
     END
-    IF (markers.length() == 0) THEN
+    IF (markers.length == 0) THEN
       RETURN NIL;
     END
     MUTABLE dot: ?Token = clearParser__peek_at(rtoc_self_view, offset);

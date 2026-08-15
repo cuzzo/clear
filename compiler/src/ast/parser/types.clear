@@ -317,7 +317,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((token.type == :CHAR) AND (["[", "{"]).contains?(token__display_value(token))) THEN
       RETURN TRUE;
     END
-    RETURN (!((prefixes.length() == 0)) AND !((["~", "!", "?", "~!", "~?", "!?", "~!?"]).contains?(prefixes)));
+    RETURN (!((prefixes.length == 0)) AND !((["~", "!", "?", "~!", "~?", "!?", "~!?"]).contains?(prefixes)));
 }
 END
 PRIVATE FN clearParser__parse_inline_type_expression(MUTABLE self: ClearParser) RETURNS !TypeExpression
@@ -473,7 +473,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     TRY (clearParser__consume(&rtoc_self_view, :CHAR, "]"));
-    IF (dimensions.length() > 1) THEN
+    IF (dimensions.length > 1) THEN
       kind = :rank;
     END
     MUTABLE collection: ?String@symbol = kind;
@@ -588,7 +588,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         DEFAULT -> collection = "";
       END
     END
-    IF (collection.length() > 0) THEN
+    IF (collection.length > 0) THEN
       MUTABLE rendered = COPY collection;
       IF type__soa?(t) THEN
         rendered = (rendered $+ ":soa");
@@ -612,7 +612,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         DEFAULT -> ownership = "";
       END
     END
-    IF (ownership.length() > 0) THEN
+    IF (ownership.length > 0) THEN
       &capabilities.append(COPY ownership);
     END
     MUTABLE sync: String = "";
@@ -627,13 +627,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         DEFAULT -> sync = "";
       END
     END
-    IF (sync.length() > 0) THEN
+    IF (sync.length > 0) THEN
       &capabilities.append(COPY sync);
     END
     IF type__observable?(t) THEN
       &capabilities.append("observable");
     END
-    IF (capabilities.length() == 0) THEN
+    IF (capabilities.length == 0) THEN
       RETURN base;
     ELSE
       RETURN "${base}@${capabilities.join(":")}";

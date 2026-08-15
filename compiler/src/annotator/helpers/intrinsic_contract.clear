@@ -124,7 +124,7 @@ FN intrinsicContract__normalized_takes_indices(emit: IntrinsicEmit, params: []Pa
   &indices.insert(_);
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < params.length() DO
+  WHILE rtoc_idx < params.length DO
   IF params[rtoc_idx]?.takes EXISTS AS takes_value THEN
       &indices.insert(COPY rtoc_idx);
   END

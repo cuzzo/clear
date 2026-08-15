@@ -495,7 +495,7 @@ PRIVATE FN clearParser__conformance_implementation_header?(self: ClearParser) RE
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE index = rtoc_self_view.pos;
-    WHILE (index < rtoc_self_view.tokens.length()) DO
+    WHILE (index < rtoc_self_view.tokens.length) DO
       MUTABLE token = COPY UNWRAP (rtoc_self_view.tokens[index]);
       IF ((token.type == :KEYWORD) AND (token__text_is?(token, "FOR"))) THEN
         RETURN TRUE;
@@ -663,7 +663,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE lines = rtoc_self_view.source_code.split("\n");
     MUTABLE sl, sc = [start_tok.line, start_tok.column];
     MUTABLE el, ec = [end_tok.line, end_tok.column];
-    IF ((sl < 1) OR (sl > lines.length())) THEN
+    IF ((sl < 1) OR (sl > lines.length)) THEN
       RETURN "";
     END
     IF (sl == el) THEN
@@ -756,7 +756,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE effects_decl: ?String@symbol = COPY parsed_effects.kind;
     MUTABLE effects_span: ?EffectSpan = COPY parsed_effects.span;
     MUTABLE requires_clauses = TRY (clearParser__parse_requires_clauses(&rtoc_self_view, name));
-    IF !((early_requires_clauses.length() == 0)) THEN
+    IF !((early_requires_clauses.length == 0)) THEN
       FOR rtoc_each_key IN early_requires_clauses.keys() DO
     MUTABLE v: String@symbol = (early_requires_clauses[rtoc_each_key] OR_ELSE panic("missing hash key"));
     IF requires_clauses.contains?(rtoc_each_key) THEN
@@ -816,21 +816,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE max_depth_n: ?Int64 = parsed_effects.max_depth;
     MUTABLE tight_reentrance = parsed_effects.tight;
     MUTABLE stored_requires_clauses_branch_value: ?{String}String@symbol = NIL;
-    IF (requires_clauses.length() == 0) THEN
+    IF (requires_clauses.length == 0) THEN
       stored_requires_clauses_branch_value = NIL;
     ELSE
       stored_requires_clauses_branch_value = requires_clauses;
     END
     MUTABLE stored_requires_clauses: ?{String}String@symbol = stored_requires_clauses_branch_value;
     MUTABLE stored_pre_clauses_branch_value: ?[]{String@symbol}ContractClauseValue = NIL;
-    IF (pre_clauses.length() == 0) THEN
+    IF (pre_clauses.length == 0) THEN
       stored_pre_clauses_branch_value = NIL;
     ELSE
       stored_pre_clauses_branch_value = pre_clauses;
     END
     MUTABLE stored_pre_clauses: ?[]{String@symbol}ContractClauseValue = stored_pre_clauses_branch_value;
     MUTABLE stored_post_clauses_branch_value: ?[]{String@symbol}ContractClauseValue = NIL;
-    IF (post_clauses.length() == 0) THEN
+    IF (post_clauses.length == 0) THEN
       stored_post_clauses_branch_value = NIL;
     ELSE
       stored_post_clauses_branch_value = post_clauses;
@@ -1357,7 +1357,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE iterations = 1000;
     MUTABLE count_text = token__display_value(clearParser__current(rtoc_self_view));
     IF (clearParser__match?(rtoc_self_view, :VAR_ID) AND regexMatch?(count_text, "^x[0-9]+$")) THEN
-      iterations = TRY (count_text.substr(1, (count_text.length() - 1)).toInt());
+      iterations = TRY (count_text.substr(1, (count_text.length - 1)).toInt());
       clearParser__consume(&rtoc_self_view, :VAR_ID);
     END
     clearParser__consume(&rtoc_self_view, :CHAR, ";");

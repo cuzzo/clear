@@ -161,9 +161,9 @@ PRIVATE FN pipelineSetIndexLowerer__distinct_insert_stmt(self: PipelineSetIndexL
   END;
   MUTABLE contract_branch_value: ?CallableContract = NIL;
   IF consumes EXISTS AS consumes_value THEN
-    contract_branch_value = callableContract__new((TRY (callableContract__no_ownership(args.length()))).signature, TRY (ownershipContract__consume_operands([consumes_value])), args.length());
+    contract_branch_value = callableContract__new((TRY (callableContract__no_ownership(args.length))).signature, TRY (ownershipContract__consume_operands([consumes_value])), args.length);
   ELSE
-    contract_branch_value = TRY (callableContract__no_ownership(args.length()));
+    contract_branch_value = TRY (callableContract__no_ownership(args.length));
   END
   MUTABLE contract: CallableContract = contract_branch_value?;
   RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL }, method: "insert", args: COPY args, try_wrap: TRUE, callable_contract: COPY contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
@@ -198,10 +198,10 @@ PRIVATE FN pipelineSetIndexLowerer__lower_stream_index(self: PipelineSetIndexLow
 END
 PRIVATE FN pipelineSetIndexLowerer__bc_index_iter(self: PipelineSetIndexLowerer, range_source: Locatable) RETURNS ?Emittable ->
   IF range_source IS_A RangeLit THEN
-    MUTABLE start_mir = pipelineSetIndexLowerer__visit_mir_call(self, range_source.start());
-    MUTABLE end_mir = pipelineSetIndexLowerer__visit_mir_call(self, range_source.finish());
+    MUTABLE start_mir = pipelineSetIndexLowerer__visit_mir_call(self, range_source.start);
+    MUTABLE end_mir = pipelineSetIndexLowerer__visit_mir_call(self, range_source.finish);
     MUTABLE end_expr_branch_value: ?BinOp = NIL;
-    IF range_source.inclusive() THEN
+    IF range_source.inclusive THEN
       end_expr_branch_value = BinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
     ELSE
       end_expr_branch_value = end_mir;

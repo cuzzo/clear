@@ -190,7 +190,7 @@ PUB FN localBindingAnalysis__each_direct_loop_node(body: []Locatable, block: FN(
     panic("body must be an Array");
   END
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < body.length() DO
+  WHILE rtoc_idx < body.length DO
     MUTABLE item: Locatable = COPY UNWRAP (body[rtoc_idx]);
     block(COPY item);
     IF item IS_A WhileLoop AS while_loop THEN
@@ -289,7 +289,7 @@ PUB FN localBindingAnalysis__binding_frame_allocates?(node: Locatable, entry: ?C
     IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
       RETURN FALSE;
     END
-    MUTABLE value = node.value();
+    MUTABLE value = node.value;
     IF !(value) THEN
       RETURN FALSE;
     END

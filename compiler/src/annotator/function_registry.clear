@@ -30,7 +30,7 @@ PUB FN functionRegistry__names(self: FunctionRegistry) RETURNS ![]String ->
   RETURN self.nodes.keys();
 END
 PUB FN functionRegistry__each_node(self: FunctionRegistry, blk: FN(FunctionDef) -> Void) RETURNS Void ->
-  FOR rtoc_each_val IN self.nodes.values() DO
+  FOR rtoc_each_val IN self.nodes.values DO
   blk(rtoc_each_val);
   END
 END

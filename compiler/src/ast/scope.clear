@@ -69,7 +69,7 @@ PUB FN scopeBindings__length(self: ScopeBindings) RETURNS Int64
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.entries.count();
+    RETURN rtoc_self_view.entries.count;
 }
 END
 FN scopeBindings__pairs(self: ScopeBindings) RETURNS ![]Tuple<String, SymbolEntry@multiowned>
@@ -563,7 +563,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     &path.append(symbol(castLocatableToIdentifier(curr).name));
     MUTABLE reversed: []String@symbol = ( { MUTABLE rtoc_empty_list_7: []String@symbol = List[]; rtoc_empty_list_7 } );
-    MUTABLE i = (path.length() - 1);
+    MUTABLE i = (path.length - 1);
     WHILE (i >= 0) DO
       &reversed.append(symbol(UNWRAP (path[i])));
       i = (i - 1);

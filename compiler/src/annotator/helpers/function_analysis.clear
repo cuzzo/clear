@@ -42,7 +42,7 @@ FN callSignatureSite__explicit_mutable_argument?(self: CallSignatureSite, index_
   IF self.node IS_A MethodCall THEN
     method_node = COPY castFunctionCallNodeToOptionalMethodCall(self.node);
   END
-  IF ((method_node != NIL) AND (self.args.length() == (method_node.args.length() + 1))) THEN
+  IF ((method_node != NIL) AND (self.args.length == (method_node.args.length + 1))) THEN
     MUTABLE concrete_method = method_node;
     IF (index_value == 0) THEN
       RETURN methodCall__explicit_mutable_receiver?(&concrete_method);
@@ -61,7 +61,7 @@ FN callSignatureSite__explicit_mutable_argument_token(self: CallSignatureSite, i
   IF self.node IS_A MethodCall THEN
     method_node = COPY castFunctionCallNodeToOptionalMethodCall(self.node);
   END
-  IF ((method_node != NIL) AND (self.args.length() == (method_node.args.length() + 1))) THEN
+  IF ((method_node != NIL) AND (self.args.length == (method_node.args.length + 1))) THEN
     MUTABLE concrete_method = method_node;
     IF (index_value == 0) THEN
       RETURN methodCall__explicit_mutable_receiver_token_value(&concrete_method);
