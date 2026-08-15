@@ -61,7 +61,8 @@ PRIVATE FN fsmWrapperEmitter__render_run_body(step: FsmStep, MUTABLE mir_emitter
   rtoc_lambda_result_2 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, mir_emitter));
   rtoc_lambda_result_2
   });
-  MUTABLE body = (rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12)).join("\n");
+  MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
+  MUTABLE body_text: String = body.join("\n");
   RETURN (["        fn runBody(__ctx_${step.ctx_id}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id}.rt;", (IF step.suppress_runtime_ref THEN
     "            _ = &${step.bg_rt};"
   ELSE
@@ -123,7 +124,8 @@ PRIVATE FN fsmWrapperEmitter__render_step(step: FsmStep, MUTABLE mir_emitter: MI
   rtoc_lambda_result_4 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, mir_emitter));
   rtoc_lambda_result_4
   });
-  MUTABLE body = (rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12)).join("\n");
+  MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
+  MUTABLE body_text: String = body.join("\n");
   RETURN (["        fn runStep${step.index}(__ctx_${step.ctx_id}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id}.rt;", (IF step.suppress_runtime_ref THEN
     "            _ = &${step.bg_rt};"
   ELSE
@@ -277,7 +279,8 @@ PRIVATE FN fsmWrapperEmitter__render_member_fn(fn_value: FsmMemberFn, MUTABLE mi
   rtoc_lambda_result_5 = TRY (fsmWrapperEmitter__render_body_items((fn_value.body_stmts OR List[]), mir_emitter));
   rtoc_lambda_result_5
   });
-  MUTABLE body = (rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12)).join("\n");
+  MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
+  MUTABLE body_text: String = body.join("\n");
   MUTABLE extra_prologue = fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value) -> {
   rtoc_lambda_result_6 = TRY (fsmWrapperEmitter__render_stmt_array((fn_value.extra_prologue_stmts OR List[]), fn_value.bg_rt));
   rtoc_lambda_result_6

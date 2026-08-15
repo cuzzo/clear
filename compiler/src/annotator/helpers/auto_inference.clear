@@ -1032,7 +1032,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF rtoc_self_view.evidence[ret_slot] == NIL THEN
             rtoc_self_view.evidence[ret_slot] = Set[];
           END
-          (rtoc_self_view.evidence[ret_slot])?.insert(return_node.value.op());
+          IF return_node.value EXISTS AS ret_value THEN
+            IF ret_value IS_A BinaryOp AS ret_binop THEN
+              IF rtoc_self_view.evidence[ret_slot] EXISTS AS evidence_set THEN
+                MUTABLE evidence_mutable = COPY evidence_set;
+                &evidence_mutable.insert(COPY ret_binop.op);
+              END
+            END
+          END
         END
         END
         operatorEvidenceCollector__walk_binops(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY return_node.value)] }, name_to_slot, fn_value);

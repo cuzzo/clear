@@ -39,7 +39,7 @@ PUB FN frozenCleanupFacts__from_bindings(bindings: {String}CleanupEntry) RETURNS
   MUTABLE entry: CleanupEntry = COPY UNWRAP (bindings[rtoc_each_key]);
   entries[placeId__from_path(Path{ StringValue: COPY rtoc_each_key })] = COPY entry;
   END
-  RETURN frozenCleanupFacts__build(entries);
+  RETURN frozenCleanupFacts__build(&entries);
 END
 PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String}CleanupEntry, MUTABLE entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
   MUTABLE _ = COPY fn_node;
@@ -48,7 +48,7 @@ PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String
   MUTABLE place_key = placeId__from_path(Path{ StringValue: COPY rtoc_inner_key });
   entries[place_key] = (entries[place_key] OR_ELSE entry);
   END
-  RETURN frozenCleanupFacts__build(entries);
+  RETURN frozenCleanupFacts__build(&entries);
 END
 PUB FN frozenCleanupFacts__build(MUTABLE entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
   RETURN FrozenCleanupFacts{ entries_by_place: entries };
