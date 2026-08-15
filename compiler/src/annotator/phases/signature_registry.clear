@@ -22,7 +22,7 @@ PUB FN signatureRegistry__extern_function_signature(node: ExternFnDecl) RETURNS 
     rtoc_ternary_value_4 = node.params;
   END
   rtoc_ternary_value_4? };
-  RETURN TRY (functionSignature__new(params |> SELECT signatureRegistry__extern_param(_), externFnDecl__annotation_return_type(node), FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (signatureRegistry__extern_lifetime_paths(node)) }, :pub, COPY node.fn_type_params, {}, FALSE, TRUE, node.from_module, TRY (signatureRegistry__extern_effects(node)), node.extern_source, COPY node.fn_type_params, node.owner_type, COPY node.owner_type_params));
+  RETURN TRY (functionSignature__new(params |> SELECT signatureRegistry__extern_param(_), castTypeToTypeTypeInput(externFnDecl__annotation_return_type(node)), FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (signatureRegistry__extern_lifetime_paths(node)) }, :pub, COPY node.fn_type_params, {}, FALSE, TRUE, node.from_module, TRY (signatureRegistry__extern_effects(node)), node.extern_source, COPY node.fn_type_params, node.owner_type, COPY node.owner_type_params));
 END
 PRIVATE FN signatureRegistry__extern_lifetime_paths(node: ExternFnDecl) RETURNS ![]FunctionSignatureLifetimeSource ->
   MUTABLE lifetime = node.return_lifetime;

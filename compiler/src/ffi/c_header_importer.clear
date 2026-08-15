@@ -202,7 +202,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
                   rtoc_idx = rtoc_idx + 1;
             CONTINUE;
               END
-              &fields.append("${compilerRegexCapture(match?, 1)}: ${field_type}");
+              &fields.append("${UNWRAP (compilerRegexCapture(match?, 1))}: ${field_type}");
             rtoc_idx = rtoc_idx + 1;
           END
           IF ((fields.length() == 0) AND !(((CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).trim().length() == 0))) THEN
