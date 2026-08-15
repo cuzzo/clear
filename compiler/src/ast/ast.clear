@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172"
 REQUIRE "pkg:rtoc_73656d616e7469632f706173735f73746174652e636c656172"
 REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172"
 REQUIRE "pkg:rtoc_6173742f7374727563745f6669656c642e636c656172"
@@ -122,7 +123,7 @@ PUB STRUCT Binding {
   symbol: ?SymbolEntry@multiowned,
   capture: ?String,
   predicate: String@symbol,
-  mir_binding_entry: ?PassStateValue
+  mir_binding_entry: ?CleanupEntry@multiowned
 }
 PUB STRUCT Capability {
   capability: ?String@symbol,
@@ -460,7 +461,7 @@ PUB STRUCT VarDecl {
   layout_transport: ?String@symbol,
   matched_signature: ?FunctionSignature@multiowned,
   matched_stdlib_def: ?FunctionSignature@multiowned,
-  mir_binding_entry: ?PassStateValue,
+  mir_binding_entry: ?CleanupEntry@multiowned,
   module_const: ?Bool,
   mutates_receiver: ?Bool,
   needs_heap_create: ?Bool,
@@ -537,7 +538,7 @@ PUB STRUCT DestructureTarget {
   layout_transport: ?String@symbol,
   matched_signature: ?FunctionSignature@multiowned,
   matched_stdlib_def: ?FunctionSignature@multiowned,
-  mir_binding_entry: ?PassStateValue,
+  mir_binding_entry: ?CleanupEntry@multiowned,
   mutates_receiver: ?Bool,
   needs_heap_create: ?Bool,
   needs_mut_ref: ?Bool,
@@ -609,7 +610,7 @@ PUB STRUCT BindExpr {
   layout_transport: ?String@symbol,
   matched_signature: ?FunctionSignature@multiowned,
   matched_stdlib_def: ?FunctionSignature@multiowned,
-  mir_binding_entry: ?PassStateValue,
+  mir_binding_entry: ?CleanupEntry@multiowned,
   mode: ?String@symbol,
   mutates_receiver: ?Bool,
   needs_heap_create: ?Bool,
