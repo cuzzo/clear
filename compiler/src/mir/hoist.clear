@@ -38,8 +38,8 @@ PUB STRUCT HoistResult {
 PUB FN result__empty?(self: HoistResult) RETURNS Bool EFFECTS REENTRANT ->
   RETURN (self.bindings_by_function.count() == 0);
 END
-PUB FN hoist__apply_mut(ast: ASTProgram, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !HoistResult ->
-  MUTABLE hoist_pass_state = mIRPassState__for_mut(PassStateProgram{ ASTProgram: COPY ast });
+PUB FN hoist__apply_mut(ast: Program, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !HoistResult ->
+  MUTABLE hoist_pass_state = mIRPassState__for_mut(PassStateProgram{ Program: COPY ast });
   TRY (mIRPassState__require_mut(hoist_pass_state, :string_concat_rewritten, "Hoist"));
   MUTABLE bindings_by_function: {String}[]VarDecl = {};
   MUTABLE rtoc_idx = 0;
@@ -60,7 +60,7 @@ PUB FN hoist__apply_mut(ast: ASTProgram, schema_lookup: ?FN(String@symbol) -> ?T
     END
   rtoc_idx = rtoc_idx + 1;
   END
-  MUTABLE rtoc_mutable_receiver_2 = mIRPassState__for_mut(Program{ ASTProgram: COPY ast });
+  MUTABLE rtoc_mutable_receiver_2 = mIRPassState__for_mut(PassStateProgram{ Program: COPY ast });
   TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_2, :hoisted));
   RETURN HoistResult{ bindings_by_function: COPY bindings_by_function };
 END
