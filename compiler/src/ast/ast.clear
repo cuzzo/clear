@@ -8817,3 +8817,9 @@ PUB FN aST__pipeline_select_filter_op?(node: Locatable) RETURNS Bool ->
   END
   RETURN FALSE;
 END
+PUB FN selectOp__expression(self: SelectOp) RETURNS Locatable ->
+  RETURN COPY self.expression;
+END
+PUB FN nextExpr__expr(self: NextExpr) RETURNS Locatable ->
+  RETURN COPY self.expr;
+END

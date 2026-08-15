@@ -180,7 +180,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN COPY node;
     ELSE_IF (node IS_A BlockExpr) THEN
-      RETURN TRY (pipelinePlaceholderRewriter__substitute_block_expr(&rtoc_self_view, node));
+      IF node IS_A BlockExpr AS block_expr THEN
+        MUTABLE block_expr_mutable = COPY block_expr;
+        RETURN TRY (pipelinePlaceholderRewriter__substitute_block_expr(&rtoc_self_view, block_expr_mutable));
+      END
+      RETURN COPY node;
     ELSE_IF node IS_A Assert AS assert THEN
       MUTABLE assert_mutable = COPY assert;
       RETURN TRY (pipelinePlaceholderRewriter__substitute_assert(&rtoc_self_view, assert_mutable));

@@ -65,7 +65,7 @@ PUB FN pipelineBindingChainLowerer__unwrap_chain(self: PipelineBindingChainLower
     IF cursor IS_A BinaryOp AS stage_op THEN
       MUTABLE stage_rhs: Locatable = COPY stage_op.right;
       IF aST__pipeline_select_filter_op?(stage_rhs) THEN
-        &stages.unshift(stage_rhs);
+        stages = ([stage_rhs] + stages);
         cursor = COPY stage_op.left;
         IF cursor IS_A BinaryOp AS next_op THEN
           cursor_is_smooth = binaryOp__smooth?(next_op);

@@ -262,7 +262,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             BREAK;
         ELSE
             MUTABLE param_match: ?CompilerRegexScanner = compilerRegexMatchData(raw_param_parts[rtoc_idx]?, compilerRegexCompile("^([A-Za-z_]\\w*):\\s*(.+)$"));
-            MUTABLE param_name: String = "arg${rtoc_idx}";
+            MUTABLE param_name: String = "arg${rtoc_idx.toString()}";
             MUTABLE raw_type: String = COPY raw_param_parts[rtoc_idx]?;
             IF param_match EXISTS AS param_match_value THEN
               param_name = COPY compilerRegexCapture(param_match_value, 1);
