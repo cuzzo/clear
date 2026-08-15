@@ -232,7 +232,8 @@ PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int6
     body_lines = ruby_array_concat_Any(body_lines, CAST(err_action AS []Any));
   END
   &body_lines.append(TRY (fsmWrapperEmitter__render_tail(arm.tail, ctx_id)));
-  MUTABLE body = (body_lines |> WHERE _ != NIL) |> WHERE !(_.empty?()).join("\n");
+  MUTABLE body_kept: []String = body_lines |> WHERE !(fsmWrapperEmitter__empty?(_));
+  MUTABLE body: String = body_kept.join("\n");
   RETURN (["    ${arm.index} => {", fsmWrapperEmitter__indent_block(body, 8), "    },"]).join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__arm_uses_continue?(arm: FsmStateArm) RETURNS Bool ->
