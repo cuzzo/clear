@@ -140,21 +140,21 @@ PRIVATE FN autoConstraintCollector__register_signature_slots(MUTABLE self: AutoC
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.fn_nodes.keys() |> EACH {
-    MUTABLE fn_value: FunctionDef@multiowned = (rtoc_self_view.fn_nodes[_] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
+    FOR rtoc_each_3 IN rtoc_self_view.fn_nodes.keys() DO
+    MUTABLE fn_value: FunctionDef@multiowned = (rtoc_self_view.fn_nodes[rtoc_each_3] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < fn_value.params.length() DO
         IF !(autoConstraintCollector__auto?(rtoc_self_view, param__type(fn_value.params[rtoc_idx]?))) THEN
           rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        rtoc_self_view.slots[autoSlotId__param(_, rtoc_idx)] = COPY Slot{ kind: :param, fn_name: COPY _, index: rtoc_idx, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } ), auto_token: KEEP param__type(fn_value.params[rtoc_idx]?).auto_token, shape: NIL, resolved_scalar: NIL } @multiowned;
+        rtoc_self_view.slots[autoSlotId__param(rtoc_each_3, rtoc_idx)] = COPY Slot{ kind: :param, fn_name: COPY rtoc_each_3, index: rtoc_idx, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } ), auto_token: KEEP param__type(fn_value.params[rtoc_idx]?).auto_token, shape: NIL, resolved_scalar: NIL } @multiowned;
       rtoc_idx = rtoc_idx + 1;
     END
     IF autoConstraintCollector__auto?(rtoc_self_view, fn_value.return_type) THEN
-        rtoc_self_view.slots[autoSlotId__return(_)] = COPY Slot{ kind: :return, fn_name: COPY _, index: NIL, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } ), auto_token: KEEP (fn_value.return_type?).auto_token, shape: NIL, resolved_scalar: NIL } @multiowned;
+        rtoc_self_view.slots[autoSlotId__return(rtoc_each_3)] = COPY Slot{ kind: :return, fn_name: COPY rtoc_each_3, index: NIL, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } ), auto_token: KEEP (fn_value.return_type?).auto_token, shape: NIL, resolved_scalar: NIL } @multiowned;
     END
-    };
+        END
     RETURN COPY rtoc_self_view.slots;
 }
 END
@@ -527,24 +527,24 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE progress: Bool = TRUE;
     WHILE progress DO
       progress = FALSE;
-      rtoc_self_view.slots.keys() |> EACH {
-    MUTABLE slot: Slot@multiowned = (rtoc_self_view.slots[_] OR_ELSE CAST(panic("missing hash key") AS Slot));
-    IF (resolved.contains?(_) OR ambiguous.contains?(_)) THEN
+      FOR rtoc_each_4 IN rtoc_self_view.slots.keys() DO
+    MUTABLE slot: Slot@multiowned = (rtoc_self_view.slots[rtoc_each_4] OR_ELSE CAST(panic("missing hash key") AS Slot));
+    IF (resolved.contains?(rtoc_each_4) OR ambiguous.contains?(rtoc_each_4)) THEN
       CONTINUE;
     END
     MUTABLE observed = TRY (autoUnifier__collect_observed_types(rtoc_self_view, slot));
     IF (observed.length() == 1) THEN
           MUTABLE type = COPY UNWRAP (observed.first());
           TRY (autoUnifier__stamp_slot_mut(rtoc_self_view, &slot, type));
-          resolved[_] = Resolution{ slot: COPY slot, type: COPY type, sources: COPY slot.sources };
+          resolved[rtoc_each_4] = Resolution{ slot: COPY slot, type: COPY type, sources: COPY slot.sources };
           progress = TRUE;
     ELSE_IF (observed.length() == 0) THEN
   
     ELSE
-          ambiguous[_] = Ambiguity{ slot: COPY slot, observed_types: COPY observed, sources: COPY slot.sources };
+          ambiguous[rtoc_each_4] = Ambiguity{ slot: COPY slot, observed_types: COPY observed, sources: COPY slot.sources };
           progress = TRUE;
     END
-      };
+            END
     END
     MUTABLE unresolved: {AutoSlotId@multiowned}Slot@multiowned = {};
     FOR rtoc_slot_key IN rtoc_self_view.slots.keys() DO
@@ -691,8 +691,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         by_decl[slotDeclIdentity(_.slot.decl_node)] = COPY pair;
     END
     END
-    by_decl.keys() |> EACH {
-    MUTABLE pair: MapPairResolution@multiowned = (by_decl[_] OR_ELSE CAST(panic("missing hash key") AS MapPairResolution@multiowned));
+    FOR rtoc_each_5 IN by_decl.keys() DO
+    MUTABLE pair: MapPairResolution@multiowned = (by_decl[rtoc_each_5] OR_ELSE CAST(panic("missing hash key") AS MapPairResolution@multiowned));
     MUTABLE key_res: ?Resolution = pair.key;
     MUTABLE val_res: ?Resolution = pair.value;
     IF !(((key_res != NIL) AND (val_res != NIL))) THEN
@@ -713,7 +713,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           item_mutable.type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${k_sym}, ${v_sym}>") }));
           decl = AutoConstraintCollectorDeclarationNode{ BindExpr: item_mutable };,
       END
-    };
+        END
 }
 END
 FN autoUnifier__new(slots: {AutoSlotId@multiowned}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS AutoUnifier@multiowned ->

@@ -56,12 +56,12 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
   };
   MUTABLE cyclic_segs = TRY (liveness__compute_cyclic_segments(segments));
   MUTABLE cross: {String}CrossSegmentVarFact = {};
-  first_def.keys() |> EACH {
-  MUTABLE def_seg: Int64 = (first_def[_] OR_ELSE CAST(panic("missing hash key") AS Int64));
-  IF capture_names.contains?(_) THEN
+  FOR rtoc_each_2 IN first_def.keys() DO
+  MUTABLE def_seg: Int64 = (first_def[rtoc_each_2] OR_ELSE CAST(panic("missing hash key") AS Int64));
+  IF capture_names.contains?(rtoc_each_2) THEN
     CONTINUE;
   END
-  MUTABLE use_seg: ?Int64 = last_use[_];
+  MUTABLE use_seg: ?Int64 = last_use[rtoc_each_2];
   IF (use_seg == NIL) THEN
       CONTINUE;
   END
@@ -70,8 +70,8 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
         CONTINUE;
       END
   END
-  cross[_] = CrossSegmentVarFact{ type_info: COPY type_by_name[_], first_def_seg: def_seg, last_use_seg: UNWRAP (use_seg) };
-  };
+  cross[rtoc_each_2] = CrossSegmentVarFact{ type_info: COPY type_by_name[rtoc_each_2], first_def_seg: def_seg, last_use_seg: UNWRAP (use_seg) };
+    END
   RETURN LivenessResult{ cross_segment_vars: cross };
 END
 PRIVATE FN liveness__compute_cyclic_segments(segments: []Segment) RETURNS ![Set]Int64 ->

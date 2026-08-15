@@ -749,13 +749,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(_) THEN
       CONTINUE;
     END
-    _.keys() |> EACH {
-      MUTABLE entry: Any = (_[_] OR_ELSE panic("missing hash key"));
+    FOR rtoc_each_1 IN _.keys() DO
+      MUTABLE entry: Any = (rtoc_each_1[rtoc_each_1] OR_ELSE panic("missing hash key"));
       IF !(entry IS_A OwnerEntry) THEN
         CONTINUE;
       END
-      saw[_] = (saw[_] OR_ELSE {:any_moved: FALSE, :any_maybe: FALSE, :any_not_moved: FALSE});
-      MUTABLE rec = UNWRAP (saw[_]);
+      saw[rtoc_each_1] = (saw[rtoc_each_1] OR_ELSE {:any_moved: FALSE, :any_maybe: FALSE, :any_not_moved: FALSE});
+      MUTABLE rec = UNWRAP (saw[rtoc_each_1]);
       IF (entry.state() == :moved) THEN
           rec[:any_moved] = TRUE;
       ELSE_IF (entry.state() == :maybe_moved) THEN
@@ -763,7 +763,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
           rec[:any_not_moved] = TRUE;
       END
-    };
+        END
     END
     RETURN ( { MUTABLE rtoc_transform_values_result_13: {PlaceId}CleanupDecision = {}; FOR rtoc_key IN saw.keys() DO rtoc_transform_values_result_13[rtoc_key] = { MUTABLE rtoc_value_block_marker = 0;
     MUTABLE rec: {String@symbol}Bool = (saw[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS {String@symbol}Bool));
