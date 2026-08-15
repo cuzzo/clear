@@ -27,7 +27,7 @@ PUB STRUCT PipelineListLowerer {
   loop_mark_stmts: FN() -> ![]Emittable
 }
 
-PUB FN pipelineListLowerer__lower(self: PipelineListLowerer, site: PipelineSite, MUTABLE op: PipelineListTerminalOp) RETURNS !MIRBlockExpr ->
+PUB FN pipelineListLowerer__lower(self: PipelineListLowerer, site: PipelineSite, MUTABLE op: PipelineListTerminalOp) RETURNS !?MIRBlockExpr ->
   IF op IS_A WhereOp@multiowned AS where_op_multiowned THEN
     RETURN TRY (pipelineListLowerer__lower_where(self, site, whereOp__expression(where_op_multiowned)));
   ELSE_IF op IS_A SelectOp@multiowned AS select_op_multiowned THEN

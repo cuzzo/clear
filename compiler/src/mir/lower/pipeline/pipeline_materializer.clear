@@ -179,7 +179,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_prefix: []Emittable = ( { MUTABLE rtoc_empty_list_1: []Emittable = List[]; rtoc_empty_list_1 } );
     MUTABLE source_cleanup: ?Cleanup = NIL;
     MUTABLE forced_alloc: ?String@symbol = pipelineMaterializer__inline_source_alloc(rtoc_self_view, source_mir);
-    MUTABLE fact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, (forced_alloc OR_ELSE :heap), TRY (aST__full_type_mut(list_node)), NIL, "pipeline allocation", !((forced_alloc == NIL)));
+    MUTABLE fact: ?AllocMarkFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, (forced_alloc OR_ELSE :heap), TRY (aST__full_type_mut(list_node)), NIL, "pipeline allocation", !((forced_alloc == NIL)));
     IF fact THEN
       &source_prefix.append(fact.mark());
       source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type((TRY (aST__full_type_mut(list_node)))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
@@ -289,7 +289,7 @@ PUB FN pipelineMaterializer__append_owned_value_stmt(self: PipelineMaterializer,
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, value_expr, runtimeHost__materializer_next_item_temp_name(rtoc_self_view.host), alloc, owned_type, NIL, "pipeline owned append item", known_owned);
+    MUTABLE fact: ?AllocMarkFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, value_expr, runtimeHost__materializer_next_item_temp_name(rtoc_self_view.host), alloc, owned_type, NIL, "pipeline owned append item", known_owned);
     IF (fact AND (fact.alloc() != alloc)) THEN
       fact.mark().scope = IF placement__heap?(fact.alloc()) THEN
         :heap
@@ -339,7 +339,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_mir = runtimeHost__materializer_visit_mir(rtoc_self_view.host, lhs);
     MUTABLE source_prefix: []Emittable = ( { MUTABLE rtoc_empty_list_4: []Emittable = List[]; rtoc_empty_list_4 } );
     MUTABLE source_cleanup: ?Cleanup = NIL;
-    MUTABLE fact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, :heap, TRY (aST__full_type_mut(lhs)));
+    MUTABLE fact: ?AllocMarkFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, :heap, TRY (aST__full_type_mut(lhs)));
     IF fact THEN
       &source_prefix.append(fact.mark());
       source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type(lhs_type))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
