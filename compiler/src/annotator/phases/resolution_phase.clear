@@ -901,11 +901,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE mod: ?CompiledModule = mod_branch_value;
     MUTABLE mod_value: CompiledModule = mod?;
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ RequireNode: COPY node }, :Void));
-    MUTABLE same_dir = (((node.kind != :package)) AND ((mod_value.source_dir == resolutionSession__import_source_dir(rtoc_self_view))));
-    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
-    TRY (scope__visible_entries(rtoc_local_receiver_21)) }).keys() |> EACH {
+    MUTABLE same_dir = (((node.kind != :package)) AND ((mod_value.source_dir == resolutionSession__import_source_dir(rtoc_self_view))));FOR rtoc_each_1 IN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
+    TRY (scope__visible_entries(rtoc_local_receiver_21)) }).keys() DO
     MUTABLE entry: Any = (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
-    TRY (scope__visible_entries(rtoc_local_receiver_21)) })[_] OR_ELSE panic("missing hash key"));
+    TRY (scope__visible_entries(rtoc_local_receiver_21)) })[rtoc_each_1] OR_ELSE panic("missing hash key"));
     MUTABLE sig = symbolEntry__fn_signature(entry);
     IF !(sig) THEN
         CONTINUE;
@@ -913,7 +912,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF functionSignature__module_alias(sig) THEN
         CONTINUE;
     END
-    IF (_ == name) THEN
+    IF (rtoc_each_1 == name) THEN
         CONTINUE;
     END
     MUTABLE vis = (functionSignature__visibility(sig) OR :package);
@@ -923,8 +922,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE imported_sig = TRY (functionSignature__import_copy(sig, node.namespace));
     MUTABLE rtoc_mutable_receiver_22 = resolutionSession__current_scope(rtoc_self_view);
-    TRY (scope__declare(&rtoc_mutable_receiver_22, _, NIL, imported_sig, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :static));
-    };
+    TRY (scope__declare(&rtoc_mutable_receiver_22, rtoc_each_1, NIL, imported_sig, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :static));
+        END
     mod_value.global_scope.types().keys() |> EACH {
     MUTABLE type_entry: Any = (mod_value.global_scope.types()[_] OR_ELSE panic("missing hash key"));
     MUTABLE schema = type_entry.schema();

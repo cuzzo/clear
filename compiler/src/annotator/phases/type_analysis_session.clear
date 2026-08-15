@@ -796,12 +796,11 @@ PUB FN typeAnalysisSession__imported_kept_params(self: TypeAnalysisSession, fn_n
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE out: {String}[]Param = {};
-    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_7 = typeAnalysisSession__semantic_root_scope(rtoc_self_view);
-    TRY (scope__visible_entries(rtoc_local_receiver_7)) }).keys() |> EACH {
+    MUTABLE out: {String}[]Param = {};FOR rtoc_each_1 IN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_7 = typeAnalysisSession__semantic_root_scope(rtoc_self_view);
+    TRY (scope__visible_entries(rtoc_local_receiver_7)) }).keys() DO
     MUTABLE entry: SymbolEntry@multiowned = (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_7 = typeAnalysisSession__semantic_root_scope(rtoc_self_view);
-    TRY (scope__visible_entries(rtoc_local_receiver_7)) })[_] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
-    MUTABLE key = COPY _;
+    TRY (scope__visible_entries(rtoc_local_receiver_7)) })[rtoc_each_1] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
+    MUTABLE key = COPY rtoc_each_1;
     IF fn_nodes.contains?(key) THEN
         CONTINUE;
     END
@@ -810,15 +809,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         CONTINUE;
     END
     MUTABLE params = TRY (functionSignature__params(signature));
-    IF !(params |> ANY (IF _.symbol != NIL THEN
-        symbolEntry__kept_identity(_.symbol)
+    IF !(params |> ANY (IF rtoc_each_1.symbol != NIL THEN
+        symbolEntry__kept_identity(rtoc_each_1.symbol)
       ELSE
         NIL
       END)) THEN
         CONTINUE;
     END
     out[key] = params;
-    };
+        END
     RETURN out;
 }
 END
@@ -3181,14 +3180,13 @@ PRIVATE FN typeAnalysisSession__module_variable_scope(self: TypeAnalysisSession)
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE seeded = scope__new();
-    typeAnalysisSession__semantic_root_scope(rtoc_self_view).binding_entries.keys() |> EACH {
-    MUTABLE entry: SymbolEntry@multiowned = (typeAnalysisSession__semantic_root_scope(rtoc_self_view).binding_entries[_] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
+    MUTABLE seeded = scope__new();FOR rtoc_each_2 IN typeAnalysisSession__semantic_root_scope(rtoc_self_view).binding_entries.keys() DO
+    MUTABLE entry: SymbolEntry@multiowned = (typeAnalysisSession__semantic_root_scope(rtoc_self_view).binding_entries[rtoc_each_2] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
     IF !(((entry.reg != NIL) AND (entry.reg IS_A VarDecl))) THEN
       CONTINUE;
     END
-    seeded.binding_entries[_] = KEEP entry;
-    };
+    seeded.binding_entries[rtoc_each_2] = KEEP entry;
+        END
     RETURN seeded;
 }
 END
