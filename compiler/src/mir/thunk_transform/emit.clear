@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_6d69722f6d69725f6c6f776572696e672e636c656172"
 REQUIRE "../../ast/type.clear"
 REQUIRE "../../backends/zig_type.clear"
 REQUIRE "../mir.clear"

@@ -518,7 +518,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__lowering_state(rtoc_self_view).test;
 }
 END
-FN mIRLowering__mir_schema_lookup(self: MIRLowering) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
+PUB FN mIRLowering__mir_schema_lookup(self: MIRLowering) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1594,7 +1594,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     symbolEntry__heap_storage?(rtoc_local_receiver_27) } == TRUE)) ELSE FALSE END))));
 }
 END
-FN mIRLowering__lower(MUTABLE self: MIRLowering, MUTABLE node: MIRLoweringLowerableStmt) RETURNS !?Emittable
+PUB FN mIRLowering__lower(MUTABLE self: MIRLowering, MUTABLE node: MIRLoweringLowerableStmt) RETURNS !?Emittable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -6437,7 +6437,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY mir, discard: !(is_void_step), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
 }
 END
-PRIVATE FN mIRLowering__lower_finalized_fsm_step_mir(MUTABLE self: MIRLowering, stmts: []Locatable, no_result: Bool, ctx_id: ?Int64 = NIL, async_result_shape: ?AsyncResultShape = NIL) RETURNS ![]Emittable
+PUB FN mIRLowering__lower_finalized_fsm_step_mir(MUTABLE self: MIRLowering, stmts: []Locatable, no_result: Bool, ctx_id: ?Int64 = NIL, async_result_shape: ?AsyncResultShape = NIL) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -6449,7 +6449,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view, result, inherited_allocs, inherited_guards));
 }
 END
-PRIVATE FN mIRLowering__last_fsm_result_transfer_facts(self: MIRLowering) RETURNS ![]FsmResultTransferFact
+PUB FN mIRLowering__last_fsm_result_transfer_facts(self: MIRLowering) RETURNS ![]FsmResultTransferFact
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -6481,7 +6481,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__with_bg_fiber_body_context(rtoc_self_view, pointer_captures, blk);
 }
 END
-PRIVATE FN mIRLowering__fsm_cap_metadata(self: MIRLowering, cap: CapabilityTransition, with_node: WithBlock, ctx_id: Int64, captured: {String}Type@multiowned) RETURNS !?{String@symbol}FsmCapMetadataValue
+PUB FN mIRLowering__fsm_cap_metadata(self: MIRLowering, cap: CapabilityTransition, with_node: WithBlock, ctx_id: Int64, captured: {String}Type@multiowned) RETURNS !?{String@symbol}FsmCapMetadataValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -6538,7 +6538,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__emit_fsm_lock_error_arm_split(MUTABLE self: MIRLowering, clause: ErrorClause, ctx_id: Int64, with_node: WithBlock, capture_map: {String}String, pointer_captures: [Set]String, bg_rt: String) RETURNS !?FsmLockErrorArmSplit
+PUB FN mIRLowering__emit_fsm_lock_error_arm_split(MUTABLE self: MIRLowering, clause: ErrorClause, ctx_id: Int64, with_node: WithBlock, capture_map: {String}String, pointer_captures: [Set]String, bg_rt: String) RETURNS !?FsmLockErrorArmSplit
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -6598,7 +6598,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "result", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "error", lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY result_name, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
-PRIVATE FN mIRLowering__default_fsm_lock_error_arm_split(self: MIRLowering, id: Int64) RETURNS FsmLockErrorArmSplit
+PUB FN mIRLowering__default_fsm_lock_error_arm_split(self: MIRLowering, id: Int64) RETURNS FsmLockErrorArmSplit
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -6964,7 +6964,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Emittable{ MIRBlockExpr: COPY block };
 }
 END
-FN mIRLowering__lower_head(self: MIRLowering, blk: FN() -> ?Emittable) RETURNS ?Emittable
+PUB FN mIRLowering__lower_head(self: MIRLowering, blk: FN() -> ?Emittable) RETURNS ?Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

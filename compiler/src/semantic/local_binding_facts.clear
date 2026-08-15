@@ -224,7 +224,9 @@ PUB FN localBindingAnalysis__each_direct_loop_node(body: []Locatable, block: FN(
         TRY (localBindingAnalysis__each_direct_loop_node(matchCase__body(_), block));
         END
         IF match_statement.default_case THEN
-          TRY (localBindingAnalysis__each_direct_loop_node(match_statement.default_case, block));
+          IF match_statement.default_case EXISTS AS rtoc_opt_body THEN
+            TRY (localBindingAnalysis__each_direct_loop_node(rtoc_opt_body, block));
+          END
         END
     ELSE_IF item IS_A WithBlock AS with_block THEN
         TRY (localBindingAnalysis__each_direct_loop_node(with_block.body, block));

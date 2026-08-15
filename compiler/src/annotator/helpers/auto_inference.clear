@@ -787,12 +787,12 @@ PRIVATE FN shapeEvidenceCollector__walk_for_shape_decls(self: ShapeEvidenceColle
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node EXISTS AS node_value THEN
       IF node_value IS_A BindExpr AS bind_expr THEN
-        IF type__auto?(bind_expr.type) THEN
+        IF typeAutoOptional?(bind_expr.type) THEN
           block(bind_expr);
         END
         shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: COPY bind_expr.value }, block);
       ELSE_IF node_value IS_A VarDecl AS var_decl THEN
-        IF type__auto?(var_decl.type) THEN
+        IF typeAutoOptional?(var_decl.type) THEN
           block(var_decl);
         END
         shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: COPY var_decl.value }, block);

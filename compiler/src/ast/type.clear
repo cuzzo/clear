@@ -5020,3 +5020,9 @@ FN ruby_wrap_optional_Token_TypeCapabilitiesMaybeToken(value: ?Token) RETURNS ?T
   END
   RETURN NIL;
 END
+PUB FN typeAutoOptional?(value: ?Type) RETURNS Bool ->
+  IF value EXISTS AS type_value THEN
+    RETURN type__auto?(type_value);
+  END
+  RETURN FALSE;
+END
