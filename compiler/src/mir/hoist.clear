@@ -38,7 +38,6 @@ PUB STRUCT HoistResult {
 PUB FN result__empty?(self: HoistResult) RETURNS Bool EFFECTS REENTRANT ->
   RETURN (self.bindings_by_function.count() == 0);
 END
-pipeline_stage_nodes: [19]Any@multiowned = [AST.SelectOp, AST.WhereOp, AST.EachOp, AST.TapOp, AST.AllOp, AST.AnyOp, AST.FindOp, AST.CountOp, AST.SumOp, AST.AverageOp, AST.MinOp, AST.MaxOp, AST.TakeWhileOp, AST.SkipOp, AST.OrderByOp, AST.DistinctOp, AST.UnnestOp, AST.IndexOp, AST.ReduceOp];
 PUB FN hoist__apply_mut(ast: ASTProgram, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !HoistResult ->
   TRY (mIRPassState__class_require_mut(ast, :string_concat_rewritten, {:consumer: "Hoist"}));
   MUTABLE bindings_by_function: {String}[]VarDecl = {};

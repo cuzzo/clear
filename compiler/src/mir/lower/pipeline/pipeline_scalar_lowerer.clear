@@ -11,7 +11,7 @@ PUB STRUCT PipelineScalarLowerer {
   loop_mark_stmts: FN() -> ![]Emittable
 }
 
-PUB FN pipelineScalarLowerer__lower(self: PipelineScalarLowerer, site: PipelineSite, op: PipelineMaterializedScalarOp) RETURNS !MIRBlockExpr ->
+PUB FN pipelineScalarLowerer__lower(self: PipelineScalarLowerer, site: PipelineSite, op: PipelineMaterializedScalarOp) RETURNS !?MIRBlockExpr ->
   IF op IS_A CountOp@multiowned AS count_op_multiowned THEN
     RETURN TRY (pipelineScalarLowerer__lower_count(self, site, CAST(COPY count_op_multiowned AS CountOp)));
   ELSE_IF op IS_A SumOp@multiowned AS sum_op_multiowned THEN
