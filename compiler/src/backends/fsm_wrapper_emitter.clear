@@ -48,7 +48,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, mir_emitte
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
   &parts.append("");
-  &parts.append(TRY (fsmWrapperEmitter__render_run_body(s.run_body, mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_run_body(s.run_body, &mir_emitter)));
   &parts.append("");
   &parts.append(fsmWrapperEmitter__render_b1_resume_fn(s.run_body.ctx_id()));
   &parts.append("");
@@ -76,7 +76,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_resume_fn(ctx_id: Int64) RETURNS String 
   RETURN (("fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n    if (runBody(__ctx_${ctx_id.toString()})) |_| {} else |err| {\n        __ctx_${ctx_id.toString()}.inner.result = err;\n    }\n    __ctx_${ctx_id.toString()}.inner.wg.done();\n    return .{ .Done = {} };\n}\n".chomp()).split("\n") |> SELECT "        ${_}").join("").chomp();
 END
 PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions: []FsmDestroyAction, mir_emitter: MIREmitter) RETURNS String ->
-  MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, mir_emitter);
+  MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, &mir_emitter);
   MUTABLE extra: String = "";
   IF !(fsmWrapperEmitter__empty?(extra_zig)) THEN
     extra = (((extra_zig.split("\n") |> SELECT "    ${_.chomp()}").join("\n")) + "\n");
@@ -108,9 +108,9 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, mir_emitter: MI
   &parts.append("        ${_}");
   END
   &parts.append("");
-  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step0, mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step0, &mir_emitter)));
   &parts.append("");
-  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step1, mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_step(s.step1, &mir_emitter)));
   &parts.append("");
   &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_dispatch(s.resume_fn)), 8));
   &parts.append("");
@@ -172,7 +172,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
   END
   &parts.append("");
   FOR _ IN ((s.member_fns OR List[])) DO
-  &parts.append(TRY (fsmWrapperEmitter__render_member_fn(_, mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_member_fn(_, &mir_emitter)));
   &parts.append("");
   END
   IF !(s.dispatch IS_A FsmDispatch) THEN
