@@ -67,7 +67,7 @@ PUB FN nextSuspend__result_type(self: NextSuspend) RETURNS !?Type ->
   IF !(type_object) THEN
     panic("FSM NEXT suspend result: missing type info");
   END
-  MUTABLE concrete_type = type_object;
+  MUTABLE concrete_type: Type = COPY UNWRAP (type_object);
   IF type__untyped?(concrete_type) THEN
     panic("FSM NEXT suspend result: unresolved type info");
   END

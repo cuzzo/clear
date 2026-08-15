@@ -8789,3 +8789,19 @@ END
 PUB FN binaryOp__smooth?(self: BinaryOp) RETURNS Bool ->
   RETURN (self.op == :SMOOTH);
 END
+PUB FN aST__pipeline_range_fold?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.CountOp AS item -> RETURN TRUE;,
+    Locatable.SumOp AS item -> RETURN TRUE;,
+    Locatable.AverageOp AS item -> RETURN TRUE;,
+    Locatable.MinOp AS item -> RETURN TRUE;,
+    Locatable.MaxOp AS item -> RETURN TRUE;,
+    Locatable.AnyOp AS item -> RETURN TRUE;,
+    Locatable.AllOp AS item -> RETURN TRUE;,
+    Locatable.FindOp AS item -> RETURN TRUE;
+  END
+  RETURN FALSE;
+END
+PUB FN whereOp__expression(self: WhereOp) RETURNS Locatable ->
+  RETURN COPY self.expression;
+END
