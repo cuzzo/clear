@@ -669,6 +669,13 @@ FN observedTypeSymbol(observed: AutoConstraintCollectorObservedType) RETURNS Str
   END
   RETURN :Any;
 END
+FN declBlockParamName(decl: AutoInferenceDeclBlockParam1) RETURNS String ->
+  PARTIAL MATCH decl START
+    AutoInferenceDeclBlockParam1.BindExpr AS item -> RETURN COPY item.name;,
+    AutoInferenceDeclBlockParam1.VarDecl AS item -> RETURN COPY item.name;
+  END
+  RETURN "";
+END
 PUB FN slotDeclIdentity(decl_node: AutoConstraintCollectorSlotDeclNode) RETURNS Int64 ->
   PARTIAL MATCH decl_node START
     AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> RETURN aST__node_identity(Locatable{ FunctionDef: COPY item });,
@@ -763,10 +770,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE list_slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__list_element(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
     MUTABLE key_slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__map_key(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
     MUTABLE val_slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__map_value(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
-    IF !((IF (IF list_slot != NIL THEN list_slot ELSE key_slot END) != NIL THEN (IF list_slot != NIL THEN list_slot ELSE key_slot END) ELSE val_slot END)) THEN
+    IF (((list_slot == NIL) AND (key_slot == NIL)) AND (val_slot == NIL)) THEN
         RETURN;
     END
-    map[(MATCH decl START AutoInferenceDeclBlockParam1.BindExpr AS item -> item.name, AutoInferenceDeclBlockParam1.VarDecl AS item -> item.name END)] = autoShapeSlots__new(list_slot, key_slot, val_slot);
+    MUTABLE decl_name: String = declBlockParamName(decl);
+    map[decl_name] = autoShapeSlots__new(list_slot, key_slot, val_slot);
     rubyToClearVoid()
     });
     RETURN map;
@@ -962,7 +970,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode(_) }, %(decl: AutoInferenceDeclBlockParam1) USE(MUTABLE map, rtoc_self_view) -> {
     MUTABLE slot_id = autoSlotId__local(castAutoInferenceDeclBlockParam1ToLocatable(decl));
     IF rtoc_self_view.slots.contains?(slot_id) THEN
-        map[(MATCH decl START AutoInferenceDeclBlockParam1.BindExpr AS item -> item.name, AutoInferenceDeclBlockParam1.VarDecl AS item -> item.name END)] = slot_id;
+        MUTABLE decl_name: String = declBlockParamName(decl);
+    map[decl_name] = slot_id;
     END
     rubyToClearVoid()
     });

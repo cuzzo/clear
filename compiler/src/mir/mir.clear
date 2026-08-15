@@ -3667,7 +3667,7 @@ END
 PUB STRUCT FsmIoBody {
   blk_label: String,
   ctx_struct: FsmCtxStruct,
-  spawn_setup: []Emittable,
+  spawn_setup: FsmSpawnSetup,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -3798,7 +3798,7 @@ END
 PUB STRUCT FsmB1Body {
   blk_label: String,
   ctx_struct: FsmCtxStruct,
-  spawn_setup: []Emittable,
+  spawn_setup: FsmSpawnSetup,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -3871,7 +3871,7 @@ PUB STRUCT FsmB1CtxStruct {
 PUB STRUCT FsmGenericBody {
   blk_label: String,
   ctx_struct: FsmCtxStruct,
-  spawn_setup: []Emittable,
+  spawn_setup: FsmSpawnSetup,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
