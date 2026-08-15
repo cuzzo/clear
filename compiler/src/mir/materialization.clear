@@ -59,8 +59,8 @@ PUB STRUCT BindingMaterialization {
 PUB FN bindingMaterialization__alloc_mark(self: BindingMaterialization) RETURNS AllocMark ->
   RETURN AllocMark{ name: COPY self.name, alloc: COPY self.alloc, type_info: COPY self.type_info, scope: ( { MUTABLE rtoc_optional_or_source_3: ?String@symbol = self.scope; MUTABLE rtoc_optional_or_result_4: ?String@symbol = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = placement__alloc_scope(self.alloc); END rtoc_optional_or_result_4 } ), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
-PUB FN bindingMaterialization__let_node(self: BindingMaterialization) RETURNS Let ->
-  RETURN Let{ name: COPY self.name, init: COPY self.expr, mutable: self.mutable, annotation: COPY self.annotation, suppression: COPY self.suppression, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
+PUB FN bindingMaterialization__let_node(self: BindingMaterialization) RETURNS Emittable ->
+  RETURN Emittable{ Let: COPY Let{ name: COPY self.name, init: COPY self.expr, mutable: self.mutable, annotation: COPY self.annotation, suppression: COPY self.suppression, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } };
 END
 PUB FN bindingMaterialization__cleanup_stmt(self: BindingMaterialization) RETURNS ?Emittable ->
   MUTABLE entry: ?CleanupEntry@multiowned = COPY KEEP self.cleanup_entry;

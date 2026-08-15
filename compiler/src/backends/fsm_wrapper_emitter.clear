@@ -21,7 +21,7 @@ PRIVATE FN fsmWrapperEmitter__render_io_body(body: FsmIoBody) RETURNS !String ->
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
   &parts.append(TRY (fsmWrapperEmitter__render_ctx_struct(body.ctx_struct, mir_emitter)));
-  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name()));
+  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
   RETURN parts.join("\n");
@@ -31,7 +31,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_body(body: FsmB1Body) RETURNS !String ->
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
   &parts.append(TRY (fsmWrapperEmitter__render_b1_ctx_struct(body.ctx_struct, mir_emitter)));
-  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name()));
+  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
   RETURN parts.join("\n");
@@ -146,7 +146,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_body(body: FsmGenericBody) RETURNS 
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
   &parts.append(TRY (fsmWrapperEmitter__render_generic_ctx_struct(body.ctx_struct, mir_emitter)));
-  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name()));
+  &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
   RETURN parts.join("\n");

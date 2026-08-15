@@ -661,6 +661,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
+FN observedTypeSymbol(observed: AutoConstraintCollectorObservedType) RETURNS String@symbol ->
+  PARTIAL MATCH observed START
+    AutoConstraintCollectorObservedType.SymbolValue AS item -> RETURN COPY item;,
+    AutoConstraintCollectorObservedType.Type AS item -> RETURN type__resolved(item);,
+    AutoConstraintCollectorObservedType.TypeMultiowned AS item -> RETURN type__resolved(item);
+  END
+  RETURN :Any;
+END
 PUB FN slotDeclIdentity(decl_node: AutoConstraintCollectorSlotDeclNode) RETURNS Int64 ->
   PARTIAL MATCH decl_node START
     AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> RETURN aST__node_identity(Locatable{ FunctionDef: COPY item });,
@@ -701,10 +709,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE key_resolution: Resolution = COPY UNWRAP (key_res);
     MUTABLE val_resolution: Resolution = COPY UNWRAP (val_res);
     MUTABLE decl: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(key_resolution.slot.decl_node);
-    MUTABLE key_type = key_resolution.type;
-    MUTABLE val_type = val_resolution.type;
-    MUTABLE k_sym = type__resolved(key_type);
-    MUTABLE v_sym = type__resolved(val_type);
+    MUTABLE k_sym: String@symbol = observedTypeSymbol(key_resolution.type);
+    MUTABLE v_sym: String@symbol = observedTypeSymbol(val_resolution.type);
     declNode__set_type(&decl, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${k_sym}, ${v_sym}>") })));
         END
 }
