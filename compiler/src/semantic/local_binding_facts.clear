@@ -286,17 +286,19 @@ PUB FN localBindingAnalysis__binding_frame_allocates?(node: Locatable, entry: ?C
     IF needs_cleanup THEN
       RETURN TRUE;
     END
-    IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
-      RETURN FALSE;
+    MUTABLE decl_value: ?Locatable = NIL;
+    IF node IS_A VarDecl AS var_decl THEN
+      decl_value = COPY var_decl.value;
+    ELSE_IF node IS_A BindExpr AS bind_expr THEN
+      decl_value = COPY bind_expr.value;
     END
-    MUTABLE value = node.value();
-    IF !(value) THEN
-      RETURN FALSE;
+    IF decl_value EXISTS AS value THEN
+      IF (value IS_A Literal OR value IS_A Identifier) THEN
+        RETURN FALSE;
+      END
+      RETURN TRUE;
     END
-    IF (value IS_A Literal OR value IS_A Identifier) THEN
-      RETURN FALSE;
-    END
-    RETURN TRUE;
+    RETURN FALSE;
   ELSE
     RETURN FALSE;
   END

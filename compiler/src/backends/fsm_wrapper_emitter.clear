@@ -50,9 +50,9 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, MUTABLE mi
   &parts.append("");
   &parts.append(TRY (fsmWrapperEmitter__render_run_body(s.run_body, &mir_emitter)));
   &parts.append("");
-  &parts.append(fsmWrapperEmitter__render_b1_resume_fn(s.run_body.ctx_id()));
+  &parts.append(fsmWrapperEmitter__render_b1_resume_fn(s.run_body.ctx_id));
   &parts.append("");
-  &parts.append(fsmWrapperEmitter__render_destroy_task(s.run_body.ctx_id(), ( { MUTABLE rtoc_empty_list_1: []FsmDestroyAction = List[]; rtoc_empty_list_1 } ), mir_emitter));
+  &parts.append(fsmWrapperEmitter__render_destroy_task(s.run_body.ctx_id, ( { MUTABLE rtoc_empty_list_1: []FsmDestroyAction = List[]; rtoc_empty_list_1 } ), mir_emitter));
   &parts.append("    };");
   RETURN parts.join("\n");
 END
