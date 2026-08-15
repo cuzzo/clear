@@ -78,7 +78,7 @@ PUB FN pipelineBindingChainLowerer__unwrap_chain(self: PipelineBindingChainLower
       MUTABLE lhs = binary_op.left;
       MUTABLE rhs = binary_op.right;
       IF rhs IS_A UnnestOp AS unnest_op THEN
-        MUTABLE unnest_expr: Locatable = unnestOp__expression(unnest_op);
+        MUTABLE unnest_expr: Locatable = COPY UNWRAP (unnestOp__expression(unnest_op));
         MUTABLE inner_binding: ?String = NIL;
         IF (IF unnest_expr IS_A BinaryOp AS binary_op THEN (binary_op.op == :BIND_VAR) ELSE FALSE END) THEN
           inner_binding = COPY CAST(unnest_expr.right().name() AS String);

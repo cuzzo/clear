@@ -35,7 +35,7 @@ PUB FN pipelineListLowerer__lower(self: PipelineListLowerer, site: PipelineSite,
   ELSE_IF op IS_A LimitOp AS limit_op THEN
     RETURN TRY (pipelineListLowerer__lower_limit(self, site, limit_op));
   ELSE_IF op IS_A TakeWhileOp@multiowned AS take_while_op_multiowned THEN
-    RETURN TRY (pipelineListLowerer__lower_take_while(self, site, takeWhileOp__expression(take_while_op_multiowned)));
+    RETURN TRY (pipelineListLowerer__lower_take_while(self, site, UNWRAP (takeWhileOp__expression(take_while_op_multiowned))));
   ELSE_IF op IS_A SkipOp AS skip_op THEN
     RETURN TRY (pipelineListLowerer__lower_skip(self, site, skip_op));
   ELSE_IF op IS_A UnnestOp@multiowned AS unnest_op_multiowned THEN
