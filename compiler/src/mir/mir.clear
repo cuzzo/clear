@@ -8505,15 +8505,15 @@ FN protocolCall__expr?(self: ProtocolCall) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT MIRBinOp {
-  op: Any@multiowned,
+  op: String@symbol,
   left: Emittable,
   right: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
 
-PUB FN mIRBinOp__op(self: MIRBinOp) RETURNS Any@multiowned ->
-  KEEP self.op;
+PUB FN mIRBinOp__op(self: MIRBinOp) RETURNS String@symbol ->
+  COPY self.op;
 END
 PUB FN mIRBinOp__left(self: MIRBinOp) RETURNS Emittable ->
   self.left;
@@ -8585,14 +8585,14 @@ FN binOp__expr?(self: MIRBinOp) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT MIRUnaryOp {
-  op: Any@multiowned,
+  op: String@symbol,
   operand: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
 
-PUB FN mIRUnaryOp__op(self: MIRUnaryOp) RETURNS Any@multiowned ->
-  KEEP self.op;
+PUB FN mIRUnaryOp__op(self: MIRUnaryOp) RETURNS String@symbol ->
+  COPY self.op;
 END
 PUB FN mIRUnaryOp__operand(self: MIRUnaryOp) RETURNS Emittable ->
   self.operand;
