@@ -144,7 +144,7 @@ PUB FN builder__new() RETURNS Builder@multiowned ->
   builder__initialize(&self);
   RETURN self @multiowned;
 END
-PUB FN recursiveSplitter__split(body: []Locatable, lowering: LoweringProtocol, ctx: ?{String@symbol}?TransformValue = NIL) RETURNS !?SegmentList ->
+PUB FN recursiveSplitter__split(body: []Locatable, lowering: MIRLowering, ctx: ?{String@symbol}?TransformValue = NIL) RETURNS !?SegmentList ->
   IF TRY (recursiveSplitter__contains_unsupported?(Body{ ArrayValue: COPY body })) THEN
     RETURN NIL;
   END
@@ -170,12 +170,12 @@ PUB FN recursiveSplitter__split(body: []Locatable, lowering: LoweringProtocol, c
     RETURN NIL;
   END
 END
-PRIVATE FN recursiveSplitter__emit_stmts_or_nil(body: []Locatable, after_idx: Int64, MUTABLE builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !?Int64 ->
+PRIVATE FN recursiveSplitter__emit_stmts_or_nil(body: []Locatable, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !?Int64 ->
   RETURN TRY (recursiveSplitter__emit_stmts(body, after_idx, &builder, lowering, ctx));
 CATCH UnsupportedShape
   RETURN NIL;
 END
-PRIVATE FN recursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 EFFECTS REENTRANT ->
+PRIVATE FN recursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 EFFECTS REENTRANT ->
   IF (FALSE OR (stmts.length() == 0)) THEN
     RETURN COPY after_idx;
   END
@@ -304,7 +304,7 @@ PRIVATE FN recursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) RETU
   END
   RETURN FALSE;
 END
-PRIVATE FN recursiveSplitter__emit_pivot(stmt: SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+PRIVATE FN recursiveSplitter__emit_pivot(stmt: SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
   MUTABLE sus = IF stmt IS_A Locatable THEN
     Segments.classify_suspend(castSegmentStmtToLocatable(stmt))
   ELSE
@@ -332,23 +332,23 @@ PRIVATE FN recursiveSplitter__emit_suspend(susp_tail: SuspendTail, after_idx: In
   builder__fill(&builder, idx, ( { MUTABLE rtoc_empty_list_5: []SegmentStmt = List[]; rtoc_empty_list_5 } ), tail);
   RETURN idx;
 END
-PRIVATE FN recursiveSplitter__emit_while_fragment(while_stmt: SplitterWhileStmt, after_idx: Int64, builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE _: Tuple<SplitterWhileStmt, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue> = CAST(Tuple{while_stmt, after_idx, builder, lowering, ctx} AS Tuple<SplitterWhileStmt, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue>);
+PRIVATE FN recursiveSplitter__emit_while_fragment(while_stmt: SplitterWhileStmt, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE _: Tuple<SplitterWhileStmt, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{while_stmt, after_idx, builder, lowering, ctx} AS Tuple<SplitterWhileStmt, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("WhileLoop recursive FSM lowering requires structural MIR conditions");
 END
-PRIVATE FN recursiveSplitter__emit_for_range_fragment(for_stmt: ForRange, after_idx: Int64, builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE _: Tuple<ForRange, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue> = CAST(Tuple{for_stmt, after_idx, builder, lowering, ctx} AS Tuple<ForRange, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue>);
+PRIVATE FN recursiveSplitter__emit_for_range_fragment(for_stmt: ForRange, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE _: Tuple<ForRange, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{for_stmt, after_idx, builder, lowering, ctx} AS Tuple<ForRange, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("ForRange recursive FSM lowering requires structural MIR loop state");
 END
-PRIVATE FN recursiveSplitter__emit_for_each_fragment(for_stmt: ForEach, after_idx: Int64, builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE _: Tuple<ForEach, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue> = CAST(Tuple{for_stmt, after_idx, builder, lowering, ctx} AS Tuple<ForEach, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue>);
+PRIVATE FN recursiveSplitter__emit_for_each_fragment(for_stmt: ForEach, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE _: Tuple<ForEach, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{for_stmt, after_idx, builder, lowering, ctx} AS Tuple<ForEach, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("ForEach recursive FSM lowering requires structural MIR iterator state");
 END
-PRIVATE FN recursiveSplitter__emit_if_fragment(if_stmt: IfStatement, after_idx: Int64, builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE _: Tuple<IfStatement, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue> = CAST(Tuple{if_stmt, after_idx, builder, lowering, ctx} AS Tuple<IfStatement, Int64, Builder, LoweringProtocol, {String@symbol}?TransformValue>);
+PRIVATE FN recursiveSplitter__emit_if_fragment(if_stmt: IfStatement, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+  MUTABLE _: Tuple<IfStatement, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{if_stmt, after_idx, builder, lowering, ctx} AS Tuple<IfStatement, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("IfStatement recursive FSM lowering requires structural MIR conditions");
 END
-PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx: Int64, MUTABLE builder: Builder, lowering: LoweringProtocol, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
   MUTABLE caps = TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_stmt)))));
   IF (caps.length() == 0) THEN
     panic("WITH with no capabilities");
@@ -364,7 +364,7 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
       MUTABLE bg_rt: String = CAST(string_mutable AS String);
       MUTABLE caps_meta: []{String@symbol}FsmCapMetadataValue = ( { MUTABLE rtoc_empty_list_6: []{String@symbol}FsmCapMetadataValue = List[]; rtoc_empty_list_6 } );
       FOR _ IN caps DO
-  MUTABLE m = lowering.fsm_cap_metadata(_, with_stmt, ctx_id, captured);
+  MUTABLE m = mIRLowering__fsm_cap_metadata(lowering, _, with_stmt, ctx_id, captured);
   IF (m == NIL) THEN
           panic("fsm_cap_metadata failed");
   END
@@ -385,7 +385,7 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
       alias_overrides[CAST(_[:alias_name]? AS String)] = COPY CAST(_[:alias_data_ref]? AS String);
       END
       MUTABLE cs_entry: Int64 = CAST(builder__with_alias_overrides(&builder, alias_overrides, %() USE(alias_overrides, bg_rt, body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
-  rtoc_lambda_result_14 = lowering.with_fiber_capture_map(alias_overrides, {:rt_override: bg_rt}, %() USE(body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
+  rtoc_lambda_result_14 = mIRLowering__with_fiber_capture_map(lowering, alias_overrides, {:rt_override: bg_rt}, %() USE(body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
   rtoc_lambda_result_13 = TRY (recursiveSplitter__emit_stmts(body_stmts, release_idx, &builder, lowering, ctx));
   rtoc_lambda_result_13
       });

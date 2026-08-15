@@ -26,7 +26,7 @@ STRUCT ThunkParamFact {
 FN thunkParamFact__from_param(param: Param) RETURNS !ThunkParamFact ->
   RETURN ThunkParamFact{ name: COPY CAST(param.name AS String), type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY param.type })) };
 END
-FN emit__build_trampoline(fn_node: FunctionDef, lowering: LoweringProtocol) RETURNS !ThunkTrampoline ->
+FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETURNS !ThunkTrampoline ->
   MUTABLE plan = TRY (emit__thunk_plan_mut(fn_node));
   MUTABLE return_type = TRY (emit__return_type_info(fn_node, lowering));
   TRY (emit__assert_non_fallible_ret_mut(fn_node, CAST(return_type AS Type)));
@@ -57,9 +57,9 @@ FN emit__build_trampoline(fn_node: FunctionDef, lowering: LoweringProtocol) RETU
     :check
   END };
 END
-FN emit__lower_frame_expr(ast_expr: Locatable, lowering: LoweringProtocol, context: FrameBindingContext) RETURNS Emittable ->
+FN emit__lower_frame_expr(ast_expr: Locatable, lowering: MIRLowering, context: FrameBindingContext) RETURNS Emittable ->
   MUTABLE lowering_api = COPY lowering;
-  MUTABLE mir = lowering_api.lower(ast_expr);
+  MUTABLE mir = mIRLowering__lower(lowering_api, ast_expr);
   RETURN emit__bind_frame_refs(CAST(mir AS Emittable), context);
 END
 FN emit__frame_init(field_name: String, value: Emittable) RETURNS ThunkFrameInit ->
@@ -121,7 +121,7 @@ PRIVATE FN emit__bind_frame_refs(mir: Emittable, context: FrameBindingContext) R
     RETURN COPY mir;
   END
 END
-FN emit__return_type_info(fn_node: FunctionDef, ignored_lowering: LoweringProtocol) RETURNS !Type ->
+FN emit__return_type_info(fn_node: FunctionDef, ignored_lowering: MIRLowering) RETURNS !Type ->
   MUTABLE rt: ?Type = COPY fn_node.return_type;
   IF rt EXISTS AS rt_value THEN
     IF TRUE THEN
@@ -146,7 +146,7 @@ PRIVATE FN emit__assert_non_fallible_ret_mut(fn_node: FunctionDef, return_type: 
   END
   panic("{}{}heap-allocated child Frames only on the normal return path; an error return would leak the in-flight chain. Before lifting the non-fallible invariant, extend `build_trampoline` and `build_mutual_trampoline` to emit an errdefer that walks `current.parent` and frees every non-initial Frame.");
 END
-FN emit__build_mutual_trampoline(fn_node: FunctionDef, lowering: LoweringProtocol) RETURNS !MutualThunkTrampoline ->
+FN emit__build_mutual_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETURNS !MutualThunkTrampoline ->
   MUTABLE mtp = TRY (emit__mutual_thunk_plan_mut(fn_node));
   MUTABLE return_type = TRY (emit__return_type_info(fn_node, lowering));
   TRY (emit__assert_non_fallible_ret_mut(fn_node, CAST(return_type AS Type)));
@@ -160,7 +160,7 @@ FN emit__build_mutual_trampoline(fn_node: FunctionDef, lowering: LoweringProtoco
     :check
   END };
 END
-PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan, lowering: LoweringProtocol) RETURNS !MutualThunkArm ->
+PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan, lowering: MIRLowering) RETURNS !MutualThunkArm ->
   MUTABLE own_plan = COPY (TRY (emit__mutual_thunk_plan_mut(cf))).own_plan;
   MUTABLE context = TRY (emit__mutual_frame_context(cf));
   MUTABLE base_cases = own_plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY emit__lower_frame_expr(_.cond_ast, lowering, context), value: COPY emit__lower_frame_expr(_.value_ast, lowering, context) };

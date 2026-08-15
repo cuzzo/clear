@@ -19,7 +19,7 @@ PUB FN suspendResolvers__resolve(seg: Segment, ctx: FsmEmitContext, lowering: An
     panic("{}Add a resolve_<kind> branch when introducing a new suspend kind.");
   END
 END
-PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext, lowering: LoweringProtocol) RETURNS !SuspendDescriptor ->
+PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext, lowering: MIRLowering) RETURNS !SuspendDescriptor ->
   MUTABLE stdlib_def = io_tail.stdlib_def;
   IF !(stdlib_def) THEN
     panic("IoSuspend missing stdlib_def");
@@ -47,7 +47,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
   IF em != NIL THEN
     state_finalize = COPY em.fsm_state_finalize();
   END
-  MUTABLE arg_mirs = io_tail.call_node.args() |> SELECT lowering.lower(_);
+  MUTABLE arg_mirs = io_tail.call_node.args() |> SELECT mIRLowering__lower(lowering, _);
   MUTABLE lowerer = lowerer__new(id, arg_mirs);
   MUTABLE setup_mir = TRY (lowerer__lower_stmts(lowerer, setup_ops));
   MUTABLE state_finalize_m = TRY (lowerer__lower_stmts(lowerer, state_finalize));
@@ -91,10 +91,10 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
   END
   RETURN SuspendDescriptor{ setup_stmts: setup_mir, bind_stmts: bind_stmts, tail: COPY FsmTailYield{ next_step: NIL, yield_reason: "WaitForLock" }, ctx_field_decls: ctx_field_decls, result_var: result_var, result_zig_type: result_zig_type, result_needs_cleanup: result_needs_cleanup };
 END
-PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitContext, lowering: LoweringProtocol, susp_idx: Int64) RETURNS !SuspendDescriptor ->
+PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitContext, lowering: MIRLowering, susp_idx: Int64) RETURNS !SuspendDescriptor ->
   MUTABLE id = ctx.id;
   MUTABLE sp_field = "sp_${susp_idx.toString()}";
-  MUTABLE promise_expr_mir = lowering.lower(next_tail.promise_ast);
+  MUTABLE promise_expr_mir = mIRLowering__lower(lowering, next_tail.promise_ast);
   MUTABLE ctx_ident = Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
   MUTABLE setup_stmts = [Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY promise_expr_mir, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }];
   MUTABLE captured_promise_guard_name: ?String = NIL;
@@ -168,7 +168,7 @@ END
 PUB FN suspendResolvers__ownership_bearing_result_type?(type_info: ?Type, lowering: Any) RETURNS !Bool ->
   IF type_info EXISTS AS type_info_value THEN
     MUTABLE schema_lookup = IF respondsTo?(lowering, "mir_schema_lookup") THEN
-      lowering.mir_schema_lookup()
+      mIRLowering__mir_schema_lookup(lowering)
     ELSE
       NIL
     END;

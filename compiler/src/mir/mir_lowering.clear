@@ -19495,7 +19495,7 @@ PRIVATE FN mIRLowering__lower_control_condition(self: MIRLowering, ast_node: Loc
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE lowerer = rtoc_self_view;
-    MUTABLE lowered = lowerer.lower(ast_node);
+    MUTABLE lowered = mIRLowering__lower(lowerer, ast_node);
     IF mIRLowering__mir_allocates?(lowerer, lowered) THEN
       RETURN mIRLowering__hoist_alloc(lowerer, lowered, ast_node, transfers_to_capture);
     ELSE
@@ -19812,7 +19812,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE capture_type = mIRLowering__capture_expr_payload_type(rtoc_self_view, expr);
-    MUTABLE schema_lookup = rtoc_self_view.mir_schema_lookup();
+    MUTABLE schema_lookup = mIRLowering__mir_schema_lookup(rtoc_self_view);
     IF !(TRY (type__needs_explicit_cleanup?(capture_type, :heap, schema_lookup))) THEN
       RETURN NIL;
     END

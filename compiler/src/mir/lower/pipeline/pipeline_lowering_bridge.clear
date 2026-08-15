@@ -136,7 +136,7 @@ PUB FN pipelineLoweringBridge__lower_head(self: PipelineLoweringBridge, blk: FN(
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE value, pending = rtoc_self_view.lowering.lower_head(%() USE(blk) -> blk());
+    MUTABLE value, pending = rtoc_self_view.mIRLowering__lower_head(lowering, %() USE(blk) -> blk());
     MUTABLE typed_pending: []Emittable = COPY pending;
     RETURN PipelineLowerHeadResult{ value: COPY CAST(value AS Emittable), pending: COPY typed_pending };
 }

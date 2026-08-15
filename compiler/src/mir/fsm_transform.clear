@@ -23,7 +23,7 @@ PUB UNION PromotedDeclListItem { Emittable: Emittable, ArrayValue: []Emittable }
 PUB UNION ContextFieldInput { ContextFieldDecl: ContextFieldDecl, ArrayValue: []ContextFieldListItem }
 PUB UNION ContextInitInput { StructInitField: StructInitField, ArrayValue: []ContextInitListItem }
 PUB UNION PromotedDeclInput { Emittable: Emittable, ArrayValue: []PromotedDeclListItem }
-PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?TransformValue, lowering: LoweringProtocol) RETURNS !?FsmLoweringResult ->
+PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?TransformValue, lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
   MUTABLE block_source = COPY bg_block;
   MUTABLE suspend_points = (block_source.fsm_suspend_points() OR List[]);
   MUTABLE need_conservative = TRY (fsmTransform__body_needs_conservative?(block_source.body()));
@@ -40,7 +40,7 @@ PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?Tran
   MUTABLE captured_map = captured.keys().to_a();
   MUTABLE ctx_id: Int64 = COPY castOptionalTransformValueToInt64(ctx[:id]);
   MUTABLE promo_capture_map = ((captured_map + promoted_names)).to_h(%(n) USE(ctx_id) -> [n, "__ctx_${ctx_id.toString()}.${n}"]);
-  MUTABLE rec_segs = lowering.with_fiber_capture_map(promo_capture_map, {:rt_override: castOptionalTransformValueToString(ctx[:bg_rt])}, %() USE(block_source, ctx, lowering) -> RecursiveSplitter.split(block_source.body(), lowering, {:ctx: ctx}));
+  MUTABLE rec_segs = mIRLowering__with_fiber_capture_map(lowering, promo_capture_map, {:rt_override: castOptionalTransformValueToString(ctx[:bg_rt])}, %() USE(block_source, ctx, lowering) -> RecursiveSplitter.split(block_source.body(), lowering, {:ctx: ctx}));
   IF (rec_segs == NIL) THEN
     RETURN NIL;
   END

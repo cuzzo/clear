@@ -4,5 +4,5 @@ REQUIRE "pkg:rtoc_6d69722f7468756e6b5f7472616e73666f726d2f7265637572736976655f73
 REQUIRE "pkg:rtoc_6d69722f7468756e6b5f7472616e73666f726d2f656d69742e636c656172" AS emit
 REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f6c6f776572696e675f70726f746f636f6c2e636c656172" AS lowering_protocol
 # Ruby module ThunkTransform
-# Ruby module ThunkTransform::LoweringProtocol
+# Ruby module ThunkTransform::MIRLowering
 # End Ruby module ThunkTransform
