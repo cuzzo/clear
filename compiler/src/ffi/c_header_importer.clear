@@ -198,11 +198,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             CONTINUE;
               END
               MUTABLE field_type: ?String = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match?, 2), :field));
-              IF !(field_type) THEN
+              IF (field_type == NIL) THEN
                   rtoc_idx = rtoc_idx + 1;
             CONTINUE;
               END
-              &fields.append("${compilerRegexCapture(UNWRAP (match), 1)}: ${field_type}");
+              MUTABLE field_type_value: String = COPY UNWRAP (field_type);
+              &fields.append("${compilerRegexCapture(UNWRAP (match), 1)}: ${field_type_value}");
             rtoc_idx = rtoc_idx + 1;
           END
           IF ((fields.length() == 0) AND !(((CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).trim().length() == 0))) THEN
