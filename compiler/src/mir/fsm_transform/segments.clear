@@ -364,7 +364,7 @@ PUB FN segments__classify_suspend(stmt: Locatable) RETURNS ?SegmentTail ->
     RETURN segments__suspend_for(bind_expr.value, bind_expr.name);
   ELSE_IF stmt IS_A Assignment AS assignment THEN
     RETURN segments__suspend_for(assignment.value, castOptionalAssignmentNameToOptionalString({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_6: ?AssignmentName = NIL;
-    IF assignment.name IS_A String THEN
+    IF TRUE THEN
       rtoc_ternary_value_6 = assignment.name;
     ELSE
       rtoc_ternary_value_6 = NIL;

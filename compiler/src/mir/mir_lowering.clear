@@ -18826,11 +18826,7 @@ PRIVATE FN mIRLowering__lower_atomic_assignment(MUTABLE self: MIRLowering, node:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE op_name = COPY CAST(node.auto_atomic_op AS String);
-    MUTABLE target_name = IF node.name IS_A String THEN
-      node.name
-    ELSE
-      node.name.name()
-    END;
+    MUTABLE target_name: String = COPY node.name;
     MUTABLE safe = mIRLowering__zig_local_name(rtoc_self_view, target_name, TRUE);
     IF mIRLowering__current_function_mutable_scalar_param?(rtoc_self_view, target_name) THEN
       safe = "_m_${target_name}";

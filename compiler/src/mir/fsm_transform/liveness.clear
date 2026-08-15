@@ -143,7 +143,7 @@ END
 PRIVATE FN liveness__collect_defs(MUTABLE stmt: Stmt, into: Any) RETURNS !Void ->
   IF stmt IS_A VarDecl AS var_decl THEN
     MUTABLE var_decl_mutable = COPY var_decl;
-    IF var_decl_mutable.name IS_A String THEN
+    IF TRUE THEN
       IF ((var_decl_mutable IS_A BindExpr AND FALSE) AND (var_decl_mutable.mode() != :decl)) THEN
         RETURN;
       END
@@ -152,7 +152,7 @@ PRIVATE FN liveness__collect_defs(MUTABLE stmt: Stmt, into: Any) RETURNS !Void -
     END
   ELSE_IF stmt IS_A BindExpr AS bind_expr THEN
     MUTABLE bind_expr_mutable = COPY bind_expr;
-    IF bind_expr_mutable.name IS_A String THEN
+    IF TRUE THEN
       IF ((TRUE AND TRUE) AND (bind_expr_mutable.mode != :decl)) THEN
         RETURN;
       END
@@ -160,7 +160,7 @@ PRIVATE FN liveness__collect_defs(MUTABLE stmt: Stmt, into: Any) RETURNS !Void -
       into[bind_expr_mutable.name] = (into[bind_expr_mutable.name] OR_ELSE t);
     END
   ELSE_IF stmt IS_A Assignment AS assignment THEN
-    IF assignment.name IS_A String THEN
+    IF TRUE THEN
       into[assignment.name] = (into[assignment.name] OR_ELSE NIL);
     END
   ELSE_IF stmt IS_A DestructuringAssignment AS destructuring_assignment THEN
