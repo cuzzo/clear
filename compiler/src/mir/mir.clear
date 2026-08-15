@@ -15,29 +15,29 @@ REQUIRE "pkg:rtoc_6173742f6173796e635f726573756c745f73686170652e636c656172"
 # dropped; nothing in the CLEAR tree reads them.
 EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_regex";
 PUB UNION Alloc { SymbolValue: String@symbol, Emittable: Emittable }
-UNION CExternFnDeclReturnValue { StringValue: String, SymbolValue: String@symbol }
-UNION CExternStructDefReturnValue { StringValue: String, SymbolValue: String@symbol }
-UNION MirCapture { StringValue: String, SymbolValue: String@symbol }
-UNION EnumDefReturnValue { StringValue: String, SymbolValue: String@symbol }
-UNION MIRReturnValue { StringValue: String, SymbolValue: String@symbol }
-UNION MutualThunkArmReturnValue { StringValue: String, ArrayValue: []ThunkBaseCase, ArrayValue2: []ThunkFrameInit }
-UNION StructDefReturnValue { StringValue: String, SymbolValue: String@symbol }
-UNION ThunkFrameInitReturnValue { StringValue: String, Emittable: Emittable }
-UNION ThunkVariantReturnValue { StringValue: String, ArrayValue: []ThunkFrameField }
-UNION TypeAliasReturnValue { StringValue: String, SymbolValue: String@symbol }
-UNION UnionTypeDefReturnValue { StringValue: String, SymbolValue: String@symbol }
-UNION UnionTypeVariantReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION CExternFnDeclReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION CExternStructDefReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION MirCapture { StringValue: String, SymbolValue: String@symbol }
+PUB UNION EnumDefReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION MIRReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION MutualThunkArmReturnValue { StringValue: String, ArrayValue: []ThunkBaseCase, ArrayValue2: []ThunkFrameInit }
+PUB UNION StructDefReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION ThunkFrameInitReturnValue { StringValue: String, Emittable: Emittable }
+PUB UNION ThunkVariantReturnValue { StringValue: String, ArrayValue: []ThunkFrameField }
+PUB UNION TypeAliasReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION UnionTypeDefReturnValue { StringValue: String, SymbolValue: String@symbol }
+PUB UNION UnionTypeVariantReturnValue { StringValue: String, SymbolValue: String@symbol }
 # Ruby module MIR
 PUB UNION Emittable { MIRProgram: MIRProgram, FnDef: FnDef, MIRParam: MIRParam, MIRStructDef: MIRStructDef, ProtocolAdapterDef: ProtocolAdapterDef, FieldDef: FieldDef, MIREnumDef: MIREnumDef, UnionTypeDef: UnionTypeDef, Import: Import, TypeAlias: TypeAlias, CExternFnDecl: CExternFnDecl, CExternStructDef: CExternStructDef, ModuleNamespace: ModuleNamespace, TestDef: TestDef, Let: Let, Set: Set, MIRDestructureTarget: MIRDestructureTarget, DestructureSet: DestructureSet, ReassignWithCleanup: ReassignWithCleanup, ResourceClose: ResourceClose, IfStmt: IfStmt, IfBindStmt: IfBindStmt, WhileStmt: WhileStmt, ForStmt: ForStmt, ScopeBlock: ScopeBlock, SwitchStmt: SwitchStmt, UnionMatchStmt: UnionMatchStmt, IfChain: IfChain, ReturnStmt: ReturnStmt, BreakStmt: BreakStmt, BreakExpr: BreakExpr, ContinueStmt: ContinueStmt, Panic: Panic, AssertStmt: AssertStmt, AssertRaisesCheck: AssertRaisesCheck, TestPreamble: TestPreamble, DebugOnly: DebugOnly, Sort: Sort, SoaFieldAccess: SoaFieldAccess, TryOrPanic: TryOrPanic, IndexInsert: IndexInsert, BatchWindowPush: BatchWindowPush, BatchWindowFlush: BatchWindowFlush, MIRDeferStmt: MIRDeferStmt, ErrDeferStmt: ErrDeferStmt, ExprStmt: ExprStmt, DiscardOwned: DiscardOwned, ThunkTrampoline: ThunkTrampoline, MutualThunkTrampoline: MutualThunkTrampoline, MIRBgBlock: MIRBgBlock, StreamSpawn: StreamSpawn, FsmStructure: FsmStructure, DirectTenseMap: DirectTenseMap, AsyncPayloadTake: AsyncPayloadTake, FsmIoBody: FsmIoBody, StreamYield: StreamYield, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody, FailureAction: FailureAction, CapabilityLockTarget: CapabilityLockTarget, CapabilityLockAddress: CapabilityLockAddress, SortedLockAcquire: SortedLockAcquire, FallibleLockBinding: FallibleLockBinding, CatchWrapper: CatchWrapper, MIRDoBlock: MIRDoBlock, Noop: Noop, Comment: Comment, Suppress: Suppress, PubConst: PubConst, ModuleVar: ModuleVar, ModuleConstFree: ModuleConstFree, HeapCreate: HeapCreate, DupeSlice: DupeSlice, AllocSlice: AllocSlice, FreeSlice: FreeSlice, DestroyPtr: DestroyPtr, Cleanup: Cleanup, ErrCleanup: ErrCleanup, MoveMark: MoveMark, DeepCopy: DeepCopy, ContainerInit: ContainerInit, CapWrap: CapWrap, SharePromote: SharePromote, RcRetain: RcRetain, ComptimeCarrierPayload: ComptimeCarrierPayload, MonomorphicKeep: MonomorphicKeep, RcRelease: RcRelease, RcDowngrade: RcDowngrade, WeakUpgrade: WeakUpgrade, AllocatorRef: AllocatorRef, FreezeExpr: FreezeExpr, MakeList: MakeList, FrameSave: FrameSave, FrameRestore: FrameRestore, CapabilityUnwrap: CapabilityUnwrap, SnapshotRead: SnapshotRead, SnapshotTransaction: SnapshotTransaction, SnapshotMultiTxn: SnapshotMultiTxn, PolymorphicMutate: PolymorphicMutate, PolymorphicMutateFlow: PolymorphicMutateFlow, PolymorphicFlowSignal: PolymorphicFlowSignal, WithMatchDispatch: WithMatchDispatch, AllocMark: AllocMark, OwnedCreate: OwnedCreate, OwnedDestroy: OwnedDestroy, OwnedTransfer: OwnedTransfer, OwnedBorrow: OwnedBorrow, OwnedStore: OwnedStore, OwnedReturn: OwnedReturn, ReturnMark: ReturnMark, TransferMark: TransferMark, ReassignMark: ReassignMark, FieldCleanupMark: FieldCleanupMark, Call: Call, RuntimeCall: RuntimeCall, TailCall: TailCall, MIRMethodCall: MIRMethodCall, FieldGet: FieldGet, UnionPayloadGet: UnionPayloadGet, IndexGet: IndexGet, ProtocolCall: ProtocolCall, MIRBinOp: MIRBinOp, MIRUnaryOp: MIRUnaryOp, FallibleOk: FallibleOk, FutureReady: FutureReady, Lit: Lit, SymbolLit: SymbolLit, VoidLiteral: VoidLiteral, DefaultValue: DefaultValue, EnumTag: EnumTag, EnumOrdinal: EnumOrdinal, Ident: Ident, TupleLiteral: TupleLiteral, FnRef: FnRef, LockAcquire: LockAcquire, TypeOf: TypeOf, TypeEq: TypeEq, StructInit: StructInit, ArrayInit: ArrayInit, ArrayDefaultInit: ArrayDefaultInit, SliceExpr: SliceExpr, MIRBlockExpr: MIRBlockExpr, ConcatStr: ConcatStr, MIRCast: MIRCast, TryExpr: TryExpr, TryCatch: TryCatch, Orelse: Orelse, Conditional: Conditional, IfOptional: IfOptional, Comptime: Comptime, UnionVariantGet: UnionVariantGet, ListItems: ListItems, ListLength: ListLength, AddressOf: AddressOf, Deref: Deref, PointerCast: PointerCast, ConstCast: ConstCast, DefaultStreamCapacity: DefaultStreamCapacity, NextPromiseList: NextPromiseList, Undef: Undef, TypeSentinel: TypeSentinel, IterRange: IterRange, MIROptionalUnwrap: MIROptionalUnwrap, TryOptional: TryOptional, ForeignOwnedUnwrap: ForeignOwnedUnwrap, ForeignSliceView: ForeignSliceView, MIRRangeLit: MIRRangeLit, HasField: HasField, ItemsAccess: ItemsAccess, OwnedSlice: OwnedSlice, LambdaExpr: LambdaExpr, Pipeline: Pipeline, RegistryCall: RegistryCall, IndexedStore: IndexedStore, CFunctionAdapter: CFunctionAdapter, ExternTrampoline: ExternTrampoline, ObservableConsumerSpawn: ObservableConsumerSpawn, ShardConcurrentEach: ShardConcurrentEach, InlineBc: InlineBc, OrElseExitBcRewrite: OrElseExitBcRewrite, ShardedMapPut: ShardedMapPut, ShardedMapGet: ShardedMapGet }
-UNION NodeRoot { Emittable: Emittable, ArrayValue: []Emittable }
+PUB UNION NodeRoot { Emittable: Emittable, ArrayValue: []Emittable }
 PUB UNION DeferBody { Emittable: Emittable, ArrayValue: []Emittable }
-UNION DeferBodyInput { Emittable: Emittable, ArrayValue: []Emittable, StringValue: String }
-UNION FsmBody { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
+PUB UNION DeferBodyInput { Emittable: Emittable, ArrayValue: []Emittable, StringValue: String }
+PUB UNION FsmBody { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
 PUB UNION BgBlockPlan { BgStackfulPlan: BgStackfulPlan, BgStreamPlan: BgStreamPlan, FutureMapPlan: FutureMapPlan, FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
-UNION NamedMirFieldValue { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
-UNION StructInitFieldValue { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
-UNION StructInitFieldInput { StructInitField: StructInitField, HashMapValue: {String@symbol}NamedMirFieldValue }
-STRUCT FnDef {
+PUB UNION NamedMirFieldValue { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
+PUB UNION StructInitFieldValue { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
+PUB UNION StructInitFieldInput { StructInitField: StructInitField, HashMapValue: {String@symbol}NamedMirFieldValue }
+PUB STRUCT FnDef {
   name: String,
   params: []MIRParam,
   ret_type: Any@multiowned,
@@ -119,7 +119,7 @@ END
 FN fnDef__stmt?(self: FnDef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT MIRParam {
+PUB STRUCT MIRParam {
   name: String,
   zig_type: String,
   pointer_passed: Any@multiowned,
@@ -302,7 +302,7 @@ END
 FN structDef__stmt?(self: MIRStructDef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FieldDef {
+PUB STRUCT FieldDef {
   name: String,
   zig_type: String,
   default: Any@multiowned,
@@ -460,7 +460,7 @@ END
 FN enumDef__stmt?(self: MIREnumDef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT UnionTypeDef {
+PUB STRUCT UnionTypeDef {
   name: String,
   variants: Any@multiowned,
   visibility: String@symbol,
@@ -531,7 +531,7 @@ END
 FN unionTypeDef__stmt?(self: UnionTypeDef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Import {
+PUB STRUCT Import {
   alias_name: String,
   module_path: Any@multiowned,
   member: Any@multiowned,
@@ -598,7 +598,7 @@ END
 FN import__stmt?(self: Import) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TypeAlias {
+PUB STRUCT TypeAlias {
   name: String,
   target: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -667,7 +667,7 @@ END
 FN typeAlias__stmt?(self: TypeAlias) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT CExternFnDecl {
+PUB STRUCT CExternFnDecl {
   name: String,
   params: Any@multiowned,
   return_type: Any@multiowned,
@@ -739,7 +739,7 @@ END
 FN cExternFnDecl__stmt?(self: CExternFnDecl) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT CExternStructDef {
+PUB STRUCT CExternStructDef {
   name: String,
   fields: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -808,7 +808,7 @@ END
 FN cExternStructDef__stmt?(self: CExternStructDef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ModuleNamespace {
+PUB STRUCT ModuleNamespace {
   name: String,
   items: []Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -873,7 +873,7 @@ END
 FN moduleNamespace__stmt?(self: ModuleNamespace) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TestDef {
+PUB STRUCT TestDef {
   name: String,
   body: []Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -1192,7 +1192,7 @@ END
 FN destructureTarget__expr?(self: MIRDestructureTarget) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT DestructureSet {
+PUB STRUCT DestructureSet {
   targets: Any@multiowned,
   value: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -1257,7 +1257,7 @@ END
 FN destructureSet__stmt?(self: DestructureSet) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ReassignWithCleanup {
+PUB STRUCT ReassignWithCleanup {
   name: String,
   value: Emittable,
   zig_type: String,
@@ -1324,7 +1324,7 @@ END
 FN reassignWithCleanup__stmt?(self: ReassignWithCleanup) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ResourceClose {
+PUB STRUCT ResourceClose {
   target: Emittable,
   close_plan: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -1470,7 +1470,7 @@ PUB STRUCT MIRIfBinding {
   capture: MirCapture
 }
 
-STRUCT IfBindStmt {
+PUB STRUCT IfBindStmt {
   bindings: []MIRIfBinding,
   then_body: Any@multiowned,
   else_body: Any@multiowned,
@@ -1549,7 +1549,7 @@ END
 FN ifBindStmt__stmt?(self: IfBindStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT WhileStmt {
+PUB STRUCT WhileStmt {
   cond: Emittable,
   body: []Emittable,
   capture: Any@multiowned,
@@ -1623,7 +1623,7 @@ END
 FN whileStmt__stmt?(self: WhileStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ForStmt {
+PUB STRUCT ForStmt {
   iter: Emittable,
   capture: Any@multiowned,
   body: []Emittable,
@@ -1697,7 +1697,7 @@ END
 FN forStmt__stmt?(self: ForStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ScopeBlock {
+PUB STRUCT ScopeBlock {
   body: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -1767,8 +1767,8 @@ END
 FN scopeBlock__stmt?(self: ScopeBlock) RETURNS Bool ->
   RETURN TRUE;
 END
-UNION SwitchPattern { Emittable: Emittable, EnumSwitchPattern: EnumSwitchPattern }
-STRUCT SwitchStmt {
+PUB UNION SwitchPattern { Emittable: Emittable, EnumSwitchPattern: EnumSwitchPattern }
+PUB STRUCT SwitchStmt {
   subject: Emittable,
   arms: []SwitchArm,
   default_body: Any@multiowned,
@@ -1859,7 +1859,7 @@ END
 FN switchStmt__stmt?(self: SwitchStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT UnionMatchStmt {
+PUB STRUCT UnionMatchStmt {
   subject: Emittable,
   arms: []UnionMatchArm,
   default_body: Any@multiowned,
@@ -1944,7 +1944,7 @@ END
 FN unionMatchStmt__stmt?(self: UnionMatchStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT IfChain {
+PUB STRUCT IfChain {
   branches: []IfChainBranch,
   default_body: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -2093,7 +2093,7 @@ END
 FN returnStmt__stmt?(self: ReturnStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT BreakStmt {
+PUB STRUCT BreakStmt {
   label: Any@multiowned,
   value: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -2158,7 +2158,7 @@ END
 FN breakStmt__stmt?(self: BreakStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT BreakExpr {
+PUB STRUCT BreakExpr {
   label: Any@multiowned,
   value: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -2219,7 +2219,7 @@ END
 FN breakExpr__expr?(self: BreakExpr) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ContinueStmt {
+PUB STRUCT ContinueStmt {
   unused: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -2284,7 +2284,7 @@ END
 FN continueStmt__stmt?(self: ContinueStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Panic {
+PUB STRUCT Panic {
   message: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -2349,7 +2349,7 @@ END
 FN panic__stmt?(self: Panic) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT AssertStmt {
+PUB STRUCT AssertStmt {
   cond: Emittable,
   message: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -2414,7 +2414,7 @@ END
 FN assertStmt__stmt?(self: AssertStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT AssertRaisesCheck {
+PUB STRUCT AssertRaisesCheck {
   expr: Emittable,
   rt_name: String,
   kind: Any@multiowned,
@@ -2484,7 +2484,7 @@ END
 FN assertRaisesCheck__stmt?(self: AssertRaisesCheck) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TestPreamble {
+PUB STRUCT TestPreamble {
   unused: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -2549,7 +2549,7 @@ END
 FN testPreamble__stmt?(self: TestPreamble) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT DebugOnly {
+PUB STRUCT DebugOnly {
   body: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -2619,7 +2619,7 @@ END
 FN debugOnly__stmt?(self: DebugOnly) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Sort {
+PUB STRUCT Sort {
   elem_type: Any@multiowned,
   items_expr: Emittable,
   key_a: Emittable,
@@ -2687,7 +2687,7 @@ END
 FN sort__stmt?(self: Sort) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT SoaFieldAccess {
+PUB STRUCT SoaFieldAccess {
   soa_expr: Any@multiowned,
   field_name: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -2751,7 +2751,7 @@ END
 FN soaFieldAccess__expr?(self: SoaFieldAccess) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TryOrPanic {
+PUB STRUCT TryOrPanic {
   expr: Emittable,
   panic_msg: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -2818,7 +2818,7 @@ END
 FN tryOrPanic__expr?(self: TryOrPanic) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT IndexInsert {
+PUB STRUCT IndexInsert {
   map: Emittable,
   key_expr: Emittable,
   value_expr: Emittable,
@@ -2887,7 +2887,7 @@ END
 FN indexInsert__stmt?(self: IndexInsert) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT BatchWindowPush {
+PUB STRUCT BatchWindowPush {
   window: Any@multiowned,
   item_expr: Emittable,
   batch_var: Any@multiowned,
@@ -2956,7 +2956,7 @@ END
 FN batchWindowPush__stmt?(self: BatchWindowPush) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT BatchWindowFlush {
+PUB STRUCT BatchWindowFlush {
   window: Any@multiowned,
   batch_var: Any@multiowned,
   elem_zig: Any@multiowned,
@@ -3272,7 +3272,7 @@ END
 FN exprStmt__stmt?(self: ExprStmt) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT DiscardOwned {
+PUB STRUCT DiscardOwned {
   expr: Emittable,
   cleanup_entry: Any@multiowned,
   zig_type: String,
@@ -3473,7 +3473,7 @@ END
 FN bgBlock__stmt?(self: MIRBgBlock) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT StreamSpawn {
+PUB STRUCT StreamSpawn {
   captures: Any@multiowned,
   body: []Emittable,
   boundary_fact: ?ExecutionBoundaryFact,
@@ -3555,8 +3555,8 @@ END
 FN streamSpawn__stmt?(self: StreamSpawn) RETURNS Bool ->
   RETURN TRUE;
 END
-UNION FsmDestroyAction { FsmDestroyCleanup: FsmDestroyCleanup, FsmDestroyStmt: FsmDestroyStmt, FsmDestroyLockRelease: FsmDestroyLockRelease }
-STRUCT FsmStructure {
+PUB UNION FsmDestroyAction { FsmDestroyCleanup: FsmDestroyCleanup, FsmDestroyStmt: FsmDestroyStmt, FsmDestroyLockRelease: FsmDestroyLockRelease }
+PUB STRUCT FsmStructure {
   captures: Any@multiowned,
   state_fields: Any@multiowned,
   steps: Any@multiowned,
@@ -3664,7 +3664,7 @@ END
 FN fsmStructure__owned_effect_for_alloc(self: FsmStructure, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT FsmIoBody {
+PUB STRUCT FsmIoBody {
   blk_label: Any@multiowned,
   ctx_struct: Any@multiowned,
   spawn_setup: Any@multiowned,
@@ -3731,7 +3731,7 @@ END
 FN fsmIoBody__stmt?(self: FsmIoBody) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT StreamYield {
+PUB STRUCT StreamYield {
   value: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -3795,7 +3795,7 @@ END
 FN streamYield__stmt?(self: StreamYield) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FsmB1Body {
+PUB STRUCT FsmB1Body {
   blk_label: Any@multiowned,
   ctx_struct: Any@multiowned,
   spawn_setup: Any@multiowned,
@@ -3862,13 +3862,13 @@ END
 FN fsmB1Body__stmt?(self: FsmB1Body) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FsmB1CtxStruct {
+PUB STRUCT FsmB1CtxStruct {
   type_name: Any@multiowned,
   promise_zig: String,
   capture_fields: Any@multiowned,
   run_body: Any@multiowned
 }
-STRUCT FsmGenericBody {
+PUB STRUCT FsmGenericBody {
   blk_label: Any@multiowned,
   ctx_struct: Any@multiowned,
   spawn_setup: Any@multiowned,
@@ -3935,7 +3935,7 @@ END
 FN fsmGenericBody__stmt?(self: FsmGenericBody) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FsmGenericCtxStruct {
+PUB STRUCT FsmGenericCtxStruct {
   type_name: Any@multiowned,
   promise_zig: String,
   capture_fields: Any@multiowned,
@@ -3945,7 +3945,7 @@ STRUCT FsmGenericCtxStruct {
   dispatch: Any@multiowned,
   destroy_actions: Any@multiowned
 }
-STRUCT FsmMemberFn {
+PUB STRUCT FsmMemberFn {
   fn_name: Any@multiowned,
   ctx_id: Any@multiowned,
   bg_rt: Any@multiowned,
@@ -3953,7 +3953,7 @@ STRUCT FsmMemberFn {
   body_stmts: Any@multiowned,
   extra_prologue_stmts: Any@multiowned
 }
-STRUCT FsmCtxStruct {
+PUB STRUCT FsmCtxStruct {
   type_name: Any@multiowned,
   promise_zig: String,
   capture_fields: Any@multiowned,
@@ -3963,14 +3963,14 @@ STRUCT FsmCtxStruct {
   step1: Any@multiowned,
   resume_fn: Any@multiowned
 }
-STRUCT FsmStep {
+PUB STRUCT FsmStep {
   index: Any@multiowned,
   ctx_id: Any@multiowned,
   bg_rt: Any@multiowned,
   suppress_runtime_ref: Any@multiowned,
   body_stmts: Any@multiowned
 }
-STRUCT SuspendDescriptor {
+PUB STRUCT SuspendDescriptor {
   setup_stmts: Any@multiowned,
   bind_stmts: Any@multiowned,
   tail: Any@multiowned,
@@ -3979,12 +3979,12 @@ STRUCT SuspendDescriptor {
   result_zig_type: Any@multiowned,
   result_needs_cleanup: Any@multiowned
 }
-STRUCT FsmDispatch {
+PUB STRUCT FsmDispatch {
   ctx_id: Any@multiowned,
   arms: Any@multiowned,
   uses_loop_label: Any@multiowned
 }
-STRUCT FsmStateArm {
+PUB STRUCT FsmStateArm {
   index: Any@multiowned,
   pre_body_skip: Any@multiowned,
   pre_body_stmts: Any@multiowned,
@@ -3992,11 +3992,11 @@ STRUCT FsmStateArm {
   err_cleanups: Any@multiowned,
   tail: Any@multiowned
 }
-STRUCT FsmTailCondSkip {
+PUB STRUCT FsmTailCondSkip {
   condition: Any@multiowned,
   skip_step: Any@multiowned
 }
-STRUCT FsmTailLockTry {
+PUB STRUCT FsmTailLockTry {
   try_method: Any@multiowned,
   lock_field_ref: Any@multiowned,
   ok_step: Any@multiowned,
@@ -4007,7 +4007,7 @@ STRUCT FsmTailLockTry {
 FN fsmTailLockTry__kind(self: FsmTailLockTry) RETURNS String@symbol ->
   RETURN :lock_try;
 END
-STRUCT FsmTailWokenCheck {
+PUB STRUCT FsmTailWokenCheck {
   ok_step: Any@multiowned,
   error_step: Any@multiowned
 }
@@ -4015,7 +4015,7 @@ STRUCT FsmTailWokenCheck {
 FN fsmTailWokenCheck__kind(self: FsmTailWokenCheck) RETURNS String@symbol ->
   RETURN :woken_check;
 END
-STRUCT FsmTailRetryOrError {
+PUB STRUCT FsmTailRetryOrError {
   retries: ?Int64,
   retry_step: Any@multiowned,
   fail_step: Any@multiowned
@@ -4024,21 +4024,21 @@ STRUCT FsmTailRetryOrError {
 FN fsmTailRetryOrError__kind(self: FsmTailRetryOrError) RETURNS String@symbol ->
   RETURN :retry_or_error;
 END
-STRUCT FsmTailDone {
+PUB STRUCT FsmTailDone {
   _: Any@multiowned
 }
 
 FN fsmTailDone__kind(self: FsmTailDone) RETURNS String@symbol ->
   RETURN :done;
 END
-STRUCT FsmTailJump {
+PUB STRUCT FsmTailJump {
   next_step: Any@multiowned
 }
 
 FN fsmTailJump__kind(self: FsmTailJump) RETURNS String@symbol ->
   RETURN :jump;
 END
-STRUCT FsmTailYield {
+PUB STRUCT FsmTailYield {
   next_step: Any@multiowned,
   yield_reason: Any@multiowned
 }
@@ -4046,7 +4046,7 @@ STRUCT FsmTailYield {
 FN fsmTailYield__kind(self: FsmTailYield) RETURNS String@symbol ->
   RETURN :yield;
 END
-STRUCT FsmTailRegisterYield {
+PUB STRUCT FsmTailRegisterYield {
   next_step: Any@multiowned,
   register_expr: Any@multiowned,
   yield_reason: Any@multiowned
@@ -4055,7 +4055,7 @@ STRUCT FsmTailRegisterYield {
 FN fsmTailRegisterYield__kind(self: FsmTailRegisterYield) RETURNS String@symbol ->
   RETURN :register_yield;
 END
-STRUCT FsmTailCondJump {
+PUB STRUCT FsmTailCondJump {
   condition: Any@multiowned,
   then_step: Any@multiowned,
   else_step: Any@multiowned
@@ -4064,7 +4064,7 @@ STRUCT FsmTailCondJump {
 FN fsmTailCondJump__kind(self: FsmTailCondJump) RETURNS String@symbol ->
   RETURN :cond_jump;
 END
-STRUCT FsmSpawnSetup {
+PUB STRUCT FsmSpawnSetup {
   alloc_var: Any@multiowned,
   alloc_expr: Any@multiowned,
   promise_var: Any@multiowned,
@@ -4079,7 +4079,7 @@ STRUCT FsmSpawnSetup {
   profile_dispatch_id: Any@multiowned,
   profile_site: Any@multiowned
 }
-STRUCT CapabilityLockTarget {
+PUB STRUCT CapabilityLockTarget {
   source: Emittable,
   arc_wrapped: Any@multiowned,
   comptime_arc_unwrap: Any@multiowned,
@@ -4143,7 +4143,7 @@ END
 FN capabilityLockTarget__expr?(self: CapabilityLockTarget) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT CapabilityLockAddress {
+PUB STRUCT CapabilityLockAddress {
   source: Emittable,
   arc_wrapped: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -4206,7 +4206,7 @@ END
 FN capabilityLockAddress__expr?(self: CapabilityLockAddress) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT SortedLockAcquire {
+PUB STRUCT SortedLockAcquire {
   entries: []SortedLockAcquireEntry,
   action: Emittable,
   matched_types: Any@multiowned,
@@ -4286,7 +4286,7 @@ END
 FN sortedLockAcquire__owned_effect_for_alloc(self: SortedLockAcquire, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT FallibleLockBinding {
+PUB STRUCT FallibleLockBinding {
   guard_var: Any@multiowned,
   alias_name: String,
   acquire_call: Emittable,
@@ -4358,7 +4358,7 @@ END
 FN fallibleLockBinding__owned_effect_for_alloc(self: FallibleLockBinding, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT CatchWrapper {
+PUB STRUCT CatchWrapper {
   inner_call: Emittable,
   error_reassigns: Any@multiowned,
   clauses: []MIRCatchClause,
@@ -4570,7 +4570,7 @@ END
 FN doBlock__stmt?(self: MIRDoBlock) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Noop {
+PUB STRUCT Noop {
   reason: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -4635,7 +4635,7 @@ END
 FN noop__stmt?(self: Noop) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Comment {
+PUB STRUCT Comment {
   text: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -4700,7 +4700,7 @@ END
 FN comment__stmt?(self: Comment) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Suppress {
+PUB STRUCT Suppress {
   name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -4765,7 +4765,7 @@ END
 FN suppress__stmt?(self: Suppress) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT PubConst {
+PUB STRUCT PubConst {
   name: String,
   value: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -4831,7 +4831,7 @@ END
 FN pubConst__stmt?(self: PubConst) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ModuleVar {
+PUB STRUCT ModuleVar {
   name: String,
   zig_type: String,
   visibility: String@symbol,
@@ -4898,7 +4898,7 @@ END
 FN moduleVar__stmt?(self: ModuleVar) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ModuleConstFree {
+PUB STRUCT ModuleConstFree {
   name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -5163,7 +5163,7 @@ END
 FN allocSlice__expr?(self: AllocSlice) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FreeSlice {
+PUB STRUCT FreeSlice {
   slice: Emittable,
   alloc: Alloc,
   lowered_node_id: ?LoweredNodeId,
@@ -5843,7 +5843,7 @@ END
 FN rcRetain__expr?(self: RcRetain) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ComptimeCarrierPayload {
+PUB STRUCT ComptimeCarrierPayload {
   source: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -5905,7 +5905,7 @@ END
 FN comptimeCarrierPayload__expr?(self: ComptimeCarrierPayload) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT MonomorphicKeep {
+PUB STRUCT MonomorphicKeep {
   source: Emittable,
   zig_base: String,
   alloc: String@symbol,
@@ -5969,7 +5969,7 @@ END
 FN monomorphicKeep__expr?(self: MonomorphicKeep) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT RcRelease {
+PUB STRUCT RcRelease {
   source: Emittable,
   zig_base: String,
   func: Any@multiowned,
@@ -6164,7 +6164,7 @@ END
 FN weakUpgrade__expr?(self: WeakUpgrade) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT AllocatorRef {
+PUB STRUCT AllocatorRef {
   kind: String@symbol,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -6227,7 +6227,7 @@ END
 FN allocatorRef__expr?(self: AllocatorRef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FreezeExpr {
+PUB STRUCT FreezeExpr {
   inner: Emittable,
   zig_base: String,
   alloc_ref: AllocatorRef,
@@ -6363,7 +6363,7 @@ END
 FN makeList__expr?(self: MakeList) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FrameSave {
+PUB STRUCT FrameSave {
   rt_expr: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -6428,7 +6428,7 @@ END
 FN frameSave__stmt?(self: FrameSave) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FrameRestore {
+PUB STRUCT FrameRestore {
   rt_expr: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -6493,7 +6493,7 @@ END
 FN frameRestore__stmt?(self: FrameRestore) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT CapabilityUnwrap {
+PUB STRUCT CapabilityUnwrap {
   source: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -6555,7 +6555,7 @@ END
 FN capabilityUnwrap__expr?(self: CapabilityUnwrap) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT SnapshotRead {
+PUB STRUCT SnapshotRead {
   cell_unwrap: Emittable,
   rt: String,
   alias_name: String,
@@ -6628,7 +6628,7 @@ END
 FN snapshotRead__owned_effect_for_alloc(self: SnapshotRead, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT SnapshotTransaction {
+PUB STRUCT SnapshotTransaction {
   cell_unwrap: Emittable,
   rt: String,
   alloc: String@symbol,
@@ -6714,7 +6714,7 @@ END
 FN snapshotTransaction__owned_effect_for_alloc(self: SnapshotTransaction, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT SnapshotMultiTxn {
+PUB STRUCT SnapshotMultiTxn {
   cells: Emittable,
   rt: String,
   alloc: String@symbol,
@@ -6798,7 +6798,7 @@ END
 FN snapshotMultiTxn__owned_effect_for_alloc(self: SnapshotMultiTxn, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT PolymorphicMutate {
+PUB STRUCT PolymorphicMutate {
   cell: Emittable,
   rt: String,
   alias_name: String,
@@ -6871,7 +6871,7 @@ END
 FN polymorphicMutate__owned_effect_for_alloc(self: PolymorphicMutate, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT PolymorphicMutateFlow {
+PUB STRUCT PolymorphicMutateFlow {
   cell: Emittable,
   rt: String,
   alias_name: String,
@@ -6954,7 +6954,7 @@ END
 FN polymorphicMutateFlow__owned_effect_for_alloc(self: PolymorphicMutateFlow, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT PolymorphicFlowSignal {
+PUB STRUCT PolymorphicFlowSignal {
   kind: Any@multiowned,
   ret: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -7019,7 +7019,7 @@ END
 FN polymorphicFlowSignal__stmt?(self: PolymorphicFlowSignal) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT WithMatchDispatch {
+PUB STRUCT WithMatchDispatch {
   cell: Emittable,
   alias_name: String,
   snapshot_mode: Any@multiowned,
@@ -7388,7 +7388,7 @@ END
 FN ownedTransfer__owned_effect_for_alloc(self: OwnedTransfer, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT OwnedBorrow {
+PUB STRUCT OwnedBorrow {
   name: String,
   source: String,
   lowered_node_id: ?LoweredNodeId,
@@ -7591,7 +7591,7 @@ END
 FN ownedReturn__owned_effect_for_alloc(self: OwnedReturn, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT ReturnMark {
+PUB STRUCT ReturnMark {
   escaped_vars: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -7726,7 +7726,7 @@ END
 FN transferMark__owned_effect_for_alloc(self: TransferMark, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT ReassignMark {
+PUB STRUCT ReassignMark {
   name: String,
   alloc: String@symbol,
   lowered_node_id: ?LoweredNodeId,
@@ -7795,7 +7795,7 @@ END
 FN reassignMark__owned_effect_for_alloc(self: ReassignMark, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT FieldCleanupMark {
+PUB STRUCT FieldCleanupMark {
   target_name: String,
   field: String,
   alloc: String@symbol,
@@ -7977,7 +7977,7 @@ END
 FN call__expr?(self: Call) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT RuntimeCall {
+PUB STRUCT RuntimeCall {
   spec: RuntimeCallSpec,
   args: []Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -8313,7 +8313,7 @@ END
 FN fieldGet__expr?(self: FieldGet) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT UnionPayloadGet {
+PUB STRUCT UnionPayloadGet {
   subject: Emittable,
   variant: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -8376,7 +8376,7 @@ END
 FN unionPayloadGet__expr?(self: UnionPayloadGet) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT IndexGet {
+PUB STRUCT IndexGet {
   object: Emittable,
   index: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -8439,7 +8439,7 @@ END
 FN indexGet__expr?(self: IndexGet) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ProtocolCall {
+PUB STRUCT ProtocolCall {
   protocol: Any@multiowned,
   operation: Any@multiowned,
   receiver: Emittable,
@@ -8660,7 +8660,7 @@ END
 FN unaryOp__expr?(self: MIRUnaryOp) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FallibleOk {
+PUB STRUCT FallibleOk {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -8722,7 +8722,7 @@ END
 FN fallibleOk__expr?(self: FallibleOk) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FutureReady {
+PUB STRUCT FutureReady {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -8847,7 +8847,7 @@ END
 FN lit__expr?(self: Lit) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT SymbolLit {
+PUB STRUCT SymbolLit {
   value: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -8910,7 +8910,7 @@ END
 FN symbolLit__expr?(self: SymbolLit) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT VoidLiteral {
+PUB STRUCT VoidLiteral {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -8972,7 +8972,7 @@ END
 FN voidLiteral__expr?(self: VoidLiteral) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT EnumOrdinal {
+PUB STRUCT EnumOrdinal {
   value: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -9097,7 +9097,7 @@ END
 FN ident__expr?(self: Ident) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TupleLiteral {
+PUB STRUCT TupleLiteral {
   items: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -9163,7 +9163,7 @@ END
 FN tupleLiteral__expr?(self: TupleLiteral) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FnRef {
+PUB STRUCT FnRef {
   name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -9226,7 +9226,7 @@ END
 FN fnRef__expr?(self: FnRef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT LockAcquire {
+PUB STRUCT LockAcquire {
   lock_expr: Emittable,
   lock_sync: Any@multiowned,
   fallible: Any@multiowned,
@@ -9355,7 +9355,7 @@ END
 FN typeOf__expr?(self: TypeOf) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TypeEq {
+PUB STRUCT TypeEq {
   left: Emittable,
   right: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -9418,7 +9418,7 @@ END
 FN typeEq__expr?(self: TypeEq) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT StructInit {
+PUB STRUCT StructInit {
   zig_type: String,
   fields: []@multiowned Any,
   lowered_node_id: ?LoweredNodeId,
@@ -9550,7 +9550,7 @@ END
 FN arrayInit__expr?(self: ArrayInit) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ArrayDefaultInit {
+PUB STRUCT ArrayDefaultInit {
   elem_type: String,
   count: String,
   default_value: Emittable,
@@ -9955,7 +9955,7 @@ END
 FN cast__expr?(self: MIRCast) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TryExpr {
+PUB STRUCT TryExpr {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10018,7 +10018,7 @@ END
 FN tryExpr__expr?(self: TryExpr) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TryCatch {
+PUB STRUCT TryCatch {
   expr: Emittable,
   catch_body: Emittable,
   capture: Any@multiowned,
@@ -10096,7 +10096,7 @@ END
 PRIVATE FN tryCatch__expr?(self: TryCatch) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Orelse {
+PUB STRUCT Orelse {
   expr: Emittable,
   fallback: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -10232,7 +10232,7 @@ END
 FN conditional__expr?(self: Conditional) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT IfOptional {
+PUB STRUCT IfOptional {
   optional: Emittable,
   capture: Any@multiowned,
   then_expr: Emittable,
@@ -10305,7 +10305,7 @@ END
 FN ifOptional__expr?(self: IfOptional) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Comptime {
+PUB STRUCT Comptime {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10368,7 +10368,7 @@ END
 FN comptime__expr?(self: Comptime) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT UnionVariantGet {
+PUB STRUCT UnionVariantGet {
   object: Emittable,
   variant: Any@multiowned,
   zig_type: String,
@@ -10432,7 +10432,7 @@ END
 FN unionVariantGet__expr?(self: UnionVariantGet) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ListItems {
+PUB STRUCT ListItems {
   list: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10494,7 +10494,7 @@ END
 FN listItems__expr?(self: ListItems) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ListLength {
+PUB STRUCT ListLength {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10624,7 +10624,7 @@ END
 FN addressOf__expr?(self: AddressOf) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT Deref {
+PUB STRUCT Deref {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10689,7 +10689,7 @@ END
 FN deref__expr?(self: Deref) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT PointerCast {
+PUB STRUCT PointerCast {
   expr: Emittable,
   target_type: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -10755,7 +10755,7 @@ END
 FN pointerCast__expr?(self: PointerCast) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ConstCast {
+PUB STRUCT ConstCast {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10820,7 +10820,7 @@ END
 FN constCast__expr?(self: ConstCast) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT DefaultStreamCapacity {
+PUB STRUCT DefaultStreamCapacity {
   worker_count: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10945,7 +10945,7 @@ END
 FN undef__expr?(self: Undef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TypeSentinel {
+PUB STRUCT TypeSentinel {
   extreme: Any@multiowned,
   zig_type: String,
   lowered_node_id: ?LoweredNodeId,
@@ -11009,7 +11009,7 @@ END
 FN typeSentinel__expr?(self: TypeSentinel) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT IterRange {
+PUB STRUCT IterRange {
   start: Any@multiowned,
   end_val: Any@multiowned,
   capture_type: Any@multiowned,
@@ -11147,7 +11147,7 @@ END
 FN optionalUnwrap__expr?(self: MIROptionalUnwrap) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT TryOptional {
+PUB STRUCT TryOptional {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -11210,7 +11210,7 @@ END
 FN tryOptional__expr?(self: TryOptional) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ForeignOwnedUnwrap {
+PUB STRUCT ForeignOwnedUnwrap {
   expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -11271,7 +11271,7 @@ END
 FN foreignOwnedUnwrap__expr?(self: ForeignOwnedUnwrap) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ForeignSliceView {
+PUB STRUCT ForeignSliceView {
   pointer: Emittable,
   count: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -11427,7 +11427,7 @@ END
 FN rangeLit__expr?(self: MIRRangeLit) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT HasField {
+PUB STRUCT HasField {
   expr: Emittable,
   field: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -11493,7 +11493,7 @@ END
 FN hasField__expr?(self: HasField) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ItemsAccess {
+PUB STRUCT ItemsAccess {
   expr: Emittable,
   safe: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -11558,7 +11558,7 @@ END
 FN itemsAccess__expr?(self: ItemsAccess) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT OwnedSlice {
+PUB STRUCT OwnedSlice {
   expr: Emittable,
   alloc: String@symbol,
   lowered_node_id: ?LoweredNodeId,
@@ -11626,7 +11626,7 @@ END
 FN ownedSlice__expr?(self: OwnedSlice) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT LambdaExpr {
+PUB STRUCT LambdaExpr {
   fn_def: Any@multiowned,
   captures: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -11757,7 +11757,7 @@ END
 FN pipeline__stmt?(self: Pipeline) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT InlineBc {
+PUB STRUCT InlineBc {
   op: String@symbol,
   args: []Emittable,
   stdlib_def: Any@multiowned,
@@ -11843,7 +11843,7 @@ END
 FN inlineBc__expr?(self: InlineBc) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT OrElseExitBcRewrite {
+PUB STRUCT OrElseExitBcRewrite {
   kind: ?String,
   name_id: ?Int64,
   clear_type: Bool,
@@ -11913,7 +11913,7 @@ END
 FN orElseExitBcRewrite__expr?(self: OrElseExitBcRewrite) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ShardedMapPut {
+PUB STRUCT ShardedMapPut {
   target: Emittable,
   key: Emittable,
   value: Emittable,
@@ -12003,7 +12003,7 @@ END
 FN shardedMapPut__stmt?(self: ShardedMapPut) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ShardedMapGet {
+PUB STRUCT ShardedMapGet {
   target: Emittable,
   key: Emittable,
   shard_idx: ?Emittable,
@@ -12111,7 +12111,7 @@ END
 FN ownershipOperandFact__non_owning(type_info: Type, source: String) RETURNS OwnershipOperandFact ->
   RETURN OwnershipOperandFact{ kind: :non_owning, name: NIL, borrowed: FALSE, type_info: COPY type_info, source: COPY source, target_alloc: NIL };
 END
-STRUCT OwnershipContract {
+PUB STRUCT OwnershipContract {
   borrows: []String,
   covers_consuming_params: Bool,
   operands: []OwnershipOperandFact,
@@ -12197,7 +12197,7 @@ FN ownershipContract__new(operands: []OwnershipOperandFact, produces: []String, 
   TRY (ownershipContract__initialize(&self, operands, produces, borrows, covers_consuming_params));
   RETURN self @multiowned;
 END
-STRUCT CallableContract {
+PUB STRUCT CallableContract {
   checked_arg_count: Int64,
   ownership_contract: OwnershipContract,
   signature: FunctionSignature
@@ -12226,7 +12226,7 @@ FN callableContract__new(signature: FunctionSignature, ownership_contract: Owner
   callableContract__initialize(&self, signature, ownership_contract, checked_arg_count);
   RETURN self @multiowned;
 END
-STRUCT OwnershipEffect {
+PUB STRUCT OwnershipEffect {
   produces_owned: Bool,
   alloc: ?String@symbol,
   cleanup_kind: ?String@symbol,
@@ -12271,7 +12271,7 @@ END
 FN ownershipEffect__with_target(self: OwnershipEffect, name: String) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN OwnershipEffect{ produces_owned: self.produces_owned, alloc: COPY self.alloc, cleanup_kind: COPY self.cleanup_kind, requires_hoist: self.requires_hoist, target_var: COPY name };
 END
-STRUCT BoundaryCaptureFact {
+PUB STRUCT BoundaryCaptureFact {
   name: String,
   storage: ?String@symbol,
   sync: ?String@symbol,
@@ -12286,13 +12286,13 @@ PUB STRUCT ExecutionBoundaryFact {
   dispatch: String@symbol,
   captures: []BoundaryCaptureFact
 }
-STRUCT FsmOwnershipFact {
+PUB STRUCT FsmOwnershipFact {
   name: String,
   target: String@symbol,
   target_alloc: ?String@symbol,
   move_guarded: Bool
 }
-STRUCT FsmResultTransferFact {
+PUB STRUCT FsmResultTransferFact {
   name: String,
   target_alloc: String@symbol,
   move_guarded: Bool
@@ -12322,7 +12322,7 @@ FN ownershipConsumptionFact__names(self: OwnershipConsumptionFact) RETURNS ![]St
   END
   RETURN names;
 END
-STRUCT MIRBodySlot {
+PUB STRUCT MIRBodySlot {
   body: []Emittable,
   name: String@symbol,
   writer: FN(Emittable[]) -> Void
@@ -12368,7 +12368,7 @@ END
 FN loweredNodeId__hash(self: LoweredNodeId) RETURNS Int64 EFFECTS REENTRANT ->
   RETURN self.value;
 END
-STRUCT LoweredBodyId {
+PUB STRUCT LoweredBodyId {
   node_ids: []LoweredNodeId
 }
 
@@ -12597,7 +12597,7 @@ PRIVATE FN ownershipEffect__ident_names_in_expr(value: ?Emittable) RETURNS ![]St
   END
   RETURN names;
 END
-STRUCT StructInitField {
+PUB STRUCT StructInitField {
   name: String@symbol,
   value: Emittable,
   alloc: ?String@symbol
@@ -12741,7 +12741,7 @@ FN mIR__each_surface_node_inner(root: ?NodeRoot, blk: FN(Emittable) -> Void) RET
     RETURN;
   END
 END
-STRUCT InlineAllocMetadata {
+PUB STRUCT InlineAllocMetadata {
   slots: {String@symbol}String@symbol
 }
 
@@ -13048,19 +13048,19 @@ FN program__new(items: []Emittable, pass_state: ?MIRPassState = NIL) RETURNS MIR
   program__initialize(&self, items, pass_state);
   RETURN self @multiowned;
 END
-STRUCT ProtocolConformanceCase {
+PUB STRUCT ProtocolConformanceCase {
   owner_type: ?String,
   owner_marker: ?String,
   type_params: []String,
   associated_types: {String}String,
   operations: {String}String
 }
-STRUCT ProtocolRequirementAdapter {
+PUB STRUCT ProtocolRequirementAdapter {
   name: String,
   argument_count: Int64,
   return_type: String
 }
-STRUCT ProtocolAdapterDef {
+PUB STRUCT ProtocolAdapterDef {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -13128,7 +13128,7 @@ END
 FN protocolAdapterDef__stmt?(self: ProtocolAdapterDef) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT UnionTypeVariant {
+PUB STRUCT UnionTypeVariant {
   name: String@symbol,
   zig_type: String
 }
@@ -13142,20 +13142,20 @@ FN unionTypeVariant__get_index(self: UnionTypeVariant, key: String@symbol) RETUR
     RETURN NIL;
   END
 END
-STRUCT EnumSwitchPattern {
+PUB STRUCT EnumSwitchPattern {
   variant: String
 }
-STRUCT SwitchArm {
+PUB STRUCT SwitchArm {
   patterns: []SwitchPattern,
   body: []Emittable
 }
-STRUCT UnionMatchArm {
+PUB STRUCT UnionMatchArm {
   variant: String,
   payload: ?String,
   pointer_payload: Bool,
   body: []Emittable
 }
-STRUCT IfChainBranch {
+PUB STRUCT IfChainBranch {
   cond: Emittable,
   body: []Emittable
 }
@@ -13173,7 +13173,7 @@ FN thunkBaseCase__fetch(self: ThunkBaseCase, key: String@symbol) RETURNS !Emitta
     panic("key not found: {}");
   END
 END
-STRUCT ThunkFrameInit {
+PUB STRUCT ThunkFrameInit {
   field_name: String,
   value: Emittable
 }
@@ -13191,7 +13191,7 @@ PUB STRUCT ThunkFrameField {
   name: String,
   type_info: Type
 }
-STRUCT ThunkVariant {
+PUB STRUCT ThunkVariant {
   name: String,
   param_fields: []ThunkFrameField
 }
@@ -13205,7 +13205,7 @@ FN thunkVariant__fetch(self: ThunkVariant, key: String@symbol) RETURNS !ThunkVar
     panic("key not found: {}");
   END
 END
-STRUCT MutualThunkArm {
+PUB STRUCT MutualThunkArm {
   variant_name: String,
   base_cases: []ThunkBaseCase,
   target_variant: String,
@@ -13298,7 +13298,7 @@ END
 FN thunkTrampoline__stmt?(self: ThunkTrampoline) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT MutualThunkTrampoline {
+PUB STRUCT MutualThunkTrampoline {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -13381,21 +13381,21 @@ FN mIR__validate_defer_body_mut(body: DeferBodyInput, label: String) RETURNS !Vo
   END
   panic("{} body must be structural MIR, got {}");
 END
-STRUCT FsmCaptureFact {
+PUB STRUCT FsmCaptureFact {
   name: String,
   cleanup_at: Any@multiowned
 }
-STRUCT FsmStateFieldFact {
+PUB STRUCT FsmStateFieldFact {
   name: String,
   finalize_at: ?Any@multiowned,
   error_handled_in_setup: Bool
 }
-STRUCT FsmStepFact {
+PUB STRUCT FsmStepFact {
   index: Int64,
   reads: []String,
   cleanups: []String
 }
-STRUCT FsmDestroyCleanup {
+PUB STRUCT FsmDestroyCleanup {
   source_kind: String@symbol,
   name: String,
   target: Emittable,
@@ -13430,7 +13430,7 @@ FN fsmDestroyCleanup__ctx_cleanup_target_name(self: FsmDestroyCleanup) RETURNS ?
     RETURN NIL;
   END
 END
-STRUCT FsmDestroyLockRelease {
+PUB STRUCT FsmDestroyLockRelease {
   name: String,
   ctx_id: Int64,
   guard_index: Int64,
@@ -13453,7 +13453,7 @@ END
 FN fsmDestroyLockRelease__ctx_cleanup_target_name(self: FsmDestroyLockRelease) RETURNS ?String ->
   RETURN NIL;
 END
-STRUCT FsmDestroyStmt {
+PUB STRUCT FsmDestroyStmt {
   source_kind: String@symbol,
   name: String,
   stmt: Emittable
@@ -13490,35 +13490,35 @@ FN fsmDestroyStmt__ctx_cleanup_target_name(self: FsmDestroyStmt) RETURNS ?String
     RETURN NIL;
   END
 END
-STRUCT FsmStructureFacts {
+PUB STRUCT FsmStructureFacts {
   required_move_guards: []String,
   move_guard_writes: []String,
   ownership_facts: []FsmOwnershipFact,
   destroy_actions: []FsmDestroyAction
 }
-STRUCT ContextFieldDecl {
+PUB STRUCT ContextFieldDecl {
   name: String,
   type_zig: String,
   default_value: ?Emittable
 }
-STRUCT CaptureCleanupAction {
+PUB STRUCT CaptureCleanupAction {
   target: Emittable,
   cleanup_entry: CleanupEntry@multiowned,
   allocator: ?Emittable
 }
-STRUCT TaskConfigPlan {
+PUB STRUCT TaskConfigPlan {
   stack_variant: String,
   profile_site_id: ?Int64,
   profile_dispatch_id: ?Int64
 }
-STRUCT ProfileTaskSite {
+PUB STRUCT ProfileTaskSite {
   site_id: Int64,
   line: Int64,
   column: Int64,
   dispatch: String@symbol,
   form: String@symbol
 }
-STRUCT FiberSpawnCall {
+PUB STRUCT FiberSpawnCall {
   target: String@symbol,
   runtime_name: ?String,
   wait_group_name: ?String,
@@ -13527,7 +13527,7 @@ STRUCT FiberSpawnCall {
   task_config: TaskConfigPlan,
   pass_ctx_by_address: Bool
 }
-STRUCT BgStackfulPlan {
+PUB STRUCT BgStackfulPlan {
   id: Int64,
   ctx_type: String,
   alloc_var: String,
@@ -13548,7 +13548,7 @@ STRUCT BgStackfulPlan {
   alloc_expr: Emittable,
   run_body: []Emittable
 }
-STRUCT DirectTenseMap {
+PUB STRUCT DirectTenseMap {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source: Emittable,
@@ -13614,7 +13614,7 @@ END
 FN directTenseMap__expr?(self: DirectTenseMap) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT AsyncPayloadTake {
+PUB STRUCT AsyncPayloadTake {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source: Emittable,
@@ -13676,7 +13676,7 @@ END
 FN asyncPayloadTake__expr?(self: AsyncPayloadTake) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT FutureMapPlan {
+PUB STRUCT FutureMapPlan {
   id: Int64,
   ctx_type: String,
   ctx_var: String,
@@ -13694,7 +13694,7 @@ STRUCT FutureMapPlan {
   profile_site: ProfileTaskSite,
   result_type: Type
 }
-STRUCT BgStreamPlan {
+PUB STRUCT BgStreamPlan {
   id: Int64,
   ctx_type: String,
   alloc_var: String,
@@ -13711,7 +13711,7 @@ STRUCT BgStreamPlan {
   spawn_call: FiberSpawnCall,
   rt_name: String
 }
-STRUCT DoBranchPlan {
+PUB STRUCT DoBranchPlan {
   ctx_type: String,
   ctx_var: String,
   wg_var: String,
@@ -13723,27 +13723,27 @@ STRUCT DoBranchPlan {
   body: []Emittable,
   spawn_call: FiberSpawnCall
 }
-STRUCT DoBlockPlan {
+PUB STRUCT DoBlockPlan {
   wg_var: String,
   branches: []DoBranchPlan
 }
-STRUCT FsmSpawnCall {
+PUB STRUCT FsmSpawnCall {
   target: String@symbol,
   runtime_name: ?String,
   ctx_var: String
 }
-STRUCT FsmLoweringResult {
+PUB STRUCT FsmLoweringResult {
   body: MIRFsmLoweringResultFsmBody,
   structure: FsmStructure
 }
 
-UNION MIRFsmLoweringResultFsmBody { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
-STRUCT CatchReassign {
+PUB UNION MIRFsmLoweringResultFsmBody { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
+PUB STRUCT CatchReassign {
   name: String,
   alloc: String@symbol,
   line: Int64
 }
-STRUCT CatchClauseMeta {
+PUB STRUCT CatchClauseMeta {
   kinds: []String,
   types: []String,
   filter_types: []String,
@@ -13751,7 +13751,7 @@ STRUCT CatchClauseMeta {
 }
 PUB ENUM CatchDefaultAction { Body, Propagate, Unreachable }
 PUB ENUM FailureActionKind { Raise, Exit, Pass, Return, Block }
-STRUCT FailureAction {
+PUB STRUCT FailureAction {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   kind: FailureActionKind,
@@ -13834,7 +13834,7 @@ END
 FN failureAction__owned_effect_for_alloc(self: FailureAction, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
-STRUCT SortedLockAcquireEntry {
+PUB STRUCT SortedLockAcquireEntry {
   index: Int64,
   alias_name: String,
   guard_var: String,
@@ -13843,7 +13843,7 @@ STRUCT SortedLockAcquireEntry {
   address_expr: Emittable,
   method_name: String
 }
-STRUCT MIRCatchClause {
+PUB STRUCT MIRCatchClause {
   meta: CatchClauseMeta,
   body: []Emittable
 }
@@ -13854,12 +13854,12 @@ END
 FN mIR__structural_bg_block_plan?<T>(plan: T) RETURNS Bool ->
   RETURN (((((T IS_A BgStackfulPlan OR T IS_A BgStreamPlan) OR T IS_A FutureMapPlan) OR T IS_A FsmIoBody) OR T IS_A FsmB1Body) OR T IS_A FsmGenericBody);
 END
-STRUCT MIRWithMatchArm {
+PUB STRUCT MIRWithMatchArm {
   family: String@symbol,
   guard_var: String,
   body: []Emittable
 }
-STRUCT OwnershipTransferPlan {
+PUB STRUCT OwnershipTransferPlan {
   name: String,
   target: String@symbol,
   target_alloc: ?String@symbol,
@@ -13891,7 +13891,7 @@ END
 FN mIR__ownership_transfer_marks(name: String, target: String@symbol, target_alloc: ?String@symbol = NIL, move_guarded: Bool = FALSE) RETURNS ![]Emittable ->
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: COPY target, target_alloc: COPY target_alloc, move_guarded: COPY move_guarded })));
 END
-STRUCT RuntimeCallSpec {
+PUB STRUCT RuntimeCallSpec {
   callee: String,
   try_wrap: Bool,
   owned_return: Bool,
@@ -13921,7 +13921,7 @@ FN runtimeCalls__atomic_reduce_init_spec(inner_zig: String) RETURNS !RuntimeCall
   RETURN RuntimeCallSpec{ callee: "CheatLib.obs.AtomicReduce(${inner_zig}).init", callable_contract: TRY (callableContract__no_ownership(1)), try_wrap: FALSE, owned_return: FALSE };
 END
 # End Ruby module MIR::RuntimeCalls
-STRUCT DefaultValue {
+PUB STRUCT DefaultValue {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   kind: String@symbol,
@@ -13985,7 +13985,7 @@ END
 FN defaultValue__expr?(self: DefaultValue) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT EnumTag {
+PUB STRUCT EnumTag {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   variant: String
@@ -14048,7 +14048,7 @@ END
 FN enumTag__expr?(self: EnumTag) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT NextPromiseList {
+PUB STRUCT NextPromiseList {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   list_expr: Emittable,
@@ -14119,11 +14119,11 @@ END
 FN nextPromiseList__expr?(self: NextPromiseList) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT RegistryCallArg {
+PUB STRUCT RegistryCallArg {
   expr: Emittable,
   coerce_type: ?String@symbol
 }
-STRUCT RegistryCall {
+PUB STRUCT RegistryCall {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   entry: FunctionSignature@multiowned,
@@ -14235,7 +14235,7 @@ END
 FN registryCall__expr?(self: RegistryCall) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT IndexedStore {
+PUB STRUCT IndexedStore {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   target: Emittable,
@@ -14335,12 +14335,12 @@ END
 FN indexedStore__expr?(self: IndexedStore) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ExternTrampolineArg {
+PUB STRUCT ExternTrampolineArg {
   expr: Emittable,
   field_type: ?Type,
   field_zig_type: ?String
 }
-STRUCT CFunctionAdapter {
+PUB STRUCT CFunctionAdapter {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   clear_function: Emittable,
@@ -14403,7 +14403,7 @@ END
 FN cFunctionAdapter__expr?(self: CFunctionAdapter) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ExternTrampoline {
+PUB STRUCT ExternTrampoline {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   id: Int64,
@@ -14494,7 +14494,7 @@ END
 FN externTrampoline__expr?(self: ExternTrampoline) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ObservableConsumerSpawn {
+PUB STRUCT ObservableConsumerSpawn {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   id: Int64,
@@ -14567,7 +14567,7 @@ END
 FN observableConsumerSpawn__expr?(self: ObservableConsumerSpawn) RETURNS Bool ->
   RETURN TRUE;
 END
-STRUCT ShardConcurrentEach {
+PUB STRUCT ShardConcurrentEach {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
