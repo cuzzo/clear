@@ -698,21 +698,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(((key_res != NIL) AND (val_res != NIL))) THEN
         CONTINUE;
     END
-    MUTABLE decl: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(inlineAllocMetadata__slot(key_res).decl_node);
+    MUTABLE decl: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(key_res.slot.decl_node);
     MUTABLE key_type = key_res.type;
     MUTABLE val_type = val_res.type;
     MUTABLE k_sym = type__resolved(key_type);
     MUTABLE v_sym = type__resolved(val_type);
-    MATCH decl START
-        AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
-          MUTABLE item_mutable = COPY item;
-          item_mutable.type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${k_sym}, ${v_sym}>") }));
-          decl = AutoConstraintCollectorDeclarationNode{ VarDecl: item_mutable };,
-        AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
-          MUTABLE item_mutable = COPY item;
-          item_mutable.type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${k_sym}, ${v_sym}>") }));
-          decl = AutoConstraintCollectorDeclarationNode{ BindExpr: item_mutable };,
-      END
+    declNode__set_type(&decl, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${k_sym}, ${v_sym}>") })));
         END
 }
 END
