@@ -27,11 +27,11 @@ END
 PRIVATE FN pipelineSourceShape__infinite_stream?(self: PipelineSourceShape) RETURNS !Bool ->
   RETURN TRY (type__inf_stream?(self.type));
 END
-PUB FN pipelineSourceShape__bc_infinite_stream?(self: PipelineSourceShape) RETURNS Bool ->
-  RETURN (((self.bc_target AND pipelineSourceShape__infinite_stream?(self))) == TRUE);
+PUB FN pipelineSourceShape__bc_infinite_stream?(self: PipelineSourceShape) RETURNS !Bool ->
+  RETURN ((self.bc_target AND TRY (pipelineSourceShape__infinite_stream?(self))) == TRUE);
 END
-PUB FN pipelineSourceShape__bc_named_infinite_stream?(self: PipelineSourceShape) RETURNS Bool ->
-  RETURN (((pipelineSourceShape__bc_infinite_stream?(self) AND !(FALSE))) == TRUE);
+PUB FN pipelineSourceShape__bc_named_infinite_stream?(self: PipelineSourceShape) RETURNS !Bool ->
+  RETURN ((TRY (pipelineSourceShape__bc_infinite_stream?(self)) AND !(FALSE)) == TRUE);
 END
 PUB STRUCT PipelineNamedBinding {
   name: String,

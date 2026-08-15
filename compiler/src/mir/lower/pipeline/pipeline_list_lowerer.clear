@@ -148,7 +148,7 @@ PRIVATE FN pipelineListLowerer__lower_limit(self: PipelineListLowerer, site: Pip
   MUTABLE elem_zig = self.transpile_type(elem_type);
   MUTABLE alloc = self.pipeline_alloc(smooth_node);
   MUTABLE count_mir = self.visit_mir(limit_node.count);
-  IF pipelineSourceShape__bc_infinite_stream?(source_shape) THEN
+  IF TRY (pipelineSourceShape__bc_infinite_stream?(source_shape)) THEN
     MUTABLE label = self.next_label();
     MUTABLE source_mir = self.visit_mir(list_node);
     self.set_current_label(label);

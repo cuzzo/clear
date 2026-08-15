@@ -13,7 +13,7 @@ STRUCT StdLibTypeBinding {
   name: String@symbol,
   schema_factory: FN() -> Any
 }
-builtin_global_bindings: [1]StdLibGlobalBinding = [StdLibGlobalBinding{ name: "argv", type: TypeTypeInput{ SymbolValue: COPY string_type }, storage: :heap }];
+builtin_global_bindings: [1]StdLibGlobalBinding = [StdLibGlobalBinding{ name: "argv", type: TypeTypeInput{ SymbolValue: :String }, storage: :heap }];
 builtin_type_bindings: [4]StdLibTypeBinding = [StdLibTypeBinding{ name: :Range, schema_factory: COPY %() -> {
   rtoc_lambda_result_6 = TRY (structSchema__new(CAST({symbol("start"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: :Float64, default: NIL, borrowed: FALSE } }, symbol("end"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: :Float64, default: NIL, borrowed: FALSE } }} AS {String@symbol}SchemasStructSchemaFieldInput), ( { MUTABLE rtoc_empty_list_4: []String@symbol = List[]; rtoc_empty_list_4 } ), ( { MUTABLE rtoc_empty_list_5: []GenericParamDecl = List[]; rtoc_empty_list_5 } ), {}, {}));
   rtoc_lambda_result_6

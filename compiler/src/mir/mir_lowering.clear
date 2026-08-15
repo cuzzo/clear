@@ -1594,7 +1594,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     symbolEntry__heap_storage?(rtoc_local_receiver_27) } == TRUE)) ELSE FALSE END))));
 }
 END
-FN mIRLowering__lower(MUTABLE self: MIRLowering, MUTABLE node: MIRLoweringLowerableStmt) RETURNS Auto
+FN mIRLowering__lower(MUTABLE self: MIRLowering, MUTABLE node: MIRLoweringLowerableStmt) RETURNS !?Emittable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
