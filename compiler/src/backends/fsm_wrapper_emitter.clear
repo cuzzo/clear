@@ -43,7 +43,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, mir_emitte
   &parts.append("        rt: *Runtime,");
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
-  MUTABLE capture_fields = fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter);
+  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
   IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
@@ -95,7 +95,7 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, mir_emitter: MI
   &parts.append("        rt: *Runtime,");
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
-  MUTABLE capture_fields = fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter);
+  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
   IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
@@ -158,7 +158,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
   &parts.append("        rt: *Runtime,");
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
-  MUTABLE capture_fields = fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter);
+  MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
   IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END

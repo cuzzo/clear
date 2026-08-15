@@ -230,9 +230,9 @@ PUB FN localBindingAnalysis__each_direct_loop_node(body: []Locatable, block: FN(
         END
     ELSE_IF item IS_A WithBlock AS with_block THEN
         TRY (localBindingAnalysis__each_direct_loop_node(with_block.body, block));
-    ELSE_IF (item IS_A DoBlock) THEN
-        FOR _ IN (body[rtoc_idx]?.branches()) DO
-        TRY (localBindingAnalysis__each_direct_loop_node(_.body(), block));
+    ELSE_IF item IS_A DoBlock AS do_block THEN
+        FOR rtoc_branch IN do_block.branches DO
+          TRY (localBindingAnalysis__each_direct_loop_node(rtoc_branch.body, block));
         END
     END
   rtoc_idx = rtoc_idx + 1;
