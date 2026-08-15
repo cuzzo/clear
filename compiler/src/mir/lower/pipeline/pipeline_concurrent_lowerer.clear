@@ -127,8 +127,8 @@ PRIVATE FN pipelineConcurrentLowerer__concurrent_plan(self: PipelineConcurrentLo
   MUTABLE lhs: Locatable = COPY castLocatableToLocatable(smooth_node.left);
   MUTABLE inner: Locatable = COPY CAST(conc_op.op AS Locatable);
   MUTABLE binding_name, real_lhs = pipelineConcurrentLowerer__unwrap_binding_source(self, lhs);
-  MUTABLE lhs_type = &lhs.full_type_mut();
-  MUTABLE real_lhs_type = &real_lhs.full_type_mut();
+  MUTABLE lhs_type = TRY (aST__full_type_mut(lhs));
+  MUTABLE real_lhs_type = TRY (aST__full_type_mut(real_lhs));
   MUTABLE terminal_kind = pipelineConcurrentLowerer__concurrent_terminal_kind(self, inner);
   MUTABLE source_kind: ?PipelineConcurrentSourceKind = pipelineConcurrentLowerer__concurrent_source_kind(self, lhs, real_lhs, lhs_type, real_lhs_type, conc_op);
   IF !(source_kind) THEN
@@ -215,7 +215,7 @@ PRIVATE FN pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self: Pip
   panic("lower_concurrent: unsupported non-legacy CONCURRENT shape lhs={} lhs_type={} op={}");
 END
 PUB FN pipelineConcurrentLowerer__lower_sharded_each(self: PipelineConcurrentLowerer, MUTABLE list_node: Locatable, MUTABLE each_op: EachOp) RETURNS !ScopeBlock ->
-  MUTABLE lhs_type = &list_node.full_type_mut();
+  MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE item_t = TRY (type__new(lhs_type.element_type().resolved()));
   MUTABLE shard_count = type__shard_count(lhs_type);
   MUTABLE conc = ConcurrentOp{ token: COPY each_op.token, op: COPY each_op, options: {}, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, shard_context: NIL, capture_analysis: NIL };
@@ -310,7 +310,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each_zig(self: Pipe
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_select_prune(self: PipelineConcurrentLowerer, lhs: Locatable, inner_expr: Locatable, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
-  MUTABLE res_zig = self.transpile_type(CAST((type__resolved(UNWRAP (TRY (type__element_type((&smooth_node.full_type_mut())))))) AS String));
+  MUTABLE res_zig = self.transpile_type(CAST((type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(smooth_node)))))))) AS String));
   MUTABLE alloc = self.pipeline_alloc(smooth_node);
   MUTABLE expr_mir = self.visit_mir_with_placeholder(inner_expr, "it");
   RETURN self.pipeline_block(lhs, %(items, label) USE(alloc, expr_mir, res_zig) -> {
@@ -319,7 +319,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_select_prune(self: Pip
   });
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_where_prune(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, inner_expr: Locatable, smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
-  MUTABLE elem_type = COPY CAST((&lhs.full_type_mut()).element_type().resolved() AS String);
+  MUTABLE elem_type = COPY CAST((TRY (aST__full_type_mut(lhs))).element_type().resolved() AS String);
   MUTABLE elem_zig = self.transpile_type(elem_type);
   MUTABLE alloc = self.pipeline_alloc(smooth_node);
   MUTABLE pred_mir = self.visit_mir_with_placeholder(inner_expr, "it");
@@ -417,32 +417,32 @@ PRIVATE FN pipelineConcurrentLowerer__bounded_result_break_stmts(self: PipelineC
   RETURN CAST((COPY source.setup + CAST([Emittable{ Let: COPY Let{ name: COPY result_var, init: COPY call, mutable: FALSE, annotation: COPY result_type, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable) + COPY source_move + CAST([Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: COPY result_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)) AS []Emittable);
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_bounded_select(self: PipelineConcurrentLowerer, MUTABLE lhs: Identifier, conc_op: ConcurrentOp, inner: SelectOp) RETURNS !MIRBlockExpr ->
-  MUTABLE item_t = UNWRAP (TRY (type__stream_element_type((&lhs.full_type_mut()))));
+  MUTABLE item_t = UNWRAP (TRY (type__stream_element_type((TRY (aST__full_type_mut(lhs))))));
   MUTABLE result_t = TRY (pipelineConcurrentLowerer__concurrent_select_result_type(self, inner));
   MUTABLE invoke = TRY (pipelineConcurrentLowerer__bounded_expr_invocation(self, conc_op, item_t, ReturnType{ Type: COPY result_t }));
   MUTABLE source = pipelineConcurrentLowerer__bounded_stream_items_setup(self, lhs, invoke.id);
   MUTABLE source_move = TRY (pipelineConcurrentLowerer__bounded_stream_source_move(self, lhs));
-  MUTABLE call = self.emit_builtin(pipelineConcurrentLowerer__concurrent_select_builtin(self, :concurrentBoundedSelect, inner), ([Ident{ name: COPY TRY (type__zig_type(item_t)), lowered_node_id: NIL, ownership_consumption: NIL }, Ident{ name: COPY TRY (type__nested_zig_type(result_t)), lowered_node_id: NIL, ownership_consumption: NIL }, Lit{ value: COPY CAST((TRY (type__stream_capacity((&lhs.full_type_mut())))) AS String), lowered_node_id: NIL, ownership_consumption: NIL }] + TRY (pipelineConcurrentInvocation__bounded_allocating_args(invoke, source.pointer, self.pipeline_result_alloc()))));
+  MUTABLE call = self.emit_builtin(pipelineConcurrentLowerer__concurrent_select_builtin(self, :concurrentBoundedSelect, inner), ([Ident{ name: COPY TRY (type__zig_type(item_t)), lowered_node_id: NIL, ownership_consumption: NIL }, Ident{ name: COPY TRY (type__nested_zig_type(result_t)), lowered_node_id: NIL, ownership_consumption: NIL }, Lit{ value: COPY CAST((TRY (type__stream_capacity((TRY (aST__full_type_mut(lhs)))))) AS String), lowered_node_id: NIL, ownership_consumption: NIL }] + TRY (pipelineConcurrentInvocation__bounded_allocating_args(invoke, source.pointer, self.pipeline_result_alloc()))));
   MUTABLE label = self.next_label();
   MUTABLE result_type = TRY (type__from_node_mut(conc_op, "bounded concurrent SELECT result"));
   RETURN self.typed_block_expr(label, TRY (pipelineConcurrentInvocation__scoped_body(invoke, ( { MUTABLE rtoc_empty_list_11: []Emittable = List[]; rtoc_empty_list_11 } ), TRY (pipelineConcurrentLowerer__bounded_result_break_stmts(self, label, "__bounded_select_result_${pipelineConcurrentLowerer__numeric_label_id(self, &label).toString()}", result_type, source, call, source_move)))), result_type);
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_bounded_where(self: PipelineConcurrentLowerer, MUTABLE lhs: Identifier, conc_op: ConcurrentOp, ignored_inner: WhereOp) RETURNS !MIRBlockExpr ->
-  MUTABLE item_t = UNWRAP (TRY (type__stream_element_type((&lhs.full_type_mut()))));
+  MUTABLE item_t = UNWRAP (TRY (type__stream_element_type((TRY (aST__full_type_mut(lhs))))));
   MUTABLE invoke = TRY (pipelineConcurrentLowerer__bounded_expr_invocation(self, conc_op, item_t, castTypeToReturnType(TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })))));
   MUTABLE source = pipelineConcurrentLowerer__bounded_stream_items_setup(self, lhs, invoke.id);
   MUTABLE source_move = TRY (pipelineConcurrentLowerer__bounded_stream_source_move(self, lhs));
-  MUTABLE call = self.emit_builtin(:concurrentBoundedWhere, ([Ident{ name: COPY TRY (type__zig_type(item_t)), lowered_node_id: NIL, ownership_consumption: NIL }, Lit{ value: COPY CAST((TRY (type__stream_capacity((&lhs.full_type_mut())))) AS String), lowered_node_id: NIL, ownership_consumption: NIL }] + TRY (pipelineConcurrentInvocation__bounded_allocating_args(invoke, source.pointer, self.pipeline_result_alloc()))));
+  MUTABLE call = self.emit_builtin(:concurrentBoundedWhere, ([Ident{ name: COPY TRY (type__zig_type(item_t)), lowered_node_id: NIL, ownership_consumption: NIL }, Lit{ value: COPY CAST((TRY (type__stream_capacity((TRY (aST__full_type_mut(lhs)))))) AS String), lowered_node_id: NIL, ownership_consumption: NIL }] + TRY (pipelineConcurrentInvocation__bounded_allocating_args(invoke, source.pointer, self.pipeline_result_alloc()))));
   MUTABLE label = self.next_label();
   MUTABLE result_type = TRY (type__from_node_mut(conc_op, "bounded concurrent WHERE result"));
   RETURN self.typed_block_expr(label, TRY (pipelineConcurrentInvocation__scoped_body(invoke, ( { MUTABLE rtoc_empty_list_12: []Emittable = List[]; rtoc_empty_list_12 } ), TRY (pipelineConcurrentLowerer__bounded_result_break_stmts(self, label, "__bounded_where_result_${pipelineConcurrentLowerer__numeric_label_id(self, &label).toString()}", result_type, source, call, source_move)))), result_type);
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_bounded_each(self: PipelineConcurrentLowerer, MUTABLE lhs: Identifier, conc_op: ConcurrentOp, ignored_inner: EachOp) RETURNS !ScopeBlock ->
-  MUTABLE item_t = UNWRAP (TRY (type__stream_element_type((&lhs.full_type_mut()))));
+  MUTABLE item_t = UNWRAP (TRY (type__stream_element_type((TRY (aST__full_type_mut(lhs))))));
   MUTABLE invoke = TRY (pipelineConcurrentLowerer__bounded_each_invocation(self, conc_op, item_t));
   MUTABLE source = pipelineConcurrentLowerer__bounded_stream_items_setup(self, lhs, invoke.id);
   MUTABLE source_move = TRY (pipelineConcurrentLowerer__bounded_stream_source_move(self, lhs));
-  MUTABLE call = self.emit_builtin(:concurrentBoundedEach, ([Ident{ name: COPY TRY (type__zig_type(item_t)), lowered_node_id: NIL, ownership_consumption: NIL }, Lit{ value: COPY CAST((TRY (type__stream_capacity((&lhs.full_type_mut())))) AS String), lowered_node_id: NIL, ownership_consumption: NIL }] + TRY (pipelineConcurrentInvocation__bounded_each_args(invoke, source.pointer))));
+  MUTABLE call = self.emit_builtin(:concurrentBoundedEach, ([Ident{ name: COPY TRY (type__zig_type(item_t)), lowered_node_id: NIL, ownership_consumption: NIL }, Lit{ value: COPY CAST((TRY (type__stream_capacity((TRY (aST__full_type_mut(lhs)))))) AS String), lowered_node_id: NIL, ownership_consumption: NIL }] + TRY (pipelineConcurrentInvocation__bounded_each_args(invoke, source.pointer))));
   RETURN ScopeBlock{ body: Body{ ArrayValue: TRY (pipelineConcurrentInvocation__scoped_body(invoke, ( { MUTABLE rtoc_empty_list_13: []Emittable = List[]; rtoc_empty_list_13 } ), (COPY source.setup + CAST([Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY call, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable) + source_move))) |> SELECT castEmittableToLocatable(_) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
@@ -593,7 +593,7 @@ PRIVATE FN pipelineConcurrentLowerer__stream_concurrent_capacity_mir(self: Pipel
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_stream_select(self: PipelineConcurrentLowerer, MUTABLE lhs: Identifier, conc_op: ConcurrentOp, inner: SelectOp) RETURNS !MIRBlockExpr ->
-  MUTABLE lhs_ti = &lhs.full_type_mut();
+  MUTABLE lhs_ti = TRY (aST__full_type_mut(lhs));
   MUTABLE item_t = TRY (pipelineConcurrentLowerer__stream_concurrent_element_type(self, CAST(lhs_ti AS Type)));
   MUTABLE result_t = TRY (pipelineConcurrentLowerer__concurrent_select_result_type(self, inner));
   MUTABLE invoke = TRY (pipelineConcurrentLowerer__bounded_expr_invocation(self, conc_op, CAST(item_t AS Type), ReturnType{ Type: COPY result_t }));
@@ -609,7 +609,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_stream_select(self: Pipel
   RETURN self.typed_block_expr(label, TRY (pipelineConcurrentInvocation__scoped_body(invoke, ( { MUTABLE rtoc_empty_list_17: []Emittable = List[]; rtoc_empty_list_17 } ), (COPY source.setup + CAST([Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY call, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)))), TRY (type__from_node_mut(conc_op, "stream concurrent SELECT result")));
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_stream_where(self: PipelineConcurrentLowerer, MUTABLE lhs: Identifier, conc_op: ConcurrentOp, inner: WhereOp) RETURNS !MIRBlockExpr ->
-  MUTABLE lhs_ti = &lhs.full_type_mut();
+  MUTABLE lhs_ti = TRY (aST__full_type_mut(lhs));
   MUTABLE item_t = TRY (pipelineConcurrentLowerer__stream_concurrent_element_type(self, CAST(lhs_ti AS Type)));
   MUTABLE invoke = TRY (pipelineConcurrentLowerer__bounded_expr_invocation(self, conc_op, CAST(item_t AS Type), castTypeToReturnType(TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })))));
   MUTABLE source = pipelineConcurrentLowerer__stream_concurrent_source_setup_mir(self, lhs, invoke.id);
@@ -624,7 +624,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_stream_where(self: Pipeli
   RETURN self.typed_block_expr(label, TRY (pipelineConcurrentInvocation__scoped_body(invoke, ( { MUTABLE rtoc_empty_list_18: []Emittable = List[]; rtoc_empty_list_18 } ), (COPY source.setup + CAST([Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY call, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)))), TRY (type__from_node_mut(conc_op, "stream concurrent WHERE result")));
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_stream_each(self: PipelineConcurrentLowerer, MUTABLE lhs: Identifier, conc_op: ConcurrentOp, inner: EachOp) RETURNS !ScopeBlock ->
-  MUTABLE lhs_ti = &lhs.full_type_mut();
+  MUTABLE lhs_ti = TRY (aST__full_type_mut(lhs));
   MUTABLE item_t = TRY (pipelineConcurrentLowerer__stream_concurrent_element_type(self, CAST(lhs_ti AS Type)));
   MUTABLE invoke = TRY (pipelineConcurrentLowerer__bounded_each_invocation(self, conc_op, CAST(item_t AS Type)));
   MUTABLE source = pipelineConcurrentLowerer__stream_concurrent_source_setup_mir(self, lhs, invoke.id);
@@ -640,12 +640,12 @@ END
 PRIVATE FN pipelineConcurrentLowerer__concurrent_list_item_type(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable) RETURNS !Type ->
   IF lhs IS_A RangeLit THEN
     MUTABLE elem = lhs.start().full_type_mut();
-    IF TRY (type__element_type((TRY (type__tense_type((&lhs.full_type_mut())))))) != NIL THEN
-      elem = type__resolved(((TRY (type__element_type((TRY (type__tense_type((&lhs.full_type_mut())))))))?));
+    IF TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))) != NIL THEN
+      elem = type__resolved(((TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))))?));
     END
     RETURN TRY (type__new(elem));
   END
-  RETURN TRY (type__new((&lhs.full_type_mut()).element_type().resolved()));
+  RETURN TRY (type__new((TRY (aST__full_type_mut(lhs))).element_type().resolved()));
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_select(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, conc_op: ConcurrentOp, inner: SelectOp) RETURNS !MIRBlockExpr ->
   MUTABLE item_t = TRY (pipelineConcurrentLowerer__concurrent_list_item_type(self, &lhs));
@@ -687,7 +687,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_count(self: Pipeline
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_reduce(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, conc_op: ConcurrentOp, inner: Inner, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
   MUTABLE item_t = TRY (pipelineConcurrentLowerer__concurrent_list_item_type(self, &lhs));
-  MUTABLE result_t = TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() }));
+  MUTABLE result_t = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }));
   MUTABLE result_zig = TRY (type__zig_type(result_t));
   MUTABLE kind = pipelineConcurrentLowerer__list_reduce_kind(self, inner);
   MUTABLE initial = pipelineConcurrentLowerer__list_reduce_initial(self, kind, result_zig, result_t);
@@ -735,7 +735,7 @@ PRIVATE FN pipelineConcurrentLowerer__unwrap_binding_source(self: PipelineConcur
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__bounded_identifier_stream?(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable) RETURNS Bool ->
-  RETURN ((!(lhs IS_A RangeLit) AND lhs IS_A Identifier) AND (&lhs.full_type_mut()).bounded_stream?());
+  RETURN ((!(lhs IS_A RangeLit) AND lhs IS_A Identifier) AND (TRY (aST__full_type_mut(lhs))).bounded_stream?());
 END
 PRIVATE FN pipelineConcurrentLowerer__stream_type?(self: PipelineConcurrentLowerer, type_info: Type) RETURNS !Bool ->
   RETURN (((TRY (type__dynamic_stream?(type_info)) OR TRY (type__bounded_stream?(type_info))) OR TRY (type__open_stream?(type_info))) OR TRY (type__inf_stream?(type_info)));
@@ -848,7 +848,7 @@ PRIVATE FN pipelineConcurrentLowerer__callback_body(self: PipelineConcurrentLowe
     IF (expr_mir IS_A Call OR expr_mir IS_A MIRMethodCall) THEN
       expr_mir.try_wrap = FALSE;
     END
-    MUTABLE expr_type = &expr_node.full_type_mut();
+    MUTABLE expr_type = TRY (aST__full_type_mut(expr_node));
     IF ((expr_type AND type__integer?((TRY (type__new(expr_type))))) AND type__float?(ret_type)) THEN
       expr_mir = Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY expr_mir, target_type: NIL, method: :floatFromInt, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: TRY (type__zig_type(ret_type)), method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END

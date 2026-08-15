@@ -81,7 +81,7 @@ PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RET
   END
 END
 PRIVATE FN pipelinePlanBuilder__soa_scalar_fold?(self: PipelinePlanBuilder, MUTABLE lhs: Locatable, rhs: Locatable) RETURNS Bool ->
-  MUTABLE lhs_type = &lhs.full_type_mut();
+  MUTABLE lhs_type = TRY (aST__full_type_mut(lhs));
   RETURN ((type__soa_linear_collection?(lhs_type) AND aST__pipeline_range_fold?(rhs)) AND (self.lowering_target() != :bc));
 END
 PRIVATE FN pipelinePlanBuilder__operation(self: PipelinePlanBuilder, execution: PipelineExecutionKind, site: PipelineSite, rhs: Locatable, terminal_kind: PipelineTerminalKind, bc_target: Bool, source_kind: PipelineSourceKind = PipelineSourceKind.Materialized, range_chain: ?PipelineRangeChain = NIL, binding_chain: ?PipelineBindingUnnestChain = NIL) RETURNS PipelineOperationPlan ->

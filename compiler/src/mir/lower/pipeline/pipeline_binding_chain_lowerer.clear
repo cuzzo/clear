@@ -171,7 +171,7 @@ END
 PRIVATE FN pipelineBindingChainLowerer__lower_binding_fold(self: PipelineBindingChainLowerer, fold: PipelineBindingFoldOp, stages: []Locatable, placeholder: String, MUTABLE smooth_node: BinaryOp, names: PipelineBindingNames) RETURNS !PipelineBindingFoldPlan ->
   IF fold IS_A SumOp@multiowned AS sum_op_multiowned THEN
     MUTABLE expr = pipelineBindingChainLowerer__visit_placeholder_expr(self, sumOp__expression(sum_op_multiowned), placeholder);
-    MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() }));
+    MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }));
     MUTABLE init_literal: String = "";
     IF type__integer?(result_type) THEN
       init_literal = "0";
@@ -224,7 +224,7 @@ PRIVATE FN pipelineBindingChainLowerer__lower_binding_fold(self: PipelineBinding
     MUTABLE accum = [IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY pred, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: CAST(Tuple{Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.accumulator, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Set, BreakStmt>), else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }];
     RETURN pipelineBindingChainLowerer__fold_plan(self, init, TRY (pipelineBindingChainLowerer__wrap_stages(self, stages, placeholder, accum)), ( { MUTABLE rtoc_empty_list_10: []Emittable = List[]; rtoc_empty_list_10 } ), Emittable{ Ident: COPY Ident{ name: COPY names.accumulator, lowered_node_id: NIL, ownership_consumption: NIL } });
   ELSE_IF fold IS_A FindOp@multiowned AS find_op_multiowned THEN
-    MUTABLE result_ft = TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() }));
+    MUTABLE result_ft = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }));
     MUTABLE find_zig: String = "";
     IF type__optional?(result_ft) THEN
       find_zig = self.transpile_type(CAST((type__resolved(UNWRAP (TRY (type__wrapped_type(result_ft))))) AS String));

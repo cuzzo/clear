@@ -34,7 +34,7 @@ PUB FN pipelineBatchWindowLowerer__lower(self: PipelineBatchWindowLowerer, MUTAB
   RETURN TRY (pipelineBatchWindowLowerer__lower_plan(self, TRY (pipelineBatchWindowLowerer__batch_window_plan(self, &list_node, smooth_node, bw_node))));
 END
 PRIVATE FN pipelineBatchWindowLowerer__batch_window_plan(self: PipelineBatchWindowLowerer, MUTABLE list_node: Locatable, smooth_node: BinaryOp, bw_node: BatchWindowOp) RETURNS !PipelineBatchWindowPlan ->
-  MUTABLE lhs_type = &list_node.full_type_mut();
+  MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE placeholder_var = "__bw_batch";
   RETURN PipelineBatchWindowPlan{ source_kind: COPY pipelineBatchWindowLowerer__source_kind_for(self, list_node, lhs_type), list_node: COPY list_node, smooth_node: COPY smooth_node, element_zig: COPY self.transpile_type(type__to_s((TRY (pipelineBatchWindowLowerer__batch_element_type(self, lhs_type))))), result_zig: COPY self.transpile_type(CAST((&bw_node.expression.full_type_mut()) AS String)), size_mir: COPY pipelineBatchWindowLowerer__batch_size_mir(self, bw_node), make_expr: COPY pipelineBatchWindowLowerer__batch_expr_builder(self, bw_node, placeholder_var), alloc: COPY self.pipeline_alloc(smooth_node), placeholder_var: COPY placeholder_var, timeout_ns: COPY pipelineBatchWindowLowerer__batch_window_timeout_ns(self, bw_node), stream_pop_method: COPY pipelineBatchWindowLowerer__runtime_stream_pop_method(self, lhs_type) };
 END

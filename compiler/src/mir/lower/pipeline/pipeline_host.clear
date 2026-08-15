@@ -518,7 +518,7 @@ PUB FN pipelineHost__lower_pipeline_body(MUTABLE self: PipelineHost, MUTABLE nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF (node.right IS_A SelectOp AND TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY &node.full_type_mut() })))))) THEN
+    IF (node.right IS_A SelectOp AND TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) })))))) THEN
       RETURN PipelineLoweringResult{ MIRBgBlock: COPY TRY (pipelineHost__lower_stream_select(&rtoc_self_view, PipelineSite{ list: COPY node.left, options: COPY node }, castLocatableToSelectOp(node.right))) };
     END
     MUTABLE plan: ?PipelineOperationPlan = TRY (pipelinePlanBuilder__build(rtoc_self_view.plan_builder, node));
@@ -547,7 +547,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(tenseSelectorPlan__asynchronous?((TRY (pipelineHost__select_tense_plan(rtoc_self_view, select))))) THEN
         RETURN FALSE;
       END
-      MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY &node.full_type_mut() }));
+      MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) }));
       RETURN (TRY (type__canonical_stream_result?(result_type)) AND TRY (type__dynamic_stream?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_26: ?Type = NIL;
       IF type__error_union?(result_type) THEN
         rtoc_ternary_value_26 = UNWRAP (TRY (type__payload_type(result_type)));
@@ -564,7 +564,7 @@ PUB FN pipelineHost__lower_concurrent_async_stream_result(MUTABLE self: Pipeline
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY &node.full_type_mut() }));
+    MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) }));
     MUTABLE stream_type_branch_value: ?Type = NIL;
     IF type__error_union?(result_type) THEN
       stream_type_branch_value = UNWRAP (TRY (type__payload_type(result_type)));
@@ -884,7 +884,7 @@ PRIVATE FN pipelineHost__build_soa_scalar_fold_block(self: PipelineHost, site: P
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE list_node = COPY site.list;
-    MUTABLE lhs_type = &list_node.full_type_mut();
+    MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
     MUTABLE smooth_node = COPY site.options;
     MUTABLE len_expr_branch_value: ?MIRCast = NIL;
     IF lhs_type.pool?() THEN
@@ -902,7 +902,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF needs_whole_item THEN
       &loop_prefix.append(Let{ name: COPY "it", init: Emittable{ MethodCall: COPY MIRMethodCall{ receiver: FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__soa_src", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL }, method: "get", args: [CAST(Ident{ name: "__soa_i", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });
     END
-    MUTABLE result_type = pipelineHost__transpile_type(rtoc_self_view, Type{ StringValue: COPY type__to_s((&smooth_node.full_type_mut())) });
+    MUTABLE result_type = pipelineHost__transpile_type(rtoc_self_view, Type{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(smooth_node)))) });
     MUTABLE init_stmts = List[];
     MUTABLE loop_body = List[];
     MUTABLE final_expr = NIL;
@@ -940,7 +940,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &loop_body.append(IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY expr_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: CAST(Tuple{Set{ target: Emittable{ Ident: COPY Ident{ name: "all_result", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }} AS Tuple<Set, BreakStmt>), else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL });
       final_expr = Ident{ name: "all_result", lowered_node_id: NIL, ownership_consumption: NIL };
     ELSE_IF fold_node IS_A FindOp@multiowned AS find_op_multiowned THEN
-      MUTABLE elem_zig_type = pipelineHost__transpile_type(rtoc_self_view, Type{ StringValue: COPY CAST((&list_node.full_type_mut()).element_type().resolved() AS String) });
+      MUTABLE elem_zig_type = pipelineHost__transpile_type(rtoc_self_view, Type{ StringValue: COPY CAST((TRY (aST__full_type_mut(list_node))).element_type().resolved() AS String) });
       &init_stmts.append(Let{ name: COPY "find_result", init: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY elem_zig_type })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });
       &init_stmts.append(Let{ name: COPY "find_found", init: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });
       &loop_body.append(Let{ name: COPY "find_matches", init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });

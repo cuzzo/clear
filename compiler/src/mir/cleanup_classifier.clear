@@ -497,17 +497,17 @@ PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNod
   END
   MUTABLE value_node: ?Locatable = value_node_branch_value;
   MUTABLE moved_alloc = TRY (moved_payload_alloc(value_node, bindings));
-  MUTABLE cleanup = TRY (classify_binding(&node.full_type_mut(), node, schema_lookup, lifecycle_registry));
+  MUTABLE cleanup = TRY (classify_binding(TRY (aST__full_type_mut(node)), node, schema_lookup, lifecycle_registry));
   IF moved_alloc THEN
-    cleanup = (cleanup OR TRY (transferred_payload_entry(&node.full_type_mut(), schema_lookup, lifecycle_registry)));
+    cleanup = (cleanup OR TRY (transferred_payload_entry(TRY (aST__full_type_mut(node)), schema_lookup, lifecycle_registry)));
   END
   IF ((cleanup AND (lifecycle_registry != NIL)) AND (cleanup.lifecycle_plan() == NIL)) THEN
-    cleanupEntry__set_lifecycle_plan_mut(&cleanup, TRY (lifecycleRegistry__fetch_binding(lifecycle_registry, castBindingNodeToLocatable(node), &node.full_type_mut())));
+    cleanupEntry__set_lifecycle_plan_mut(&cleanup, TRY (lifecycleRegistry__fetch_binding(lifecycle_registry, castBindingNodeToLocatable(node), TRY (aST__full_type_mut(node)))));
   END
   IF !(cleanup) THEN
     IF ((((lifecycle_registry == NIL) AND TRUE) AND ((aST__node__symbol(node) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_6 = ((aST__node__symbol(node))?);
     symbolEntry__heap_storage?(rtoc_local_receiver_6) })) AND !(optional_empty_initializer?(value))) THEN
-      MUTABLE ti = &node.full_type_mut();
+      MUTABLE ti = TRY (aST__full_type_mut(node));
       IF TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup)) THEN
         cleanup = entry(:uniform, :heap);
       END
@@ -518,10 +518,10 @@ PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNod
       cleanupEntry__set_alloc_mut(&cleanup, moved_alloc);
     END
   ELSE
-    cleanup = TRY (no_cleanup_alloc_entry(&node.full_type_mut(), schema_lookup));
+    cleanup = TRY (no_cleanup_alloc_entry(TRY (aST__full_type_mut(node)), schema_lookup));
   END
   IF ((cleanup AND (lifecycle_registry != NIL)) AND (cleanup.lifecycle_plan() == NIL)) THEN
-    cleanupEntry__set_lifecycle_plan_mut(&cleanup, TRY (lifecycleRegistry__fetch_binding(lifecycle_registry, castBindingNodeToLocatable(node), &node.full_type_mut())));
+    cleanupEntry__set_lifecycle_plan_mut(&cleanup, TRY (lifecycleRegistry__fetch_binding(lifecycle_registry, castBindingNodeToLocatable(node), TRY (aST__full_type_mut(node)))));
   END
   IF respondsTo?(node, "mir_binding_entry=") THEN
     node.mir_binding_entry = (cleanup OR new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));

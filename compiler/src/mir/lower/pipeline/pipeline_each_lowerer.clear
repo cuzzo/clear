@@ -36,7 +36,7 @@ PUB FN pipelineEachLowerer__lower(self: PipelineEachLowerer, MUTABLE list_node: 
   RETURN TRY (pipelineEachLowerer__lower_plan(self, pipelineEachLowerer__each_plan(self, &list_node, each_op)));
 END
 PRIVATE FN pipelineEachLowerer__each_plan(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS PipelineEachPlan ->
-  MUTABLE lhs_type = &list_node.full_type_mut();
+  MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE bc_target = self.bc_target();
   MUTABLE range_chain: ?PipelineRangeChain = self.range_chain(list_node);
   RETURN PipelineEachPlan{ source_kind: COPY pipelineEachLowerer__each_source_kind(self, list_node, lhs_type, range_chain, &bc_target), list_node: COPY list_node, each_op: COPY each_op, lhs_type: COPY lhs_type, range_chain: COPY range_chain, bc_target: bc_target };
@@ -139,7 +139,7 @@ PRIVATE FN pipelineEachLowerer__lower_list_each(self: PipelineEachLowerer, MUTAB
   END
   END
   MUTABLE stmts: []Emittable = ( { MUTABLE rtoc_empty_list_2: []Emittable = List[]; rtoc_empty_list_2 } );
-  MUTABLE fact: ?Tuple<AllocMark, CleanupEntry@multiowned> = self.source_alloc_fact(source_mir, "__each_src", &list_node.full_type_mut());
+  MUTABLE fact: ?Tuple<AllocMark, CleanupEntry@multiowned> = self.source_alloc_fact(source_mir, "__each_src", TRY (aST__full_type_mut(list_node)));
   IF fact EXISTS AS fact_value THEN
     &stmts.append(COPY fact_value._0);
   END

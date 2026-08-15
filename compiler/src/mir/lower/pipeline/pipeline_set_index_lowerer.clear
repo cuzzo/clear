@@ -45,7 +45,7 @@ PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, li
       RETURN COPY observable_value;
     END
   END
-  MUTABLE elem_type = UNWRAP (TRY (type__element_type((&smooth_node.full_type_mut()))));
+  MUTABLE elem_type = UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(smooth_node))))));
   MUTABLE elem_zig = self.transpile_type(CAST(type__resolved(elem_type) AS String));
   MUTABLE set_zig = "CheatLib.Set(${elem_zig})";
   MUTABLE alloc = self.pipeline_alloc(smooth_node);
@@ -63,7 +63,7 @@ PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, li
 END
 PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTABLE list_node: Locatable, smooth_node: BinaryOp, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   MUTABLE elem_zig: String = "";
-  MUTABLE lhs_type = &list_node.full_type_mut();
+  MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE alloc = self.pipeline_alloc(smooth_node);
   MUTABLE range_chain: ?PipelineRangeChain = self.range_chain(list_node);
   IF range_chain EXISTS AS range_chain_value THEN
@@ -73,7 +73,7 @@ PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTAB
     MUTABLE map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(${elem_zig}))";
     RETURN TRY (pipelineSetIndexLowerer__lower_stream_index(self, range_chain_value_mutable, expr_node, elem_zig, CAST(elem_type AS Type), alloc, map_type, TRY (type__from_node_mut(smooth_node, "INDEX result"))));
   END
-  MUTABLE elem_type = TRY (type__element_type((&list_node.full_type_mut())));
+  MUTABLE elem_type = TRY (type__element_type((TRY (aST__full_type_mut(list_node)))));
   elem_zig = self.transpile_type(CAST(type__resolved(elem_type) AS String));
   MUTABLE expr_mir = self.visit_mir_with_placeholder(expr_node, "it");
   MUTABLE map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(${elem_zig}))";
@@ -104,7 +104,7 @@ PRIVATE FN pipelineSetIndexLowerer__lower_range_distinct(self: PipelineSetIndexL
     defer_deinit_branch_value = NIL;
   END
   MUTABLE defer_deinit: ?MIRDeferStmt = defer_deinit_branch_value;
-  MUTABLE elem_type: ?Type = TRY (type__element_type((&smooth_node.full_type_mut())));
+  MUTABLE elem_type: ?Type = TRY (type__element_type((TRY (aST__full_type_mut(smooth_node)))));
   MUTABLE elem_zig = COPY ((compilerRegexMatchGroup(set_zig, compilerRegexCompile("CheatLib\\.Set\\((.*)\\)"), 1)) OR_ELSE "");
   MUTABLE insert_body =   IF elem_type THEN
     TRY (pipelineSetIndexLowerer__distinct_insert_body(self, key_expr_mir, distinct_node.expression, UNWRAP (elem_type), elem_zig, alloc, TRUE))
@@ -148,7 +148,7 @@ PRIVATE FN pipelineSetIndexLowerer__distinct_insert_body(self: PipelineSetIndexL
   END
 END
 PRIVATE FN pipelineSetIndexLowerer__distinct_set_alloc_stmts(self: PipelineSetIndexLowerer, MUTABLE smooth_node: BinaryOp, set_zig: String, alloc: String@symbol) RETURNS ![]Emittable ->
-  RETURN CAST([Emittable{ AllocMark: COPY AllocMark{ name: "dist_set", alloc: COPY alloc, type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() })), scope: COPY placement__alloc_scope(alloc), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: COPY "dist_set", init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: COPY set_zig, strategy: :set_empty, alloc: NIL, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
+  RETURN CAST([Emittable{ AllocMark: COPY AllocMark{ name: "dist_set", alloc: COPY alloc, type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) })), scope: COPY placement__alloc_scope(alloc), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: COPY "dist_set", init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: COPY set_zig, strategy: :set_empty, alloc: NIL, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
 END
 PRIVATE FN pipelineSetIndexLowerer__distinct_set_transfer_marks(self: PipelineSetIndexLowerer, alloc: String@symbol) RETURNS ![]Emittable ->
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: "dist_set", target: :block_result, target_alloc: COPY alloc, move_guarded: FALSE })));
@@ -169,7 +169,7 @@ PRIVATE FN pipelineSetIndexLowerer__distinct_insert_stmt(self: PipelineSetIndexL
   RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL }, method: "insert", args: COPY args, try_wrap: TRUE, callable_contract: COPY contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN pipelineSetIndexLowerer__index_stream_element_type(self: PipelineSetIndexLowerer, MUTABLE list_node: Locatable, lhs_type: Type, MUTABLE range_source: Locatable) RETURNS !Type ->
-  RETURN ((TRY (type__runtime_stream_storage_element_type(lhs_type)) OR_ELSE TRY (type__runtime_stream_storage_element_type((&range_source.full_type_mut())))) OR TRY (type__element_type((&list_node.full_type_mut()))));
+  RETURN ((TRY (type__runtime_stream_storage_element_type(lhs_type)) OR_ELSE TRY (type__runtime_stream_storage_element_type((TRY (aST__full_type_mut(range_source)))))) OR TRY (type__element_type((TRY (aST__full_type_mut(list_node))))));
 END
 PRIVATE FN pipelineSetIndexLowerer__lower_stream_index(self: PipelineSetIndexLowerer, range_chain: PipelineRangeChain, expr_node: Locatable, elem_zig: String, elem_type: Type, alloc: String@symbol, map_type: String, result_type: Type) RETURNS !MIRBlockExpr ->
   MUTABLE on_skip: FN(String) -> ![]Emittable = %(var) USE(elem_zig) -> {

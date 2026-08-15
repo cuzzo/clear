@@ -10341,7 +10341,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((MATCH node START AllocDeclarationNode.VarDecl AS item -> item.value IS_A StructLit, AllocDeclarationNode.BindExpr AS item -> item.value IS_A StructLit END)) THEN
       RETURN storage;
     END
-    MUTABLE rtoc_mutable_receiver_238 = (&node.full_type_mut());
+    MUTABLE rtoc_mutable_receiver_238 = (TRY (aST__full_type_mut(node)));
     type__mark_stack_value_mut(&rtoc_mutable_receiver_238);
     node.storage = :stack;
     MUTABLE value_node: Any = NIL;
@@ -10382,7 +10382,7 @@ PRIVATE FN typeAnalysisSession__resolve_resource_close(self: TypeAnalysisSession
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ti = &node.full_type_mut();
+    MUTABLE ti = TRY (aST__full_type_mut(node));
     RETURN ti.resolve_resource_close(%(name) USE(rtoc_self_view) -> typeAnalysisSession__lookup_type_schema(rtoc_self_view, name));
 }
 END

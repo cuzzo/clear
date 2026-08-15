@@ -179,13 +179,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_prefix: []Emittable = ( { MUTABLE rtoc_empty_list_1: []Emittable = List[]; rtoc_empty_list_1 } );
     MUTABLE source_cleanup: ?Cleanup = NIL;
     MUTABLE forced_alloc: ?String@symbol = pipelineMaterializer__inline_source_alloc(rtoc_self_view, source_mir);
-    MUTABLE fact = rtoc_self_view.host.materializer_alloc_mark_fact(source_mir, src_name, (forced_alloc OR_ELSE :heap), &list_node.full_type_mut(), NIL, "pipeline allocation", !((forced_alloc == NIL)));
+    MUTABLE fact = rtoc_self_view.host.materializer_alloc_mark_fact(source_mir, src_name, (forced_alloc OR_ELSE :heap), TRY (aST__full_type_mut(list_node)), NIL, "pipeline allocation", !((forced_alloc == NIL)));
     IF fact THEN
       &source_prefix.append(fact.mark());
-      source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type((&list_node.full_type_mut())))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type((TRY (aST__full_type_mut(list_node)))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     rtoc_self_view.host.materializer_set_current_label(label);
-    MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, &list_node.full_type_mut(), TRUE));
+    MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, TRY (aST__full_type_mut(list_node)), TRUE));
     MUTABLE body_stmts = TRY (blk(item_setup.items_ident, label));
     RETURN MIRBlockExpr{ label: label, body: COPY (source_prefix + [Let{ name: COPY src_name, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, source_cleanup] + item_setup.statements + body_stmts), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 }
@@ -333,13 +333,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF lhs IS_A RangeLit THEN
       RETURN TRY (pipelineMaterializer__range_concurrent_source_setup(rtoc_self_view, lhs));
     END
-    MUTABLE lhs_type = &lhs.full_type_mut();
+    MUTABLE lhs_type = TRY (aST__full_type_mut(lhs));
     MUTABLE label = rtoc_self_view.host.materializer_next_label();
     MUTABLE src_name = pipelineMaterializer__source_binding_name(rtoc_self_view, label);
     MUTABLE source_mir = rtoc_self_view.host.materializer_visit_mir(lhs);
     MUTABLE source_prefix: []Emittable = ( { MUTABLE rtoc_empty_list_4: []Emittable = List[]; rtoc_empty_list_4 } );
     MUTABLE source_cleanup: ?Cleanup = NIL;
-    MUTABLE fact = rtoc_self_view.host.materializer_alloc_mark_fact(source_mir, src_name, :heap, &lhs.full_type_mut());
+    MUTABLE fact = rtoc_self_view.host.materializer_alloc_mark_fact(source_mir, src_name, :heap, TRY (aST__full_type_mut(lhs)));
     IF fact THEN
       &source_prefix.append(fact.mark());
       source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type(lhs_type))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };

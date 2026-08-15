@@ -8786,3 +8786,6 @@ PUB FN aST__node_left(node: Locatable) RETURNS ?Locatable ->
   END
   RETURN NIL;
 END
+PUB FN binaryOp__smooth?(self: BinaryOp) RETURNS Bool ->
+  RETURN (self.op == :SMOOTH);
+END

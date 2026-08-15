@@ -141,13 +141,13 @@ END
 PRIVATE FN fsmTransform__local_entry_for_node(MUTABLE node: Locatable) RETURNS !?PromotedLocalFact ->
   IF node IS_A VarDecl AS var_decl THEN
     MUTABLE var_decl_mutable = COPY var_decl;
-    RETURN TRY (fsmTransform__local_entry(var_decl_mutable.name, &var_decl_mutable.full_type_mut()));
+    RETURN TRY (fsmTransform__local_entry(var_decl_mutable.name, TRY (aST__full_type_mut(var_decl_mutable))));
   ELSE_IF node IS_A BindExpr AS bind_expr THEN
     MUTABLE bind_expr_mutable = COPY bind_expr;
     IF !((bind_expr_mutable.mode == :decl)) THEN
       RETURN NIL;
     END
-    RETURN TRY (fsmTransform__local_entry(bind_expr_mutable.name, &bind_expr_mutable.full_type_mut(), fsmTransform__suspend_value?(bind_expr_mutable.value)));
+    RETURN TRY (fsmTransform__local_entry(bind_expr_mutable.name, TRY (aST__full_type_mut(bind_expr_mutable)), fsmTransform__suspend_value?(bind_expr_mutable.value)));
   ELSE_IF node IS_A ForRange AS for_range THEN
     IF for_range.var_name THEN
       RETURN PromotedLocalFact{ name: COPY CAST(for_range.var_name AS String), type_zig: "i64", is_suspend_result: FALSE };
