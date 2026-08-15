@@ -12,7 +12,7 @@ REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
 PUB FN mIRHoistFacts__container_borrow_expr?(ast_node: ?Locatable) RETURNS Bool EFFECTS REENTRANT ->
   IF ast_node EXISTS AS ast_node_value THEN
     IF (IF ast_node_value IS_A BinaryOp AS binary_op THEN (((binary_op.op == symbol("OR")) OR (binary_op.op == symbol("OR_ELSE")))) ELSE FALSE END) THEN
-      RETURN mIRHoistFacts__container_borrow_expr?(ast_node_value.left());
+      RETURN mIRHoistFacts__container_borrow_expr?(aST__node_left(ast_node_value));
     END
     RETURN (TRUE AND (aST__node__container_borrow(ast_node_value) == TRUE));
   ELSE

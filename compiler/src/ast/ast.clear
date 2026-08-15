@@ -8779,3 +8779,10 @@ PUB FN dedupeStrings(values: []String) RETURNS []String ->
   END
   RETURN unique;
 END
+PUB FN aST__node_left(node: Locatable) RETURNS ?Locatable ->
+  PARTIAL MATCH node START
+    Locatable.BinaryOp AS item -> RETURN COPY item.left;,
+    Locatable.IsA AS item -> RETURN COPY item.left;
+  END
+  RETURN NIL;
+END

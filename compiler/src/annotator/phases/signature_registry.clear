@@ -30,8 +30,10 @@ PRIVATE FN signatureRegistry__extern_lifetime_paths(node: ExternFnDecl) RETURNS 
     RETURN CAST(( { MUTABLE rtoc_empty_list_5: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_5 } ) AS []FunctionSignatureLifetimeSource);
   END
   MUTABLE lifetime: ClearParserReturnLifetime = COPY UNWRAP (lifetime_opt);
-  IF (lifetime == :wildcard) THEN
-    RETURN CAST([FunctionSignatureLifetimeSource{ SymbolValue: :wildcard }] AS []FunctionSignatureLifetimeSource);
+  IF lifetime IS_A String@symbol AS lifetime_symbol THEN
+    IF (lifetime_symbol == :wildcard) THEN
+      RETURN CAST([FunctionSignatureLifetimeSource{ SymbolValue: :wildcard }] AS []FunctionSignatureLifetimeSource);
+    END
   END
   MUTABLE paths: []FunctionSignatureLifetimeSource = ( { MUTABLE rtoc_empty_list_6: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_6 } );
   MUTABLE rtoc_each_items_7 = (CAST(lifetime AS []Locatable));
