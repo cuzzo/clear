@@ -266,9 +266,9 @@ PUB FN localBindingAnalysis__binding_entry(node_opt: ?Locatable) RETURNS ?Cleanu
   END
   MUTABLE node: Locatable = COPY UNWRAP (node_opt);
   IF node IS_A VarDecl AS var_decl THEN
-    RETURN var_decl.mir_binding_entry;
+    RETURN KEEP var_decl.mir_binding_entry;
   ELSE_IF node IS_A BindExpr AS bind_expr THEN
-    RETURN bind_expr.mir_binding_entry;
+    RETURN KEEP bind_expr.mir_binding_entry;
   ELSE
     RETURN NIL;
   END

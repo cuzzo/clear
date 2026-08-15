@@ -20,7 +20,7 @@ PRIVATE FN fsmWrapperEmitter__render_io_body(body: FsmIoBody) RETURNS !String ->
   MUTABLE mir_emitter = mIREmitter__new();
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
-  &parts.append(TRY (fsmWrapperEmitter__render_ctx_struct(body.ctx_struct, mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_ctx_struct(body.ctx_struct, &mir_emitter)));
   &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
@@ -30,13 +30,13 @@ PRIVATE FN fsmWrapperEmitter__render_b1_body(body: FsmB1Body) RETURNS !String ->
   MUTABLE mir_emitter = mIREmitter__new();
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
-  &parts.append(TRY (fsmWrapperEmitter__render_b1_ctx_struct(body.ctx_struct, mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_b1_ctx_struct(body.ctx_struct, &mir_emitter)));
   &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
   RETURN parts.join("\n");
 END
-PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, mir_emitter: MIREmitter) RETURNS !String ->
+PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
   MUTABLE parts = List[];
   &parts.append("    const ${s.type_name} = struct {");
   &parts.append("        task: *CheatHeader.FsmTask,");
@@ -75,7 +75,7 @@ END
 PRIVATE FN fsmWrapperEmitter__render_b1_resume_fn(ctx_id: Int64) RETURNS String ->
   RETURN (("fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n    if (runBody(__ctx_${ctx_id.toString()})) |_| {} else |err| {\n        __ctx_${ctx_id.toString()}.inner.result = err;\n    }\n    __ctx_${ctx_id.toString()}.inner.wg.done();\n    return .{ .Done = {} };\n}\n".chomp()).split("\n") |> SELECT "        ${_}").join("").chomp();
 END
-PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions: []FsmDestroyAction, mir_emitter: MIREmitter) RETURNS String ->
+PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions: []FsmDestroyAction, MUTABLE mir_emitter: MIREmitter) RETURNS String ->
   MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, &mir_emitter);
   MUTABLE extra: String = "";
   IF !(fsmWrapperEmitter__empty?(extra_zig)) THEN
@@ -88,7 +88,7 @@ END
 PUB FN fsmWrapperEmitter__render_ctx_size_gate(type_name: String) RETURNS String ->
   RETURN (("comptime {\n    if (@sizeOf(${type_name}) > 256) {\n        @compileError(\"FSM context is larger than 256 bytes; use @stack on this BG block to force a compiler-sized stackful fiber.\");\n    }\n}\n".chomp()).split("\n") |> SELECT "    ${_}").join("").chomp();
 END
-PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, mir_emitter: MIREmitter) RETURNS !String ->
+PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
   MUTABLE parts = List[];
   &parts.append("    const ${s.type_name} = struct {");
   &parts.append("        task: *CheatHeader.FsmTask,");
@@ -145,13 +145,13 @@ PRIVATE FN fsmWrapperEmitter__render_generic_body(body: FsmGenericBody) RETURNS 
   MUTABLE mir_emitter = mIREmitter__new();
   MUTABLE parts = List[];
   &parts.append("${body.blk_label}: {");
-  &parts.append(TRY (fsmWrapperEmitter__render_generic_ctx_struct(body.ctx_struct, mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_generic_ctx_struct(body.ctx_struct, &mir_emitter)));
   &parts.append(fsmWrapperEmitter__render_ctx_size_gate(body.ctx_struct.type_name));
   &parts.append(TRY (fsmWrapperEmitter__render_spawn_setup(body.spawn_setup, body.blk_label)));
   &parts.append("}");
   RETURN parts.join("\n");
 END
-PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, mir_emitter: MIREmitter) RETURNS !String ->
+PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
   MUTABLE parts = List[];
   &parts.append("    const ${s.type_name} = struct {");
   &parts.append("        task: *CheatHeader.FsmTask,");
