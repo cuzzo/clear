@@ -13187,7 +13187,7 @@ FN thunkFrameInit__fetch(self: ThunkFrameInit, key: String@symbol) RETURNS !Thun
     panic("key not found: {}");
   END
 END
-STRUCT ThunkFrameField {
+PUB STRUCT ThunkFrameField {
   name: String,
   type_info: Type
 }
@@ -13225,7 +13225,7 @@ FN mutualThunkArm__fetch(self: MutualThunkArm, key: String@symbol) RETURNS !Mutu
     panic("key not found: {}");
   END
 END
-STRUCT ThunkTrampoline {
+PUB STRUCT ThunkTrampoline {
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,

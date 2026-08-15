@@ -17,7 +17,7 @@ END
 FN bindingFact__frame?(self: BindingFact) RETURNS Bool ->
   RETURN (self.alloc == :frame);
 END
-FN placement__alloc(value: ?String@symbol, default_value: String@symbol = :heap) RETURNS String@symbol ->
+PUB FN placement__alloc(value: ?String@symbol, default_value: String@symbol = :heap) RETURNS String@symbol ->
   IF (value == :heap) THEN
     RETURN :heap;
   END
@@ -29,36 +29,36 @@ END
 PUB FN placement__heap?(value: ?String@symbol) RETURNS Bool ->
   RETURN (placement__alloc(value, :heap) == :heap);
 END
-FN placement__frame?(value: ?String@symbol) RETURNS Bool ->
+PUB FN placement__frame?(value: ?String@symbol) RETURNS Bool ->
   RETURN (placement__alloc(value, :heap) == :frame);
 END
-FN placement__explicit_heap?(value: ?String@symbol) RETURNS Bool ->
+PUB FN placement__explicit_heap?(value: ?String@symbol) RETURNS Bool ->
   RETURN (value == :heap);
 END
-FN placement__explicit_frame?(value: ?String@symbol) RETURNS Bool ->
+PUB FN placement__explicit_frame?(value: ?String@symbol) RETURNS Bool ->
   RETURN (value == :frame);
 END
-FN placement__alloc_scope(value: ?String@symbol) RETURNS String@symbol ->
+PUB FN placement__alloc_scope(value: ?String@symbol) RETURNS String@symbol ->
   IF placement__heap?(value) THEN
     RETURN :heap;
   ELSE
     RETURN :iteration;
   END
 END
-FN placement__cleanup_scope(value: ?String@symbol) RETURNS String@symbol ->
+PUB FN placement__cleanup_scope(value: ?String@symbol) RETURNS String@symbol ->
   IF placement__heap?(value) THEN
     RETURN :heap;
   ELSE
     RETURN :iteration;
   END
 END
-FN placement__binding_alloc(storage: ?String@symbol, cleanup_alloc: ?String@symbol, default_value: String@symbol = :frame) RETURNS String@symbol ->
+PUB FN placement__binding_alloc(storage: ?String@symbol, cleanup_alloc: ?String@symbol, default_value: String@symbol = :frame) RETURNS String@symbol ->
   IF (storage == :heap) THEN
     RETURN :heap;
   END
   RETURN placement__alloc(cleanup_alloc, default_value);
 END
-FN placement__zig_allocator(value: ?String@symbol, rt_name: ?String) RETURNS String ->
+PUB FN placement__zig_allocator(value: ?String@symbol, rt_name: ?String) RETURNS String ->
   MUTABLE rt: String = "rt";
   IF rt_name EXISTS AS given_rt THEN
     rt = COPY given_rt;
