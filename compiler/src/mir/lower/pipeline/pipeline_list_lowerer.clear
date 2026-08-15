@@ -57,10 +57,10 @@ PUB FN pipelineListLowerer__lower(self: PipelineListLowerer, site: PipelineSite,
   END
 END
 PUB FN pipelineListLowerer__lower_where_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
-  RETURN TRY (pipelineListLowerer__lower_where(self, site, expr_node));
+  RETURN TRY (pipelineListLowerer__lower_where(self, site, COPY expr_node));
 END
 PUB FN pipelineListLowerer__lower_select_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
-  RETURN TRY (pipelineListLowerer__lower_select(self, site, expr_node));
+  RETURN TRY (pipelineListLowerer__lower_select(self, site, COPY expr_node));
 END
 PUB FN pipelineListLowerer__lower_take_while_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   RETURN TRY (pipelineListLowerer__lower_take_while(self, site, expr_node));

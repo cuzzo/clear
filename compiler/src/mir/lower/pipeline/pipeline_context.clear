@@ -248,7 +248,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_method_call(MUTABLE self: Pip
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.object));
+    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.object));
     MUTABLE new_args = node.args |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
     IF ((new_target == node.object) AND (new_args == node.args)) THEN
       RETURN COPY node;

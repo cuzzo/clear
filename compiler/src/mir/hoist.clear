@@ -50,7 +50,7 @@ PUB FN hoist__apply_mut(ast: Program, schema_lookup: ?FN(String@symbol) -> ?Type
         MUTABLE counter = HoistCounter{ value: 0 };
         MUTABLE generated: []VarDecl = ( { MUTABLE rtoc_empty_list_1: []VarDecl = List[]; rtoc_empty_list_1 } );
         MUTABLE fn_return: ?Type = COPY fn_stmt.return_type;
-        TRY (hoist__hoist_body_mut(fn_stmt.body, counter, schema_lookup, &generated, castTypeToOptionalTypeTypeInput(fn_return)));
+        TRY (hoist__hoist_body_mut(COPY fn_stmt.body, counter, schema_lookup, &generated, castTypeToOptionalTypeTypeInput(fn_return)));
         IF !((generated.length() == 0)) THEN
           bindings_by_function[fn_stmt.name] = generated;
         END
