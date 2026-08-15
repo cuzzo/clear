@@ -58,7 +58,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, MUTABLE mi
 END
 PRIVATE FN fsmWrapperEmitter__render_run_body(step: FsmStep, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
   MUTABLE rendered = fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
-  rtoc_lambda_result_2 = TRY (fsmWrapperEmitter__render_body_items((step.body_stmts OR List[]), mir_emitter));
+  rtoc_lambda_result_2 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, mir_emitter));
   rtoc_lambda_result_2
   });
   MUTABLE body = (rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12)).join("\n");
@@ -120,7 +120,7 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emi
 END
 PRIVATE FN fsmWrapperEmitter__render_step(step: FsmStep, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
   MUTABLE rendered = fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
-  rtoc_lambda_result_4 = TRY (fsmWrapperEmitter__render_body_items((step.body_stmts OR List[]), mir_emitter));
+  rtoc_lambda_result_4 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, mir_emitter));
   rtoc_lambda_result_4
   });
   MUTABLE body = (rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12)).join("\n");

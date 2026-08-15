@@ -3950,7 +3950,7 @@ PUB STRUCT FsmMemberFn {
   ctx_id: Any@multiowned,
   bg_rt: Any@multiowned,
   suppress_runtime_ref: Any@multiowned,
-  body_stmts: Any@multiowned,
+  body_stmts: []Emittable,
   extra_prologue_stmts: Any@multiowned
 }
 PUB STRUCT FsmCtxStruct {
@@ -3968,7 +3968,7 @@ PUB STRUCT FsmStep {
   ctx_id: Any@multiowned,
   bg_rt: Any@multiowned,
   suppress_runtime_ref: Any@multiowned,
-  body_stmts: Any@multiowned
+  body_stmts: []Emittable
 }
 PUB STRUCT SuspendDescriptor {
   setup_stmts: Any@multiowned,
