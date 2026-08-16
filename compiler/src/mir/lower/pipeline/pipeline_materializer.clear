@@ -180,9 +180,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_cleanup: ?Cleanup = NIL;
     MUTABLE forced_alloc: ?String@symbol = pipelineMaterializer__inline_source_alloc(rtoc_self_view, source_mir);
     MUTABLE fact: ?AllocationFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, (forced_alloc OR_ELSE :heap), TRY (aST__full_type_mut(list_node)), NIL, "pipeline allocation", !((forced_alloc == NIL)));
-    IF fact THEN
-      &source_prefix.append(fact.mark());
-      source_cleanup = Cleanup{ name: COPY src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type((TRY (aST__full_type_mut(list_node)))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    IF fact EXISTS AS fact_value THEN
+      &source_prefix.append(Emittable{ AllocMark: COPY fact_value.mark });
+      source_cleanup = Cleanup{ name: COPY src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact_value.alloc, FALSE, NIL, TRY (type__zig_type((TRY (aST__full_type_mut(list_node)))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     runtimeHost__materializer_set_current_label(rtoc_self_view.host, label);
     MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, TRY (aST__full_type_mut(list_node)), TRUE));
