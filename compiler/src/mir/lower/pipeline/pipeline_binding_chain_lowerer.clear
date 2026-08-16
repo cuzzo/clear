@@ -257,21 +257,29 @@ PRIVATE FN pipelineBindingChainLowerer__binding_chain_shape?(self: PipelineBindi
   MUTABLE has_unnest_stage: Bool = FALSE;
   MUTABLE cursor: Locatable = COPY node.left;
   WHILE cursor IS_A BinaryOp DO
-    IF (cursor.op() == :BIND_VAR) THEN
-      has_bind_source = TRUE;
-    END
-    MUTABLE rhs = cursor.right();
-    IF rhs IS_A UnnestOp THEN
-      has_unnest_stage = TRUE;
-      MUTABLE unnest_expr = rhs.expression();
-      IF (unnest_expr IS_A BinaryOp AND (unnest_expr.op() == :BIND_VAR)) THEN
+    MUTABLE keep_walking: Bool = FALSE;
+    IF cursor IS_A BinaryOp AS cursor_binary THEN
+      IF (cursor_binary.op == :BIND_VAR) THEN
         has_bind_source = TRUE;
       END
+      IF cursor_binary.right IS_A UnnestOp AS rhs_unnest THEN
+        has_unnest_stage = TRUE;
+        IF unnestOp__expression(rhs_unnest) EXISTS AS unnest_expr THEN
+          IF unnest_expr IS_A BinaryOp AS unnest_binary THEN
+            IF (unnest_binary.op == :BIND_VAR) THEN
+              has_bind_source = TRUE;
+            END
+          END
+        END
+      END
+      IF binaryOp__smooth?(cursor_binary) THEN
+        keep_walking = TRUE;
+        cursor = COPY cursor_binary.left;
+      END
     END
-    IF !(cursor.smooth?()) THEN
+    IF !(keep_walking) THEN
       BREAK;
     END
-    cursor = cursor.left();
   END
   RETURN (has_bind_source AND has_unnest_stage);
 END
