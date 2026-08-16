@@ -2715,7 +2715,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBenchmarkStmt(v: BenchmarkStmt) RETURNS []
   IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.iterations)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2782,7 +2781,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBenchmarkStmtMultiowned(v: BenchmarkStmt) 
   IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.iterations)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END

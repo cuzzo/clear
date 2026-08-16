@@ -247,7 +247,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
   ELSE_IF stmt IS_A DestructuringAssignment AS destructuring_assignment THEN
     MUTABLE destructuring_assignment_mutable = COPY destructuring_assignment;
     IF destructuring_assignment_mutable.value THEN
-      destructuring_assignment_mutable.value = TRY (hoist__hoist_escape_value_mut(destructuring_assignment_mutable.value, hoists, counter, schema_lookup));
+      destructuring_assignment_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY destructuring_assignment_mutable.value, &hoists, counter, schema_lookup));
     END
   END
   NIL;

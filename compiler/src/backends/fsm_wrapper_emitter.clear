@@ -197,11 +197,12 @@ END
 PRIVATE FN fsmWrapperEmitter__render_dispatch(d: FsmDispatch) RETURNS !String ->
   MUTABLE arms_zig = (d.arms |> SELECT TRY (fsmWrapperEmitter__render_dispatch_arm(_, d.ctx_id))).join("\n");
   MUTABLE needs_loop_label = d.arms |> ANY fsmWrapperEmitter__arm_uses_continue?(_);
-  MUTABLE inner =   IF needs_loop_label THEN
-    (["__sw: while (true) {", "    switch (__ctx_${d.ctx_id.toString()}.step) {", arms_zig, "        else => unreachable,", "    }", "}"]).join("\n")
+  MUTABLE inner: String = "";
+  IF needs_loop_label THEN
+    inner = (["__sw: while (true) {", "    switch (__ctx_${d.ctx_id.toString()}.step) {", arms_zig, "        else => unreachable,", "    }", "}"]).join("\n");
   ELSE
-    (["switch (__ctx_${d.ctx_id.toString()}.step) {", arms_zig, "    else => unreachable,", "}"]).join("\n")
-  END;
+    inner = (["switch (__ctx_${d.ctx_id.toString()}.step) {", arms_zig, "    else => unreachable,", "}"]).join("\n");
+  END
   RETURN (["fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {", "    const __ctx_${d.ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));", fsmWrapperEmitter__indent_block(inner, 4), "}"]).join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int64) RETURNS !String ->
