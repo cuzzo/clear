@@ -2844,7 +2844,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBgStreamBlock(v: BgStreamBlock) RETURNS []
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: v.body |> SELECT castLocatableToNode(_) });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stack_size)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2902,11 +2901,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBgStreamBlock(v: BgStreamBlock) RETURNS []
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.computed_stack_tier)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.capture_analysis)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.spawn_form)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fsm_ineligible_reason)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fsm_suspend_points)] });
   IF v.declared_yield_type EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
@@ -2921,7 +2915,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBinaryOp(v: BinaryOp) RETURNS []AutoInfere
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.left)] });
   &out.append(AutoInferenceWalkNode{ SymbolValue: COPY v.op });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.right)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.paren_bind)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2979,11 +2972,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBinaryOp(v: BinaryOp) RETURNS []AutoInfere
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.string_concat)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.or_fallback_dupe)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.error_union_type)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.observable_terminal)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.observable_dest)] });
   IF v.retain_error_channel EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2992,7 +2980,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeBindExpr(v: BindExpr) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   IF v.type EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
@@ -3054,10 +3041,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBindExpr(v: BindExpr) RETURNS []AutoInfere
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mode)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.reassign_cleanup)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mir_binding_entry)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.ownership_transport_plan)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeBreakNode(v: BreakNode) RETURNS []AutoInferenceWalkNode ->
@@ -3125,7 +3108,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeCallSiteOverride(v: CallSiteOverride) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.n)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.inner)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -3190,10 +3172,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeCapabilityWrap(v: CapabilityWrap) RETURNS 
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.value)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.ownership)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.sync)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.layout)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.lock_rank)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3442,7 +3420,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeConcurrentOp(v: ConcurrentOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.op)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3500,8 +3477,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeConcurrentOp(v: ConcurrentOp) RETURNS []Au
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.shard_context)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.capture_analysis)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeConformanceDef(v: ConformanceDef) RETURNS []AutoInferenceWalkNode ->
@@ -3754,9 +3729,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeCopyNode(v: CopyNode) RETURNS []AutoInfere
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.deep_copy)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.carrier_op)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.own)] });
   IF v.alloc EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -3897,8 +3869,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeDefaultArrayLit(v: DefaultArrayLit) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.type_info)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.storage)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4280,8 +4250,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeDistinctOpMultiowned(v: DistinctOp) RETURN
 END
 FN rtocChildrenOfAutoInferenceWalkNodeDrop(v: Drop) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.token)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4339,7 +4307,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeDrop(v: Drop) RETURNS []AutoInferenceWalkN
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.cleanup_entry)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeEachOp(v: EachOp) RETURNS []AutoInferenceWalkNode ->
@@ -4408,11 +4375,9 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeExternFnDecl(v: ExternFnDecl) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.from_module)] });
   IF v.owner_type EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -4422,8 +4387,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeExternFnDecl(v: ExternFnDecl) RETURNS []Au
   FOR rtoc_arr_child IN v.fn_type_params DO
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.extern_source)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.return_lifetime)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4486,7 +4449,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeExternStructDecl(v: ExternStructDecl) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   IF v.from_module EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -4499,7 +4461,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeExternStructDecl(v: ExternStructDecl) RETU
   IF v.as_type EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.extern_source)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4561,10 +4522,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeExternStructDecl(v: ExternStructDecl) RETU
 END
 FN rtocChildrenOfAutoInferenceWalkNodeFieldCleanup(v: FieldCleanup) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.token)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.target_name)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.field)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.alloc)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4759,10 +4717,8 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeForEach(v: ForEach) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.var_name)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.collection)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: v.body |> SELECT castLocatableToNode(_) });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.is_mutable)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4820,19 +4776,15 @@ FN rtocChildrenOfAutoInferenceWalkNodeForEach(v: ForEach) RETURNS []AutoInferenc
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mark_per_iter)] });
   &out.append(AutoInferenceWalkNode{ BoolValue: COPY v.tight });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeForRange(v: ForRange) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.var_name)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.start_expr)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.end_expr)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.inclusive)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: v.body |> SELECT castLocatableToNode(_) });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mark_per_iter)] });
   &out.append(AutoInferenceWalkNode{ BoolValue: COPY v.tight });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -4959,7 +4911,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeFuncCall(v: FuncCall) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   FOR rtoc_arr_child IN v.args DO
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
@@ -5020,17 +4971,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeFuncCall(v: FuncCall) RETURNS []AutoInfere
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.module_alias)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.extern_call)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.extern_effects)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.extern_source)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.generic_type_args)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fn_var_call)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.pipe_lhs)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.heap_dupe_result)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.arg_families)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.collapsed_errors)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.error_union_type)] });
   IF v.protocol_name EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -5045,40 +4986,23 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeFunctionDef(v: FunctionDef) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.captures)] });
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.return_lifetime)] });
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.catch_clauses)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.default_catch)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.visibility)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.uses_frame)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.explicit_return_type)] });
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.tail_call)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.requires)] });
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.arrow_token });
   IF v.name_token EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effects_decl)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effects_span)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.max_depth_n)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.tight_reentrance)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.requires_clauses)] });
   IF v.return_type_token EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.pre_clauses)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.post_clauses)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.is_method)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5136,29 +5060,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeFunctionDef(v: FunctionDef) RETURNS []Auto
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effect_set)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.inferred_effects)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.reentrance_kind)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.thunk_plan)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mutual_thunk_plan)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.needs_rt)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fn_value_ref)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.alloc_fault)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.error_fallible)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.uses_heap)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.uses_alloc)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.uses_rt)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effects)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.snapshot_types)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stack_tier)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stack_vars_bytes)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.moved_guard_info)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.cleanup_bindings)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.heap_carry_return)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.heap_carry_return_vars)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fsm_eligible)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fsm_ineligible_reason)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fsm_suspend_points)] });
   IF v.conformance_protocol EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -5171,40 +5072,23 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.captures)] });
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.return_lifetime)] });
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.catch_clauses)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.default_catch)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.visibility)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.uses_frame)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.explicit_return_type)] });
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.tail_call)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.requires)] });
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.arrow_token });
   IF v.name_token EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effects_decl)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effects_span)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.max_depth_n)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.tight_reentrance)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.requires_clauses)] });
   IF v.return_type_token EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.pre_clauses)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.post_clauses)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.is_method)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5262,29 +5146,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeFunctionDefMultiowned(v: FunctionDef) RETU
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effect_set)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.inferred_effects)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.reentrance_kind)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.thunk_plan)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mutual_thunk_plan)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.needs_rt)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fn_value_ref)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.alloc_fault)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.error_fallible)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.uses_heap)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.uses_alloc)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.uses_rt)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effects)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.snapshot_types)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stack_tier)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stack_vars_bytes)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.moved_guard_info)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.cleanup_bindings)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.heap_carry_return)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.heap_carry_return_vars)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fsm_eligible)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fsm_ineligible_reason)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fsm_suspend_points)] });
   IF v.conformance_protocol EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -5298,7 +5159,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeGetField(v: GetField) RETURNS []AutoInfere
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToAutoInferenceWalkNode(COPY v.target));
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.field)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5356,9 +5216,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeGetField(v: GetField) RETURNS []AutoInfere
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.is_assignment_lhs)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.indirect_field)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.safe_nav_chain)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeGetIndex(v: GetIndex) RETURNS []AutoInferenceWalkNode ->
@@ -5423,7 +5280,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeGetIndex(v: GetIndex) RETURNS []AutoInfere
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.safe_nav_chain)] });
   IF v.protocol_operation EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -5432,7 +5288,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeHashLit(v: HashLit) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.storage)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5553,10 +5408,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeIdentifier(v: Identifier) RETURNS []AutoIn
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fn_ref)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.heap_dupe_result)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.atomic_borrow)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.ownership_pending_transfer)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeIfBind(v: IfBind) RETURNS []AutoInferenceWalkNode ->
@@ -5635,8 +5486,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeIfStatement(v: IfStatement) RETURNS []Auto
       &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
     END
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.then_drops)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.else_drops)] });
   &out.append(AutoInferenceWalkNode{ BoolValue: COPY v.comptime });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -5695,16 +5544,11 @@ FN rtocChildrenOfAutoInferenceWalkNodeIfStatement(v: IfStatement) RETURNS []Auto
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expr_mode)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.then_result_type)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.else_result_type)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeImplementationDef(v: ImplementationDef) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.owner_name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.owner_token)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5900,8 +5744,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeIsA(v: IsA) RETURNS []AutoInferenceWalkNod
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.left)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.right)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.binding)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5959,9 +5801,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeIsA(v: IsA) RETURNS []AutoInferenceWalkNod
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.runtime_variant_name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.runtime_payload_type)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.runtime_indirect_payload_as)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeJoinOp(v: JoinOp) RETURNS []AutoInferenceWalkNode ->
@@ -6089,15 +5928,12 @@ FN rtocChildrenOfAutoInferenceWalkNodeKeepNode(v: KeepNode) RETURNS []AutoInfere
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.carrier_op)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeLambdaLit(v: LambdaLit) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.captures)] });
   &out.append(castLambdaBodyToAutoInferenceWalkNode(COPY v.body));
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.storage)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6160,7 +5996,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeLetBinding(v: LetBinding) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   &out.append(castLocatableToAutoInferenceWalkNode(COPY v.expr));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -6353,7 +6188,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeListLit(v: ListLit) RETURNS []AutoInferenc
   FOR rtoc_arr_child IN v.items DO
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.storage)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6416,9 +6250,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeLiteral(v: Literal) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.type)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.value)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.storage)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6482,10 +6313,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeMatchStatement(v: MatchStatement) RETURNS 
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToAutoInferenceWalkNode(COPY v.expr));
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.case_drops)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.default_drops)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.exhaustive)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.takes)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6543,10 +6370,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeMatchStatement(v: MatchStatement) RETURNS 
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.string_match)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expr_mode)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.case_result_types)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.default_result_type)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeMaxOp(v: MaxOp) RETURNS []AutoInferenceWalkNode ->
@@ -7704,9 +7527,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeProtocolDef(v: ProtocolDef) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name_token)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.visibility)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7900,9 +7720,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeRaise(v: Raise) RETURNS []AutoInferenceWal
 END
 FN rtocChildrenOfAutoInferenceWalkNodeReassignCleanup(v: ReassignCleanup) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.token)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.alloc)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8162,7 +7979,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeRequire(v: Require) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.path)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8225,8 +8041,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeRequireNode(v: RequireNode) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.path)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.namespace)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8351,8 +8165,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeResolveNode(v: ResolveNode) RETURNS []Auto
 END
 FN rtocChildrenOfAutoInferenceWalkNodeReturn(v: Return) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.token)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.escaped_vars)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8482,10 +8294,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeSelectOp(v: SelectOp) RETURNS []AutoInfere
   IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effect_mode)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stream_mode)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.modifier_order)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.capture_analysis)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8552,10 +8360,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeSelectOpMultiowned(v: SelectOp) RETURNS []
   IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effect_mode)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stream_mode)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.modifier_order)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.capture_analysis)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8811,7 +8615,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeSlice(v: Slice) RETURNS []AutoInferenceWal
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.target)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.start)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.end)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.exclusive)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9007,7 +8810,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeStaticCall(v: StaticCall) RETURNS []AutoIn
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.type_name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.method_name)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.args)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -9066,8 +8868,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeStaticCall(v: StaticCall) RETURNS []AutoIn
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.error_union_type)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.retain_error_channel)] });
   IF v.inherent_call EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ FuncCall: COPY rtoc_opt_child });
   END
@@ -9142,7 +8942,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeStructLit(v: StructLit) RETURNS []AutoInfe
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ SymbolValue: COPY v.name });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.storage)] });
   IF v.type_args EXISTS AS rtoc_opt_child THEN
     FOR rtoc_arr_child IN rtoc_opt_child DO
       &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_arr_child });
@@ -9205,13 +9004,11 @@ FN rtocChildrenOfAutoInferenceWalkNodeStructLit(v: StructLit) RETURNS []AutoInfe
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.borrowed_field_names)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeStructPattern(v: StructPattern) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.partial)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9274,8 +9071,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeStubDecl(v: StubDecl) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.function_name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.value)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9469,8 +9264,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeSumOpMultiowned(v: SumOp) RETURNS []AutoIn
 END
 FN rtocChildrenOfAutoInferenceWalkNodeSuppressCleanup(v: SuppressCleanup) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.token)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9533,7 +9326,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSyncPolicyDecl(v: SyncPolicyDecl) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.handlers)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9792,7 +9584,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeTenseNavigation(v: TenseNavigation) RETURN
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToAutoInferenceWalkNode(COPY v.target));
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.markers)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9855,9 +9646,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeTestBlock(v: TestBlock) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.setup)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.whens)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9915,17 +9704,11 @@ FN rtocChildrenOfAutoInferenceWalkNodeTestBlock(v: TestBlock) RETURNS []AutoInfe
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.before_each)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.after_each)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.before_all)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.after_all)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.lets)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeTestThat(v: TestThat) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.description)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: v.body |> SELECT castLocatableToNode(_) });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -9984,14 +9767,11 @@ FN rtocChildrenOfAutoInferenceWalkNodeTestThat(v: TestThat) RETURNS []AutoInfere
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.synthetic_fn)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.pending)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeThenChain(v: ThenChain) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.steps)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10116,34 +9896,15 @@ FN rtocChildrenOfAutoInferenceWalkNodeThrowNode(v: ThrowNode) RETURNS []AutoInfe
 END
 FN rtocChildrenOfAutoInferenceWalkNodeToken(v: Token) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.type)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.value)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.line)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.column)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.file)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.start_offset)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.end_offset)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.end_line)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.end_column)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeTokenMultiowned(v: Token) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.type)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.value)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.line)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.column)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.file)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.start_offset)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.end_offset)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.end_line)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.end_column)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeTupleLit(v: TupleLit) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.storage)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10206,8 +9967,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeUnionDef(v: UnionDef) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.visibility)] });
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
@@ -10273,10 +10032,6 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeUnionVariantLit(v: UnionVariantLit) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.union_name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.variant_name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.fields)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.storage)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10471,12 +10226,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeVarDecl(v: VarDecl) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.name)] });
   IF v.type EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.value)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mutable)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10534,8 +10287,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeVarDecl(v: VarDecl) RETURNS []AutoInferenc
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mir_binding_entry)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.ownership_transport_plan)] });
   IF v.const_visibility EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -10547,10 +10298,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeWhenBlock(v: WhenBlock) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.description)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.setup)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.tests)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.benchmarks)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10608,12 +10356,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeWhenBlock(v: WhenBlock) RETURNS []AutoInfe
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.before_each)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.after_each)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.before_all)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.after_all)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.lets)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.tags)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeWhereOp(v: WhereOp) RETURNS []AutoInferenceWalkNode ->
@@ -10752,8 +10494,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeWhileBindLoop(v: WhileBindLoop) RETURNS []
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToAutoInferenceWalkNode(COPY v.condition));
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.binding_name)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.binding_token)] });
   FOR rtoc_arr_child IN v.do_branch DO
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
@@ -10814,7 +10554,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeWhileBindLoop(v: WhileBindLoop) RETURNS []
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mark_per_iter)] });
   &out.append(AutoInferenceWalkNode{ BoolValue: COPY v.tight });
   RETURN out;
 END
@@ -10883,7 +10622,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeWhileLoop(v: WhileLoop) RETURNS []AutoInfe
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mark_per_iter)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeWindowOp(v: WindowOp) RETURNS []AutoInferenceWalkNode ->
@@ -11026,7 +10764,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeWithBlock(v: WithBlock) RETURNS []AutoInfe
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.capability_plan)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -11084,11 +10821,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeWithBlock(v: WithBlock) RETURNS []AutoInfe
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.lock_error_clause)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.view_kind)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.snapshot_mode)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.polymorphic)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.universal_poly)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeYieldExpr(v: YieldExpr) RETURNS []AutoInferenceWalkNode ->
