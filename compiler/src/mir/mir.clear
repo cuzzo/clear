@@ -3948,8 +3948,8 @@ PUB STRUCT FsmGenericCtxStruct {
 PUB STRUCT FsmMemberFn {
   fn_name: Any@multiowned,
   ctx_id: Int64,
-  bg_rt: Any@multiowned,
-  suppress_runtime_ref: Any@multiowned,
+  bg_rt: String,
+  suppress_runtime_ref: ?Bool,
   body_stmts: []Emittable,
   extra_prologue_stmts: Any@multiowned
 }
@@ -3966,12 +3966,12 @@ PUB STRUCT FsmCtxStruct {
 PUB STRUCT FsmStep {
   index: Int64,
   ctx_id: Int64,
-  bg_rt: Any@multiowned,
-  suppress_runtime_ref: Any@multiowned,
+  bg_rt: String,
+  suppress_runtime_ref: ?Bool,
   body_stmts: []Emittable
 }
 PUB STRUCT SuspendDescriptor {
-  setup_stmts: Any@multiowned,
+  setup_stmts: []Emittable,
   bind_stmts: Any@multiowned,
   tail: Any@multiowned,
   ctx_field_decls: Any@multiowned,
