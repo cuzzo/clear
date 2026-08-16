@@ -3992,13 +3992,13 @@ PUB STRUCT FsmStateArm {
   index: Int64,
   pre_body_skip: ?FsmPreBodySkip,
   pre_body_stmts: []Emittable,
-  body_fn_name: Any@multiowned,
+  body_fn_name: String,
   err_cleanups: []Emittable,
   tail: FsmTail
 }
 PUB STRUCT FsmTailCondSkip {
   condition: Any@multiowned,
-  skip_step: Any@multiowned
+  skip_step: Int64
 }
 PUB STRUCT FsmTailLockTry {
   try_method: Any@multiowned,
