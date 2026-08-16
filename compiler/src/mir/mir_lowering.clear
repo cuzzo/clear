@@ -1414,7 +1414,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (mIRLowering__function_state(rtoc_self_view).current_reassignment_target == name) THEN
         RETURN COPY Emittable{ Ident: COPY ident_mutable };
       END
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[name] OR_ELSE new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[name] OR_ELSE mIRLowering__new());
       MUTABLE plan = entry.lifecycle_plan();
       IF !((cleanupEntry__present?(entry) AND ((plan != NIL) AND lifecyclePlan__needs_drop?((plan?))))) THEN
         RETURN COPY Emittable{ Ident: COPY ident_mutable };
@@ -3144,7 +3144,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF rename_map.contains?(safe) THEN
             safe = UNWRAP (COPY rename_map[safe]);
       END
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[rtoc_each_items_70[rtoc_idx]] OR_ELSE new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[rtoc_each_items_70[rtoc_idx]] OR_ELSE mIRLowering__new());
       IF !(cleanupEntry__present?(entry)) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -3348,7 +3348,7 @@ FN mIRLowering__ownership_consumed_name_operands(self: MIRLowering, names: []Str
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (CAST(((names |> SELECT _.toString()) |> WHERE !(_.empty?()) |> DISTINCT _) AS []OwnershipOperandFact)) |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[_] OR_ELSE new()); { MUTABLE rtoc_value_block_marker = 0; MUTABLE has_alloc_mark = mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.contains?(_); (IF (require_visible AND !(((has_alloc_mark OR ((entry AND cleanupEntry__present?(entry))))))) THEN NIL ELSE ownershipOperandFact__owned_binding(_, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), source, target_alloc) END) } } |> WHERE _ != NIL;
+    RETURN (CAST(((names |> SELECT _.toString()) |> WHERE !(_.empty?()) |> DISTINCT _) AS []OwnershipOperandFact)) |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[_] OR_ELSE mIRLowering__new()); { MUTABLE rtoc_value_block_marker = 0; MUTABLE has_alloc_mark = mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.contains?(_); (IF (require_visible AND !(((has_alloc_mark OR ((entry AND cleanupEntry__present?(entry))))))) THEN NIL ELSE ownershipOperandFact__owned_binding(_, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), source, target_alloc) END) } } |> WHERE _ != NIL;
 }
 END
 FN mIRLowering__with_ownership_consumption_for_value(self: MIRLowering, MUTABLE node: Emittable, value_mir: Emittable, ast_value: Locatable, source: String, target: String@symbol = :owned_sink, target_alloc: ?String@symbol = NIL, value_type: ?Type = NIL) RETURNS !Emittable
@@ -3440,7 +3440,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE root: ?String = mIRLowering__ownership_root_name(rtoc_self_view, ast_value);
     IF root EXISTS AS root_value THEN
       MUTABLE mapped = mIRLowering__transfer_binding_name(rtoc_self_view, root_value);
-      IF (mIRLowering__owned_binding_visible?(rtoc_self_view, mapped) OR ((!(require_visible_owned) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_79 = (((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[root_value] OR_ELSE new()));
+      IF (mIRLowering__owned_binding_visible?(rtoc_self_view, mapped) OR ((!(require_visible_owned) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_79 = (((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[root_value] OR_ELSE mIRLowering__new()));
       cleanupEntry__present?(rtoc_local_receiver_79) }))) THEN
         RETURN CAST([ownershipOperandFact__owned_binding(mapped, ti, source, target_alloc)] AS []OwnershipOperandFact);
       END
@@ -3515,7 +3515,7 @@ FN mIRLowering__owned_binding_visible?(self: MIRLowering, name: String) RETURNS 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_83 = (((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[name] OR_ELSE new()));
+    IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_83 = (((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[name] OR_ELSE mIRLowering__new()));
     cleanupEntry__present?(rtoc_local_receiver_83) } THEN
       RETURN TRUE;
     END
@@ -5835,10 +5835,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[identifier__name(identifier)] != NIL THEN
     RETURN KEEP ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[identifier__name(identifier)])?;
       ELSE
-    RETURN new();
+    RETURN mIRLowering__new();
       END
     ELSE
-      RETURN new();
+      RETURN mIRLowering__new();
     END
 }
 END
@@ -6266,7 +6266,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (IF result_owner IS_A Ident AS ident THEN mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type) ELSE FALSE END) THEN
       MUTABLE owner_name = COPY CAST(result_owner.name() AS String);
       owner_name = COPY (rename_map[owner_name] OR_ELSE owner_name);
-      MUTABLE mir_entry = ((IF bindings[CAST(result_owner.name() AS String)] != NIL THEN bindings[CAST(result_owner.name() AS String)] ELSE bindings[owner_name] END) OR_ELSE new());
+      MUTABLE mir_entry = ((IF bindings[CAST(result_owner.name() AS String)] != NIL THEN bindings[CAST(result_owner.name() AS String)] ELSE bindings[owner_name] END) OR_ELSE mIRLowering__new());
       IF cleanupEntry__present?(mir_entry) THEN
         cleanupEntry__mark_moved_guard_mut(&mir_entry);
         guarded_cleanup_names[owner_name] = TRUE;
@@ -6283,7 +6283,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_idx < consumed.length() DO
       MUTABLE safe = mIRLowering__fsm_zig_safe_name(rtoc_self_view, consumed[rtoc_idx]?);
       safe = COPY (rename_map[safe] OR_ELSE safe);
-      MUTABLE binding_entry = ((IF bindings[consumed[rtoc_idx]?] != NIL THEN bindings[consumed[rtoc_idx]?] ELSE bindings[safe] END) OR_ELSE new());
+      MUTABLE binding_entry = ((IF bindings[consumed[rtoc_idx]?] != NIL THEN bindings[consumed[rtoc_idx]?] ELSE bindings[safe] END) OR_ELSE mIRLowering__new());
       IF !(cleanupEntry__present?(binding_entry)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -6297,7 +6297,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_199.length() DO
       MUTABLE name = COPY CAST(rtoc_each_items_199[rtoc_idx].name() AS String);
       MUTABLE safe = COPY (rename_map[name] OR_ELSE name);
-      MUTABLE entry = ((IF bindings[name] != NIL THEN bindings[name] ELSE bindings[safe] END) OR_ELSE new());
+      MUTABLE entry = ((IF bindings[name] != NIL THEN bindings[name] ELSE bindings[safe] END) OR_ELSE mIRLowering__new());
       MUTABLE guarded = ((guarded_cleanup_names[name] == TRUE) OR (guarded_cleanup_names[safe] == TRUE));
       IF !((guarded OR cleanupEntry__present?(entry))) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -6394,7 +6394,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE safe = mIRLowering__fsm_zig_safe_name(rtoc_self_view, node.name);
     safe = COPY (rename_map[safe] OR_ELSE safe);
-    MUTABLE entry = ((IF bindings[node.name] != NIL THEN bindings[node.name] ELSE bindings[safe] END) OR_ELSE new());
+    MUTABLE entry = ((IF bindings[node.name] != NIL THEN bindings[node.name] ELSE bindings[safe] END) OR_ELSE mIRLowering__new());
     RETURN (((cleanupEntry__present?(entry) AND entry.heap?())) OR ((node.symbol != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_203 = ((node.symbol)?);
     symbolEntry__heap_storage?(rtoc_local_receiver_203) } == TRUE)));
 }
@@ -8148,7 +8148,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN effect_alloc_value;
     END
     IF mir? IS_A Ident AS ident THEN
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST(ident.name AS String)] OR_ELSE new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST(ident.name AS String)] OR_ELSE mIRLowering__new());
       IF cleanupEntry__present?(entry) THEN
         RETURN entry.alloc();
       ELSE
@@ -9123,7 +9123,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_316.length() DO
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST((rtoc_each_items_316[rtoc_idx]?.name) AS String)] OR_ELSE new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST((rtoc_each_items_316[rtoc_idx]?.name) AS String)] OR_ELSE mIRLowering__new());
       MUTABLE ti = COPY rtoc_each_items_316[rtoc_idx]?.type;
       IF !(((((IF rtoc_each_items_316[rtoc_idx]?.symbol != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_317 = CAST((rtoc_each_items_316[rtoc_idx]?.symbol) AS SymbolEntry);
@@ -9669,7 +9669,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[UNWRAP (root)] OR_ELSE new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[UNWRAP (root)] OR_ELSE mIRLowering__new());
       IF !(cleanupEntry__present?(entry)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -16884,7 +16884,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE nm = mIRLowering__zig_safe_name(rtoc_self_view, identifier__name(identifier_mutable));
       MUTABLE rename_map = TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view)));
       nm = COPY (rename_map[nm] OR_ELSE nm);
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[identifier__name(identifier_mutable)] OR_ELSE new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[identifier__name(identifier_mutable)] OR_ELSE mIRLowering__new());
       IF !(cleanupEntry__present?(entry)) THEN
         RETURN;
       END
@@ -17813,7 +17813,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE transport_plan = node.ownership_transport_plan;
     MUTABLE inferred_borrow = (transport_plan IS_A OwnershipTransportPlan AND (transport_plan.action() == :borrow));
     IF inferred_borrow THEN
-      binding_entry = new();
+      binding_entry = mIRLowering__new();
     END
     MUTABLE empty_optional_init = mIRLowering__optional_nil_initializer?(rtoc_self_view, ft, node.value);
     MUTABLE has_mir_drop = (binding_entry.needs_cleanup?() AND !(binding_entry.match_as?()));
@@ -18443,7 +18443,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF rename_map.contains?(safe) THEN
         safe = COPY (rename_map[safe] OR_ELSE "");
       END
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[source_name] OR_ELSE new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[source_name] OR_ELSE mIRLowering__new());
       IF !(cleanupEntry__present?(entry)) THEN
         RETURN CAST(( { MUTABLE rtoc_empty_list_676: []Stmt = List[]; rtoc_empty_list_676 } ) AS []Stmt);
       END
@@ -18588,7 +18588,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE target_name = mIRLowering__assignment_storage_name(rtoc_self_view, CAST(node.name AS String), TRUE);
       MUTABLE rp = node.reassign_cleanup;
-      MUTABLE binding_entry = ((IF mIRLowering__cleanup_entry_for_ast_binding(rtoc_self_view, Locatable{ BindExpr: COPY node }) != NIL THEN mIRLowering__cleanup_entry_for_ast_binding(rtoc_self_view, Locatable{ BindExpr: COPY node }) ELSE (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST(node.name AS String)] END) OR_ELSE new());
+      MUTABLE binding_entry = ((IF mIRLowering__cleanup_entry_for_ast_binding(rtoc_self_view, Locatable{ BindExpr: COPY node }) != NIL THEN mIRLowering__cleanup_entry_for_ast_binding(rtoc_self_view, Locatable{ BindExpr: COPY node }) ELSE (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST(node.name AS String)] END) OR_ELSE mIRLowering__new());
       MUTABLE heap_return_var = mIRLowering__current_function_heap_carry_return_var?(rtoc_self_view, CAST(node.name AS String));
       MUTABLE module_global = mIRLowering__program_state(rtoc_self_view).module_global_names.contains?(CAST(node.name AS String));
       MUTABLE assign_alloc =     IF (heap_return_var OR module_global) THEN
@@ -19088,7 +19088,7 @@ PRIVATE FN mIRLowering__ownership_marks_for_transferred_temp(self: MIRLowering, 
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF value IS_A Ident AS ident THEN
       MUTABLE name = COPY ident.name;
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[name] OR_ELSE new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[name] OR_ELSE mIRLowering__new());
       MUTABLE guarded = mIRLowering__pipeline_guarded_cleanup_name?(rtoc_self_view, name);
       IF !((guarded OR cleanupEntry__present?(entry))) THEN
         RETURN CAST(( { MUTABLE rtoc_empty_list_692: []Stmt = List[]; rtoc_empty_list_692 } ) AS []Stmt);

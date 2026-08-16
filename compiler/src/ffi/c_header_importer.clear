@@ -54,7 +54,7 @@ PUB FN cHeaderImporter__expand(source: String, source_dir: String) RETURNS !Stri
   };
 END
 PUB FN cHeaderImporter__import(header_value: String, library: String, source_dir: String) RETURNS !String ->
-  MUTABLE header_path = expand(header_value, source_dir);
+  MUTABLE header_path = cHeaderImporter__expand(header_value, source_dir);
   IF !(file?(header_path)) THEN
     RAISE Input, Error, "C header not found: {}";
   END

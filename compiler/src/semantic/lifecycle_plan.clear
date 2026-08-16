@@ -515,7 +515,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       panic("missing annotation binding lifecycle plan for place {}");
     ELSE
-      # Ruby falls back to `fetch(type_info)`; the translation turned that into
+      # Ruby falls back to `lifecycleRegistry__fetch(type_info)`; the translation turned that into
       # an unwrap of a one-element list literal.
       RETURN TRY (lifecycleRegistry__fetch(rtoc_self_view, type_info));
     END
