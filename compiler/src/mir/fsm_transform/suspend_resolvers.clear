@@ -96,7 +96,7 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
   MUTABLE sp_field = "sp_${susp_idx.toString()}";
   MUTABLE promise_expr_mir = mIRLowering__lower(lowering, next_tail.promise_ast);
   MUTABLE ctx_ident = Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
-  MUTABLE setup_stmts = [Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY promise_expr_mir, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }];
+  MUTABLE setup_stmts = [Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY promise_expr_mir, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
   MUTABLE captured_promise_guard_name: ?String = NIL;
   MUTABLE captured_names = ctx.captured.keys() |> SELECT _.toString();
   MUTABLE promise_root = (aST__root_identifier(next_tail.promise_ast) OR_ELSE NIL);
