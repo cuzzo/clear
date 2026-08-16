@@ -238,7 +238,7 @@ PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int6
   &body_lines.append(TRY (fsmWrapperEmitter__render_tail(arm.tail, ctx_id)));
   MUTABLE body_kept: []String = body_lines |> WHERE !(fsmWrapperEmitter__empty?(_));
   MUTABLE body: String = body_kept.join("\n");
-  RETURN (["    ${arm.index} => {", fsmWrapperEmitter__indent_block(body, 8), "    },"]).join("\n");
+  RETURN (["    ${arm.index.toString()} => {", fsmWrapperEmitter__indent_block(body, 8), "    },"]).join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__arm_uses_continue?(arm: FsmStateArm) RETURNS Bool ->
   IF arm.pre_body_skip THEN

@@ -441,7 +441,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       value = share_node.value;
     END
     MUTABLE value_value: Locatable = value?;
-    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, value_value));
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY value_value));
     IF (new_value == value_value) THEN
       RETURN COPY castNodeToLocatable(node);
     END

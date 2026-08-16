@@ -234,20 +234,20 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
         END
       END
     END
-    return_node_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY UNWRAP (return_node_mutable.value), &hoists, counter, schema_lookup, ruby_wrap_optional_Type_TypeTypeInput(expected)));
+    return_node_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY UNWRAP (return_node_mutable.value), &hoists, &counter, schema_lookup, ruby_wrap_optional_Type_TypeTypeInput(expected)));
   ELSE_IF stmt IS_A YieldExpr AS yield_expr THEN
     MUTABLE yield_expr_mutable = COPY yield_expr;
-    yield_expr_mutable.expr = TRY (hoist__hoist_escape_value_mut(COPY yield_expr_mutable.expr, &hoists, counter, schema_lookup));
+    yield_expr_mutable.expr = TRY (hoist__hoist_escape_value_mut(COPY yield_expr_mutable.expr, &hoists, &counter, schema_lookup));
   ELSE_IF stmt IS_A Assignment AS assignment THEN
     MUTABLE assignment_mutable = COPY assignment;
     IF assignment_mutable.name IS_A GetField AS assign_field THEN
       MUTABLE dest_type: Type = TRY (aST__full_type_mut(Locatable{ GetField: COPY assign_field }));
-      assignment_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY assignment_mutable.value, &hoists, counter, schema_lookup, TypeTypeInput{ Type: COPY dest_type }));
+      assignment_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY assignment_mutable.value, &hoists, &counter, schema_lookup, TypeTypeInput{ Type: COPY dest_type }));
     END
   ELSE_IF stmt IS_A DestructuringAssignment AS destructuring_assignment THEN
     MUTABLE destructuring_assignment_mutable = COPY destructuring_assignment;
     IF destructuring_assignment_mutable.value THEN
-      destructuring_assignment_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY destructuring_assignment_mutable.value, &hoists, counter, schema_lookup));
+      destructuring_assignment_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY destructuring_assignment_mutable.value, &hoists, &counter, schema_lookup));
     END
   END
   NIL;

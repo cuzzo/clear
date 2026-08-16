@@ -4999,7 +4999,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeFunctionDef(v: FunctionDef) RETURNS []Auto
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
   IF v.default_catch EXISTS AS rtoc_opt_default_catch THEN
-    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_default_catch)] });
+    &out.append(AutoInferenceWalkNode{ ArrayValue: rtoc_opt_default_catch |> SELECT castLocatableToNode(_) });
   END
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_arr_child });
@@ -5087,7 +5087,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeFunctionDefMultiowned(v: FunctionDef) RETU
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
   IF v.default_catch EXISTS AS rtoc_opt_default_catch THEN
-    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_default_catch)] });
+    &out.append(AutoInferenceWalkNode{ ArrayValue: rtoc_opt_default_catch |> SELECT castLocatableToNode(_) });
   END
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_arr_child });
@@ -9683,7 +9683,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeTestBlock(v: TestBlock) RETURNS []AutoInfe
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   IF v.setup EXISTS AS rtoc_opt_setup THEN
-    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_setup)] });
+    &out.append(AutoInferenceWalkNode{ ArrayValue: rtoc_opt_setup |> SELECT castLocatableToNode(_) });
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -10339,7 +10339,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeWhenBlock(v: WhenBlock) RETURNS []AutoInfe
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   IF v.setup EXISTS AS rtoc_opt_setup THEN
-    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_setup)] });
+    &out.append(AutoInferenceWalkNode{ ArrayValue: rtoc_opt_setup |> SELECT castLocatableToNode(_) });
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
