@@ -450,7 +450,7 @@ PRIVATE FN hoist__callee_param_type(call: Locatable, idx: Int64) RETURNS !?Type 
 END
 PRIVATE FN hoist__collection_value_store_call?(call: MethodCall) RETURNS !Bool ->
   MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_stdlib_def));
-  sig = (sig OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_signature)));
+  sig = (sig OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY call.matched_signature)));
   IF !((((((sig != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_10 = (sig?);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_10)) }) AND TRY (functionSignature__takes_ownership?(&sig)))) OR TRY (intrinsicRegistry__collection_value_store_method?(Name{ StringValue: COPY call.name }, call.args.length())))) THEN
     RETURN FALSE;

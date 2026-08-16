@@ -449,7 +449,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.block_in[_.id] = TRY (ownershipDataflow__empty_ownership_state(rtoc_self_view));
     rtoc_self_view.block_out[_.id] = NIL;
     END
-    rtoc_self_view.block_in[(KEEP rtoc_self_view.cfg.entry).id] = TRY (ownershipDataflow__init_entry_state(rtoc_self_view));
+    rtoc_self_view.block_in[(COPY rtoc_self_view.cfg.entry).id] = TRY (ownershipDataflow__init_entry_state(rtoc_self_view));
     MUTABLE order_index = TRY (ownershipDataflow__reverse_postorder_index(rtoc_self_view));
     MUTABLE worklist: []BasicBlock@multiowned = rtoc_self_view.cfg.blocks |> ORDER_BY (order_index[_.id] OR_ELSE rtoc_self_view.cfg.blocks.length());
     MUTABLE in_worklist = {};
@@ -460,7 +460,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE block = UNWRAP (&worklist.shift());
       &in_worklist.delete(block.id);
       MUTABLE new_in =     IF (block == KEEP rtoc_self_view.cfg.entry) THEN
-        rtoc_self_view.block_in[(KEEP rtoc_self_view.cfg.entry).id]
+        rtoc_self_view.block_in[(COPY rtoc_self_view.cfg.entry).id]
       ELSE
         TRY (ownershipDataflow__join_predecessors(rtoc_self_view, block))
       END;
@@ -838,8 +838,8 @@ PRIVATE FN ownershipDataflow__exit_ownership_state(self: OwnershipDataflow) RETU
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF rtoc_self_view.block_in[(KEEP rtoc_self_view.cfg.exit_block).id] != NIL THEN
-    RETURN COPY (rtoc_self_view.block_in[(KEEP rtoc_self_view.cfg.exit_block).id])?;
+    IF rtoc_self_view.block_in[(COPY rtoc_self_view.cfg.exit_block).id] != NIL THEN
+    RETURN COPY (rtoc_self_view.block_in[(COPY rtoc_self_view.cfg.exit_block).id])?;
     ELSE
     RETURN TRY (ownershipDataflow__empty_ownership_state(rtoc_self_view));
     END

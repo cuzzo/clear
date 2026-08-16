@@ -10657,7 +10657,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP node.matched_stdlib_def));
-    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP node.matched_signature)));
+    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY node.matched_signature)));
     IF signature EXISTS AS signature_value THEN
       MUTABLE takes_indices = (TRY (functionSignature__params(signature_value))).each_index() |> WHERE (UNWRAP ((TRY (functionSignature__params(signature_value)))[_])).takes;
       IF !((scopeBindings__length(takes_indices) == 1)) THEN
@@ -11872,7 +11872,7 @@ PRIVATE FN typeAnalysisSession__fn_var_call_error_fallible?(self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP node.matched_signature));
+    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY node.matched_signature));
     IF type__error_union?((IF sig != NIL THEN
       functionSignature__return_type(sig)
     ELSE

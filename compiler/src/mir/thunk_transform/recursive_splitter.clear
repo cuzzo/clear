@@ -45,7 +45,7 @@ PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS ?Pla
     MUTABLE stmt = COPY UNWRAP (stmts[i]);
     MUTABLE bc: ?BaseCase = recursiveSplitter__match_base_case(stmt, fn_name);
     IF bc EXISTS AS bc_value THEN
-      &base_cases.append(bc_value);
+      &base_cases.append(COPY bc_value);
       i = (i + 1);
     ELSE
       RETURN NIL;
@@ -79,7 +79,7 @@ PUB FN recursiveSplitter__split_mutual(body: []Locatable, fn_name: String, partn
     MUTABLE stmt = COPY UNWRAP (stmts[i]);
     MUTABLE bc: ?BaseCase = recursiveSplitter__match_mutual_base_case(stmt, cycle);
     IF bc EXISTS AS bc_value THEN
-      &base_cases.append(bc_value);
+      &base_cases.append(COPY bc_value);
       i = (i + 1);
     ELSE
       RETURN NIL;
@@ -108,7 +108,6 @@ PRIVATE FN recursiveSplitter__match_mutual_base_case(stmt: Locatable, cycle_name
     END
     MUTABLE then_b: ?[]Locatable = CAST(if_statement.then_branch AS ?[]Locatable);
     IF then_b EXISTS AS then_b_value THEN
-      MUTABLE then_b_value = COPY then_b_value;
       IF (then_b_value.length() != 1) THEN
         RETURN NIL;
       END
@@ -185,7 +184,6 @@ PRIVATE FN recursiveSplitter__match_base_case(stmt: Locatable, fn_name: String) 
     END
     MUTABLE then_b: ?[]Locatable = CAST(if_statement.then_branch AS ?[]Locatable);
     IF then_b EXISTS AS then_b_value THEN
-      MUTABLE then_b_value = COPY then_b_value;
       IF (then_b_value.length() != 1) THEN
         RETURN NIL;
       END
