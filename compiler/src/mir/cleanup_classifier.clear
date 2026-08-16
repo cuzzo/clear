@@ -58,11 +58,14 @@ PUB FN frozenCleanupFacts__empty?(self: FrozenCleanupFacts) RETURNS Bool EFFECTS
 END
 PUB FN frozenCleanupFacts__entry_for(self: FrozenCleanupFacts, name: Name) RETURNS CleanupEntry@multiowned ->
   MUTABLE place = placeId__from_path(castNameToPath(name));
-  IF (IF self.entries_by_place[place] != NIL THEN self.entries_by_place[place] ELSE self.entries_by_place[placeId__from_path(Path{ StringValue: COPY place.path })] END) != NIL THEN
-  RETURN ((IF self.entries_by_place[place] != NIL THEN self.entries_by_place[place] ELSE self.entries_by_place[placeId__from_path(Path{ StringValue: COPY place.path })] END))?;
-  ELSE
-  RETURN new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
+  IF self.entries_by_place[place] EXISTS AS direct_entry THEN
+    RETURN KEEP direct_entry;
   END
+  MUTABLE path_place = placeId__from_path(Path{ StringValue: COPY place.path });
+  IF self.entries_by_place[path_place] EXISTS AS path_entry THEN
+    RETURN KEEP path_entry;
+  END
+  RETURN cleanupEntry__blank();
 END
 PUB FN frozenCleanupFacts__entry_for_node(self: FrozenCleanupFacts, name: Name, node: Locatable) RETURNS CleanupEntry@multiowned ->
   MUTABLE place = cleanupClassifier__place_for_binding_node(CAST(name AS String), node);
