@@ -3993,7 +3993,7 @@ PUB STRUCT FsmStateArm {
   pre_body_skip: ?FsmPreBodySkip,
   pre_body_stmts: []Emittable,
   body_fn_name: Any@multiowned,
-  err_cleanups: Any@multiowned,
+  err_cleanups: []Emittable,
   tail: FsmTail
 }
 PUB STRUCT FsmTailCondSkip {

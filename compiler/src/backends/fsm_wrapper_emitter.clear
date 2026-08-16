@@ -219,7 +219,7 @@ PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int6
   END
   IF arm.body_fn_name THEN
     MUTABLE tail_kind: String@symbol = fsmWrapperEmitter__tail_kind(arm.tail);
-    MUTABLE arm_cleanups = fsmWrapperEmitter__render_resume_fn_cleanups((arm.err_cleanups OR List[]));
+    MUTABLE arm_cleanups = fsmWrapperEmitter__render_resume_fn_cleanups(COPY arm.err_cleanups);
     MUTABLE err_action: []String = List[];
     IF ((tail_kind == :done) AND fsmWrapperEmitter__empty?(arm_cleanups)) THEN
       err_action = ["if (@This().${arm.body_fn_name}(__ctx_${ctx_id.toString()})) |_| {} else |err| {", "    __ctx_${ctx_id.toString()}.inner.result = err;", "}"];
