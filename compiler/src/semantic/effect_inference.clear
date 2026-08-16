@@ -11,8 +11,8 @@ FN effectInference__analyze_mut(fn_nodes: {String}FunctionDef) RETURNS !Void ->
 END
 FN effectInference__build(fn_value: FunctionDef) RETURNS !EffectSet@multiowned ->
   MUTABLE eff: [Set]String@symbol = Set[];
-  MUTABLE raw = fn_value.effects;
-  IF raw THEN
+  MUTABLE raw: [Set]String@symbol = COPY (fn_value.effects OR_ELSE Set[]);
+  IF TRUE THEN
     IF raw.contains?(symbol("YIELD")) THEN
       &eff.insert(:yield);
     END
@@ -26,7 +26,7 @@ FN effectInference__build(fn_value: FunctionDef) RETURNS !EffectSet@multiowned -
   IF (TRUE AND (fn_value.can_fail != NIL)) THEN
     &eff.insert(:fail);
   END
-  IF raw THEN
+  IF TRUE THEN
     IF raw.contains?(symbol("CONTENTION")) THEN
       &eff.insert(:contention);
     END

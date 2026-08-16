@@ -284,7 +284,7 @@ PUB STRUCT FunctionDef {
   conformance_protocol: ?String,
   container_borrow: ?Bool,
   effect_set: ?EffectSet@multiowned,
-  effects: ?PassStateValue,
+  effects: ?[Set]String@symbol,
   error_fallible: ?Bool,
   error_kind: ?String@symbol,
   error_type: ?String@symbol,
