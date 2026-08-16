@@ -45,7 +45,7 @@ PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, li
       RETURN COPY observable_value;
     END
   END
-  MUTABLE elem_type = UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node }))))));
+  MUTABLE elem_type = UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(smooth_node))))));
   MUTABLE elem_zig = pipelineSetIndexLowerer__transpile_type_call(self, CAST(type__resolved(elem_type) AS String));
   MUTABLE set_zig = "CheatLib.Set(${elem_zig})";
   MUTABLE alloc = pipelineSetIndexLowerer__pipeline_alloc_call(self, smooth_node);
@@ -104,7 +104,7 @@ PRIVATE FN pipelineSetIndexLowerer__lower_range_distinct(self: PipelineSetIndexL
     defer_deinit_branch_value = NIL;
   END
   MUTABLE defer_deinit: ?MIRDeferStmt = defer_deinit_branch_value;
-  MUTABLE elem_type: ?Type = TRY (type__element_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))));
+  MUTABLE elem_type: ?Type = TRY (type__element_type((TRY (aST__full_type_mut(smooth_node)))));
   MUTABLE elem_zig = COPY ((compilerRegexMatchGroup(set_zig, compilerRegexCompile("CheatLib\\.Set\\((.*)\\)"), 1)) OR_ELSE "");
   MUTABLE insert_body =   IF elem_type THEN
     TRY (pipelineSetIndexLowerer__distinct_insert_body(self, key_expr_mir, distinct_node.expression, UNWRAP (elem_type), elem_zig, alloc, TRUE))
@@ -148,7 +148,7 @@ PRIVATE FN pipelineSetIndexLowerer__distinct_insert_body(self: PipelineSetIndexL
   END
 END
 PRIVATE FN pipelineSetIndexLowerer__distinct_set_alloc_stmts(self: PipelineSetIndexLowerer, MUTABLE smooth_node: BinaryOp, set_zig: String, alloc: String@symbol) RETURNS ![]Emittable ->
-  RETURN CAST([Emittable{ AllocMark: COPY AllocMark{ name: "dist_set", alloc: COPY alloc, type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) })), scope: COPY placement__alloc_scope(alloc), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: COPY "dist_set", init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: COPY set_zig, strategy: :set_empty, alloc: NIL, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
+  RETURN CAST([Emittable{ AllocMark: COPY AllocMark{ name: "dist_set", alloc: COPY alloc, type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) })), scope: COPY placement__alloc_scope(alloc), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: COPY "dist_set", init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: COPY set_zig, strategy: :set_empty, alloc: NIL, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
 END
 PRIVATE FN pipelineSetIndexLowerer__distinct_set_transfer_marks(self: PipelineSetIndexLowerer, alloc: String@symbol) RETURNS ![]Emittable ->
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: "dist_set", target: :block_result, target_alloc: COPY alloc, move_guarded: FALSE })));

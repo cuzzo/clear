@@ -6216,7 +6216,7 @@ PUB FN aST__each_locatable(root: Locatable, MUTABLE descend_functions: Bool, vis
   IF !(descend_functions) AND (root IS_A FunctionDef) THEN
     RETURN;
   END
-  FOR rtoc_walk_child IN rtocChildrenLocatable(Locatable{ Identifier: COPY root }) DO
+  FOR rtoc_walk_child IN rtocChildrenLocatable(root) DO
     aST__each_locatable(rtoc_walk_child, &descend_functions, visitor);
   END
 END

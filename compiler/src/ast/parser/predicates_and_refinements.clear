@@ -169,7 +169,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN ruby_array_concat_StepsItem(TRY (clearParser__refinement_steps(rtoc_self_view, binary_op.left, if_token)), TRY (clearParser__refinement_steps(rtoc_self_view, binary_op.right, if_token)));
     ELSE
-      RETURN [castLocatableToStepsItem(Locatable{ IfStatement: COPY node })];
+      RETURN [castLocatableToStepsItem(node)];
     END
 }
 END

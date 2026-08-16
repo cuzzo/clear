@@ -927,7 +927,7 @@ PUB FN cleanupClassifier__capture_expr_owned_alloc(expr: Locatable, schema_looku
       RETURN :heap;
     END
     MUTABLE receiver = expr.object();
-    IF (TRUE AND ((aST__node__symbol(Locatable{ Identifier: COPY receiver }) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12 = ((aST__node__symbol(Locatable{ Identifier: COPY receiver }))?);
+    IF (TRUE AND ((aST__node__symbol(receiver) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12 = ((aST__node__symbol(receiver))?);
     symbolEntry__heap_storage?(rtoc_local_receiver_12) })) THEN
       RETURN :heap;
     END
@@ -995,7 +995,7 @@ END
 PUB FN cleanupClassifier__receiver_storage_alloc(expr: MethodCall) RETURNS ?String@symbol ->
   MUTABLE receiver = COPY expr.object;
   MUTABLE symbol = IF TRUE THEN
-    aST__node__symbol(Locatable{ Identifier: COPY receiver })
+    aST__node__symbol(receiver)
   ELSE
     NIL
   END;
@@ -1006,7 +1006,7 @@ PUB FN cleanupClassifier__receiver_storage_alloc(expr: MethodCall) RETURNS ?Stri
   IF (storage == :frame) THEN
     RETURN :frame;
   END
-  MUTABLE root = (aST__root_identifier(Locatable{ Identifier: COPY receiver }) OR_ELSE NIL);
+  MUTABLE root = (aST__root_identifier(receiver) OR_ELSE NIL);
   MUTABLE root_symbol = (IF root != NIL THEN
     root.symbol()
   ELSE

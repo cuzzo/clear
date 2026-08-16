@@ -6753,7 +6753,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE rhs = COPY let_binding.expr;
       MUTABLE before = referenced.size();
-      mIRLowering__collect_identifier_refs(rtoc_self_view, castLocatableToOptionalAstIdentifierSearchNode(Locatable{ CollectOp: COPY rhs }), let_ast_map, &referenced);
+      mIRLowering__collect_identifier_refs(rtoc_self_view, castLocatableToOptionalAstIdentifierSearchNode(rhs), let_ast_map, &referenced);
       IF (referenced.size() > before) THEN
             changed = TRUE;
       END
