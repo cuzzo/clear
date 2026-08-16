@@ -165,7 +165,7 @@ PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: FN(
   END
   MUTABLE bindings: {String}CleanupEntry@multiowned = {};
   MUTABLE entries_by_place: {PlaceId}CleanupEntry@multiowned = {};
-  TRY (walk_bindings(fn_node.body, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+  TRY (cleanupClassifier__walk_bindings(COPY fn_node.body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
   TRY (walk_takes_params(fn_node, schema_lookup, lifecycle_registry, &bindings));
   walk_moved_source_guards(fn_node.body, bindings);
   TRY (walk_match_as_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
@@ -440,8 +440,8 @@ PUB FN cleanupClassifier__field_owner_cleanup_alloc(target_node: Locatable, fact
     RETURN :frame;
   END
 END
-PUB FN cleanupClassifier__walk_bindings(body: []AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS ![]CleanupEntry@multiowned ->
-  TRY (classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+PUB FN cleanupClassifier__walk_bindings(body: []AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS ![]CleanupEntry@multiowned ->
+  TRY (cleanupClassifier__classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
   RETURN bindings.values();
 END
 PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
@@ -452,7 +452,7 @@ PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []AstBodyNode, sch
   END
   TRY (classify_inline_bg_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
   FOR rtoc_mutable_block_param_4 IN (TRY (aST__child_bodies(castAstBodyNodeToLocatable(rtoc_mutable_block_param_4)))) DO
-  TRY (classify_cleanup_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+  TRY (cleanupClassifier__classify_cleanup_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
   END
   END
 END
@@ -467,14 +467,14 @@ PUB FN cleanupClassifier__classify_inline_bg_binding_body(node: AstBodyNode, sch
     IF (rtoc_each_items_5[rtoc_idx]? IS_A BgBlock OR rtoc_each_items_5[rtoc_idx]? IS_A BgStreamBlock) THEN
         MUTABLE body = rtoc_each_items_5[rtoc_idx]?.body();
         IF body THEN
-          TRY (classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+          TRY (cleanupClassifier__classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
         END
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
     IF rtoc_each_items_5[rtoc_idx]? IS_A BlockExpr THEN
         IF rtoc_each_items_5[rtoc_idx]?.body() THEN
-          TRY (classify_cleanup_binding_body(rtoc_each_items_5[rtoc_idx]?.body(), schema_lookup, lifecycle_registry, bindings, entries_by_place));
+          TRY (cleanupClassifier__classify_cleanup_binding_body(rtoc_each_items_5[rtoc_idx]?.body(), schema_lookup, lifecycle_registry, bindings, entries_by_place));
         END
         IF rtoc_each_items_5[rtoc_idx]?.result() THEN
           TRY (classify_inline_bg_binding_body(rtoc_each_items_5[rtoc_idx]?.result(), schema_lookup, lifecycle_registry, bindings, entries_by_place));
