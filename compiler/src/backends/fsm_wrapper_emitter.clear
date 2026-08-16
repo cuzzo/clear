@@ -128,15 +128,17 @@ PRIVATE FN fsmWrapperEmitter__render_step(step: FsmStep, MUTABLE mir_emitter: MI
   }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
   MUTABLE body_text: String = body.join("\n");
-  RETURN (["        fn runStep${step.index.toString()}(__ctx_${step.ctx_id.toString()}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id.toString()}.rt;", (IF step.suppress_runtime_ref THEN
-    "            _ = &${step.bg_rt};"
-  ELSE
-    NIL
-  END), (IF !(body.empty?()) THEN
-    body
-  ELSE
-    NIL
-  END), "        }"]).join("\n");
+  MUTABLE step_parts: []String = [];
+  &step_parts.append("        fn runStep${step.index.toString()}(__ctx_${step.ctx_id.toString()}: *@This()) anyerror!void {");
+  &step_parts.append("            const ${step.bg_rt} = __ctx_${step.ctx_id.toString()}.rt;");
+  IF (step.suppress_runtime_ref == TRUE) THEN
+    &step_parts.append("            _ = &${step.bg_rt};");
+  END
+  IF !(body_text.empty?()) THEN
+    &step_parts.append(COPY body_text);
+  END
+  &step_parts.append("        }");
+  RETURN step_parts.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_resume_fn_cleanups(cleanups: []Emittable) RETURNS !String ->
   IF (cleanups.length() == 0) THEN
