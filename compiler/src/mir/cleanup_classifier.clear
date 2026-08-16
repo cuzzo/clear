@@ -186,7 +186,7 @@ PUB FN cleanupClassifier__mark_moved_source_guards_in_node(node: Locatable, bind
   IF node IS_A Identifier AS moved_identifier THEN
     IF aST__moved?(Locatable{ Identifier: COPY moved_identifier }) THEN
       IF bindings[moved_identifier.name] EXISTS AS moved_entry THEN
-        MUTABLE moved_entry_mutable = KEEP moved_entry;
+        MUTABLE moved_entry_mutable = COPY moved_entry;
         cleanupEntry__mark_moved_guard_mut(&moved_entry_mutable);
       END
     END

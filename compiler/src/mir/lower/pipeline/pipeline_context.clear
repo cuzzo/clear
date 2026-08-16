@@ -355,7 +355,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_var_decl(MUTABLE self: Pipeli
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
-    IF !(new_value.equal?(node.value)) THEN
+    IF (new_value != node.value) THEN
       node.value = new_value;
     END
     RETURN COPY Locatable{ VarDecl: COPY node };

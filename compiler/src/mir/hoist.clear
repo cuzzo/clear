@@ -214,7 +214,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
     IF expected EXISTS AS expected_value THEN
       MUTABLE expected_value = TRY (type__success_type(expected_value));
     END
-    MUTABLE value_type = TRY (type__from_node_mut(return_node_mutable.value, "return value hoist"));
+    MUTABLE value_type: ?Type = TRY (type__from_node_mut(return_node_mutable.value, "return value hoist"));
     IF (((value_type != NIL) AND type__collection?((value_type?))) AND !(hoist__empty_list_literal?(return_node_mutable.value))) THEN
       expected = COPY value_type;
     END
