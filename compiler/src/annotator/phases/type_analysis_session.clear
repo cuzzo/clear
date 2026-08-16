@@ -6643,10 +6643,10 @@ PRIVATE FN typeAnalysisSession__analyze_concurrent_op(MUTABLE self: TypeAnalysis
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE conc = COPY node.right;
     MUTABLE options: {String}Locatable = CAST(conc.options() AS {String}Locatable);
-    typeAnalysisSession__validate_concurrent_options_mut(&rtoc_self_view, node, castLocatableToConcurrentOp(conc), options);
+    typeAnalysisSession__validate_concurrent_options_mut(&rtoc_self_view, node, castLocatableToConcurrentOp(Locatable{ ConcurrentOp: COPY conc }), options);
     typeAnalysisSession__stamp_concurrent_option_values_mut(&rtoc_self_view, options);
     MUTABLE lhs_type = &node.left.full_type_mut("pipeline left");
-    MUTABLE shard_node: ?ShardOp = typeAnalysisSession__prepare_concurrent_shard_context_mut(rtoc_self_view, node, castLocatableToConcurrentOp(conc));
+    MUTABLE shard_node: ?ShardOp = typeAnalysisSession__prepare_concurrent_shard_context_mut(rtoc_self_view, node, castLocatableToConcurrentOp(Locatable{ ConcurrentOp: COPY conc }));
     MUTABLE proxy = BinaryOp{ token: COPY node.token, left: COPY node.left, op: :SMOOTH, right: COPY conc.op(), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
     IF (conc.op() IS_A SelectOp) OR (conc.op() IS_A WhereOp) THEN
       IF typeAnalysisSession__bounded_stream_source?(rtoc_self_view, &node.left) THEN
@@ -6670,10 +6670,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         conc.capture_analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, %() USE(conc, MUTABLE node, MUTABLE proxy, sharded_names, MUTABLE rtoc_self_view) -> {
     IF (sharded_names.length() > 1) THEN
-            typeAnalysisSession__emit_multi_map_warning(rtoc_self_view, castLocatableToConcurrentOp(conc), sharded_names);
+            typeAnalysisSession__emit_multi_map_warning(rtoc_self_view, castLocatableToConcurrentOp(Locatable{ ConcurrentOp: COPY conc }), sharded_names);
             typeAnalysisSession__analyze_each_op(&rtoc_self_view, &proxy);
     ELSE_IF (sharded_names.length() == 1) THEN
-            typeAnalysisSession__analyze_auto_shard_each_op(&rtoc_self_view, &node, castLocatableToConcurrentOp(conc), proxy);
+            typeAnalysisSession__analyze_auto_shard_each_op(&rtoc_self_view, &node, castLocatableToConcurrentOp(Locatable{ ConcurrentOp: COPY conc }), proxy);
     ELSE
             typeAnalysisSession__analyze_each_op(&rtoc_self_view, &proxy);
     END

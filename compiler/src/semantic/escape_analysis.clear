@@ -366,7 +366,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
     CONTINUE;
         END
         IF !(arg IS_A Identifier) THEN
-            MUTABLE arg_type = TRY (escapeAnalysis__kept_edge_arg_type(arg));
+            MUTABLE arg_type = TRY (escapeAnalysis__kept_edge_arg_type(Locatable{ Identifier: COPY arg }));
             MUTABLE conflict: ?String@symbol = escapeAnalysis__kept_family_conflict(arg_type, family);
             IF conflict EXISTS AS conflict_value THEN
               (IF on_family_violation != NIL THEN
@@ -395,7 +395,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
             entry = local_entries[arg.name()];
         END
         IF !((entry != NIL)) THEN
-            arg_type = TRY (escapeAnalysis__kept_edge_arg_type(arg));
+            arg_type = TRY (escapeAnalysis__kept_edge_arg_type(Locatable{ Identifier: COPY arg }));
             op = IF (IF arg_type != NIL THEN
               TRY (type__any_rc?(arg_type))
             ELSE
@@ -1094,7 +1094,7 @@ PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Par
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    escapeAnalysis__mark_expr_roots_heap_mut(arg);
+    escapeAnalysis__mark_expr_roots_heap_mut(Locatable{ Identifier: COPY arg });
   rtoc_idx = rtoc_idx + 1;
   END
 END
@@ -1272,7 +1272,7 @@ PUB FN escapeAnalysis__mark_receiver_scope_escapes_mut(receiver: Locatable, args
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    TRY (escapeAnalysis__mark_expr_identifiers_heap_mut(arg));
+    TRY (escapeAnalysis__mark_expr_identifiers_heap_mut(Locatable{ Identifier: COPY arg }));
   rtoc_idx = rtoc_idx + 1;
   END
 END

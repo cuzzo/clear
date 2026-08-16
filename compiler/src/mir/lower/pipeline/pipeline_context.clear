@@ -103,7 +103,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY node;
     END
     IF pipelinePlaceholderRewriter__soa_each_field?(rtoc_self_view, node) THEN
-      RETURN Locatable{ Identifier: COPY pipelinePlaceholderRewriter__soa_each_field(&rtoc_self_view, castLocatableToGetField(node)) };
+      RETURN Locatable{ Identifier: COPY pipelinePlaceholderRewriter__soa_each_field(&rtoc_self_view, castLocatableToGetField(Locatable{ IsA: COPY node })) };
     END
     IF node IS_A Identifier AS identifier THEN
       RETURN pipelinePlaceholderRewriter__substitute_identifier(rtoc_self_view, identifier);

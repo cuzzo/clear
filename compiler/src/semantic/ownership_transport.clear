@@ -334,8 +334,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE conditional = COPY left.ancestors[rtoc_idx]?;
-      MUTABLE left_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, left, castLocatableToIfStatement(conditional));
-      MUTABLE right_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, right, castLocatableToIfStatement(conditional));
+      MUTABLE left_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, left, castLocatableToIfStatement(Locatable{ IfStatement: COPY conditional }));
+      MUTABLE right_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, right, castLocatableToIfStatement(Locatable{ IfStatement: COPY conditional }));
       IF (((left_side != NIL) AND (right_side != NIL)) AND (left_side != right_side)) THEN
           RETURN TRUE;
       END
