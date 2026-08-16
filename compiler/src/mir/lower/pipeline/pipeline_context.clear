@@ -342,7 +342,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_optional_unwrap(MUTABLE self:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.target));
-    IF new_target.equal?(node.target) THEN
+    IF (new_target == node.target) THEN
       RETURN COPY node;
     END
     MUTABLE new_unwrap = OptionalUnwrap{ token: COPY node.token, target: COPY new_target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, error_union_type: NIL };

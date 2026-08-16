@@ -205,7 +205,10 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
     IF !(return_node_mutable.value) THEN
       RETURN;
     END
-    MUTABLE expected: ?Type = TRY (type__from_node(return_type));
+    MUTABLE expected: ?Type = NIL;
+    IF return_type EXISTS AS declared_return THEN
+      expected = TRY (type__new(castTypeTypeInputToTypeConstructionInput(declared_return)));
+    END
     IF expected EXISTS AS expected_value THEN
       MUTABLE expected_value = TRY (type__success_type(expected_value));
     END
