@@ -195,7 +195,7 @@ PRIVATE FN pipelineBatchWindowLowerer__bc_batch_end_expr(self: PipelineBatchWind
 END
 PRIVATE FN pipelineBatchWindowLowerer__bc_append_value_stmt(self: PipelineBatchWindowLowerer, alloc: String@symbol, append_uses_allocator: Bool) RETURNS !ExprStmt ->
   MUTABLE append_args =   IF append_uses_allocator THEN
-    CAST(Tuple{AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL }, Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL }} AS Tuple<AllocatorRef, Ident>)
+    [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL } }]
   ELSE
     [Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL }]
   END;
