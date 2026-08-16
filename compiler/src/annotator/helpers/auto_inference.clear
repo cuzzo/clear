@@ -5074,7 +5074,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeFunctionDef(v: FunctionDef) RETURNS []Auto
   IF v.implementation_owner EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY symbol(rtoc_opt_child) });
   END
-  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY v.source_name });
+  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY symbol(v.source_name) });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []AutoInferenceWalkNode ->
@@ -5162,7 +5162,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeFunctionDefMultiowned(v: FunctionDef) RETU
   IF v.implementation_owner EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY symbol(rtoc_opt_child) });
   END
-  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY v.source_name });
+  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY symbol(v.source_name) });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeGetField(v: GetField) RETURNS []AutoInferenceWalkNode ->
@@ -5360,7 +5360,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeIdentifier(v: Identifier) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY v.name });
+  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY symbol(v.name) });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7605,7 +7605,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeProtocolRequirement(v: ProtocolRequirement) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY v.name });
+  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY symbol(v.name) });
   &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY v.return_type });
   &out.append(AutoInferenceWalkNode{ BoolValue: COPY v.is_method });
   IF v.effects_decl EXISTS AS rtoc_opt_child THEN
@@ -8977,7 +8977,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeStructLit(v: StructLit) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY v.name });
+  &out.append(AutoInferenceWalkNode{ SymbolValue: COPY symbol(v.name) });
   IF v.type_args EXISTS AS rtoc_opt_child THEN
     FOR rtoc_arr_child IN rtoc_opt_child DO
       &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_arr_child });
