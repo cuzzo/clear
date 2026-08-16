@@ -234,7 +234,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_func_call(MUTABLE self: Pipel
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_args = node.args |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
-    IF (new_args == node.args) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ FuncCall: COPY node };
     END
     MUTABLE new_call = FuncCall{ token: COPY node.token, name: node.name, args: COPY new_args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
@@ -250,7 +250,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_method_call(MUTABLE self: Pip
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.object));
     MUTABLE new_args = node.args |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
-    IF ((new_target == node.object) AND (new_args == node.args)) THEN
+    IF FALSE THEN
       RETURN COPY node;
     END
     MUTABLE new_mc = MethodCall{ token: COPY node.token, object: COPY new_target, name: COPY node.name, args: COPY new_args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
@@ -274,7 +274,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_binary_op(MUTABLE self: Pipel
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.left));
     MUTABLE new_right = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.right));
-    IF ((new_left == node.left) AND (new_right == node.right)) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
     MUTABLE new_bin = BinaryOp{ token: COPY node.token, left: COPY new_left, op: COPY node.op, right: COPY new_right, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
@@ -301,7 +301,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN Locatable{ GetIndex: COPY new_gi };
     END
     MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.target));
-    IF (new_target == node.target) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ GetField: COPY node };
     END
     MUTABLE new_gf = GetField{ token: COPY node.token, target: COPY new_target, field: node.field, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, is_assignment_lhs: NIL, indirect_field: NIL, safe_nav_chain: NIL, tuple_position: NIL };
@@ -316,7 +316,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_get_index(MUTABLE self: Pipel
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.target));
     MUTABLE new_index = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.index));
-    IF ((new_target == node.target) AND (new_index == node.index)) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ GetIndex: COPY node };
     END
     MUTABLE new_ia = GetIndex{ token: COPY node.token, target: COPY new_target, index: COPY new_index, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, safe_nav_chain: NIL, protocol_operation: NIL };
@@ -330,7 +330,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_is_a(MUTABLE self: PipelinePl
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.left));
-    IF (new_left != node.left) THEN
+    IF TRUE THEN
       node.left = new_left;
     END
     RETURN COPY Locatable{ IsA: COPY node };
@@ -342,7 +342,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_optional_unwrap(MUTABLE self:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.target));
-    IF (new_target == node.target) THEN
+    IF FALSE THEN
       RETURN COPY node;
     END
     MUTABLE new_unwrap = OptionalUnwrap{ token: COPY node.token, target: COPY new_target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, error_union_type: NIL };
@@ -355,7 +355,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_var_decl(MUTABLE self: Pipeli
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
-    IF (new_value != node.value) THEN
+    IF TRUE THEN
       node.value = new_value;
     END
     RETURN COPY Locatable{ VarDecl: COPY node };
@@ -368,7 +368,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_bind_expr(MUTABLE self: Pipel
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, castStringToAssignmentName(COPY node.name)));
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
-    IF ((assignmentNameString(new_name) == node.name) AND (new_value == node.value)) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ BindExpr: COPY node };
     END
     MUTABLE new_bind = BindExpr{ token: COPY node.token, name: COPY assignmentNameString(new_name), type: COPY node.type, value: new_value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL };
@@ -397,7 +397,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_assignment(MUTABLE self: Pipe
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, COPY node.name));
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
-    IF ((new_name == node.name) AND (new_value == node.value)) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ Assignment: COPY node };
     END
     MUTABLE new_assign = Assignment{ token: COPY node.token, name: COPY new_name, value: COPY new_value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
@@ -442,7 +442,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE value_value: Locatable = value?;
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY value_value));
-    IF (new_value == value_value) THEN
+    IF FALSE THEN
       RETURN COPY castNodeToLocatable(node);
     END
     MUTABLE new_node: ?PipelineRewriteNode = NIL;
@@ -466,7 +466,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_unary_op(MUTABLE self: Pipeli
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_operand = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.right));
-    IF (new_operand == node.right) THEN
+    IF FALSE THEN
       RETURN COPY node;
     END
     MUTABLE new_uo = UnaryOp{ token: COPY node.token, op: node.op, right: new_operand, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
@@ -495,7 +495,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE arm_body: []Locatable = TRY (withMatchArm__body_nodes(arm));
         MUTABLE new_arm_body = TRY (pipelinePlaceholderRewriter__substitute_body(&rtoc_self_view, arm_body));
         MUTABLE rewritten_arm_branch_value: ?WithMatchArm = NIL;
-        IF (new_arm_body == arm_body) THEN
+        IF FALSE THEN
           rewritten_arm_branch_value = arm;
         ELSE
           rewritten_arm_branch_value = WithMatchArm{ family: COPY withMatchArm__family_value(arm), body: COPY new_arm_body, lock_error_clauses: COPY TRY (withMatchArm__lock_error_clauses_value(arm)), token: withMatchArm__token_value(arm) };
@@ -506,7 +506,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       new_arms = rewritten_arms;
     END
-    IF ((new_body == node.body) AND (new_arms == node.arms)) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ WithBlock: COPY node };
     END
     MUTABLE new_with = WithBlock{ token: COPY node.token, capabilities: COPY node.capabilities, body: COPY new_body, deferred_drops: COPY node.deferred_drops, capability_plan: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, lock_error_clause: NIL, deadlock_escape: NIL, view_kind: NIL, snapshot_mode: NIL, polymorphic: NIL, universal_poly: NIL, arms: NIL };
@@ -552,7 +552,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       new_fields[key] = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, fields[key]?));
       index = (index + 1);
     END
-    IF (new_fields == fields) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ StructLit: COPY node };
     END
     MUTABLE new_sl = StructLit{ token: COPY node.token, name: COPY node.name, fields: COPY new_fields, storage: COPY node.storage, type_args: COPY node.type_args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, borrowed_field_names: NIL, field_tokens: {} };
@@ -566,7 +566,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_list_lit(MUTABLE self: Pipeli
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
-    IF (new_items == node.items) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ ListLit: COPY node };
     END
     MUTABLE new_ll = ListLit{ token: COPY node.token, items: COPY new_items, storage: COPY node.storage, constructor_options: COPY node.constructor_options, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
@@ -580,7 +580,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_tuple_lit(MUTABLE self: Pipel
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
-    IF (new_items == node.items) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ TupleLit: COPY node };
     END
     MUTABLE new_tl = TupleLit{ token: COPY node.token, items: COPY new_items, storage: COPY node.storage, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
@@ -593,7 +593,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_cast(MUTABLE self: PipelinePl
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
-    IF (new_value == node.value) THEN
+    IF FALSE THEN
       RETURN COPY node;
     END
     MUTABLE new_cast = Cast{ token: COPY node.token, value: new_value, target: node.target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
@@ -612,7 +612,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE pair_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY rtoc_pair._1));
       &new_pairs.append(CAST(Tuple{pair_key, pair_value} AS Tuple<Locatable,Locatable>));
     END
-    IF (new_pairs == pairs) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ HashLit: COPY node };
     END
     MUTABLE new_hl = HashLit{ token: COPY node.token, pairs: COPY new_pairs, storage: COPY node.storage, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
@@ -640,7 +640,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       new_result_branch_value = NIL;
     END
     MUTABLE new_result: ?Locatable = new_result_branch_value;
-    IF ((new_body == node.body) AND (new_result == node.result)) THEN
+    IF FALSE THEN
       RETURN COPY node;
     END
     MUTABLE new_block = BlockExpr{ token: COPY node.token, body: COPY new_body, result: COPY new_result, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
@@ -658,7 +658,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_assert(MUTABLE self: Pipeline
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_cond = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.condition));
-    IF (new_cond == node.condition) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ Assert: COPY node };
     END
     MUTABLE new_assert = Assert{ token: COPY node.token, condition: new_cond, message: node.message, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
@@ -677,7 +677,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.else_branch != NIL THEN
       new_else = COPY ((node.else_branch)?) |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
     END
-    IF (((new_cond == node.condition) AND (new_then == node.then_branch)) AND (new_else == node.else_branch)) THEN
+    IF FALSE THEN
       RETURN COPY Locatable{ IfStatement: COPY node };
     END
     MUTABLE new_if = IfStatement{ token: COPY node.token, condition: COPY new_cond, then_branch: COPY new_then, else_branch: COPY new_else, then_drops: node.then_drops, else_drops: node.else_drops, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
