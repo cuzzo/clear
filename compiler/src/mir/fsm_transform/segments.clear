@@ -349,7 +349,7 @@ PRIVATE FN segments__contains_suspend_anywhere?(stmts: ?[]Locatable) RETURNS !Bo
     RETURN FALSE;
   END
 END
-PUB FN segments__classify_suspend(stmt: Locatable) RETURNS ?SegmentTail ->
+PUB FN segments__classify_suspend(stmt: Locatable) RETURNS !?SegmentTail ->
   IF (stmt IS_A FuncCall) OR (stmt IS_A MethodCall) OR (stmt IS_A NextExpr) THEN
     RETURN segments__suspend_for(stmt, NIL);
   ELSE_IF stmt IS_A VarDecl AS var_decl THEN

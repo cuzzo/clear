@@ -190,7 +190,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
   END
   &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_dispatch(s.dispatch)), 8));
   &parts.append("");
-  &parts.append(fsmWrapperEmitter__render_destroy_task(s.dispatch.ctx_id(), (s.destroy_actions OR List[]), &mir_emitter));
+  &parts.append(fsmWrapperEmitter__render_destroy_task(s.dispatch.ctx_id, COPY s.destroy_actions, &mir_emitter));
   &parts.append("    };");
   RETURN parts.join("\n");
 END

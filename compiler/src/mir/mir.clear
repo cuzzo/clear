@@ -3943,7 +3943,7 @@ PUB STRUCT FsmGenericCtxStruct {
   promoted_field_decls: Any@multiowned,
   member_fns: []FsmMemberFn,
   dispatch: FsmDispatch,
-  destroy_actions: Any@multiowned
+  destroy_actions: []FsmDestroyAction
 }
 PUB STRUCT FsmMemberFn {
   fn_name: Any@multiowned,

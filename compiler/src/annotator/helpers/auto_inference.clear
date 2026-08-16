@@ -2442,7 +2442,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeAssignment(v: Assignment) RETURNS []AutoIn
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.field_lifecycle_plan)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.auto_atomic_op)] });
   RETURN out;
 END

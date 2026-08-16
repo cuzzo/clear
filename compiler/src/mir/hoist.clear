@@ -234,7 +234,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
         END
       END
     END
-    return_node_mutable.value = TRY (hoist__hoist_escape_value_mut(return_node_mutable.value, hoists, counter, schema_lookup, ruby_wrap_optional_Type_TypeTypeInput(expected)));
+    return_node_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY UNWRAP (return_node_mutable.value), &hoists, counter, schema_lookup, ruby_wrap_optional_Type_TypeTypeInput(expected)));
   ELSE_IF stmt IS_A YieldExpr AS yield_expr THEN
     MUTABLE yield_expr_mutable = COPY yield_expr;
     IF yield_expr_mutable.expr EXISTS AS yield_value THEN
