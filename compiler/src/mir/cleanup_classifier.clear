@@ -165,7 +165,7 @@ PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: FN(
   END
   MUTABLE bindings: {String}CleanupEntry@multiowned = {};
   MUTABLE entries_by_place: {PlaceId}CleanupEntry@multiowned = {};
-  TRY (cleanupClassifier__walk_bindings(COPY fn_node.body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+  TRY (cleanupClassifier__walk_bindings(fn_node.body |> SELECT castLocatableToAstBodyNode(_), schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
   TRY (walk_takes_params(fn_node, schema_lookup, lifecycle_registry, &bindings));
   walk_moved_source_guards(fn_node.body, bindings);
   TRY (walk_match_as_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));

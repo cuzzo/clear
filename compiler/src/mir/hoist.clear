@@ -192,7 +192,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < call.args.length() DO
     IF hoist__concat?(call.args[rtoc_idx]) THEN
-        call.args[rtoc_idx] = TRY (hoist__make_temp_mut(call.args[rtoc_idx], &hoists, hoistCounter__next_name(&counter)));
+        call.args[rtoc_idx] = TRY (hoist__make_temp_mut(COPY UNWRAP (call.args[rtoc_idx]), &hoists, hoistCounter__next_name(&counter)));
     ELSE
         TRY (hoist__hoist_concats_within_mut(call.args[rtoc_idx], hoists, counter));
     END

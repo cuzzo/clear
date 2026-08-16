@@ -272,8 +272,8 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_binary_op(MUTABLE self: Pipel
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.left));
-    MUTABLE new_right = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.right));
+    MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.left));
+    MUTABLE new_right = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.right));
     IF ((new_left == node.left) AND (new_right == node.right)) THEN
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
@@ -329,7 +329,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_is_a(MUTABLE self: PipelinePl
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.left));
+    MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.left));
     IF !(new_left.equal?(node.left)) THEN
       node.left = new_left;
     END
@@ -470,7 +470,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_unary_op(MUTABLE self: Pipeli
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_operand = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.right));
+    MUTABLE new_operand = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.right));
     IF (new_operand == node.right) THEN
       RETURN COPY node;
     END

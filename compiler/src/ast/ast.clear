@@ -8874,3 +8874,6 @@ PUB FN unnestRightName(node: Locatable) RETURNS String ->
   END
   RETURN "";
 END
+PUB FN aST__call?(node: Locatable) RETURNS Bool ->
+  RETURN ((node IS_A FuncCall) OR (node IS_A MethodCall));
+END

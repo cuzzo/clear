@@ -82,7 +82,7 @@ PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions
   MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, &mir_emitter);
   MUTABLE extra: String = "";
   IF !(fsmWrapperEmitter__empty?(extra_zig)) THEN
-    extra = (((extra_zig.split("\n") |> SELECT "    ${_.trim()}").join("\n")) + "\n");
+    extra = (((extra_zig.split("\n") |> SELECT "    ${_.trim()}").join("\n")) $+ "\n");
   ELSE
     extra = "";
   END

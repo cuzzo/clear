@@ -922,7 +922,7 @@ FN rtocChildrenOfCollectValueFunctionDef(v: FunctionDef) RETURNS []CollectValue 
   END
   RETURN out;
 END
-FN rtocChildrenOfCollectValueFunctionDefMultiowned(v: FunctionDef@multiowned) RETURNS []CollectValue ->
+FN rtocChildrenOfCollectValueFunctionDefMultiowned(v: FunctionDef) RETURNS []CollectValue ->
   MUTABLE out: []CollectValue = [];
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToCollectValue(COPY rtoc_arr_child));
@@ -1037,7 +1037,7 @@ FN rtocChildrenOfCollectValueWithBlock(v: WithBlock) RETURNS []CollectValue ->
   END
   RETURN out;
 END
-FN rtocChildrenOfCollectValueWithBlockMultiowned(v: WithBlock@multiowned) RETURNS []CollectValue ->
+FN rtocChildrenOfCollectValueWithBlockMultiowned(v: WithBlock) RETURNS []CollectValue ->
   MUTABLE out: []CollectValue = [];
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToCollectValue(COPY rtoc_arr_child));
