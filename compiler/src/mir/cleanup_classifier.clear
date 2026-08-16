@@ -83,7 +83,7 @@ PUB FN frozenCleanupFacts__live_entry_for(self: FrozenCleanupFacts, name: Name) 
   IF cleanupEntry__needs_cleanup?(entry) THEN
     RETURN entry;
   ELSE
-    RETURN new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
+    RETURN cleanupEntry__blank();
   END
 END
 PUB FN frozenCleanupFacts__live_entry_for_node(self: FrozenCleanupFacts, name: Name, node: Locatable) RETURNS CleanupEntry@multiowned ->
@@ -91,7 +91,7 @@ PUB FN frozenCleanupFacts__live_entry_for_node(self: FrozenCleanupFacts, name: N
   IF cleanupEntry__needs_cleanup?(entry) THEN
     RETURN entry;
   ELSE
-    RETURN new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
+    RETURN cleanupEntry__blank();
   END
 END
 PUB FN frozenCleanupFacts__with_live_entry_for(self: FrozenCleanupFacts, name: Name, block: FN(CleanupEntry) -> Void) RETURNS Bool ->
