@@ -265,7 +265,7 @@ PRIVATE FN hoist__hoist_escape_value_mut(MUTABLE value: Locatable, MUTABLE hoist
     RETURN Locatable{ Identifier: COPY TRY (hoist__make_temp_mut(value, &hoists, hoistCounter__next_name(&counter), TRUE, expected_type)) };
   END
   IF ((value IS_A StructLit OR value IS_A UnionVariantLit) OR value IS_A ListLit) THEN
-    TRY (hoist__hoist_concats_within_mut(value, hoists, &counter));
+    TRY (hoist__hoist_concats_within_mut(value, &hoists, &counter));
   END
   RETURN COPY castLocatableToLocatable(value);
 END

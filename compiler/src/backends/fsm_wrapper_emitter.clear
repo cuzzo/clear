@@ -245,12 +245,12 @@ PRIVATE FN fsmWrapperEmitter__arm_uses_continue?(arm: FsmStateArm) RETURNS Bool 
     RETURN TRUE;
   END
   RETURN PARTIAL MATCH arm.tail START
-    MIR.FsmTailJump -> TRUE,
-    MIR.FsmTailRegisterYield -> TRUE,
-    MIR.FsmTailCondJump -> TRUE,
-    MIR.FsmTailLockTry -> TRUE,
-    MIR.FsmTailWokenCheck -> TRUE,
-    MIR.FsmTailRetryOrError -> TRUE,
+    FsmTail.FsmTailJump AS item -> TRUE,
+    FsmTail.FsmTailRegisterYield AS item -> TRUE,
+    FsmTail.FsmTailCondJump AS item -> TRUE,
+    FsmTail.FsmTailLockTry AS item -> TRUE,
+    FsmTail.FsmTailWokenCheck AS item -> TRUE,
+    FsmTail.FsmTailRetryOrError AS item -> TRUE,
     DEFAULT -> FALSE
   END;
 END

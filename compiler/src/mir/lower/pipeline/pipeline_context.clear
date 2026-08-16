@@ -565,7 +565,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_list_lit(MUTABLE self: Pipeli
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
+    MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
     IF (new_items == node.items) THEN
       RETURN COPY Locatable{ ListLit: COPY node };
     END
@@ -579,7 +579,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_tuple_lit(MUTABLE self: Pipel
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, _));
+    MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
     IF (new_items == node.items) THEN
       RETURN COPY Locatable{ TupleLit: COPY node };
     END
