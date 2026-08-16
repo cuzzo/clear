@@ -169,10 +169,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Ident{ name: COPY pipelineMaterializer__source_binding_name(rtoc_self_view, runtimeHost__materializer_current_label(rtoc_self_view.host)), lowered_node_id: NIL, ownership_consumption: NIL };
 }
 END
-PUB FN pipelineMaterializer__pipeline_block(self: PipelineMaterializer, MUTABLE list_node: Locatable, blk: FN(String, String) -> ![]Emittable) RETURNS !MIRBlockExpr
+PUB FN pipelineMaterializer__pipeline_block(MUTABLE self: PipelineMaterializer, MUTABLE list_node: Locatable, blk: FN(String, String) -> ![]Emittable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE label = runtimeHost__materializer_next_label(rtoc_self_view.host);
     MUTABLE src_name = pipelineMaterializer__source_binding_name(rtoc_self_view, label);
     MUTABLE source_mir = runtimeHost__materializer_visit_mir(rtoc_self_view.host, list_node);

@@ -788,7 +788,7 @@ PRIVATE FN pipelineHost__pipeline_block(self: PipelineHost, MUTABLE list_node: L
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (pipelineMaterializer__pipeline_block(rtoc_self_view.materializer, &list_node, blk));
+    RETURN TRY (pipelineMaterializer__pipeline_block(&rtoc_self_view.materializer, &list_node, blk));
 }
 END
 PRIVATE FN pipelineHost__pipeline_result_alloc(self: PipelineHost) RETURNS String@symbol
