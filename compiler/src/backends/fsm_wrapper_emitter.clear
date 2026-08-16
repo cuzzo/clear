@@ -57,10 +57,10 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, MUTABLE mi
   RETURN parts.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_run_body(step: FsmStep, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
-  MUTABLE rendered = fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
+  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
   rtoc_lambda_result_2 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, mir_emitter));
   rtoc_lambda_result_2
-  });
+  }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
   MUTABLE body_text: String = body.join("\n");
   RETURN (["        fn runBody(__ctx_${step.ctx_id}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id}.rt;", (IF step.suppress_runtime_ref THEN
@@ -120,10 +120,10 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emi
   RETURN parts.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_step(step: FsmStep, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
-  MUTABLE rendered = fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
+  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
   rtoc_lambda_result_4 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, mir_emitter));
   rtoc_lambda_result_4
-  });
+  }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
   MUTABLE body_text: String = body.join("\n");
   RETURN (["        fn runStep${step.index}(__ctx_${step.ctx_id}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id}.rt;", (IF step.suppress_runtime_ref THEN
@@ -276,10 +276,10 @@ PRIVATE FN fsmWrapperEmitter__render_tail(t: FsmTail, ctx_id: Int64) RETURNS !St
   END
 END
 PRIVATE FN fsmWrapperEmitter__render_member_fn(fn_value: FsmMemberFn, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
-  MUTABLE rendered = fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value, mir_emitter) -> {
+  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value, mir_emitter) -> {
   rtoc_lambda_result_5 = TRY (fsmWrapperEmitter__render_body_items((fn_value.body_stmts OR List[]), mir_emitter));
   rtoc_lambda_result_5
-  });
+  }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
   MUTABLE body_text: String = body.join("\n");
   MUTABLE extra_prologue = fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value) -> {
@@ -448,12 +448,12 @@ END
 PRIVATE FN fsmWrapperEmitter__render_destroy_lock_action(ctx_id: Int64, action: FsmDestroyLockRelease, mir_emitter: MIREmitter) RETURNS !String ->
   RETURN "if (__ctx_${ctx_id.toString()}.${fsmDestroyLockRelease__guard_field(action)}) ${TRY (mIREmitter__emit(&mir_emitter, action.lock_ref))}.${action.unlock_method}();";
 END
-PUB FN fsmWrapperEmitter__with_rt_name(MUTABLE mir_emitter: MIREmitter, rt_name: String, blk: FN() -> Any) RETURNS Any@multiowned ->
+PUB FN fsmWrapperEmitter__with_rt_name(MUTABLE mir_emitter: MIREmitter, rt_name: String, blk: FN() -> ![]String) RETURNS ![]String ->
 MUTABLE previous: String = "rt";
 previous = COPY mir_emitter.rt_name;
 DEFER mir_emitter.rt_name = previous;
 mir_emitter.rt_name = COPY rt_name;
-RETURN blk();
+RETURN TRY (blk());
 END
 PRIVATE FN fsmWrapperEmitter__indent_block(text: String, n: Int64) RETURNS String ->
   IF fsmWrapperEmitter__empty?(text) THEN

@@ -1042,7 +1042,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
         END
         END
-        operatorEvidenceCollector__walk_binops(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY return_node.value)] }, name_to_slot, fn_value);
+        operatorEvidenceCollector__walk_binops(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY UNWRAP (return_node.value))] }, name_to_slot, fn_value);
       ELSE_IF node_value IS_A FunctionDef@multiowned AS function_def_multiowned THEN
     
       ELSE_IF node_value IS_A Token@multiowned AS token_multiowned THEN
