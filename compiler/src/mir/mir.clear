@@ -4001,8 +4001,8 @@ PUB STRUCT FsmTailCondSkip {
   skip_step: Int64
 }
 PUB STRUCT FsmTailLockTry {
-  try_method: Any@multiowned,
-  lock_field_ref: Any@multiowned,
+  try_method: String,
+  lock_field_ref: String,
   ok_step: Any@multiowned,
   wait_step: Any@multiowned,
   error_step: Any@multiowned

@@ -292,7 +292,7 @@ PRIVATE FN hoist__allocating?(MUTABLE node: ?Locatable, schema_lookup: ?FN(Strin
     IF !(TRUE) THEN
       RETURN FALSE;
     END
-    MUTABLE ti = &node_value_mutable.full_type_mut("hoist allocation candidate");
+    MUTABLE ti = TRY (aST__full_type_mut(node_value_mutable));
     IF TRY (type__c_string?(ti)) THEN
       RETURN FALSE;
     END

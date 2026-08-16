@@ -597,11 +597,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY node;
     END
     MUTABLE new_cast = Cast{ token: COPY node.token, value: new_value, target: node.target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-    MUTABLE rtoc_rewrite_new_cast: PipelineRewriteNode = PipelineRewriteNode{ Cast: COPY new_cast };
-    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ Cast: COPY node }, &rtoc_rewrite_new_cast);
-    IF rtoc_rewrite_new_cast IS_A Cast AS rtoc_updated_new_cast THEN
-      new_cast = COPY rtoc_updated_new_cast;
-    END
     RETURN new_cast;
 }
 END
