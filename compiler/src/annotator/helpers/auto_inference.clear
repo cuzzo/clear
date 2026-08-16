@@ -604,27 +604,24 @@ PRIVATE FN autoUnifier__types_equal?(self: AutoUnifier, a: AutoConstraintCollect
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (a == b) THEN
-      RETURN TRUE;
+    MUTABLE a_key: ?String@symbol = NIL;
+    IF a IS_A Type AS a_type THEN
+      a_key = COPY type__resolved(a_type);
+    ELSE_IF a IS_A String@symbol AS a_symbol THEN
+      a_key = COPY a_symbol;
     END
-    IF !((a IS_A Type OR b IS_A Type)) THEN
-      RETURN FALSE;
+    MUTABLE b_key: ?String@symbol = NIL;
+    IF b IS_A Type AS b_type THEN
+      b_key = COPY type__resolved(b_type);
+    ELSE_IF b IS_A String@symbol AS b_symbol THEN
+      b_key = COPY b_symbol;
     END
-    MUTABLE a_sym_branch_value: ?AutoConstraintCollectorObservedType = NIL;
-    IF a IS_A Type AS type THEN
-      a_sym_branch_value = AutoConstraintCollectorObservedType{ SymbolValue: COPY type__resolved(type) };
-    ELSE
-      a_sym_branch_value = COPY a;
+    IF a_key EXISTS AS a_key_value THEN
+      IF b_key EXISTS AS b_key_value THEN
+        RETURN (a_key_value == b_key_value);
+      END
     END
-    MUTABLE a_sym: AutoConstraintCollectorObservedType = a_sym_branch_value?;
-    MUTABLE b_sym_branch_value: ?AutoConstraintCollectorObservedType = NIL;
-    IF b IS_A Type AS type THEN
-      b_sym_branch_value = AutoConstraintCollectorObservedType{ SymbolValue: COPY type__resolved(type) };
-    ELSE
-      b_sym_branch_value = COPY b;
-    END
-    MUTABLE b_sym: AutoConstraintCollectorObservedType = b_sym_branch_value?;
-    RETURN (a_sym == b_sym);
+    RETURN FALSE;
 }
 END
 PRIVATE FN autoUnifier__stamp_slot_mut(self: AutoUnifier, MUTABLE slot: Slot, type: AutoConstraintCollectorObservedType) RETURNS !Void
