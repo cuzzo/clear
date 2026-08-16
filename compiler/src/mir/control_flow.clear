@@ -549,12 +549,15 @@ PUB FN ownershipDataflow__cleanup_summary(self: OwnershipDataflow) RETURNS !{Str
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (ownershipDataflow__cleanup_summary_by_place(rtoc_self_view))).each_with_object({}, %(tuple_param_0, out: Tuple<PlaceId,CleanupDecision>) -> {
-    MUTABLE place = tuple_param_0._0;
-    MUTABLE decision = tuple_param_0._1;
-    out[place.path()] = decision;
-    NIL
-    });
+    MUTABLE by_place = TRY (ownershipDataflow__cleanup_summary_by_place(rtoc_self_view));
+    MUTABLE out: {String}CleanupDecision = {};
+    FOR rtoc_place IN by_place.keys() DO
+      IF by_place[rtoc_place] EXISTS AS decision THEN
+        MUTABLE decision_key: String = COPY rtoc_place.path;
+        out[decision_key] = COPY decision;
+      END
+    END
+    RETURN out;
 }
 END
 PUB FN ownershipDataflow__cleanup_summary_by_place(self: OwnershipDataflow) RETURNS !{PlaceId}CleanupDecision
@@ -679,14 +682,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     counts[name] = (UNWRAP (counts[name]) + 1);
     rubyToClearVoid()
     });
-    RETURN counts.each_with_object(Set[], %(tuple_param_0, out: Tuple<String,Int64>) -> {
-    MUTABLE name = tuple_param_0._0;
-    MUTABLE count = tuple_param_0._1;
-    IF (count > 1) THEN
-      RETURN &out.append(name);
+    MUTABLE duplicated: [Set]String = Set[];
+    FOR rtoc_name IN counts.keys() DO
+      IF counts[rtoc_name] EXISTS AS name_count THEN
+        IF (name_count > 1) THEN
+          &duplicated.insert(COPY rtoc_name);
+        END
+      END
     END
-    NIL
-    });
+    RETURN duplicated;
 }
 END
 PUB FN ownershipDataflow__linear_scope_decl_always_moves?(self: OwnershipDataflow, stmts: []Locatable, var: String) RETURNS !Bool
