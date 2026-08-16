@@ -222,7 +222,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
     END
     MUTABLE ret_or_binop: Bool = FALSE;
     IF return_node_mutable.value IS_A BinaryOp AS ret_binop THEN
-      ret_or_binop = ((ret_binop.op == :OR) OR (ret_binop.op == :OR_ELSE));
+      ret_or_binop = ((ret_binop.op == symbol("OR")) OR (ret_binop.op == symbol("OR_ELSE")));
     END
     IF ret_or_binop THEN
       IF aST__node_right(return_node_mutable.value) EXISTS AS or_right THEN
