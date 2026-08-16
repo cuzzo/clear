@@ -259,7 +259,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF rtoc_rewrite_new_mc IS_A MethodCall AS rtoc_updated_new_mc THEN
       new_mc = COPY rtoc_updated_new_mc;
     END
-    pipelinePlaceholderRewriter__copy_call_metadata(rtoc_self_view, node, &new_mc);
+    MUTABLE rtoc_meta_new_mc: PipelineRewriteNode = PipelineRewriteNode{ MethodCall: COPY new_mc };
+    pipelinePlaceholderRewriter__copy_call_metadata(rtoc_self_view, PipelineRewriteNode{ MethodCall: COPY node }, &rtoc_meta_new_mc);
+    IF rtoc_meta_new_mc IS_A MethodCall AS rtoc_meta_updated_new_mc THEN
+      new_mc = COPY rtoc_meta_updated_new_mc;
+    END
     RETURN new_mc;
 }
 END
