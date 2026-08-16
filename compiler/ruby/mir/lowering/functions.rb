@@ -2916,13 +2916,15 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     end
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
-    captures = node.captures&.map { |c|
-      if c.respond_to?(:name)
-        c.name.to_s
-      else
-        c.to_s
-      end
-    } || []
+    # A WITH alias (`WITH POLYMORPHIC self AS rtoc_self_view`) lowers to the
+    # variable it aliases, so a capture named for the alias would not match the
+    # name the body actually references. Record both.
+    alias_owners = capability_state.with_alias_owner_map || {}
+    captures = (node.captures || []).flat_map { |c|
+      name = c.respond_to?(:name) ? c.name.to_s : c.to_s
+      owner = alias_owners[name]
+      owner ? [name, owner.to_s] : [name]
+    }
     MIR::LambdaExpr.new(fn_def, captures)
   end
 
