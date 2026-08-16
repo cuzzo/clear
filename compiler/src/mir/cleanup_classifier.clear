@@ -51,7 +51,7 @@ PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String
   RETURN frozenCleanupFacts__build(&entries);
 END
 PUB FN frozenCleanupFacts__build(MUTABLE entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
-  RETURN FrozenCleanupFacts{ entries_by_place: entries };
+  RETURN FrozenCleanupFacts{ entries_by_place: COPY entries };
 END
 PUB FN frozenCleanupFacts__empty?(self: FrozenCleanupFacts) RETURNS Bool EFFECTS REENTRANT ->
   RETURN (self.entries_by_place.count() == 0);

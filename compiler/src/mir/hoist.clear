@@ -74,10 +74,23 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, counter: HoistCounte
     MUTABLE stmt = COPY UNWRAP (body[i]);
     MUTABLE hoists: []VarDecl = ( { MUTABLE rtoc_empty_list_3: []VarDecl = List[]; rtoc_empty_list_3 } );
     TRY (hoist__collect_stmt_hoists_mut(&stmt, &hoists, counter, schema_lookup, return_type));
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < hoists.length() DO
-  &body.insert((i + rtoc_idx), Locatable{ VarDecl: COPY UNWRAP (hoists[rtoc_idx]) });
-  rtoc_idx = rtoc_idx + 1;
+    IF !((hoists.length() == 0)) THEN
+      MUTABLE rebuilt: []Locatable = ( { MUTABLE rtoc_rebuilt_list: []Locatable = List[]; rtoc_rebuilt_list } );
+      MUTABLE copy_idx = 0;
+      WHILE (copy_idx < i) DO
+        &rebuilt.append(COPY UNWRAP (body[copy_idx]));
+        copy_idx = (copy_idx + 1);
+      END
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < hoists.length() DO
+        &rebuilt.append(Locatable{ VarDecl: COPY UNWRAP (hoists[rtoc_idx]) });
+        rtoc_idx = (rtoc_idx + 1);
+      END
+      WHILE (copy_idx < body.length()) DO
+        &rebuilt.append(COPY UNWRAP (body[copy_idx]));
+        copy_idx = (copy_idx + 1);
+      END
+      body = rebuilt;
     END
     generated = ruby_array_concat_VarDecl(generated, hoists);
     i = (i + hoists.length());
