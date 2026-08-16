@@ -1923,7 +1923,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeAllOp(v: AllOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1986,7 +1989,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeAllOpMultiowned(v: AllOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2049,7 +2055,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeAnyOp(v: AnyOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2112,7 +2121,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeAnyOpMultiowned(v: AnyOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2239,7 +2251,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeAssertRaises(v: AssertRaises) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2302,7 +2317,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeAssertRaisesMultiowned(v: AssertRaises) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2434,7 +2452,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeAverageOp(v: AverageOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2497,7 +2518,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeAverageOpMultiowned(v: AverageOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2561,7 +2585,10 @@ FN rtocChildrenOfAutoInferenceWalkNodeBatchWindowOp(v: BatchWindowOp) RETURNS []
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.options)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2625,7 +2652,10 @@ FN rtocChildrenOfAutoInferenceWalkNodeBatchWindowOpMultiowned(v: BatchWindowOp) 
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.options)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2688,7 +2718,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeBenchmarkStmt(v: BenchmarkStmt) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.iterations)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -2752,7 +2785,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeBenchmarkStmtMultiowned(v: BenchmarkStmt) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.iterations)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -3742,7 +3778,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeCountOp(v: CountOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3805,7 +3844,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeCountOpMultiowned(v: CountOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4120,7 +4162,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeDistinctOp(v: DistinctOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4183,7 +4228,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeDistinctOpMultiowned(v: DistinctOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4592,7 +4640,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeFindOp(v: FindOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4655,7 +4706,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeFindOpMultiowned(v: FindOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5730,7 +5784,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeIndexOp(v: IndexOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5793,7 +5850,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeIndexOpMultiowned(v: IndexOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6510,7 +6570,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeMaxOp(v: MaxOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6573,7 +6636,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeMaxOpMultiowned(v: MaxOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6636,7 +6702,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeMinOp(v: MinOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6699,7 +6768,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeMinOpMultiowned(v: MinOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7262,7 +7334,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeOrderByOp(v: OrderByOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7325,7 +7400,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeOrderByOpMultiowned(v: OrderByOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7512,7 +7590,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeProfileStmt(v: ProfileStmt) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7575,7 +7656,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeProfileStmtMultiowned(v: ProfileStmt) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7963,7 +8047,10 @@ FN rtocChildrenOfAutoInferenceWalkNodeReduceOp(v: ReduceOp) RETURNS []AutoInfere
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.initial_value)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8027,7 +8114,10 @@ FN rtocChildrenOfAutoInferenceWalkNodeReduceOpMultiowned(v: ReduceOp) RETURNS []
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.initial_value)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8406,7 +8496,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSelectOp(v: SelectOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effect_mode)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stream_mode)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.modifier_order)] });
@@ -8473,7 +8566,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSelectOpMultiowned(v: SelectOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.effect_mode)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.stream_mode)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.modifier_order)] });
@@ -8796,7 +8892,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSmashStmt(v: SmashStmt) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8859,7 +8958,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSmashStmtMultiowned(v: SmashStmt) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9254,7 +9356,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSumOp(v: SumOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9317,7 +9422,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSumOpMultiowned(v: SumOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9506,7 +9614,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeTakeWhileOp(v: TakeWhileOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9569,7 +9680,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeTakeWhileOpMultiowned(v: TakeWhileOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10243,7 +10357,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeUnnestOp(v: UnnestOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10306,7 +10423,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeUnnestOpMultiowned(v: UnnestOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10517,7 +10637,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeWhereOp(v: WhereOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10580,7 +10703,10 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeWhereOpMultiowned(v: WhereOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10784,7 +10910,10 @@ FN rtocChildrenOfAutoInferenceWalkNodeWindowOp(v: WindowOp) RETURNS []AutoInfere
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.size)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -10848,7 +10977,10 @@ FN rtocChildrenOfAutoInferenceWalkNodeWindowOpMultiowned(v: WindowOp) RETURNS []
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.size)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.expression)] });
+  MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
+  IF rtoc_expr_opt EXISTS AS rtoc_expr_value THEN
+    &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_expr_value)] });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
