@@ -225,22 +225,18 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
       ret_or_binop = ((ret_binop.op == :OR) OR (ret_binop.op == :OR_ELSE));
     END
     IF ret_or_binop THEN
-      MUTABLE right_type_branch_value: ?Type = NIL;
-      IF return_node_mutable.value.right() IS_A Locatable THEN
-        right_type_branch_value = return_node_mutable.value.right().full_type_mut();
-      ELSE
-        right_type_branch_value = TRY (type__from_node_mut(return_node_mutable.value.right(), "return OR right hoist"));
-      END
-      MUTABLE right_type: Type = right_type_branch_value?;
-      IF type__collection?(right_type) THEN
-        expected = COPY right_type;
+      IF aST__node_right(return_node_mutable.value) EXISTS AS or_right THEN
+        MUTABLE right_type: Type = TRY (aST__full_type_mut(or_right));
+        IF type__collection?(right_type) THEN
+          expected = COPY right_type;
+        END
       END
     END
     return_node_mutable.value = TRY (hoist__hoist_escape_value_mut(return_node_mutable.value, hoists, counter, schema_lookup, ruby_wrap_optional_Type_TypeTypeInput(expected)));
   ELSE_IF stmt IS_A YieldExpr AS yield_expr THEN
     MUTABLE yield_expr_mutable = COPY yield_expr;
-    IF yieldExpr__expr(yield_expr_mutable) THEN
-      yield_expr_mutable.expr = TRY (hoist__hoist_escape_value_mut(yieldExpr__expr(yield_expr_mutable), hoists, counter, schema_lookup));
+    IF yield_expr_mutable.expr EXISTS AS yield_value THEN
+      yield_expr_mutable.expr = TRY (hoist__hoist_escape_value_mut(yield_value, &hoists, counter, schema_lookup));
     END
   ELSE_IF stmt IS_A Assignment AS assignment THEN
     MUTABLE assignment_mutable = COPY assignment;
