@@ -260,7 +260,7 @@ PRIVATE FN fsmWrapperEmitter__render_tail(t: FsmTail, ctx_id: Int64) RETURNS !St
   ELSE_IF t IS_A FsmTailYield AS fsm_tail_yield THEN
     RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_yield.next_step.toString()};", "return .{ .${fsm_tail_yield.yield_reason} = {} };"]).join("\n");
   ELSE_IF t IS_A FsmTailRegisterYield AS fsm_tail_register_yield THEN
-    RETURN (["if (${TRY (fsmWrapperEmitter__render_fsm_expr(fsm_tail_register_yield.register_expr))}) {", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_register_yield.next_step};", "    return .{ .${fsm_tail_register_yield.yield_reason} = {} };", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_register_yield.next_step};", "continue :__sw;"]).join("\n");
+    RETURN (["if (${TRY (fsmWrapperEmitter__render_fsm_expr(fsm_tail_register_yield.register_expr))}) {", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_register_yield.next_step.toString()};", "    return .{ .${fsm_tail_register_yield.yield_reason} = {} };", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_register_yield.next_step.toString()};", "continue :__sw;"]).join("\n");
   ELSE_IF t IS_A FsmTailJump AS fsm_tail_jump THEN
     RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_jump.next_step.toString()};", "continue :__sw;"]).join("\n");
   ELSE_IF t IS_A FsmTailCondJump AS fsm_tail_cond_jump THEN

@@ -279,7 +279,11 @@ PRIVATE FN hoist__allocating?(MUTABLE node: ?Locatable, schema_lookup: ?FN(Strin
       RETURN FALSE;
     END
     MUTABLE coerced: ?Type = aST__node_coerced_type_object(node_value_mutable);
-    IF coerced.node_reference?() THEN
+    MUTABLE coerced_is_node_ref: Bool = FALSE;
+    IF coerced EXISTS AS coerced_value THEN
+      coerced_is_node_ref = TRY (type__node_reference?(coerced_value));
+    END
+    IF coerced_is_node_ref THEN
       RETURN FALSE;
     END
     IF ((hoist__concat?(node_value_mutable) OR node_value_mutable IS_A ListLit) OR node_value_mutable IS_A HashLit) THEN

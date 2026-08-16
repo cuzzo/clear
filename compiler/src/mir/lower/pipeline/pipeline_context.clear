@@ -593,7 +593,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_cast(MUTABLE self: PipelinePl
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
-    IF new_value.equal?(node.value) THEN
+    IF (new_value == node.value) THEN
       RETURN COPY node;
     END
     MUTABLE new_cast = Cast{ token: COPY node.token, value: new_value, target: node.target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
