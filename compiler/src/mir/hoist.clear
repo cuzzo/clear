@@ -308,7 +308,7 @@ PRIVATE FN hoist__moved_arg?(node: ?Locatable) RETURNS Bool ->
   RETURN aST__moved?(node);
 END
 PRIVATE FN hoist__each_method_call(node: Locatable, blk: FN(MethodCall) -> Void) RETURNS !Void ->
-  TRY (hoist__each_call_like(node, %(candidate) -> candidate IS_A MethodCall, %(candidate: Locatable) USE(blk) -> {
+  TRY (hoist__each_call_like(node, %(candidate: Locatable) -> candidate IS_A MethodCall, %(candidate: Locatable) USE(blk) -> {
   blk(CAST(candidate AS MethodCall));
   rubyToClearVoid()
   }));

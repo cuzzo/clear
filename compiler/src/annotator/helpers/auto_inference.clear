@@ -275,7 +275,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF arg EXISTS AS arg_value THEN
         MUTABLE slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__param(callee_value.name, rtoc_idx)];
         IF slot EXISTS AS slot_value THEN
-          MUTABLE slot_mutable = KEEP slot_value;
+          MUTABLE slot_mutable = COPY slot_value;
           &slot_mutable.sources.append(COPY arg_value);
         END
       END
@@ -298,7 +298,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__return(current_fn.name)];
     IF slot EXISTS AS slot_value THEN
-      MUTABLE return_slot = KEEP slot_value;
+      MUTABLE return_slot = COPY slot_value;
       &return_slot.sources.append(COPY return_node.value);
     END
 }
@@ -346,7 +346,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_self_view.slots[slot_id] = (rtoc_self_view.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: ( { MUTABLE rtoc_empty_list_6: []Locatable = List[]; rtoc_empty_list_6 } ), shape: NIL, auto_token: declNodeAutoToken(decl_node), resolved_scalar: NIL } @multiowned);
       IF declNodeValue(decl_node) THEN
         IF rtoc_self_view.slots[slot_id] EXISTS AS rtoc_map_slot_7 THEN
-          MUTABLE local_slot = KEEP rtoc_map_slot_7;
+          MUTABLE local_slot = COPY rtoc_map_slot_7;
           &local_slot.sources.append(declNodeValue(decl_node));
         ELSE
           panic("T.must: map slot is NIL");
@@ -370,8 +370,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF rhs EXISTS AS rhs_value THEN
       IF entry IS_A AutoMapShapeEntry AS auto_map_shape_entry THEN
         IF rhs_value IS_A HashLit AS hash_lit THEN
-          MUTABLE key_slot = KEEP UNWRAP (rtoc_self_view.slots[KEEP auto_map_shape_entry.key]);
-          MUTABLE val_slot = KEEP UNWRAP (rtoc_self_view.slots[KEEP auto_map_shape_entry.value]);
+          MUTABLE key_slot = COPY UNWRAP (rtoc_self_view.slots[KEEP auto_map_shape_entry.key]);
+          MUTABLE val_slot = COPY UNWRAP (rtoc_self_view.slots[KEEP auto_map_shape_entry.value]);
           hash_lit.pairs |> EACH {
     pair_key, pair_value = _;
     &key_slot.sources.append(COPY pair_key);
@@ -382,7 +382,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN;
         END
       END
-      MUTABLE slot = KEEP UNWRAP (rtoc_self_view.slots[castAutoConstraintCollectorLocalDeclEntryToAutoSlotIdMultiowned(entry)]);
+      MUTABLE slot = COPY UNWRAP (rtoc_self_view.slots[castAutoConstraintCollectorLocalDeclEntryToAutoSlotIdMultiowned(entry)]);
       IF (slot.shape == :list_element) THEN
         IF rhs_value IS_A ListLit AS list_lit THEN
           FOR rtoc_item IN list_lit.items DO

@@ -605,7 +605,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_hash_lit(MUTABLE self: Pipeli
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE pairs: {Locatable}Locatable = COPY node.pairs;
+    MUTABLE pairs: []Tuple<Locatable,Locatable> = COPY node.pairs;
     MUTABLE new_pairs: {Locatable}Locatable = {};
     FOR rtoc_each_key IN pairs.keys() DO
     MUTABLE value: Locatable = COPY UNWRAP (pairs[rtoc_each_key]);
