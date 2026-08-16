@@ -397,7 +397,7 @@ PUB FN pipelineHost__typed_block_expr(self: PipelineHost, label: String, body: [
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE block = MIRBlockExpr{ label: COPY label, body: body |> SELECT castEmittableToLocatable(_), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+    MUTABLE block = MIRBlockExpr{ label: COPY label, body: body, lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
     block.result_type = COPY result_type;
     RETURN block;
 }
@@ -742,7 +742,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE source_ref = FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "ctx", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "source", lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE loop =   IF type__array?(source_type) THEN
-      ForStmt{ iter: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ FieldGet: COPY source_ref }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__select_item", body: item_body |> SELECT castEmittableToLocatable(_), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
+      ForStmt{ iter: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ FieldGet: COPY source_ref }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__select_item", body: item_body, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
     ELSE
       {
     MUTABLE rtoc_value_block_marker = 0;
@@ -751,7 +751,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       next_method = "next";
     END
-    WhileStmt{ cond: Emittable{ MethodCall: COPY MIRMethodCall{ receiver: source_ref, method: COPY next_method, args: ( { MUTABLE rtoc_empty_list_32: []Any = List[]; rtoc_empty_list_32 } ), try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, body: item_body |> SELECT castEmittableToLocatable(_), capture: "__select_item", update: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
+    WhileStmt{ cond: Emittable{ MethodCall: COPY MIRMethodCall{ receiver: source_ref, method: COPY next_method, args: ( { MUTABLE rtoc_empty_list_32: []Any = List[]; rtoc_empty_list_32 } ), try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, body: item_body, capture: "__select_item", update: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
     }
     END;
     MUTABLE stream_zig: String = "";
