@@ -143,14 +143,13 @@ class PipelineListLowerer < T::Struct
       # before the rewind). If the stamp missed a shape, DON'T rewind — the
       # checker's FRAME_NO_REWIND rejection stays fail-closed instead of
       # emitting a rewind that frees moved frame elements (UAF).
-      rewind_per_iter = alloc == :heap && element_head_frame_transients?(head)
       # A SELECT element that yields a FRESH owned value is MOVED into res_list;
       # a borrowed element (a plain field/`it` projection) is COPIED so res_list
       # owns an independent value. Ownership is carried on the head, established
       # from MIR facts at lowering time (value effect + captured owned hoists) --
       # not re-derived from AST syntax after hoisting has flattened the value.
       element_owned = head.owned
-      body = T.let(rewind_per_iter ? self.loop_mark_stmts.call.dup : [], T::Array[MIR::Emittable])
+      body = T.let([], T::Array[MIR::Emittable])
       body.concat(head.pending)
       if element_owned
         body << self.append_fresh_owned_value_stmt.call(res, alloc, head.value, res_type)
@@ -159,6 +158,11 @@ class PipelineListLowerer < T::Struct
         body << self.append_owned_value_stmt.call(res, alloc,
           self.borrowed_pipeline_value.call(MIR::Ident.new("val"), res_type, alloc))
       end
+      # Decide the rewind from the ASSEMBLED body, not from the element head:
+      # the append's cross-allocator copy creates its own iteration-scoped frame
+      # temp, which a head-only scan cannot see (that gap made a heap SELECT
+      # feeding DISTINCT fail FRAME_NO_REWIND).
+      body.unshift(*self.loop_mark_stmts.call) if alloc == :heap && body_frame_transients?(body)
       [
         # Explicit allocation + block-result transfer facts (mirrors
         # lower_order_by): statement-level finalization stamps these when the
@@ -181,16 +185,15 @@ class PipelineListLowerer < T::Struct
     end)
   end
 
-  # True when the lowered element carries frame AllocMarks — per-iteration
-  # frame transients that require the loop rewind above. Fibers/lambdas are
+  # True when the loop body carries frame AllocMarks — per-iteration frame
+  # transients that require the loop rewind above. Fibers/lambdas are
   # boundaries (their frames are their own); nested loops are NOT (their
   # allocations still land in this function's arena every outer iteration).
-  sig { params(head: PipelineElementHead).returns(T::Boolean) }
-  def element_head_frame_transients?(head)
+  sig { params(body: T::Array[MIR::Emittable]).returns(T::Boolean) }
+  def body_frame_transients?(body)
     found = T.let(false, T::Boolean)
     boundary = ->(node) { node.is_a?(MIR::BgBlock) || node.is_a?(MIR::LambdaExpr) }
-    nodes = T.let([*head.pending, head.value], T::Array[MIR::Emittable])
-    MIR.each_node_until(nodes, boundary) do |node|
+    MIR.each_node_until(body, boundary) do |node|
       found = true if node.is_a?(MIR::AllocMark) && MIR::Placement.frame?(node.alloc)
     end
     found

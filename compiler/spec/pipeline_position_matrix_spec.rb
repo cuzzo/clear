@@ -77,6 +77,11 @@ module PipelinePositionMatrix
     # DISTINCT yields a set (not T[]): only length/iteration positions apply.
     "distinct_str"   => { frag: "xs |> DISTINCT _",                             elem: :str, src: :str,
                           exclude: %w[ret arg_borrow terminal_join each_terminal arg_takes struct_field push_outer] },
+    # An owned SELECT element feeding DISTINCT: the element is heap-owned and
+    # the set is frame-allocated, so the insert loop carries an iteration-scoped
+    # frame temp and needs the same per-iteration rewind SELECT's own loop has.
+    "sel_distinct"   => { frag: "xs |> SELECT dup(_) |> DISTINCT _",             elem: :str, src: :str,
+                          exclude: %w[ret arg_borrow terminal_join each_terminal arg_takes struct_field push_outer] },
     "where_unnest"   => { frag: "xs |> WHERE !(_.empty?()) |> UNNEST _.split(\":\")", elem: :str, src: :str },
     "skip_sel_owned" => { frag: "(xs |> SKIP 1) |> SELECT dup(_)",              elem: :str, src: :str },
     "unnest_select"  => { frag: "xs |> UNNEST _.split(\":\") |> SELECT dup(_)", elem: :str, src: :str },

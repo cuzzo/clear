@@ -401,9 +401,14 @@ class MIRChecker
   # `strict` is retained for call-site compatibility only. MIR ownership
   # checks are always strict: an unhoisted allocation or provenance placement
   # side channel is a compiler bug, not an optional lint.
-  sig { params(fn_def: MIR::FnDef, strict: T::Boolean).returns(T::Array[String]) }
-  def check_fn!(fn_def, strict: false)
+  # `captured_names` are bindings a lambda body reads from its enclosing
+  # function. Their AllocMark lives in that enclosing frame -- the lambda
+  # borrows them exactly like a parameter, so allocator-metadata checks treat
+  # them the same instead of demanding a local mark that cannot exist.
+  sig { params(fn_def: MIR::FnDef, strict: T::Boolean, captured_names: T::Array[String]).returns(T::Array[String]) }
+  def check_fn!(fn_def, strict: false, captured_names: [])
     @fn_name = fn_def.name
+    @captured_names = T.let(captured_names.map(&:to_s).to_set, T.nilable(T::Set[String]))
     @errors = []
     nodes = T.let(MIR.nodes(fn_def.body), T::Array[MIR::Node])
 
@@ -463,7 +468,8 @@ class MIRChecker
       when MIR::LambdaExpr
         if node.fn_def
           sub = MIRChecker.new(schema_lookup: @schema_lookup)
-          @errors.concat(sub.check_fn!(node.fn_def, strict: strict))
+          @errors.concat(sub.check_fn!(node.fn_def, strict: strict,
+            captured_names: node.captures.map(&:to_s)))
         end
       end
     end
@@ -2241,6 +2247,7 @@ class MIRChecker
       # does not require a local AllocMark.
       names << name.delete_prefix("_m_") if name.start_with?("_m_")
     end, T::Set[String])
+    param_names |= T.must(@captured_names) if @captured_names
     metadata_nodes.each do |node|
       alloc_metadata = allocator_metadata_for(node)
       next unless alloc_metadata && !alloc_metadata.empty?
