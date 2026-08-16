@@ -118,7 +118,7 @@ PUB FN pipelineBindingChainLowerer__lower(self: PipelineBindingChainLowerer, cha
   MUTABLE names = pipelineBindingChainLowerer__binding_names(self, label);
   MUTABLE bindings: {String}String = CAST({outer_name: outer_zig} AS {String}String);
   IF inner_name EXISTS AS inner_name_value THEN
-    bindings[inner_name_value] = inner_zig;
+    bindings[inner_name_value] = COPY inner_zig;
   END
   RETURN pipelineBindingChainLowerer__with_named_bindings_call(self, bindings, %() USE(chain, inner_zig, label, names, outer_zig, MUTABLE smooth_node, self) -> {
   MUTABLE source_mir = pipelineBindingChainLowerer__visit_mir_call(self, chain.source);
