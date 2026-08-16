@@ -300,7 +300,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ GetField: COPY node }, PipelineRewriteNode{ GetIndex: COPY new_gi });
       RETURN Locatable{ GetIndex: COPY new_gi };
     END
-    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.target));
+    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.target));
     IF (new_target == node.target) THEN
       RETURN COPY Locatable{ GetField: COPY node };
     END
@@ -314,7 +314,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_get_index(MUTABLE self: Pipel
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.target));
+    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.target));
     MUTABLE new_index = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.index));
     IF ((new_target == node.target) AND (new_index == node.index)) THEN
       RETURN COPY Locatable{ GetIndex: COPY node };
@@ -341,7 +341,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_optional_unwrap(MUTABLE self:
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.target));
+    MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.target));
     IF new_target.equal?(node.target) THEN
       RETURN COPY node;
     END

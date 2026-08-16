@@ -103,7 +103,7 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emi
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
   &parts.append("        step: u8 = 0,");
-  MUTABLE state_fields = fsmWrapperEmitter__render_fsm_state_field_decls((s.state_decls OR List[]), mir_emitter);
+  MUTABLE state_fields = fsmWrapperEmitter__render_fsm_state_field_decls(COPY s.state_decls, mir_emitter);
   IF !(fsmWrapperEmitter__empty?(state_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(state_fields, 8));
   END
@@ -313,7 +313,7 @@ PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: St
   MUTABLE alloc_expr: ?String = TRY (mIREmitter__emit(&mir_emitter, s.alloc_expr));
   &parts.append("    const ${s.alloc_var} = ${alloc_expr};");
   &parts.append("    const ${s.promise_var} = try ${s.promise_zig}.spawn(${s.alloc_var}, ${s.rt_name}.getSched());");
-  MUTABLE promoted_decls = ((((s.promoted_decls OR List[]))) |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE out: ?String = TRY (mIREmitter__emit(&mir_emitter, _)); (IF ((out == NIL) OR ((out?).trim().length() == 0)) THEN NIL ELSE out END) } |> WHERE _ != NIL).join("\n");
+  MUTABLE promoted_decls = (((COPY s.promoted_field_decls)) |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE out: ?String = TRY (mIREmitter__emit(&mir_emitter, _)); (IF ((out == NIL) OR ((out?).trim().length() == 0)) THEN NIL ELSE out END) } |> WHERE _ != NIL).join("\n");
   IF !(fsmWrapperEmitter__empty?(promoted_decls)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(promoted_decls, 4));
   END

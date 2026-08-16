@@ -430,7 +430,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[(\\d+)\\](.+)$"));
     IF match EXISTS AS match_value THEN
       MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 2);
-      item = TRY (translator__map_type(&rtoc_self_view, match_value_capture, :field));
+      item = TRY (translator__map_type(&rtoc_self_view, UNWRAP (match_value_capture), :field));
       IF item EXISTS AS item_value THEN
         RETURN "[${compilerRegexCapture(match_value_mutable, 1)}]${item_value}";
       ELSE
@@ -447,7 +447,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]const\\s+(.+)$"));
     IF match EXISTS AS match_value THEN
       MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
-      item = TRY (translator__map_type(&rtoc_self_view, match_value_capture, :field));
+      item = TRY (translator__map_type(&rtoc_self_view, UNWRAP (match_value_capture), :field));
       IF item EXISTS AS item_value THEN
         RETURN "?[]@c ${item_value}";
       ELSE
@@ -457,7 +457,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*(.+)$"));
     IF match EXISTS AS match_value THEN
       MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
-      item = TRY (translator__map_type(&rtoc_self_view, match_value_capture, :field));
+      item = TRY (translator__map_type(&rtoc_self_view, UNWRAP (match_value_capture), :field));
       IF item EXISTS AS item_value THEN
         RETURN "?${item_value}";
       ELSE
