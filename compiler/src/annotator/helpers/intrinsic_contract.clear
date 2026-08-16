@@ -139,3 +139,6 @@ FN intrinsicContract__normalized_argument_takes_indices(emit: IntrinsicEmit) RET
   END
   RETURN indices;
 END
+PUB FN intrinsicBehaviorContract__fsm_setup_present(self: IntrinsicBehaviorContract) RETURNS Bool ->
+  RETURN self.fsm_setup_present;
+END

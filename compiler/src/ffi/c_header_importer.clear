@@ -361,7 +361,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]\\?\\*(.+)$"));
     IF match EXISTS AS match_value THEN
       MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
-      inner = TRY (translator__map_type(&rtoc_self_view, match_value_capture, :param));
+      inner = TRY (translator__map_type(&rtoc_self_view, UNWRAP (match_value_capture), :param));
       IF inner EXISTS AS inner_value THEN
         RETURN CHeaderImporterParam{ name: COPY name, type: "?${inner_value}", mutable: TRUE };
       ELSE
@@ -371,7 +371,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\](?!const\\s)(.+)$"));
     IF match EXISTS AS match_value THEN
       MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
-      inner = TRY (translator__map_type(&rtoc_self_view, match_value_capture, :param));
+      inner = TRY (translator__map_type(&rtoc_self_view, UNWRAP (match_value_capture), :param));
       IF inner EXISTS AS inner_value THEN
         RETURN CHeaderImporterParam{ name: COPY name, type: COPY inner_value, mutable: TRUE };
       ELSE
@@ -384,7 +384,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]const\\s+(.+)$"));
     IF match EXISTS AS match_value THEN
       MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
-      inner = TRY (translator__map_type(&rtoc_self_view, match_value_capture, :param));
+      inner = TRY (translator__map_type(&rtoc_self_view, UNWRAP (match_value_capture), :param));
       IF inner EXISTS AS inner_value THEN
         RETURN CHeaderImporterParam{ name: COPY name, type: "[]@c ${inner_value}", mutable: FALSE };
       ELSE
@@ -394,7 +394,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*(.+)$"));
     IF match EXISTS AS match_value THEN
       MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
-      inner = TRY (translator__map_type(&rtoc_self_view, match_value_capture, :param));
+      inner = TRY (translator__map_type(&rtoc_self_view, UNWRAP (match_value_capture), :param));
       IF inner EXISTS AS inner_value THEN
         RETURN CHeaderImporterParam{ name: COPY name, type: COPY inner_value, mutable: FALSE };
       ELSE

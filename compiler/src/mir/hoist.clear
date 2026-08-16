@@ -172,7 +172,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
           expected_branch_value = NIL;
         END
       MUTABLE expected: ?Type = expected_branch_value;
-      MUTABLE replacement = TRY (hoist__make_temp_mut(rtoc_each_items_6[rtoc_idx], &hoists, hoistCounter__next_name(&counter), hoist__moved_arg?(rtoc_each_items_6[rtoc_idx]), ruby_wrap_optional_Type_TypeTypeInput(expected), schema_lookup));
+      MUTABLE replacement = TRY (hoist__make_temp_mut(COPY UNWRAP (rtoc_each_items_6[rtoc_idx]), &hoists, hoistCounter__next_name(&counter), hoist__moved_arg?(rtoc_each_items_6[rtoc_idx]), ruby_wrap_optional_Type_TypeTypeInput(expected), schema_lookup));
       IF call IS_A FuncCall AS func_call THEN
           func_call.args[rtoc_idx] = replacement;
       ELSE_IF call IS_A MethodCall AS method_call THEN
