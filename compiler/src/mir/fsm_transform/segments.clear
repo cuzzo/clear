@@ -274,7 +274,7 @@ PRIVATE FN segments__loop_condition_for(node: Locatable) RETURNS ?Locatable ->
     RETURN NIL;
   END
 END
-PRIVATE FN segments__contains_unsupported_shape?(body: []Locatable) RETURNS Bool ->
+PRIVATE FN segments__contains_unsupported_shape?(body: []Locatable) RETURNS !Bool ->
   RETURN body |> ANY segments__stmt_unsupported?(_);
 END
 PRIVATE FN segments__stmt_unsupported?(stmt: Locatable) RETURNS Bool ->

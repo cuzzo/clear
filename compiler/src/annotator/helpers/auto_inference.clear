@@ -2385,7 +2385,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeAssignment(v: Assignment) RETURNS []AutoIn
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castAssignmentNameToAutoInferenceWalkNode(COPY v.name));
   &out.append(castLocatableToAutoInferenceWalkNode(COPY v.value));
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.compound_op)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3007,7 +3006,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBindExpr(v: BindExpr) RETURNS []AutoInfere
     &out.append(AutoInferenceWalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.value)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.compound_op)] });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ BoolValue: COPY rtoc_opt_child });
   END

@@ -211,7 +211,7 @@ PUB FN cleanupClassifier__stamp_default_scopes_mut(body: []AstBodyNode, loop_dep
     ELSE
       loop_depth
     END;
-  FOR _ IN (TRY (aST__child_bodies(castAstBodyNodeToLocatable(_)))) DO
+  FOR _ IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(_)))) DO
   TRY (cleanupClassifier__stamp_default_scopes_mut(_, child_depth));
   END
   END
@@ -245,7 +245,7 @@ PUB FN cleanupClassifier__stamp_binding_default_scope_mut(node: AstBodyNode, loo
 END
 PUB FN cleanupClassifier__stamp_extended_loop_lifetimes_mut(body: []AstBodyNode, bindings: {String}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
   FOR _ IN body DO
-  FOR _ IN (TRY (aST__child_bodies(castAstBodyNodeToLocatable(_)))) DO
+  FOR _ IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(_)))) DO
   IF aST__loop_node?(castAstBodyNodeToLocatable(_)) THEN
       TRY (cleanupClassifier__stamp_loop_extensions_mut(_, bindings));
   END
@@ -442,7 +442,7 @@ PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []AstBodyNode, sch
       TRY (cleanupClassifier__classify_cleanup_binding_node(&rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
   END
   TRY (cleanupClassifier__classify_inline_bg_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
-  FOR rtoc_mutable_block_param_4 IN (TRY (aST__child_bodies(castAstBodyNodeToLocatable(rtoc_mutable_block_param_4)))) DO
+  FOR rtoc_mutable_block_param_4 IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(rtoc_mutable_block_param_4)))) DO
   TRY (cleanupClassifier__classify_cleanup_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
   END
   END

@@ -368,7 +368,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_bind_expr(MUTABLE self: Pipel
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, AssignmentName{ StringValue: COPY node.name }));
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
-    IF ((new_name == node.name) AND (new_value == node.value)) THEN
+    IF ((new_name == AssignmentName{ StringValue: COPY node.name }) AND (new_value == node.value)) THEN
       RETURN COPY Locatable{ BindExpr: COPY node };
     END
     MUTABLE new_bind = BindExpr{ token: COPY node.token, name: new_name, type: COPY node.type, value: new_value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL };
@@ -397,7 +397,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_assignment(MUTABLE self: Pipe
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, AssignmentName{ StringValue: COPY node.name }));
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
-    IF ((new_name == node.name) AND (new_value == node.value)) THEN
+    IF ((new_name == AssignmentName{ StringValue: COPY node.name }) AND (new_value == node.value)) THEN
       RETURN COPY Locatable{ Assignment: COPY node };
     END
     MUTABLE new_assign = Assignment{ token: COPY node.token, name: COPY new_name, value: COPY new_value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };

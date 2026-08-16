@@ -215,10 +215,16 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
       MUTABLE expected_value = TRY (type__success_type(expected_value));
     END
     MUTABLE value_type: ?Type = TRY (type__from_node_mut(return_node_mutable.value, "return value hoist"));
-    IF (((value_type != NIL) AND type__collection?(UNWRAP (value_type))) AND !(hoist__empty_list_literal?(return_node_mutable.value))) THEN
-      expected = COPY value_type;
+    IF value_type EXISTS AS collection_type THEN
+      IF (type__collection?(collection_type) AND !(hoist__empty_list_literal?(return_node_mutable.value))) THEN
+        expected = COPY collection_type;
+      END
     END
-    IF (return_node_mutable.value IS_A BinaryOp AND (((return_node_mutable.value.op() == symbol("OR")) OR (return_node_mutable.value.op() == symbol("OR_ELSE"))))) THEN
+    MUTABLE ret_or_binop: Bool = FALSE;
+    IF return_node_mutable.value IS_A BinaryOp AS ret_binop THEN
+      ret_or_binop = ((ret_binop.op == :OR) OR (ret_binop.op == :OR_ELSE));
+    END
+    IF ret_or_binop THEN
       MUTABLE right_type_branch_value: ?Type = NIL;
       IF return_node_mutable.value.right() IS_A Locatable THEN
         right_type_branch_value = return_node_mutable.value.right().full_type_mut();
