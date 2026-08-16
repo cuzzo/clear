@@ -3577,7 +3577,7 @@ FN mIRLowering__ownership_scanner(self: MIRLowering) RETURNS !MIRLoweringOwnersh
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN MIRLoweringOwnershipScanner{ schema_lookup: COPY mIRLowering__mir_schema_lookup(rtoc_self_view), bindings: TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))), capture_map: COPY (mIRLowering__capture_state(rtoc_self_view).do_capture_map OR_ELSE {}), rename_map: COPY TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view))), safe_name: COPY %(name) USE(rtoc_self_view) -> mIRLowering__zig_safe_name(rtoc_self_view, name) };
+    RETURN MIRLoweringOwnershipScanner{ schema_lookup: COPY mIRLowering__mir_schema_lookup(rtoc_self_view), bindings: TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))), capture_map: COPY (mIRLowering__capture_state(rtoc_self_view).do_capture_map OR_ELSE {}), rename_map: COPY TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view))), safe_name: %(name) USE(rtoc_self_view) -> mIRLowering__zig_safe_name(rtoc_self_view, name) };
 }
 END
 FN mIRLowering__collect_bg_capture_transfer_roots(self: MIRLowering, stmt: ?Locatable) RETURNS ![]String

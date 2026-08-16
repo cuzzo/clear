@@ -397,8 +397,7 @@ PRIVATE FN segments__io_suspending_call?(call_node: SegmentsCallNode) RETURNS !B
   IF md EXISTS AS md_value THEN
     MUTABLE md_mutable = COPY md_value;
     IF TRY (functionSignature__intrinsic_suspends?(&md_mutable)) THEN
-      MUTABLE contract = TRY (functionSignature__intrinsic_contract(&md_mutable));
-      RETURN intrinsicBehaviorContract__fsm_setup_present(contract.behavior);
+      RETURN intrinsicBehaviorContract__fsm_setup_present((TRY (functionSignature__intrinsic_contract(&md_mutable))).behavior);
     END
   END
   RETURN FALSE;
