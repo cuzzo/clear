@@ -184,7 +184,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
     &parts.append(fsmWrapperEmitter__indent_block(promoted_fields, 8));
   END
   &parts.append("");
-  FOR _ IN ((s.member_fns OR List[])) DO
+  FOR _ IN COPY s.member_fns DO
   &parts.append(TRY (fsmWrapperEmitter__render_member_fn(_, &mir_emitter)));
   &parts.append("");
   END

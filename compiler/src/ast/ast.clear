@@ -9013,3 +9013,9 @@ END
 PUB FN aST__loop_node?(node: Locatable) RETURNS Bool ->
   RETURN ((((node IS_A WhileLoop) OR (node IS_A WhileBindLoop)) OR (node IS_A ForRange)) OR (node IS_A ForEach));
 END
+PUB FN assignmentNameString(value: AssignmentName) RETURNS String ->
+  PARTIAL MATCH value START
+    AssignmentName.StringValue AS item -> RETURN COPY item;
+  END
+  RETURN "";
+END
