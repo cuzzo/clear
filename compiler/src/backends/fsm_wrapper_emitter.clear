@@ -63,7 +63,7 @@ PRIVATE FN fsmWrapperEmitter__render_run_body(step: FsmStep, MUTABLE mir_emitter
   }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
   MUTABLE body_text: String = body.join("\n");
-  RETURN (["        fn runBody(__ctx_${step.ctx_id}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id}.rt;", (IF step.suppress_runtime_ref THEN
+  RETURN (["        fn runBody(__ctx_${step.ctx_id.toString()}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id.toString()}.rt;", (IF step.suppress_runtime_ref THEN
     "            _ = &${step.bg_rt};"
   ELSE
     NIL
@@ -126,7 +126,7 @@ PRIVATE FN fsmWrapperEmitter__render_step(step: FsmStep, MUTABLE mir_emitter: MI
   }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
   MUTABLE body_text: String = body.join("\n");
-  RETURN (["        fn runStep${step.index}(__ctx_${step.ctx_id}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id}.rt;", (IF step.suppress_runtime_ref THEN
+  RETURN (["        fn runStep${step.index.toString()}(__ctx_${step.ctx_id.toString()}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id.toString()}.rt;", (IF step.suppress_runtime_ref THEN
     "            _ = &${step.bg_rt};"
   ELSE
     NIL

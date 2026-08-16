@@ -3561,7 +3561,7 @@ PUB STRUCT FsmStructure {
   state_fields: Any@multiowned,
   steps: Any@multiowned,
   finalize_cleanups: Any@multiowned,
-  ctx_id: Any@multiowned,
+  ctx_id: Int64,
   result_aliases_finalized: Any@multiowned,
   facts: FsmStructureFacts,
   lowered_node_id: ?LoweredNodeId,
@@ -3947,7 +3947,7 @@ PUB STRUCT FsmGenericCtxStruct {
 }
 PUB STRUCT FsmMemberFn {
   fn_name: Any@multiowned,
-  ctx_id: Any@multiowned,
+  ctx_id: Int64,
   bg_rt: Any@multiowned,
   suppress_runtime_ref: Any@multiowned,
   body_stmts: []Emittable,
@@ -3964,8 +3964,8 @@ PUB STRUCT FsmCtxStruct {
   resume_fn: FsmDispatch
 }
 PUB STRUCT FsmStep {
-  index: Any@multiowned,
-  ctx_id: Any@multiowned,
+  index: Int64,
+  ctx_id: Int64,
   bg_rt: Any@multiowned,
   suppress_runtime_ref: Any@multiowned,
   body_stmts: []Emittable
@@ -3980,12 +3980,12 @@ PUB STRUCT SuspendDescriptor {
   result_needs_cleanup: Any@multiowned
 }
 PUB STRUCT FsmDispatch {
-  ctx_id: Any@multiowned,
+  ctx_id: Int64,
   arms: Any@multiowned,
   uses_loop_label: Any@multiowned
 }
 PUB STRUCT FsmStateArm {
-  index: Any@multiowned,
+  index: Int64,
   pre_body_skip: Any@multiowned,
   pre_body_stmts: Any@multiowned,
   body_fn_name: Any@multiowned,

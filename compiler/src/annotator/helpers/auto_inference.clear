@@ -1068,7 +1068,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_22 = ([binop.left, binop.right]);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_22.length() DO
-      MUTABLE operand: Locatable = COPY UNWRAP (rtoc_each_items_22[rtoc_idx]);
+      MUTABLE operand: Locatable = COPY rtoc_each_items_22[rtoc_idx];
       IF operand IS_A Identifier AS operand_identifier THEN
         MUTABLE slot_id: ?AutoSlotId@multiowned = COPY name_to_slot[operand_identifier.name];
         IF slot_id EXISTS AS slot_id_value THEN
