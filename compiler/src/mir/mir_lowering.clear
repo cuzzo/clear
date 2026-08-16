@@ -518,7 +518,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__lowering_state(rtoc_self_view).test;
 }
 END
-PUB FN mIRLowering__mir_schema_lookup(self: MIRLowering) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
+PUB FN mIRLowering__mir_schema_lookup(self: MIRLowering) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -556,7 +556,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-FN mIRLowering__replace_mir_schema_lookup_mut(self: MIRLowering, lookup_proc: FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult) RETURNS Void
+FN mIRLowering__replace_mir_schema_lookup_mut(self: MIRLowering, lookup_proc: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -579,7 +579,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__lowering_schemas(rtoc_self_view).struct_schemas;
 }
 END
-FN mIRLowering__enum_schemas(self: MIRLowering) RETURNS !{String@symbol}[]MIRLoweringSchemasEnumVariantsItem
+FN mIRLowering__enum_schemas(self: MIRLowering) RETURNS !{String@symbol}[]TypeEnumVariantsItem
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1784,8 +1784,8 @@ FN mIRLowering__lower_union_payload_coercion(self: MIRLowering, mir: Emittable, 
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE target_type = TRY (type__value_payload_type(coerced_type));
     MUTABLE schema: ?UnionSchema@multiowned = COPY (TRY (mIRLowering__union_schemas(rtoc_self_view)))[type__resolved(target_type)];
-    schema = (schema OR_ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE looked_up: ?MIRLoweringSchemasSchemaLookupResult = mIRLowering__mir_schema_lookup(rtoc_self_view)(type__resolved(target_type));
-    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_29: ?MIRLoweringSchemasSchemaLookupResult = NIL;
+    schema = (schema OR_ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE looked_up: ?TypeSchemaLookupResult = mIRLowering__mir_schema_lookup(rtoc_self_view)(type__resolved(target_type));
+    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_29: ?TypeSchemaLookupResult = NIL;
     IF ((looked_up != NIL) AND (looked_up IS_A UnionSchema)) THEN
       rtoc_ternary_value_29 = looked_up;
     ELSE
@@ -4599,7 +4599,7 @@ PRIVATE FN mIRLowering__lower_struct_def(MUTABLE self: MIRLowering, node: Struct
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_mutable_receiver_130 = mIRLowering__lowering_schemas(rtoc_self_view);
-    mIRLoweringSchemas__register_struct(&rtoc_mutable_receiver_130, MIRLoweringSchemasSchemaName{ StringValue: COPY node.name }, TRY (structSchema__new(node.field_decls, node.type_params |> SELECT symbol(_), ( { MUTABLE rtoc_empty_list_129: []GenericParamDecl = List[]; rtoc_empty_list_129 } ), {}, {})));
+    mIRLoweringSchemas__register_struct(&rtoc_mutable_receiver_130, COPY node.name, TRY (structSchema__new(node.field_decls, node.type_params |> SELECT symbol(_), ( { MUTABLE rtoc_empty_list_129: []GenericParamDecl = List[]; rtoc_empty_list_129 } ), {}, {})));
     IF node.type_params |> ANY _ THEN
       MUTABLE comptime_params = node.type_params |> SELECT "comptime ${_}: type";
       MUTABLE fields_mir = node.field_decls.keys() |> SELECT {
@@ -15742,7 +15742,7 @@ PRIVATE FN mIRLowering__struct_lit_field_types(self: MIRLowering, node: StructLi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE schema: ?MIRLoweringSchemasSchemaLookupResult = mIRLowering__mir_schema_lookup(rtoc_self_view)(symbol(node.name));
+    MUTABLE schema: ?TypeSchemaLookupResult = mIRLowering__mir_schema_lookup(rtoc_self_view)(symbol(node.name));
     IF schema IS_A UnionSchema@multiowned AS union_schema_multiowned THEN
       MUTABLE union_schema_multiowned_mutable = COPY union_schema_multiowned;
       MUTABLE union_subst: {String@symbol}TypeTypeInput = {};
@@ -16143,7 +16143,7 @@ PRIVATE FN mIRLowering__struct_lit_fields_with_callsite_defaults(self: MIRLoweri
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fields: {String}Locatable = COPY node.fields;
-    MUTABLE schema: ?MIRLoweringSchemasSchemaLookupResult = mIRLowering__mir_schema_lookup(rtoc_self_view)(symbol(node.name));
+    MUTABLE schema: ?TypeSchemaLookupResult = mIRLowering__mir_schema_lookup(rtoc_self_view)(symbol(node.name));
     IF schema? IS_A StructSchema AS struct_schema THEN
       FOR rtoc_key IN struct_schema.fields.keys() DO
     MUTABLE field: StructField@multiowned = COPY UNWRAP (struct_schema.fields[rtoc_key]);

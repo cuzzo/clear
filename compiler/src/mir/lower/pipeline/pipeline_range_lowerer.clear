@@ -118,7 +118,7 @@ PUB STRUCT RuntimeHost {
   next_label: FN() -> String,
   next_observable_id: FN() -> Int64,
   runtime_name: FN() -> String,
-  schema_lookup: FN() -> FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult,
+  schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult,
   task_config_variant: FN() -> String,
   transpile_type: FN(PipelineRangeTypeInput) -> String,
   visit_mir: FN(Locatable) -> Emittable,
@@ -128,7 +128,7 @@ PUB STRUCT RuntimeHost {
   with_fiber_rt: FN(String, FN() -> Any@multiowned) -> Any@multiowned
 }
 
-PUB FN runtimeHost__initialize(MUTABLE self: RuntimeHost, visit_mir: FN(Locatable) -> Emittable, visit_mir_with_decl_alloc: FN(Locatable, String@symbol) -> Emittable, visit_mir_with_context: FN(Locatable, ?String, ?String) -> Emittable, lower_head_with_context: FN(Locatable, ?String) -> PipelineLowerHeadResult, with_fiber_rt: FN(String, FN() -> Any) -> Any, visit_pipeline_body_mir: FN(Locatable[], String) -> ![]Emittable, ast_stmts_use_placeholder: FN(Locatable[]) -> Bool, bc_target: FN() -> Bool, next_label: FN() -> String, transpile_type: FN(PipelineRangeTypeInput) -> String, schema_lookup: FN() -> FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult, runtime_name: FN() -> String, next_observable_id: FN() -> Int64, task_config_variant: FN() -> String) RETURNS Void
+PUB FN runtimeHost__initialize(MUTABLE self: RuntimeHost, visit_mir: FN(Locatable) -> Emittable, visit_mir_with_decl_alloc: FN(Locatable, String@symbol) -> Emittable, visit_mir_with_context: FN(Locatable, ?String, ?String) -> Emittable, lower_head_with_context: FN(Locatable, ?String) -> PipelineLowerHeadResult, with_fiber_rt: FN(String, FN() -> Any) -> Any, visit_pipeline_body_mir: FN(Locatable[], String) -> ![]Emittable, ast_stmts_use_placeholder: FN(Locatable[]) -> Bool, bc_target: FN() -> Bool, next_label: FN() -> String, transpile_type: FN(PipelineRangeTypeInput) -> String, schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult, runtime_name: FN() -> String, next_observable_id: FN() -> Int64, task_config_variant: FN() -> String) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -218,7 +218,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN runtimeHost__transpile_type_call(rtoc_self_view, type_info);
 }
 END
-PUB FN runtimeHost__range_schema_lookup(self: RuntimeHost) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
+PUB FN runtimeHost__range_schema_lookup(self: RuntimeHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -246,7 +246,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN runtimeHost__task_config_variant_call(rtoc_self_view);
 }
 END
-PUB FN runtimeHost__new(visit_mir: FN(Locatable) -> Emittable, visit_mir_with_decl_alloc: FN(Locatable, String@symbol) -> Emittable, visit_mir_with_context: FN(Locatable, ?String, ?String) -> Emittable, lower_head_with_context: FN(Locatable, ?String) -> PipelineLowerHeadResult, with_fiber_rt: FN(String, FN() -> Any) -> Any, visit_pipeline_body_mir: FN(Locatable[], String) -> ![]Emittable, ast_stmts_use_placeholder: FN(Locatable[]) -> Bool, bc_target: FN() -> Bool, next_label: FN() -> String, transpile_type: FN(PipelineRangeTypeInput) -> String, schema_lookup: FN() -> FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult, runtime_name: FN() -> String, next_observable_id: FN() -> Int64, task_config_variant: FN() -> String) RETURNS RuntimeHost@multiowned ->
+PUB FN runtimeHost__new(visit_mir: FN(Locatable) -> Emittable, visit_mir_with_decl_alloc: FN(Locatable, String@symbol) -> Emittable, visit_mir_with_context: FN(Locatable, ?String, ?String) -> Emittable, lower_head_with_context: FN(Locatable, ?String) -> PipelineLowerHeadResult, with_fiber_rt: FN(String, FN() -> Any) -> Any, visit_pipeline_body_mir: FN(Locatable[], String) -> ![]Emittable, ast_stmts_use_placeholder: FN(Locatable[]) -> Bool, bc_target: FN() -> Bool, next_label: FN() -> String, transpile_type: FN(PipelineRangeTypeInput) -> String, schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult, runtime_name: FN() -> String, next_observable_id: FN() -> Int64, task_config_variant: FN() -> String) RETURNS RuntimeHost@multiowned ->
   MUTABLE self = RuntimeHost{ ast_stmts_use_placeholder: COPY ast_stmts_use_placeholder, bc_target: COPY bc_target, lower_head_with_context: COPY lower_head_with_context, next_label: COPY next_label, next_observable_id: COPY next_observable_id, runtime_name: COPY runtime_name, schema_lookup: COPY schema_lookup, task_config_variant: COPY task_config_variant, transpile_type: COPY transpile_type, visit_mir: COPY visit_mir, visit_mir_with_context: COPY visit_mir_with_context, visit_mir_with_decl_alloc: COPY visit_mir_with_decl_alloc, visit_pipeline_body_mir: COPY visit_pipeline_body_mir, with_fiber_rt: COPY with_fiber_rt };
   runtimeHost__initialize(&self, visit_mir, visit_mir_with_decl_alloc, visit_mir_with_context, lower_head_with_context, with_fiber_rt, visit_pipeline_body_mir, ast_stmts_use_placeholder, bc_target, next_label, transpile_type, schema_lookup, runtime_name, next_observable_id, task_config_variant);
   RETURN self @multiowned;

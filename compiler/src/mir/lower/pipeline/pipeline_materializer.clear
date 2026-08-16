@@ -29,12 +29,12 @@ PUB STRUCT RuntimeHost {
   next_item_temp_name: FN() -> String,
   next_label: FN() -> String,
   result_alloc: FN() -> String@symbol,
-  schema_lookup: FN() -> FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult,
+  schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult,
   set_current_label: FN(String) -> Void,
   visit_mir: FN(Locatable) -> Emittable
 }
 
-PUB FN runtimeHost__initialize(MUTABLE self: RuntimeHost, visit_mir: FN(Locatable) -> Emittable, alloc_mark_fact: FN(Emittable, String, String@symbol, ?Type, ?Locatable, String, Bool) -> ?AllocationFact, result_alloc: FN() -> String@symbol, bc_target: FN() -> Bool, schema_lookup: FN() -> FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult, next_label: FN() -> String, set_current_label: FN(String) -> Void, next_item_temp_name: FN() -> String) RETURNS Void
+PUB FN runtimeHost__initialize(MUTABLE self: RuntimeHost, visit_mir: FN(Locatable) -> Emittable, alloc_mark_fact: FN(Emittable, String, String@symbol, ?Type, ?Locatable, String, Bool) -> ?AllocationFact, result_alloc: FN() -> String@symbol, bc_target: FN() -> Bool, schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult, next_label: FN() -> String, set_current_label: FN(String) -> Void, next_item_temp_name: FN() -> String) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -77,7 +77,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN runtimeHost__bc_target_call(rtoc_self_view);
 }
 END
-PUB FN runtimeHost__materializer_schema_lookup(self: RuntimeHost) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
+PUB FN runtimeHost__materializer_schema_lookup(self: RuntimeHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -113,7 +113,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN runtimeHost__next_item_temp_name_call(rtoc_self_view);
 }
 END
-PUB FN runtimeHost__new(visit_mir: FN(Locatable) -> Emittable, alloc_mark_fact: FN(Emittable, String, String@symbol, ?Type, ?Locatable, String, Bool) -> ?AllocationFact, result_alloc: FN() -> String@symbol, bc_target: FN() -> Bool, schema_lookup: FN() -> FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult, next_label: FN() -> String, set_current_label: FN(String) -> Void, next_item_temp_name: FN() -> String) RETURNS RuntimeHost@multiowned ->
+PUB FN runtimeHost__new(visit_mir: FN(Locatable) -> Emittable, alloc_mark_fact: FN(Emittable, String, String@symbol, ?Type, ?Locatable, String, Bool) -> ?AllocationFact, result_alloc: FN() -> String@symbol, bc_target: FN() -> Bool, schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult, next_label: FN() -> String, set_current_label: FN(String) -> Void, next_item_temp_name: FN() -> String) RETURNS RuntimeHost@multiowned ->
   MUTABLE self = RuntimeHost{ alloc_mark_fact: COPY alloc_mark_fact, bc_target: COPY bc_target, current_label: NIL, next_item_temp_name: COPY next_item_temp_name, next_label: COPY next_label, result_alloc: COPY result_alloc, schema_lookup: COPY schema_lookup, set_current_label: COPY set_current_label, visit_mir: COPY visit_mir };
   runtimeHost__initialize(&self, visit_mir, alloc_mark_fact, result_alloc, bc_target, schema_lookup, next_label, set_current_label, next_item_temp_name);
   RETURN self @multiowned;
@@ -132,7 +132,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN runtimeHost__materializer_result_alloc(rtoc_self_view.host);
 }
 END
-PUB FN pipelineMaterializer__schema_lookup(self: PipelineMaterializer) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
+PUB FN pipelineMaterializer__schema_lookup(self: PipelineMaterializer) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -569,7 +569,7 @@ PUB FN runtimeHost__set_current_label_call(self: RuntimeHost, arg0: String) RETU
   MUTABLE fn_value = self.set_current_label;
   RETURN fn_value(arg0);
 END
-PUB FN runtimeHost__schema_lookup_call(self: RuntimeHost) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult ->
+PUB FN runtimeHost__schema_lookup_call(self: RuntimeHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult ->
   MUTABLE fn_value = self.schema_lookup;
   RETURN fn_value();
 END

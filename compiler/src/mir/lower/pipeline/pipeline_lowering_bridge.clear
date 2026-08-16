@@ -61,7 +61,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__pipeline_result_alloc(rtoc_self_view.lowering);
 }
 END
-PUB FN pipelineLoweringBridge__mir_schema_lookup(self: PipelineLoweringBridge) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
+PUB FN pipelineLoweringBridge__mir_schema_lookup(self: PipelineLoweringBridge) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

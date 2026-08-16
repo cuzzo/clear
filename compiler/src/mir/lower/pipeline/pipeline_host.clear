@@ -798,7 +798,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelineMaterializer__result_alloc(rtoc_self_view.materializer);
 }
 END
-PRIVATE FN pipelineHost__pipeline_schema_lookup(self: PipelineHost) RETURNS FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult
+PRIVATE FN pipelineHost__pipeline_schema_lookup(self: PipelineHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
