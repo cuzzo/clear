@@ -3,13 +3,13 @@ STRUCT EffectSet {
 }
 
 effect_order: [10]String@symbol = [:yield, :alloc_heap, :io, :fail, :contention, :contends_maybe, symbol("contention?"), :blocking, :blocks_maybe, symbol("blocking?")];
-FN effectSet__initialize(MUTABLE self: EffectSet, effects_value: Auto = NIL) RETURNS !Void
+FN effectSet__initialize(MUTABLE self: EffectSet, effects_value: ?[Set]String@symbol = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE eff: [Set]String@symbol = Set[];
-    IF effects_value THEN
-      eff = ( { MUTABLE rtoc_pipe_src = CAST(effects_value AS []String@symbol); rtoc_pipe_src |> DISTINCT _ } );
+    IF effects_value EXISTS AS effects_present THEN
+      eff = COPY effects_present;
     ELSE
       eff = Set[];
     END
@@ -120,7 +120,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (effectSet__to_s(rtoc_self_view));
 }
 END
-FN effectSet__new(effects: Auto = NIL) RETURNS !EffectSet@multiowned ->
+FN effectSet__new(effects: ?[Set]String@symbol = NIL) RETURNS !EffectSet@multiowned ->
   MUTABLE self = EffectSet{ effects: Set[] };
   TRY (effectSet__initialize(&self, effects));
   RETURN self @multiowned;

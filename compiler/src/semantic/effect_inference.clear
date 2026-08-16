@@ -10,7 +10,7 @@ FN effectInference__analyze_mut(fn_nodes: {String}FunctionDef) RETURNS !Void ->
   END
 END
 FN effectInference__build(fn_value: FunctionDef) RETURNS !EffectSet@multiowned ->
-  MUTABLE eff = Set[];
+  MUTABLE eff: [Set]String@symbol = Set[];
   MUTABLE raw = fn_value.effects;
   IF raw THEN
     IF raw.contains?(symbol("YIELD")) THEN
