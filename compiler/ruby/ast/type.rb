@@ -2390,7 +2390,24 @@ class Type
   end
 
   sig { returns(String) }
-  def to_s; resolved.to_s; end
+  def to_s
+    # `resolved` on a function type is its RETURN type, so a bare to_s renders
+    # `FN(Int64) -> Int64` as `Int64` -- which made a reentrancy mismatch read
+    # as the self-contradictory "expected Int64, got Int64".
+    return function_type_description if fn_type?
+
+    resolved.to_s
+  end
+
+  sig { returns(String) }
+  def function_type_description
+    ft = function_type
+    return resolved.to_s unless ft
+
+    params = ft.params.map { |p| p.type.to_s }.join(", ")
+    suffix = ft.reentrant ? " EFFECTS REENTRANT" : ""
+    "FN(#{params}) -> #{ft.return_type}#{suffix}"
+  end
 
   sig { returns(Symbol) }
   # ruby-to-clear: effects reentrant

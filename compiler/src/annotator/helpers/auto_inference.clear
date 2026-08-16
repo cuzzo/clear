@@ -566,21 +566,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_idx < slot.sources.length() DO
       MUTABLE type_of_fn = rtoc_self_view.type_of;
       MUTABLE t: ?AutoConstraintCollectorObservedType = type_of_fn(UNWRAP (slot.sources[rtoc_idx]));
-      IF (t == NIL) THEN
+      IF t EXISTS AS t_value THEN
+        IF (IF t_value IS_A Type AS type THEN type__auto?(type) ELSE FALSE END) THEN
           rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      IF (IF t? IS_A Type AS type THEN type__auto?(type) ELSE FALSE END) THEN
+          CONTINUE;
+        END
+        MUTABLE widened = autoUnifier__widen_byte_array_to_string(rtoc_self_view, COPY t_value);
+        IF seen |> ANY autoUnifier__types_equal?(rtoc_self_view, _, COPY widened) THEN
           rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
+          CONTINUE;
+        END
+        &seen.append(COPY widened);
       END
-      t = autoUnifier__widen_byte_array_to_string(rtoc_self_view, UNWRAP (t));
-      IF seen |> ANY autoUnifier__types_equal?(rtoc_self_view, _, UNWRAP (t)) THEN
-          rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      &seen.append(UNWRAP (t));
-    rtoc_idx = rtoc_idx + 1;
+      rtoc_idx = rtoc_idx + 1;
     END
     RETURN seen;
 }

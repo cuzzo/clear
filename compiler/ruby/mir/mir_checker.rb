@@ -469,7 +469,7 @@ class MIRChecker
         if node.fn_def
           sub = MIRChecker.new(schema_lookup: @schema_lookup)
           @errors.concat(sub.check_fn!(node.fn_def, strict: strict,
-            captured_names: node.captures.map(&:to_s)))
+            captured_names: (node.captures || []).map(&:to_s)))
         end
       end
     end
