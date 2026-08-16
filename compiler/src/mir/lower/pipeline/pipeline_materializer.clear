@@ -256,7 +256,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF (kind == ItemKind.Default) THEN
       RETURN CAST([Emittable{ Let: COPY Let{ name: COPY items_name, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
     ELSE
-      RETURN NIL;
+      panic("pipeline items setup: unsupported item kind");
     END
 }
 END
