@@ -2094,8 +2094,8 @@ FN returnStmt__stmt?(self: ReturnStmt) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT BreakStmt {
-  label: String,
-  value: Emittable,
+  label: ?String,
+  value: ?Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
