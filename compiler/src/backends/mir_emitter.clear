@@ -72,7 +72,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN EmissionState{ symbol_literals: COPY rtoc_self_view.symbol_literals, uses_c_callback: rtoc_self_view.uses_c_callback, if_bind_counter: rtoc_self_view.if_bind_counter, discard_counter: rtoc_self_view.discard_counter, deep_copy_counter: rtoc_self_view.deep_copy_counter, items_block_counter: rtoc_self_view.items_block_counter, owned_slice_counter: rtoc_self_view.owned_slice_counter };
 }
 END
-FN mIREmitter__emit(MUTABLE self: MIREmitter, MUTABLE node: ?Any@multiowned) RETURNS !?String
+FN mIREmitter__emit(MUTABLE self: MIREmitter, MUTABLE node: ?Emittable) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

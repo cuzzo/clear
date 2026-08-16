@@ -145,7 +145,14 @@ PRIVATE FN fsmWrapperEmitter__render_resume_fn_cleanups(cleanups: []Emittable) R
     RETURN "";
   END
   MUTABLE emitter = mIREmitter__new();
-  RETURN (cleanups |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE out: ?String = TRY (mIREmitter__emit(&emitter, COPY _)); (IF ((out == NIL) OR ((out?).trim().length() == 0)) THEN NIL ELSE out END) } |> WHERE _ != NIL).join("\n");
+  MUTABLE rendered_cleanups: []String = [];
+  FOR rtoc_cleanup IN cleanups DO
+    MUTABLE out: String = TRY (mIREmitter__emit(&emitter, COPY rtoc_cleanup));
+    IF !(out.trim().empty?()) THEN
+      &rendered_cleanups.append(COPY out);
+    END
+  END
+  RETURN rendered_cleanups.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_generic_body(body: FsmGenericBody) RETURNS !String ->
   MUTABLE mir_emitter = mIREmitter__new();
