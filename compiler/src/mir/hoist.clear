@@ -102,24 +102,43 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, counter: HoistCounte
   END
   NIL;
 END
-PUB FN hoist__child_bodies(stmt: Locatable) RETURNS ![][]Node ->
-  IF (stmt IS_A ForRange) OR (stmt IS_A ForEach) OR (stmt IS_A WithBlock) OR (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
-    RETURN CAST([stmt.body()] AS [][]Node);
+PUB FN hoist__child_bodies(stmt: Locatable) RETURNS ![][]Locatable ->
+  MUTABLE bodies: [][]Locatable = ( { MUTABLE rtoc_empty_list_5: [][]Locatable = List[]; rtoc_empty_list_5 } );
+  IF stmt IS_A ForRange AS for_range THEN
+    &bodies.append(COPY for_range.body);
+  ELSE_IF stmt IS_A ForEach AS for_each THEN
+    &bodies.append(COPY for_each.body);
+  ELSE_IF stmt IS_A WithBlock AS with_block THEN
+    &bodies.append(COPY with_block.body);
+  ELSE_IF stmt IS_A BgBlock AS bg_block THEN
+    &bodies.append(COPY bg_block.body);
+  ELSE_IF stmt IS_A BgStreamBlock AS bg_stream_block THEN
+    &bodies.append(COPY bg_stream_block.body);
   ELSE_IF stmt IS_A WhileLoop AS while_loop THEN
-    RETURN CAST([while_loop.do_branch] AS [][]Node);
+    &bodies.append(COPY while_loop.do_branch);
   ELSE_IF stmt IS_A WhileBindLoop AS while_bind_loop THEN
-    RETURN CAST([while_bind_loop.do_branch] AS [][]Node);
+    &bodies.append(COPY while_bind_loop.do_branch);
   ELSE_IF stmt IS_A IfStatement AS if_statement THEN
-    RETURN (CAST(Tuple{if_statement.then_branch, if_statement.else_branch} AS Tuple<[]Locatable, ?[]Locatable>));
+    &bodies.append(COPY if_statement.then_branch);
+    IF if_statement.else_branch EXISTS AS else_body THEN
+      &bodies.append(COPY else_body);
+    END
   ELSE_IF stmt IS_A IfBind AS if_bind THEN
-    RETURN ([if_bind.then_branch, if_bind.else_branch]);
+    &bodies.append(COPY if_bind.then_branch);
+    &bodies.append(COPY if_bind.else_branch);
   ELSE_IF stmt IS_A MatchStatement AS match_statement THEN
-    RETURN ((match_statement.cases |> SELECT matchCase__body(_)) + ([match_statement.default_case]));
-  ELSE_IF (stmt IS_A DoBlock) THEN
-    RETURN stmt.branches() |> SELECT _.body();
-  ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_5: [][]Node = List[]; rtoc_empty_list_5 } ) AS [][]Node);
+    FOR rtoc_case IN match_statement.cases DO
+      &bodies.append(TRY (matchCase__body(rtoc_case)));
+    END
+    IF match_statement.default_case EXISTS AS default_body THEN
+      &bodies.append(COPY default_body);
+    END
+  ELSE_IF stmt IS_A DoBlock AS do_block THEN
+    FOR rtoc_branch IN do_block.branches DO
+      &bodies.append(COPY rtoc_branch.body);
+    END
   END
+  RETURN bodies;
 END
 PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoists: []VarDecl, counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, return_type: ?TypeTypeInput = NIL) RETURNS !Void ->
   TRY (hoist__each_call(stmt, %(call: CallLike) USE(MUTABLE counter, MUTABLE hoists, schema_lookup, MUTABLE expected) -> {
