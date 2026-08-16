@@ -112,7 +112,14 @@ PUB FN frozenCleanupFacts__with_live_entry_for_node(self: FrozenCleanupFacts, na
 END
 PUB FN frozenCleanupFacts__without_names(self: FrozenCleanupFacts, names: []NamesItem) RETURNS FrozenCleanupFacts ->
   MUTABLE removed_paths: [Set]String = (names |> SELECT (placeId__from_path(castNamesItemToPath(_))).path) |> DISTINCT _;
-  MUTABLE kept = self.entries_by_place |> WHERE !(removed_paths.contains?(_._0.path));
+  MUTABLE kept: {PlaceId}CleanupEntry@multiowned = {};
+  FOR rtoc_place IN self.entries_by_place.keys() DO
+    IF !(removed_paths.contains?(rtoc_place.path)) THEN
+      IF self.entries_by_place[rtoc_place] EXISTS AS kept_entry THEN
+        kept[rtoc_place] = KEEP kept_entry;
+      END
+    END
+  END
   RETURN frozenCleanupFacts__build(kept);
 END
 PUB FN frozenCleanupFacts__bindings(self: FrozenCleanupFacts) RETURNS !{String}CleanupEntry@multiowned ->

@@ -145,7 +145,12 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
   IF (IF call IS_A MethodCall AS method_call THEN TRY (hoist__collection_value_store_call?(method_call)) ELSE FALSE END) THEN
       RETURN;
   END
-  MUTABLE rtoc_each_items_6 = (MATCH call START CallLike.FuncCall AS item -> item.args, CallLike.MethodCall AS item -> item.args END);
+  MUTABLE rtoc_each_items_6: []Locatable = ( { MUTABLE rtoc_args_list: []Locatable = List[]; rtoc_args_list } );
+  IF call IS_A FuncCall AS func_call_args THEN
+    rtoc_each_items_6 = COPY func_call_args.args;
+  ELSE_IF call IS_A MethodCall AS method_call_args THEN
+    rtoc_each_items_6 = COPY method_call_args.args;
+  END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_6.length() DO
       IF (rtoc_each_items_6[rtoc_idx] IS_A MoveNode AND rtoc_each_items_6[rtoc_idx].value() IS_A Identifier) THEN
