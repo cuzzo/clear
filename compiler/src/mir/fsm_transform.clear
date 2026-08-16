@@ -245,7 +245,6 @@ FN castOptionalTransformValueToEmittable(value: ?TransformValue) RETURNS Emittab
     panic("Invalid cast to Emittable");
   END
   PARTIAL MATCH value? START
-    TransformValue.MIRBgBlock AS cast_payload -> RETURN Emittable{ MIRBgBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to Emittable");
   END
   panic("Invalid cast to Emittable");
