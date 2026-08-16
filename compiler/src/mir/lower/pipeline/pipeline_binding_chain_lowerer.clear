@@ -235,7 +235,7 @@ PRIVATE FN pipelineBindingChainLowerer__lower_binding_fold(self: PipelineBinding
     MUTABLE result_ft = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) }));
     MUTABLE find_zig: String = "";
     IF type__optional?(result_ft) THEN
-      find_zig = pipelineBindingChainLowerer__transpile_type_call(self, CAST((type__resolved(UNWRAP (TRY (type__wrapped_type(result_ft))))) AS String));
+      find_zig = pipelineBindingChainLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY type__resolved(UNWRAP (TRY (type__wrapped_type(result_ft)))) });
     ELSE
       find_zig = COPY placeholder;
     END
