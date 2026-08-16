@@ -117,7 +117,7 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emi
   &parts.append("");
   &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_dispatch(s.resume_fn)), 8));
   &parts.append("");
-  &parts.append(fsmWrapperEmitter__render_destroy_task(s.resume_fn.ctx_id(), ( { MUTABLE rtoc_empty_list_3: []FsmDestroyAction = List[]; rtoc_empty_list_3 } ), &mir_emitter));
+  &parts.append(fsmWrapperEmitter__render_destroy_task(s.resume_fn.ctx_id, ( { MUTABLE rtoc_empty_list_3: []FsmDestroyAction = List[]; rtoc_empty_list_3 } ), &mir_emitter));
   &parts.append("    };");
   RETURN parts.join("\n");
 END

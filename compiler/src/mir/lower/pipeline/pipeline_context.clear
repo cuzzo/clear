@@ -330,7 +330,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_is_a(MUTABLE self: PipelinePl
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_left = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.left));
-    IF !(new_left.equal?(node.left)) THEN
+    IF (new_left != node.left) THEN
       node.left = new_left;
     END
     RETURN COPY Locatable{ IsA: COPY node };
