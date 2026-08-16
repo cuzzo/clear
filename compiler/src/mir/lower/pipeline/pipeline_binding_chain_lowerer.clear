@@ -178,7 +178,7 @@ PRIVATE FN pipelineBindingChainLowerer__fold_expression(self: PipelineBindingCha
 END
 PRIVATE FN pipelineBindingChainLowerer__lower_binding_fold(self: PipelineBindingChainLowerer, fold: PipelineBindingFoldOp, stages: []Locatable, placeholder: String, MUTABLE smooth_node: BinaryOp, names: PipelineBindingNames) RETURNS !PipelineBindingFoldPlan ->
   IF fold IS_A SumOp@multiowned AS sum_op_multiowned THEN
-    MUTABLE expr = pipelineBindingChainLowerer__visit_placeholder_expr(self, sumOp__expression(sum_op_multiowned), placeholder);
+    MUTABLE expr = pipelineBindingChainLowerer__visit_placeholder_expr(self, UNWRAP (sumOp__expression(sum_op_multiowned)), placeholder);
     MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }));
     MUTABLE init_literal: String = "";
     IF type__integer?(result_type) THEN
