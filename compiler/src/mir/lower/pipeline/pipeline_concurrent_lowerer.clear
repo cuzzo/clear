@@ -946,26 +946,12 @@ FN castCleanupToEmittable(value: Cleanup) RETURNS Emittable ->
 END
 FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
-    Emittable.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
-    Emittable.MIRStructDef AS cast_payload -> RETURN Locatable{ MIRStructDef: COPY cast_payload };,
-    Emittable.MIREnumDef AS cast_payload -> RETURN Locatable{ MIREnumDef: COPY cast_payload };,
-    Emittable.MIRDestructureTarget AS cast_payload -> RETURN Locatable{ MIRDestructureTarget: COPY cast_payload };,
-    Emittable.MIRDeferStmt AS cast_payload -> RETURN Locatable{ MIRDeferStmt: COPY cast_payload };,
-    Emittable.MIRBgBlock AS cast_payload -> RETURN Locatable{ MIRBgBlock: COPY cast_payload };,
-    Emittable.MIRDoBlock AS cast_payload -> RETURN Locatable{ MIRDoBlock: COPY cast_payload };,
-    Emittable.MIRMethodCall AS cast_payload -> RETURN Locatable{ MIRMethodCall: COPY cast_payload };,
-    Emittable.MIRUnaryOp AS cast_payload -> RETURN Locatable{ MIRUnaryOp: COPY cast_payload };,
-    Emittable.MIRBlockExpr AS cast_payload -> RETURN Locatable{ MIRBlockExpr: COPY cast_payload };,
-    Emittable.MIRCast AS cast_payload -> RETURN Locatable{ MIRCast: COPY cast_payload };,
-    Emittable.MIROptionalUnwrap AS cast_payload -> RETURN Locatable{ MIROptionalUnwrap: COPY cast_payload };,
-    Emittable.MIRRangeLit AS cast_payload -> RETURN Locatable{ MIRRangeLit: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
 FN castExprToEmittable(value: Expr) RETURNS Emittable ->
   PARTIAL MATCH value START
-    Expr.FsmOpsBinOp AS cast_payload -> RETURN Emittable{ FsmOpsBinOp: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to Emittable");
   END
   panic("Invalid cast to Emittable");

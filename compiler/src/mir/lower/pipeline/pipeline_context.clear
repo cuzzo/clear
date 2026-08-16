@@ -874,7 +874,6 @@ FN castNodeToPipelineRewriteNode(value: Node) RETURNS PipelineRewriteNode ->
     Node.BinaryOp AS cast_payload -> RETURN PipelineRewriteNode{ BinaryOp: COPY cast_payload };,
     Node.Identifier AS cast_payload -> RETURN PipelineRewriteNode{ Identifier: COPY cast_payload };,
     Node.ListLit AS cast_payload -> RETURN PipelineRewriteNode{ ListLit: COPY cast_payload };,
-    Node.TupleLit AS cast_payload -> RETURN PipelineRewriteNode{ TupleLit: COPY cast_payload };,
     Node.HashLit AS cast_payload -> RETURN PipelineRewriteNode{ HashLit: COPY cast_payload };,
     Node.StructLit AS cast_payload -> RETURN PipelineRewriteNode{ StructLit: COPY cast_payload };,
     Node.IfStatement AS cast_payload -> RETURN PipelineRewriteNode{ IfStatement: COPY cast_payload };,

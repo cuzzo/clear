@@ -220,7 +220,6 @@ FN castContextFieldListItemToOptionalContextFieldInput(value: ContextFieldListIt
 END
 FN castContextFieldListItemToRaw(value: ContextFieldListItem) RETURNS Raw ->
   PARTIAL MATCH value START
-    ContextFieldListItem.ContextFieldDecl AS cast_payload -> RETURN Raw{ ContextFieldDecl: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to Raw");
   END
   panic("Invalid cast to Raw");
