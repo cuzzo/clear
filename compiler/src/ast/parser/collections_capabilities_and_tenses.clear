@@ -358,7 +358,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF token__text_is?(escape_token, "POSSIBLE_DEADLOCK") THEN
           escape_kind = :deadlock;
         END
-        node.deadlock_escape = DeadlockEscape{ kind: escape_kind, token: COPY escape_token };
+        node.deadlock_escape = DeadlockEscape{ kind: COPY escape_kind, token: COPY escape_token };
       END
       RETURN node;
     END
@@ -371,7 +371,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF token__text_is?(escape_token, "POSSIBLE_DEADLOCK") THEN
         escape_kind = :deadlock;
       END
-      node.deadlock_escape = DeadlockEscape{ kind: escape_kind, token: COPY escape_token };
+      node.deadlock_escape = DeadlockEscape{ kind: COPY escape_kind, token: COPY escape_token };
     END
     RETURN node;
 }

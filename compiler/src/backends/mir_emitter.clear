@@ -3937,10 +3937,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE success_expr: TryCatch = castEmittableToTryCatch(discard_expr);
       MUTABLE opt = "${name}_opt";
       MUTABLE expr: ?String = TRY (mIREmitter__emit(&rtoc_self_view, success_expr.expr));
-      MUTABLE body = (["{", "const ${opt}: ?${node.zig_type} = (${expr} catch null);", "if (${opt}) |${name}_val| {", "var ${name} = ${name}_val;", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, Node{ Cleanup: COPY Cleanup{ name: name, cleanup_entry: node.cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, FALSE)), 4), "}", "}"]).join("\n");
+      MUTABLE body = (["{", "const ${opt}: ?${node.zig_type} = (${expr} catch null);", "if (${opt}) |${name}_val| {", "var ${name} = ${name}_val;", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, Node{ Cleanup: COPY Cleanup{ name: COPY name, cleanup_entry: node.cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, FALSE)), 4), "}", "}"]).join("\n");
       RETURN body;
     END
-    RETURN (["{", "var ${name} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.expr))};", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, Node{ Cleanup: COPY Cleanup{ name: name, cleanup_entry: node.cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, FALSE)), 4), "}"]).join("\n");
+    RETURN (["{", "var ${name} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.expr))};", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, Node{ Cleanup: COPY Cleanup{ name: COPY name, cleanup_entry: node.cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, FALSE)), 4), "}"]).join("\n");
 }
 END
 PRIVATE FN mIREmitter__discard_success_only?(self: MIREmitter, expr: Emittable) RETURNS Bool

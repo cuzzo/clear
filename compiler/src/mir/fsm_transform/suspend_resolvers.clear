@@ -89,7 +89,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
     &ctx_field_decls.append(suspendResolvers__fsm_owned_guard_decl(result_var));
     &bind_stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY suspendResolvers__fsm_owned_guard_name(result_var), lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
   END
-  RETURN SuspendDescriptor{ setup_stmts: setup_mir, bind_stmts: bind_stmts, tail: COPY FsmTailYield{ next_step: NIL, yield_reason: "WaitForLock" }, ctx_field_decls: ctx_field_decls, result_var: result_var, result_zig_type: result_zig_type, result_needs_cleanup: result_needs_cleanup };
+  RETURN SuspendDescriptor{ setup_stmts: setup_mir, bind_stmts: bind_stmts, tail: COPY FsmTailYield{ next_step: NIL, yield_reason: "WaitForLock" }, ctx_field_decls: ctx_field_decls, result_var: COPY result_var, result_zig_type: result_zig_type, result_needs_cleanup: result_needs_cleanup };
 END
 PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitContext, lowering: MIRLowering, susp_idx: Int64) RETURNS !SuspendDescriptor ->
   MUTABLE id = ctx.id;
@@ -151,7 +151,7 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
       &ctx_field_decls.append(suspendResolvers__fsm_owned_guard_decl(result_var));
     END
   END
-  RETURN SuspendDescriptor{ setup_stmts: setup_stmts, bind_stmts: bind_stmts, tail: COPY tail, ctx_field_decls: ctx_field_decls, result_var: result_var, result_zig_type: inner_zig, result_needs_cleanup: result_needs_cleanup };
+  RETURN SuspendDescriptor{ setup_stmts: setup_stmts, bind_stmts: bind_stmts, tail: COPY tail, ctx_field_decls: ctx_field_decls, result_var: COPY result_var, result_zig_type: inner_zig, result_needs_cleanup: result_needs_cleanup };
 END
 PUB FN suspendResolvers__fsm_owned_guard_name(name: String) RETURNS String ->
   RETURN "__owned_${name}_init";

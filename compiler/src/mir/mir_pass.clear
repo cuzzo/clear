@@ -204,7 +204,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           NIL
         END;
         IF target_name EXISTS AS target_name_value THEN
-          &result.append(FieldCleanup{ token: rtoc_mutable_block_param_2.token(), target_name: target_name_value, field: target.field(), alloc: rtoc_mutable_block_param_2.field_pre_cleanup(), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+          &result.append(FieldCleanup{ token: rtoc_mutable_block_param_2.token(), target_name: COPY target_name_value, field: target.field(), alloc: rtoc_mutable_block_param_2.field_pre_cleanup(), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
         END
     END
     TRY (mIRPass__mark_consumed_cleanup_guards_mut(rtoc_self_view, rtoc_mutable_block_param_2, cleanup_facts));
@@ -508,7 +508,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             RETURN;
           END
           MUTABLE zig_type = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY type__resolved(ti) }))))) OR_ELSE CAST(type__resolved(ti) AS String)));
-          bind_expr_mutable.reassign_cleanup = ReassignPlan{ alloc: cleanupEntry__alloc(entry), zig_type: zig_type, lifecycle_plan: lifecycle_value };
+          bind_expr_mutable.reassign_cleanup = ReassignPlan{ alloc: cleanupEntry__alloc(entry), zig_type: COPY zig_type, lifecycle_plan: lifecycle_value };
         ELSE
           panic("missing planned lifecycle for reassignment '{}'");
         END
@@ -578,7 +578,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
                 END
         MUTABLE alloc_type: Type = alloc_type_branch_value?;
         &mir_prefix.append(mIRPass__alloc_marker(rtoc_self_view, binding, cleanupEntry__alloc(as_entry), alloc_type));
-        MUTABLE drop = Drop{ token: match_statement_mutable.token, name: binding, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
+        MUTABLE drop = Drop{ token: match_statement_mutable.token, name: COPY binding, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
         drop.cleanup_entry = COPY as_entry;
         &mir_prefix.append(drop);
         match_statement_mutable.cases[rtoc_idx].body = (mir_prefix + match_statement_mutable.cases[rtoc_idx].body());

@@ -182,12 +182,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fact: ?AllocationFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, (forced_alloc OR_ELSE :heap), TRY (aST__full_type_mut(list_node)), NIL, "pipeline allocation", !((forced_alloc == NIL)));
     IF fact THEN
       &source_prefix.append(fact.mark());
-      source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type((TRY (aST__full_type_mut(list_node)))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      source_cleanup = Cleanup{ name: COPY src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type((TRY (aST__full_type_mut(list_node)))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     runtimeHost__materializer_set_current_label(rtoc_self_view.host, label);
     MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, TRY (aST__full_type_mut(list_node)), TRUE));
     MUTABLE body_stmts = TRY (blk(item_setup.items_ident, label));
-    RETURN MIRBlockExpr{ label: label, body: COPY (source_prefix + [Let{ name: COPY src_name, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, source_cleanup] + item_setup.statements + body_stmts), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+    RETURN MIRBlockExpr{ label: COPY label, body: COPY (source_prefix + [Let{ name: COPY src_name, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, source_cleanup] + item_setup.statements + body_stmts), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 }
 END
 PUB FN pipelineMaterializer__items_setup(self: PipelineMaterializer, lhs_type: Type, per_label: Bool = FALSE) RETURNS !ItemSetup
@@ -307,7 +307,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         NIL
       END); MUTABLE rtoc_optional_or_result_3: ?String = NIL; IF rtoc_optional_or_source_2 != NIL THEN rtoc_optional_or_result_3 = COPY rtoc_optional_or_source_2; ELSE rtoc_optional_or_result_3 = pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr); END rtoc_optional_or_result_3 } ), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
-      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [fact.mark(), Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Cleanup{ name: src_name, cleanup_entry: COPY src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [fact.mark(), Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Cleanup{ name: COPY src_name, cleanup_entry: COPY src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     IF fact THEN
       fact.mark().scope = IF placement__heap?(fact.alloc()) THEN
@@ -342,7 +342,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fact: ?AllocationFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, :heap, TRY (aST__full_type_mut(lhs)));
     IF fact THEN
       &source_prefix.append(fact.mark());
-      source_cleanup = Cleanup{ name: src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type(lhs_type))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      source_cleanup = Cleanup{ name: COPY src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact.alloc(), FALSE, NIL, TRY (type__zig_type(lhs_type))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     runtimeHost__materializer_set_current_label(rtoc_self_view.host, label);
     MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, lhs_type));

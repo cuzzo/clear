@@ -97,7 +97,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   END (IF (fn_name == NIL) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; body_fn_names_by_index[_.index] = UNWRAP (fn_name); { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.body_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE d: ?SuspendDescriptor = COPY _.descriptor;
   IF d EXISTS AS d_value THEN
     body = ruby_array_concat_FsmBodyItem(body, TRY (emit__fsm_body_mir_items(d_value.setup_stmts)));
-  END FsmMemberFn{ fn_name: fn_name, ctx_id: id, bg_rt: bg_rt, suppress_runtime_ref: _.suppress_runtime_ref, body_stmts: TRY (emit__fsm_body_emit_values(body)), extra_prologue_stmts: COPY _.extra_prologue_stmts } } } } END) } } } } } |> WHERE _ != NIL;
+  END FsmMemberFn{ fn_name: fn_name, ctx_id: id, bg_rt: COPY bg_rt, suppress_runtime_ref: _.suppress_runtime_ref, body_stmts: TRY (emit__fsm_body_emit_values(body)), extra_prologue_stmts: COPY _.extra_prologue_stmts } } } } END) } } } } } |> WHERE _ != NIL;
   MUTABLE arms = segment_specs |> SELECT {
   MUTABLE tail = TRY (emit__build_dispatch_tail(_));
   FsmStateArm{ index: _.index, pre_body_skip: COPY _.pre_body_skip, pre_body_stmts: COPY _.pre_body_stmts, body_fn_name: COPY body_fn_names_by_index[_.index], err_cleanups: COPY _.err_cleanups, tail: tail }

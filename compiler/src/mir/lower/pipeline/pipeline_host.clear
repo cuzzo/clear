@@ -723,7 +723,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         cleanupEntry__mark_moved_guard_mut(&entry);
         &push_stmts.append(Emittable{ AllocMark: COPY AllocMark{ name: UNWRAP (COPY transfer_name), alloc: :heap, type_info: COPY item_type, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
         &push_stmts.append(Emittable{ Let: COPY Let{ name: COPY UNWRAP (COPY transfer_name), init: COPY selector, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
-        &push_stmts.append(Emittable{ ErrCleanup: COPY ErrCleanup{ name: transfer_name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+        &push_stmts.append(Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY transfer_name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
         pushed = Emittable{ Ident: COPY Ident{ name: UNWRAP (COPY transfer_name), lowered_node_id: NIL, ownership_consumption: NIL } };
       END
       push_contract = callableContract__new((TRY (callableContract__no_ownership(1))).signature, TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(UNWRAP (transfer_name), item_type, "stream SELECT push transfers the item to the consumer", :heap)])), 1);

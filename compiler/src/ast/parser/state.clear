@@ -1090,7 +1090,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (range_file == NIL) THEN
         range_file = COPY last.file;
       END
-      RETURN SourceRange{ file: range_file, start_offset: range.start_offset, end_offset: end_offset, start_line: range.start_line, start_column: range.start_column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
+      RETURN SourceRange{ file: COPY range_file, start_offset: range.start_offset, end_offset: end_offset, start_line: range.start_line, start_column: range.start_column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
     END
     panic("Internal: source range missing from postfix receiver");
 }

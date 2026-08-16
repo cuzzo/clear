@@ -72,7 +72,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           p_type = (TRY (type__new(TypeConstructionInput{ SymbolValue: symbol("Auto") }, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, TRUE)));
         END
     END
-    Capture{ name: UNWRAP (COPY p_name), type: COPY (p_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }))), default: COPY default_val, mutable: castClearParserReturnValueToBool(is_mutable), takes: castClearParserReturnValueToBool(takes), comptime: is_comptime, name_token: COPY name_tok, carrier_contract: carrier_contract, storage: NIL }
+    Capture{ name: UNWRAP (COPY p_name), type: COPY (p_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }))), default: COPY default_val, mutable: castClearParserReturnValueToBool(is_mutable), takes: castClearParserReturnValueToBool(takes), comptime: is_comptime, name_token: COPY name_tok, carrier_contract: COPY carrier_contract, storage: NIL }
     })))._1;
 }
 END
@@ -203,7 +203,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       namespace = TRY (token__text_mut(clearParser__consume(&rtoc_self_view, :VAR_ID)));
     END
     clearParser__match_mut(&rtoc_self_view, :CHAR, ";");
-    RETURN RequireNode{ token: COPY tok, path: path, namespace: namespace, kind: COPY kind, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    RETURN RequireNode{ token: COPY tok, path: COPY path, namespace: COPY namespace, kind: COPY kind, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
 PRIVATE FN clearParser__parse_visibility_decl(MUTABLE self: ClearParser, visibility: String@symbol) RETURNS !Locatable
@@ -1344,7 +1344,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE expr = TRY (clearParser__parse_expression(&rtoc_self_view));
     clearParser__consume(&rtoc_self_view, :CHAR, ";");
-    RETURN AssertRaises{ token: COPY tok, kind: COPY kind, error_name: error_name, expression: expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    RETURN AssertRaises{ token: COPY tok, kind: COPY kind, error_name: COPY error_name, expression: expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
 FN clearParser__parse_benchmark_stmt(MUTABLE self: ClearParser) RETURNS !BenchmarkStmt
