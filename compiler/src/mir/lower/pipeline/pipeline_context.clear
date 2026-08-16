@@ -94,7 +94,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.context = COPY context;
 }
 END
-PUB FN pipelinePlaceholderRewriter__substitute(MUTABLE self: PipelinePlaceholderRewriter, MUTABLE node: Locatable) RETURNS !Locatable
+PUB FN pipelinePlaceholderRewriter__substitute(MUTABLE self: PipelinePlaceholderRewriter, node: Locatable) RETURNS !Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
