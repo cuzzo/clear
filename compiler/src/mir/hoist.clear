@@ -227,7 +227,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
       END
     END
     IF ret_or_binop THEN
-      IF aST__node_right(return_node_mutable.value) EXISTS AS or_right THEN
+      IF aST__node_right(UNWRAP (return_node_mutable.value)) EXISTS AS or_right THEN
         MUTABLE right_type: Type = TRY (aST__full_type_mut(or_right));
         IF type__collection?(right_type) THEN
           expected = COPY right_type;

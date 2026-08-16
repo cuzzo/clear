@@ -188,9 +188,6 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
   &parts.append(TRY (fsmWrapperEmitter__render_member_fn(_, &mir_emitter)));
   &parts.append("");
   END
-  IF !(s.dispatch IS_A FsmDispatch) THEN
-    panic("generic FSM ctx requires MIR::FsmDispatch");
-  END
   &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_dispatch(s.dispatch)), 8));
   &parts.append("");
   &parts.append(fsmWrapperEmitter__render_destroy_task(s.dispatch.ctx_id(), (s.destroy_actions OR List[]), &mir_emitter));

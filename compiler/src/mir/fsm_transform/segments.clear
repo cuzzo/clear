@@ -304,7 +304,7 @@ PRIVATE FN segments__stmt_unsupported?(stmt: Locatable) RETURNS !Bool ->
     RETURN FALSE;
   END
 END
-PRIVATE FN segments__contains_suspend_anywhere?(stmts: ?[]Locatable) RETURNS Bool EFFECTS REENTRANT ->
+PRIVATE FN segments__contains_suspend_anywhere?(stmts: ?[]Locatable) RETURNS !Bool EFFECTS REENTRANT ->
   IF stmts EXISTS AS stmts_value THEN
     MUTABLE items = COPY stmts_value;
     MUTABLE index = 0;
