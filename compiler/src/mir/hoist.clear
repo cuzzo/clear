@@ -153,7 +153,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_6.length() DO
-      MUTABLE call_arg: Locatable = COPY rtoc_each_items_6[rtoc_idx];
+      MUTABLE call_arg: Locatable = COPY UNWRAP (rtoc_each_items_6[rtoc_idx]);
       MUTABLE arg_is_moved_ident: Bool = FALSE;
       IF call_arg IS_A MoveNode AS move_node THEN
         arg_is_moved_ident = move_node.value IS_A Identifier;

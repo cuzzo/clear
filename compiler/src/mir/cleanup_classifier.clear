@@ -123,12 +123,14 @@ PUB FN frozenCleanupFacts__without_names(self: FrozenCleanupFacts, names: []Name
   RETURN frozenCleanupFacts__build(&kept);
 END
 PUB FN frozenCleanupFacts__bindings(self: FrozenCleanupFacts) RETURNS !{String}CleanupEntry@multiowned ->
-  RETURN self.entries_by_place.each_with_object({}, %(tuple_param_0, out: Tuple<PlaceId,CleanupEntry@multiowned>) -> {
-  MUTABLE place = tuple_param_0._0;
-  MUTABLE entry = tuple_param_0._1;
-  out[place.path()] = entry;
-  NIL
-  });
+  MUTABLE out: {String}CleanupEntry@multiowned = {};
+  FOR rtoc_place IN self.entries_by_place.keys() DO
+    IF self.entries_by_place[rtoc_place] EXISTS AS binding_entry THEN
+      MUTABLE binding_key: String = COPY rtoc_place.path;
+      out[binding_key] = KEEP binding_entry;
+    END
+  END
+  RETURN out;
 END
 PUB FN frozenCleanupFacts__each_entry(self: FrozenCleanupFacts, block: FN(PlaceId, CleanupEntry) -> Void) RETURNS Void ->
   FOR rtoc_each_key IN self.entries_by_place.keys() DO

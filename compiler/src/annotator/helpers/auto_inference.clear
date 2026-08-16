@@ -1772,7 +1772,7 @@ FN castNodeToOptionalAutoInferenceWalkNode(value: Node) RETURNS ?AutoInferenceWa
   panic("Invalid cast to ?AutoInferenceWalkNode");
 END
 FN castProgramToOptionalAutoInferenceWalkNode(value: Program) RETURNS ?AutoInferenceWalkNode ->
-  RETURN AutoInferenceWalkNode{ MIRProgram: COPY value };
+  RETURN CAST(panic("program is not a walk node") AS AutoInferenceWalkNode);
 END
 FN rtocChildrenAutoInferenceWalkNode(node: AutoInferenceWalkNode) RETURNS []AutoInferenceWalkNode ->
   PARTIAL MATCH node START
