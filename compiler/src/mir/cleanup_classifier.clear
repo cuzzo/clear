@@ -749,7 +749,7 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
   RETURN NIL;
 END
 PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
-  aST__walk_body(Body{ ArrayValue: COPY body }, %(node: Locatable) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
+  aST__walk_body(COPY body, %(node: Locatable) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
   IF !(node IS_A MatchStatement) THEN
       RETURN;
   END
@@ -1036,7 +1036,7 @@ PUB FN cleanupClassifier__call_has_return_lifetime?(expr: Locatable) RETURNS !Bo
   RETURN (!(!(sig)) AND !(((TRY (functionSignature__return_lifetime(sig))).length() == 0)));
 END
 PUB FN cleanupClassifier__each_capture_binding(body: []Node, block: FN(String, Locatable, CaptureBindingBlockParam3) -> Void) RETURNS Void ->
-  aST__walk_body(Body{ ArrayValue: body |> SELECT castNodeToLocatable(_) }, %(node: Locatable) -> {
+  aST__walk_body(body |> SELECT castNodeToLocatable(_), %(node: Locatable) -> {
   IF node IS_A WhileBindLoop AS while_bind_loop THEN
       block(CAST(while_bind_loop.binding_name AS String), while_bind_loop.condition, while_bind_loop);
   ELSE_IF node IS_A IfBind AS if_bind THEN

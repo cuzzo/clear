@@ -14174,7 +14174,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__visit(&rtoc_self_view, node.do_branch));
     END
     typeAnalysisSession__finalize_scope(rtoc_self_view, Locatable{ WhileLoop: COPY node });
-    typeAnalysisSession__validate_moved_values_not_reused_by_loop_mut(rtoc_self_view, Node{ WhileLoop: COPY node }, Body{ ArrayValue: COPY node.do_branch }, pre_loop_states, :USE_OF_MOVED_IN_LOOP);
+    typeAnalysisSession__validate_moved_values_not_reused_by_loop_mut(rtoc_self_view, Node{ WhileLoop: COPY node }, COPY node.do_branch, pre_loop_states, :USE_OF_MOVED_IN_LOOP);
     node.deferred_drops
     })], FALSE));
     IF node.tight THEN
@@ -14221,7 +14221,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__og_declare(rtoc_self_view, CAST(node.binding_name AS String), NIL, unwrapped);
     TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, node.do_branch));
     typeAnalysisSession__finalize_scope(rtoc_self_view, Locatable{ WhileBindLoop: COPY node });
-    typeAnalysisSession__validate_moved_values_not_reused_by_loop_mut(rtoc_self_view, Node{ WhileBindLoop: COPY node }, Body{ ArrayValue: COPY node.do_branch }, pre_loop_states, :USE_OF_MOVED_IN_LOOP_SHORT, CAST(node.binding_name AS String));
+    typeAnalysisSession__validate_moved_values_not_reused_by_loop_mut(rtoc_self_view, Node{ WhileBindLoop: COPY node }, COPY node.do_branch, pre_loop_states, :USE_OF_MOVED_IN_LOOP_SHORT, CAST(node.binding_name AS String));
     node.deferred_drops
     })], FALSE));
     node.mark_per_iter = FALSE;

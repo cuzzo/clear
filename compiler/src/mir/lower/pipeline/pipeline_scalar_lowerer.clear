@@ -119,7 +119,7 @@ PRIVATE FN pipelineScalarLowerer__visit_pipeline_expr_mir(self: PipelineScalarLo
   RETURN pipelineScalarLowerer__visit_expr_call(self, list_node, expr_node, placeholder);
 END
 PRIVATE FN pipelineScalarLowerer__scalar_loop(self: PipelineScalarLowerer, iter: Emittable, capture: String, body: []Emittable, mark: ?Bool = NIL) RETURNS !ForStmt ->
-  RETURN ForStmt{ iter: COPY iter, capture: COPY capture, body: Body{ ArrayValue: TRY (pipelineScalarLowerer__with_iteration_rewind(self, body)) |> SELECT castEmittableToLocatable(_) }, index_capture: COPY mark, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+  RETURN ForStmt{ iter: COPY iter, capture: COPY capture, body: TRY (pipelineScalarLowerer__with_iteration_rewind(self, body)) |> SELECT castEmittableToLocatable(_), index_capture: COPY mark, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN pipelineScalarLowerer__with_iteration_rewind(self: PipelineScalarLowerer, body: []Emittable) RETURNS ![]Emittable ->
   MUTABLE found: Bool = FALSE;

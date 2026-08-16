@@ -150,7 +150,7 @@ PRIVATE FN mIRPass__pre_mark_bg_resource_captures_mut(self: MIRPass, fn_value: F
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (aST__each_bg_block(Body{ ArrayValue: COPY fn_value.body }, %(bg_value: BgNode) USE(facts) -> {
+    TRY (aST__each_bg_block(COPY fn_value.body, %(bg_value: BgNode) USE(facts) -> {
     MUTABLE resource_captures = (IF selectOp__capture_analysis(bg_value) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = (selectOp__capture_analysis(bg_value));
     TRY (ownershipDataflow__resource_captures(rtoc_local_receiver_1)) }
