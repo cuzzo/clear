@@ -370,7 +370,7 @@ PUB FN segments__classify_suspend(stmt: Locatable) RETURNS !?SegmentTail ->
     RETURN NIL;
   END
 END
-PRIVATE FN segments__suspend_for(v: ?Locatable, name: ?String) RETURNS ?SegmentTail ->
+PRIVATE FN segments__suspend_for(v: ?Locatable, name: ?String) RETURNS !?SegmentTail ->
   IF v EXISTS AS v_value THEN
     MUTABLE value = COPY v_value;
     IF (value IS_A FuncCall) OR (value IS_A MethodCall) THEN

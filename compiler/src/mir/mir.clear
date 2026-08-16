@@ -3981,7 +3981,7 @@ PUB STRUCT SuspendDescriptor {
 }
 PUB STRUCT FsmDispatch {
   ctx_id: Int64,
-  arms: Any@multiowned,
+  arms: []FsmStateArm,
   uses_loop_label: Any@multiowned
 }
 PUB STRUCT FsmStateArm {

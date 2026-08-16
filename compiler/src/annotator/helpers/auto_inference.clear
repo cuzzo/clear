@@ -2442,7 +2442,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeAssignment(v: Assignment) RETURNS []AutoIn
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(AutoInferenceWalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.auto_atomic_op)] });
   RETURN out;
 END
 FN rtocChildrenOfAutoInferenceWalkNodeAverageOp(v: AverageOp) RETURNS []AutoInferenceWalkNode ->
@@ -3063,7 +3062,6 @@ FN rtocChildrenOfAutoInferenceWalkNodeBindExpr(v: BindExpr) RETURNS []AutoInfere
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mode)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.reassign_cleanup)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.mir_binding_entry)] });
-  &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.auto_atomic_op)] });
   &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY v.ownership_transport_plan)] });
   RETURN out;
 END
