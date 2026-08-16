@@ -211,11 +211,11 @@ PRIVATE FN pipelineBindingChainLowerer__lower_binding_fold(self: PipelineBinding
     MUTABLE expr = pipelineBindingChainLowerer__visit_placeholder_expr(self, UNWRAP (maxOp__expression(max_op_multiowned)), placeholder);
     MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (maxOp__expression(max_op_multiowned)))) }));
     MUTABLE zig_type = TRY (type__zig_type(result_type));
-    MUTABLE sentinel = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_7: ?Lit = NIL;
+    MUTABLE sentinel = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_7: ?Emittable = NIL;
     IF type__unsigned_integer?(result_type) THEN
-      rtoc_ternary_value_7 = Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL };
+      rtoc_ternary_value_7 = Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE
-      rtoc_ternary_value_7 = TypeSentinel{ extreme: :min, zig_type: COPY zig_type, lowered_node_id: NIL, ownership_consumption: NIL };
+      rtoc_ternary_value_7 = Emittable{ TypeSentinel: COPY TypeSentinel{ extreme: :min, zig_type: COPY zig_type, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     rtoc_ternary_value_7? };
     MUTABLE init = [Emittable{ Let: COPY Let{ name: COPY names.accumulator, init: COPY sentinel, mutable: TRUE, annotation: COPY result_type, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
