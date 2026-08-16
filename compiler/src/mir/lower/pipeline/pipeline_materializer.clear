@@ -187,7 +187,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     runtimeHost__materializer_set_current_label(&rtoc_self_view.host, label);
     MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, TRY (aST__full_type_mut(list_node)), TRUE));
     MUTABLE body_stmts = TRY (blk(item_setup.items_ident, label));
-    RETURN MIRBlockExpr{ label: COPY label, body: COPY (source_prefix + [Let{ name: COPY src_name, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, source_cleanup] + item_setup.statements + body_stmts), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+    MUTABLE block_body: []Emittable = COPY source_prefix;
+    &block_body.append(Emittable{ Let: COPY Let{ name: COPY src_name, init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
+    IF source_cleanup EXISTS AS source_cleanup_value THEN
+      &block_body.append(Emittable{ Cleanup: COPY source_cleanup_value });
+    END
+    block_body = COPY (block_body + item_setup.statements + body_stmts);
+    RETURN MIRBlockExpr{ label: COPY label, body: COPY block_body, lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 }
 END
 PUB FN pipelineMaterializer__items_setup(self: PipelineMaterializer, lhs_type: Type, per_label: Bool = FALSE) RETURNS !ItemSetup
