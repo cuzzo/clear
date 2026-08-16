@@ -215,7 +215,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
       MUTABLE expected_value = TRY (type__success_type(expected_value));
     END
     MUTABLE value_type: ?Type = TRY (type__from_node_mut(return_node_mutable.value, "return value hoist"));
-    IF (((value_type != NIL) AND type__collection?((value_type?))) AND !(hoist__empty_list_literal?(return_node_mutable.value))) THEN
+    IF (((value_type != NIL) AND type__collection?(UNWRAP (value_type))) AND !(hoist__empty_list_literal?(return_node_mutable.value))) THEN
       expected = COPY value_type;
     END
     IF (return_node_mutable.value IS_A BinaryOp AND (((return_node_mutable.value.op() == symbol("OR")) OR (return_node_mutable.value.op() == symbol("OR_ELSE"))))) THEN

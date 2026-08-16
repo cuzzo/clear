@@ -9010,3 +9010,6 @@ PUB FN aST__stamp_synthetic_type_mut(MUTABLE node: Locatable, value: Type, conte
   END
   RETURN TRY (aST__full_type_mut(node));
 END
+PUB FN aST__loop_node?(node: Locatable) RETURNS Bool ->
+  RETURN ((((node IS_A WhileLoop) OR (node IS_A WhileBindLoop)) OR (node IS_A ForRange)) OR (node IS_A ForEach));
+END
