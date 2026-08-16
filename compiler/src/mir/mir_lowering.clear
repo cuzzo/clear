@@ -17406,11 +17406,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE pair_stmts = COPY mIRLowering__function_state(rtoc_self_view).pending_stmts;
     MUTABLE rtoc_writer_receiver_643: FunctionState = mIRLowering__function_state(rtoc_self_view);
     rtoc_writer_receiver_643.pending_stmts = outer_pending;
-    &items.append(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_644: ?ExprStmt = NIL;
+    &items.append(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_644: ?Emittable = NIL;
       IF (pair_stmts.length() == 0) THEN
         rtoc_ternary_value_644 = put_stmt;
       ELSE
-        rtoc_ternary_value_644 = MIRBlockExpr{ label: NIL, body: COPY (pair_stmts + [put_stmt]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
+        rtoc_ternary_value_644 = Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: NIL, body: COPY (pair_stmts + [put_stmt]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
       END
       rtoc_ternary_value_644? }));
     END

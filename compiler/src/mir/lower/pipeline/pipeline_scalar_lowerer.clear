@@ -78,11 +78,11 @@ PRIVATE FN pipelineScalarLowerer__lower_max(self: PipelineScalarLowerer, site: P
   MUTABLE expr_mir = pipelineScalarLowerer__visit_pipeline_expr_mir(self, list_node, max_node.expression);
   MUTABLE result_type = TRY (type__new(&max_node.expression.full_type_mut()));
   MUTABLE zig_type = TRY (type__zig_type(result_type));
-  MUTABLE sentinel = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_6: ?Lit = NIL;
+  MUTABLE sentinel = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_6: ?Emittable = NIL;
   IF type__unsigned_integer?(result_type) THEN
-    rtoc_ternary_value_6 = Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL };
+    rtoc_ternary_value_6 = Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } };
   ELSE
-    rtoc_ternary_value_6 = TypeSentinel{ extreme: :min, zig_type: COPY zig_type, lowered_node_id: NIL, ownership_consumption: NIL };
+    rtoc_ternary_value_6 = Emittable{ TypeSentinel: COPY TypeSentinel{ extreme: :min, zig_type: COPY zig_type, lowered_node_id: NIL, ownership_consumption: NIL } };
   END
   rtoc_ternary_value_6? };
   RETURN pipelineScalarLowerer__pipeline_block_call(self, list_node, %(items, label) USE(expr_mir, result_type, sentinel, self) -> {
