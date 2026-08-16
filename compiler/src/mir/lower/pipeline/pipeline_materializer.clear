@@ -251,7 +251,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRY (pipelineMaterializer__build_soa_list(rtoc_self_view, lhs_type));
     ELSE_IF (kind == ItemKind.ShardedList) THEN
       RETURN TRY (pipelineMaterializer__build_sharded_list(rtoc_self_view, lhs_type));
-    ELSE_IF (kind IS_A Set) THEN
+    ELSE_IF (kind == ItemKind.Set) THEN
       RETURN TRY (pipelineMaterializer__build_set(rtoc_self_view, lhs_type));
     ELSE_IF (kind == ItemKind.Default) THEN
       RETURN CAST([Emittable{ Let: COPY Let{ name: COPY items_name, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
