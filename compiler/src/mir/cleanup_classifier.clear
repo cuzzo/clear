@@ -174,16 +174,7 @@ PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: FN(
   RETURN cleanupClassificationPlan__from_function(fn_node, bindings, &entries_by_place);
 END
 PUB FN cleanupClassifier__place_for_binding_node(name: String, node: Locatable) RETURNS PlaceId ->
-  MUTABLE sym = IF TRUE THEN
-    aST__node__symbol(node)
-  ELSE
-    NIL
-  END;
-  MUTABLE symbol = IF sym IS_A SymbolEntry THEN
-    sym
-  ELSE
-    NIL
-  END;
+  MUTABLE symbol: ?SymbolEntry@multiowned = aST__node__symbol(node);
   RETURN placeId__from_symbol(Path{ StringValue: COPY name }, symbol);
 END
 PUB FN cleanupClassifier__walk_moved_source_guards(body: []Locatable, bindings: {String}CleanupEntry) RETURNS Void ->
@@ -192,13 +183,13 @@ PUB FN cleanupClassifier__walk_moved_source_guards(body: []Locatable, bindings: 
   END
 END
 PUB FN cleanupClassifier__mark_moved_source_guards_in_node(node: Locatable, bindings: {String}CleanupEntry) RETURNS Void EFFECTS REENTRANT ->
-  IF (IF node IS_A Identifier AS identifier THEN aST__moved?(Locatable{ Identifier: COPY identifier }) ELSE FALSE END) THEN
-    (IF bindings[CAST(node.name() AS String)] != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_1 = (bindings[CAST(node.name() AS String)]);
-    cleanupEntry__mark_moved_guard_mut(&rtoc_mutable_receiver_1) }
-    ELSE
-      NIL
-    END);
+  IF node IS_A Identifier AS moved_identifier THEN
+    IF aST__moved?(Locatable{ Identifier: COPY moved_identifier }) THEN
+      IF bindings[moved_identifier.name] EXISTS AS moved_entry THEN
+        MUTABLE moved_entry_mutable = KEEP moved_entry;
+        cleanupEntry__mark_moved_guard_mut(&moved_entry_mutable);
+      END
+    END
   END
   IF node IS_A FunctionDef AS function_def THEN
     RETURN;
