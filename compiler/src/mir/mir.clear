@@ -3997,7 +3997,7 @@ PUB STRUCT FsmStateArm {
   tail: FsmTail
 }
 PUB STRUCT FsmTailCondSkip {
-  condition: Any@multiowned,
+  condition: Emittable,
   skip_step: Int64
 }
 PUB STRUCT FsmTailLockTry {
@@ -4036,31 +4036,31 @@ FN fsmTailDone__kind(self: FsmTailDone) RETURNS String@symbol ->
   RETURN :done;
 END
 PUB STRUCT FsmTailJump {
-  next_step: Any@multiowned
+  next_step: Int64
 }
 
 FN fsmTailJump__kind(self: FsmTailJump) RETURNS String@symbol ->
   RETURN :jump;
 END
 PUB STRUCT FsmTailYield {
-  next_step: Any@multiowned,
-  yield_reason: Any@multiowned
+  next_step: Int64,
+  yield_reason: String
 }
 
 FN fsmTailYield__kind(self: FsmTailYield) RETURNS String@symbol ->
   RETURN :yield;
 END
 PUB STRUCT FsmTailRegisterYield {
-  next_step: Any@multiowned,
-  register_expr: Any@multiowned,
-  yield_reason: Any@multiowned
+  next_step: Int64,
+  register_expr: Emittable,
+  yield_reason: String
 }
 
 FN fsmTailRegisterYield__kind(self: FsmTailRegisterYield) RETURNS String@symbol ->
   RETURN :register_yield;
 END
 PUB STRUCT FsmTailCondJump {
-  condition: Any@multiowned,
+  condition: Emittable,
   then_step: Any@multiowned,
   else_step: Any@multiowned
 }

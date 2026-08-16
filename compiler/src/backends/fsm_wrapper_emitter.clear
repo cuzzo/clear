@@ -258,13 +258,13 @@ PRIVATE FN fsmWrapperEmitter__render_tail(t: FsmTail, ctx_id: Int64) RETURNS !St
   IF t IS_A FsmTailDone AS fsm_tail_done THEN
     RETURN (["__ctx_${ctx_id.toString()}.inner.wg.done();", "return .{ .Done = {} };"]).join("\n");
   ELSE_IF t IS_A FsmTailYield AS fsm_tail_yield THEN
-    RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_yield.next_step};", "return .{ .${fsm_tail_yield.yield_reason} = {} };"]).join("\n");
+    RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_yield.next_step.toString()};", "return .{ .${fsm_tail_yield.yield_reason} = {} };"]).join("\n");
   ELSE_IF t IS_A FsmTailRegisterYield AS fsm_tail_register_yield THEN
     RETURN (["if (${TRY (fsmWrapperEmitter__render_fsm_expr(fsm_tail_register_yield.register_expr))}) {", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_register_yield.next_step};", "    return .{ .${fsm_tail_register_yield.yield_reason} = {} };", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_register_yield.next_step};", "continue :__sw;"]).join("\n");
   ELSE_IF t IS_A FsmTailJump AS fsm_tail_jump THEN
-    RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_jump.next_step};", "continue :__sw;"]).join("\n");
+    RETURN (["__ctx_${ctx_id.toString()}.step = ${fsm_tail_jump.next_step.toString()};", "continue :__sw;"]).join("\n");
   ELSE_IF t IS_A FsmTailCondJump AS fsm_tail_cond_jump THEN
-    RETURN (["if (${TRY (fsmWrapperEmitter__render_fsm_expr(fsm_tail_cond_jump.condition))}) {", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_cond_jump.then_step};", "    continue :__sw;", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_cond_jump.else_step};", "continue :__sw;"]).join("\n");
+    RETURN (["if (${TRY (fsmWrapperEmitter__render_fsm_expr(fsm_tail_cond_jump.condition))}) {", "    __ctx_${ctx_id.toString()}.step = ${fsm_tail_cond_jump.then_step.toString()};", "    continue :__sw;", "}", "__ctx_${ctx_id.toString()}.step = ${fsm_tail_cond_jump.else_step.toString()};", "continue :__sw;"]).join("\n");
   ELSE_IF t IS_A FsmTailLockTry AS fsm_tail_lock_try THEN
     RETURN (["const __lock_r = ${fsm_tail_lock_try.lock_field_ref}.${fsm_tail_lock_try.try_method}(", "    __ctx_${ctx_id.toString()}.task,", "    &__ctx_${ctx_id.toString()}.lock_waiter,", "    __ctx_${ctx_id.toString()}.rt.getSched(),", ");", "switch (__lock_r) {", "    .Acquired => {", "        __ctx_${ctx_id.toString()}.step = ${fsm_tail_lock_try.ok_step};", "        continue :__sw;", "    },", "    .Registered => {", "        __ctx_${ctx_id.toString()}.step = ${fsm_tail_lock_try.wait_step};", "        return .{ .WaitForLock = {} };", "    },", "    .Error => {", "        __ctx_${ctx_id.toString()}.step = ${fsm_tail_lock_try.error_step};", "        continue :__sw;", "    },", "}"]).join("\n");
   ELSE_IF t IS_A FsmTailWokenCheck AS fsm_tail_woken_check THEN
