@@ -254,7 +254,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY node;
     END
     MUTABLE new_mc = MethodCall{ token: COPY node.token, object: COPY new_target, name: COPY node.name, args: COPY new_args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
-    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ MethodCall: COPY node }, &new_mc);
+    MUTABLE rtoc_rewrite_new_mc: PipelineRewriteNode = PipelineRewriteNode{ MethodCall: COPY new_mc };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ MethodCall: COPY node }, &rtoc_rewrite_new_mc);
+    IF rtoc_rewrite_new_mc IS_A MethodCall AS rtoc_updated_new_mc THEN
+      new_mc = COPY rtoc_updated_new_mc;
+    END
     pipelinePlaceholderRewriter__copy_call_metadata(rtoc_self_view, node, &new_mc);
     RETURN new_mc;
 }
@@ -338,7 +342,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY node;
     END
     MUTABLE new_unwrap = OptionalUnwrap{ token: COPY node.token, target: COPY new_target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, error_union_type: NIL };
-    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ OptionalUnwrap: COPY node }, &new_unwrap);
+    MUTABLE rtoc_rewrite_new_unwrap: PipelineRewriteNode = PipelineRewriteNode{ OptionalUnwrap: COPY new_unwrap };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ OptionalUnwrap: COPY node }, &rtoc_rewrite_new_unwrap);
+    IF rtoc_rewrite_new_unwrap IS_A OptionalUnwrap AS rtoc_updated_new_unwrap THEN
+      new_unwrap = COPY rtoc_updated_new_unwrap;
+    END
     RETURN new_unwrap;
 }
 END
@@ -463,7 +471,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY node;
     END
     MUTABLE new_uo = UnaryOp{ token: COPY node.token, op: node.op, right: new_operand, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ UnaryOp: COPY node }, &new_uo);
+    MUTABLE rtoc_rewrite_new_uo: PipelineRewriteNode = PipelineRewriteNode{ UnaryOp: COPY new_uo };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ UnaryOp: COPY node }, &rtoc_rewrite_new_uo);
+    IF rtoc_rewrite_new_uo IS_A UnaryOp AS rtoc_updated_new_uo THEN
+      new_uo = COPY rtoc_updated_new_uo;
+    END
     RETURN new_uo;
 }
 END
@@ -587,7 +599,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY node;
     END
     MUTABLE new_cast = Cast{ token: COPY node.token, value: new_value, target: node.target, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ Cast: COPY node }, &new_cast);
+    MUTABLE rtoc_rewrite_new_cast: PipelineRewriteNode = PipelineRewriteNode{ Cast: COPY new_cast };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ Cast: COPY node }, &rtoc_rewrite_new_cast);
+    IF rtoc_rewrite_new_cast IS_A Cast AS rtoc_updated_new_cast THEN
+      new_cast = COPY rtoc_updated_new_cast;
+    END
     RETURN new_cast;
 }
 END
@@ -634,7 +650,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY node;
     END
     MUTABLE new_block = BlockExpr{ token: COPY node.token, body: COPY new_body, result: COPY new_result, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ BlockExpr: COPY node }, &new_block);
+    MUTABLE rtoc_rewrite_new_block: PipelineRewriteNode = PipelineRewriteNode{ BlockExpr: COPY new_block };
+    pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ BlockExpr: COPY node }, &rtoc_rewrite_new_block);
+    IF rtoc_rewrite_new_block IS_A BlockExpr AS rtoc_updated_new_block THEN
+      new_block = COPY rtoc_updated_new_block;
+    END
     RETURN new_block;
 }
 END
