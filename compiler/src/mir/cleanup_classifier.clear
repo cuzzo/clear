@@ -120,7 +120,7 @@ PUB FN frozenCleanupFacts__without_names(self: FrozenCleanupFacts, names: []Name
       END
     END
   END
-  RETURN frozenCleanupFacts__build(kept);
+  RETURN frozenCleanupFacts__build(&kept);
 END
 PUB FN frozenCleanupFacts__bindings(self: FrozenCleanupFacts) RETURNS !{String}CleanupEntry@multiowned ->
   RETURN self.entries_by_place.each_with_object({}, %(tuple_param_0, out: Tuple<PlaceId,CleanupEntry@multiowned>) -> {

@@ -291,7 +291,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         "${prefix}${_.name}: ${_.type}"
       };
-      &output.append("EXTERN FN ${name}(${rendered_params.join(", ")}) RETURNS ${return_type} AS \"${name}\" FROM \"${rtoc_self_view.library}\" ABI C HEADER \"${rtoc_self_view.header}\";");
+      &output.append("EXTERN FN ${name}(${rendered_params.join(", ")}) RETURNS ${UNWRAP (return_type)} AS \"${name}\" FROM \"${rtoc_self_view.library}\" ABI C HEADER \"${rtoc_self_view.header}\";");
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN output;
