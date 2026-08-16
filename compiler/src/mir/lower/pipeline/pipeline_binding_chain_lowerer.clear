@@ -295,7 +295,8 @@ PRIVATE FN pipelineBindingChainLowerer__wrap_stages(self: PipelineBindingChainLo
         rtoc_reverse_i_12 = rtoc_reverse_i_12 - 1;
   CONTINUE;
     END
-    MUTABLE pred = pipelineBindingChainLowerer__visit_placeholder_expr(self, ((rtoc_reverse_items_11[rtoc_reverse_i_12])?).expression(), placeholder);
+    MUTABLE where_stage = CAST((rtoc_reverse_items_11[rtoc_reverse_i_12])? AS WhereOp);
+    MUTABLE pred = pipelineBindingChainLowerer__visit_placeholder_expr(self, whereOp__expression(where_stage), placeholder);
     body = [Emittable{ IfStmt: COPY IfStmt{ cond: COPY pred, then_body: body, else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }];
   rtoc_reverse_i_12 = rtoc_reverse_i_12 - 1;
   END
