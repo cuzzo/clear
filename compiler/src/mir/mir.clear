@@ -3939,7 +3939,7 @@ PUB STRUCT FsmGenericCtxStruct {
   type_name: String,
   promise_zig: String,
   capture_fields: []ContextFieldDecl,
-  extra_field_decls: Any@multiowned,
+  extra_field_decls: []ContextFieldDecl,
   promoted_field_decls: Any@multiowned,
   member_fns: Any@multiowned,
   dispatch: Any@multiowned,

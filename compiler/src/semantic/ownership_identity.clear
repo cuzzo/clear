@@ -7,10 +7,10 @@ STRUCT BindingId {
   binding_id: Int64
 }
 
-FN bindingId__from_symbol(name: String, symbol: SymbolEntry) RETURNS BindingId ->
+PUB FN bindingId__from_symbol(name: String, symbol: SymbolEntry) RETURNS BindingId ->
   RETURN BindingId{ name: COPY name, binding_id: symbol.binding_id };
 END
-FN bindingId__to_s(self: BindingId) RETURNS String ->
+PUB FN bindingId__to_s(self: BindingId) RETURNS String ->
   RETURN "${self.name}#${self.binding_id.toString()}";
 END
 PUB STRUCT PlaceId {
@@ -25,7 +25,7 @@ PUB FN placeId__from_path(path: Path) RETURNS PlaceId ->
   END
   RETURN PlaceId{ path: COPY CAST(path AS String), binding_name: NIL, binding_id: NIL };
 END
-FN placeId__from_symbol(path: Path, symbol: ?SymbolEntry) RETURNS PlaceId ->
+PUB FN placeId__from_symbol(path: Path, symbol: ?SymbolEntry) RETURNS PlaceId ->
   IF symbol EXISTS AS symbol_value THEN
     MUTABLE name = COPY CAST(path AS String);
     RETURN PlaceId{ path: COPY name, binding_name: COPY name, binding_id: symbol_value.binding_id };
@@ -33,7 +33,7 @@ FN placeId__from_symbol(path: Path, symbol: ?SymbolEntry) RETURNS PlaceId ->
     RETURN placeId__from_path(path);
   END
 END
-FN placeId__binding_identity(self: PlaceId) RETURNS ?BindingId ->
+PUB FN placeId__binding_identity(self: PlaceId) RETURNS ?BindingId ->
   MUTABLE name: ?String = COPY self.binding_name;
   MUTABLE id: ?Int64 = self.binding_id;
   IF name EXISTS AS name_value THEN

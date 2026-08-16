@@ -175,7 +175,7 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
   IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
-  MUTABLE extra_fields = fsmWrapperEmitter__render_context_field_decls((s.extra_field_decls OR List[]), mir_emitter);
+  MUTABLE extra_fields = fsmWrapperEmitter__render_context_field_decls(COPY s.extra_field_decls, mir_emitter);
   IF !(fsmWrapperEmitter__empty?(extra_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(extra_fields, 8));
   END

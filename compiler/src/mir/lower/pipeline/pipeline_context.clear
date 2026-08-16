@@ -354,7 +354,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_var_decl(MUTABLE self: Pipeli
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.value));
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
     IF !(new_value.equal?(node.value)) THEN
       node.value = new_value;
     END
@@ -367,7 +367,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_bind_expr(MUTABLE self: Pipel
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, node.name));
-    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.value));
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
     IF ((new_name == node.name) AND (new_value == node.value)) THEN
       RETURN COPY Locatable{ BindExpr: COPY node };
     END
@@ -396,7 +396,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_assignment(MUTABLE self: Pipe
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, node.name));
-    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.value));
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
     IF ((new_name == node.name) AND (new_value == node.value)) THEN
       RETURN COPY Locatable{ Assignment: COPY node };
     END
@@ -593,7 +593,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_cast(MUTABLE self: PipelinePl
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.value));
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
     IF new_value.equal?(node.value) THEN
       RETURN COPY node;
     END
