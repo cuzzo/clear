@@ -65,7 +65,7 @@ END
 PRIVATE FN hoist__synthesized_body?(fn_value: FunctionDef) RETURNS Bool ->
   RETURN !(!(((((TRUE AND fn_value.thunk_plan)) OR ((TRUE AND fn_value.mutual_thunk_plan))))));
 END
-PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, MUTABLE generated: []VarDecl, return_type: ?TypeTypeInput = NIL) RETURNS !Void EFFECTS REENTRANT ->
+PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, MUTABLE counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, MUTABLE generated: []VarDecl, return_type: ?TypeTypeInput = NIL) RETURNS !Void EFFECTS REENTRANT ->
   IF !(TRUE) THEN
     RETURN;
   END
@@ -140,7 +140,7 @@ PUB FN hoist__child_bodies(stmt: Locatable) RETURNS ![][]Locatable ->
   END
   RETURN bodies;
 END
-PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoists: []VarDecl, counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, return_type: ?TypeTypeInput = NIL) RETURNS !Void ->
+PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoists: []VarDecl, MUTABLE counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, return_type: ?TypeTypeInput = NIL) RETURNS !Void ->
   TRY (hoist__each_call(stmt, %(call: CallLike) USE(MUTABLE counter, MUTABLE hoists, schema_lookup) -> {
   IF (IF call IS_A MethodCall AS method_call THEN TRY (hoist__collection_value_store_call?(method_call)) ELSE FALSE END) THEN
       RETURN;
@@ -252,7 +252,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
   END
   NIL;
 END
-PRIVATE FN hoist__hoist_escape_value_mut(MUTABLE value: Locatable, MUTABLE hoists: []VarDecl, counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, expected_type: ?TypeTypeInput = NIL) RETURNS !Locatable ->
+PRIVATE FN hoist__hoist_escape_value_mut(MUTABLE value: Locatable, MUTABLE hoists: []VarDecl, MUTABLE counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, expected_type: ?TypeTypeInput = NIL) RETURNS !Locatable ->
   IF value IS_A MoveNode AS move_node THEN
   IF move_node.value IS_A Identifier THEN
     RETURN COPY CAST(move_node AS Locatable);
@@ -265,7 +265,7 @@ PRIVATE FN hoist__hoist_escape_value_mut(MUTABLE value: Locatable, MUTABLE hoist
     RETURN Locatable{ Identifier: COPY TRY (hoist__make_temp_mut(value, &hoists, hoistCounter__next_name(&counter), TRUE, expected_type)) };
   END
   IF ((value IS_A StructLit OR value IS_A UnionVariantLit) OR value IS_A ListLit) THEN
-    TRY (hoist__hoist_concats_within_mut(value, hoists, counter));
+    TRY (hoist__hoist_concats_within_mut(value, hoists, &counter));
   END
   RETURN COPY castLocatableToLocatable(value);
 END
@@ -379,7 +379,7 @@ PRIVATE FN hoist__non_body_exprs(node: Locatable) RETURNS ![]Any@multiowned ->
       rtoc_ternary_value_8? })
   END;
 END
-PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []VarDecl, counter: HoistCounter) RETURNS !Void EFFECTS REENTRANT ->
+PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []VarDecl, MUTABLE counter: HoistCounter) RETURNS !Void EFFECTS REENTRANT ->
   IF node IS_A StructLit AS struct_lit THEN
     MUTABLE struct_lit_mutable = COPY struct_lit;
     FOR _ IN struct_lit_mutable.fields.keys() DO
@@ -387,7 +387,7 @@ PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []Va
   IF hoist__concat?(v) THEN
         struct_lit_mutable.fields[_] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
   ELSE
-        TRY (hoist__hoist_concats_within_mut(v, hoists, counter));
+        TRY (hoist__hoist_concats_within_mut(v, hoists, &counter));
   END
     END
   ELSE_IF node IS_A UnionVariantLit AS union_variant_lit THEN
@@ -397,7 +397,7 @@ PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []Va
   IF hoist__concat?(v) THEN
         union_variant_lit_mutable.fields[_] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
   ELSE
-        TRY (hoist__hoist_concats_within_mut(v, hoists, counter));
+        TRY (hoist__hoist_concats_within_mut(v, hoists, &counter));
   END
     END
   ELSE_IF node IS_A ListLit AS list_lit THEN
@@ -408,7 +408,7 @@ PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []Va
     list_lit_mutable.items[idx] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
     RETURN NIL;
   ELSE
-    RETURN TRY (hoist__hoist_concats_within_mut(v, hoists, counter));
+    RETURN TRY (hoist__hoist_concats_within_mut(v, hoists, &counter));
   END
   NIL
     });
