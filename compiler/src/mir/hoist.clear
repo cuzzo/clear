@@ -96,7 +96,7 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, MUTABLE counter: Hoi
     i = (i + hoists.length());
     FOR _ IN (TRY (hoist__child_bodies(stmt))) DO
   MUTABLE rtoc_mutable_block_param_4 = COPY _;
-    TRY (hoist__hoist_body_mut(&rtoc_mutable_block_param_4, counter, schema_lookup, &generated, return_type));
+    TRY (hoist__hoist_body_mut(&rtoc_mutable_block_param_4, &counter, schema_lookup, &generated, return_type));
     END
     i = (i + 1);
   END
