@@ -246,7 +246,7 @@ PRIVATE FN pipelineBindingChainLowerer__lower_binding_fold(self: PipelineBinding
     MUTABLE result = Conditional{ cond: Emittable{ Ident: COPY Ident{ name: COPY names.found, lowered_node_id: NIL, ownership_consumption: NIL } }, then_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ Ident: COPY Ident{ name: COPY names.result, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "?${find_zig}", method: :as, lowered_node_id: NIL, ownership_consumption: NIL } }, else_val: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
     RETURN pipelineBindingChainLowerer__fold_plan(self, init, TRY (pipelineBindingChainLowerer__wrap_stages(self, stages, placeholder, accum)), post_inner, Emittable{ Conditional: COPY result });
   ELSE
-    RETURN NIL;
+    panic("binding-chain fold: unsupported fold op");
   END
 END
 PRIVATE FN pipelineBindingChainLowerer__fold_plan(self: PipelineBindingChainLowerer, init: []Emittable, body: []Emittable, post_inner: []Emittable, result: Emittable) RETURNS PipelineBindingFoldPlan ->
