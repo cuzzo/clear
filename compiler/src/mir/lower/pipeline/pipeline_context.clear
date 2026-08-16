@@ -606,10 +606,11 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_hash_lit(MUTABLE self: Pipeli
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE pairs: []Tuple<Locatable,Locatable> = COPY node.pairs;
-    MUTABLE new_pairs: {Locatable}Locatable = {};
-    FOR rtoc_each_key IN pairs.keys() DO
-    MUTABLE value: Locatable = COPY UNWRAP (pairs[rtoc_each_key]);
-    new_pairs[rtoc_each_key] = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, value));
+    MUTABLE new_pairs: []Tuple<Locatable,Locatable> = [];
+    FOR rtoc_pair IN pairs DO
+      MUTABLE pair_key = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY rtoc_pair._0));
+      MUTABLE pair_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY rtoc_pair._1));
+      &new_pairs.append(CAST(Tuple{pair_key, pair_value} AS Tuple<Locatable,Locatable>));
     END
     IF (new_pairs == pairs) THEN
       RETURN COPY Locatable{ HashLit: COPY node };
