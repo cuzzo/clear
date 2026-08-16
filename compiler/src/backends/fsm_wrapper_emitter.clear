@@ -63,15 +63,17 @@ PRIVATE FN fsmWrapperEmitter__render_run_body(step: FsmStep, MUTABLE mir_emitter
   }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
   MUTABLE body_text: String = body.join("\n");
-  RETURN (["        fn runBody(__ctx_${step.ctx_id.toString()}: *@This()) anyerror!void {", "            const ${step.bg_rt} = __ctx_${step.ctx_id.toString()}.rt;", (IF step.suppress_runtime_ref THEN
-    "            _ = &${step.bg_rt};"
-  ELSE
-    NIL
-  END), (IF !(body.empty?()) THEN
-    body
-  ELSE
-    NIL
-  END), "        }"]).join("\n");
+  MUTABLE run_parts: []String = [];
+  &run_parts.append("        fn runBody(__ctx_${step.ctx_id.toString()}: *@This()) anyerror!void {");
+  &run_parts.append("            const ${step.bg_rt} = __ctx_${step.ctx_id.toString()}.rt;");
+  IF (step.suppress_runtime_ref == TRUE) THEN
+    &run_parts.append("            _ = &${step.bg_rt};");
+  END
+  IF !(body_text.empty?()) THEN
+    &run_parts.append(COPY body_text);
+  END
+  &run_parts.append("        }");
+  RETURN run_parts.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_b1_resume_fn(ctx_id: Int64) RETURNS String ->
   RETURN (("fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n    if (runBody(__ctx_${ctx_id.toString()})) |_| {} else |err| {\n        __ctx_${ctx_id.toString()}.inner.result = err;\n    }\n    __ctx_${ctx_id.toString()}.inner.wg.done();\n    return .{ .Done = {} };\n}\n".chomp()).split("\n") |> SELECT "        ${_}").join("").chomp();
