@@ -76,20 +76,20 @@ PRIVATE FN fsmWrapperEmitter__render_run_body(step: FsmStep, MUTABLE mir_emitter
   RETURN run_parts.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_b1_resume_fn(ctx_id: Int64) RETURNS String ->
-  RETURN (("fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n    if (runBody(__ctx_${ctx_id.toString()})) |_| {} else |err| {\n        __ctx_${ctx_id.toString()}.inner.result = err;\n    }\n    __ctx_${ctx_id.toString()}.inner.wg.done();\n    return .{ .Done = {} };\n}\n".chomp()).split("\n") |> SELECT "        ${_}").join("").chomp();
+  RETURN (("fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n    if (runBody(__ctx_${ctx_id.toString()})) |_| {} else |err| {\n        __ctx_${ctx_id.toString()}.inner.result = err;\n    }\n    __ctx_${ctx_id.toString()}.inner.wg.done();\n    return .{ .Done = {} };\n}\n".trim()).split("\n") |> SELECT "        ${_}").join("").trim();
 END
 PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions: []FsmDestroyAction, MUTABLE mir_emitter: MIREmitter) RETURNS String ->
   MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, &mir_emitter);
   MUTABLE extra: String = "";
   IF !(fsmWrapperEmitter__empty?(extra_zig)) THEN
-    extra = (((extra_zig.split("\n") |> SELECT "    ${_.chomp()}").join("\n")) + "\n");
+    extra = (((extra_zig.split("\n") |> SELECT "    ${_.trim()}").join("\n")) + "\n");
   ELSE
     extra = "";
   END
-  RETURN (("fn destroyTask(__fsm_task: *CheatHeader.FsmTask) void {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n${extra}    CheatHeader.freeFsmCtx(@This(), __fsm_task, __ctx_${ctx_id.toString()});\n}\n".chomp()).split("\n") |> SELECT "        ${_}").join("").chomp();
+  RETURN (("fn destroyTask(__fsm_task: *CheatHeader.FsmTask) void {\n    const __ctx_${ctx_id.toString()}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));\n${extra}    CheatHeader.freeFsmCtx(@This(), __fsm_task, __ctx_${ctx_id.toString()});\n}\n".trim()).split("\n") |> SELECT "        ${_}").join("").trim();
 END
 PUB FN fsmWrapperEmitter__render_ctx_size_gate(type_name: String) RETURNS String ->
-  RETURN (("comptime {\n    if (@sizeOf(${type_name}) > 256) {\n        @compileError(\"FSM context is larger than 256 bytes; use @stack on this BG block to force a compiler-sized stackful fiber.\");\n    }\n}\n".chomp()).split("\n") |> SELECT "    ${_}").join("").chomp();
+  RETURN (("comptime {\n    if (@sizeOf(${type_name}) > 256) {\n        @compileError(\"FSM context is larger than 256 bytes; use @stack on this BG block to force a compiler-sized stackful fiber.\");\n    }\n}\n".trim()).split("\n") |> SELECT "    ${_}").join("").trim();
 END
 PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
   MUTABLE parts = List[];
@@ -465,7 +465,7 @@ PRIVATE FN fsmWrapperEmitter__indent_block(text: String, n: Int64) RETURNS Strin
   END
   MUTABLE pad = compilerRepeatString(" ", n);
   RETURN (text.split("\n") |> SELECT {
-  MUTABLE stripped = _.chomp("\n");
+  MUTABLE stripped = _.trim();
   (IF stripped.trim().empty?() THEN
       ""
     ELSE

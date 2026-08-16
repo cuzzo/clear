@@ -1240,7 +1240,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (((src != NIL) AND TRUE) AND node.token) THEN
       MUTABLE line_num = node.token.line;
       MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR_ELSE "");
-      MUTABLE body = line_text.chomp();
+      MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.lstrip();
       IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
@@ -1284,7 +1284,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF src EXISTS AS src_value THEN
       MUTABLE line_num = node.source_range.start_line;
       MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
-      MUTABLE body = line_text.chomp();
+      MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.lstrip();
       MUTABLE index = COPY node.index;
@@ -1316,7 +1316,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF src EXISTS AS src_value THEN
       MUTABLE line_num = token__start_line(node.source_range());
       MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
-      MUTABLE body = line_text.chomp();
+      MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.lstrip();
       IF !(inner.empty?()) THEN

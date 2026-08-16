@@ -604,7 +604,7 @@ FN emit_cap_field_needs_with_mut(node: GetField, code: String@symbol, name: Name
   IF ((src AND TRUE) AND node.token) THEN
     MUTABLE line_num = node.token.line;
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
-    MUTABLE body = line_text.chomp();
+    MUTABLE body = line_text.trim();
     MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
     MUTABLE inner = body.lstrip();
     IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
@@ -635,7 +635,7 @@ FN emit_foreign_index_needs_unsafe_view_mut(node: GetIndex, name: String) RETURN
   IF src THEN
     MUTABLE line_num = node.source_range.start_line;
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
-    MUTABLE body = line_text.chomp();
+    MUTABLE body = line_text.trim();
     MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
     MUTABLE inner = body.lstrip();
     MUTABLE index = node.index;
@@ -663,7 +663,7 @@ FN emit_direct_view_access_finding_mut(node: Locatable, name: String, permission
   IF src THEN
     MUTABLE line_num = token__start_line(node.source_range());
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
-    MUTABLE body = line_text.chomp();
+    MUTABLE body = line_text.trim();
     MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
     MUTABLE inner = body.lstrip();
     IF !(inner.empty?()) THEN
