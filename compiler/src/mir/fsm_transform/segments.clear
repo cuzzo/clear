@@ -394,8 +394,13 @@ PRIVATE FN segments__io_suspending_call?(call_node: SegmentsCallNode) RETURNS !B
     SegmentsCallNode.MethodCall AS item ->
       md = COPY item.matched_stdlib_def;,
   END
-  RETURN !(!(((((md != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_7 = (md?);
-  TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_7)) }) AND ((TRY (functionSignature__intrinsic_contract(&md))).behavior).fsm_setup_present))));
+  IF md EXISTS AS md_value THEN
+    MUTABLE md_mutable = COPY md_value;
+    IF TRY (functionSignature__intrinsic_suspends?(&md_mutable)) THEN
+      RETURN (TRY (functionSignature__intrinsic_contract(&md_mutable))).behavior.fsm_setup_present;
+    END
+  END
+  RETURN FALSE;
 END
 PUB FN segments__suspending_call?(expr: Locatable) RETURNS Bool ->
   RETURN ((aST__call?(expr)) AND segments__io_suspending_call?(castLocatableToCallNode(expr)));
