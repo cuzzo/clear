@@ -292,12 +292,7 @@ PUB FN fiberCtxBuilder__rc_payload_zig_type(ti: Type) RETURNS !String ->
 END
 # End Ruby module FiberCtxBuilder
 FN castCallToEmittable(value: Call) RETURNS Emittable ->
-  PARTIAL MATCH value START
-    Call.FuncCall AS cast_payload -> RETURN Emittable{ FuncCall: COPY cast_payload };,
-    Call.MethodCall AS cast_payload -> RETURN Emittable{ MethodCall: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to Emittable");
-  END
-  panic("Invalid cast to Emittable");
+  RETURN Emittable{ Call: COPY value };
 END
 FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
