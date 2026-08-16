@@ -218,11 +218,7 @@ PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int6
     &body_lines.append(pre_body);
   END
   IF arm.body_fn_name THEN
-    MUTABLE tail_kind = IF respondsTo?(arm.tail, "kind") THEN
-      arm.tail.kind()
-    ELSE
-      NIL
-    END;
+    MUTABLE tail_kind: String@symbol = fsmWrapperEmitter__tail_kind(arm.tail);
     MUTABLE arm_cleanups = fsmWrapperEmitter__render_resume_fn_cleanups((arm.err_cleanups OR List[]));
     MUTABLE err_action: []String = List[];
     IF ((tail_kind == :done) AND fsmWrapperEmitter__empty?(arm_cleanups)) THEN
@@ -487,4 +483,14 @@ FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
     &result.append(COPY rtoc_right_item);
   END
   RETURN result;
+END
+PRIVATE FN fsmWrapperEmitter__tail_kind(tail: FsmTail) RETURNS String@symbol ->
+  PARTIAL MATCH tail START
+    FsmTail.FsmTailDone AS item -> RETURN :done;,
+    FsmTail.FsmTailYield AS item -> RETURN :yield;,
+    FsmTail.FsmTailRegisterYield AS item -> RETURN :register_yield;,
+    FsmTail.FsmTailJump AS item -> RETURN :jump;,
+    FsmTail.FsmTailCondJump AS item -> RETURN :cond_jump;
+  END
+  RETURN :done;
 END
