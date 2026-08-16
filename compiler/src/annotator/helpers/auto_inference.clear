@@ -370,8 +370,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF rhs EXISTS AS rhs_value THEN
       IF entry IS_A AutoMapShapeEntry AS auto_map_shape_entry THEN
         IF rhs_value IS_A HashLit AS hash_lit THEN
-          MUTABLE key_slot = COPY UNWRAP (rtoc_self_view.slots[KEEP auto_map_shape_entry.key]);
-          MUTABLE val_slot = COPY UNWRAP (rtoc_self_view.slots[KEEP auto_map_shape_entry.value]);
+          MUTABLE key_slot = COPY UNWRAP (rtoc_self_view.slots[COPY auto_map_shape_entry.key]);
+          MUTABLE val_slot = COPY UNWRAP (rtoc_self_view.slots[COPY auto_map_shape_entry.value]);
           hash_lit.pairs |> EACH {
     pair_key, pair_value = _;
     &key_slot.sources.append(COPY pair_key);
@@ -552,7 +552,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         CONTINUE;
       END
       MUTABLE slot: Slot@multiowned = (rtoc_self_view.slots[rtoc_slot_key] OR_ELSE CAST(panic("missing hash key") AS Slot));
-      unresolved[rtoc_slot_key] = KEEP slot;
+      unresolved[rtoc_slot_key] = COPY slot;
     END
     RETURN Result{ resolved: COPY resolved, ambiguous: COPY ambiguous, unresolved: COPY unresolved };
 }

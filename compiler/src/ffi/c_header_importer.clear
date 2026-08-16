@@ -484,8 +484,7 @@ PRIVATE FN translator__map_callback(MUTABLE self: Translator, raw: String) RETUR
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE match: ?CompilerRegexScanner = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*const fn \\((.*)\\) callconv\\(\\.c\\) (.+)$"));
     IF match EXISTS AS match_value THEN
-      MUTABLE match_value_mutable = COPY match_value;
-      MUTABLE raw_params = TRY (translator__split_top_level(rtoc_self_view, compilerRegexCapture(match_value_mutable, 1)));
+      MUTABLE raw_params = TRY (translator__split_top_level(rtoc_self_view, compilerRegexCapture(match_value, 1)));
       MUTABLE params: []String = ( { MUTABLE rtoc_empty_list_17: []String = List[]; rtoc_empty_list_17 } );
       FOR _ IN raw_params DO
     MUTABLE type = compilerRegexReplaceFirst(_, compilerRegexCompile("^[A-Za-z_]\\w*:\\s*"), "");
@@ -497,7 +496,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((params.length() == raw_params.length())) THEN
         RETURN NIL;
       END
-      MUTABLE result: ?String = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value_mutable, 2), :return));
+      MUTABLE result: ?String = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match_value, 2), :return));
       IF result EXISTS AS result_value THEN
         RETURN "FN(${params.join(", ")}) -> ${result_value} CALLCONV C";
       ELSE

@@ -4003,17 +4003,17 @@ PUB STRUCT FsmTailCondSkip {
 PUB STRUCT FsmTailLockTry {
   try_method: String,
   lock_field_ref: String,
-  ok_step: Any@multiowned,
-  wait_step: Any@multiowned,
-  error_step: Any@multiowned
+  ok_step: Int64,
+  wait_step: Int64,
+  error_step: Int64
 }
 
 FN fsmTailLockTry__kind(self: FsmTailLockTry) RETURNS String@symbol ->
   RETURN :lock_try;
 END
 PUB STRUCT FsmTailWokenCheck {
-  ok_step: Any@multiowned,
-  error_step: Any@multiowned
+  ok_step: Int64,
+  error_step: Int64
 }
 
 FN fsmTailWokenCheck__kind(self: FsmTailWokenCheck) RETURNS String@symbol ->
@@ -4021,8 +4021,8 @@ FN fsmTailWokenCheck__kind(self: FsmTailWokenCheck) RETURNS String@symbol ->
 END
 PUB STRUCT FsmTailRetryOrError {
   retries: ?Int64,
-  retry_step: Any@multiowned,
-  fail_step: Any@multiowned
+  retry_step: Int64,
+  fail_step: Int64
 }
 
 FN fsmTailRetryOrError__kind(self: FsmTailRetryOrError) RETURNS String@symbol ->
@@ -4061,8 +4061,8 @@ FN fsmTailRegisterYield__kind(self: FsmTailRegisterYield) RETURNS String@symbol 
 END
 PUB STRUCT FsmTailCondJump {
   condition: Emittable,
-  then_step: Any@multiowned,
-  else_step: Any@multiowned
+  then_step: Int64,
+  else_step: Int64
 }
 
 FN fsmTailCondJump__kind(self: FsmTailCondJump) RETURNS String@symbol ->
