@@ -9019,3 +9019,6 @@ PUB FN assignmentNameString(value: AssignmentName) RETURNS String ->
   END
   RETURN "";
 END
+PUB FN castStringToAssignmentName(value: String) RETURNS AssignmentName ->
+  RETURN AssignmentName{ StringValue: COPY value };
+END

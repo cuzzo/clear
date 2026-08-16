@@ -366,7 +366,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_bind_expr(MUTABLE self: Pipel
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, COPY node.name));
+    MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, castStringToAssignmentName(COPY node.name)));
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
     IF ((new_name == AssignmentName{ StringValue: COPY node.name }) AND (new_value == node.value)) THEN
       RETURN COPY Locatable{ BindExpr: COPY node };
@@ -395,7 +395,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_assignment(MUTABLE self: Pipe
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, COPY node.name));
+    MUTABLE new_name = TRY (pipelinePlaceholderRewriter__substitute_assignment_target(&rtoc_self_view, castStringToAssignmentName(COPY node.name)));
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.value));
     IF ((new_name == AssignmentName{ StringValue: COPY node.name }) AND (new_value == node.value)) THEN
       RETURN COPY Locatable{ Assignment: COPY node };

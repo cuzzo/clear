@@ -403,7 +403,7 @@ PRIVATE FN segments__io_suspending_call?(call_node: SegmentsCallNode) RETURNS !B
   END
   RETURN FALSE;
 END
-PUB FN segments__suspending_call?(expr: Locatable) RETURNS Bool ->
+PUB FN segments__suspending_call?(expr: Locatable) RETURNS !Bool ->
   RETURN ((aST__call?(expr)) AND segments__io_suspending_call?(castLocatableToCallNode(expr)));
 END
 PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable ->
