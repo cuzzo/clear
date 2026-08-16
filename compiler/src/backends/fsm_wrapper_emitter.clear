@@ -103,7 +103,7 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emi
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
   &parts.append("        step: u8 = 0,");
-  MUTABLE state_fields = fsmWrapperEmitter__render_fsm_state_field_decls(COPY s.state_decls, mir_emitter);
+  MUTABLE state_fields: String = TRY (fsmWrapperEmitter__render_fsm_state_field_decls(COPY s.state_decls, mir_emitter));
   IF !(fsmWrapperEmitter__empty?(state_fields)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(state_fields, 8));
   END

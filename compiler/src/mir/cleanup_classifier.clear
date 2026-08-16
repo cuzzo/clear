@@ -170,7 +170,7 @@ PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: FN(
   cleanupClassifier__walk_moved_source_guards(fn_node.body, bindings);
   TRY (cleanupClassifier__walk_match_as_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
   TRY (cleanupClassifier__walk_capture_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
-  TRY (cleanupClassifier__stamp_cleanup_scopes_mut(fn_node.body, bindings));
+  TRY (cleanupClassifier__stamp_cleanup_scopes_mut(fn_node.body |> SELECT castLocatableToAstBodyNode(_), &bindings));
   RETURN cleanupClassificationPlan__from_function(fn_node, bindings, entries_by_place);
 END
 PUB FN cleanupClassifier__place_for_binding_node(name: String, node: Locatable) RETURNS PlaceId ->

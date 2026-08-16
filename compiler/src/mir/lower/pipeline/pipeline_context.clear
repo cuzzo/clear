@@ -315,7 +315,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_get_index(MUTABLE self: Pipel
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_target = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.target));
-    MUTABLE new_index = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, node.index));
+    MUTABLE new_index = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY node.index));
     IF ((new_target == node.target) AND (new_index == node.index)) THEN
       RETURN COPY Locatable{ GetIndex: COPY node };
     END
