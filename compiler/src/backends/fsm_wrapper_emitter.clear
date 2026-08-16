@@ -207,14 +207,13 @@ PRIVATE FN fsmWrapperEmitter__render_dispatch(d: FsmDispatch) RETURNS !String ->
 END
 PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int64) RETURNS !String ->
   MUTABLE body_lines = List[];
-  MUTABLE pre_body_skip = arm.pre_body_skip;
-  IF pre_body_skip THEN
-    &body_lines.append("if (${TRY (fsmWrapperEmitter__render_fsm_expr(pre_body_skip.condition()))}) {");
-    &body_lines.append("    __ctx_${ctx_id.toString()}.step = ${pre_body_skip.skip_step()};");
+  IF arm.pre_body_skip EXISTS AS pre_body_skip THEN
+    &body_lines.append("if (${TRY (fsmWrapperEmitter__render_fsm_expr(pre_body_skip.condition))}) {");
+    &body_lines.append("    __ctx_${ctx_id.toString()}.step = ${pre_body_skip.skip_step.toString()};");
     &body_lines.append("    continue :__sw;");
     &body_lines.append("}");
   END
-  MUTABLE pre_body = TRY (fsmWrapperEmitter__render_stmt_array((arm.pre_body_stmts OR List[]), "rt"));
+  MUTABLE pre_body = TRY (fsmWrapperEmitter__render_stmt_array(COPY arm.pre_body_stmts, "rt"));
   IF !((pre_body.length() == 0)) THEN
     &body_lines.append(pre_body);
   END

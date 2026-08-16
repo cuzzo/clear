@@ -3973,7 +3973,7 @@ PUB STRUCT FsmStep {
 PUB STRUCT SuspendDescriptor {
   setup_stmts: []Emittable,
   bind_stmts: Any@multiowned,
-  tail: Any@multiowned,
+  tail: FsmTail,
   ctx_field_decls: Any@multiowned,
   result_var: ?String,
   result_zig_type: Any@multiowned,
@@ -3984,13 +3984,17 @@ PUB STRUCT FsmDispatch {
   arms: []FsmStateArm,
   uses_loop_label: Any@multiowned
 }
+PUB STRUCT FsmPreBodySkip {
+  condition: Emittable,
+  skip_step: Int64
+}
 PUB STRUCT FsmStateArm {
   index: Int64,
-  pre_body_skip: Any@multiowned,
-  pre_body_stmts: Any@multiowned,
+  pre_body_skip: ?FsmPreBodySkip,
+  pre_body_stmts: []Emittable,
   body_fn_name: Any@multiowned,
   err_cleanups: Any@multiowned,
-  tail: Any@multiowned
+  tail: FsmTail
 }
 PUB STRUCT FsmTailCondSkip {
   condition: Any@multiowned,
