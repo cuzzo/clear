@@ -10887,7 +10887,7 @@ FN defaultStreamCapacity__expr?(self: DefaultStreamCapacity) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT Undef {
-  zig_type: String,
+  zig_type: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
