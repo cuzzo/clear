@@ -67,8 +67,8 @@ PUB STRUCT FunctionCFG {
   block_counter: Int64,
   blocks: []BasicBlock@multiowned,
   can_fail_fns: ?[Set]String,
-  entry: ?BasicBlock@multiowned,
-  exit_block: ?BasicBlock@multiowned,
+  entry: BasicBlock@multiowned,
+  exit_block: BasicBlock@multiowned,
   fn_name: String
 }
 

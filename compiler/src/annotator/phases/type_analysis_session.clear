@@ -117,7 +117,7 @@ UNION TypeAnalysisSessionReturnValueItem { StringValue: String, SymbolValue: Str
 PUB STRUCT TypeAnalysisSession {
   audit_inputs: CapabilityAuditInputs,
   config: AnnotatorPhasesTypeAnalysisSessionConfig,
-  resolution: ?ResolutionFacts@multiowned,
+  resolution: ResolutionFacts@multiowned,
   traversal_state: TraversalState
 }
 

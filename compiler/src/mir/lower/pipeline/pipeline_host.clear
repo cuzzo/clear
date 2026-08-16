@@ -33,12 +33,12 @@ PUB UNION PipelineHostReturnValue { Lit: Lit, TypeSentinel: TypeSentinel, String
 PUB UNION Promises { MIRBgBlock: MIRBgBlock, MIRBlockExpr: MIRBlockExpr, ForStmt: ForStmt, ScopeBlock: ScopeBlock, ShardConcurrentEach: ShardConcurrentEach }
 PUB UNION Type { StringValue: String, SymbolValue: String@symbol, Type: Type }
 PUB STRUCT PipelineHost {
-  batch_window_lowerer: ?PipelineBatchWindowLowerer,
-  binding_chain_lowerer: ?PipelineBindingChainLowerer,
-  concurrent_lowerer: ?PipelineConcurrentLowerer,
+  batch_window_lowerer: PipelineBatchWindowLowerer,
+  binding_chain_lowerer: PipelineBindingChainLowerer,
+  concurrent_lowerer: PipelineConcurrentLowerer,
   do_rt_name: ?String,
   each_idx_counter: Int64,
-  each_lowerer: ?PipelineEachLowerer,
+  each_lowerer: PipelineEachLowerer,
   fn_sigs: {String@symbol}FunctionSignature@multiowned,
   label_state: PipelineLabelState@multiowned,
   list_lowerer: PipelineListLowerer,
