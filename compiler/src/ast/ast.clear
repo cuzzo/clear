@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_73656d616e7469632f6566666563745f7365742e636c656172"
 REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172"
 REQUIRE "pkg:rtoc_73656d616e7469632f706173735f73746174652e636c656172"
 REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172"
@@ -282,7 +283,7 @@ PUB STRUCT FunctionDef {
   collection_return: ?Type,
   conformance_protocol: ?String,
   container_borrow: ?Bool,
-  effect_set: ?PassStateValue,
+  effect_set: ?EffectSet@multiowned,
   effects: ?PassStateValue,
   error_fallible: ?Bool,
   error_kind: ?String@symbol,
@@ -296,7 +297,7 @@ PUB STRUCT FunctionDef {
   heap_carry_return_vars: ?PassStateValue,
   implementation_owner: ?String,
   implicit_layout_cost: ?Bool,
-  inferred_effects: ?PassStateValue,
+  inferred_effects: ?EffectSet@multiowned,
   kept_edge_plan: ?CallEdgeOwnershipPlan,
   kept_edge_plans: ?{Int64}CallEdgeOwnershipPlan,
   layout_transport: ?String@symbol,
