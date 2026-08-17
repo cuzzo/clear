@@ -135,7 +135,7 @@ PRIVATE FN pipelineEachLowerer__lower_list_each(self: PipelineEachLowerer, MUTAB
   MUTABLE list_body_mir = TRY (pipelineEachLowerer__visit_body_with_placeholder_call(self, each_op.body, "__each_item"));
   IF bc_target THEN
   IF list_node IS_A Identifier AS identifier THEN
-    RETURN ScopeBlock{ body: COPY [pipelineEachLowerer__lower_bc_indexed_each(self, Locatable{ Identifier: COPY identifier }, list_body_mir, FALSE)], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN ScopeBlock{ body: COPY [Emittable{ ForStmt: COPY pipelineEachLowerer__lower_bc_indexed_each(self, Locatable{ Identifier: COPY identifier }, list_body_mir, FALSE) }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
   END
   END
   MUTABLE stmts: []Emittable = ( { MUTABLE rtoc_empty_list_2: []Emittable = List[]; rtoc_empty_list_2 } );
