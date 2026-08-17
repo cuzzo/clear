@@ -3123,8 +3123,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((typeAnalysisSession__language_mode(rtoc_self_view) == :strict)) THEN
           typeAnalysisSession__phase_audit_inputs(rtoc_self_view).ownership_transport_frames.append(KEEP transport_facts);
       END
-      IF node IS_A FunctionDef THEN
-          typeAnalysisSession__visit_pre_clauses_mut(&rtoc_self_view, node);
+      IF node IS_A FunctionDef AS node_narrowed THEN
+          typeAnalysisSession__visit_pre_clauses_mut(&rtoc_self_view, node_narrowed);
       END
       DEFER IF !((typeAnalysisSession__language_mode(rtoc_self_view) == :strict)) THEN
           MUTABLE popped: ?OwnershipTransportFacts@multiowned = typeAnalysisSession__phase_audit_inputs(rtoc_self_view).ownership_transport_frames.pop();
@@ -3142,8 +3142,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           typeAnalysisSession__finalize_ownership_transport_facts_mut(rtoc_self_view, transport_facts);
       END
       NIL;
-      IF node IS_A FunctionDef THEN
-          typeAnalysisSession__visit_post_clauses_mut(&rtoc_self_view, node);
+      IF node IS_A FunctionDef AS node_narrowed THEN
+          typeAnalysisSession__visit_post_clauses_mut(&rtoc_self_view, node_narrowed);
       END
       rubyToClearVoid()
     });
@@ -4706,8 +4706,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE entry = scope__entry_for_write_mut(&owner_scope, cap_name);
       IF (captures[rtoc_idx].mutable() AND !(entry.mutable)) THEN
-      IF node IS_A FunctionDef THEN
-          typeAnalysisSession__emit_capture_immutable_as_mutable_error_mut(rtoc_self_view, node, cap_name, owner_scope);
+      IF node IS_A FunctionDef AS node_narrowed THEN
+          typeAnalysisSession__emit_capture_immutable_as_mutable_error_mut(rtoc_self_view, node_narrowed, cap_name, owner_scope);
       END
       END
       scope__mark_read(&owner_scope, cap_name);
@@ -4787,8 +4787,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_ternary_value_100? })
       })) |> DISTINCT _ |> SELECT COPY _).size();
       IF (normalized > 1) THEN
-        IF node IS_A FunctionDef THEN
-          typeAnalysisSession__emit_ambiguous_return_error_mut(rtoc_self_view, node, found_returns);
+        IF node IS_A FunctionDef AS node_narrowed THEN
+          typeAnalysisSession__emit_ambiguous_return_error_mut(rtoc_self_view, node_narrowed, found_returns);
         END
       END
     END
@@ -5201,8 +5201,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE item = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__inf_stream_element_type(source_type))) END);
       RETURN PipelineSourceFact{ kind: :inf_stream, item_type: COPY item };
     END
-    IF source IS_A RangeLit THEN
-      RETURN PipelineSourceFact{ kind: :range, item_type: CAST(COPY typeAnalysisSession__range_element_type(rtoc_self_view, source) AS Type) };
+    IF source IS_A RangeLit AS source_narrowed THEN
+      RETURN PipelineSourceFact{ kind: :range, item_type: CAST(COPY typeAnalysisSession__range_element_type(rtoc_self_view, source_narrowed) AS Type) };
     END
     IF TRY (type__open_stream?(source_type)) THEN
       MUTABLE item = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__open_stream_element_type(source_type))) END);
@@ -13696,8 +13696,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       typeAnalysisSession__analyze_when_match_case_mut(&rtoc_self_view, node, match_case);
     ELSE_IF (match_case.kind == :struct_pattern) THEN
       MUTABLE pattern = COPY match_case.value;
-      IF pattern IS_A StructPattern THEN
-        typeAnalysisSession__annotate_struct_pattern_mut(&rtoc_self_view, node, pattern);
+      IF pattern IS_A StructPattern AS pattern_narrowed THEN
+        typeAnalysisSession__annotate_struct_pattern_mut(&rtoc_self_view, node, pattern_narrowed);
       END
     ELSE
       typeAnalysisSession__analyze_value_match_case_mut(&rtoc_self_view, node, match_case, plan);

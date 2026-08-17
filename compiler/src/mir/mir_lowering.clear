@@ -18277,8 +18277,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF rhs_unwrapped IS_A MoveNode THEN
         RETURN TRY (mIRLowering__lower(&rtoc_self_view, node.value));
       END
-      IF rhs_unwrapped IS_A NextExpr THEN
-        RETURN mIRLowering__lower_next_expr(&rtoc_self_view, rhs_unwrapped, decl_alloc);
+      IF rhs_unwrapped IS_A NextExpr AS rhs_unwrapped_narrowed THEN
+        RETURN mIRLowering__lower_next_expr(&rtoc_self_view, rhs_unwrapped_narrowed, decl_alloc);
       END
       IF aST__call?(rhs_unwrapped) THEN
         RETURN TRY (mIRLowering__lower(&rtoc_self_view, node.value));

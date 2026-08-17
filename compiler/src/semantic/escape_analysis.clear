@@ -942,8 +942,8 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
       RETURN NIL;
   END
   escapeAnalysis__mark_symbol_heap_mut(root.symbol);
-  IF node IS_A MethodCall THEN
-    RETURN TRY (escapeAnalysis__mark_loop_method_value_params_heap_mut(node, value_params));
+  IF node IS_A MethodCall AS node_narrowed THEN
+    RETURN TRY (escapeAnalysis__mark_loop_method_value_params_heap_mut(node_narrowed, value_params));
   END
   NIL
   }));

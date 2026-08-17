@@ -1686,10 +1686,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source = COPY node.value;
     IF source IS_A CopyNode THEN
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, source.value(), state));
-    ELSE_IF source IS_A Identifier THEN
+    ELSE_IF source IS_A Identifier AS source_narrowed THEN
       MUTABLE ti = TRY (type__from_node_mut(source, "share read"));
       IF type__shared?(ti) THEN
-        useAfterMoveChecker__check_identifier_node_read(&rtoc_self_view, source, state);
+        useAfterMoveChecker__check_identifier_node_read(&rtoc_self_view, source_narrowed, state);
       END
     ELSE
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, source, state));

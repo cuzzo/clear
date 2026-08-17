@@ -808,8 +808,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(rtoc_self_view.host.range_bc_target?()) THEN
       RETURN NIL;
     END
-    IF range_lit IS_A RangeLit THEN
-      MUTABLE iter, cap = pipelineRangeLowerer__bc_for_iter_range(rtoc_self_view, range_lit, capture_name);
+    IF range_lit IS_A RangeLit AS range_lit_narrowed THEN
+      MUTABLE iter, cap = pipelineRangeLowerer__bc_for_iter_range(rtoc_self_view, range_lit_narrowed, capture_name);
       RETURN PipelineRangeLoopIter{ iter: Emittable{ IterRange: COPY iter }, capture_name: COPY cap };
     END
     IF range_lit IS_A Identifier AS identifier THEN
