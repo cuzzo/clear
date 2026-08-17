@@ -208,7 +208,7 @@ END
 PRIVATE FN pipelineListLowerer__lower_reduce(self: PipelineListLowerer, site: PipelineSite, MUTABLE reduce_node: ReduceOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE acc_zig = pipelineListLowerer__transpile_type_call(self, TRY (aST__full_type_mut(reduce_node)));
-  MUTABLE init_mir = pipelineListLowerer__visit_mir_call(self, reduce_node.initial_value);
+  MUTABLE init_mir = pipelineListLowerer__visit_mir_call(self, UNWRAP (reduce_node.initial_value));
   MUTABLE expr_mir = pipelineListLowerer__visit_reduce_expr_call(self, reduce_node.expression, "it", "acc");
   RETURN pipelineListLowerer__pipeline_block_call(self, list_node, %(items, label) USE(acc_zig, expr_mir, init_mir) -> {
   rtoc_lambda_result_10 = [Emittable{ Let: COPY Let{ name: COPY "acc", init: COPY init_mir, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ForStmt: COPY ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: COPY [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY expr_mir, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
@@ -246,7 +246,7 @@ PRIVATE FN pipelineListLowerer__lower_join(self: PipelineListLowerer, site: Pipe
   MUTABLE list_node = COPY site.list;
   MUTABLE left_type_info = (TRY (aST__full_type_mut(list_node))).element_type();
   MUTABLE left_zig = pipelineListLowerer__transpile_type_call(self, CAST(left_type_info.resolved() AS String));
-  MUTABLE right_src_mir = pipelineListLowerer__visit_mir_call(self, join_node.right_source);
+  MUTABLE right_src_mir = pipelineListLowerer__visit_mir_call(self, UNWRAP (join_node.right_source));
   MUTABLE right_type_info = &join_node.right_source.full_type_mut();
   MUTABLE right_element_type = TRY (type__element_type(right_type_info));
   MUTABLE right_zig = pipelineListLowerer__transpile_type_call(self, CAST(right_element_type.resolved() AS String));
