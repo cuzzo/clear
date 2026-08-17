@@ -1553,7 +1553,7 @@ PUB STRUCT WhileStmt {
   cond: Emittable,
   body: []Emittable,
   capture: Any@multiowned,
-  update: Emittable,
+  update: ?Emittable,
   mark_per_iter: Any@multiowned,
   tight: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -2030,7 +2030,7 @@ FN ifChain__stmt?(self: IfChain) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT ReturnStmt {
-  value: Emittable,
+  value: ?Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -2159,8 +2159,8 @@ FN breakStmt__stmt?(self: BreakStmt) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT BreakExpr {
-  label: String,
-  value: Emittable,
+  label: ?String,
+  value: ?Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -3563,7 +3563,7 @@ PUB STRUCT FsmStructure {
   finalize_cleanups: Any@multiowned,
   ctx_id: Int64,
   result_aliases_finalized: Any@multiowned,
-  facts: FsmStructureFacts,
+  facts: ?FsmStructureFacts,
   lowered_node_id: ?LoweredNodeId,
   owned_result_required: ?Bool,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -5578,7 +5578,7 @@ PUB STRUCT ContainerInit {
   zig_type: String,
   strategy: String@symbol,
   alloc: ?String@symbol,
-  capacity: Emittable,
+  capacity: ?Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -6960,7 +6960,7 @@ FN polymorphicMutateFlow__owned_effect_for_alloc(self: PolymorphicMutateFlow, al
 END
 PUB STRUCT PolymorphicFlowSignal {
   kind: Any@multiowned,
-  ret: Emittable,
+  ret: ?Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -9423,7 +9423,7 @@ FN typeEq__expr?(self: TypeEq) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT StructInit {
-  zig_type: String,
+  zig_type: ?String,
   fields: []@multiowned Any,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -9628,7 +9628,7 @@ END
 PUB STRUCT SliceExpr {
   target: Emittable,
   start: Emittable,
-  end_expr: Emittable,
+  end_expr: ?Emittable,
   elem_type: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -9691,7 +9691,7 @@ FN sliceExpr__expr?(self: SliceExpr) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT MIRBlockExpr {
-  label: String,
+  label: ?String,
   body: []Emittable,
   borrowed_view: ?Bool,
   lazy_boundary: ?Bool,
