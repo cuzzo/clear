@@ -267,7 +267,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((TRY (type__recursive_cleanup_shape?(type_info, pipelineMaterializer__schema_lookup(rtoc_self_view))) OR TRY (type__heap_ptr?(type_info)))) THEN
       RETURN COPY value;
     END
-    RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY value, zig_type: COPY TRY (type__zig_type(type_info)), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
+    RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY value, zig_type: COPY TRY (type__zig_type(type_info)), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(type_info))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
 }
 END
 PUB FN pipelineMaterializer__cleanup_bearing_type?(self: PipelineMaterializer, type_info: Type) RETURNS !Bool
@@ -287,7 +287,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       :function
     END, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     MUTABLE entry = cleanupEntry__build(:uniform, alloc, TRUE, NIL, zig_type);
-    RETURN CAST([Emittable{ AllocMark: COPY mark }, Emittable{ Let: COPY Let{ name: COPY name, init: Emittable{ DeepCopy: COPY DeepCopy{ source: COPY source, zig_type: COPY zig_type, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY zig_type })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
+    RETURN CAST([Emittable{ AllocMark: COPY mark }, Emittable{ Let: COPY Let{ name: COPY name, init: Emittable{ DeepCopy: COPY DeepCopy{ source: COPY source, zig_type: COPY zig_type, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY zig_type), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY zig_type })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 }
 END
 PUB FN pipelineMaterializer__append_owned_value_stmt(self: PipelineMaterializer, receiver: String, alloc: String@symbol, value_expr: Emittable, known_owned: Bool = FALSE, owned_type: ?Type = NIL) RETURNS !Emittable
@@ -312,7 +312,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         TRY (type__zig_type(owned_type))
       ELSE
         NIL
-      END); MUTABLE rtoc_optional_or_result_3: ?String = NIL; IF rtoc_optional_or_source_2 != NIL THEN rtoc_optional_or_result_3 = COPY rtoc_optional_or_source_2; ELSE rtoc_optional_or_result_3 = pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr); END rtoc_optional_or_result_3 } ), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+      END); MUTABLE rtoc_optional_or_result_3: ?String = NIL; IF rtoc_optional_or_source_2 != NIL THEN rtoc_optional_or_result_3 = COPY rtoc_optional_or_source_2; ELSE rtoc_optional_or_result_3 = pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr); END rtoc_optional_or_result_3 } ), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: deepCopy__copy_shape_for_zig_type(NIL), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
       RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [Emittable{ AllocMark: COPY cross_fact.mark }, Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Cleanup{ name: COPY src_name, cleanup_entry: COPY src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     IF fact EXISTS AS owned_fact THEN

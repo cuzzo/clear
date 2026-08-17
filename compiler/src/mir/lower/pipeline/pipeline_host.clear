@@ -694,7 +694,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fresh_composite = ((((selector IS_A StructInit OR selector IS_A TupleLiteral) OR selector IS_A ArrayInit)) AND TRY (type__recursive_cleanup_shape?(item_type, pipelineHost__pipeline_schema_lookup(rtoc_self_view))));
     MUTABLE selector_owned = (((ownershipEffect__of(selector).produces_owned OR (selector_prefix |> ANY _ IS_A AllocMark))) OR fresh_composite);
     IF ((!(selector_owned) AND !(identity_selector)) AND TRY (type__recursive_cleanup_shape?(item_type, pipelineHost__pipeline_schema_lookup(rtoc_self_view)))) THEN
-      selector = Emittable{ DeepCopy: COPY DeepCopy{ source: selector, zig_type: COPY TRY (type__zig_type(item_type)), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: NIL, type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
+      selector = Emittable{ DeepCopy: COPY DeepCopy{ source: selector, zig_type: COPY TRY (type__zig_type(item_type)), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(item_type))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
       selector_owned = TRUE;
     END
     MUTABLE push_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_29: []Emittable = List[]; rtoc_empty_list_29 } );
