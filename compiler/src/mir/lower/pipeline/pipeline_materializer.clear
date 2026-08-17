@@ -363,7 +363,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN (effect.alloc)?;
     END
     MUTABLE metadata: ?InlineAllocMetadata@multiowned = emittable__allocs(source_mir);
-    IF !(metadata EXISTS) THEN
+    IF (metadata == NIL) THEN
       RETURN NIL;
     END
     MUTABLE metadata_value: InlineAllocMetadata@multiowned = COPY UNWRAP (metadata);
