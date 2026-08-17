@@ -381,7 +381,7 @@ PRIVATE FN pipelineMaterializer__bc_target?(self: PipelineMaterializer) RETURNS 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.host.materializer_bc_target?();
+    RETURN runtimeHost__materializer_bc_target?(rtoc_self_view.host);
 }
 END
 PRIVATE FN pipelineMaterializer__zig_type_for(self: PipelineMaterializer, value_expr: Emittable) RETURNS String

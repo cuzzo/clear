@@ -306,7 +306,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE item_used: Bool = FALSE;
     MUTABLE outer_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_6: []Emittable = List[]; rtoc_empty_list_6 } );
     MUTABLE stage_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_7: []Emittable = List[]; rtoc_empty_list_7 } );
-    MUTABLE track_owned = (track_owned_items AND !(rtoc_self_view.host.range_bc_target?()));
+    MUTABLE track_owned = (track_owned_items AND !(runtimeHost__range_bc_target?(rtoc_self_view.host)));
     MUTABLE current_type: Type = elem_t;
     MUTABLE current_owned: Bool = FALSE;
     IF (track_owned AND TRY (type__runtime_stream?(source_ti))) THEN
@@ -555,7 +555,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(rtoc_self_view, &range_lit, stages, NIL, NIL, NIL, TRUE));
     label = runtimeHost__range_next_label(rtoc_self_view.host);
-    MUTABLE names = pipelineRangeFoldNames__for_label(label, rtoc_self_view.host.range_bc_target?());
+    MUTABLE names = pipelineRangeFoldNames__for_label(label, runtimeHost__range_bc_target?(rtoc_self_view.host));
     MUTABLE plan = TRY (pipelineRangeLowerer__scalar_fold_plan(rtoc_self_view, prefix, fold_op, smooth_node, names));
     RETURN pipelineRangeLowerer__range_accumulating_block(rtoc_self_view, &range_lit, prefix, label, plan, prefix.initial_capture);
 }
@@ -805,7 +805,7 @@ PUB FN pipelineRangeLowerer__bc_loop_iter(self: PipelineRangeLowerer, range_lit:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(rtoc_self_view.host.range_bc_target?()) THEN
+    IF !(runtimeHost__range_bc_target?(rtoc_self_view.host)) THEN
       RETURN NIL;
     END
     IF range_lit IS_A RangeLit AS range_lit_narrowed THEN
