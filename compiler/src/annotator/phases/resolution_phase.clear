@@ -78,8 +78,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     resolutionSession__visit_RequireNode(rtoc_self_view, _);
     END
     resolutionSession__register_type_declarations(&rtoc_self_view, declarations);
-    MUTABLE conformance_resolutions = resolutionSession__resolve_conformance_declarations_mut(rtoc_self_view, declarations);
-    MUTABLE implementation_resolutions = resolutionSession__resolve_implementation_declarations_mut(rtoc_self_view, declarations);
+    MUTABLE conformance_resolutions = TRY (resolutionSession__resolve_conformance_declarations_mut(rtoc_self_view, declarations));
+    MUTABLE implementation_resolutions = TRY (resolutionSession__resolve_implementation_declarations_mut(rtoc_self_view, declarations));
     resolutionSession__prepare_conformance_members_mut(rtoc_self_view, declarations, conformance_resolutions, program);
     resolutionSession__prepare_implementation_members_mut(rtoc_self_view, declarations, implementation_resolutions, program);
     resolutionSession__register_program_signatures(&rtoc_self_view, declarations);
@@ -548,7 +548,7 @@ PRIVATE FN resolutionSession__lookup_scope_for(self: ResolutionSession, name: St
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_reverse_items_3: []Scope@multiowned = resolutionSession__scope_stack_for_helper(rtoc_self_view);
+    MUTABLE rtoc_reverse_items_3: []Scope@multiowned = TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_4 = rtoc_reverse_items_3.length() - 1;
     WHILE rtoc_reverse_i_4 >= 0 DO
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ((rtoc_reverse_items_3[rtoc_reverse_i_4])?);
@@ -588,7 +588,7 @@ PRIVATE FN resolutionSession__lookup_type_schema(self: ResolutionSession, name: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE base_name = symbol((compilerRegexReplaceFirst((CAST(name AS String)), compilerRegexCompile("<.*>$"), "")));
-    MUTABLE rtoc_reverse_items_6: []Scope@multiowned = resolutionSession__scope_stack_for_helper(rtoc_self_view);
+    MUTABLE rtoc_reverse_items_6: []Scope@multiowned = TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_7 = rtoc_reverse_items_6.length() - 1;
     WHILE rtoc_reverse_i_7 >= 0 DO
       MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = ((rtoc_reverse_items_6[rtoc_reverse_i_7])?);
@@ -624,7 +624,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_10 = COPY scope;
     END
     rtoc_ternary_value_10? };
-  MUTABLE stack: []Scope@multiowned = resolutionSession__scope_stack_for_helper(rtoc_self_view);
+  MUTABLE stack: []Scope@multiowned = TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view));
   new_scope.depth = stack.length();
   &stack.push(new_scope);
   RETURN blk();
@@ -688,7 +688,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_PROTOCOL }, [], {:protocol: protocol_name});
     END
     MUTABLE local_owner = local_structs[owner_name];
-    MUTABLE owner_params: ?[]GenericParamDecl = resolutionSession__conformance_owner_params(rtoc_self_view, owner_name, local_owner);
+    MUTABLE owner_params: ?[]GenericParamDecl = TRY (resolutionSession__conformance_owner_params(rtoc_self_view, owner_name, local_owner));
     IF !(owner_params) THEN
         resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_OWNER }, [], {:owner: owner_name});
     END
@@ -702,8 +702,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     &seen.insert(key);
     resolutionSession__validate_conformance_arity_mut(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name, owner_params);
-    MUTABLE associated = resolutionSession__conformance_associated_types(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol));
-    MUTABLE members = resolutionSession__collect_conformance_members_mut(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name);
+    MUTABLE associated = TRY (resolutionSession__conformance_associated_types(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol)));
+    MUTABLE members = TRY (resolutionSession__collect_conformance_members_mut(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 }, :Void));
     ConformanceResolution{ declaration: COPY rtoc_mutable_block_param_14, protocol: UNWRAP (COPY protocol), owner_name: COPY owner_name, owner_generic_params: COPY owner_params, associated_types: CAST(COPY associated AS {String@symbol}Type), members: members }
     } };
@@ -1123,7 +1123,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     seen[_.owner_name] = COPY _;
     resolutionSession__validate_implementation_file_mut(rtoc_self_view, _, UNWRAP (owner));
-    MUTABLE bindings = resolutionSession__resolve_owner_generic_bindings_mut(rtoc_self_view, _, UNWRAP (owner));
+    MUTABLE bindings = TRY (resolutionSession__resolve_owner_generic_bindings_mut(rtoc_self_view, _, UNWRAP (owner)));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ImplementationDef: COPY _ }, :Void));
     ImplementationResolution{ declaration: COPY _, owner: UNWRAP (COPY owner), bindings: COPY bindings }
     };
@@ -1182,7 +1182,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &types.append(COPY return_type_value);
     END
     FOR _ IN (types |> WHERE _ != NIL) DO
-    MUTABLE rtoc_each_items_30 = resolutionSession__unbound_type_parameter_names(rtoc_self_view, _);
+    MUTABLE rtoc_each_items_30 = TRY (resolutionSession__unbound_type_parameter_names(rtoc_self_view, _));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_30.length() DO
       IF declared.contains?(rtoc_each_items_30[rtoc_idx]) THEN
@@ -1433,7 +1433,7 @@ PRIVATE FN resolutionSession__validate_c_boundary_type_mut(self: ResolutionSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE reason: ?String = resolutionSession__c_boundary_rejection(rtoc_self_view, type, return_position);
+    MUTABLE reason: ?String = TRY (resolutionSession__c_boundary_rejection(rtoc_self_view, type, return_position));
     IF reason EXISTS AS reason_value THEN
       resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :C_EXTERN_UNSUPPORTED_TYPE }, [], {:position: position, :type: TRY (type__surface_name(castTypeToTypeTypeInput(type))), :reason: reason_value});
     ELSE
@@ -1651,13 +1651,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN structs DO
     _.field_decls.keys() |> EACH {
     MUTABLE field: StructField@multiowned = (_.field_decls[_] OR_ELSE CAST(panic("missing hash key") AS StructField@multiowned));
-    MUTABLE target: ?String@symbol = resolutionSession__inline_recursive_target(rtoc_self_view, structField__type(field), names);
+    MUTABLE target: ?String@symbol = TRY (resolutionSession__inline_recursive_target(rtoc_self_view, structField__type(field), names));
     IF target EXISTS AS target_value THEN
         &edges.append(RecursiveFieldEdge{ owner: COPY symbol(_.name), target: COPY target_value, field_name: COPY _, type: COPY structField__type(field) });
     END
     };
     END
-    MUTABLE rtoc_each_items_48 = resolutionSession__recursive_components(rtoc_self_view, names, edges);
+    MUTABLE rtoc_each_items_48 = TRY (resolutionSession__recursive_components(rtoc_self_view, names, edges));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_48.length() DO
       MUTABLE internal = edges |> WHERE (rtoc_each_items_48[rtoc_idx]?.contains?(_.owner) AND rtoc_each_items_48[rtoc_idx]?.contains?(_.target));
@@ -1666,7 +1666,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE labels = (internal |> SELECT "${_.owner}.${_.field_name}").join(", ");
-      MUTABLE fixes: []Fix@multiowned = resolutionSession__recursive_layout_fixes(rtoc_self_view, internal);
+      MUTABLE fixes: []Fix@multiowned = TRY (resolutionSession__recursive_layout_fixes(rtoc_self_view, internal));
       MUTABLE owner_node = UNWRAP (structs |> FIND (symbol(_.name) == (UNWRAP (internal.first())).owner));
       IF (internal.length() == 1) THEN
           resolutionSession__fixable_mut(rtoc_self_view, owner_node, :type, fixes, NIL, :RECURSIVE_LAYOUT_REQUIRES_INDIRECT, :error, TRUE, {:edge: labels});
@@ -1874,7 +1874,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :COLLECTION_HINT_VALUE_ONLY });
     END
     END
-    MUTABLE tp_names = resolutionSession__type_params(rtoc_self_view, node.type_params);
+    MUTABLE tp_names = TRY (resolutionSession__type_params(rtoc_self_view, node.type_params));
     node.field_decls.keys() |> EACH {
     MUTABLE field: StructField@multiowned = (node.field_decls[_] OR_ELSE CAST(panic("missing hash key") AS StructField@multiowned));
     MUTABLE ft = structField__type(field);
@@ -1969,7 +1969,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE synthetic_name = symbol("${node.name}_${_}");
     resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, ScopeScopeTypeSchema{ StructSchemaMultiowned: COPY TRY (structSchema__new(variant_data.fields().transform_values(%(type) -> StructField{ type: type, default: NIL, borrowed: FALSE }), ( { MUTABLE rtoc_empty_list_60: []String@symbol = List[]; rtoc_empty_list_60 } ), ( { MUTABLE rtoc_empty_list_61: []GenericParamDecl = List[]; rtoc_empty_list_61 } ), {}, {})) });
-    MUTABLE entries = resolutionSession__inline_struct_deinit_entries(rtoc_self_view, variant_data);
+    MUTABLE entries = TRY (resolutionSession__inline_struct_deinit_entries(rtoc_self_view, variant_data));
     IF entries |> ANY _ THEN
         TRY (inlineStructVariant__set_deinit_entries(&variant_data, entries));
     END

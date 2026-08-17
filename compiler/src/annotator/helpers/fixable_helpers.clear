@@ -78,7 +78,7 @@ FN closest_name(input: NameCandidate, candidates: []NameCandidate, max_distance:
   MUTABLE best: ?NameCandidate = NIL;
   MUTABLE best_d: Int64 = (max_distance + 1);
   FOR _ IN candidates DO
-  MUTABLE d = levenshtein(nameCandidate__text(input), nameCandidate__text(_));
+  MUTABLE d = TRY (levenshtein(nameCandidate__text(input), nameCandidate__text(_)));
   IF (d < best_d) THEN
       best = COPY _;
       best_d = d;
@@ -485,14 +485,14 @@ FN emit_local_never_shared_finding_mut(info: BindingAuditRecord) RETURNS !Void -
   fixable_mut(anchor, {:code: :LOCAL_NEVER_SHARED, :name: name, :category: :lint, :level: :info, :fixes: fixes});
 END
 FN emit_immutable_assignment_error_mut(node: BindExpr, scope: Scope) RETURNS Void ->
-  MUTABLE fix = build_declare_mutable_fix(node.name, scope);
+  MUTABLE fix = TRY (build_declare_mutable_fix(node.name, scope));
   IF !(fix) THEN
     RETURN error_mut(node, :IMMUTABLE_ASSIGNMENT, {:name: node.name});
   END
   fixable_mut(node, {:code: :IMMUTABLE_ASSIGNMENT, :name: node.name, :category: :ownership, :level: :error, :fixes: [fix]});
 END
 FN emit_immutable_arg_error_mut(arg_node: Identifier, scope: Scope, arg_idx: Int64, param_name: String) RETURNS Void ->
-  MUTABLE fix = build_declare_mutable_fix(arg_node.name, scope);
+  MUTABLE fix = TRY (build_declare_mutable_fix(arg_node.name, scope));
   MUTABLE kw = {:index: arg_idx, :param: param_name, :actual: arg_node.name};
   IF !(fix) THEN
     RETURN error_mut(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, kw);
@@ -504,7 +504,7 @@ FN emit_missing_mutable_marker_error_mut(facts: CallArgumentFacts, scope: Scope)
   MUTABLE root: ?Identifier = aST__root_identifier(arg);
   IF root EXISTS AS root_value THEN
     MUTABLE edits: []Edit = [edit__new(span__new(NIL, root_value.token.line, root_value.token.column, 0), "&")];
-    MUTABLE mutable_fix = build_declare_mutable_fix(root_value.name, scope);
+    MUTABLE mutable_fix = TRY (build_declare_mutable_fix(root_value.name, scope));
     IF (scope__is_immutable?(scope, root_value.name) AND mutable_fix) THEN
       edits = ruby_array_concat_Edit(edits, CAST(mutable_fix.edits() AS []Edit));
     END
@@ -524,14 +524,14 @@ FN emit_unexpected_mutable_argument_error_mut(facts: CallArgumentFacts) RETURNS 
   END
 END
 FN emit_immutable_index_assignment_error_mut(assignment_node: Assignment, scope: Scope, var_name: String) RETURNS Void ->
-  MUTABLE fix = build_declare_mutable_fix(var_name, scope);
+  MUTABLE fix = TRY (build_declare_mutable_fix(var_name, scope));
   IF !(fix) THEN
     RETURN error_mut(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, {:name: var_name});
   END
   fixable_mut(assignment_node, {:code: :ASSIGN_INDEX_IMMUTABLE_LIST, :name: var_name, :category: :ownership, :level: :error, :fixes: [fix]});
 END
 FN emit_immutable_field_assignment_error_mut(assignment_node: Assignment, scope: Scope, var_name: String, field_name: String) RETURNS Void ->
-  MUTABLE fix = build_declare_mutable_fix(var_name, scope);
+  MUTABLE fix = TRY (build_declare_mutable_fix(var_name, scope));
   MUTABLE kw = {:name: var_name, :field: field_name};
   IF !(fix) THEN
     RETURN error_mut(assignment_node, :IMMUTABLE_FIELD_ASSIGNMENT, kw);
@@ -550,7 +550,7 @@ FN emit_reentrant_error_mut(fn_node: FunctionDef, code: String@symbol) RETURNS !
   fixable_mut(fn_node, {:code: code, :name: fn_node.name, :category: :reentrance, :level: :error, :fixes: [fix]});
 END
 FN emit_capture_immutable_as_mutable_error_mut(node: FunctionDef, cap_name: String, owner_scope: Scope) RETURNS Void ->
-  MUTABLE fix = build_declare_mutable_fix(cap_name, owner_scope);
+  MUTABLE fix = TRY (build_declare_mutable_fix(cap_name, owner_scope));
   IF !(fix) THEN
     RETURN error_mut(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, {:name: cap_name});
   END
@@ -797,7 +797,7 @@ END
 FN emit_with_restrict_immutable_error_mut(node: WithBlock, var_node: Identifier) RETURNS Void ->
   MUTABLE name = COPY var_node.name;
   MUTABLE scope = ((var_node.symbol?.scope) OR_ELSE current_scope());
-  MUTABLE fix = build_declare_mutable_fix(name, scope);
+  MUTABLE fix = TRY (build_declare_mutable_fix(name, scope));
   IF !(fix) THEN
     RETURN error_mut(node, :WITH_RESTRICT_NEEDS_MUTABLE, {:name: name});
   END
@@ -821,7 +821,7 @@ END
 FN emit_type_mismatch_assign_error_mut(node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS Void ->
   MUTABLE kw = {:got: value_type, :expected: target_type};
   MUTABLE value = node.value();
-  MUTABLE fix = build_cast_wrap_fix(value, target_type);
+  MUTABLE fix = TRY (build_cast_wrap_fix(value, target_type));
   IF !(fix) THEN
     RETURN error_mut(node, :TYPE_MISMATCH_ASSIGN, kw);
   END
@@ -1103,7 +1103,7 @@ FN emit_auto_resolved_finding_mut(resolution: Resolution) RETURNS Void ->
     RETURN;
   END
   MUTABLE type_str = auto_type_source_form(resolution.type);
-  MUTABLE label = auto_slot_label(slot);
+  MUTABLE label = TRY (auto_slot_label(slot));
   MUTABLE auto_tok = auto_token_for(slot);
   fixable_mut((auto_tok OR slot.decl_node), {:code: :AUTO_INFERRED_TYPE, :label: label, :type: type_str, :category: :type, :level: :info, :fixes: build_auto_replace_fixes(auto_tok, type_str)});
 END
@@ -1136,7 +1136,7 @@ FN build_auto_replace_fixes(auto_tok: ?Token, type_str: String) RETURNS ![]Fix -
 END
 FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS Void ->
   MUTABLE slot = COPY ambiguity.slot;
-  MUTABLE label = auto_slot_label(slot);
+  MUTABLE label = TRY (auto_slot_label(slot));
   MUTABLE observed = COPY ambiguity.observed_types;
   MUTABLE observed_strs = observed |> SELECT auto_type_source_form(_);
   MUTABLE message = build_auto_ambiguity_message(label, observed_strs, slot);
@@ -1147,14 +1147,14 @@ FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotI
   ELSE
     ops = Set[];
   END
-  MUTABLE candidates = auto_rank_candidates(ops);
+  MUTABLE candidates = TRY (auto_rank_candidates(ops));
   IF !(candidates.empty?()) THEN
     message = (message + build_auto_op_evidence_block(ops, candidates));
   END
   MUTABLE fixes = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < candidates.length() DO
-    MUTABLE fix = build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym(), candidates[rtoc_idx].note(), (rtoc_idx + 1));
+    MUTABLE fix = TRY (build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym(), candidates[rtoc_idx].note(), (rtoc_idx + 1)));
     IF fix THEN
         &fixes.append(fix);
     END
@@ -1164,7 +1164,7 @@ FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotI
   fixable_mut((auto_tok OR slot.decl_node), {:code: :AUTO_AMBIGUOUS_TYPE, :detail: message, :category: :type, :level: :error, :fixes: fixes});
 END
 FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS Void ->
-  MUTABLE label = auto_slot_label(slot);
+  MUTABLE label = TRY (auto_slot_label(slot));
   MUTABLE base_msg = "Cannot infer type for ${label} \u{2014} no observed uses to drive inference.";
   MUTABLE slot_id = slot_id_for(slot);
   MUTABLE ops: [Set]Any = Set[];
@@ -1173,7 +1173,7 @@ FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]St
   ELSE
     ops = Set[];
   END
-  MUTABLE candidates = auto_rank_candidates(ops);
+  MUTABLE candidates = TRY (auto_rank_candidates(ops));
   MUTABLE message = COPY base_msg;
   IF candidates.empty?() THEN
     message = (message $+ " Replace `Auto` with a concrete type, or remove the unused declaration.");
@@ -1183,7 +1183,7 @@ FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]St
   MUTABLE fixes = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < candidates.length() DO
-    MUTABLE fix = build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym(), candidates[rtoc_idx].note(), (rtoc_idx + 1));
+    MUTABLE fix = TRY (build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym(), candidates[rtoc_idx].note(), (rtoc_idx + 1)));
     IF fix THEN
         &fixes.append(fix);
     END

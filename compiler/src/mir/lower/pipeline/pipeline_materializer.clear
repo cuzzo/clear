@@ -358,7 +358,7 @@ PRIVATE FN pipelineMaterializer__inline_source_alloc(self: PipelineMaterializer,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE effect = ownershipEffect__of(source_mir);
+    MUTABLE effect = TRY (ownershipEffect__of(source_mir));
     IF (effect.produces_owned AND (effect.alloc != NIL)) THEN
       RETURN (effect.alloc)?;
     END

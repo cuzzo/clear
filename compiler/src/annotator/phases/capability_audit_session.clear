@@ -563,7 +563,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE best: ?NameCandidate = NIL;
     MUTABLE best_d: Int64 = (max_distance + 1);
     FOR _ IN candidates DO
-    MUTABLE d = capabilityAuditSession__levenshtein(rtoc_self_view, CAST(input AS String), CAST(_ AS String));
+    MUTABLE d = TRY (capabilityAuditSession__levenshtein(rtoc_self_view, CAST(input AS String), CAST(_ AS String)));
     IF (d < best_d) THEN
         best = COPY _;
         best_d = d;
@@ -1072,7 +1072,7 @@ PRIVATE FN capabilityAuditSession__emit_immutable_assignment_error_mut(self: Cap
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, node.name, scope);
+    MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, node.name, scope));
     IF fix EXISTS AS fix_value THEN
       capabilityAuditSession__fixable_mut(rtoc_self_view, node, :ownership, [fix_value], NIL, :IMMUTABLE_ASSIGNMENT, :error, FALSE, {:name: node.name});
     ELSE
@@ -1084,7 +1084,7 @@ PRIVATE FN capabilityAuditSession__emit_immutable_arg_error_mut(self: Capability
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, arg_node.name, scope);
+    MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, arg_node.name, scope));
     MUTABLE kw = {:index: arg_idx, :param: param_name, :actual: arg_node.name};
     IF fix EXISTS AS fix_value THEN
       capabilityAuditSession__fixable_mut(rtoc_self_view, arg_node, :ownership, [fix_value], NIL, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, :error, TRUE, kw);
@@ -1101,7 +1101,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE root: ?Identifier = aST__root_identifier(arg);
     IF root EXISTS AS root_value THEN
       MUTABLE edits: []Edit = [edit__new(span__new(NIL, root_value.token.line, root_value.token.column, 0), "&")];
-      MUTABLE mutable_fix: ?Fix@multiowned = capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, root_value.name, scope);
+      MUTABLE mutable_fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, root_value.name, scope));
       IF (scope__is_immutable?(scope, root_value.name) AND (mutable_fix != NIL)) THEN
         edits = ruby_array_concat_Edit(edits, mutable_fix.edits);
       END
@@ -1129,7 +1129,7 @@ PRIVATE FN capabilityAuditSession__emit_immutable_index_assignment_error_mut(sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, var_name, scope);
+    MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, var_name, scope));
     IF fix EXISTS AS fix_value THEN
       capabilityAuditSession__fixable_mut(rtoc_self_view, assignment_node, :ownership, [fix_value], NIL, :ASSIGN_INDEX_IMMUTABLE_LIST, :error, FALSE, {:name: var_name});
     ELSE
@@ -1141,7 +1141,7 @@ PRIVATE FN capabilityAuditSession__emit_immutable_field_assignment_error_mut(sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, var_name, scope);
+    MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, var_name, scope));
     MUTABLE kw = {:name: var_name, :field: field_name};
     IF fix EXISTS AS fix_value THEN
       capabilityAuditSession__fixable_mut(rtoc_self_view, assignment_node, :ownership, [fix_value], NIL, :IMMUTABLE_FIELD_ASSIGNMENT, :error, FALSE, kw);
@@ -1169,7 +1169,7 @@ PRIVATE FN capabilityAuditSession__emit_capture_immutable_as_mutable_error_mut(s
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, cap_name, owner_scope);
+    MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, cap_name, owner_scope));
     IF fix EXISTS AS fix_value THEN
       capabilityAuditSession__fixable_mut(rtoc_self_view, node, :ownership, [fix_value], NIL, :CAPTURE_IMMUTABLE_AS_MUTABLE, :error, FALSE, {:name: cap_name});
     ELSE
@@ -1482,7 +1482,7 @@ PRIVATE FN capabilityAuditSession__emit_with_restrict_immutable_error_mut(self: 
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name = COPY var_node.name;
     MUTABLE scope = ((var_node.symbol?.scope) OR_ELSE capabilityAuditSession__current_scope(rtoc_self_view));
-    MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, name, scope);
+    MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, name, scope));
     IF fix EXISTS AS fix_value THEN
       capabilityAuditSession__fixable_mut(rtoc_self_view, node, :capability, [fix_value], NIL, :WITH_RESTRICT_NEEDS_MUTABLE, :error, FALSE, {:name: name});
     ELSE
@@ -1515,7 +1515,7 @@ PRIVATE FN capabilityAuditSession__emit_type_mismatch_assign_error_mut(self: Cap
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE kw = {:got: value_type, :expected: target_type};
     MUTABLE value = node.value();
-    MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_cast_wrap_fix(rtoc_self_view, value, target_type);
+    MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_cast_wrap_fix(rtoc_self_view, value, target_type));
     IF fix EXISTS AS fix_value THEN
       capabilityAuditSession__fixable_mut(rtoc_self_view, node, :type, [fix_value], NIL, :TYPE_MISMATCH_ASSIGN, :error, FALSE, kw);
     ELSE
@@ -1862,7 +1862,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType(resolution.type));
-    MUTABLE label: ?String = capabilityAuditSession__auto_slot_label(rtoc_self_view, slot);
+    MUTABLE label: ?String = TRY (capabilityAuditSession__auto_slot_label(rtoc_self_view, slot));
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
     capabilityAuditSession__fixable_mut(rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, capabilityAuditSession__build_auto_replace_fixes(rtoc_self_view, CAST(auto_tok AS ?Token), type_str), NIL, :AUTO_INFERRED_TYPE, :info, FALSE, {:label: label, :type: type_str});
 }
@@ -1907,7 +1907,7 @@ PRIVATE FN capabilityAuditSession__emit_auto_ambiguity_finding_mut(self: Capabil
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE slot = COPY ambiguity.slot;
-    MUTABLE label: ?String = capabilityAuditSession__auto_slot_label(rtoc_self_view, slot);
+    MUTABLE label: ?String = TRY (capabilityAuditSession__auto_slot_label(rtoc_self_view, slot));
     MUTABLE observed = COPY ambiguity.observed_types;
     MUTABLE observed_strs = observed |> SELECT capabilityAuditSession__auto_type_source_form(rtoc_self_view, _);
     MUTABLE message = capabilityAuditSession__build_auto_ambiguity_message(rtoc_self_view, label?, observed_strs, slot);
@@ -1918,14 +1918,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       ops = Set[];
     END
-    MUTABLE candidates = capabilityAuditSession__auto_rank_candidates(rtoc_self_view, ops);
+    MUTABLE candidates = TRY (capabilityAuditSession__auto_rank_candidates(rtoc_self_view, ops));
     IF !((candidates.length() == 0)) THEN
       message = (message $+ capabilityAuditSession__build_auto_op_evidence_block(rtoc_self_view, ops, candidates));
     END
     MUTABLE fixes = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < candidates.length() DO
-      MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_auto_candidate_fix(rtoc_self_view, slot, candidates[rtoc_idx]?.type_sym, candidates[rtoc_idx]?.note, (rtoc_idx + 1));
+      MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_auto_candidate_fix(rtoc_self_view, slot, candidates[rtoc_idx]?.type_sym, candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
       IF fix EXISTS AS fix_value THEN
           &fixes.append(fix_value);
       END
@@ -1939,7 +1939,7 @@ PRIVATE FN capabilityAuditSession__emit_auto_unresolved_finding_mut(self: Capabi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE label: ?String = capabilityAuditSession__auto_slot_label(rtoc_self_view, slot);
+    MUTABLE label: ?String = TRY (capabilityAuditSession__auto_slot_label(rtoc_self_view, slot));
     MUTABLE base_msg = "Cannot infer type for ${label} \u{2014} no observed uses to drive inference.";
     MUTABLE slot_id: ?AutoSlotId@multiowned = capabilityAuditSession__slot_id_for(rtoc_self_view, slot);
     MUTABLE ops: [Set]Any = Set[];
@@ -1948,7 +1948,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       ops = Set[];
     END
-    MUTABLE candidates = capabilityAuditSession__auto_rank_candidates(rtoc_self_view, ops);
+    MUTABLE candidates = TRY (capabilityAuditSession__auto_rank_candidates(rtoc_self_view, ops));
     MUTABLE message = COPY base_msg;
     IF (candidates.length() == 0) THEN
       message = (message $+ " Replace `Auto` with a concrete type, or remove the unused declaration.");
@@ -1958,7 +1958,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fixes = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < candidates.length() DO
-      MUTABLE fix: ?Fix@multiowned = capabilityAuditSession__build_auto_candidate_fix(rtoc_self_view, slot, candidates[rtoc_idx]?.type_sym, candidates[rtoc_idx]?.note, (rtoc_idx + 1));
+      MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_auto_candidate_fix(rtoc_self_view, slot, candidates[rtoc_idx]?.type_sym, candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
       IF fix EXISTS AS fix_value THEN
           &fixes.append(fix_value);
       END
@@ -2128,7 +2128,7 @@ PRIVATE FN capabilityAuditSession__lookup_scope_for(self: CapabilityAuditSession
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_reverse_items_6: []Scope@multiowned = capabilityAuditSession__scope_stack_for_helper(rtoc_self_view);
+    MUTABLE rtoc_reverse_items_6: []Scope@multiowned = TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_7 = rtoc_reverse_items_6.length() - 1;
     WHILE rtoc_reverse_i_7 >= 0 DO
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = ((rtoc_reverse_items_6[rtoc_reverse_i_7])?);
@@ -2168,7 +2168,7 @@ PRIVATE FN capabilityAuditSession__lookup_type_schema(self: CapabilityAuditSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE base_name = symbol((compilerRegexReplaceFirst((CAST(name AS String)), compilerRegexCompile("<.*>$"), "")));
-    MUTABLE rtoc_reverse_items_9: []Scope@multiowned = capabilityAuditSession__scope_stack_for_helper(rtoc_self_view);
+    MUTABLE rtoc_reverse_items_9: []Scope@multiowned = TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_10 = rtoc_reverse_items_9.length() - 1;
     WHILE rtoc_reverse_i_10 >= 0 DO
       MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_11 = ((rtoc_reverse_items_9[rtoc_reverse_i_10])?);
@@ -2204,7 +2204,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_13 = COPY scope;
     END
     rtoc_ternary_value_13? };
-  MUTABLE stack: []Scope@multiowned = capabilityAuditSession__scope_stack_for_helper(rtoc_self_view);
+  MUTABLE stack: []Scope@multiowned = TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
   new_scope.depth = stack.length();
   &stack.push(new_scope);
   RETURN blk();
@@ -2310,7 +2310,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         MUTABLE before = current.size();
         MUTABLE site_ctx = capabilityAuditSession__effect_call_site_context_for(rtoc_self_view, rtoc_each_7, callees[rtoc_idx]);
-        MUTABLE resolved_callee = capabilityAuditSession__resolve_maybe_effects(rtoc_self_view, callee_effs, rtoc_each_7, callees[rtoc_idx]);
+        MUTABLE resolved_callee = TRY (capabilityAuditSession__resolve_maybe_effects(rtoc_self_view, callee_effs, rtoc_each_7, callees[rtoc_idx]));
         capabilityAuditSession__inherit_effects_from_callee(rtoc_self_view, &current, resolved_callee, site_ctx);
         IF (current.size() > before) THEN
               changed = TRUE;
@@ -2335,7 +2335,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((has_block_maybe OR has_cont_maybe)) THEN
       RETURN COPY callee_set;
     END
-    MUTABLE call_sites = capabilityAuditSession__effect_call_site_arg_families_for(rtoc_self_view, caller_name, callee_name);
+    MUTABLE call_sites = TRY (capabilityAuditSession__effect_call_site_arg_families_for(rtoc_self_view, caller_name, callee_name));
     IF (call_sites.length() == 0) THEN
       RETURN COPY callee_set;
     END
@@ -2420,7 +2420,7 @@ PRIVATE FN capabilityAuditSession__compute_needs_rt_mut(MUTABLE self: Capability
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = capabilityAuditSession__function_node_map();
-    MUTABLE needs_rt = capabilityAuditSession__initial_needs_rt_map(rtoc_self_view, fn_nodes);
+    MUTABLE needs_rt = TRY (capabilityAuditSession__initial_needs_rt_map(rtoc_self_view, fn_nodes));
     capabilityAuditSession__seed_imported_needs_rt_mut(&rtoc_self_view, &needs_rt);
     capabilityAuditSession__propagate_needs_rt_mut(&rtoc_self_view, &needs_rt);
 }
@@ -2684,7 +2684,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRUE AND type__tense?(ret_t)) THEN
         CONTINUE;
     END
-    MUTABLE hint = capabilityAuditSession__fallibility_hint_for(&rtoc_self_view, rtoc_each_14);
+    MUTABLE hint = TRY (capabilityAuditSession__fallibility_hint_for(&rtoc_self_view, rtoc_each_14));
     MUTABLE return_type = ret_t.resolved();
     MUTABLE tok = IF respondsTo?(fn_node, "return_type_token") THEN
         fn_node.return_type_token()
@@ -2903,7 +2903,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           node = AsyncSpawnNode{ BgStreamBlock: item_mutable };,
       END
     ELSE
-      MUTABLE decision = capabilityAuditSession__bg_spawn_form_for(&rtoc_self_view, body_scan.callees, body_scan.has_fnptr_call);
+      MUTABLE decision = TRY (capabilityAuditSession__bg_spawn_form_for(&rtoc_self_view, body_scan.callees, body_scan.has_fnptr_call));
       MATCH node START
         AsyncSpawnNode.BgBlock AS item ->
           MUTABLE item_mutable = COPY item;
@@ -2953,7 +2953,7 @@ PRIVATE FN capabilityAuditSession__assign_async_stack_tier_mut(MUTABLE self: Cap
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE raw: String@symbol = capabilityAuditSession__max_tier_for_calls(&rtoc_self_view, calls);
+    MUTABLE raw: String@symbol = TRY (capabilityAuditSession__max_tier_for_calls(&rtoc_self_view, calls));
     target.computed_stack_tier = IF ((raw == :unbounded)) THEN
       :service
     ELSE
@@ -3231,19 +3231,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       capabilityAuditSession__emit_can_smash_unsupported_error_mut(rtoc_self_view, node);
       RETURN;
     END
-    MUTABLE plain_reentrant_callee: ?String = capabilityAuditSession__find_plain_reentrant_callee(&rtoc_self_view, call_names);
+    MUTABLE plain_reentrant_callee: ?String = TRY (capabilityAuditSession__find_plain_reentrant_callee(&rtoc_self_view, call_names));
     IF ((plain_reentrant_callee != NIL) AND (user_size != :service)) THEN
       capabilityAuditSession__emit_service_required_error_mut(rtoc_self_view, node, plain_reentrant_callee, user_size);
       RETURN;
     END
-    MUTABLE raw = capabilityAuditSession__max_tier_for_calls(&rtoc_self_view, call_names);
+    MUTABLE raw = TRY (capabilityAuditSession__max_tier_for_calls(&rtoc_self_view, call_names));
     MUTABLE computed = IF ((raw == :unbounded)) THEN
       :service
     ELSE
       raw
     END;
     IF ((raw == :unbounded) AND (user_size != :service)) THEN
-      MUTABLE mutual_md_callee: ?String = capabilityAuditSession__find_mutual_max_depth_callee(&rtoc_self_view, call_names);
+      MUTABLE mutual_md_callee: ?String = TRY (capabilityAuditSession__find_mutual_max_depth_callee(&rtoc_self_view, call_names));
       IF mutual_md_callee EXISTS AS mutual_md_callee_value THEN
         capabilityAuditSession__error_mut(rtoc_self_view, node, CapabilityAuditCodeOrMessage{ SymbolValue: :STACK_SAFETY_MUTUAL_RECURSION }, [], {:callee: mutual_md_callee_value});
         RETURN;
@@ -3359,7 +3359,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((fn_node.reentrance_kind() == :reentrant_not_logical)) THEN
       CONTINUE;
     END
-    MUTABLE direct = capabilityAuditSession__effect_direct_effects_for(rtoc_self_view, rtoc_each_18).contains?(symbol("REENTRANT"));
+    MUTABLE direct = TRY (capabilityAuditSession__effect_direct_effects_for(rtoc_self_view, rtoc_each_18)).contains?(symbol("REENTRANT"));
     MUTABLE mutual = (!(direct) AND capabilityAuditSession__reachable_from_self?(&rtoc_self_view, rtoc_each_18));
     IF !((direct OR mutual)) THEN
         CONTINUE;
@@ -3384,14 +3384,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((fn_node.reentrance_kind() == :reentrant_max_depth)) THEN
       CONTINUE;
     END
-    MUTABLE direct = capabilityAuditSession__effect_direct_effects_for(rtoc_self_view, rtoc_each_19).contains?(symbol("REENTRANT"));
+    MUTABLE direct = TRY (capabilityAuditSession__effect_direct_effects_for(rtoc_self_view, rtoc_each_19)).contains?(symbol("REENTRANT"));
     MUTABLE mutual = (!(direct) AND capabilityAuditSession__reachable_from_self?(&rtoc_self_view, rtoc_each_19));
     IF !(mutual) THEN
         CONTINUE;
     END
-    MUTABLE cycle_members = capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, rtoc_each_19) |> ORDER_BY rtoc_each_19;
+    MUTABLE cycle_members = TRY (capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, rtoc_each_19)) |> ORDER_BY rtoc_each_19;
     MUTABLE fixes = List[];
-    MUTABLE drop_edits: []Edit@multiowned = capabilityAuditSession__effects_clause_edits(rtoc_self_view, fn_node, "EFFECTS REENTRANT");
+    MUTABLE drop_edits: []Edit@multiowned = TRY (capabilityAuditSession__effects_clause_edits(rtoc_self_view, fn_node, "EFFECTS REENTRANT"));
     IF drop_edits |> ANY rtoc_each_19 THEN
         &fixes.append(TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :DROP_MAX_DEPTH_MUTUAL, {:max_depth: fn_node.max_depth_n()}), drop_edits, :auto)));
     END
@@ -3443,7 +3443,7 @@ PRIVATE FN capabilityAuditSession__try_stamp_mutual_thunk_plan_mut(MUTABLE self:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = capabilityAuditSession__function_node_map();
-    MUTABLE cycle_names = capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, fn_node.name);
+    MUTABLE cycle_names = TRY (capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, fn_node.name));
     IF (cycle_names.length() < 2) THEN
       RETURN FALSE;
     END
@@ -3490,7 +3490,7 @@ PRIVATE FN capabilityAuditSession__emit_mutual_thunk_unsupported_mut(MUTABLE sel
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = capabilityAuditSession__function_node_map();
     MUTABLE name = fn_node.name;
-    MUTABLE cycle_names = capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, name);
+    MUTABLE cycle_names = TRY (capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, name));
     MUTABLE cycle_thunk_fns = (cycle_names |> SELECT:? fn_nodes[_] |> WHERE _ != NIL) |> WHERE (_.reentrance_kind() == :reentrant_thunk);
     MUTABLE fixes = List[];
     MUTABLE edits_plain = cycle_thunk_fns |> UNNEST capabilityAuditSession__effects_clause_edits(rtoc_self_view, _, "EFFECTS REENTRANT");
@@ -3501,7 +3501,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE nl_ok = !((cycle_thunk_fns.length() == 0));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < cycle_thunk_fns.length() DO
-      MUTABLE eff: []Edit@multiowned = capabilityAuditSession__effects_clause_edits(rtoc_self_view, cycle_thunk_fns[rtoc_idx], "EFFECTS REENTRANT:NOT_LOGICAL");
+      MUTABLE eff: []Edit@multiowned = TRY (capabilityAuditSession__effects_clause_edits(rtoc_self_view, cycle_thunk_fns[rtoc_idx], "EFFECTS REENTRANT:NOT_LOGICAL"));
       IF (eff.length() == 0) THEN
           nl_ok = FALSE;
           BREAK;
@@ -3532,7 +3532,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE default_n = 64;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < cycle_thunk_fns.length() DO
-      MUTABLE eff: []Edit@multiowned = capabilityAuditSession__effects_clause_edits(rtoc_self_view, cycle_thunk_fns[rtoc_idx], "EFFECTS REENTRANT:MAX_DEPTH(${default_n.toString()})");
+      MUTABLE eff: []Edit@multiowned = TRY (capabilityAuditSession__effects_clause_edits(rtoc_self_view, cycle_thunk_fns[rtoc_idx], "EFFECTS REENTRANT:MAX_DEPTH(${default_n.toString()})"));
       IF (eff.length() == 0) THEN
           md_ok = FALSE;
           BREAK;
@@ -3569,7 +3569,7 @@ PRIVATE FN capabilityAuditSession__thunk_cycle_members(MUTABLE self: CapabilityA
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE start_s = COPY start_value;
-    MUTABLE forward = capabilityAuditSession__compute_reachable(rtoc_self_view, TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)), start_s);
+    MUTABLE forward = TRY (capabilityAuditSession__compute_reachable(rtoc_self_view, TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)), start_s));
     MUTABLE reverse_graph = {};
     (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() |> EACH {
     MUTABLE callees: [Set]String = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[_] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
@@ -3580,7 +3580,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     (reverse_graph[CAST(_ AS String)])?.insert(_);
     END
     };
-    MUTABLE backward = capabilityAuditSession__compute_reachable(rtoc_self_view, reverse_graph, start_s);
+    MUTABLE backward = TRY (capabilityAuditSession__compute_reachable(rtoc_self_view, reverse_graph, start_s));
     MUTABLE scc = ruby_set_intersection_String_set(forward, backward);
     IF forward.contains?(start_s) THEN
       &scc.append(start_s);
@@ -3670,7 +3670,7 @@ PRIVATE FN capabilityAuditSession__validate_predicate_purity_mut(self: Capabilit
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_each_items_26 = capabilityAuditSession__predicate_call_sites_store(rtoc_self_view);
+    MUTABLE rtoc_each_items_26 = TRY (capabilityAuditSession__predicate_call_sites_store(rtoc_self_view));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_26.length() DO
       MUTABLE call = COPY KEEP rtoc_each_items_26[rtoc_idx]?.call;
@@ -3977,10 +3977,10 @@ PRIVATE FN capabilityAuditSession__check_lock_cycles_mut(MUTABLE self: Capabilit
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE transitive_acquires = capabilityAuditSession__propagate_lock_acquires_mut(&rtoc_self_view);
+    MUTABLE transitive_acquires = TRY (capabilityAuditSession__propagate_lock_acquires_mut(&rtoc_self_view));
     capabilityAuditSession__resolve_held_calls_mut(rtoc_self_view, transitive_acquires);
     MUTABLE non_opted = capabilityAuditSession__build_lock_graph(rtoc_self_view, FALSE);
-    MUTABLE rtoc_each_items_37 = capabilityAuditSession__tarjan_scc(rtoc_self_view, non_opted.nodes, non_opted.adj);
+    MUTABLE rtoc_each_items_37 = TRY (capabilityAuditSession__tarjan_scc(rtoc_self_view, non_opted.nodes, non_opted.adj));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_37.length() DO
       IF !(capabilityAuditSession__scc_is_cyclic?(rtoc_self_view, rtoc_each_items_37[rtoc_idx]?, non_opted.adj)) THEN
@@ -4290,7 +4290,7 @@ PRIVATE FN capabilityAuditSession__run_whole_program_semantics_mut(self: Capabil
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fn_nodes = capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view);
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view));
     MUTABLE body_summaries = TRY (capabilityAuditSession__function_body_summaries(rtoc_self_view));
     escapeAnalysis__propagate_caller_sync_mut(fn_nodes, body_summaries);
     FOR _ IN fn_nodes.values() DO

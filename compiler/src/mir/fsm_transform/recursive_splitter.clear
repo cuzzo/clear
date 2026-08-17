@@ -365,7 +365,7 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
       MUTABLE bg_rt: String = CAST(string_mutable AS String);
       MUTABLE caps_meta: []{String@symbol}FsmCapMetadataValue = ( { MUTABLE rtoc_empty_list_6: []{String@symbol}FsmCapMetadataValue = List[]; rtoc_empty_list_6 } );
       FOR _ IN caps DO
-  MUTABLE m = mIRLowering__fsm_cap_metadata(lowering, _, with_stmt, ctx_id, captured);
+  MUTABLE m = TRY (mIRLowering__fsm_cap_metadata(lowering, _, with_stmt, ctx_id, captured));
   IF (m == NIL) THEN
           panic("fsm_cap_metadata failed");
   END

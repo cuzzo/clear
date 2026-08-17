@@ -875,7 +875,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   MUTABLE bg_rt = COPY ctx.bg_rt;
   MUTABLE id = ctx.id;
   MUTABLE captured = COPY ctx.captured;
-  MUTABLE meta = mIRLowering__fsm_cap_metadata(lowering_api, castLockCapToCapabilityTransition(cap), with_node, id, captured);
+  MUTABLE meta = TRY (mIRLowering__fsm_cap_metadata(lowering_api, castLockCapToCapabilityTransition(cap), with_node, id, captured));
   IF (meta == NIL) THEN
     RETURN NIL;
   END
@@ -887,7 +887,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   MUTABLE try_success_idx = COPY held_set_idx;
   MUTABLE prior_meta: []{String@symbol}FsmCapMetadataValue = ( { MUTABLE rtoc_map_results_37: []{String@symbol}FsmCapMetadataValue = List[];
   FOR rtoc_map_item_36 IN prior DO
-  MUTABLE m = mIRLowering__fsm_cap_metadata(lowering_api, castLockCapToCapabilityTransition(rtoc_map_item_36), with_node, id, captured);
+  MUTABLE m = TRY (mIRLowering__fsm_cap_metadata(lowering_api, castLockCapToCapabilityTransition(rtoc_map_item_36), with_node, id, captured));
   IF (m == NIL) THEN
       RETURN NIL;
   END

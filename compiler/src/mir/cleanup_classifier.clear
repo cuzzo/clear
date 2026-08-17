@@ -1606,7 +1606,7 @@ PUB FN cleanupClassifier__struct_lit_borrows_cleanup_fields?(node: Any, schema: 
   IF !(value IS_A StructLit) THEN
     RETURN FALSE;
   END
-  MUTABLE borrowed = cleanupClassifier__borrowed_field_names(schema);
+  MUTABLE borrowed = TRY (cleanupClassifier__borrowed_field_names(schema));
   RETURN schema.fields() |> ALL { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanupClassifier__cleanup_field_type(_._1)); (IF !(TRY (elem_type_needs_cleanup?(t, schema_lookup))) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fval = (value.fields()[CAST(_._0 AS String)] OR value.fields()[_._0]); (((cleanup_field_borrowed?(_._1) OR borrowed.contains?(CAST(_._0 AS String))) OR ((TRUE AND ((aST__node__symbol(fval) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_20 = ((aST__node__symbol(fval))?);
   symbolEntry__borrow_provenance?(rtoc_local_receiver_20) })))) OR ((fval AND type__borrowed_reference?((TRY (type__from_node_mut(fval, "struct literal borrowed field"))))))) } END) };
 END
@@ -1625,7 +1625,7 @@ PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locata
   ELSE
     NIL
   END;
-  MUTABLE borrowed = cleanupClassifier__borrowed_field_names(schema);
+  MUTABLE borrowed = TRY (cleanupClassifier__borrowed_field_names(schema));
   MUTABLE has_cleanup = schema.fields() |> ANY (IF borrowed.contains?(CAST(_._0 AS String)) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanupClassifier__cleanup_field_type(_._1)); { MUTABLE rtoc_value_block_marker = 0; IF struct_lit THEN
     MUTABLE fval = (struct_lit.fields()[CAST(_._0 AS String)] OR struct_lit.fields()[_._0]);
     IF (TRUE AND ((aST__node__symbol(fval) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = ((aST__node__symbol(fval))?);
@@ -1722,7 +1722,7 @@ PUB FN cleanupClassifier__elem_has_cleanup_fields?(schema: ?FieldBearingSchema, 
     RETURN FALSE;
   END
   MUTABLE concrete_schema: ?FieldBearingSchema = COPY schema;
-  MUTABLE borrowed = cleanupClassifier__borrowed_field_names(concrete_schema);
+  MUTABLE borrowed = TRY (cleanupClassifier__borrowed_field_names(concrete_schema));
   RETURN concrete_schema.fields() |> ANY (IF borrowed.contains?(CAST(_._0 AS String)) THEN FALSE ELSE (IF cleanup_field_borrowed?(_._1) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanupClassifier__cleanup_field_type(_._1)); (((((((TRY (type__string?(t)) OR TRY (type__non_string_array?(t))) OR type__collection?(t)) OR t.indirect?()) OR TRY (type__any_rc?(t))) OR type__link?(t)) OR (((schema_lookup != NIL) AND TRY (type__recursive_cleanup_shape?(t, schema_lookup))))) OR (((schema_lookup != NIL) AND t.needs_cleanup?(schema_lookup)))) } END) END);
 END
 PUB FN cleanupClassifier__cleanup_field_borrowed?(field: Field) RETURNS Bool ->

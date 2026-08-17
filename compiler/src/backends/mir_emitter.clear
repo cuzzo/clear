@@ -882,7 +882,7 @@ PRIVATE FN mIREmitter__emit_registry_call(MUTABLE self: MIREmitter, node: Regist
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE code = mIREmitter__registry_template(rtoc_self_view, KEEP node.entry, IntrinsicTemplateKind.Zig);
+    MUTABLE code = TRY (mIREmitter__registry_template(rtoc_self_view, KEEP node.entry, IntrinsicTemplateKind.Zig));
     code = TRY (mIREmitter__substitute_registry_common(rtoc_self_view, code, KEEP node.entry, KEEP node.allocs, node.key_type, node.value_type));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
@@ -903,7 +903,7 @@ PRIVATE FN mIREmitter__emit_indexed_store(MUTABLE self: MIREmitter, node: Indexe
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE code = mIREmitter__registry_template(rtoc_self_view, KEEP node.entry, node.template_kind);
+    MUTABLE code = TRY (mIREmitter__registry_template(rtoc_self_view, KEEP node.entry, node.template_kind));
     code = TRY (mIREmitter__substitute_registry_common(rtoc_self_view, code, KEEP node.entry, KEEP node.allocs, node.key_type, node.value_type));
     MUTABLE target = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.target)));
     MUTABLE index = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.index)));
@@ -2792,7 +2792,7 @@ PRIVATE FN mIREmitter__emit_catch_body(MUTABLE self: MIREmitter, rt_name: String
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE parts: []String = ( { MUTABLE rtoc_empty_list_37: []String = List[]; rtoc_empty_list_37 } );
-    MUTABLE snapshot_decl = mIREmitter__emit_catch_snapshot_decl(rtoc_self_view, rt_name, snapshot_type);
+    MUTABLE snapshot_decl = TRY (mIREmitter__emit_catch_snapshot_decl(rtoc_self_view, rt_name, snapshot_type));
     IF !((snapshot_decl.length() == 0)) THEN
       &parts.append(snapshot_decl);
     END
@@ -3018,7 +3018,7 @@ PRIVATE FN mIREmitter__emit_thunk_trampoline(MUTABLE self: MIREmitter, node: Thu
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE return_type_zig = TRY (type__zig_type(node.return_type));
-    MUTABLE param_field_lines = mIREmitter__emit_thunk_frame_field_decls(rtoc_self_view, node.param_fields, "            ");
+    MUTABLE param_field_lines = TRY (mIREmitter__emit_thunk_frame_field_decls(rtoc_self_view, node.param_fields, "            "));
     MUTABLE param_init = TRY (mIREmitter__emit_thunk_frame_inits(&rtoc_self_view, node.param_init_fields));
     MUTABLE base_case_branches = (node.base_cases |> SELECT "if (${TRY (mIREmitter__emit(&rtoc_self_view, _.cond))}) {\n                    const result: ${return_type_zig} = ${TRY (mIREmitter__emit(&rtoc_self_view, _.value))};\n${TRY (mIREmitter__emit_thunk_return_or_pop(rtoc_self_view))}\n                }\n".trim()).join("\n                    ");
     MUTABLE recurse_arg_inits = TRY (mIREmitter__emit_thunk_frame_inits(&rtoc_self_view, node.recurse_arg_inits));
@@ -3039,7 +3039,7 @@ PRIVATE FN mIREmitter__emit_mutual_thunk_trampoline(MUTABLE self: MIREmitter, no
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE variant_decls = (node.variants |> SELECT {
-    MUTABLE fields = mIREmitter__emit_thunk_frame_field_decls(rtoc_self_view, _.param_fields, "          ");
+    MUTABLE fields = TRY (mIREmitter__emit_thunk_frame_field_decls(rtoc_self_view, _.param_fields, "          "));
     "${_.name}: struct {\n          ${fields}\n      },\n".trim()
     }).join("\n      ");
     MUTABLE initial_fields = TRY (mIREmitter__emit_thunk_frame_inits(&rtoc_self_view, node.initial_fields));

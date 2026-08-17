@@ -139,7 +139,7 @@ PUB FN segments__split(body_input: []Locatable, lowering: Any) RETURNS !?SplitRe
   MUTABLE segments: []Segment = ( { MUTABLE rtoc_empty_list_1: []Segment = List[]; rtoc_empty_list_1 } );
   MUTABLE current_stmts: []Locatable = ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } );
   FOR _ IN body DO
-  MUTABLE suspend: ?SegmentTail = segments__classify_suspend(_);
+  MUTABLE suspend: ?SegmentTail = TRY (segments__classify_suspend(_));
   IF suspend EXISTS AS suspend_value THEN
       &segments.append(Segment{ index: segments.length(), stmts: current_stmts, tail: suspend_value });
       current_stmts = ( { MUTABLE rtoc_empty_list_3: []Locatable = List[]; rtoc_empty_list_3 } );
@@ -199,7 +199,7 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
       MUTABLE index = 0;
       WHILE (index < loop_body_value.length()) DO
         MUTABLE s = UNWRAP (loop_body_value[index]);
-        MUTABLE sus: ?SegmentTail = segments__classify_suspend(s);
+        MUTABLE sus: ?SegmentTail = TRY (segments__classify_suspend(s));
         IF (sus == NIL) THEN
           IF segments__contains_suspend_anywhere?([s]) THEN
             RETURN NIL;

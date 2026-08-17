@@ -247,7 +247,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each(self: Pipeline
     range_node_branch_value = COPY CAST(castLocatableToBinaryOp(lhs).left AS RangeLit);
   END
   MUTABLE range_node: RangeLit = range_node_branch_value?;
-  MUTABLE id = pipelineConcurrentLowerer__numeric_label_id(self, pipelineConcurrentLowerer__next_label_call(self));
+  MUTABLE id = TRY (pipelineConcurrentLowerer__numeric_label_id(self, pipelineConcurrentLowerer__next_label_call(self)));
   MUTABLE idx_var = "__sh${id.toString()}_i";
   MUTABLE key_var = "__sh${id.toString()}_key";
   MUTABLE start_mir = pipelineConcurrentLowerer__visit_mir_call(self, range_node.start);
@@ -289,7 +289,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each_zig(self: Pipe
   MUTABLE map_type = TRY (type__from_node_mut(map_node, "SHARD target map"));
   MUTABLE shard_count: ?Int64 = (IF ctx.shard_count != NIL THEN ctx.shard_count ELSE type__shard_count(map_type) END);
   IF shard_count EXISTS AS shard_count_value THEN
-    MUTABLE key_type = pipelineConcurrentLowerer__shard_key_type(self, map_type);
+    MUTABLE key_type = TRY (pipelineConcurrentLowerer__shard_key_type(self, map_type));
     MUTABLE head = pipelineConcurrentLowerer__lower_head_with_placeholder_call(self, ctx.key_expr, idx_var);
     MUTABLE key_setup: []Emittable = COPY head.pending;
     MUTABLE key_cleanup: []Emittable = ( { MUTABLE rtoc_empty_list_3: []Emittable = List[]; rtoc_empty_list_3 } );
@@ -379,7 +379,7 @@ PRIVATE FN pipelineConcurrentLowerer__bounded_concurrent_task_cfg_mir(self: Pipe
   RETURN StructInit{ zig_type: NIL, fields: [CAST(mIR__named_field(Name{ StringValue: COPY "stack_size" }, Emittable{ EnumTag: COPY EnumTag{ variant: COPY pipelineConcurrentLowerer__task_config_variant_call(self, size_name) } }) AS Any)], lowered_node_id: NIL, ownership_consumption: NIL };
 END
 PRIVATE FN pipelineConcurrentLowerer__build_bounded_concurrent_callback(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp, item_type: Type, return_type: ReturnType, body_kind: PipelineConcurrentCallbackBodyKind) RETURNS !PipelineConcurrentCallback ->
-  MUTABLE id = pipelineConcurrentLowerer__numeric_label_id(self, pipelineConcurrentLowerer__next_label_call(self));
+  MUTABLE id = TRY (pipelineConcurrentLowerer__numeric_label_id(self, pipelineConcurrentLowerer__next_label_call(self)));
   MUTABLE ctx_name = "__BoundedConcurrentCtx${id.toString()}";
   MUTABLE caps = TRY (fiberCtxBuilder__build(conc_op.capture_analysis, "ctx", {}, NIL, 0, {}));
   MUTABLE specs = COPY caps.specs;
@@ -712,7 +712,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_each_in_place(self: 
   RETURN ScopeBlock{ body: TRY (pipelineConcurrentInvocation__scoped_body(invoke, setup_stmts, [Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY call, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }])), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN pipelineConcurrentLowerer__build_bounded_concurrent_callback_pointer(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp, item_type: Type) RETURNS !PipelineConcurrentCallback ->
-  MUTABLE id = pipelineConcurrentLowerer__numeric_label_id(self, pipelineConcurrentLowerer__next_label_call(self));
+  MUTABLE id = TRY (pipelineConcurrentLowerer__numeric_label_id(self, pipelineConcurrentLowerer__next_label_call(self)));
   MUTABLE ctx_name = "__BoundedConcurrentCtx${id.toString()}";
   MUTABLE caps = TRY (fiberCtxBuilder__build(conc_op.capture_analysis, "ctx", {}, NIL, 0, {}));
   MUTABLE specs = COPY caps.specs;

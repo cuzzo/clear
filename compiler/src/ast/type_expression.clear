@@ -549,7 +549,7 @@ PRIVATE FN typeExpressionParser__parse_optional_source(inner_source: String) RET
   IF typeExpressionParser__grouped_type?(inner_source) THEN
     RETURN typeExpression__of(TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY TRY (typeExpressionParser__parse_source((inner_source.substr(1, (((inner_source.length() - 2) - 1) + 1))))) } });
   END
-  MUTABLE optional_array_parts: ?Tuple<String, ?TypeExpressionDimension> = typeExpressionParser__split_array_suffix(inner_source);
+  MUTABLE optional_array_parts: ?Tuple<String, ?TypeExpressionDimension> = TRY (typeExpressionParser__split_array_suffix(inner_source));
   IF optional_array_parts EXISTS AS optional_array_pair THEN
     MUTABLE item_source: String = COPY optional_array_pair._0;
     MUTABLE dimension: ?TypeExpressionDimension = COPY optional_array_pair._1;
@@ -569,7 +569,7 @@ PRIVATE FN typeExpressionParser__parse_primary_source(source: String) RETURNS !T
   RETURN TRY (typeExpressionParser__parse_generic_or_named_source(source));
 END
 PRIVATE FN typeExpressionParser__parse_array_source(source: String) RETURNS !?TypeExpression EFFECTS REENTRANT ->
-  MUTABLE array_parts: ?Tuple<String, ?TypeExpressionDimension> = typeExpressionParser__split_array_suffix(source);
+  MUTABLE array_parts: ?Tuple<String, ?TypeExpressionDimension> = TRY (typeExpressionParser__split_array_suffix(source));
   IF array_parts EXISTS AS array_parts_value THEN
     MUTABLE item_source: String = COPY array_parts_value._0;
     MUTABLE dimension: ?TypeExpressionDimension = COPY array_parts_value._1;

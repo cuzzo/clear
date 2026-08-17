@@ -2811,7 +2811,7 @@ PRIVATE FN type__observable_wrapper_zig(self: Type, tense_type: Type) RETURNS !S
   MUTABLE terminal: ?String@symbol = type__observable_terminal(self);
   IF terminal EXISTS AS terminal_value_2 THEN
     MUTABLE terminal_value: String@symbol = CAST(terminal_value_2 AS String@symbol);
-    MUTABLE wrapper: ?String = type__observable_wrapper_for_terminal(terminal_value, tense_type);
+    MUTABLE wrapper: ?String = TRY (type__observable_wrapper_for_terminal(terminal_value, tense_type));
     IF wrapper EXISTS AS wrapper_value THEN
       RETURN COPY wrapper_value;
     ELSE

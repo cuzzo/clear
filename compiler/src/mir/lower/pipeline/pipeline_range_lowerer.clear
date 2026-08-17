@@ -466,7 +466,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE item_var = COPY prefix.item_var;
     MUTABLE initial_capture = COPY prefix.initial_capture;
     MUTABLE item_used = prefix.item_used;
-    MUTABLE body_mir = runtimeHost__range_visit_pipeline_body_mir(rtoc_self_view.host, each_op.body, item_var);
+    MUTABLE body_mir = TRY (runtimeHost__range_visit_pipeline_body_mir(rtoc_self_view.host, each_op.body, item_var));
     MUTABLE body_uses_initial = (((item_var == initial_capture)) AND rtoc_self_view.host.range_ast_stmts_use_placeholder?(each_op.body));
     item_used = (item_used OR body_uses_initial);
     MUTABLE capture_name: String = "";
@@ -483,11 +483,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       defer_deinit_branch_value = NIL;
     END
     MUTABLE defer_deinit: ?MIRDeferStmt = defer_deinit_branch_value;
-    MUTABLE bc_iter: ?PipelineRangeLoopIter = pipelineRangeLowerer__bc_loop_iter(rtoc_self_view, range_lit, source_ti, IF (capture_name == "_") THEN
+    MUTABLE bc_iter: ?PipelineRangeLoopIter = TRY (pipelineRangeLowerer__bc_loop_iter(rtoc_self_view, range_lit, source_ti, IF (capture_name == "_") THEN
       "_"
     ELSE
       initial_capture
-    END);
+    END));
     IF bc_iter EXISTS AS bc_iter_value THEN
       RETURN ScopeBlock{ body: COPY (TRY (pipelineLazyRangePrefix__outer_setup_stmts(prefix)) + [TRY (pipelineLazyRangePrefix__loop_stmt(prefix, bc_iter_value.iter, body_mir, bc_iter_value.capture_name))]), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
@@ -705,7 +705,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       defer_deinit_branch_value = NIL;
     END
     MUTABLE defer_deinit: ?MIRDeferStmt = defer_deinit_branch_value;
-    MUTABLE bc_iter: ?PipelineRangeLoopIter = pipelineRangeLowerer__bc_loop_iter(rtoc_self_view, range_lit, source_ti, capture_name);
+    MUTABLE bc_iter: ?PipelineRangeLoopIter = TRY (pipelineRangeLowerer__bc_loop_iter(rtoc_self_view, range_lit, source_ti, capture_name));
     IF bc_iter EXISTS AS bc_iter_value THEN
       RETURN MIRBlockExpr{ label: COPY label, body: COPY (TRY (pipelineLazyRangePrefix__outer_setup_stmts(prefix)) + plan.acc_init_stmts + [TRY (pipelineLazyRangePrefix__loop_stmt(prefix, bc_iter_value.iter, plan.loop_acc_stmts, bc_iter_value.capture_name))] + plan.post_loop_stmts + [BreakStmt{ label: COPY label, value: COPY plan.result_expr, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
     END
