@@ -12216,7 +12216,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.checked_arg_count = COPY checked_arg_count;
 }
 END
-FN callableContract__no_ownership(checked_arg_count: Int64) RETURNS !CallableContract@multiowned ->
+PUB FN callableContract__no_ownership(checked_arg_count: Int64) RETURNS !CallableContract@multiowned ->
   MUTABLE params: []Param = ( { MUTABLE rtoc_empty_list_189: []Param = List[]; rtoc_empty_list_189 } );
   MUTABLE idx: Int64 = 0;
   WHILE (idx < checked_arg_count) DO
