@@ -7891,7 +7891,7 @@ FN call__set_result_type(MUTABLE self: Call, value: ?Type) RETURNS ?Type ->
   self.result_type = COPY value;
   RETURN COPY value;
 END
-FN call__initialize(MUTABLE self: Call, callee: String, args: []Emittable, try_wrap: Bool, owned_return: Bool = FALSE, callable_contract: ?CallableContract@multiowned = NIL) RETURNS Void ->
+FN call__initialize(MUTABLE self: Call, callee: String, args: []Emittable, try_wrap: Bool, owned_return: Bool = FALSE, callable_contract: ?CallableContract = NIL) RETURNS Void ->
   self.never_success = FALSE;
 END
 FN call__owned_return?(self: Call) RETURNS Bool ->
@@ -8068,7 +8068,7 @@ PUB STRUCT TailCall {
   ownership_consumption: ?OwnershipConsumptionFact
 }
 
-FN tailCall__initialize(MUTABLE self: TailCall, callee: String, args: []Any, callable_contract: ?CallableContract@multiowned = NIL) RETURNS Void ->
+FN tailCall__initialize(MUTABLE self: TailCall, callee: String, args: []Any, callable_contract: ?CallableContract = NIL) RETURNS Void ->
 
 END
 FN tailCall__child_exprs(self: TailCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -8181,7 +8181,7 @@ FN methodCall__set_result_type(MUTABLE self: MIRMethodCall, value: ?Type) RETURN
   self.result_type = COPY value;
   RETURN COPY value;
 END
-FN methodCall__initialize(MUTABLE self: MIRMethodCall, receiver: Any, method_value: String, args: []Any, try_wrap: Bool, callable_contract: ?CallableContract@multiowned = NIL, owned_result_alloc: ?String@symbol = NIL) RETURNS Void ->
+FN methodCall__initialize(MUTABLE self: MIRMethodCall, receiver: Any, method_value: String, args: []Any, try_wrap: Bool, callable_contract: ?CallableContract = NIL, owned_result_alloc: ?String@symbol = NIL) RETURNS Void ->
 
 END
 FN methodCall__child_exprs(self: MIRMethodCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
