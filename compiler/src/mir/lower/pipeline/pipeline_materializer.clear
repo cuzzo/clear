@@ -182,7 +182,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fact: ?AllocationFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, (forced_alloc OR_ELSE :heap), TRY (aST__full_type_mut(list_node)), NIL, "pipeline allocation", !((forced_alloc == NIL)));
     IF fact EXISTS AS fact_value THEN
       &source_prefix.append(Emittable{ AllocMark: COPY fact_value.mark });
-      source_cleanup = Cleanup{ name: COPY src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, fact_value.alloc, FALSE, NIL, TRY (type__zig_type((TRY (aST__full_type_mut(list_node)))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      source_cleanup = Cleanup{ name: COPY src_name, cleanup_entry: cleanupEntry__build(:uniform, fact_value.alloc, FALSE, NIL, TRY (type__zig_type((TRY (aST__full_type_mut(list_node)))))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     runtimeHost__materializer_set_current_label(&rtoc_self_view.host, label);
     MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, TRY (aST__full_type_mut(list_node)), TRUE));
@@ -310,7 +310,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE src_name = COPY cross_mark.name;
       MUTABLE src_entry = cleanupEntry__build(:uniform, cross_fact.alloc, FALSE, NIL, owned_value_zig);
       MUTABLE copy = DeepCopy{ source: Emittable{ Ident: COPY Ident{ name: COPY src_name, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_type: COPY owned_value_zig, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: deepCopy__copy_shape_for_zig_type(NIL), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
-      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [Emittable{ AllocMark: COPY cross_mark }, Emittable{ Let: COPY Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Cleanup: COPY Cleanup{ name: COPY src_name, cleanup_entry: COPY src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [Emittable{ AllocMark: COPY cross_mark }, Emittable{ Let: COPY Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Cleanup: COPY Cleanup{ name: COPY src_name, cleanup_entry: src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     IF fact EXISTS AS owned_fact THEN
       MUTABLE owned_mark = COPY owned_fact.mark;
@@ -342,7 +342,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fact: ?AllocationFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, :heap, TRY (aST__full_type_mut(lhs)));
     IF fact EXISTS AS source_fact THEN
       &source_prefix.append(Emittable{ AllocMark: COPY source_fact.mark });
-      source_cleanup = Cleanup{ name: COPY src_name, cleanup_entry: COPY cleanupEntry__build(:uniform, source_fact.alloc, FALSE, NIL, TRY (type__zig_type(lhs_type))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      source_cleanup = Cleanup{ name: COPY src_name, cleanup_entry: cleanupEntry__build(:uniform, source_fact.alloc, FALSE, NIL, TRY (type__zig_type(lhs_type))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     runtimeHost__materializer_set_current_label(&rtoc_self_view.host, label);
     MUTABLE item_setup = TRY (pipelineMaterializer__items_setup(rtoc_self_view, lhs_type));

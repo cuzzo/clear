@@ -275,7 +275,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each(self: Pipeline
     &inner.append(Emittable{ AllocMark: COPY fact_value.mark });
     &inner.append(Emittable{ Let: COPY Let{ name: COPY key_var, init: COPY head.value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
     IF KEEP fact_value.cleanup_entry EXISTS AS cleanup_entry_value THEN
-      &inner.append(castCleanupToEmittable(Cleanup{ name: COPY key_var, cleanup_entry: COPY cleanup_entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }));
+      &inner.append(castCleanupToEmittable(Cleanup{ name: COPY key_var, cleanup_entry: cleanup_entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }));
     END
   ELSE
     &inner.append(Emittable{ Let: COPY Let{ name: COPY key_var, init: COPY head.value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
@@ -297,7 +297,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each_zig(self: Pipe
     IF key_fact EXISTS AS key_fact_value THEN
       &key_setup.append(Emittable{ AllocMark: COPY key_fact_value.mark });
       IF KEEP key_fact_value.cleanup_entry EXISTS AS cleanup_entry_value THEN
-        &key_cleanup.append(castCleanupToEmittable(Cleanup{ name: COPY key_var, cleanup_entry: COPY cleanup_entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }));
+        &key_cleanup.append(castCleanupToEmittable(Cleanup{ name: COPY key_var, cleanup_entry: cleanup_entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }));
       END
     END
     MUTABLE producer_key_body = TRY (pipelineConcurrentLowerer__append_ownership_transfers_call(self, (key_setup + [Let{ name: COPY key_var, init: COPY head.value, mutable: FALSE, annotation: CAST(COPY key_type AS ?Type), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] + key_cleanup)));

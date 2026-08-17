@@ -319,7 +319,7 @@ PRIVATE FN pipelineListLowerer__right_cleanup_stmts(self: PipelineListLowerer, r
   IF !(right_owns) THEN
     RETURN CAST(( { MUTABLE rtoc_empty_list_17: []Emittable = List[]; rtoc_empty_list_17 } ) AS []Emittable);
   END
-  RETURN CAST([Emittable{ ErrCleanup: COPY ErrCleanup{ name: "__match", cleanup_entry: COPY cleanupEntry__build(:uniform, alloc, TRUE, NIL, "?${right_zig}"), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
+  RETURN CAST([Emittable{ ErrCleanup: COPY ErrCleanup{ name: "__match", cleanup_entry: cleanupEntry__build(:uniform, alloc, TRUE, NIL, "?${right_zig}"), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 END
 FN castEmittableToBreakStmt(value: Emittable) RETURNS BreakStmt ->
   IF value IS_A BreakStmt AS cast_payload THEN

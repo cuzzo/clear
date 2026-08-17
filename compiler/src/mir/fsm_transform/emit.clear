@@ -97,7 +97,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   END (IF (fn_name == NIL) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; body_fn_names_by_index[_.index] = UNWRAP (fn_name); { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.body_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE d: ?SuspendDescriptor = COPY _.descriptor;
   IF d EXISTS AS d_value THEN
     body = ruby_array_concat_FsmBodyItem(body, TRY (emit__fsm_body_mir_items(d_value.setup_stmts)));
-  END FsmMemberFn{ fn_name: fn_name, ctx_id: id, bg_rt: COPY bg_rt, suppress_runtime_ref: _.suppress_runtime_ref, body_stmts: TRY (emit__fsm_body_emit_values(body)), extra_prologue_stmts: COPY _.extra_prologue_stmts } } } } END) } } } } } |> WHERE _ != NIL;
+  END FsmMemberFn{ fn_name: fn_name, ctx_id: id, bg_rt: COPY bg_rt, suppress_runtime_ref: _.suppress_runtime_ref, body_stmts: TRY (emit__fsm_body_emit_values(body)), extra_prologue_stmts: _.extra_prologue_stmts } } } } END) } } } } } |> WHERE _ != NIL;
   MUTABLE arms = segment_specs |> SELECT {
   MUTABLE tail = TRY (emit__build_dispatch_tail(_));
   FsmStateArm{ index: _.index, pre_body_skip: COPY _.pre_body_skip, pre_body_stmts: COPY _.pre_body_stmts, body_fn_name: COPY body_fn_names_by_index[_.index], err_cleanups: COPY _.err_cleanups, tail: tail }
@@ -129,7 +129,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   &extra_field_names.insert(COPY _.name);
   END
   promoted_field_decls = promoted_field_decls |> WHERE !(extra_field_names.contains?(_.name));
-  MUTABLE ctx_struct = FsmGenericCtxStruct{ type_name: COPY ctx.ctx_type, promise_zig: COPY ctx.promise_zig, capture_fields: COPY ctx.capture_fields, extra_field_decls: extra_field_decls, promoted_field_decls: COPY promoted_field_decls, member_fns: member_fns, dispatch: dispatch, destroy_actions: destroy_actions };
+  MUTABLE ctx_struct = FsmGenericCtxStruct{ type_name: COPY ctx.ctx_type, promise_zig: COPY ctx.promise_zig, capture_fields: COPY ctx.capture_fields, extra_field_decls: extra_field_decls, promoted_field_decls: promoted_field_decls, member_fns: member_fns, dispatch: dispatch, destroy_actions: destroy_actions };
   MUTABLE spawn_setup = TRY (emit__build_spawn_setup(ctx));
   MUTABLE fsm_body = FsmGenericBody{ blk_label: COPY ctx.blk_label, ctx_struct: ctx_struct, spawn_setup: spawn_setup, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
   RETURN FsmLoweringResult{ body: FsmBody{ FsmGenericBody: COPY fsm_body }, structure: COPY TRY (emit__build_fsm_structure(ctx, segment_specs, destroy_actions, id)) };
@@ -1048,7 +1048,7 @@ PRIVATE FN emit__build_spawn_setup(ctx: FsmEmitContext) RETURNS !FsmSpawnSetup -
     profile_site_branch_value = NIL;
   END
   MUTABLE profile_site: ProfileTaskSite = profile_site_branch_value?;
-  RETURN FsmSpawnSetup{ alloc_var: COPY ctx.alloc_var, alloc_expr: alloc_expr, promise_var: COPY ctx.promise_var, promise_zig: COPY ctx.promise_zig, promoted_decls: COPY ctx.promoted_decls, ctx_var: COPY ctx.ctx_var, ctx_type: COPY ctx.ctx_type, ctx_init_fields: ctx_init_fields, spawn_call: spawn_call, rt_name: COPY ctx.rt_name, profile_site_id: ctx.profile_site_id, profile_dispatch_id: emit__profile_dispatch_id(dispatch), profile_site: profile_site };
+  RETURN FsmSpawnSetup{ alloc_var: ctx.alloc_var, alloc_expr: alloc_expr, promise_var: ctx.promise_var, promise_zig: COPY ctx.promise_zig, promoted_decls: ctx.promoted_decls, ctx_var: ctx.ctx_var, ctx_type: ctx.ctx_type, ctx_init_fields: ctx_init_fields, spawn_call: spawn_call, rt_name: COPY ctx.rt_name, profile_site_id: ctx.profile_site_id, profile_dispatch_id: emit__profile_dispatch_id(dispatch), profile_site: profile_site };
 END
 PUB FN emit__ctx_field_decl(name: String, type_zig: String, default_value: ?Emittable) RETURNS ContextFieldDecl ->
   RETURN ContextFieldDecl{ name: COPY name, type_zig: COPY type_zig, default_value: COPY default_value };

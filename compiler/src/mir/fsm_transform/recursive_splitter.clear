@@ -103,7 +103,7 @@ PUB FN builder__fill(MUTABLE self: Builder, idx: Int64, stmts: []SegmentStmt, ta
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.segments[idx] = Segment{ index: COPY idx, stmts: COPY stmts, tail: COPY tail };
+    rtoc_self_view.segments[idx] = Segment{ index: COPY idx, stmts: stmts, tail: tail };
     builder__stamp_overrides(&rtoc_self_view, idx);
     RETURN COPY idx;
 }
@@ -457,7 +457,7 @@ PRIVATE FN recursiveSplitter__renumber_with_entry(segments: []Segment, entry: In
   MUTABLE remapped = (segments |> SELECT {
   MUTABLE new_idx: ?Any = COPY mapping[_.index];
   MUTABLE new_tail = recursiveSplitter__remap_tail(_.tail, mapping);
-  Segment{ index: COPY new_idx, stmts: COPY _.stmts, tail: COPY new_tail }
+  Segment{ index: COPY new_idx, stmts: _.stmts, tail: new_tail }
   }) |> ORDER_BY _.index;
   RETURN CAST(Tuple{remapped, mapping} AS Tuple<[]Segment, {Int64}Int64>);
 END
