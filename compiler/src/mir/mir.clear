@@ -3563,7 +3563,7 @@ PUB STRUCT FsmStructure {
   finalize_cleanups: Any@multiowned,
   ctx_id: Int64,
   result_aliases_finalized: Any@multiowned,
-  facts: ?FsmStructureFacts,
+  facts: FsmStructureFacts,
   lowered_node_id: ?LoweredNodeId,
   owned_result_required: ?Bool,
   ownership_consumption: ?OwnershipConsumptionFact

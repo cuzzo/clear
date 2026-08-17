@@ -140,7 +140,7 @@ PRIVATE FN emit__build_fsm_structure(ctx: FsmEmitContext, segment_specs: []FsmSe
   MUTABLE capture_names = captured.keys() |> SELECT _.toString();
   MUTABLE captures = capture_names |> SELECT:? (IF !(cleanup_names.contains?(_)) THEN NIL ELSE FsmCaptureFact{ name: COPY _, cleanup_at: :finalize } END) |> WHERE _ != NIL;
   MUTABLE steps = segment_specs |> SELECT FsmStepFact{ index: _.index, reads: COPY _.facts.ctx_reads, cleanups: ( { MUTABLE rtoc_empty_list_2: []String = List[]; rtoc_empty_list_2 } ) };
-  MUTABLE structure = FsmStructure{ captures: captures, state_fields: List[], steps: steps, finalize_cleanups: cleanup_names, ctx_id: COPY id, result_aliases_finalized: NIL, lowered_node_id: NIL, ownership_consumption: NIL, facts: NIL, owned_result_required: NIL };
+  MUTABLE structure = FsmStructure{ captures: captures, state_fields: List[], steps: steps, finalize_cleanups: cleanup_names, ctx_id: COPY id, result_aliases_finalized: NIL, lowered_node_id: NIL, ownership_consumption: NIL, facts: FsmStructureFacts{ required_move_guards: List[], move_guard_writes: List[], ownership_facts: List[], destroy_actions: List[] }, owned_result_required: NIL };
   fsmStructure__set_required_move_guards(&structure, (segment_specs |> UNNEST _.facts.required_move_guards) |> DISTINCT _ |> SELECT COPY _);
   fsmStructure__set_move_guard_writes(&structure, (segment_specs |> UNNEST _.facts.move_guard_writes) |> DISTINCT _ |> SELECT COPY _);
   fsmStructure__set_ownership_facts(&structure, TRY (emit__unique_fsm_ownership_facts(segment_specs |> UNNEST _.facts.ownership_facts)));
