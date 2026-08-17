@@ -320,7 +320,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_select_prune(self: Pip
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_where_prune(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, inner_expr: Locatable, smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
   MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(lhs)))))) AS String);
-  MUTABLE elem_zig = pipelineConcurrentLowerer__transpile_type_call(self, elem_type);
+  MUTABLE elem_zig = pipelineConcurrentLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY elem_type });
   MUTABLE alloc = pipelineConcurrentLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE pred_mir = pipelineConcurrentLowerer__visit_mir_with_placeholder_call(self, inner_expr, "it");
   RETURN pipelineConcurrentLowerer__pipeline_block_call(self, lhs, %(items, label) USE(alloc, elem_zig, pred_mir) -> {

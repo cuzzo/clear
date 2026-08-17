@@ -69,7 +69,7 @@ PRIVATE FN pipelineListLowerer__lower_where(self: PipelineListLowerer, site: Pip
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(list_node)))))) AS String);
-  MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, elem_type);
+  MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY elem_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE pred_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, expr_node);
   RETURN pipelineListLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, elem_type, elem_zig, pred_mir, self) -> {
@@ -81,7 +81,7 @@ PRIVATE FN pipelineListLowerer__lower_select(self: PipelineListLowerer, site: Pi
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE res_type = TRY (pipelineListLowerer__select_result_type(self, &expr_node));
-  MUTABLE res_zig = pipelineListLowerer__transpile_type_call(self, res_type);
+  MUTABLE res_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY res_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   RETURN pipelineListLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, expr_node, res_type, res_zig, MUTABLE smooth_node, self) -> {
   MUTABLE res = pipelineListLowerer__result_binding_name(self, label);
@@ -145,7 +145,7 @@ PRIVATE FN pipelineListLowerer__lower_limit(self: PipelineListLowerer, site: Pip
   MUTABLE smooth_node = COPY site.options;
   MUTABLE source_shape = pipelineListLowerer__source_shape_call(self, list_node);
   MUTABLE elem_type = COPY CAST((type__resolved((TRY (pipelineSourceShape__element_type(source_shape))))) AS String);
-  MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, elem_type);
+  MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY elem_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE count_mir = pipelineListLowerer__visit_mir_call(self, limit_node.count);
   IF TRY (pipelineSourceShape__bc_infinite_stream?(source_shape)) THEN
@@ -163,7 +163,7 @@ PRIVATE FN pipelineListLowerer__lower_take_while(self: PipelineListLowerer, site
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(list_node)))))) AS String);
-  MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, elem_type);
+  MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY elem_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE pred_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, expr_node);
   RETURN pipelineListLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, elem_type, elem_zig, pred_mir, self) -> {
@@ -185,7 +185,7 @@ PRIVATE FN pipelineListLowerer__lower_unnest(self: PipelineListLowerer, site: Pi
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE inner_elem_type = COPY CAST((type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(unnest_node)))))))) AS String);
-  MUTABLE inner_zig = pipelineListLowerer__transpile_type_call(self, inner_elem_type);
+  MUTABLE inner_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY inner_elem_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE elem_ti = TRY (type__new(TypeConstructionInput{ StringValue: COPY inner_elem_type }));
   MUTABLE inner_list_ti = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (unnest_node.expression))) }));
@@ -219,7 +219,7 @@ PRIVATE FN pipelineListLowerer__lower_window(self: PipelineListLowerer, site: Pi
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE expr_type_str = COPY CAST((TRY (aST__full_type_mut(UNWRAP (window_node.expression)))) AS String);
-  MUTABLE res_zig = pipelineListLowerer__transpile_type_call(self, expr_type_str);
+  MUTABLE res_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY expr_type_str });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE size_mir = pipelineListLowerer__visit_mir_call(self, window_node.size);
   MUTABLE expr_mir = pipelineListLowerer__visit_expr_call(self, list_node, window_node.expression, "window_slice");
@@ -232,7 +232,7 @@ PRIVATE FN pipelineListLowerer__lower_order_by(self: PipelineListLowerer, site: 
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(list_node)))))) AS String);
-  MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, elem_type);
+  MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY elem_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE key_expr = COPY order_node.expression;
   MUTABLE key_a = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "a");
