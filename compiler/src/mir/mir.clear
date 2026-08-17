@@ -40,7 +40,7 @@ PUB UNION StructInitFieldInput { StructInitField: StructInitField, HashMapValue:
 PUB STRUCT FnDef {
   name: String,
   params: []MIRParam,
-  ret_type: Any@multiowned,
+  ret_type: String,
   body: []Emittable,
   visibility: String@symbol,
   can_fail: Any@multiowned,
@@ -533,7 +533,7 @@ FN unionTypeDef__stmt?(self: UnionTypeDef) RETURNS Bool ->
 END
 PUB STRUCT Import {
   alias_name: String,
-  module_path: Any@multiowned,
+  module_path: String,
   member: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -600,7 +600,7 @@ FN import__stmt?(self: Import) RETURNS Bool ->
 END
 PUB STRUCT TypeAlias {
   name: String,
-  target: Any@multiowned,
+  target: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -2285,7 +2285,7 @@ FN continueStmt__stmt?(self: ContinueStmt) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT Panic {
-  message: Any@multiowned,
+  message: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -2351,7 +2351,7 @@ FN panic__stmt?(self: Panic) RETURNS Bool ->
 END
 PUB STRUCT AssertStmt {
   cond: Emittable,
-  message: Any@multiowned,
+  message: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -2688,7 +2688,7 @@ FN sort__stmt?(self: Sort) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT SoaFieldAccess {
-  soa_expr: Any@multiowned,
+  soa_expr: Emittable,
   field_name: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -2888,7 +2888,7 @@ FN indexInsert__stmt?(self: IndexInsert) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT BatchWindowPush {
-  window: Any@multiowned,
+  window: String,
   item_expr: Emittable,
   batch_var: Any@multiowned,
   elem_zig: Any@multiowned,
@@ -2957,7 +2957,7 @@ FN batchWindowPush__stmt?(self: BatchWindowPush) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT BatchWindowFlush {
-  window: Any@multiowned,
+  window: String,
   batch_var: Any@multiowned,
   elem_zig: Any@multiowned,
   result_var: ?String,
@@ -4217,7 +4217,7 @@ PUB STRUCT SortedLockAcquire {
   bubble_types: Any@multiowned,
   retries: ?Int64,
   source_line: ?Int64,
-  loop_label: Any@multiowned,
+  loop_label: String,
   rt_name: String,
   fallible: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
@@ -4299,7 +4299,7 @@ PUB STRUCT FallibleLockBinding {
   matched_types: Any@multiowned,
   bubble_types: Any@multiowned,
   source_line: ?Int64,
-  acquire_block: Any@multiowned,
+  acquire_block: String,
   rt_name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -4575,7 +4575,7 @@ FN doBlock__stmt?(self: MIRDoBlock) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT Noop {
-  reason: Any@multiowned,
+  reason: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -4640,7 +4640,7 @@ FN noop__stmt?(self: Noop) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT Comment {
-  text: Any@multiowned,
+  text: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -4771,7 +4771,7 @@ FN suppress__stmt?(self: Suppress) RETURNS Bool ->
 END
 PUB STRUCT PubConst {
   name: String,
-  value: Any@multiowned,
+  value: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -5786,7 +5786,7 @@ END
 PUB STRUCT RcRetain {
   source: Emittable,
   zig_base: String,
-  func: Any@multiowned,
+  func: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -9492,7 +9492,7 @@ FN structInit__expr?(self: StructInit) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT ArrayInit {
-  elem_type: Any@multiowned,
+  elem_type: String,
   count: Emittable,
   items: []Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -11354,7 +11354,7 @@ PUB FN mIRRangeLit__end_val(self: MIRRangeLit) RETURNS Emittable ->
   self.end_val;
 END
 PUB FN mIRRangeLit__elem_type(self: MIRRangeLit) RETURNS Any@multiowned ->
-  KEEP self.elem_type;
+  COPY self.elem_type;
 END
 PUB FN mIRRangeLit__lowered_node_id(self: MIRRangeLit) RETURNS ?LoweredNodeId ->
   COPY self.lowered_node_id;
