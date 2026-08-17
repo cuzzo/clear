@@ -202,7 +202,7 @@ PRIVATE FN pipelineSetIndexLowerer__bc_index_iter(self: PipelineSetIndexLowerer,
     MUTABLE end_mir = pipelineSetIndexLowerer__visit_mir_call(self, range_source.finish());
     MUTABLE end_expr_branch_value: ?BinOp = NIL;
     IF range_source.inclusive() THEN
-      end_expr_branch_value = BinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
+      end_expr_branch_value = MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
     ELSE
       end_expr_branch_value = end_mir;
     END
