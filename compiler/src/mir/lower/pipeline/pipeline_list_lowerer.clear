@@ -68,7 +68,7 @@ END
 PRIVATE FN pipelineListLowerer__lower_where(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
-  MUTABLE elem_type = COPY CAST(type__element_type(TRY (aST__full_type_mut(list_node))).resolved() AS String);
+  MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (type__element_type(TRY (aST__full_type_mut(list_node))))) AS String);
   MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, elem_type);
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE pred_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, expr_node);
@@ -162,7 +162,7 @@ END
 PRIVATE FN pipelineListLowerer__lower_take_while(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
-  MUTABLE elem_type = COPY CAST(type__element_type(TRY (aST__full_type_mut(list_node))).resolved() AS String);
+  MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (type__element_type(TRY (aST__full_type_mut(list_node))))) AS String);
   MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, elem_type);
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE pred_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, expr_node);
@@ -231,7 +231,7 @@ END
 PRIVATE FN pipelineListLowerer__lower_order_by(self: PipelineListLowerer, site: PipelineSite, order_node: OrderByOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
-  MUTABLE elem_type = COPY CAST(type__element_type(TRY (aST__full_type_mut(list_node))).resolved() AS String);
+  MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (type__element_type(TRY (aST__full_type_mut(list_node))))) AS String);
   MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, elem_type);
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE key_expr = COPY order_node.expression;
