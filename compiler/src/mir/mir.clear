@@ -9880,7 +9880,7 @@ FN concatStr__expr?(self: ConcatStr) RETURNS Bool ->
 END
 PUB STRUCT MIRCast {
   expr: Emittable,
-  target_type: String,
+  target_type: ?String,
   method: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
