@@ -84,10 +84,10 @@ PUB STRUCT FunctionType {
   source_signature: ?TypeSourceSignature,
   abi: String@symbol
 }
-FN type__function_type_expression_for(signature: FunctionType) RETURNS TypeExpressionKind ->
+PUB FN type__function_type_expression_for(signature: FunctionType) RETURNS TypeExpressionKind ->
   RETURN TypeExpressionKind{ FunctionTypeExpression: COPY FunctionTypeExpression{ signature: COPY FunctionSignatureExpression{ params: COPY signature.params |> SELECT FunctionParamExpression{ expression: COPY _.type.shape.expression }, return_expression: COPY signature.return_type.shape.expression, reentrant: signature.reentrant, abi: COPY signature.abi, semantic_payload: NIL } } };
 END
-FN type__function_type_for_expression(expression: FunctionTypeExpression) RETURNS !FunctionType EFFECTS REENTRANT ->
+PUB FN type__function_type_for_expression(expression: FunctionTypeExpression) RETURNS !FunctionType EFFECTS REENTRANT ->
   MUTABLE fn_params = expression.signature.params |> SELECT FunctionTypeParam{ type: COPY TRY (type__new(TypeConstructionInput{ TypeExpression: COPY _.expression })) };
   RETURN FunctionType{ params: COPY fn_params, return_type: COPY TRY (type__new(TypeConstructionInput{ TypeExpression: COPY expression.signature.return_expression })), reentrant: expression.signature.reentrant, abi: COPY expression.signature.abi, source_signature: NIL };
 END
@@ -4617,7 +4617,7 @@ END
 PUB FN resourceClosePlan__function(name: String, runtime_heap_alloc_args: Int64 = 0) RETURNS ResourceClosePlan ->
   RETURN ResourceClosePlan{ actions: [ResourceCloseAction{ call_kind: COPY ResourceCloseCallKind.Function, name: COPY name, runtime_heap_alloc_args: COPY runtime_heap_alloc_args, field_path: List[] }] };
 END
-FN resourceClosePlan__c_function(name: String) RETURNS ResourceClosePlan ->
+PUB FN resourceClosePlan__c_function(name: String) RETURNS ResourceClosePlan ->
   RETURN ResourceClosePlan{ actions: [ResourceCloseAction{ call_kind: COPY ResourceCloseCallKind.CFunction, name: COPY name, field_path: List[], runtime_heap_alloc_args: 0 }] };
 END
 FN resourceClosePlan__composite(actions: []ResourceCloseAction) RETURNS ResourceClosePlan ->
@@ -4668,13 +4668,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 
-FN inlineStructDeinitEntry__indirect(field: String, zig_type: String) RETURNS InlineStructDeinitEntry ->
+PUB FN inlineStructDeinitEntry__indirect(field: String, zig_type: String) RETURNS InlineStructDeinitEntry ->
   RETURN InlineStructDeinitEntry{ field: COPY field, kind: :indirect, zig_type: COPY zig_type, elem_zig_type: NIL };
 END
-FN inlineStructDeinitEntry__uniform(field: String, zig_type: String) RETURNS InlineStructDeinitEntry ->
+PUB FN inlineStructDeinitEntry__uniform(field: String, zig_type: String) RETURNS InlineStructDeinitEntry ->
   RETURN InlineStructDeinitEntry{ field: COPY field, kind: :uniform, zig_type: COPY zig_type, elem_zig_type: NIL };
 END
-FN inlineStructDeinitEntry__array(field: String, elem_zig_type: String) RETURNS InlineStructDeinitEntry ->
+PUB FN inlineStructDeinitEntry__array(field: String, elem_zig_type: String) RETURNS InlineStructDeinitEntry ->
   RETURN InlineStructDeinitEntry{ field: COPY field, kind: :array, zig_type: NIL, elem_zig_type: COPY elem_zig_type };
 END
 

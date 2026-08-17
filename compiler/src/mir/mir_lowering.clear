@@ -263,7 +263,7 @@ STRUCT OwnershipSurfaceScan {
   facts: []MIRLoweringOwnershipFact,
   transfer_targets: []OwnershipTransferTarget
 }
-FN mIRLowering__fn_sigs(self: MIRLowering) RETURNS !{String@symbol}FunctionSignature@multiowned
+PUB FN mIRLowering__fn_sigs(self: MIRLowering) RETURNS !{String@symbol}FunctionSignature@multiowned
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -271,7 +271,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__program_state(rtoc_self_view).fn_sigs;
 }
 END
-FN mIRLowering__shard_context(self: MIRLowering) RETURNS !?{String@symbol}String
+PUB FN mIRLowering__shard_context(self: MIRLowering) RETURNS !?{String@symbol}String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -279,7 +279,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__program_state(rtoc_self_view).shard_context;
 }
 END
-FN mIRLowering__set_shard_context(self: MIRLowering, context: ?{String@symbol}String) RETURNS !?{String@symbol}String
+PUB FN mIRLowering__set_shard_context(self: MIRLowering, context: ?{String@symbol}String) RETURNS !?{String@symbol}String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -483,7 +483,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__lowering_state(rtoc_self_view).program;
 }
 END
-FN mIRLowering__runtime_state(self: MIRLowering) RETURNS MIRLoweringRuntimeState
+PUB FN mIRLowering__runtime_state(self: MIRLowering) RETURNS MIRLoweringRuntimeState
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -638,7 +638,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__lowering_state(rtoc_self_view).function_state;
 }
 END
-FN mIRLowering__lowering_target(self: MIRLowering) RETURNS String@symbol
+PUB FN mIRLowering__lowering_target(self: MIRLowering) RETURNS String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -659,7 +659,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__runtime_state(rtoc_self_view).rt_name;
 }
 END
-FN mIRLowering__next_pipeline_observable_id(self: MIRLowering) RETURNS Int64
+PUB FN mIRLowering__next_pipeline_observable_id(self: MIRLowering) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -667,7 +667,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     mIRLoweringCounters__next_background_block_id(&rtoc_mutable_receiver_4) }).value;
 }
 END
-FN mIRLowering__pipeline_result_alloc(self: MIRLowering) RETURNS String@symbol
+PUB FN mIRLowering__pipeline_result_alloc(self: MIRLowering) RETURNS String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -681,7 +681,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names[name] == TRUE);
 }
 END
-FN mIRLowering__pipeline_execution_boundary_fact(self: MIRLowering, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS ExecutionBoundaryFact
+PUB FN mIRLowering__pipeline_execution_boundary_fact(self: MIRLowering, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS ExecutionBoundaryFact
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1882,7 +1882,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN mIRLowering__lower_body(MUTABLE self: MIRLowering, stmts: []MIRLoweringLowerableStmt) RETURNS ![]Emittable
+PUB FN mIRLowering__lower_body(MUTABLE self: MIRLowering, stmts: []MIRLoweringLowerableStmt) RETURNS ![]Emittable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -2459,7 +2459,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN names;
 }
 END
-FN mIRLowering__append_ownership_transfers_for_mir_body(self: MIRLowering, body: []Emittable, inherited_alloc_names: [Set]String = Set[], inherited_guarded_names: [Set]String = Set[]) RETURNS ![]Emittable
+PUB FN mIRLowering__append_ownership_transfers_for_mir_body(self: MIRLowering, body: []Emittable, inherited_alloc_names: [Set]String = Set[], inherited_guarded_names: [Set]String = Set[]) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5222,7 +5222,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN items |> SELECT:? (IF !(_ IS_A FnDef) THEN NIL ELSE _ END) |> WHERE _ != NIL;
 }
 END
-FN mIRLowering__task_config_variant(self: MIRLowering, stack_size: ?String@symbol, computed_tier: ?String@symbol) RETURNS String
+PUB FN mIRLowering__task_config_variant(self: MIRLowering, stack_size: ?String@symbol, computed_tier: ?String@symbol) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5352,7 +5352,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN names;
 }
 END
-FN mIRLowering__emit_builtin(self: MIRLowering, name: String@symbol, args: []Emittable) RETURNS !MIRLoweringReturnValue
+PUB FN mIRLowering__emit_builtin(self: MIRLowering, name: String@symbol, args: []Emittable) RETURNS !MIRLoweringReturnValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5493,7 +5493,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (((stmt.expr?() AND !(stripped.endsWith?(";"))) AND !(stripped.endsWith?("}"))) AND !(stripped.endsWith?("{")));
 }
 END
-FN mIRLowering__pipeline_lower_node_with_decl_alloc(MUTABLE self: MIRLowering, node: Locatable, alloc: String@symbol) RETURNS !Emittable
+PUB FN mIRLowering__pipeline_lower_node_with_decl_alloc(MUTABLE self: MIRLowering, node: Locatable, alloc: String@symbol) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -5503,7 +5503,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
 }
 END
-FN mIRLowering__pipeline_alloc_mark_fact(self: MIRLowering, MUTABLE value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS ?PipelineAllocMarkFact
+PUB FN mIRLowering__pipeline_alloc_mark_fact(self: MIRLowering, MUTABLE value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS ?PipelineAllocMarkFact
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5525,7 +5525,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_ternary_value_166 } };
 }
 END
-FN mIRLowering__pipeline_owned_cleanup_entry(self: MIRLowering, value: Emittable, ast_node: ?Locatable) RETURNS ?CleanupEntry@multiowned
+PUB FN mIRLowering__pipeline_owned_cleanup_entry(self: MIRLowering, value: Emittable, ast_node: ?Locatable) RETURNS ?CleanupEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5572,7 +5572,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     });
 }
 END
-FN mIRLowering__pipeline_iteration_loop_marks(self: MIRLowering) RETURNS ![]Emittable
+PUB FN mIRLowering__pipeline_iteration_loop_marks(self: MIRLowering) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5582,7 +5582,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST([Emittable{ Let: COPY Let{ name: COPY mark_var, init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "saveLoopMark", args: ( { MUTABLE rtoc_empty_list_170: []Any = List[]; rtoc_empty_list_170 } ), try_wrap: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "restoreLoopMark", args: [CAST(Ident{ name: COPY mark_var, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 }
 END
-FN mIRLowering__pipeline_index_insert_with_ownership(self: MIRLowering, MUTABLE insert: IndexInsert, value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
+PUB FN mIRLowering__pipeline_index_insert_with_ownership(self: MIRLowering, MUTABLE insert: IndexInsert, value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

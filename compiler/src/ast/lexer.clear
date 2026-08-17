@@ -150,7 +150,7 @@ END
 PUB FN token__start_line(self: Token) RETURNS Int64 ->
   RETURN self.line;
 END
-FN token__start_column(self: Token) RETURNS Int64 ->
+PUB FN token__start_column(self: Token) RETURNS Int64 ->
   RETURN self.column;
 END
 FN token__byte_length(self: Token) RETURNS Int64 ->

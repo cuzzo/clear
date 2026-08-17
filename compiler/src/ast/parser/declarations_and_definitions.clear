@@ -106,7 +106,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (clearParser__parse_argument_specs(&rtoc_self_view));
 }
 END
-PRIVATE FN clearParser__parse_mutable_var_decl(MUTABLE self: ClearParser) RETURNS !ClearParserReturnValue
+PUB FN clearParser__parse_mutable_var_decl(MUTABLE self: ClearParser) RETURNS !ClearParserReturnValue
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -134,7 +134,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     panic("clearParser__error_mut raises");
 }
 END
-PRIVATE FN clearParser__parse_const_decl(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !VarDecl
+PUB FN clearParser__parse_const_decl(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !VarDecl
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -179,7 +179,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN DefaultArrayLit{ token: COPY tok, type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY type })), storage: :stack, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-PRIVATE FN clearParser__parse_require(MUTABLE self: ClearParser) RETURNS !RequireNode
+PUB FN clearParser__parse_require(MUTABLE self: ClearParser) RETURNS !RequireNode
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -206,7 +206,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN RequireNode{ token: COPY tok, path: COPY path, namespace: COPY namespace, kind: COPY kind, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-PRIVATE FN clearParser__parse_visibility_decl(MUTABLE self: ClearParser, visibility: String@symbol) RETURNS !Locatable
+PUB FN clearParser__parse_visibility_decl(MUTABLE self: ClearParser, visibility: String@symbol) RETURNS !Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -232,7 +232,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN clearParser__parse_extern_decl(MUTABLE self: ClearParser) RETURNS !ClearParserReturnValue
+PUB FN clearParser__parse_extern_decl(MUTABLE self: ClearParser) RETURNS !ClearParserReturnValue
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -415,7 +415,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ExternSource{ dependency: COPY dependency, abi: COPY abi, symbol: COPY native_name, callconv: COPY callconv, header: COPY header };
 }
 END
-PRIVATE FN clearParser__parse_struct_def(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !StructDef
+PUB FN clearParser__parse_struct_def(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !StructDef
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -429,7 +429,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN node;
 }
 END
-PRIVATE FN clearParser__parse_protocol_def(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !ProtocolDef
+PUB FN clearParser__parse_protocol_def(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !ProtocolDef
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -474,7 +474,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ProtocolRequirement{ token: token, name: COPY name, params: COPY params, return_type: COPY return_type, is_method: method, effects_decl: COPY effects.kind, max_depth_n: effects.max_depth, tight_reentrance: effects.tight, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-PRIVATE FN clearParser__parse_implementation_def(MUTABLE self: ClearParser) RETURNS !ClearParserReturnValue
+PUB FN clearParser__parse_implementation_def(MUTABLE self: ClearParser) RETURNS !ClearParserReturnValue
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -557,7 +557,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN members;
 }
 END
-PRIVATE FN clearParser__parse_enum_def(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !EnumDef
+PUB FN clearParser__parse_enum_def(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !EnumDef
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -574,7 +574,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN EnumDef{ token: COPY tok, name: COPY name, variants: variants, visibility: COPY visibility, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-PRIVATE FN clearParser__parse_union_def(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !UnionDef
+PUB FN clearParser__parse_union_def(MUTABLE self: ClearParser, visibility: String@symbol = :package) RETURNS !UnionDef
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -679,7 +679,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN clearParser__parse_function_def(MUTABLE self: ClearParser, visibility: String@symbol = :package, is_method_input: Bool = FALSE) RETURNS !FunctionDef
+PUB FN clearParser__parse_function_def(MUTABLE self: ClearParser, visibility: String@symbol = :package, is_method_input: Bool = FALSE) RETURNS !FunctionDef
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1148,7 +1148,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY names;
 }
 END
-FN clearParser__deep_clone_node(self: ClearParser, node: Locatable) RETURNS Locatable
+PUB FN clearParser__deep_clone_node(self: ClearParser, node: Locatable) RETURNS Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1164,7 +1164,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN clearParser__parse_test_block(MUTABLE self: ClearParser) RETURNS !TestBlock
+PUB FN clearParser__parse_test_block(MUTABLE self: ClearParser) RETURNS !TestBlock
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1328,7 +1328,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TestThat{ token: COPY tok, description: COPY desc, body: body, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, synthetic_fn: NIL, pending: NIL };
 }
 END
-FN clearParser__parse_assert_raises(MUTABLE self: ClearParser) RETURNS !AssertRaises
+PUB FN clearParser__parse_assert_raises(MUTABLE self: ClearParser) RETURNS !AssertRaises
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1347,7 +1347,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN AssertRaises{ token: COPY tok, kind: COPY kind, error_name: COPY error_name, expression: expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-FN clearParser__parse_benchmark_stmt(MUTABLE self: ClearParser) RETURNS !BenchmarkStmt
+PUB FN clearParser__parse_benchmark_stmt(MUTABLE self: ClearParser) RETURNS !BenchmarkStmt
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1364,7 +1364,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN BenchmarkStmt{ token: COPY tok, expression: expr, iterations: iterations, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-FN clearParser__parse_smash_stmt(MUTABLE self: ClearParser) RETURNS !SmashStmt
+PUB FN clearParser__parse_smash_stmt(MUTABLE self: ClearParser) RETURNS !SmashStmt
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1375,7 +1375,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN SmashStmt{ token: COPY tok, expression: expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-FN clearParser__parse_profile_stmt(MUTABLE self: ClearParser) RETURNS !ProfileStmt
+PUB FN clearParser__parse_profile_stmt(MUTABLE self: ClearParser) RETURNS !ProfileStmt
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1386,7 +1386,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ProfileStmt{ token: COPY tok, expression: expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-FN clearParser__parse_stub(MUTABLE self: ClearParser) RETURNS !StubDecl
+PUB FN clearParser__parse_stub(MUTABLE self: ClearParser) RETURNS !StubDecl
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

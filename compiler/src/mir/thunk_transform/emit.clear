@@ -27,7 +27,7 @@ STRUCT ThunkParamFact {
 FN thunkParamFact__from_param(param: Param) RETURNS !ThunkParamFact ->
   RETURN ThunkParamFact{ name: COPY CAST(param.name AS String), type_info: COPY TRY (type__new(TypeConstructionInput{ Type: COPY param.type })) };
 END
-FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETURNS !ThunkTrampoline ->
+PUB FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETURNS !ThunkTrampoline ->
   MUTABLE plan = TRY (emit__thunk_plan_mut(fn_node));
   MUTABLE return_type = TRY (emit__return_type_info(fn_node, lowering));
   TRY (emit__assert_non_fallible_ret_mut(fn_node, CAST(return_type AS Type)));
@@ -147,7 +147,7 @@ PRIVATE FN emit__assert_non_fallible_ret_mut(fn_node: FunctionDef, return_type: 
   END
   panic("{}{}heap-allocated child Frames only on the normal return path; an error return would leak the in-flight chain. Before lifting the non-fallible invariant, extend `build_trampoline` and `build_mutual_trampoline` to emit an errdefer that walks `current.parent` and frees every non-initial Frame.");
 END
-FN emit__build_mutual_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETURNS !MutualThunkTrampoline ->
+PUB FN emit__build_mutual_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETURNS !MutualThunkTrampoline ->
   MUTABLE mtp = TRY (emit__mutual_thunk_plan_mut(fn_node));
   MUTABLE return_type = TRY (emit__return_type_info(fn_node, lowering));
   TRY (emit__assert_non_fallible_ret_mut(fn_node, CAST(return_type AS Type)));

@@ -19,31 +19,31 @@ STRUCT LightweightSnapshot {
   edge_count: Int64
 }
 
-FN lightweightSnapshot__state_for(self: LightweightSnapshot, path: String) RETURNS ?String@symbol ->
+PUB FN lightweightSnapshot__state_for(self: LightweightSnapshot, path: String) RETURNS ?String@symbol ->
   RETURN lightweightSnapshot__state_for_place(self, placeId__from_path(Path{ StringValue: COPY path }));
 END
 PRIVATE FN lightweightSnapshot__state_for_place(self: LightweightSnapshot, place: PlaceId) RETURNS ?String@symbol ->
   RETURN COPY self.states[place];
 END
-FN lightweightSnapshot__move_line_for(self: LightweightSnapshot, path: String) RETURNS ?Int64 ->
+PUB FN lightweightSnapshot__move_line_for(self: LightweightSnapshot, path: String) RETURNS ?Int64 ->
   RETURN lightweightSnapshot__move_line_for_place(self, placeId__from_path(Path{ StringValue: COPY path }));
 END
 FN lightweightSnapshot__move_line_for_place(self: LightweightSnapshot, place: PlaceId) RETURNS ?Int64 ->
   RETURN COPY self.move_lines[place];
 END
-FN lightweightSnapshot__move_col_for(self: LightweightSnapshot, path: String) RETURNS ?Int64 ->
+PUB FN lightweightSnapshot__move_col_for(self: LightweightSnapshot, path: String) RETURNS ?Int64 ->
   RETURN lightweightSnapshot__move_col_for_place(self, placeId__from_path(Path{ StringValue: COPY path }));
 END
 FN lightweightSnapshot__move_col_for_place(self: LightweightSnapshot, place: PlaceId) RETURNS ?Int64 ->
   RETURN COPY self.move_cols[place];
 END
-FN lightweightSnapshot__move_action_for(self: LightweightSnapshot, path: String) RETURNS ?String@symbol ->
+PUB FN lightweightSnapshot__move_action_for(self: LightweightSnapshot, path: String) RETURNS ?String@symbol ->
   RETURN lightweightSnapshot__move_action_for_place(self, placeId__from_path(Path{ StringValue: COPY path }));
 END
 FN lightweightSnapshot__move_action_for_place(self: LightweightSnapshot, place: PlaceId) RETURNS ?String@symbol ->
   RETURN COPY self.move_actions[place];
 END
-FN lightweightSnapshot__each_state(self: LightweightSnapshot, block: FN(String, String@symbol) -> Void) RETURNS Void ->
+PUB FN lightweightSnapshot__each_state(self: LightweightSnapshot, block: FN(String, String@symbol) -> Void) RETURNS Void ->
   FOR rtoc_each_key IN self.states.keys() DO
   MUTABLE state: String@symbol = COPY UNWRAP (self.states[rtoc_each_key]);
   block(rtoc_each_key.path, state);
@@ -114,7 +114,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN rtoc_self_view.scope_depth;
 }
 END
-FN ownershipGraph__push_scope_mut(MUTABLE self: OwnershipGraph) RETURNS Int64
+PUB FN ownershipGraph__push_scope_mut(MUTABLE self: OwnershipGraph) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -125,7 +125,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (rtoc_self_view.scope_depth + 1);
 }
 END
-FN ownershipGraph__pop_scope_mut(MUTABLE self: OwnershipGraph, archive: Bool = FALSE) RETURNS !Int64
+PUB FN ownershipGraph__pop_scope_mut(MUTABLE self: OwnershipGraph, archive: Bool = FALSE) RETURNS !Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -158,7 +158,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.completed_nodes = {};
 }
 END
-FN ownershipGraph__add_edge(MUTABLE self: OwnershipGraph, edge: Edge) RETURNS !Edge
+PUB FN ownershipGraph__add_edge(MUTABLE self: OwnershipGraph, edge: Edge) RETURNS !Edge
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -212,7 +212,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN ownershipGraph__declare(MUTABLE self: OwnershipGraph, path: String, kind: String@symbol = :affine, type_info: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), scope_depth: Int64 = 0, line: Int64 = 0) RETURNS !Void
+PUB FN ownershipGraph__declare(MUTABLE self: OwnershipGraph, path: String, kind: String@symbol = :affine, type_info: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), scope_depth: Int64 = 0, line: Int64 = 0) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -227,7 +227,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN;
 }
 END
-FN ownershipGraph__transfer(MUTABLE self: OwnershipGraph, from_value: String, to: String, at_token: ?Token = NIL, action: String@symbol = :move) RETURNS !Void
+PUB FN ownershipGraph__transfer(MUTABLE self: OwnershipGraph, from_value: String, to: String, at_token: ?Token = NIL, action: String@symbol = :move) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -243,7 +243,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN ownershipGraph__mark_moved(self: OwnershipGraph, path: String, at_token: ?Token = NIL, action: String@symbol = :move, consumer_param_type: ?TypeTypeInput = NIL) RETURNS !Void
+PUB FN ownershipGraph__mark_moved(self: OwnershipGraph, path: String, at_token: ?Token = NIL, action: String@symbol = :move, consumer_param_type: ?TypeTypeInput = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -258,7 +258,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN ownershipGraph__borrow(MUTABLE self: OwnershipGraph, borrower: String, source: String, mutable_value: Bool = FALSE) RETURNS !?String
+PUB FN ownershipGraph__borrow(MUTABLE self: OwnershipGraph, borrower: String, source: String, mutable_value: Bool = FALSE) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -287,7 +287,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN ownershipGraph__release_borrow(MUTABLE self: OwnershipGraph, borrower: String) RETURNS !Void
+PUB FN ownershipGraph__release_borrow(MUTABLE self: OwnershipGraph, borrower: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -297,7 +297,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN ownershipGraph__drop(MUTABLE self: OwnershipGraph, path: String) RETURNS ![]String
+PUB FN ownershipGraph__drop(MUTABLE self: OwnershipGraph, path: String) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -436,7 +436,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-FN ownershipGraph__fork_lightweight(self: OwnershipGraph) RETURNS LightweightSnapshot
+PUB FN ownershipGraph__fork_lightweight(self: OwnershipGraph) RETURNS LightweightSnapshot
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -463,7 +463,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN LightweightSnapshot{ states: COPY states, move_lines: COPY move_lines, move_cols: COPY move_cols, move_actions: COPY move_actions, edge_count: rtoc_self_view.edges.length() };
 }
 END
-FN ownershipGraph__restore_lightweight(MUTABLE self: OwnershipGraph, snapshot_value: LightweightSnapshot) RETURNS !Void
+PUB FN ownershipGraph__restore_lightweight(MUTABLE self: OwnershipGraph, snapshot_value: LightweightSnapshot) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -485,7 +485,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN ownershipGraph__merge(MUTABLE self: OwnershipGraph, other: OwnershipGraph) RETURNS ![]String
+PUB FN ownershipGraph__merge(MUTABLE self: OwnershipGraph, other: OwnershipGraph) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -531,7 +531,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN errors;
 }
 END
-FN ownershipGraph__get_index(self: OwnershipGraph, path: String) RETURNS ?OwnershipNode
+PUB FN ownershipGraph__get_index(self: OwnershipGraph, path: String) RETURNS ?OwnershipNode
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -695,7 +695,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN ownershipGraph__new() RETURNS OwnershipGraph@multiowned ->
+PUB FN ownershipGraph__new() RETURNS OwnershipGraph@multiowned ->
   MUTABLE self = OwnershipGraph{ children: {}, completed_nodes: {}, edges: List[], edges_by_source: {}, edges_by_target: {}, nodes: {}, scope_depth: 0 };
   ownershipGraph__initialize(&self);
   RETURN self @multiowned;

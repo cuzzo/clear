@@ -2,7 +2,7 @@ REQUIRE "../ast/type.clear"
 REQUIRE "../ast/ast.clear"
 REQUIRE "effect_set.clear"
 # Ruby module EffectInference
-FN effectInference__analyze_mut(fn_nodes: {String}FunctionDef) RETURNS !Void ->
+PUB FN effectInference__analyze_mut(fn_nodes: {String}FunctionDef) RETURNS !Void ->
   FOR rtoc_key IN fn_nodes.keys() DO
   MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
   fn_value.effect_set = TRY (effectInference__build(fn_value));

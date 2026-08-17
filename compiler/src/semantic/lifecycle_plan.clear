@@ -31,14 +31,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.linear = COPY linear;
 }
 END
-FN linearResourceFacts__empty() RETURNS LinearResourceFacts@multiowned ->
+PUB FN linearResourceFacts__empty() RETURNS LinearResourceFacts@multiowned ->
   RETURN linearResourceFacts__new({}, {});
 END
 FN linearResourceFacts__build(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !LinearResourceFacts@multiowned ->
   MUTABLE inventory = TRY (lifecycleRegistry__type_inventory(program, schema_lookup));
   RETURN TRY (linearResourceFacts__build_types(inventory.values(), schema_lookup));
 END
-FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !LinearResourceFacts@multiowned ->
+PUB FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !LinearResourceFacts@multiowned ->
   MUTABLE key: String = "";
   MUTABLE known: {String}Bool = {};
   MUTABLE seeds: {String}Bool = {};
@@ -256,7 +256,7 @@ END
 FN lifecyclePlanner__monomorphic_carrier_key(type_info: Type) RETURNS String ->
   RETURN "MONOMORPHIC ${type__resolved(type_info)}";
 END
-FN lifecyclePlanner__monomorphic_carrier_plan(type_info: Type) RETURNS LifecyclePlan ->
+PUB FN lifecyclePlanner__monomorphic_carrier_plan(type_info: Type) RETURNS LifecyclePlan ->
   RETURN LifecyclePlan{ type_key: COPY lifecyclePlanner__monomorphic_carrier_key(type_info), drop_strategy: :release, copy_strategy: :retain, resource_close_plan: NIL };
 END
 FN lifecyclePlanner__plan_binding(type_info: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, linear_resource_facts: ?LinearResourceFacts = NIL) RETURNS !LifecyclePlan ->
@@ -315,7 +315,7 @@ STRUCT LifecycleRegistry {
 }
 
 UNION SemanticLifecycleRegistryBindingNode { VarDecl: VarDecl, BindExpr: BindExpr, DestructureTarget: DestructureTarget }
-FN lifecycleRegistry__empty() RETURNS LifecycleRegistry@multiowned ->
+PUB FN lifecycleRegistry__empty() RETURNS LifecycleRegistry@multiowned ->
   RETURN lifecycleRegistry__new({}, {});
 END
 FN lifecycleRegistry__concrete_schema_type(owner: Type, raw_type: TypeTypeInput, type_params: []String@symbol) RETURNS !Type ->
@@ -332,7 +332,7 @@ FN lifecycleRegistry__concrete_schema_type(owner: Type, raw_type: TypeTypeInput,
   END
   RETURN CAST(TRY (lifecycleRegistry__substitute_schema_type(raw_type, subst)) AS Type);
 END
-FN lifecycleRegistry__type_inventory(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !{String}Type ->
+PUB FN lifecycleRegistry__type_inventory(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !{String}Type ->
   MUTABLE types: {String}Type = {};
   aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE types) -> {
   # `typed?` is `!full_type.untyped?` on the Ruby side; there is no such method
@@ -347,7 +347,7 @@ FN lifecycleRegistry__type_inventory(program: Program, schema_lookup: FN(String@
   TRY (lifecycleRegistry__add_instantiated_schema_types_mut(&types, schema_lookup));
   RETURN types;
 END
-FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, binding_nodes: []SemanticLifecycleRegistryBindingNode, linear_resource_facts: ?LinearResourceFacts = NIL, inventory: ?{String}Type = NIL) RETURNS !LifecycleRegistry@multiowned ->
+PUB FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, binding_nodes: []SemanticLifecycleRegistryBindingNode, linear_resource_facts: ?LinearResourceFacts = NIL, inventory: ?{String}Type = NIL) RETURNS !LifecycleRegistry@multiowned ->
   MUTABLE types: {String}Type = {};
   IF inventory EXISTS AS given_inventory THEN
     types = COPY given_inventory;
@@ -494,7 +494,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN LifecyclePlan{ type_key: COPY key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL };
 }
 END
-FN lifecycleRegistry__fetch_monomorphic(self: LifecycleRegistry, type_info: Type) RETURNS LifecyclePlan
+PUB FN lifecycleRegistry__fetch_monomorphic(self: LifecycleRegistry, type_info: Type) RETURNS LifecyclePlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -504,7 +504,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN lifecyclePlanner__monomorphic_carrier_plan(type_info);
 }
 END
-FN lifecycleRegistry__fetch_binding(self: LifecycleRegistry, node: Locatable, type_info: Type) RETURNS !LifecyclePlan
+PUB FN lifecycleRegistry__fetch_binding(self: LifecycleRegistry, node: Locatable, type_info: Type) RETURNS !LifecyclePlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

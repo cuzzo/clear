@@ -66,7 +66,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN functionReturn__new(rtoc_self_view.kind);
 }
 END
-FN functionReturn__resolve(self: FunctionReturn, receiver: ?Type, args: []Locatable) RETURNS !Type
+PUB FN functionReturn__resolve(self: FunctionReturn, receiver: ?Type, args: []Locatable) RETURNS !Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

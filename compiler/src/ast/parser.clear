@@ -80,7 +80,7 @@ PUB STRUCT ParsedExternEffects {
   safe: Bool
 }
 
-FN parsedExternEffects__to_h(self: ParsedExternEffects) RETURNS !{String@symbol}ExternEffectValue ->
+PUB FN parsedExternEffects__to_h(self: ParsedExternEffects) RETURNS !{String@symbol}ExternEffectValue ->
   MUTABLE alloc_kind: ?String@symbol = COPY self.alloc;
   IF ((alloc_kind != NIL) AND self.safe) THEN
     RETURN {:alloc: ExternEffectValue{ SymbolValue: COPY alloc_kind }, :safe: ExternEffectValue{ BoolValue: TRUE }};
@@ -130,7 +130,7 @@ CONST SUFFIX_RULE_INDEX: {String}ParserRule = clearParser__index_rules(SUFFIX_RU
 element_capability_tokens = ["@shared", "@multiowned", "@node", "@locked", "@writeLocked", "@alwaysMutable", "@link", "@boxed", "@indirect"];
 element_sync_tokens = ["@locked", "@writeLocked", "@alwaysMutable", "locked", "writeLocked", "alwaysMutable"];
 capability_tokens = ["@multiowned", "@shared", "@node", "@split", "@locked", "@writeLocked", "@alwaysMutable", "@local", "@versioned", "@atomic", "@boxed", "@indirect", "@link", "@raw", "@symbol", "@c", "@size", "@list", "@pool", "@set", "@soa", "@sharded", "@observable"];
-FN clearParser__sigil_attrs(dim: ?String@symbol = NIL, val: ?String@symbol = NIL, stack_size: ?String@symbol = NIL, pinned: Bool = FALSE, parallel: Bool = FALSE, arena: Bool = FALSE, can_smash: Bool = FALSE) RETURNS SigilAttrs ->
+PUB FN clearParser__sigil_attrs(dim: ?String@symbol = NIL, val: ?String@symbol = NIL, stack_size: ?String@symbol = NIL, pinned: Bool = FALSE, parallel: Bool = FALSE, arena: Bool = FALSE, can_smash: Bool = FALSE) RETURNS SigilAttrs ->
   RETURN SigilAttrs{ dim: COPY dim, val: COPY val, stack_size: COPY stack_size, pinned: COPY pinned, parallel: COPY parallel, arena: COPY arena, can_smash: COPY can_smash };
 END
 FN clearParser__initialize(MUTABLE self: ClearParser, tokens: []Token, source_code: String = "", gradual: ?Bool = NIL, budget: ?FrontendResourceBudget = NIL) RETURNS !Void
@@ -194,7 +194,7 @@ PUB FN clearParser__parse_source(source: String, file: ?String = NIL) RETURNS !P
   MUTABLE parser = TRY (clearParser__new(tokens, source, NIL, budget));
   RETURN TRY (clearParser__parse(&parser));
 END
-FN clearParser__parse(MUTABLE self: ClearParser) RETURNS !Program
+PUB FN clearParser__parse(MUTABLE self: ClearParser) RETURNS !Program
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -268,7 +268,7 @@ PRIVATE FN clearParser__typo_anchor(token: ?Token) RETURNS AnchorToken ->
   END
   RETURN AnchorToken{ line: 0, column: 0 };
 END
-PRIVATE FN clearParser__emit_typo_suggestion_mut(self: ClearParser, token: ?Token, name: String, candidates: []String, message: String, fix_label: String, category: String@symbol = :registry, cascade: Bool = TRUE) RETURNS !Void
+PUB FN clearParser__emit_typo_suggestion_mut(self: ClearParser, token: ?Token, name: String, candidates: []String, message: String, fix_label: String, category: String@symbol = :registry, cascade: Bool = TRUE) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -325,7 +325,7 @@ PRIVATE FN clearParser__suggestion_levenshtein(self: ClearParser, left: String, 
   END
   RETURN UNWRAP (previous.last());
 END
-FN clearParser__new(tokens: []Token, source_code: String = "", gradual: ?Bool = NIL, budget: ?FrontendResourceBudget = NIL) RETURNS !ClearParser@multiowned ->
+PUB FN clearParser__new(tokens: []Token, source_code: String = "", gradual: ?Bool = NIL, budget: ?FrontendResourceBudget = NIL) RETURNS !ClearParser@multiowned ->
   MUTABLE self = ClearParser{ budget: (budget OR_ELSE frontendResourceBudget__new()), delimiter_closings: List[], gradual: FALSE, pos: 0, source_code: COPY source_code, tokens: COPY tokens, wrapper_operand_precedence: NIL };
   TRY (clearParser__initialize(&self, tokens, source_code, gradual, budget));
   RETURN self @multiowned;

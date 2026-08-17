@@ -358,7 +358,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ParsedVarForm{ node: COPY UNWRAP (node), assignment: TRUE };
 }
 END
-PRIVATE FN clearParser__parse_inferred_wrapper_annotation(MUTABLE self: ClearParser) RETURNS !?Type
+PUB FN clearParser__parse_inferred_wrapper_annotation(MUTABLE self: ClearParser) RETURNS !?Type
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -671,7 +671,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN clearParser__parse_match_expr(MUTABLE self: ClearParser, MUTABLE partial_value: Bool = FALSE) RETURNS !MatchStatement
+PUB FN clearParser__parse_match_expr(MUTABLE self: ClearParser, MUTABLE partial_value: Bool = FALSE) RETURNS !MatchStatement
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

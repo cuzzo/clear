@@ -18,7 +18,7 @@ STRUCT CallSignatureSite {
   args: []Locatable
 }
 
-FN callSignatureSite__assign_signature_mut(MUTABLE self: CallSignatureSite, signature: FunctionSignature) RETURNS Void ->
+PUB FN callSignatureSite__assign_signature_mut(MUTABLE self: CallSignatureSite, signature: FunctionSignature) RETURNS Void ->
   MATCH self.node START
     FunctionCallNode.FuncCall AS item ->
       MUTABLE item_mutable = COPY item;
@@ -31,10 +31,10 @@ FN callSignatureSite__assign_signature_mut(MUTABLE self: CallSignatureSite, sign
   END
   self.node = COPY self.node;
 END
-FN callSignatureSite__append_arg_mut(MUTABLE self: CallSignatureSite, arg: Locatable) RETURNS Void ->
+PUB FN callSignatureSite__append_arg_mut(MUTABLE self: CallSignatureSite, arg: Locatable) RETURNS Void ->
   &self.args.append(COPY arg);
 END
-FN callSignatureSite__replace_arg_mut(MUTABLE self: CallSignatureSite, index_value: Int64, arg: Locatable) RETURNS Void ->
+PUB FN callSignatureSite__replace_arg_mut(MUTABLE self: CallSignatureSite, index_value: Int64, arg: Locatable) RETURNS Void ->
   self.args[index_value] = COPY arg;
 END
 FN callSignatureSite__explicit_mutable_argument?(self: CallSignatureSite, index_value: Int64) RETURNS Bool EFFECTS REENTRANT ->
@@ -56,7 +56,7 @@ FN callSignatureSite__explicit_mutable_argument?(self: CallSignatureSite, index_
   MUTABLE method_call: MethodCall = COPY castFunctionCallNodeToMethodCall(self.node);
   RETURN methodCall__explicit_mutable_argument?(method_call, index_value);
 END
-FN callSignatureSite__explicit_mutable_argument_token(self: CallSignatureSite, index_value: Int64) RETURNS ?Token EFFECTS REENTRANT ->
+PUB FN callSignatureSite__explicit_mutable_argument_token(self: CallSignatureSite, index_value: Int64) RETURNS ?Token EFFECTS REENTRANT ->
   MUTABLE method_node: ?MethodCall = NIL;
   IF self.node IS_A MethodCall THEN
     method_node = COPY castFunctionCallNodeToOptionalMethodCall(self.node);
@@ -89,7 +89,7 @@ END
 FN callArityPlan__exact?(self: CallArityPlan) RETURNS Bool ->
   RETURN (self.min_args == self.max_args);
 END
-FN callArityPlan__injectable_defaults(self: CallArityPlan) RETURNS ![]Param ->
+PUB FN callArityPlan__injectable_defaults(self: CallArityPlan) RETURNS ![]Param ->
   IF !((self.given_args < self.max_args)) THEN
     RETURN CAST(( { MUTABLE rtoc_empty_list_1: []Param = List[]; rtoc_empty_list_1 } ) AS []Param);
   END

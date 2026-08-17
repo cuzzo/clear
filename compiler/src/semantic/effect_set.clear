@@ -93,7 +93,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN value;
 }
 END
-FN effectSet__to_a(self: EffectSet) RETURNS ![]String@symbol
+PUB FN effectSet__to_a(self: EffectSet) RETURNS ![]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -120,7 +120,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (effectSet__to_s(rtoc_self_view));
 }
 END
-FN effectSet__new(effects: ?[Set]String@symbol = NIL) RETURNS !EffectSet@multiowned ->
+PUB FN effectSet__new(effects: ?[Set]String@symbol = NIL) RETURNS !EffectSet@multiowned ->
   MUTABLE self = EffectSet{ effects: Set[] };
   TRY (effectSet__initialize(&self, effects));
   RETURN self @multiowned;

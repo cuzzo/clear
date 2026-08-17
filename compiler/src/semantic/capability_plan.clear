@@ -14,7 +14,7 @@ STRUCT CapabilityRequest {
   view_length: ?Locatable
 }
 
-FN capabilityRequest__from_ast(source: Capability) RETURNS CapabilityRequest ->
+PUB FN capabilityRequest__from_ast(source: Capability) RETURNS CapabilityRequest ->
   MUTABLE alias_name: ?String = CAST(source.alias_value AS ?String);
   RETURN CapabilityRequest{ source: COPY source, capability: COPY CAST((source.capability OR_ELSE :infer) AS String@symbol), var_node: COPY CAST(source.var_node AS Locatable), alias_name: COPY alias_name, alias_explicit: !((alias_name == NIL)), alias_mutable: (source.alias_mutable == TRUE), guard_expr: COPY CAST(source.guard_expr AS ?Locatable), view_length: COPY CAST(source.view_length AS ?Locatable) };
 END
@@ -118,7 +118,7 @@ END
 FN capabilityTransition__write_locked_sync?(self: CapabilityTransition) RETURNS Bool EFFECTS REENTRANT ->
   RETURN symbolEntry__write_locked_sync?(self.sync);
 END
-FN capabilityTransition__exclusive_validation_action(self: CapabilityTransition) RETURNS String@symbol ->
+PUB FN capabilityTransition__exclusive_validation_action(self: CapabilityTransition) RETURNS String@symbol ->
   IF capabilityTransition__exclusive_sync?(self) THEN
     RETURN :valid;
   END
@@ -139,13 +139,13 @@ END
 FN capabilityTransition__declares_plain_restrict_alias?(self: CapabilityTransition) RETURNS Bool ->
   RETURN ((capabilityTransition__restrict?(self) AND self.alias_explicit) AND (self.sync == NIL));
 END
-FN capabilityTransition__declared_source_type(self: CapabilityTransition) RETURNS Type ->
+PUB FN capabilityTransition__declared_source_type(self: CapabilityTransition) RETURNS Type ->
   RETURN COPY self.source_type;
 END
-FN capabilityTransition__borrowed_rejection_qualifier(self: CapabilityTransition) RETURNS ?String ->
+PUB FN capabilityTransition__borrowed_rejection_qualifier(self: CapabilityTransition) RETURNS ?String ->
   RETURN COPY self.borrowed_qualifier;
 END
-FN capabilityTransition__lock_identity(self: CapabilityTransition) RETURNS ?String@symbol ->
+PUB FN capabilityTransition__lock_identity(self: CapabilityTransition) RETURNS ?String@symbol ->
   RETURN self.lock_identity_value;
 END
 FN capabilityTransition__sync_constrained?(self: CapabilityTransition) RETURNS Bool ->
@@ -218,7 +218,7 @@ END
 FN withCapabilityPlan__mutable_snapshot?(self: WithCapabilityPlan) RETURNS !Bool ->
   RETURN (TRY (withCapabilityPlan__snapshot_transitions(self))) |> ANY _.alias_mutable;
 END
-FN withCapabilityPlan__first_transition(self: WithCapabilityPlan) RETURNS CapabilityTransition ->
+PUB FN withCapabilityPlan__first_transition(self: WithCapabilityPlan) RETURNS CapabilityTransition ->
   RETURN COPY UNWRAP (self.all.first());
 END
 FN withCapabilityPlan__refresh_live_symbols(self: WithCapabilityPlan, live_symbols: {String}SymbolEntry) RETURNS !WithCapabilityPlan ->
@@ -228,7 +228,7 @@ FN withCapabilityPlan__refresh_live_symbols(self: WithCapabilityPlan, live_symbo
   END
   RETURN refreshed;
 END
-FN capabilityPlan__var_name_for(var_node: Locatable) RETURNS String ->
+PUB FN capabilityPlan__var_name_for(var_node: Locatable) RETURNS String ->
   MUTABLE root: ?Identifier = aST__root_identifier(var_node);
   IF root EXISTS AS root_value THEN
     RETURN COPY root_value.name;
@@ -238,11 +238,11 @@ FN capabilityPlan__var_name_for(var_node: Locatable) RETURNS String ->
   END
   RETURN "__unknown";
 END
-FN capabilityPlan__transition_from(request: CapabilityRequest, target: CapabilityTargetFact, borrowed_qualifier: ?String) RETURNS !CapabilityTransition ->
+PUB FN capabilityPlan__transition_from(request: CapabilityRequest, target: CapabilityTargetFact, borrowed_qualifier: ?String) RETURNS !CapabilityTransition ->
   MUTABLE capability = (request.source.capability OR_ELSE request.capability);
   RETURN CapabilityTransition{ request: COPY request, target: COPY target, source: COPY request.source, capability: COPY capability, var_node: COPY request.var_node, var_name: COPY target.var_name, target_label: COPY target.target_label, alias_name: COPY (request.alias_name OR_ELSE target.var_name), alias_explicit: request.alias_explicit, alias_mutable: request.alias_mutable, guard_expr: COPY request.guard_expr, view_length: COPY request.view_length, resolved_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY target.resolved_type })), old_scope: KEEP target.old_scope, source_entry: KEEP target.source_entry, field_target: target.field_target, sync: COPY target.sync, storage: COPY target.storage, layout: COPY target.layout, source_type: COPY target.source_type, lock_identity_value: COPY TRY (capabilityTargetFact__lock_identity(target)), borrowed_qualifier: COPY borrowed_qualifier };
 END
-FN capabilityPlan__refresh_function_plans_mut(fn_value: FunctionDef, with_blocks: []WithBlock) RETURNS !Void ->
+PUB FN capabilityPlan__refresh_function_plans_mut(fn_value: FunctionDef, with_blocks: []WithBlock) RETURNS !Void ->
   MUTABLE live_symbols = TRY (scope__live_param_syms(fn_value));
   IF (live_symbols.count() == 0) THEN
     RETURN;

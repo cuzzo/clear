@@ -285,7 +285,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN clearParser__parse_with_capability(MUTABLE self: ClearParser) RETURNS !?WithBlock
+PUB FN clearParser__parse_with_capability(MUTABLE self: ClearParser) RETURNS !?WithBlock
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -492,7 +492,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN arms;
 }
 END
-FN clearParser__parse_sync_policy_block(MUTABLE self: ClearParser) RETURNS !SyncPolicyDecl
+PUB FN clearParser__parse_sync_policy_block(MUTABLE self: ClearParser) RETURNS !SyncPolicyDecl
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -611,7 +611,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN clearParser__parse_cap_join(MUTABLE self: ClearParser, tok: Token, first_attrs: SigilAttrs) RETURNS !CapJoin
+PUB FN clearParser__parse_cap_join(MUTABLE self: ClearParser, tok: Token, first_attrs: SigilAttrs) RETURNS !CapJoin
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -800,7 +800,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TaskPrefix{ pinned: pinned, parallel: parallel, stack_size: COPY stack_size, arena: arena, can_smash: can_smash, stack_size_token: COPY stack_size_token, can_smash_token: COPY can_smash_token };
 }
 END
-FN clearParser__parse_do_block(MUTABLE self: ClearParser) RETURNS !DoBlock
+PUB FN clearParser__parse_do_block(MUTABLE self: ClearParser) RETURNS !DoBlock
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -826,7 +826,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN DoBlock{ token: COPY do_token, branches: branches, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-FN clearParser__parse_bg_block(MUTABLE self: ClearParser) RETURNS !BgNode
+PUB FN clearParser__parse_bg_block(MUTABLE self: ClearParser) RETURNS !BgNode
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -940,7 +940,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN node;
 }
 END
-FN clearParser__parse_yield_expr(MUTABLE self: ClearParser) RETURNS !YieldExpr
+PUB FN clearParser__parse_yield_expr(MUTABLE self: ClearParser) RETURNS !YieldExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -951,7 +951,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN YieldExpr{ token: COPY tok, expr: COPY expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-FN clearParser__parse_close_stream(MUTABLE self: ClearParser) RETURNS !CloseStream
+PUB FN clearParser__parse_close_stream(MUTABLE self: ClearParser) RETURNS !CloseStream
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -961,7 +961,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN CloseStream{ token: COPY tok, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-FN clearParser__parse_next_expr(MUTABLE self: ClearParser) RETURNS !NextExpr
+PUB FN clearParser__parse_next_expr(MUTABLE self: ClearParser) RETURNS !NextExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

@@ -286,7 +286,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.deinit_entries;
 }
 END
-FN inlineStructVariant__set_deinit_entries(MUTABLE self: InlineStructVariant, entries: []InlineStructDeinitEntry) RETURNS ![]InlineStructDeinitEntry
+PUB FN inlineStructVariant__set_deinit_entries(MUTABLE self: InlineStructVariant, entries: []InlineStructDeinitEntry) RETURNS ![]InlineStructDeinitEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -456,7 +456,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.type_params;
 }
 END
-FN structSchema__field_defaults(self: StructSchema) RETURNS !{String}Locatable
+PUB FN structSchema__field_defaults(self: StructSchema) RETURNS !{String}Locatable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -473,7 +473,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN out;
 }
 END
-FN structSchema__borrowed_fields(self: StructSchema) RETURNS ![Set]String
+PUB FN structSchema__borrowed_fields(self: StructSchema) RETURNS ![Set]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

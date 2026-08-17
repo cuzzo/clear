@@ -43,7 +43,7 @@ FN diagnosticRegistry__pending?(code: String@symbol) RETURNS Bool ->
   END
   RETURN FALSE;
 END
-FN diagnosticRegistry__format(code: String@symbol, args: Any[], kwargs: {String@symbol}String = {}) RETURNS !?String ->
+PUB FN diagnosticRegistry__format(code: String@symbol, args: Any[], kwargs: {String@symbol}String = {}) RETURNS !?String ->
   RETURN TRY (diagnosticRegistry__format_from_hash(code, args, kwargs));
 END
 PUB FN diagnosticRegistry__format_from_hash(code: String@symbol, args: Any[], kwargs: {String@symbol}String) RETURNS !?String ->

@@ -880,7 +880,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CleanupDecisionFacts{ match_takes_vars: COPY match_takes_vars, loop_declared_names: COPY loop_declared_names };
 }
 END
-PRIVATE FN ownershipDataflow__analyze(fn_node: FunctionDef, can_fail_fns: ?[Set]String = NIL, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !OwnershipDataflow@multiowned ->
+PUB FN ownershipDataflow__analyze(fn_node: FunctionDef, can_fail_fns: ?[Set]String = NIL, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !OwnershipDataflow@multiowned ->
   MUTABLE cfg = TRY (functionCFG__build(fn_node, can_fail_fns));
   RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_14 = ownershipDataflow__new(cfg, fn_node, schema_lookup);
   TRY (ownershipDataflow__analyze_mut(&rtoc_mutable_receiver_14)) };
@@ -1043,7 +1043,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN !((((((type__primitive?(ti) OR TRY (type__string?(ti))) OR type__any?(ti)) OR type__void?(ti)) OR ((TRY (type__any_rc?(ti)) AND !(is_atomic_ptr))))));
 }
 END
-PRIVATE FN ownershipDataflow__resource_captures(self: OwnershipDataflow, node: Locatable) RETURNS ![]String
+PUB FN ownershipDataflow__resource_captures(self: OwnershipDataflow, node: Locatable) RETURNS ![]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

@@ -72,7 +72,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN EmissionState{ symbol_literals: COPY rtoc_self_view.symbol_literals, uses_c_callback: rtoc_self_view.uses_c_callback, if_bind_counter: rtoc_self_view.if_bind_counter, discard_counter: rtoc_self_view.discard_counter, deep_copy_counter: rtoc_self_view.deep_copy_counter, items_block_counter: rtoc_self_view.items_block_counter, owned_slice_counter: rtoc_self_view.owned_slice_counter };
 }
 END
-FN mIREmitter__emit(MUTABLE self: MIREmitter, MUTABLE node: ?Emittable) RETURNS !String
+PUB FN mIREmitter__emit(MUTABLE self: MIREmitter, MUTABLE node: ?Emittable) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -418,7 +418,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN mIREmitter__emit_statements(MUTABLE self: MIREmitter, stmts: []Emittable) RETURNS !String
+PUB FN mIREmitter__emit_statements(MUTABLE self: MIREmitter, stmts: []Emittable) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -647,7 +647,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     }).join("\n");
 }
 END
-FN mIREmitter__emit_profile_task_site(self: MIREmitter, site: ProfileTaskSite) RETURNS String
+PUB FN mIREmitter__emit_profile_task_site(self: MIREmitter, site: ProfileTaskSite) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3227,7 +3227,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIREmitter__emit_body(&rtoc_self_view, stmts));
 }
 END
-FN mIREmitter__emit_direct_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, alloc_override: ?String = NIL) RETURNS !String
+PUB FN mIREmitter__emit_direct_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, alloc_override: ?String = NIL) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4287,7 +4287,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIREmitter__direct_cleanup_statement(rtoc_self_view, name, "CheatLib.cleanup(${storage_type}, ${alloc}, ${arg})", guarded);
 }
 END
-FN mIREmitter__new(state: ?EmissionState = NIL) RETURNS MIREmitter@multiowned ->
+PUB FN mIREmitter__new(state: ?EmissionState = NIL) RETURNS MIREmitter@multiowned ->
   MUTABLE self = MIREmitter{ deep_copy_counter: ((COPY state)?.deep_copy_counter OR_ELSE 0), discard_counter: ((COPY state)?.discard_counter OR_ELSE 0), flow_alias_name: NIL, heap_allocator_cache_name: NIL, heap_allocator_cache_names: List[], heap_allocator_cache_runtime_name: NIL, ident_overrides: {}, if_bind_counter: NIL, indent: 0, items_block_counter: ((COPY state)?.items_block_counter OR_ELSE 0), move_guard_overrides: {}, owned_slice_counter: ((COPY state)?.owned_slice_counter OR_ELSE 0), rt_name: "rt", symbol_literals: {}, uses_c_callback: (((COPY state)?.uses_c_callback != NIL) OR FALSE) };
   mIREmitter__initialize(&self, state);
   RETURN self @multiowned;

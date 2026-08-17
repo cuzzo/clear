@@ -63,7 +63,7 @@ FN fnDef__body_slots(MUTABLE self: FnDef) RETURNS ![]MIRBodySlot EFFECTS REENTRA
   rubyToClearVoid()
   })] AS []MIRBodySlot);
 END
-FN fnDef__body(self: FnDef) RETURNS ![]Emittable ->
+PUB FN fnDef__body(self: FnDef) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN fnDef__mir?(self: FnDef) RETURNS Bool ->
@@ -1711,7 +1711,7 @@ FN scopeBlock__body_slots(MUTABLE self: ScopeBlock) RETURNS ![]MIRBodySlot EFFEC
   rubyToClearVoid()
   })] AS []MIRBodySlot);
 END
-FN scopeBlock__body(self: ScopeBlock) RETURNS ![]Emittable ->
+PUB FN scopeBlock__body(self: ScopeBlock) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN scopeBlock__mir?(self: ScopeBlock) RETURNS Bool ->
@@ -3068,7 +3068,7 @@ FN deferStmt__child_exprs(self: MIRDeferStmt) RETURNS ![]Emittable EFFECTS REENT
   END
   RETURN deferStmt__compact_child_exprs(self, exprs);
 END
-FN deferStmt__body(self: MIRDeferStmt) RETURNS DeferBody ->
+PUB FN deferStmt__body(self: MIRDeferStmt) RETURNS DeferBody ->
   RETURN COPY self.body;
 END
 FN deferStmt__mir?(self: MIRDeferStmt) RETURNS Bool ->
@@ -3148,7 +3148,7 @@ FN errDeferStmt__child_exprs(self: ErrDeferStmt) RETURNS ![]Emittable EFFECTS RE
   END
   RETURN errDeferStmt__compact_child_exprs(self, exprs);
 END
-FN errDeferStmt__body(self: ErrDeferStmt) RETURNS DeferBody ->
+PUB FN errDeferStmt__body(self: ErrDeferStmt) RETURNS DeferBody ->
   RETURN COPY self.body;
 END
 FN errDeferStmt__mir?(self: ErrDeferStmt) RETURNS Bool ->
@@ -3219,7 +3219,7 @@ FN exprStmt__explicit_ownership_contract(self: ExprStmt) RETURNS !?OwnershipCont
     RETURN NIL;
   END
 END
-FN exprStmt__expr(self: ExprStmt) RETURNS Emittable ->
+PUB FN exprStmt__expr(self: ExprStmt) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN exprStmt__mir?(self: ExprStmt) RETURNS Bool ->
@@ -3575,21 +3575,21 @@ END
 FN fsmStructure__required_move_guards(self: FsmStructure) RETURNS ![]String EFFECTS REENTRANT ->
   RETURN COPY self.facts.required_move_guards;
 END
-FN fsmStructure__set_required_move_guards(MUTABLE self: FsmStructure, value: []String) RETURNS ![]String EFFECTS REENTRANT ->
+PUB FN fsmStructure__set_required_move_guards(MUTABLE self: FsmStructure, value: []String) RETURNS ![]String EFFECTS REENTRANT ->
   self.facts.required_move_guards = COPY value;
   RETURN value;
 END
 FN fsmStructure__move_guard_writes(self: FsmStructure) RETURNS ![]String EFFECTS REENTRANT ->
   RETURN COPY self.facts.move_guard_writes;
 END
-FN fsmStructure__set_move_guard_writes(MUTABLE self: FsmStructure, value: []String) RETURNS ![]String EFFECTS REENTRANT ->
+PUB FN fsmStructure__set_move_guard_writes(MUTABLE self: FsmStructure, value: []String) RETURNS ![]String EFFECTS REENTRANT ->
   self.facts.move_guard_writes = COPY value;
   RETURN value;
 END
 FN fsmStructure__ownership_facts(self: FsmStructure) RETURNS ![]FsmOwnershipFact EFFECTS REENTRANT ->
   RETURN COPY self.facts.ownership_facts;
 END
-FN fsmStructure__set_ownership_facts(MUTABLE self: FsmStructure, value: []FsmOwnershipFact) RETURNS ![]FsmOwnershipFact EFFECTS REENTRANT ->
+PUB FN fsmStructure__set_ownership_facts(MUTABLE self: FsmStructure, value: []FsmOwnershipFact) RETURNS ![]FsmOwnershipFact EFFECTS REENTRANT ->
   self.facts.ownership_facts = COPY value;
   RETURN value;
 END
@@ -3603,7 +3603,7 @@ END
 FN fsmStructure__destroy_actions(self: FsmStructure) RETURNS ![]FsmDestroyAction EFFECTS REENTRANT ->
   RETURN COPY self.facts.destroy_actions;
 END
-FN fsmStructure__set_destroy_actions(MUTABLE self: FsmStructure, value: []FsmDestroyAction) RETURNS ![]FsmDestroyAction EFFECTS REENTRANT ->
+PUB FN fsmStructure__set_destroy_actions(MUTABLE self: FsmStructure, value: []FsmDestroyAction) RETURNS ![]FsmDestroyAction EFFECTS REENTRANT ->
   self.facts.destroy_actions = COPY value;
   RETURN value;
 END
@@ -9722,7 +9722,7 @@ PUB FN mIRBlockExpr__result_type(self: MIRBlockExpr) RETURNS ?Type ->
   self.result_type;
 END
 
-FN blockExpr__lazy_boundary(MUTABLE self: MIRBlockExpr) RETURNS Bool ->
+PUB FN blockExpr__lazy_boundary(MUTABLE self: MIRBlockExpr) RETURNS Bool ->
   IF !(TRUE) THEN
     self.lazy_boundary = NIL;
   END
@@ -9755,7 +9755,7 @@ FN blockExpr__body_slots(MUTABLE self: MIRBlockExpr) RETURNS ![]MIRBodySlot EFFE
   rubyToClearVoid()
   })] AS []MIRBodySlot);
 END
-FN blockExpr__body(self: MIRBlockExpr) RETURNS ![]Emittable ->
+PUB FN blockExpr__body(self: MIRBlockExpr) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN blockExpr__ownership_effect(MUTABLE self: MIRBlockExpr) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
@@ -9917,7 +9917,7 @@ END
 FN cast__without_try(self: MIRCast) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
-FN cast__expr(self: MIRCast) RETURNS Emittable ->
+PUB FN cast__expr(self: MIRCast) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN cast__mir?(self: MIRCast) RETURNS Bool ->
@@ -9977,7 +9977,7 @@ END
 FN tryExpr__ownership_effect(self: TryExpr) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__of(self.expr));
 END
-FN tryExpr__expr(self: TryExpr) RETURNS Emittable ->
+PUB FN tryExpr__expr(self: TryExpr) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN tryExpr__mir?(self: TryExpr) RETURNS Bool ->
@@ -10052,7 +10052,7 @@ END
 FN tryCatch__ownership_effect(MUTABLE self: TryCatch) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__from_try_fallback(TRY (ownershipEffect__of(self.expr)), TRY (ownershipEffect__of(self.catch_body)), self.result_type, self.catch_body IS_A Lit, tryCatch__call_never_success?(self, self.expr));
 END
-FN tryCatch__expr(self: TryCatch) RETURNS Emittable ->
+PUB FN tryCatch__expr(self: TryCatch) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 PRIVATE FN tryCatch__call_never_success?(self: TryCatch, value: Emittable) RETURNS Bool ->
@@ -10129,7 +10129,7 @@ END
 FN orelse__ownership_effect(MUTABLE self: Orelse) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__from_optional_fallback(TRY (ownershipEffect__of(self.expr)), TRY (ownershipEffect__of(self.fallback)), self.result_type);
 END
-FN orelse__expr(self: Orelse) RETURNS Emittable ->
+PUB FN orelse__expr(self: Orelse) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN orelse__mir?(self: Orelse) RETURNS Bool ->
@@ -10572,7 +10572,7 @@ PUB STRUCT AddressOf {
 FN addressOf__child_exprs(self: AddressOf) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN addressOf__compact_child_exprs(self, [CAST(self.expr AS Any)]);
 END
-FN addressOf__expr(self: AddressOf) RETURNS Emittable ->
+PUB FN addressOf__expr(self: AddressOf) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN addressOf__mir?(self: AddressOf) RETURNS Bool ->
@@ -10637,7 +10637,7 @@ PUB STRUCT Deref {
 FN deref__child_exprs(self: Deref) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN deref__compact_child_exprs(self, [CAST(self.expr AS Any)]);
 END
-FN deref__expr(self: Deref) RETURNS Emittable ->
+PUB FN deref__expr(self: Deref) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN deref__mir?(self: Deref) RETURNS Bool ->
@@ -11106,7 +11106,7 @@ END
 FN optionalUnwrap__ownership_effect(self: MIROptionalUnwrap) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__of(self.expr));
 END
-FN optionalUnwrap__expr(self: MIROptionalUnwrap) RETURNS Emittable ->
+PUB FN optionalUnwrap__expr(self: MIROptionalUnwrap) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN optionalUnwrap__mir?(self: MIROptionalUnwrap) RETURNS Bool ->
@@ -11169,7 +11169,7 @@ END
 FN tryOptional__ownership_effect(self: TryOptional) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__of(self.expr));
 END
-FN tryOptional__expr(self: TryOptional) RETURNS Emittable ->
+PUB FN tryOptional__expr(self: TryOptional) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN tryOptional__mir?(self: TryOptional) RETURNS Bool ->
@@ -11581,7 +11581,7 @@ END
 FN ownedSlice__ownership_effect(self: OwnedSlice) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownedSlice__owned_effect_for_alloc(self, self.alloc);
 END
-FN ownedSlice__expr(self: OwnedSlice) RETURNS Emittable ->
+PUB FN ownedSlice__expr(self: OwnedSlice) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN ownedSlice__mir?(self: OwnedSlice) RETURNS Bool ->
@@ -12103,16 +12103,16 @@ PUB STRUCT OwnershipOperandFact {
   target_alloc: ?String@symbol
 }
 
-FN ownershipOperandFact__owned_binding(name: String, type_info: Type, source: String, target_alloc: ?String@symbol = NIL) RETURNS OwnershipOperandFact ->
+PUB FN ownershipOperandFact__owned_binding(name: String, type_info: Type, source: String, target_alloc: ?String@symbol = NIL) RETURNS OwnershipOperandFact ->
   RETURN OwnershipOperandFact{ kind: :owned_binding, name: COPY name, borrowed: FALSE, type_info: COPY type_info, source: COPY source, target_alloc: COPY target_alloc };
 END
-FN ownershipOperandFact__owned_result(type_info: Type, source: String, target_alloc: ?String@symbol = NIL) RETURNS OwnershipOperandFact ->
+PUB FN ownershipOperandFact__owned_result(type_info: Type, source: String, target_alloc: ?String@symbol = NIL) RETURNS OwnershipOperandFact ->
   RETURN OwnershipOperandFact{ kind: :owned_result, name: NIL, borrowed: FALSE, type_info: COPY type_info, source: COPY source, target_alloc: COPY target_alloc };
 END
-FN ownershipOperandFact__borrowed_access(name: ?String, type_info: Type, source: String, target_alloc: ?String@symbol = NIL) RETURNS OwnershipOperandFact ->
+PUB FN ownershipOperandFact__borrowed_access(name: ?String, type_info: Type, source: String, target_alloc: ?String@symbol = NIL) RETURNS OwnershipOperandFact ->
   RETURN OwnershipOperandFact{ kind: :borrowed_access, name: COPY name, borrowed: TRUE, type_info: COPY type_info, source: COPY source, target_alloc: COPY target_alloc };
 END
-FN ownershipOperandFact__non_owning(type_info: Type, source: String) RETURNS OwnershipOperandFact ->
+PUB FN ownershipOperandFact__non_owning(type_info: Type, source: String) RETURNS OwnershipOperandFact ->
   RETURN OwnershipOperandFact{ kind: :non_owning, name: NIL, borrowed: FALSE, type_info: COPY type_info, source: COPY source, target_alloc: NIL };
 END
 PUB STRUCT OwnershipContract {
@@ -12132,16 +12132,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.covers_consuming_params = COPY covers_consuming_params;
 }
 END
-FN ownershipContract__empty() RETURNS !OwnershipContract@multiowned ->
+PUB FN ownershipContract__empty() RETURNS !OwnershipContract@multiowned ->
   MUTABLE no_operands: []OwnershipOperandFact = [];
   MUTABLE no_produces: []String = [];
   MUTABLE no_borrows: []String = [];
   RETURN TRY (ownershipContract__new(no_operands, no_produces, no_borrows));
 END
-FN ownershipContract__consume_operands(operands: []OwnershipOperandFact) RETURNS !OwnershipContract@multiowned ->
+PUB FN ownershipContract__consume_operands(operands: []OwnershipOperandFact) RETURNS !OwnershipContract@multiowned ->
   RETURN TRY (ownershipContract__new(operands, ( { MUTABLE rtoc_empty_list_186: []String = List[]; rtoc_empty_list_186 } ), ( { MUTABLE rtoc_empty_list_187: []String = List[]; rtoc_empty_list_187 } ), TRUE));
 END
-FN ownershipContract__owned_operand_names(self: OwnershipContract) RETURNS ![]String
+PUB FN ownershipContract__owned_operand_names(self: OwnershipContract) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12196,7 +12196,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN normalized;
 }
 END
-FN ownershipContract__new(operands: []OwnershipOperandFact, produces: []String, borrows: []String, covers_consuming_params: Bool = FALSE) RETURNS !OwnershipContract@multiowned ->
+PUB FN ownershipContract__new(operands: []OwnershipOperandFact, produces: []String, borrows: []String, covers_consuming_params: Bool = FALSE) RETURNS !OwnershipContract@multiowned ->
   MUTABLE self = OwnershipContract{ borrows: List[], covers_consuming_params: covers_consuming_params, operands: List[], produces: List[] };
   TRY (ownershipContract__initialize(&self, operands, produces, borrows, covers_consuming_params));
   RETURN self @multiowned;
@@ -12225,7 +12225,7 @@ PUB FN callableContract__no_ownership(checked_arg_count: Int64) RETURNS !Callabl
   END
   RETURN callableContract__new(TRY (functionSignature__new(params, TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_190: []String@symbol = List[]; rtoc_empty_list_190 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_191: []String@symbol = List[]; rtoc_empty_list_191 } ), NIL, ( { MUTABLE rtoc_empty_list_192: []String@symbol = List[]; rtoc_empty_list_192 } ))), TRY (ownershipContract__new(( { MUTABLE rtoc_empty_list_193: []OwnershipOperandFact = List[]; rtoc_empty_list_193 } ), ( { MUTABLE rtoc_empty_list_194: []String = List[]; rtoc_empty_list_194 } ), ( { MUTABLE rtoc_empty_list_195: []String = List[]; rtoc_empty_list_195 } ), TRUE)), checked_arg_count);
 END
-FN callableContract__new(signature: FunctionSignature, ownership_contract: OwnershipContract, checked_arg_count: Int64) RETURNS CallableContract@multiowned ->
+PUB FN callableContract__new(signature: FunctionSignature, ownership_contract: OwnershipContract, checked_arg_count: Int64) RETURNS CallableContract@multiowned ->
   MUTABLE self = CallableContract{ checked_arg_count: checked_arg_count, ownership_contract: COPY ownership_contract, signature: COPY signature };
   callableContract__initialize(&self, signature, ownership_contract, checked_arg_count);
   RETURN self @multiowned;
@@ -12238,10 +12238,10 @@ PUB STRUCT OwnershipEffect {
   target_var: ?String
 }
 
-FN ownershipEffect__none() RETURNS OwnershipEffect EFFECTS REENTRANT ->
+PUB FN ownershipEffect__none() RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN OwnershipEffect{ produces_owned: FALSE, alloc: NIL, cleanup_kind: NIL, requires_hoist: FALSE, target_var: NIL };
 END
-FN ownershipEffect__owned(alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform, requires_hoist: Bool = TRUE, target_var: ?String = NIL) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+PUB FN ownershipEffect__owned(alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform, requires_hoist: Bool = TRUE, target_var: ?String = NIL) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN OwnershipEffect{ produces_owned: TRUE, alloc: COPY alloc, cleanup_kind: COPY cleanup_kind, requires_hoist: COPY requires_hoist, target_var: COPY target_var };
 END
 FN ownershipEffect__from_callable_facts(emits_allocating: Bool, MUTABLE heap_return_alloc: Bool, fixed_void_without_alloc_metadata: Bool, mutates_receiver_without_heap_return: Bool, result_owns: ?Bool, result_type: ?Type, alloc: ?String@symbol, target_var: ?String) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
@@ -12272,7 +12272,7 @@ FN ownershipEffect__owned_result_type?(type_info: Type) RETURNS !Bool ->
   END
   RETURN TRY (type__ownership_bearing?(ti));
 END
-FN ownershipEffect__with_target(self: OwnershipEffect, name: String) RETURNS OwnershipEffect EFFECTS REENTRANT ->
+PUB FN ownershipEffect__with_target(self: OwnershipEffect, name: String) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN OwnershipEffect{ produces_owned: self.produces_owned, alloc: COPY self.alloc, cleanup_kind: COPY self.cleanup_kind, requires_hoist: self.requires_hoist, target_var: COPY name };
 END
 PUB STRUCT BoundaryCaptureFact {
@@ -12302,7 +12302,7 @@ PUB STRUCT FsmResultTransferFact {
   move_guarded: Bool
 }
 
-FN fsmResultTransferFact__marks(self: FsmResultTransferFact) RETURNS ![]Emittable EFFECTS REENTRANT ->
+PUB FN fsmResultTransferFact__marks(self: FsmResultTransferFact) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY self.name, target: :owned_sink, target_alloc: COPY self.target_alloc, move_guarded: self.move_guarded })));
 END
 PUB STRUCT OwnershipConsumptionFact {
@@ -12341,7 +12341,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.writer = COPY writer;
 }
 END
-FN bodySlot__replace(MUTABLE self: MIRBodySlot, body: []Emittable) RETURNS Void
+PUB FN bodySlot__replace(MUTABLE self: MIRBodySlot, body: []Emittable) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -12398,7 +12398,7 @@ END
 # Ruby module MIR::NamedEmittable
 # Ruby module MIR::Stmt
 # Ruby module MIR::Expr
-FN ownershipEffect__of(node: ?Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+PUB FN ownershipEffect__of(node: ?Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   IF node EXISTS AS node_value THEN
     RETURN TRY (emittable__ownership_effect(node_value));
   END
@@ -12408,7 +12408,7 @@ FN ownershipEffect__hoistable_owned_result?(node: ?Emittable) RETURNS !Bool ->
   MUTABLE effect = TRY (ownershipEffect__of(node));
   RETURN (effect.produces_owned AND effect.requires_hoist);
 END
-FN ownershipEffect__alloc_of(node: ?Emittable) RETURNS !?String@symbol EFFECTS REENTRANT ->
+PUB FN ownershipEffect__alloc_of(node: ?Emittable) RETURNS !?String@symbol EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__of(node)).alloc;
 END
 FN ownershipEffect__from_effects(effects_value: []OwnershipEffect) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
@@ -12618,16 +12618,16 @@ FN structInitField__get_index(self: StructInitField, key: String@symbol) RETURNS
     RETURN NIL;
   END
 END
-FN mIR__named_field(name: String@symbol, value: Emittable) RETURNS StructInitField ->
+PUB FN mIR__named_field(name: String@symbol, value: Emittable) RETURNS StructInitField ->
   RETURN StructInitField{ name: COPY name, value: COPY value, alloc: NIL };
 END
-FN mIR__if_binding(expr: Emittable, capture: MirCapture) RETURNS !{String@symbol}NamedMirFieldValue ->
+PUB FN mIR__if_binding(expr: Emittable, capture: MirCapture) RETURNS !{String@symbol}NamedMirFieldValue ->
   MUTABLE binding: {String@symbol}NamedMirFieldValue = {};
   binding[:expr] = NamedMirFieldValue{ Emittable: COPY expr };
   binding[:capture] = castCaptureToNamedMirFieldValue(COPY capture);
   RETURN binding;
 END
-FN mIR__struct_init_field_name(field: StructInitFieldInput) RETURNS ?MIRReturnValue ->
+PUB FN mIR__struct_init_field_name(field: StructInitFieldInput) RETURNS ?MIRReturnValue ->
   IF field IS_A StructInitField AS struct_init_field THEN
     RETURN COPY MIRReturnValue{ SymbolValue: COPY struct_init_field.name };
   END
@@ -12636,7 +12636,7 @@ FN mIR__struct_init_field_name(field: StructInitFieldInput) RETURNS ?MIRReturnVa
   END
   RETURN NIL;
 END
-FN mIR__struct_init_field_value(field: StructInitFieldInput) RETURNS ?Emittable ->
+PUB FN mIR__struct_init_field_value(field: StructInitFieldInput) RETURNS ?Emittable ->
   IF field IS_A StructInitField AS struct_init_field THEN
     RETURN COPY struct_init_field.value;
   END
@@ -12654,13 +12654,13 @@ FN mIR__struct_init_field_alloc(field: StructInitFieldInput) RETURNS ?String@sym
   END
   RETURN NIL;
 END
-FN mIR__each_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
+PUB FN mIR__each_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
   TRY (mIR__each_node_inner(root, FALSE, NIL, blk));
 END
-FN mIR__each_node_until(root: ?NodeRoot, stop: FN(Emittable) -> Bool, blk: FN(Emittable) -> Void) RETURNS !Void ->
+PUB FN mIR__each_node_until(root: ?NodeRoot, stop: FN(Emittable) -> Bool, blk: FN(Emittable) -> Void) RETURNS !Void ->
   TRY (mIR__each_node_inner(root, FALSE, stop, blk));
 END
-FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
+PUB FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_197: []Emittable = List[]; rtoc_empty_list_197 } );
   mIR__each_node(UNWRAP (root), %(node: Emittable) USE(MUTABLE out) -> {
   &out.append(COPY node);
@@ -12668,7 +12668,7 @@ FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   });
   RETURN out;
 END
-FN mIR__each_surface_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
+PUB FN mIR__each_surface_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
   TRY (mIR__each_surface_node_inner(UNWRAP (root), blk));
 END
 FN mIR__surface_nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
@@ -12777,7 +12777,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (rtoc_self_view.slots.count() == 0);
 }
 END
-FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS Void
+PUB FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -12789,7 +12789,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN inlineAllocMetadata__values(self: InlineAllocMetadata) RETURNS ![]String@symbol
+PUB FN inlineAllocMetadata__values(self: InlineAllocMetadata) RETURNS ![]String@symbol
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -12804,7 +12804,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN rtoc_self_view.slots[key];
 }
 END
-FN inlineAllocMetadata__primary(self: InlineAllocMetadata) RETURNS ?String@symbol
+PUB FN inlineAllocMetadata__primary(self: InlineAllocMetadata) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12818,14 +12818,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN inlineAllocMetadata__slot(rtoc_self_view, :key_alloc);
 }
 END
-FN inlineAllocMetadata__value_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
+PUB FN inlineAllocMetadata__value_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN inlineAllocMetadata__slot(rtoc_self_view, :val_alloc);
 }
 END
-FN inlineAllocMetadata__shard_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
+PUB FN inlineAllocMetadata__shard_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12881,7 +12881,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (TRY (inlineAllocMetadata__values(rtoc_self_view))).contains?(:frame);
 }
 END
-FN inlineAllocMetadata__with_all(self: InlineAllocMetadata, alloc: String@symbol) RETURNS InlineAllocMetadata@multiowned
+PUB FN inlineAllocMetadata__with_all(self: InlineAllocMetadata, alloc: String@symbol) RETURNS InlineAllocMetadata@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12901,7 +12901,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN compilerInspectValue();
 }
 END
-FN inlineAllocMetadata__new(alloc: ?String@symbol = NIL, key_alloc: ?String@symbol = NIL, val_alloc: ?String@symbol = NIL, shard_alloc: ?String@symbol = NIL) RETURNS InlineAllocMetadata@multiowned ->
+PUB FN inlineAllocMetadata__new(alloc: ?String@symbol = NIL, key_alloc: ?String@symbol = NIL, val_alloc: ?String@symbol = NIL, shard_alloc: ?String@symbol = NIL) RETURNS InlineAllocMetadata@multiowned ->
   MUTABLE self = InlineAllocMetadata{ slots: {} };
   inlineAllocMetadata__initialize(&self, alloc, key_alloc, val_alloc, shard_alloc);
   RETURN self @multiowned;
@@ -13442,7 +13442,7 @@ PUB STRUCT FsmDestroyLockRelease {
   unlock_method: String
 }
 
-FN fsmDestroyLockRelease__guard_field(self: FsmDestroyLockRelease) RETURNS String ->
+PUB FN fsmDestroyLockRelease__guard_field(self: FsmDestroyLockRelease) RETURNS String ->
   RETURN "__lock_held_${self.guard_index.toString()}";
 END
 FN fsmDestroyLockRelease__destroy_order_bucket(self: FsmDestroyLockRelease) RETURNS Int64 ->
@@ -13870,14 +13870,14 @@ PUB STRUCT OwnershipTransferPlan {
   move_guarded: Bool
 }
 
-FN ownershipTransferPlan__marks(self: OwnershipTransferPlan) RETURNS ![]Emittable ->
+PUB FN ownershipTransferPlan__marks(self: OwnershipTransferPlan) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = [Emittable{ TransferMark: COPY TransferMark{ name: COPY self.name, target: COPY self.target, target_alloc: COPY self.target_alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
   IF self.move_guarded THEN
     &out.append(Emittable{ MoveMark: COPY MoveMark{ name: COPY self.name, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
   END
   RETURN out;
 END
-FN mIR__kept_edge_transfer_boundary(names: []String) RETURNS ![]Emittable ->
+PUB FN mIR__kept_edge_transfer_boundary(names: []String) RETURNS ![]Emittable ->
   MUTABLE unique_names: []String = [];
   FOR transfer_name IN names DO
     IF !(unique_names.contains?(transfer_name)) THEN
@@ -13892,7 +13892,7 @@ FN mIR__kept_edge_transfer_boundary(names: []String) RETURNS ![]Emittable ->
   END
   RETURN marks;
 END
-FN mIR__ownership_transfer_marks(name: String, target: String@symbol, target_alloc: ?String@symbol = NIL, move_guarded: Bool = FALSE) RETURNS ![]Emittable ->
+PUB FN mIR__ownership_transfer_marks(name: String, target: String@symbol, target_alloc: ?String@symbol = NIL, move_guarded: Bool = FALSE) RETURNS ![]Emittable ->
   RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: COPY target, target_alloc: COPY target_alloc, move_guarded: COPY move_guarded })));
 END
 PUB STRUCT RuntimeCallSpec {
@@ -13906,22 +13906,22 @@ PUB FN runtimeCallSpec__call(self: RuntimeCallSpec, args: []Emittable) RETURNS C
   RETURN Call{ callee: COPY self.callee, args: COPY args, try_wrap: self.try_wrap, owned_return: self.owned_return, callable_contract: COPY KEEP self.callable_contract, lowered_node_id: NIL, never_success: FALSE, ownership_consumption: NIL, result_type: NIL };
 END
 # Ruby module MIR::RuntimeCalls
-FN runtimeCalls__eql_spec() RETURNS !RuntimeCallSpec ->
+PUB FN runtimeCalls__eql_spec() RETURNS !RuntimeCallSpec ->
   RETURN RuntimeCallSpec{ callee: "CheatLib.eql", callable_contract: TRY (callableContract__no_ownership(2)), try_wrap: FALSE, owned_return: FALSE };
 END
-FN runtimeCalls__thread_count_spec() RETURNS !RuntimeCallSpec ->
+PUB FN runtimeCalls__thread_count_spec() RETURNS !RuntimeCallSpec ->
   RETURN RuntimeCallSpec{ callee: "CheatLib.threadCount", callable_contract: TRY (callableContract__no_ownership(0)), try_wrap: FALSE, owned_return: FALSE };
 END
-FN runtimeCalls__rank_get_spec() RETURNS !RuntimeCallSpec ->
+PUB FN runtimeCalls__rank_get_spec() RETURNS !RuntimeCallSpec ->
   RETURN RuntimeCallSpec{ callee: "CheatLib.rankGet", callable_contract: TRY (callableContract__no_ownership(3)), try_wrap: FALSE, owned_return: FALSE };
 END
-FN runtimeCalls__rank_set_spec() RETURNS !RuntimeCallSpec ->
+PUB FN runtimeCalls__rank_set_spec() RETURNS !RuntimeCallSpec ->
   RETURN RuntimeCallSpec{ callee: "CheatLib.rankSet", callable_contract: TRY (callableContract__no_ownership(4)), try_wrap: FALSE, owned_return: FALSE };
 END
-FN runtimeCalls__batch_window_init_spec(element_zig: String) RETURNS !RuntimeCallSpec ->
+PUB FN runtimeCalls__batch_window_init_spec(element_zig: String) RETURNS !RuntimeCallSpec ->
   RETURN RuntimeCallSpec{ callee: "CheatLib.BatchWindow(${element_zig}).init", callable_contract: TRY (callableContract__no_ownership(3)), try_wrap: FALSE, owned_return: FALSE };
 END
-FN runtimeCalls__atomic_reduce_init_spec(inner_zig: String) RETURNS !RuntimeCallSpec ->
+PUB FN runtimeCalls__atomic_reduce_init_spec(inner_zig: String) RETURNS !RuntimeCallSpec ->
   RETURN RuntimeCallSpec{ callee: "CheatLib.obs.AtomicReduce(${inner_zig}).init", callable_contract: TRY (callableContract__no_ownership(1)), try_wrap: FALSE, owned_return: FALSE };
 END
 # End Ruby module MIR::RuntimeCalls
@@ -14066,7 +14066,7 @@ PUB STRUCT NextPromiseList {
 FN nextPromiseList__child_exprs(self: NextPromiseList) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN nextPromiseList__compact_child_exprs(self, [CAST(self.list_expr AS Any)]);
 END
-FN nextPromiseList__elem_zig(self: NextPromiseList) RETURNS !String ->
+PUB FN nextPromiseList__elem_zig(self: NextPromiseList) RETURNS !String ->
   MUTABLE payload = TRY (type__success_type(self.async_shape.payload_type));
   RETURN TRY (type__nested_zig_type(payload));
 END
