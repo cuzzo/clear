@@ -625,7 +625,7 @@ PRIVATE FN pipelineHost__lower_stream_select(MUTABLE self: PipelineHost, site: P
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.stream_select_counter = (rtoc_self_view.stream_select_counter + 1);
     MUTABLE id = rtoc_self_view.stream_select_counter;
-    MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(site.options)) }));
+    MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY site.options })) }));
     MUTABLE stream_type_branch_value: ?Type = NIL;
     IF type__error_union?(result_type) THEN
       stream_type_branch_value = UNWRAP (TRY (type__payload_type(result_type)));

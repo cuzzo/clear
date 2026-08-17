@@ -43,7 +43,7 @@ END
 PRIVATE FN pipelineScalarLowerer__lower_sum(self: PipelineScalarLowerer, site: PipelineSite, sum_node: SumOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE expr_mir = pipelineScalarLowerer__visit_pipeline_expr_mir(self, list_node, UNWRAP (sum_node.expression));
-  MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(site.options)) }));
+  MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY site.options })) }));
   MUTABLE zero: String = "";
   IF type__integer?(result_type) THEN
     zero = "0";
