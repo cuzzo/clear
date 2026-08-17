@@ -337,11 +337,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             current_owned = !((owned_stmts.length() == 0));
             IF current_owned THEN
               MUTABLE stage_value: Emittable = head.value();
-              MUTABLE fact_source = PARTIAL MATCH stage_value START
-                Emittable.Call AS call -> call.callee,
-                Emittable.MIRMethodCall AS mir_method_call -> mir_method_call.method,
-                DEFAULT -> next_item
-              END;
+              MUTABLE fact_source = NIL;
+              PARTIAL MATCH stage_value START
+                Emittable.Call AS call -> fact_source = call.callee;,
+                Emittable.MIRMethodCall AS mir_method_call -> fact_source = mir_method_call.method;,
+                DEFAULT -> fact_source = next_item;
+              END
               &stage_stmts.append(Emittable{ OwnedCreate: COPY OwnedCreate{ name: COPY next_item, alloc: :heap, type_info: COPY current_type, source: COPY fact_source, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
             END
           END

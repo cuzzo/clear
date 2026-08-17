@@ -882,11 +882,12 @@ FN build_cast_wrap_fix(value: ?Locatable, target_type: TypeTypeInput) RETURNS !?
       target_name_branch_value = COPY target_type;
     END
     MUTABLE target_name: TypeTypeInput = target_name_branch_value?;
-    MUTABLE text_length = PARTIAL MATCH value_value START
-      Locatable.Literal AS literal -> literal_source_length(tok),
-      Locatable.Identifier AS identifier -> identifier__name(identifier).codepointCount(),
-      DEFAULT -> NIL
-    END;
+    MUTABLE text_length = NIL;
+    PARTIAL MATCH value_value START
+      Locatable.Literal AS literal -> text_length = literal_source_length(tok);,
+      Locatable.Identifier AS identifier -> text_length = identifier__name(identifier).codepointCount();,
+      DEFAULT -> text_length = NIL;
+    END
     IF !(text_length) THEN
       RETURN NIL;
     END

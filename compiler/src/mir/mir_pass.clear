@@ -298,13 +298,14 @@ PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = Set[];
-    MUTABLE rhs = PARTIAL MATCH stmt START
-      Locatable.VarDecl AS var_decl -> var_decl.value,
-      Locatable.BindExpr AS bind_expr -> bind_expr.value,
-      Locatable.Assignment AS assignment -> assignment.value,
-      Locatable.DestructuringAssignment AS destructuring_assignment -> destructuring_assignment.value,
-      DEFAULT -> NIL
-    END;
+    MUTABLE rhs = NIL;
+    PARTIAL MATCH stmt START
+      Locatable.VarDecl AS var_decl -> rhs = var_decl.value;,
+      Locatable.BindExpr AS bind_expr -> rhs = bind_expr.value;,
+      Locatable.Assignment AS assignment -> rhs = assignment.value;,
+      Locatable.DestructuringAssignment AS destructuring_assignment -> rhs = destructuring_assignment.value;,
+      DEFAULT -> rhs = NIL;
+    END
     IF rhs THEN
       MUTABLE ident = IF rhs IS_A MoveNode THEN
         rhs.value()
@@ -320,13 +321,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (mIRPass__add_if_consumed(rtoc_self_view, &move_node.value, &names, facts, aST__moved?(move_node.value)));
     END
     END
-    MUTABLE value_expr = PARTIAL MATCH stmt START
-      Locatable.VarDecl AS var_decl -> var_decl.value,
-      Locatable.BindExpr AS bind_expr -> bind_expr.value,
-      Locatable.Assignment AS assignment -> assignment.value,
-      Locatable.DestructuringAssignment AS destructuring_assignment -> destructuring_assignment.value,
-      DEFAULT -> stmt
-    END;
+    MUTABLE value_expr = NIL;
+    PARTIAL MATCH stmt START
+      Locatable.VarDecl AS var_decl -> value_expr = var_decl.value;,
+      Locatable.BindExpr AS bind_expr -> value_expr = bind_expr.value;,
+      Locatable.Assignment AS assignment -> value_expr = assignment.value;,
+      Locatable.DestructuringAssignment AS destructuring_assignment -> value_expr = destructuring_assignment.value;,
+      DEFAULT -> value_expr = stmt;
+    END
     IF value_expr IS_A MoveNode THEN
       value_expr = value_expr.value();
     END
