@@ -9890,7 +9890,7 @@ PUB FN mIRCast__expr(self: MIRCast) RETURNS Emittable ->
   self.expr;
 END
 PUB FN mIRCast__target_type(self: MIRCast) RETURNS Any@multiowned ->
-  KEEP self.target_type;
+  COPY self.target_type;
 END
 PUB FN mIRCast__method(self: MIRCast) RETURNS Any@multiowned ->
   KEEP self.method;
