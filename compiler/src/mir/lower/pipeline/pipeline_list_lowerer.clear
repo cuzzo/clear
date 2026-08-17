@@ -111,7 +111,7 @@ PRIVATE FN pipelineListLowerer__lower_select(self: PipelineListLowerer, site: Pi
 END
 PRIVATE FN pipelineListLowerer__element_head_frame_transients?(self: PipelineListLowerer, head: PipelineElementHead) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
-  MUTABLE boundary = %(node) -> (node IS_A MIRBgBlock OR node IS_A LambdaExpr);
+  MUTABLE boundary = %(node: Emittable) -> (node IS_A MIRBgBlock OR node IS_A LambdaExpr);
   MUTABLE nodes: []Emittable = (COPY head.pending + CAST([head.value] AS []Emittable));
   mIR__each_node_until(NodeRoot{ ArrayValue: COPY nodes }, boundary, %(node: Emittable) -> {
   IF (IF node IS_A AllocMark AS alloc_mark THEN placement__frame?(alloc_mark.alloc) ELSE FALSE END) THEN

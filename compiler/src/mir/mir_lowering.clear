@@ -19842,7 +19842,7 @@ PRIVATE FN mIRLowering__stamp_loop_frame_alloc_scopes_mut(self: MIRLowering, stm
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE boundary = %(node) -> (((node IS_A WhileStmt OR node IS_A ForStmt) OR node IS_A MIRBgBlock) OR node IS_A LambdaExpr);
+    MUTABLE boundary = %(node: Emittable) -> (((node IS_A WhileStmt OR node IS_A ForStmt) OR node IS_A MIRBgBlock) OR node IS_A LambdaExpr);
     mIR__each_node_until(NodeRoot{ ArrayValue: COPY stmts }, boundary, %(node: Emittable) USE(scope) -> {
     IF (IF node IS_A AllocMark AS alloc_mark THEN placement__frame?(alloc_mark.alloc) ELSE FALSE END) THEN
         node.scope = COPY scope;

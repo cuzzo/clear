@@ -159,7 +159,7 @@ PRIVATE FN pipelineEachLowerer__with_iteration_rewind(self: PipelineEachLowerer,
 END
 PRIVATE FN pipelineEachLowerer__body_frame_transients?(self: PipelineEachLowerer, body: []Emittable) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
-  MUTABLE boundary = %(node) -> (node IS_A MIRBgBlock OR node IS_A LambdaExpr);
+  MUTABLE boundary = %(node: Emittable) -> (node IS_A MIRBgBlock OR node IS_A LambdaExpr);
   mIR__each_node_until(NodeRoot{ ArrayValue: COPY body }, boundary, %(node: Emittable) -> {
   IF (IF node IS_A AllocMark AS alloc_mark THEN placement__frame?(alloc_mark.alloc) ELSE FALSE END) THEN
       found = TRUE;
