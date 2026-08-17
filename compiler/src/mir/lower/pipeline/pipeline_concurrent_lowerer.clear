@@ -319,7 +319,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_select_prune(self: Pip
   });
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_where_prune(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, inner_expr: Locatable, smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
-  MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (type__element_type(TRY (aST__full_type_mut(lhs))))) AS String);
+  MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(lhs)))))) AS String);
   MUTABLE elem_zig = pipelineConcurrentLowerer__transpile_type_call(self, elem_type);
   MUTABLE alloc = pipelineConcurrentLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE pred_mir = pipelineConcurrentLowerer__visit_mir_with_placeholder_call(self, inner_expr, "it");
@@ -645,7 +645,7 @@ PRIVATE FN pipelineConcurrentLowerer__concurrent_list_item_type(self: PipelineCo
     END
     RETURN TRY (type__new(elem));
   END
-  RETURN TRY (type__new(type__resolved(UNWRAP (type__element_type(TRY (aST__full_type_mut(lhs)))))));
+  RETURN TRY (type__new(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(lhs))))))));
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_select(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, conc_op: ConcurrentOp, inner: SelectOp) RETURNS !MIRBlockExpr ->
   MUTABLE item_t = TRY (pipelineConcurrentLowerer__concurrent_list_item_type(self, &lhs));
