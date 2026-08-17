@@ -12769,7 +12769,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.slots = slots;
 }
 END
-FN inlineAllocMetadata__empty?(self: InlineAllocMetadata) RETURNS Bool
+PUB FN inlineAllocMetadata__empty?(self: InlineAllocMetadata) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -12867,7 +12867,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN inlineAllocMetadata__any_heap?(self: InlineAllocMetadata) RETURNS !Bool
+PUB FN inlineAllocMetadata__any_heap?(self: InlineAllocMetadata) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -16779,4 +16779,11 @@ END
 PUB FN mIRBodySlot__writer_call(self: MIRBodySlot, arg0: Emittable[]) RETURNS Void ->
   MUTABLE fn_value = self.writer;
   RETURN fn_value(arg0);
+END
+PUB FN emittable__allocs(node: Emittable) RETURNS ?InlineAllocMetadata@multiowned ->
+  PARTIAL MATCH node START
+    Emittable.RegistryCall AS item -> RETURN COPY item.allocs;,
+    Emittable.IndexedStore AS item -> RETURN COPY item.allocs;,
+  END
+  RETURN NIL;
 END
