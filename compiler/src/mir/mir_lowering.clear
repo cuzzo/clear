@@ -2595,7 +2595,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alloc_mark: ?AllocMark = mIRLowering__implicit_alloc_mark_for_mir_node(rtoc_self_view, node, state);
     IF alloc_mark EXISTS AS alloc_mark_value THEN
       &state.out.append(Emittable{ AllocMark: COPY alloc_mark_value });
-      MUTABLE fact = mIRLowering__owned_create_fact_for_alloc_mark(rtoc_self_view, alloc_mark_value, mIRLowering__ownership_fact_source(rtoc_self_view, Emittable{ AllocMark: COPY alloc_mark_value }));
+      MUTABLE fact = mIRLowering__owned_create_fact_for_alloc_mark(rtoc_self_view, COPY alloc_mark_value, mIRLowering__ownership_fact_source(rtoc_self_view, Emittable{ AllocMark: COPY alloc_mark_value }));
       &state.out.append(Emittable{ OwnedCreate: COPY fact });
       mIRLowering__mark_ownership_finalized_node_mut(rtoc_self_view, Emittable{ AllocMark: COPY alloc_mark_value });
       mIRLowering__mark_ownership_finalized_node_mut(rtoc_self_view, Emittable{ OwnedCreate: COPY fact });
@@ -2883,7 +2883,7 @@ FN mIRLowering__append_ownership_facts_for_structural_node_mut(self: MIRLowering
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A AllocMark AS alloc_mark THEN
-      &facts.append(MIRLoweringOwnershipFact{ OwnedCreate: COPY mIRLowering__owned_create_fact_for_alloc_mark(rtoc_self_view, alloc_mark, mIRLowering__ownership_fact_source(rtoc_self_view, Emittable{ AllocMark: COPY alloc_mark })) });
+      &facts.append(MIRLoweringOwnershipFact{ OwnedCreate: COPY mIRLowering__owned_create_fact_for_alloc_mark(rtoc_self_view, COPY alloc_mark, mIRLowering__ownership_fact_source(rtoc_self_view, Emittable{ AllocMark: COPY alloc_mark })) });
     ELSE_IF node IS_A Cleanup AS cleanup THEN
       &facts.append(MIRLoweringOwnershipFact{ OwnedDestroy: COPY OwnedDestroy{ name: COPY CAST(cleanup.name AS String), alloc: COPY cleanup.cleanup_entry.alloc(), source: COPY mIRLowering__ownership_fact_source(rtoc_self_view, Emittable{ Cleanup: COPY cleanup }), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     ELSE_IF node IS_A ErrCleanup AS err_cleanup THEN
