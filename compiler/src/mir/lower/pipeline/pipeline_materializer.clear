@@ -297,12 +297,13 @@ PUB FN pipelineMaterializer__append_owned_value_stmt(self: PipelineMaterializer,
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fact: ?AllocationFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, value_expr, runtimeHost__materializer_next_item_temp_name(rtoc_self_view.host), alloc, owned_type, NIL, "pipeline owned append item", known_owned);
     IF fact EXISTS AS cross_fact AND (cross_fact.alloc != alloc) THEN
-      cross_fact.mark.scope = IF placement__heap?(cross_fact.alloc) THEN
+      MUTABLE cross_mark = COPY cross_fact.mark;
+      cross_mark.scope = IF placement__heap?(cross_fact.alloc) THEN
         :heap
       ELSE
         :iteration
       END;
-      MUTABLE src_name = COPY cross_fact.mark.name;
+      MUTABLE src_name = COPY cross_mark.name;
       MUTABLE src_entry = cleanupEntry__build(:uniform, cross_fact.alloc, FALSE, NIL, ((IF owned_type != NIL THEN
         TRY (type__zig_type(owned_type))
       ELSE
@@ -313,21 +314,22 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         NIL
       END); MUTABLE rtoc_optional_or_result_3: ?String = NIL; IF rtoc_optional_or_source_2 != NIL THEN rtoc_optional_or_result_3 = COPY rtoc_optional_or_source_2; ELSE rtoc_optional_or_result_3 = pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr); END rtoc_optional_or_result_3 } ), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: deepCopy__copy_shape_for_zig_type(NIL), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
-      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [Emittable{ AllocMark: COPY cross_fact.mark }, Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Cleanup{ name: COPY src_name, cleanup_entry: COPY src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [Emittable{ AllocMark: COPY cross_mark }, Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Cleanup{ name: COPY src_name, cleanup_entry: COPY src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     IF fact EXISTS AS owned_fact THEN
-      owned_fact.mark.scope = IF placement__heap?(owned_fact.alloc) THEN
+      MUTABLE owned_mark = COPY owned_fact.mark;
+      owned_mark.scope = IF placement__heap?(owned_fact.alloc) THEN
         :heap
       ELSE
         :function
       END;
-      MUTABLE temp_name = COPY owned_fact.mark.name;
+      MUTABLE temp_name = COPY owned_mark.name;
       MUTABLE entry = cleanupEntry__build(:uniform, owned_fact.alloc, TRUE, NIL, ((IF owned_type != NIL THEN
         TRY (type__zig_type(owned_type))
       ELSE
         NIL
       END) OR_ELSE pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr)));
-      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY ([Emittable{ AllocMark: COPY owned_fact.mark }, Emittable{ Let: COPY Let{ name: COPY temp_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY temp_name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(Ident{ name: COPY temp_name, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY temp_name, target: :owned_sink, target_alloc: COPY alloc, move_guarded: TRUE })))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY ([Emittable{ AllocMark: COPY owned_mark }, Emittable{ Let: COPY Let{ name: COPY temp_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY temp_name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(Ident{ name: COPY temp_name, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY temp_name, target: :owned_sink, target_alloc: COPY alloc, move_guarded: TRUE })))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(value_expr AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
 }
