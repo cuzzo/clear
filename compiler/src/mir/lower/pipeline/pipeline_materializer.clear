@@ -388,17 +388,17 @@ PRIVATE FN pipelineMaterializer__zig_type_for(self: PipelineMaterializer, value_
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE zig_type = PARTIAL MATCH value_expr START
-      Emittable.DeepCopy AS deep_copy -> deep_copy.zig_type,
-      Emittable.ContainerInit AS container_init -> container_init.zig_type,
-      Emittable.StructInit AS struct_init -> struct_init.zig_type,
-      Emittable.TypeSentinel AS type_sentinel -> type_sentinel.zig_type,
-      Emittable.Undef AS undef -> undef.zig_type,
-      Emittable.HeapCreate AS heap_create -> heap_create.zig_type,
-      Emittable.DiscardOwned AS discard_owned -> discard_owned.zig_type,
-      Emittable.UnionVariantGet AS union_variant_get -> union_variant_get.zig_type,
-      DEFAULT -> NIL
-    END;
+    MUTABLE zig_type: ?String = NIL;
+    PARTIAL MATCH value_expr START
+      Emittable.DeepCopy AS deep_copy -> zig_type = COPY deep_copy.zig_type;,
+      Emittable.ContainerInit AS container_init -> zig_type = COPY container_init.zig_type;,
+      Emittable.StructInit AS struct_init -> zig_type = COPY struct_init.zig_type;,
+      Emittable.TypeSentinel AS type_sentinel -> zig_type = COPY type_sentinel.zig_type;,
+      Emittable.Undef AS undef -> zig_type = COPY undef.zig_type;,
+      Emittable.HeapCreate AS heap_create -> zig_type = COPY heap_create.zig_type;,
+      Emittable.DiscardOwned AS discard_owned -> zig_type = COPY discard_owned.zig_type;,
+      Emittable.UnionVariantGet AS union_variant_get -> zig_type = COPY union_variant_get.zig_type;,
+    END
     RETURN pipelineMaterializer__normalized_zig_type(rtoc_self_view, zig_type);
 }
 END
