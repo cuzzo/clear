@@ -73,9 +73,9 @@ END
 PUB FN pipelineLazyRangePrefix__loop_stmt(self: PipelineLazyRangePrefix, iter: ?Emittable, body_stmts: []Emittable, capture_name: ?String = self.initial_capture) RETURNS !PipelineLazyRangePrefixReturnValue ->
   MUTABLE body = TRY (pipelineLazyRangePrefix__stage_body(self, body_stmts));
   IF iter EXISTS AS iter_value THEN
-    RETURN PipelineLazyRangePrefixReturnValue{ ForStmt: COPY ForStmt{ iter: COPY iter_value, capture: COPY capture_name, body: body, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+    RETURN PipelineLazyRangePrefixReturnValue{ ForStmt: COPY ForStmt{ iter: COPY iter_value, capture: capture_name, body: body, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
   ELSE
-    RETURN PipelineLazyRangePrefixReturnValue{ WhileStmt: COPY WhileStmt{ cond: Emittable{ MIRMethodCall: COPY TRY (pipelineLazyRangePrefix__next_call(self)) }, body: body, capture: COPY capture_name?, update: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+    RETURN PipelineLazyRangePrefixReturnValue{ WhileStmt: COPY WhileStmt{ cond: Emittable{ MIRMethodCall: COPY TRY (pipelineLazyRangePrefix__next_call(self)) }, body: body, capture: capture_name?, update: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
   END
 END
 PUB STRUCT PipelineRangeFoldNames {
@@ -442,7 +442,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       next_method = "next";
     END
-    RETURN PipelineLazyRangePrefix{ range_mark: COPY range_mark, range_let: COPY range_let, source_name: COPY source_name, outer_stmts: COPY outer_stmts, stage_stmts: COPY stage_stmts, item_var: COPY item_var, initial_capture: COPY initial_capture, item_used: item_used, elem_zig: COPY elem_zig, next_method: COPY next_method, item_type: COPY current_type, item_owned: current_owned };
+    RETURN PipelineLazyRangePrefix{ range_mark: COPY range_mark, range_let: COPY range_let, source_name: COPY source_name, outer_stmts: COPY outer_stmts, stage_stmts: COPY stage_stmts, item_var: COPY item_var, initial_capture: initial_capture, item_used: item_used, elem_zig: COPY elem_zig, next_method: COPY next_method, item_type: COPY current_type, item_owned: current_owned };
 }
 END
 PUB FN pipelineRangeLowerer__range_literal_element_type(self: PipelineRangeLowerer, source_node: Locatable) RETURNS !Type
