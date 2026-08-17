@@ -96,7 +96,7 @@ PRIVATE FN pipelineBatchWindowLowerer__batch_element_type(self: PipelineBatchWin
 END
 PRIVATE FN pipelineBatchWindowLowerer__batch_expr_builder(self: PipelineBatchWindowLowerer, bw_node: BatchWindowOp, placeholder_var: String) RETURNS FN() -> Emittable ->
   RETURN %() USE(bw_node, placeholder_var, self) -> {
-  MUTABLE head = pipelineBatchWindowLowerer__visit_expr_head_call(self, bw_node.expression, placeholder_var);
+  MUTABLE head = pipelineBatchWindowLowerer__visit_expr_head_call(self, UNWRAP (bw_node.expression), placeholder_var);
   IF ((head.pending.length() == 0) AND !(head.owned)) THEN
       RETURN head.value;
   END

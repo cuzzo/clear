@@ -55,7 +55,7 @@ PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, li
     MUTABLE range_chain_value_mutable = COPY range_chain_value;
     RETURN TRY (pipelineSetIndexLowerer__lower_range_distinct(self, range_chain_value_mutable, &smooth_node, distinct_node, set_zig, alloc));
   END
-  MUTABLE insert_body = TRY (pipelineSetIndexLowerer__distinct_insert_body(self, expr_mir, distinct_node.expression, elem_type, elem_zig, alloc, TRUE));
+  MUTABLE insert_body = TRY (pipelineSetIndexLowerer__distinct_insert_body(self, expr_mir, UNWRAP (distinct_node.expression), elem_type, elem_zig, alloc, TRUE));
   RETURN pipelineSetIndexLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, insert_body, set_zig, MUTABLE smooth_node, self) -> {
   rtoc_lambda_result_1 = (TRY (pipelineSetIndexLowerer__distinct_set_alloc_stmts(self, &smooth_node, set_zig, alloc)) + [ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: insert_body, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + TRY (pipelineSetIndexLowerer__distinct_set_transfer_marks(self, alloc)) + [BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]);
   rtoc_lambda_result_1
@@ -94,7 +94,7 @@ END
 PRIVATE FN pipelineSetIndexLowerer__lower_range_distinct(self: PipelineSetIndexLowerer, range_chain: PipelineRangeChain, MUTABLE smooth_node: BinaryOp, distinct_node: DistinctOp, set_zig: String, alloc: String@symbol) RETURNS !MIRBlockExpr ->
   MUTABLE prefix = pipelineSetIndexLowerer__lazy_range_prefix_call(self, range_chain.source, range_chain.stages, NIL, FALSE);
   MUTABLE item_var = COPY prefix.item_var;
-  MUTABLE key_expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, distinct_node.expression, item_var);
+  MUTABLE key_expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, UNWRAP (distinct_node.expression), item_var);
   MUTABLE label = pipelineSetIndexLowerer__next_label_call(self);
   MUTABLE source_type = TRY (aST__full_type_mut(range_chain.source));
   MUTABLE defer_deinit_branch_value: ?MIRDeferStmt = NIL;
