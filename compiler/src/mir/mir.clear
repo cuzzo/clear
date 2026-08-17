@@ -1552,7 +1552,7 @@ END
 PUB STRUCT WhileStmt {
   cond: Emittable,
   body: []Emittable,
-  capture: Any@multiowned,
+  capture: ?String,
   update: ?Emittable,
   mark_per_iter: Any@multiowned,
   tight: Any@multiowned,
@@ -1625,7 +1625,7 @@ FN whileStmt__stmt?(self: WhileStmt) RETURNS Bool ->
 END
 PUB STRUCT ForStmt {
   iter: Emittable,
-  capture: Any@multiowned,
+  capture: ?String,
   body: []Emittable,
   index_capture: Any@multiowned,
   mark_per_iter: Any@multiowned,
@@ -9493,7 +9493,7 @@ FN structInit__expr?(self: StructInit) RETURNS Bool ->
 END
 PUB STRUCT ArrayInit {
   elem_type: Any@multiowned,
-  count: Any@multiowned,
+  count: Emittable,
   items: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -9880,7 +9880,7 @@ FN concatStr__expr?(self: ConcatStr) RETURNS Bool ->
 END
 PUB STRUCT MIRCast {
   expr: Emittable,
-  target_type: Any@multiowned,
+  target_type: String,
   method: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10025,7 +10025,7 @@ END
 PUB STRUCT TryCatch {
   expr: Emittable,
   catch_body: Emittable,
-  capture: Any@multiowned,
+  capture: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
@@ -10238,7 +10238,7 @@ FN conditional__expr?(self: Conditional) RETURNS Bool ->
 END
 PUB STRUCT IfOptional {
   optional: Emittable,
-  capture: Any@multiowned,
+  capture: ?String,
   then_expr: Emittable,
   else_expr: Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -11014,8 +11014,8 @@ FN typeSentinel__expr?(self: TypeSentinel) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT IterRange {
-  start: Any@multiowned,
-  end_val: Any@multiowned,
+  start: Emittable,
+  end_val: Emittable,
   capture_type: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
