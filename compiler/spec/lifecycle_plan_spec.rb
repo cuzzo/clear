@@ -173,6 +173,23 @@ RSpec.describe Semantic::LifecyclePlan do
       .to raise_error(RuntimeError, /missing annotation binding lifecycle plan for place 42/)
   end
 
+  it "reuses the payload's plan for an optional the inventory never saw" do
+    # An owned `?String` reaches fetch when a COPY lands in an optional field,
+    # a shape no declaration carries, so the inventory has the payload's plan
+    # but not the optional's. The optional adds no cleanup of its own, so the
+    # payload's plan IS its plan -- failing closed here reported a phantom
+    # inventory bug.
+    payload = Type.new(:String)
+    optional = Type.new(:"?String")
+    plan = Semantic::LifecyclePlanner.plan(payload, no_schema)
+    registry = Semantic::LifecycleRegistry.new({ payload.lifecycle_type_key => plan }, {})
+
+    fetched = registry.fetch(optional)
+
+    expect(fetched.drop_strategy).to eq(plan.drop_strategy)
+    expect(fetched.copy_strategy).to eq(plan.copy_strategy)
+  end
+
   it "inventories intermediate optional payloads inside fallible returns before MIR cleanup" do
     source = <<~CLEAR
       STRUCT Descriptor {

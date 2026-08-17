@@ -184,6 +184,18 @@ module Semantic
     def copyable?
       copy_strategy != :forbidden
     end
+
+    # The same contract under a different key: an OPTIONAL reuses its payload's
+    # plan, and the key it is fetched by has to name the optional.
+    sig { params(key: String).returns(LifecyclePlan) }
+    def with_type_key(key)
+      LifecyclePlan.new(
+        type_key: key,
+        drop_strategy: drop_strategy,
+        copy_strategy: copy_strategy,
+        resource_close_plan: resource_close_plan,
+      )
+    end
   end
 
   # The only semantic-to-lifecycle classifier. Consumers receive an immutable
@@ -461,6 +473,16 @@ module Semantic
         # silently leak. Post-annotation synthetic bindings that legitimately
         # reach here (e.g. a desugared pipeline fold's Bool found-flag) are
         # primitive; anything else must be registered during build.
+        # An OPTIONAL adds no cleanup of its own: `?T` owns exactly what `T`
+        # owns. A COPY into an optional field produces a `?T` no declaration
+        # carries, so the inventory holds T's plan but not `?T`'s -- reuse it
+        # rather than reporting a phantom inventory bug.
+        wrapped = type_info.optional? ? type_info.wrapped_type : nil
+        if wrapped
+          payload = @plans[wrapped.lifecycle_type_key]
+          return payload.with_type_key(key) if payload
+        end
+
         unless type_info.primitive?
           raise "missing annotation lifecycle plan for #{key} (non-primitive type absent from inventory; refusing to default to no-drop)"
         end
