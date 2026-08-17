@@ -20188,7 +20188,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       result = mIRLowering__lower_if_chain_match(&rtoc_self_view, node, facts);
     END
     IF expr_label EXISTS AS expr_label_value THEN
-      RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY expr_label_value, body: COPY [result], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
+      RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY expr_label_value, body: COPY [Emittable{ Set: COPY result }], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
     ELSE
       RETURN result;
     END
