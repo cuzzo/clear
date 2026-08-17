@@ -81,7 +81,7 @@ PRIVATE FN pipelineListLowerer__lower_select(self: PipelineListLowerer, site: Pi
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE res_type = TRY (pipelineListLowerer__select_result_type(self, &expr_node));
-  MUTABLE res_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY res_type });
+  MUTABLE res_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ Type: COPY res_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   RETURN pipelineListLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, expr_node, res_type, res_zig, MUTABLE smooth_node, self) -> {
   MUTABLE res = pipelineListLowerer__result_binding_name(self, label);
