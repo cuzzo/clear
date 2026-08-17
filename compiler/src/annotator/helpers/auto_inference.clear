@@ -505,7 +505,7 @@ PUB STRUCT Result {
   ambiguous: {AutoSlotId@multiowned}Ambiguity,
   unresolved: {AutoSlotId@multiowned}Slot@multiowned
 }
-FN autoUnifier__default_type_of(node: Locatable) RETURNS ?AutoConstraintCollectorObservedType EFFECTS REENTRANT ->
+FN autoUnifier__default_type_of(node: Locatable) RETURNS !?AutoConstraintCollectorObservedType EFFECTS REENTRANT ->
   RETURN AutoConstraintCollectorObservedType{ Type: TRY (aST__full_type_mut(node)) };
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN NIL;

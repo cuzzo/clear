@@ -74,7 +74,7 @@ FN emit_mutable_unused_finding_mut(reg: ?FixableReg, name: String) RETURNS !Void
     RETURN;
   END
 END
-FN closest_name(input: NameCandidate, candidates: []NameCandidate, max_distance: Int64 = 3) RETURNS ?String ->
+FN closest_name(input: NameCandidate, candidates: []NameCandidate, max_distance: Int64 = 3) RETURNS !?String ->
   MUTABLE best: ?NameCandidate = NIL;
   MUTABLE best_d: Int64 = (max_distance + 1);
   FOR _ IN candidates DO
@@ -120,7 +120,7 @@ FN emit_registry_mismatch_mut(token: Token, name: NameCandidate, candidates: []N
   MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch?((CAST(name AS String)), "\\A[A-Z]")) THEN
     NIL
   ELSE
-    closest_name(name, candidates)
+    TRY (closest_name(name, candidates))
   END;
   MUTABLE fixes = List[];
   IF best THEN
@@ -137,7 +137,7 @@ PUB FN emit_typo_suggestion_mut(token: ?TypoToken, name: String, candidates: []S
   MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch?(name, "\\A[A-Z]")) THEN
     NIL
   ELSE
-    closest_name(name, candidates)
+    TRY (closest_name(name, candidates))
   END;
   MUTABLE fixes = List[];
   IF best THEN
@@ -165,7 +165,7 @@ FN variant_anchor_from_unionlit(node: Node, variant_name: String) RETURNS ?Ancho
   RETURN anchor_at(node.token().line(), (node.token().column() - variant_name.codepointCount()));
 END
 FN emit_variant_typo_mut(anchor: AnchorToken, name: String, candidates: []NameCandidate, message: String, fix_label: String, cascade: Bool = FALSE) RETURNS !Void ->
-  MUTABLE best = closest_name(name, candidates);
+  MUTABLE best = TRY (closest_name(name, candidates));
   MUTABLE fixes = List[];
   IF best THEN
     &fixes.append(TRY (fix__new(fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: name, :best: best, :label: fix_label}), [edit__new(span__new(NIL, anchor.line, anchor.column, name.codepointCount()), CAST(best AS String))], :auto)));
@@ -484,14 +484,14 @@ FN emit_local_never_shared_finding_mut(info: BindingAuditRecord) RETURNS !Void -
   END;
   fixable_mut(anchor, {:code: :LOCAL_NEVER_SHARED, :name: name, :category: :lint, :level: :info, :fixes: fixes});
 END
-FN emit_immutable_assignment_error_mut(node: BindExpr, scope: Scope) RETURNS Void ->
+FN emit_immutable_assignment_error_mut(node: BindExpr, scope: Scope) RETURNS !Void ->
   MUTABLE fix = TRY (build_declare_mutable_fix(node.name, scope));
   IF !(fix) THEN
     RETURN error_mut(node, :IMMUTABLE_ASSIGNMENT, {:name: node.name});
   END
   fixable_mut(node, {:code: :IMMUTABLE_ASSIGNMENT, :name: node.name, :category: :ownership, :level: :error, :fixes: [fix]});
 END
-FN emit_immutable_arg_error_mut(arg_node: Identifier, scope: Scope, arg_idx: Int64, param_name: String) RETURNS Void ->
+FN emit_immutable_arg_error_mut(arg_node: Identifier, scope: Scope, arg_idx: Int64, param_name: String) RETURNS !Void ->
   MUTABLE fix = TRY (build_declare_mutable_fix(arg_node.name, scope));
   MUTABLE kw = {:index: arg_idx, :param: param_name, :actual: arg_node.name};
   IF !(fix) THEN
@@ -523,14 +523,14 @@ FN emit_unexpected_mutable_argument_error_mut(facts: CallArgumentFacts) RETURNS 
     RETURN error_mut(facts.arg_node, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, {:index: (facts.index + 1), :param: facts.param.name});
   END
 END
-FN emit_immutable_index_assignment_error_mut(assignment_node: Assignment, scope: Scope, var_name: String) RETURNS Void ->
+FN emit_immutable_index_assignment_error_mut(assignment_node: Assignment, scope: Scope, var_name: String) RETURNS !Void ->
   MUTABLE fix = TRY (build_declare_mutable_fix(var_name, scope));
   IF !(fix) THEN
     RETURN error_mut(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, {:name: var_name});
   END
   fixable_mut(assignment_node, {:code: :ASSIGN_INDEX_IMMUTABLE_LIST, :name: var_name, :category: :ownership, :level: :error, :fixes: [fix]});
 END
-FN emit_immutable_field_assignment_error_mut(assignment_node: Assignment, scope: Scope, var_name: String, field_name: String) RETURNS Void ->
+FN emit_immutable_field_assignment_error_mut(assignment_node: Assignment, scope: Scope, var_name: String, field_name: String) RETURNS !Void ->
   MUTABLE fix = TRY (build_declare_mutable_fix(var_name, scope));
   MUTABLE kw = {:name: var_name, :field: field_name};
   IF !(fix) THEN
@@ -549,7 +549,7 @@ FN emit_reentrant_error_mut(fn_node: FunctionDef, code: String@symbol) RETURNS !
   END
   fixable_mut(fn_node, {:code: code, :name: fn_node.name, :category: :reentrance, :level: :error, :fixes: [fix]});
 END
-FN emit_capture_immutable_as_mutable_error_mut(node: FunctionDef, cap_name: String, owner_scope: Scope) RETURNS Void ->
+FN emit_capture_immutable_as_mutable_error_mut(node: FunctionDef, cap_name: String, owner_scope: Scope) RETURNS !Void ->
   MUTABLE fix = TRY (build_declare_mutable_fix(cap_name, owner_scope));
   IF !(fix) THEN
     RETURN error_mut(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, {:name: cap_name});
@@ -794,7 +794,7 @@ FN emit_with_materialized_needs_tense_mut(node: WithBlock, name: String, got: Ty
   END
   fixable_mut(node, mergeKwargs(mergeKwargs({:code: :WITH_MATERIALIZED_NEEDS_TENSE}, kw), {:category: :capability, :level: :error, :fixes: [fix], :raise_in_collector: TRUE}));
 END
-FN emit_with_restrict_immutable_error_mut(node: WithBlock, var_node: Identifier) RETURNS Void ->
+FN emit_with_restrict_immutable_error_mut(node: WithBlock, var_node: Identifier) RETURNS !Void ->
   MUTABLE name = COPY var_node.name;
   MUTABLE scope = ((var_node.symbol?.scope) OR_ELSE current_scope());
   MUTABLE fix = TRY (build_declare_mutable_fix(name, scope));
@@ -818,7 +818,7 @@ FN emit_can_smash_unsupported_error_mut(node: AsyncValidationNode) RETURNS !Void
   END
   fixable_mut(node, {:code: :CAN_SMASH_NOT_SUPPORTED, :category: :reentrance, :level: :error, :fixes: [fix]});
 END
-FN emit_type_mismatch_assign_error_mut(node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS Void ->
+FN emit_type_mismatch_assign_error_mut(node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS !Void ->
   MUTABLE kw = {:got: value_type, :expected: target_type};
   MUTABLE value = node.value();
   MUTABLE fix = TRY (build_cast_wrap_fix(value, target_type));
@@ -1098,7 +1098,7 @@ FN build_auto_op_evidence_block(ops: [Set]String@symbol, candidates: []AutoCandi
   END
   RETURN msg;
 END
-FN emit_auto_resolved_finding_mut(resolution: Resolution) RETURNS Void ->
+FN emit_auto_resolved_finding_mut(resolution: Resolution) RETURNS !Void ->
   MUTABLE slot = COPY resolution.slot;
   IF (TRUE AND (slot.shape != NIL)) THEN
     RETURN;
@@ -1135,7 +1135,7 @@ FN build_auto_replace_fixes(auto_tok: ?Token, type_str: String) RETURNS ![]Fix -
     RETURN CAST(( { MUTABLE rtoc_empty_list_7: []Fix = List[]; rtoc_empty_list_7 } ) AS []Fix);
   END
 END
-FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS Void ->
+FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS !Void ->
   MUTABLE slot = COPY ambiguity.slot;
   MUTABLE label = TRY (auto_slot_label(slot));
   MUTABLE observed = COPY ambiguity.observed_types;
@@ -1164,7 +1164,7 @@ FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotI
   MUTABLE auto_tok = auto_token_for(slot);
   fixable_mut((auto_tok OR slot.decl_node), {:code: :AUTO_AMBIGUOUS_TYPE, :detail: message, :category: :type, :level: :error, :fixes: fixes});
 END
-FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS Void ->
+FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS !Void ->
   MUTABLE label = TRY (auto_slot_label(slot));
   MUTABLE base_msg = "Cannot infer type for ${label} \u{2014} no observed uses to drive inference.";
   MUTABLE slot_id = slot_id_for(slot);

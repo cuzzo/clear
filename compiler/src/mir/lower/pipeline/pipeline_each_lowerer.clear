@@ -33,9 +33,9 @@ PUB STRUCT PipelineEachLowerer {
 }
 
 PUB FN pipelineEachLowerer__lower(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS !?PipelineEachResult ->
-  RETURN TRY (pipelineEachLowerer__lower_plan(self, pipelineEachLowerer__each_plan(self, &list_node, each_op)));
+  RETURN TRY (pipelineEachLowerer__lower_plan(self, TRY (pipelineEachLowerer__each_plan(self, &list_node, each_op))));
 END
-PRIVATE FN pipelineEachLowerer__each_plan(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS PipelineEachPlan ->
+PRIVATE FN pipelineEachLowerer__each_plan(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS !PipelineEachPlan ->
   MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE bc_target = pipelineEachLowerer__bc_target_call(self);
   MUTABLE range_chain: ?PipelineRangeChain = pipelineEachLowerer__range_chain_call(self, list_node);

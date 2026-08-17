@@ -42,7 +42,7 @@ PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImpor
   MUTABLE ast = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (TRY (clearParser__new(tokens, cheat_code, (ownership_mode == :easy), budget)));
   TRY (clearParser__parse(rtoc_local_receiver_2)) };
   program__set_language_mode(&ast, ownership_mode);
-  MUTABLE annotator = semanticAnnotator__new(importer, NIL, source_dir, strict_test, cheat_code);
+  MUTABLE annotator = TRY (semanticAnnotator__new(importer, NIL, source_dir, strict_test, cheat_code));
   TRY (semanticAnnotator__annotate_mut(&annotator, &ast));
   MUTABLE rtoc_mutable_receiver_3 = pipelineRewriter__new(annotator);
   TRY (pipelineRewriter__rewrite_mut(&rtoc_mutable_receiver_3, castProgramToLocatable(ast)));

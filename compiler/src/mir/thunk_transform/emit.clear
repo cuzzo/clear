@@ -35,7 +35,7 @@ PUB FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETUR
   MUTABLE param_fields = params |> SELECT emit__frame_field(_.name, _.type_info);
   MUTABLE param_init_fields = params |> SELECT emit__frame_init(_.name, Emittable{ Ident: COPY Ident{ name: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } });
   MUTABLE context = TRY (emit__current_frame_context(fn_node));
-  MUTABLE base_cases = plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY emit__lower_frame_expr(_.cond_ast, lowering, context), value: COPY emit__lower_frame_expr(_.value_ast, lowering, context) };
+  MUTABLE base_cases = plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY TRY (emit__lower_frame_expr(_.cond_ast, lowering, context)), value: COPY TRY (emit__lower_frame_expr(_.value_ast, lowering, context)) };
   MUTABLE recurse_arg_inits = {
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_1: []Locatable = plan.recurse_args;
@@ -44,13 +44,13 @@ PUB FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETUR
   WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length() DO
     &rtoc_indexed_output_3.append({
   MUTABLE param: ThunkParamFact = COPY UNWRAP (params[rtoc_indexed_i_2]);
-  emit__frame_init(param.name, emit__lower_frame_expr(UNWRAP (rtoc_indexed_items_1[rtoc_indexed_i_2]), lowering, context))
+  emit__frame_init(param.name, TRY (emit__lower_frame_expr(UNWRAP (rtoc_indexed_items_1[rtoc_indexed_i_2]), lowering, context)))
   });
     rtoc_indexed_i_2 = rtoc_indexed_i_2 + 1;
   END
   rtoc_indexed_output_3
   };
-  MUTABLE combine_lhs = emit__lower_frame_expr(plan.combine_lhs, lowering, context);
+  MUTABLE combine_lhs = TRY (emit__lower_frame_expr(plan.combine_lhs, lowering, context));
   TRY (emit__validate_combine_op_mut(plan.combine_op));
   RETURN ThunkTrampoline{ fn_name: COPY fn_node.name, return_type: CAST(COPY return_type AS Type), param_fields: COPY param_fields, param_init_fields: COPY param_init_fields, base_cases: COPY base_cases, recurse_arg_inits: COPY recurse_arg_inits, combine_lhs: COPY combine_lhs, combine_op: COPY plan.combine_op, yield_policy: IF fn_node.tight_reentrance THEN
     :tight_skip
@@ -58,7 +58,7 @@ PUB FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETUR
     :check
   END };
 END
-FN emit__lower_frame_expr(ast_expr: Locatable, lowering: MIRLowering, context: FrameBindingContext) RETURNS Emittable ->
+FN emit__lower_frame_expr(ast_expr: Locatable, lowering: MIRLowering, context: FrameBindingContext) RETURNS !Emittable ->
   MUTABLE lowering_api = COPY lowering;
   MUTABLE mir = TRY (mIRLowering__lower(lowering_api, ast_expr));
   RETURN emit__bind_frame_refs(CAST(mir AS Emittable), context);
@@ -164,7 +164,7 @@ END
 PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan, lowering: MIRLowering) RETURNS !MutualThunkArm ->
   MUTABLE own_plan = COPY (TRY (emit__mutual_thunk_plan_mut(cf))).own_plan;
   MUTABLE context = TRY (emit__mutual_frame_context(cf));
-  MUTABLE base_cases = own_plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY emit__lower_frame_expr(_.cond_ast, lowering, context), value: COPY emit__lower_frame_expr(_.value_ast, lowering, context) };
+  MUTABLE base_cases = own_plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY TRY (emit__lower_frame_expr(_.cond_ast, lowering, context)), value: COPY TRY (emit__lower_frame_expr(_.value_ast, lowering, context)) };
   MUTABLE target_fn = COPY own_plan.target_fn;
   MUTABLE target_args = COPY own_plan.target_args;
   MUTABLE target_params = TRY (emit__function_params(CAST(TRY (emit__find_cycle_member(cf, target_fn)) AS FunctionDef)));
@@ -179,7 +179,7 @@ PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan,
   WHILE rtoc_indexed_i_5 < rtoc_indexed_items_4.length() DO
     &rtoc_indexed_output_6.append({
   MUTABLE target_param = COPY UNWRAP (target_params[rtoc_indexed_i_5]);
-  emit__frame_init(target_param.name, emit__lower_frame_expr(rtoc_indexed_items_4[rtoc_indexed_i_5], lowering, context))
+  emit__frame_init(target_param.name, TRY (emit__lower_frame_expr(rtoc_indexed_items_4[rtoc_indexed_i_5], lowering, context)))
   });
     rtoc_indexed_i_5 = rtoc_indexed_i_5 + 1;
   END

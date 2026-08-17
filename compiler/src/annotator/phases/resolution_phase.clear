@@ -277,8 +277,8 @@ PRIVATE FN resolutionSession__validate_union_method_mut(MUTABLE self: Resolution
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entry: ?SymbolEntry@multiowned = NIL;
-    IF resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name) != NIL THEN
-      entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = ((resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name))?);
+    IF TRY (resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name)) != NIL THEN
+      entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = ((TRY (resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name)))?);
     scope__resolve_entry(rtoc_local_receiver_2, requirement.name) };
     END
     IF entry EXISTS AS entry_value THEN
@@ -544,7 +544,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN KEEP UNWRAP (resolutionSession__scope_stack_for_helper(rtoc_self_view).last());
 }
 END
-PRIVATE FN resolutionSession__lookup_scope_for(self: ResolutionSession, name: String) RETURNS ?Scope@multiowned
+PRIVATE FN resolutionSession__lookup_scope_for(self: ResolutionSession, name: String) RETURNS !?Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -568,7 +568,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF scope__entry?(scope, name) THEN
       RETURN scope;
     ELSE
-      MUTABLE outer_scope: ?Scope@multiowned = resolutionSession__lookup_scope_for(rtoc_self_view, name);
+      MUTABLE outer_scope: ?Scope@multiowned = TRY (resolutionSession__lookup_scope_for(rtoc_self_view, name));
       IF outer_scope EXISTS AS outer_scope_value THEN
         IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
@@ -583,7 +583,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__lookup_type_schema(self: ResolutionSession, name: String@symbol) RETURNS Any@multiowned
+PRIVATE FN resolutionSession__lookup_type_schema(self: ResolutionSession, name: String@symbol) RETURNS !Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -731,7 +731,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF _.is_method THEN
         resolutionSession__prepare_conformance_receiver_mut(rtoc_self_view, _, _);
     END
-    resolutionSession__validate_member_type_parameter_references_mut(rtoc_self_view, _);
+    TRY (resolutionSession__validate_member_type_parameter_references_mut(rtoc_self_view, _));
     &declarations.function_declarations.append(KEEP _);
     &declarations.body_statements.append(COPY _);
     &program.statements.append(COPY _);
@@ -1169,10 +1169,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF member.is_method THEN
       resolutionSession__prepare_method_receiver_mut(rtoc_self_view, member, resolution);
     END
-    resolutionSession__validate_member_type_parameter_references_mut(rtoc_self_view, member);
+    TRY (resolutionSession__validate_member_type_parameter_references_mut(rtoc_self_view, member));
 }
 END
-PRIVATE FN resolutionSession__validate_member_type_parameter_references_mut(self: ResolutionSession, member: FunctionDef) RETURNS Void
+PRIVATE FN resolutionSession__validate_member_type_parameter_references_mut(self: ResolutionSession, member: FunctionDef) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1594,7 +1594,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) |> WHERE _ != NIL;
-    resolutionSession__resolve_recursive_struct_layouts_mut(rtoc_self_view, structs);
+    TRY (resolutionSession__resolve_recursive_struct_layouts_mut(rtoc_self_view, structs));
     FOR _ IN declarations.type_declarations DO
     IF _ IS_A ProtocolDef AS protocol_def THEN
       MUTABLE protocol_def_mutable = COPY protocol_def;
@@ -1642,7 +1642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ProtocolDef: COPY node }, :Void));
 }
 END
-PRIVATE FN resolutionSession__resolve_recursive_struct_layouts_mut(self: ResolutionSession, structs: []StructDef) RETURNS Void
+PRIVATE FN resolutionSession__resolve_recursive_struct_layouts_mut(self: ResolutionSession, structs: []StructDef) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
