@@ -902,7 +902,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF needs_whole_item THEN
       &loop_prefix.append(Let{ name: COPY "it", init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__soa_src", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "get", args: [CAST(Ident{ name: "__soa_i", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });
     END
-    MUTABLE result_type = TRY (pipelineHost__transpile_type(rtoc_self_view, Type{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(smooth_node)))) }));
+    MUTABLE result_type = TRY (pipelineHost__transpile_type(rtoc_self_view, Type{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))) }));
     MUTABLE init_stmts = List[];
     MUTABLE loop_body = List[];
     MUTABLE final_expr = NIL;

@@ -310,7 +310,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each_zig(self: Pipe
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_select_prune(self: PipelineConcurrentLowerer, lhs: Locatable, inner_expr: Locatable, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
-  MUTABLE res_zig = pipelineConcurrentLowerer__transpile_type_call(self, CAST((type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(smooth_node)))))))) AS String));
+  MUTABLE res_zig = pipelineConcurrentLowerer__transpile_type_call(self, CAST((type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))))))) AS String));
   MUTABLE alloc = pipelineConcurrentLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE expr_mir = pipelineConcurrentLowerer__visit_mir_with_placeholder_call(self, inner_expr, "it");
   RETURN pipelineConcurrentLowerer__pipeline_block_call(self, lhs, %(items, label) USE(alloc, expr_mir, res_zig) -> {
@@ -687,7 +687,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_count(self: Pipeline
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_reduce(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, conc_op: ConcurrentOp, inner: Inner, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
   MUTABLE item_t = TRY (pipelineConcurrentLowerer__concurrent_list_item_type(self, &lhs));
-  MUTABLE result_t = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }));
+  MUTABLE result_t = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) }));
   MUTABLE result_zig = TRY (type__zig_type(result_t));
   MUTABLE kind = pipelineConcurrentLowerer__list_reduce_kind(self, inner);
   MUTABLE initial = pipelineConcurrentLowerer__list_reduce_initial(self, kind, result_zig, result_t);
