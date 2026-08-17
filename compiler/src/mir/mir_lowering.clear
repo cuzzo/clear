@@ -6814,7 +6814,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: COPY (suppress_stmts + [Emittable{ Let: COPY Let{ name: COPY si, init: Emittable{ Ident: COPY idx }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY idx }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY idx }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ Ident: COPY seq }, index: Emittable{ Ident: COPY Ident{ name: COPY si, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
     ELSE_IF (stub_info[:kind] == :with) THEN
       MUTABLE args_mir = call_inputs |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, _));
-      RETURN Emittable{ Call: COPY Call{ callee: COPY stub_info[:var], args: COPY ([Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL }] + args_mir), try_wrap: TRUE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
+      RETURN Emittable{ Call: COPY Call{ callee: COPY stub_info[:var], args: COPY ([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }] + args_mir), try_wrap: TRUE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     ELSE
       RETURN NIL;
     END
@@ -9211,7 +9211,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     };
     MUTABLE arg_idents = node.params |> SELECT Ident{ name: runtimeCallSpec__call(forward_name, _), lowered_node_id: NIL, ownership_consumption: NIL };
     IF fn_needs_rt THEN
-      arg_idents = ([Ident{ name: "rt", lowered_node_id: NIL, ownership_consumption: NIL }] + arg_idents);
+      arg_idents = ([Emittable{ Ident: COPY Ident{ name: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }] + arg_idents);
     END
     MUTABLE rt_obj: ?Type = COPY node.return_type;
     MUTABLE is_error_union = !(!((((rt_obj != NIL) AND type__error_union?(rt_obj)))));
@@ -9240,13 +9240,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY cond_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: msg_text, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }
     };
     MUTABLE body =   IF is_void THEN
-      ([ExprStmt{ expr: Emittable{ Call: COPY inner_call_mir }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + (IF !((check_stmts.length() == 0)) THEN
+      ([Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY inner_call_mir }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + (IF !((check_stmts.length() == 0)) THEN
       [DebugOnly{ body: check_stmts |> SELECT SegmentStmt{ Emittable: Emittable{ IfStmt: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]
     ELSE
       NIL
     END) + [ReturnStmt{ value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }])
     ELSE
-      ([Let{ name: COPY "result", init: Emittable{ Call: COPY inner_call_mir }, mutable: FALSE, annotation: NIL, suppression: "_ = &result;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] + (IF !((check_stmts.length() == 0)) THEN
+      ([Emittable{ Let: COPY Let{ name: COPY "result", init: Emittable{ Call: COPY inner_call_mir }, mutable: FALSE, annotation: NIL, suppression: "_ = &result;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] + (IF !((check_stmts.length() == 0)) THEN
       [DebugOnly{ body: check_stmts |> SELECT SegmentStmt{ Emittable: Emittable{ IfStmt: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]
     ELSE
       NIL
@@ -10106,7 +10106,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       mod_prefix = "";
     END
     IF (TRUE AND node.fn_var_call) THEN
-      all_args = ([Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL }] + args_mir);
+      all_args = ([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }] + args_mir);
       MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(rtoc_self_view, functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY node.matched_signature)), node.args, args_mir));
       RETURN Emittable{ Call: COPY Call{ callee: "try ${node.name}", args: COPY all_args, try_wrap: FALSE, owned_return: mIRLowering__call_owned_return?(rtoc_self_view, Node{ FuncCall: COPY node }), callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     END
@@ -11331,7 +11331,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_name = "_lambda_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_417 = mIRLowering__lowering_counters(rtoc_self_view);
     mIRLoweringCounters__next_lambda_id(&rtoc_mutable_receiver_417) }}";
     MUTABLE params_list = sig.params();
-    MUTABLE params_mir: []MIRParam = ([MIRParam{ name: "_rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }] + (params_list |> SELECT {
+    MUTABLE params_mir: []MIRParam = ([Emittable{ MIRParam: COPY MIRParam{ name: "_rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } }] + (params_list |> SELECT {
     MUTABLE p_type = _.type();
     MUTABLE type_str: String = "";
       IF p_type IS_A Type THEN
