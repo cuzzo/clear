@@ -129,15 +129,14 @@ PRIVATE FN pipelineListLowerer__result_binding_name(self: PipelineListLowerer, l
   RETURN "res_list_${raw}";
 END
 PRIVATE FN pipelineListLowerer__select_result_type(self: PipelineListLowerer, MUTABLE expr_node: Locatable) RETURNS !Type ->
-  MUTABLE retained_error =   IF ((respondsTo?(expr_node, "retain_error_channel") AND (expr_node.retain_error_channel() == TRUE)) AND respondsTo?(expr_node, "error_union_type")) THEN
-    expr_node.error_union_type()
+  MUTABLE retained_error: ?Type = NIL;
+  IF (aST__node_retain_error_channel(expr_node) OR_ELSE FALSE) THEN
+    retained_error = aST__node_error_union_type(expr_node);
+  END
+  IF retained_error EXISTS AS retained_error_value THEN
+    RETURN TRY (type__new(TypeConstructionInput{ Type: COPY retained_error_value }));
   ELSE
-    NIL
-  END;
-  IF retained_error THEN
-    RETURN TRY (type__new(retained_error));
-  ELSE
-    RETURN &expr_node.full_type_mut("SELECT result");
+    RETURN TRY (aST__full_type_mut(expr_node));
   END
 END
 PRIVATE FN pipelineListLowerer__lower_limit(self: PipelineListLowerer, site: PipelineSite, limit_node: LimitOp) RETURNS !MIRBlockExpr ->

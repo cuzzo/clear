@@ -9156,3 +9156,22 @@ PUB FN aST__node_coerced_type_object(node: Locatable) RETURNS ?Type ->
   END
   RETURN NIL;
 END
+PUB FN aST__node_error_union_type(node: Locatable) RETURNS ?Type ->
+  PARTIAL MATCH node START
+    Locatable.BinaryOp AS item -> RETURN COPY item.error_union_type;,
+    Locatable.FuncCall AS item -> RETURN COPY item.error_union_type;,
+    Locatable.MethodCall AS item -> RETURN COPY item.error_union_type;,
+    Locatable.OptionalUnwrap AS item -> RETURN COPY item.error_union_type;,
+    Locatable.StaticCall AS item -> RETURN COPY item.error_union_type;,
+  END
+  RETURN NIL;
+END
+PUB FN aST__node_retain_error_channel(node: Locatable) RETURNS ?Bool ->
+  PARTIAL MATCH node START
+    Locatable.BinaryOp AS item -> RETURN COPY item.retain_error_channel;,
+    Locatable.FuncCall AS item -> RETURN COPY item.retain_error_channel;,
+    Locatable.MethodCall AS item -> RETURN COPY item.retain_error_channel;,
+    Locatable.StaticCall AS item -> RETURN COPY item.retain_error_channel;,
+  END
+  RETURN NIL;
+END
