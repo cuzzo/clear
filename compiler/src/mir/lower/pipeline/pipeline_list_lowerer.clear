@@ -188,7 +188,7 @@ PRIVATE FN pipelineListLowerer__lower_unnest(self: PipelineListLowerer, site: Pi
   MUTABLE inner_zig = pipelineListLowerer__transpile_type_call(self, inner_elem_type);
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE elem_ti = TRY (type__new(TypeConstructionInput{ StringValue: COPY inner_elem_type }));
-  MUTABLE inner_list_ti = TRY (type__new(TRY (aST__full_type_mut(unnest_node.expression))));
+  MUTABLE inner_list_ti = TRY (type__new(TRY (aST__full_type_mut(UNWRAP (unnest_node.expression)))));
   MUTABLE expr_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, UNWRAP (unnest_node.expression));
   MUTABLE inner_owned = (ownershipEffect__of(expr_mir).produces_owned OR expr_mir IS_A MakeList);
   MUTABLE inner_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } );
@@ -218,7 +218,7 @@ END
 PRIVATE FN pipelineListLowerer__lower_window(self: PipelineListLowerer, site: PipelineSite, window_node: WindowOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
-  MUTABLE expr_type_str = COPY CAST((TRY (aST__full_type_mut(window_node.expression))) AS String);
+  MUTABLE expr_type_str = COPY CAST((TRY (aST__full_type_mut(UNWRAP (window_node.expression)))) AS String);
   MUTABLE res_zig = pipelineListLowerer__transpile_type_call(self, expr_type_str);
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE size_mir = pipelineListLowerer__visit_mir_call(self, window_node.size);
