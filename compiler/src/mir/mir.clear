@@ -5511,7 +5511,7 @@ PUB STRUCT DeepCopy {
 FN deepCopy__initialize(MUTABLE self: DeepCopy, source: Any, zig_type: ?String, elem_type: ?String, strategy: String@symbol, alloc: ?String@symbol, copy_shape: String@symbol = deepCopy__copy_shape_for_zig_type(zig_type), type_info: ?Type = NIL) RETURNS Void ->
 
 END
-FN deepCopy__copy_shape_for_zig_type(zig_type: ?String) RETURNS String@symbol ->
+PUB FN deepCopy__copy_shape_for_zig_type(zig_type: ?String) RETURNS String@symbol ->
   MUTABLE text = COPY (zig_type OR_ELSE "");
   RETURN ((CAST({"": :inferred, "*": :pointer, "[]": :slice} AS {String}String@symbol))[text.substr(0, 2)] OR_ELSE ((CAST({"": :inferred, "*": :pointer, "[]": :slice} AS {String}String@symbol))[text.substr(0, 1)] OR_ELSE :value));
 END
