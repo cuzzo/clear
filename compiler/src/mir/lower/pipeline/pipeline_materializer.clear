@@ -178,7 +178,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source_mir = runtimeHost__materializer_visit_mir(rtoc_self_view.host, list_node);
     MUTABLE source_prefix: []Emittable = ( { MUTABLE rtoc_empty_list_1: []Emittable = List[]; rtoc_empty_list_1 } );
     MUTABLE source_cleanup: ?Cleanup = NIL;
-    MUTABLE forced_alloc: ?String@symbol = pipelineMaterializer__inline_source_alloc(rtoc_self_view, source_mir);
+    MUTABLE forced_alloc: ?String@symbol = TRY (pipelineMaterializer__inline_source_alloc(rtoc_self_view, source_mir));
     MUTABLE fact: ?AllocationFact = runtimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, source_mir, src_name, (forced_alloc OR_ELSE :heap), TRY (aST__full_type_mut(list_node)), NIL, "pipeline allocation", !((forced_alloc == NIL)));
     IF fact EXISTS AS fact_value THEN
       &source_prefix.append(Emittable{ AllocMark: COPY fact_value.mark });
@@ -354,7 +354,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (setup_body + item_setup.statements);
 }
 END
-PRIVATE FN pipelineMaterializer__inline_source_alloc(self: PipelineMaterializer, source_mir: Emittable) RETURNS ?String@symbol
+PRIVATE FN pipelineMaterializer__inline_source_alloc(self: PipelineMaterializer, source_mir: Emittable) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
