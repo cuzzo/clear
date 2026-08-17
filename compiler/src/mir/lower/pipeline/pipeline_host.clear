@@ -842,7 +842,7 @@ PRIVATE FN pipelineHost__concurrent_source_setup(self: PipelineHost, MUTABLE lhs
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (pipelineMaterializer__concurrent_source_setup(rtoc_self_view.materializer, &lhs));
+    RETURN TRY (pipelineMaterializer__concurrent_source_setup(&rtoc_self_view.materializer, &lhs));
 }
 END
 PRIVATE FN pipelineHost__visit_pipeline_expr_mir(MUTABLE self: PipelineHost, list_node: Locatable, expr_node: Locatable, placeholder: String = "it") RETURNS Emittable

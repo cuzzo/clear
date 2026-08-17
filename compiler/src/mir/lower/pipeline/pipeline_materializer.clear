@@ -326,10 +326,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(value_expr AS Any)], try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
 }
 END
-PUB FN pipelineMaterializer__concurrent_source_setup(self: PipelineMaterializer, MUTABLE lhs: Locatable) RETURNS ![]Emittable
+PUB FN pipelineMaterializer__concurrent_source_setup(MUTABLE self: PipelineMaterializer, MUTABLE lhs: Locatable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF lhs IS_A RangeLit AS lhs_range THEN
       RETURN TRY (pipelineMaterializer__range_concurrent_source_setup(rtoc_self_view, lhs_range));
     END
