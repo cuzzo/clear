@@ -89,13 +89,7 @@ PRIVATE FN mIRLoweringSchemas__schema_key(self: MIRLoweringSchemas, name: String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF name IS_A String@symbol AS string_symbol THEN
-      RETURN COPY string_symbol;
-    END
-    IF name IS_A String AS name_text THEN
-      RETURN symbol(name_text);
-    END
-    RETURN :unknown;
+    RETURN COPY name;
 }
 END
 PUB FN mIRLoweringSchemas__new(struct_schemas: {String@symbol}StructSchema, enum_schemas: {String@symbol}[]TypeEnumVariantsItem, union_schemas: {String@symbol}UnionSchema) RETURNS MIRLoweringSchemas@multiowned ->
