@@ -328,7 +328,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           stage_stmts = ruby_array_concat_Emittable(stage_stmts, CAST(head.pending() AS []Emittable));
           &stage_stmts.append(Emittable{ Let: COPY Let{ name: COPY next_item, init: COPY head.value(), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           item_var = COPY next_item;
-          current_type = TRY (type__new(TRY (aST__full_type_mut(UNWRAP (selectOp__expression(select_op))))));
+          current_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (selectOp__expression(select_op)))) }));
           IF (!(track_owned) OR pipelinePlaceholderUsage__placeholder_projection?(selectOp__expression(select_op))) THEN
             current_owned = FALSE;
           ELSE

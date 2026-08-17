@@ -634,7 +634,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE stream_type: Type = stream_type_branch_value?;
     MUTABLE item_type = UNWRAP (TRY (type__canonical_stream_item_type(result_type)));
-    MUTABLE source_type = TRY (type__new(TRY (aST__full_type_mut(site.list))));
+    MUTABLE source_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(site.list)) }));
     MUTABLE ctx_type = "__SelectStreamCtx${id.toString()}";
     MUTABLE alloc_var = "__select_stream${id.toString()}_alloc";
     MUTABLE stream_var = "__select_stream${id.toString()}_stream";
@@ -663,7 +663,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (respondsTo?(op.expression, "error_union_type") AND op.expression.error_union_type()) THEN
         expression_type_branch_value = TRY (type__new(op.expression.error_union_type()));
       ELSE
-        expression_type_branch_value = TRY (type__new(TRY (aST__full_type_mut(UNWRAP (op.expression)))));
+        expression_type_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (op.expression))) }));
       END
       MUTABLE expression_type: Type = expression_type_branch_value?;
       MUTABLE outer_fallible = tenseEnvelope__split_future(tense_plan.envelope).outer |> ANY (_.kind == TenseLayerKind.Fallible);

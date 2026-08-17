@@ -13629,7 +13629,7 @@ PRIVATE FN mIRLowering__next_expr_plan(MUTABLE self: MIRLowering, MUTABLE node: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE promise_type = TRY (type__new(TRY (aST__full_type_mut(node.expr))));
+    MUTABLE promise_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.expr)) }));
     MUTABLE result_type = &node.full_type_mut("NEXT result");
     MUTABLE async_shape = IF node.expr IS_A Identifier THEN
       (IF node.expr.symbol() != NIL THEN
@@ -14755,7 +14755,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((mIRLowering__current_function_has_catch?(rtoc_self_view) AND ((TRY (mIRLowering__current_function_snapshot_types(rtoc_self_view))).size() == 1))) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_554: []Stmt = List[]; rtoc_empty_list_554 } ) AS []Stmt);
     END
-    MUTABLE t = TRY (type__new(TRY (aST__full_type_mut(node.left))));
+    MUTABLE t = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.left)) }));
     IF !(type__catch_snapshot_payload?(t)) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_555: []Stmt = List[]; rtoc_empty_list_555 } ) AS []Stmt);
     END
