@@ -43,7 +43,7 @@ END
 PRIVATE FN pipelineScalarLowerer__lower_sum(self: PipelineScalarLowerer, site: PipelineSite, sum_node: SumOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE expr_mir = pipelineScalarLowerer__visit_pipeline_expr_mir(self, list_node, UNWRAP (sum_node.expression));
-  MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY &site.options.full_type_mut() }));
+  MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(site.options)) }));
   MUTABLE zero: String = "";
   IF type__integer?(result_type) THEN
     zero = "0";
@@ -66,7 +66,7 @@ END
 PRIVATE FN pipelineScalarLowerer__lower_min(self: PipelineScalarLowerer, site: PipelineSite, min_node: MinOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE expr_mir = pipelineScalarLowerer__visit_pipeline_expr_mir(self, list_node, UNWRAP (min_node.expression));
-  MUTABLE result_type = TRY (type__new(&min_node.expression.full_type_mut()));
+  MUTABLE result_type = TRY (type__new(TRY (aST__full_type_mut(min_node.expression))));
   MUTABLE zig_type = TRY (type__zig_type(result_type));
   RETURN pipelineScalarLowerer__pipeline_block_call(self, list_node, %(items, label) USE(expr_mir, result_type, zig_type, self) -> {
   rtoc_lambda_result_4 = [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "==", left: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "len", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: "MIN applied to empty list", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }, Emittable{ Let: COPY Let{ name: COPY "min_result", init: Emittable{ TypeSentinel: COPY TypeSentinel{ extreme: :max, zig_type: COPY zig_type, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY result_type, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ForStmt: COPY TRY (pipelineScalarLowerer__scalar_loop(self, Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, "it", [Emittable{ Let: COPY Let{ name: COPY "min_val", init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "<", left: Emittable{ Ident: COPY Ident{ name: "min_val", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "min_result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: "min_result", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: "min_val", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], NIL)) }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "min_result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
@@ -76,7 +76,7 @@ END
 PRIVATE FN pipelineScalarLowerer__lower_max(self: PipelineScalarLowerer, site: PipelineSite, max_node: MaxOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE expr_mir = pipelineScalarLowerer__visit_pipeline_expr_mir(self, list_node, UNWRAP (max_node.expression));
-  MUTABLE result_type = TRY (type__new(&max_node.expression.full_type_mut()));
+  MUTABLE result_type = TRY (type__new(TRY (aST__full_type_mut(max_node.expression))));
   MUTABLE zig_type = TRY (type__zig_type(result_type));
   MUTABLE sentinel = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_6: ?Emittable = NIL;
   IF type__unsigned_integer?(result_type) THEN

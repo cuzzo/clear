@@ -533,7 +533,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(self: PipelineC
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Each) THEN
     RETURN PipelineConcurrentResult{ ScopeBlock: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_stream_each(self, &lhs, plan.conc_op, castLocatableToEachOp(plan.inner))) };
   ELSE
-    RETURN TRY (pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self, plan.lhs, &plan.lhs.full_type_mut(), plan.inner));
+    RETURN TRY (pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self, plan.lhs, TRY (aST__full_type_mut(plan.lhs)), plan.inner));
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_list_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->

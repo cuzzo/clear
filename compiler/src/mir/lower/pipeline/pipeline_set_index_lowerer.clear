@@ -96,7 +96,7 @@ PRIVATE FN pipelineSetIndexLowerer__lower_range_distinct(self: PipelineSetIndexL
   MUTABLE item_var = COPY prefix.item_var;
   MUTABLE key_expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, distinct_node.expression, item_var);
   MUTABLE label = pipelineSetIndexLowerer__next_label_call(self);
-  MUTABLE source_type = &range_chain.source.full_type_mut();
+  MUTABLE source_type = TRY (aST__full_type_mut(range_chain.source));
   MUTABLE defer_deinit_branch_value: ?MIRDeferStmt = NIL;
   IF TRY (type__bounded_stream?(source_type)) THEN
     defer_deinit_branch_value = TRY (pipelineLazyRangePrefix__deinit_stmt(prefix));
@@ -180,7 +180,7 @@ PRIVATE FN pipelineSetIndexLowerer__lower_stream_index(self: PipelineSetIndexLow
   MUTABLE item_var = COPY prefix.item_var;
   MUTABLE expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, expr_node, item_var);
   MUTABLE label = pipelineSetIndexLowerer__next_label_call(self);
-  MUTABLE source_type = &range_chain.source.full_type_mut();
+  MUTABLE source_type = TRY (aST__full_type_mut(range_chain.source));
   MUTABLE defer_deinit_branch_value: ?MIRDeferStmt = NIL;
   IF TRY (type__bounded_stream?(source_type)) THEN
     defer_deinit_branch_value = TRY (pipelineLazyRangePrefix__deinit_stmt(prefix));

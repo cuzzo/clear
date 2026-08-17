@@ -15844,7 +15844,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN value.items()[index_value].full_type_mut({:context: "destructuring literal element"});
     END
     IF type__tuple?((&node.value.full_type_mut("destructuring tuple value"))) THEN
-      RETURN COPY (TRY (type__generic_args((&node.value.full_type_mut()))))[index_value];
+      RETURN COPY (TRY (type__generic_args((TRY (aST__full_type_mut(node.value))))))[index_value];
     END
     RETURN COPY fallback;
 }
@@ -16612,8 +16612,8 @@ PRIVATE FN typeAnalysisSession__visit_RangeLit(MUTABLE self: TypeAnalysisSession
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.start));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.finish));
-    MUTABLE start_type = (&node.start.full_type_mut()).resolved();
-    MUTABLE finish_type = (&node.finish.full_type_mut()).resolved();
+    MUTABLE start_type = (TRY (aST__full_type_mut(node.start))).resolved();
+    MUTABLE finish_type = (TRY (aST__full_type_mut(node.finish))).resolved();
     IF !(type__numeric?((TRY (type__new(start_type))))) THEN
       typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :RANGE_START_NEEDS_NUMERIC }, [], {:got: start_type});
     END
