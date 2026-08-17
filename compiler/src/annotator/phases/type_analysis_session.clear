@@ -16612,8 +16612,8 @@ PRIVATE FN typeAnalysisSession__visit_RangeLit(MUTABLE self: TypeAnalysisSession
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.start));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.finish));
-    MUTABLE start_type = (TRY (aST__full_type_mut(node.start))).resolved();
-    MUTABLE finish_type = (TRY (aST__full_type_mut(node.finish))).resolved();
+    MUTABLE start_type = type__resolved(TRY (aST__full_type_mut(node.start)));
+    MUTABLE finish_type = type__resolved(TRY (aST__full_type_mut(node.finish)));
     IF !(type__numeric?((TRY (type__new(start_type))))) THEN
       typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :RANGE_START_NEEDS_NUMERIC }, [], {:got: start_type});
     END

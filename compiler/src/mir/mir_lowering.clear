@@ -16413,7 +16413,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       MIRBinOp{ op: "+", left: Emittable{ MIRCast: COPY MIRCast{ expr: COPY end_expr, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }
     END;
-    MUTABLE element_type = (TRY (aST__full_type_mut(node.target))).element_type();
+    MUTABLE element_type = type__element_type(TRY (aST__full_type_mut(node.target)));
     MUTABLE elem_zig: String = "";
     IF element_type THEN
       elem_zig = TRY (type__zig_type((TRY (type__new(element_type)))));
