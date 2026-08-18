@@ -219,10 +219,10 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    IF callsites[_.call_site_facts[rtoc_idx].callee_name] == NIL THEN
-        callsites[_.call_site_facts[rtoc_idx].callee_name] = List[];
-      END
-    (callsites[_.call_site_facts[rtoc_idx].callee_name])?.append(_.call_site_facts[rtoc_idx]);
+    MUTABLE callee_key: String = COPY _.call_site_facts[rtoc_idx].callee_name;
+    MUTABLE callee_facts: []CallSiteFact = COPY (callsites[callee_key] OR_ELSE List[]);
+    &callee_facts.append(COPY _.call_site_facts[rtoc_idx]);
+    callsites[callee_key] = COPY callee_facts;
   rtoc_idx = rtoc_idx + 1;
   END
   END
