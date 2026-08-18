@@ -1111,7 +1111,7 @@ PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, arg
   MUTABLE receiver_root: ?Identifier = aST__root_identifier(receiver);
   MUTABLE receiver_sym: ?SymbolEntry = NIL;
   IF receiver_root != NIL THEN
-    receiver_sym = COPY (receiver_root?).symbol;
+    receiver_sym = COPY UNWRAP (receiver_root).symbol;
   END
   IF receiver_sym EXISTS AS receiver_sym_value THEN
     MUTABLE receiver_sym_value_mutable = COPY receiver_sym_value;
@@ -1169,7 +1169,7 @@ PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Lo
     RETURN TRUE;
   END
   MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
-  IF (((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_14 = (entry?);
+  IF (((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_14 = UNWRAP (entry);
   cleanupEntry__present?(rtoc_local_receiver_14) }) AND cleanupEntry__frame?(entry)) THEN
     RETURN TRUE;
   END
@@ -1242,7 +1242,7 @@ PUB FN escapeAnalysis__heap_owned_transfer_source?(arg: ?Locatable) RETURNS Bool
   MUTABLE root: ?Identifier = root_branch_value;
   MUTABLE sym: ?SymbolEntry = NIL;
   IF root != NIL THEN
-    sym = COPY (root?).symbol;
+    sym = COPY UNWRAP (root).symbol;
   END
   RETURN escapeAnalysis__symbol_heap?(sym);
 CATCH Transient, Input, System, NotFound, Permission, Canceled
@@ -1577,7 +1577,7 @@ PUB FN escapeAnalysis__receiver_is_param?(receiver: Locatable) RETURNS Bool ->
   MUTABLE root: ?Identifier = aST__root_identifier(receiver);
   MUTABLE sym: ?SymbolEntry = NIL;
   IF root != NIL THEN
-    sym = COPY (root?).symbol;
+    sym = COPY UNWRAP (root).symbol;
   END
   RETURN !(!(((((sym != NIL) AND TRUE) AND symbolEntry__is_param(sym)))));
 END
@@ -1725,7 +1725,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
     END
   END
   MUTABLE expr_t = TRY (aST__full_type_mut(expr));
-  IF (!(expr IS_A Identifier) AND ((expr_t != NIL) AND (expr_t?).rodata?())) THEN
+  IF (!(expr IS_A Identifier) AND ((expr_t != NIL) AND UNWRAP (expr_t).rodata?())) THEN
     RETURN FALSE;
   END
   IF (ti.rodata?() OR type__borrowed_reference?(ti)) THEN

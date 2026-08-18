@@ -128,13 +128,13 @@ PRIVATE FN liveness__collect_tail_uses(seg: Segment, uses_by_seg: {Int64}[Set]St
     MUTABLE call_node = tail.call_node();
     IF call_node IS_A MethodCall THEN
       liveness__walk_idents(call_node.object(), %(name: String) USE(bucket) -> {
-  (bucket?).insert(COPY name);
+  UNWRAP (bucket).insert(COPY name);
   rubyToClearVoid()
       });
     END
     FOR _ IN call_node.args() DO
     liveness__walk_idents(_, %(name: String) USE(bucket) -> {
-  (bucket?).insert(COPY name);
+  UNWRAP (bucket).insert(COPY name);
   rubyToClearVoid()
     });
     END

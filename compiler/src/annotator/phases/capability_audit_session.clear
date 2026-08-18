@@ -4114,7 +4114,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE anchor: ?Token@multiowned = NIL;
     IF sample != NIL THEN
-      anchor = COPY KEEP (sample?).site_token;
+      anchor = COPY KEEP UNWRAP (sample).site_token;
     END
     RETURN capabilityAuditSession__error_mut(rtoc_self_view, (anchor OR_ELSE capabilityAuditSession__semantic_program(rtoc_self_view)), CapabilityAuditCodeOrMessage{ SymbolValue: :LOCK_CYCLE_DETECTED }, [], {:kind: kind, :types: types_str, :sites: site_lines});
 }

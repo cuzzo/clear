@@ -273,7 +273,7 @@ PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []AstBodyNode, binding
       END
   ELSE_IF node IS_A Assignment AS assignment THEN
       MUTABLE target: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable(assignment.name));
-      IF (((target != NIL) AND (target?).name) AND local_names.contains?(target.name)) THEN
+      IF (((target != NIL) AND UNWRAP (target).name) AND local_names.contains?(target.name)) THEN
         RETURN;
       END
       cleanupClassifier__mark_iteration_values_function_mut(assignment.value, local_entries);
@@ -285,7 +285,7 @@ PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []AstBodyNode, binding
       cleanupClassifier__mark_call_lifetime_extensions_mut(func_call.args, cleanupClassifier__params_for_call(func_call), local_entries, NIL);
   ELSE_IF (node IS_A MethodCall) THEN
       MUTABLE receiver: ?Identifier = aST__root_identifier(node.object());
-      MUTABLE receiver_nonlocal = !(!(((((receiver != NIL) AND (receiver?).name) AND !(local_names.contains?(receiver.name))))));
+      MUTABLE receiver_nonlocal = !(!(((((receiver != NIL) AND UNWRAP (receiver).name) AND !(local_names.contains?(receiver.name))))));
       cleanupClassifier__mark_call_lifetime_extensions_mut(node.args(), cleanupClassifier__params_for_method_call(node) |> SKIP 1, local_entries, receiver_nonlocal);
   END
   rubyToClearVoid()
@@ -1073,7 +1073,7 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
   END
   MUTABLE lifecycle: ?LifecyclePlan = NIL;
   IF lifecycle_registry != NIL THEN
-    lifecycle = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_13 = (lifecycle_registry?);
+    lifecycle = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_13 = UNWRAP (lifecycle_registry);
   TRY (lifecycleRegistry__fetch_binding(rtoc_local_receiver_13, node, ti)) };
   END
   IF ((lifecycle != NIL) AND !(lifecyclePlan__needs_drop?(lifecycle))) THEN

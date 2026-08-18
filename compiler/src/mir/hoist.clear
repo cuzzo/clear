@@ -432,11 +432,11 @@ PRIVATE FN hoist__callee_param_type(call: Locatable, idx: Int64) RETURNS !?Type 
   END
   MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(aST__node__matched_signature(call));
   IF signature != NIL THEN
-  IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = (signature?);
+  IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = UNWRAP (signature);
   TRY (functionSignature__params(rtoc_local_receiver_9)) } != NIL THEN
-    IF (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = (signature?);
+    IF (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = UNWRAP (signature);
     TRY (functionSignature__params(rtoc_local_receiver_9)) })?)[idx] != NIL THEN
-      RETURN (((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = (signature?);
+      RETURN (((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = UNWRAP (signature);
     TRY (functionSignature__params(rtoc_local_receiver_9)) })?)[idx])?).type();
     ELSE
       RETURN NIL;
@@ -451,7 +451,7 @@ END
 PRIVATE FN hoist__collection_value_store_call?(call: MethodCall) RETURNS !Bool ->
   MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_stdlib_def));
   sig = (sig OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY call.matched_signature)));
-  IF !((((((sig != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_10 = (sig?);
+  IF !((((((sig != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_10 = UNWRAP (sig);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_10)) }) AND TRY (functionSignature__takes_ownership?(&sig)))) OR TRY (intrinsicRegistry__collection_value_store_method?(Name{ StringValue: COPY call.name }, call.args.length())))) THEN
     RETURN FALSE;
   END

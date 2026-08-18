@@ -250,7 +250,7 @@ FN emit_use_of_moved_error_mut(use_node: Identifier, og_node: OwnershipNode) RET
       END
       MUTABLE scope = lookup_scope_for(name);
       MUTABLE decl = COPY (IF scope != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (scope?);
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = UNWRAP (scope);
       scope__resolve_entry(rtoc_local_receiver_2, name) }
       ELSE
         NIL
@@ -761,7 +761,7 @@ FN emit_with_materialized_needs_tense_mut(node: WithBlock, name: String, got: Ty
   MUTABLE src = source_code();
   MUTABLE scope = lookup_scope_for(name);
   MUTABLE decl = COPY (IF scope != NIL THEN
-    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = (scope?);
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = UNWRAP (scope);
   scope__resolve_entry(rtoc_local_receiver_3, name) }
   ELSE
     NIL
@@ -900,7 +900,7 @@ FN build_decl_cap_insert_fix(name: String, sigil: String, description_code: Stri
   MUTABLE src = source_code();
   MUTABLE scope = lookup_scope_for(name);
   MUTABLE decl = COPY (IF scope != NIL THEN
-    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_4 = (scope?);
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_4 = UNWRAP (scope);
   scope__resolve_entry(rtoc_local_receiver_4, name) }
   ELSE
     NIL
@@ -928,7 +928,7 @@ FN build_decl_cap_replace_fix(name: String, old_sigil: String, new_sigil: String
   MUTABLE src = source_code();
   MUTABLE scope = lookup_scope_for(name);
   MUTABLE decl = COPY (IF scope != NIL THEN
-    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = (scope?);
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = UNWRAP (scope);
   scope__resolve_entry(rtoc_local_receiver_5, name) }
   ELSE
     NIL

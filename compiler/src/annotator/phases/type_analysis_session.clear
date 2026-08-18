@@ -3210,7 +3210,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn_ctx: ?FunctionContext@multiowned = typeAnalysisSession__current_fn_ctx(rtoc_self_view);
     MUTABLE saved_returns: ?[]ReturnFact = NIL;
     IF fn_ctx != NIL THEN
-      saved_returns = COPY (fn_ctx?).returns;
+      saved_returns = COPY UNWRAP (fn_ctx).returns;
     END
     IF fn_ctx EXISTS AS fn_ctx_value THEN
       MUTABLE fn_ctx_value_mutable = COPY fn_ctx_value;
@@ -4343,7 +4343,7 @@ PRIVATE FN typeAnalysisSession__any_element_collection_param?(self: TypeAnalysis
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE expected_elem: ?Type = TRY (type__element_type(expected_type));
-    MUTABLE expected_accepts_any_element = (((TRY (type__collection_value?(expected_type)) OR type__dynamic?(expected_type))) AND ((expected_elem != NIL) AND type__any?((expected_elem?))));
+    MUTABLE expected_accepts_any_element = (((TRY (type__collection_value?(expected_type)) OR type__dynamic?(expected_type))) AND ((expected_elem != NIL) AND type__any?(UNWRAP (expected_elem))));
     MUTABLE actual_is_collection_like = (TRY (type__collection_value?(actual_type)) OR TRY (type__runtime_stream?(actual_type)));
     RETURN !(!(((expected_accepts_any_element AND actual_is_collection_like))));
 }
@@ -4424,7 +4424,7 @@ PRIVATE FN typeAnalysisSession__atomic_cell_arg?(self: TypeAnalysisSession, arg_
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sym: ?SymbolEntry = COPY arg_node.symbol;
-    RETURN !(!(((((sym != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_80 = (sym?);
+    RETURN !(!(((((sym != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_80 = UNWRAP (sym);
     symbolEntry__atomic?(rtoc_local_receiver_80) }) AND !(symbolEntry__indirect?(sym))))));
 }
 END
@@ -5320,7 +5320,7 @@ PRIVATE FN typeAnalysisSession__analyze_collect_op(self: TypeAnalysisSession, MU
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE lhs_t = TRY (aST__full_type_mut(node.left));
-    IF !((((lhs_t != NIL) AND type__future?((lhs_t?))) AND type__observable?(lhs_t))) THEN
+    IF !((((lhs_t != NIL) AND type__future?(UNWRAP (lhs_t))) AND type__observable?(lhs_t))) THEN
       MUTABLE ty: String = "<unknown>";
       IF lhs_t != NIL THEN
         ty = lhs_t.resolved();
@@ -5335,7 +5335,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       NIL
     END);
-    IF (((lhs_t != NIL) AND type__observable?((lhs_t?))) AND ((inner != NIL) AND type__array?((inner?)))) THEN
+    IF (((lhs_t != NIL) AND type__observable?(UNWRAP (lhs_t))) AND ((inner != NIL) AND type__array?(UNWRAP (inner)))) THEN
       MUTABLE elem_sym = type__to_sym(TRY (type__element_type(inner)));
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${elem_sym}[]") }))));
       node.storage = :heap;
@@ -6562,7 +6562,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END;
-    IF !((((target_info != NIL) AND type__sharded?((target_info?))) AND FALSE)) THEN
+    IF !((((target_info != NIL) AND type__sharded?(UNWRAP (target_info))) AND FALSE)) THEN
       typeAnalysisSession__error_mut(rtoc_self_view, shard_op.target_map(), TypeAnalysisCodeOrMessage{ SymbolValue: :SHARD_TARGET_BAD }, [], {:remediation: "SHARD routes items to owning schedulers \u{2014} :locked maps don't have ownership."});
     END
     MUTABLE map_key = (IF target_info != NIL THEN
@@ -7056,7 +7056,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     END
-    IF (allow_stream AND ((lhs_type != NIL) AND (lhs_type?).runtime_stream?())) THEN
+    IF (allow_stream AND ((lhs_type != NIL) AND UNWRAP (lhs_type).runtime_stream?())) THEN
       RETURN;
     END
     IF (op_name == "SELECT") THEN
@@ -7662,10 +7662,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_174 = TRY (type__element_type(shape));
     END
     rtoc_ternary_value_174? };
-    IF (((payload != NIL) AND (payload?).indirect?()) AND type__primitive?(payload)) THEN
+    IF (((payload != NIL) AND UNWRAP (payload).indirect?()) AND type__primitive?(payload)) THEN
       typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], {:type: payload.resolved()});
     END
-    IF (type__sharded?(type_obj) AND ((payload != NIL) AND (payload?).multiowned?())) THEN
+    IF (type__sharded?(type_obj) AND ((payload != NIL) AND UNWRAP (payload).multiowned?())) THEN
       typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_ELEMENT_REQUIRES_SHARED }, [], {:got: CAST(payload AS String)});
     END
 }
@@ -8616,7 +8616,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         type__mark_heap_allocated_mut(&node_type);
       END
     END
-    IF (!(coll_src) AND ((decl_type != NIL) AND type__soa((decl_type?)))) THEN
+    IF (!(coll_src) AND ((decl_type != NIL) AND type__soa(UNWRAP (decl_type)))) THEN
       TRY (type__mark_soa_layout_mut(&node_type));
     END
     IF decl_type EXISTS AS decl_type_value THEN
@@ -9763,7 +9763,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE old_scope: ?Scope@multiowned = CAST(aSTCapability__old_scope(cap) AS ?Scope@multiowned);
     MUTABLE source_entry: ?SymbolEntry@multiowned = NIL;
     IF old_scope != NIL THEN
-      source_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_216 = (old_scope?);
+      source_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_216 = UNWRAP (old_scope);
     scope__resolve_entry(rtoc_local_receiver_216, var_name) };
     END
     MUTABLE source_type_branch_value: ?Type = NIL;
@@ -10469,7 +10469,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE scope_entry: ?SymbolEntry = identifier_mutable.symbol;
       MUTABLE ti: ?Type@multiowned = NIL;
       IF scope_entry != NIL THEN
-        ti = COPY symbolEntry__type((scope_entry?));
+        ti = COPY symbolEntry__type(UNWRAP (scope_entry));
       END
       IF scope_entry EXISTS AS scope_entry_value THEN
         MUTABLE scope_entry_value_mutable = COPY scope_entry_value;
@@ -10557,7 +10557,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         runtimeCallSpec__call(CAST(arg_validator_value AS RuntimeCallSpec), node, node.args, obj_type, method(CAST(symbol("error!") AS String)));
       END
       MUTABLE element_type: ?Type = TRY (type__element_type(obj_type));
-      IF ((((element_type != NIL) AND TRY (type__node_reference?((element_type?)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
+      IF ((((element_type != NIL) AND TRY (type__node_reference?(UNWRAP (element_type)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
@@ -10617,7 +10617,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.can_fail = (((IF node.can_fail != NIL THEN node.can_fail ELSE functionSignature__can_fail(defn_value_mutable) END) != NIL) OR defn_allocates);
       node.error_kind = TRY (functionSignature__intrinsic_error_kind(&defn_value_mutable));
       node.error_type = TRY (functionSignature__intrinsic_error_type(&defn_value_mutable));
-      IF ((((element_type != NIL) AND TRY (type__node_reference?((element_type?)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
+      IF ((((element_type != NIL) AND TRY (type__node_reference?(UNWRAP (element_type)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
@@ -12165,7 +12165,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       typeAnalysisSession__validate_indirect_collection_insertion_mut(rtoc_self_view, &node);
       MUTABLE receiver_type = TRY (aST__full_type_mut(node.object));
       MUTABLE element_type: ?Type = TRY (type__element_type(receiver_type));
-      IF ((((element_type != NIL) AND TRY (type__node_reference?((element_type?)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
+      IF ((((element_type != NIL) AND TRY (type__node_reference?(UNWRAP (element_type)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
@@ -12819,7 +12819,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         receiver_type
       END;
       MUTABLE element_type: ?Type = TRY (type__element_type(resolved_receiver_type));
-      IF ((((element_type != NIL) AND TRY (type__node_reference?((element_type?)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
+      IF ((((element_type != NIL) AND TRY (type__node_reference?(UNWRAP (element_type)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
@@ -14838,7 +14838,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       DeclarationNode.BindExpr AS item ->
         value_node = COPY item.value;,
     END
-    IF (value_node IS_A BgBlock AND ((declared != NIL) AND TRY (type__single_future?((declared?))))) THEN
+    IF (value_node IS_A BgBlock AND ((declared != NIL) AND TRY (type__single_future?(UNWRAP (declared))))) THEN
       MUTABLE payload = TRY (type__tense_type(declared));
       IF (((payload AND !(type__dynamic?(payload))) AND !(type__auto?(payload))) AND !(([symbol("Auto"), :Any]).contains?(type__resolved(payload)))) THEN
         value_node.declared_async_payload = payload;
@@ -15486,7 +15486,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE tscope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, tname));
       MUTABLE tsym: ?SymbolEntry@multiowned = NIL;
       IF tscope != NIL THEN
-        tsym = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_384 = (tscope?);
+        tsym = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_384 = UNWRAP (tscope);
       scope__resolve_entry(rtoc_local_receiver_384, tname) };
       END
       IF (IF (IF (IF tsym != NIL THEN
@@ -18546,7 +18546,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__resolve_variable_scope(rtoc_self_view, identifier__name(identifier)));
       MUTABLE entry: ?SymbolEntry@multiowned = NIL;
       IF scope != NIL THEN
-        entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_447 = (scope?);
+        entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_447 = UNWRAP (scope);
       scope__resolve_entry(rtoc_local_receiver_447, identifier__name(identifier)) };
       END
       IF scope EXISTS AS scope_value THEN
@@ -19074,7 +19074,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_ternary_value_462? });
     END
     rtoc_ternary_value_463 };
-    IF (((expected_t != NIL) AND type__symbol?((expected_t?))) AND type__symbol?(vti)) THEN
+    IF (((expected_t != NIL) AND type__symbol?(UNWRAP (expected_t))) AND type__symbol?(vti)) THEN
       RETURN NIL;
     END
     IF type__list_collection?(vti) THEN
@@ -20135,7 +20135,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         NIL
       END));
       IF sym != NIL THEN
-    RETURN (sym?).scope_depth;
+    RETURN UNWRAP (sym).scope_depth;
       ELSE
     RETURN NIL;
       END
