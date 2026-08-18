@@ -152,12 +152,12 @@ PRIVATE FN pipelineEachLowerer__lower_list_each(self: PipelineEachLowerer, MUTAB
   RETURN ScopeBlock{ body: stmts, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN pipelineEachLowerer__with_iteration_rewind(self: PipelineEachLowerer, body: []Emittable) RETURNS ![]Emittable ->
-  IF !(pipelineEachLowerer__body_frame_transients?(self, body)) THEN
+  IF !(TRY (pipelineEachLowerer__body_frame_transients?(self, body))) THEN
     RETURN COPY body;
   END
   RETURN (COPY (TRY (pipelineEachLowerer__loop_mark_stmts_call(self))) + body);
 END
-PRIVATE FN pipelineEachLowerer__body_frame_transients?(self: PipelineEachLowerer, body: []Emittable) RETURNS Bool ->
+PRIVATE FN pipelineEachLowerer__body_frame_transients?(self: PipelineEachLowerer, body: []Emittable) RETURNS !Bool ->
   MUTABLE found: Bool = FALSE;
   MUTABLE boundary = %(node: Emittable) -> (node IS_A MIRBgBlock OR node IS_A LambdaExpr);
   TRY (mIR__each_node_until(NodeRoot{ ArrayValue: COPY body }, boundary, %(node: Emittable) -> {

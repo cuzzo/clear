@@ -161,7 +161,7 @@ PRIVATE FN pipelineConcurrentLowerer__concurrent_source_kind(self: PipelineConcu
   IF (pipelineConcurrentLowerer__bc_target_call(self) AND !(pipelineConcurrentLowerer__stream_type?(self, lhs_type))) THEN
     RETURN PipelineConcurrentSourceKind.BcMaterialized;
   END
-  IF pipelineConcurrentLowerer__bounded_identifier_stream?(self, &lhs) THEN
+  IF TRY (pipelineConcurrentLowerer__bounded_identifier_stream?(self, &lhs)) THEN
     RETURN PipelineConcurrentSourceKind.BoundedStream;
   END
   IF pipelineConcurrentLowerer__runtime_stream_source?(self, lhs, lhs_type) THEN
@@ -734,7 +734,7 @@ PRIVATE FN pipelineConcurrentLowerer__unwrap_binding_source(self: PipelineConcur
     RETURN CAST(Tuple{NIL, lhs} AS Tuple<?String, Locatable>);
   END
 END
-PRIVATE FN pipelineConcurrentLowerer__bounded_identifier_stream?(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable) RETURNS Bool ->
+PRIVATE FN pipelineConcurrentLowerer__bounded_identifier_stream?(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable) RETURNS !Bool ->
   RETURN ((!(lhs IS_A RangeLit) AND lhs IS_A Identifier) AND (TRY (aST__full_type_mut(lhs))).bounded_stream?());
 END
 PRIVATE FN pipelineConcurrentLowerer__stream_type?(self: PipelineConcurrentLowerer, type_info: Type) RETURNS !Bool ->

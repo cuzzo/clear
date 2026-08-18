@@ -1219,7 +1219,7 @@ PUB FN escapeAnalysis__each_loop_body_node(body: []Node, block: FN(Locatable) ->
   END
   NIL;
 END
-PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
+PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF arg? IS_A MoveNode AS move_node THEN
     RETURN type_requires_owned_storage?(TRY (aST__full_type_mut(move_node.value)), schema_lookup);
   END

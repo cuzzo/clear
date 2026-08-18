@@ -363,7 +363,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
         MUTABLE get_field_mutable = COPY get_field;
-        IF mIRPass__owning_field_move?(rtoc_self_view, Locatable{ GetField: COPY get_field_mutable }) THEN
+        IF TRY (mIRPass__owning_field_move?(rtoc_self_view, Locatable{ GetField: COPY get_field_mutable })) THEN
           MUTABLE root: ?Identifier = aST__root_identifier(Locatable{ GetField: COPY get_field_mutable });
           IF root EXISTS AS root_value THEN
             MUTABLE root_value_mutable = COPY root_value;
@@ -471,7 +471,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN &names.insert(name);
 }
 END
-PRIVATE FN mIRPass__owning_field_move?(self: MIRPass, MUTABLE node: Locatable) RETURNS Bool
+PRIVATE FN mIRPass__owning_field_move?(self: MIRPass, MUTABLE node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

@@ -1298,7 +1298,7 @@ PRIVATE FN ownershipDataflow__collect_field_owner_transfer(self: OwnershipDatafl
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(ownershipDataflow__owning_field_move?(rtoc_self_view, Locatable{ GetField: COPY node })) THEN
+    IF !(TRY (ownershipDataflow__owning_field_move?(rtoc_self_view, Locatable{ GetField: COPY node }))) THEN
       TRY (ownershipDataflow__collect_explicit_in(rtoc_self_view, Locatable{ GetField: COPY node }, step));
       RETURN;
     END
@@ -1416,7 +1416,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (((((TRY (type__node_reference?(ti)) OR type__primitive?(ti)) OR TRY (type__string?(ti))) OR type__any?(ti)) OR type__void?(ti)) OR ((TRY (type__any_rc?(ti)) AND !(is_atomic_ptr))));
 }
 END
-PRIVATE FN ownershipDataflow__owning_field_move?(self: OwnershipDataflow, MUTABLE node: Locatable) RETURNS Bool
+PRIVATE FN ownershipDataflow__owning_field_move?(self: OwnershipDataflow, MUTABLE node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

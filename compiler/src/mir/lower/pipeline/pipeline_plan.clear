@@ -54,7 +54,7 @@ PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RET
   MUTABLE rhs: Locatable = COPY castLocatableToLocatable(node.right);
   MUTABLE site = PipelineSite{ list: COPY lhs, options: COPY node };
   MUTABLE bc_target = (pipelinePlanBuilder__lowering_target_call(self) == :bc);
-  IF pipelinePlanBuilder__soa_scalar_fold?(self, &lhs, rhs) THEN
+  IF TRY (pipelinePlanBuilder__soa_scalar_fold?(self, &lhs, rhs)) THEN
     RETURN pipelinePlanBuilder__operation(self, PipelineExecutionKind.SoaScalarFold, site, rhs, PipelineTerminalKind.ScalarFold, bc_target, PipelineSourceKind.Soa);
   END
   IF aST__pipeline_range_fold?(rhs) THEN
@@ -80,7 +80,7 @@ PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RET
     RETURN NIL;
   END
 END
-PRIVATE FN pipelinePlanBuilder__soa_scalar_fold?(self: PipelinePlanBuilder, MUTABLE lhs: Locatable, rhs: Locatable) RETURNS Bool ->
+PRIVATE FN pipelinePlanBuilder__soa_scalar_fold?(self: PipelinePlanBuilder, MUTABLE lhs: Locatable, rhs: Locatable) RETURNS !Bool ->
   MUTABLE lhs_type = TRY (aST__full_type_mut(lhs));
   RETURN ((type__soa_linear_collection?(lhs_type) AND aST__pipeline_range_fold?(rhs)) AND (pipelinePlanBuilder__lowering_target_call(self) != :bc));
 END
