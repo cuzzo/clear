@@ -129,43 +129,43 @@ PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schem
   END
   END
   FOR _ IN facts_by_name.values() DO
-  escapeAnalysis__record_placement_phase_mut(&placements, _, :owning_return, %() USE(schema_lookup, _) -> {
+  TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :owning_return, %() USE(schema_lookup, _) -> {
   TRY (escapeAnalysis__mark_heap_return_facts_mut(_, schema_lookup));
   rubyToClearVoid()
-  });
+  }));
   END
   FOR _ IN facts_by_name.values() DO
-  escapeAnalysis__record_placement_phase_mut(&placements, _, :receiver_backing_storage, %() USE(_) -> {
+  TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :receiver_backing_storage, %() USE(_) -> {
     TRY (escapeAnalysis__mark_param_receiver_allocations_heap_mut(_.escape_nodes));
     rubyToClearVoid()
-  });
-  escapeAnalysis__record_placement_phase_mut(&placements, _, :recursive_aggregate_owner, %() USE(schema_lookup, _) -> {
+  }));
+  TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :recursive_aggregate_owner, %() USE(schema_lookup, _) -> {
     TRY (escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(_, schema_lookup));
     rubyToClearVoid()
-  });
+  }));
   END
   FOR _ IN facts_by_name.values() DO
   MUTABLE body = COPY _.fn.body;
-  escapeAnalysis__record_placement_phase_mut(&placements, _, :escape_sink, %() USE(bg_heap, facts_by_name, fn_nodes, schema_lookup, _) -> {
+  TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :escape_sink, %() USE(bg_heap, facts_by_name, fn_nodes, schema_lookup, _) -> {
     TRY (escapeAnalysis__mark_body_escapes_mut(_, fn_nodes, facts_by_name, bg_heap, schema_lookup));
     rubyToClearVoid()
-  });
-  escapeAnalysis__record_placement_phase_mut(&placements, _, :loop_receiver_backing_storage, %() USE(body) -> {
+  }));
+  TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :loop_receiver_backing_storage, %() USE(body) -> {
     TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(body));
     rubyToClearVoid()
-  });
-  escapeAnalysis__record_placement_phase_mut(&placements, _, :assignment_ownership, %() USE(facts_by_name, fn_nodes, schema_lookup, _) -> {
+  }));
+  TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :assignment_ownership, %() USE(facts_by_name, fn_nodes, schema_lookup, _) -> {
     TRY (escapeAnalysis__propagate_assignment_ownership_mut(_, fn_nodes, facts_by_name, schema_lookup));
     rubyToClearVoid()
-  });
-  escapeAnalysis__record_placement_phase_mut(&placements, _, :hoist_dependency, %() USE(_) -> {
+  }));
+  TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :hoist_dependency, %() USE(_) -> {
     TRY (escapeAnalysis__propagate_hoist_dependencies_mut(_));
     rubyToClearVoid()
-  });
-  escapeAnalysis__record_placement_phase_mut(&placements, _, :value_block_placement, %() USE(_) -> {
+  }));
+  TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :value_block_placement, %() USE(_) -> {
     escapeAnalysis__propagate_value_block_placements_mut(_);
     rubyToClearVoid()
-  });
+  }));
   END
   RETURN EscapeAnalysisResult{ heap_fns: COPY TRY (escapePlacementFacts__heap_function_names(placements)), bg_heap: COPY bg_heap, placements: COPY placements };
 END
@@ -651,7 +651,7 @@ PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, 
   ELSE_IF (sink.handler == symbol("apply_destructuring_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_destructuring_escape_sink_mut(castLocatableToDestructuringAssignment(node), context));
   ELSE_IF (sink.handler == symbol("apply_execution_boundary_escape_sink!")) THEN
-    escapeAnalysis__apply_execution_boundary_escape_sink_mut(CAST(node AS Any@multiowned), context);
+    TRY (escapeAnalysis__apply_execution_boundary_escape_sink_mut(CAST(node AS Any@multiowned), context));
   ELSE_IF (sink.handler == symbol("apply_lambda_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_lambda_escape_sink_mut(castLocatableToLambdaLit(node), context));
   ELSE_IF (sink.handler == symbol("apply_func_call_escape_sink!")) THEN
@@ -750,10 +750,10 @@ PUB FN escapeAnalysis__mark_value_position_heap_mut(expr: ?Locatable) RETURNS Vo
     END
   END
 END
-PUB FN escapeAnalysis__apply_execution_boundary_escape_sink_mut(node: Node, context: EscapeContext) RETURNS Void ->
+PUB FN escapeAnalysis__apply_execution_boundary_escape_sink_mut(node: Node, context: EscapeContext) RETURNS !Void ->
   escapeAnalysis__mark_capture_analysis_heap_mut(node.capture_analysis(), context.bg_heap);
   IF node IS_A BgBlock AS bg_block THEN
-    escapeAnalysis__mark_fsm_ctx_locals_heap_mut(bg_block, COPY context.schema_lookup);
+    TRY (escapeAnalysis__mark_fsm_ctx_locals_heap_mut(bg_block, COPY context.schema_lookup));
   END
 END
 PUB FN escapeAnalysis__apply_lambda_escape_sink_mut(node: LambdaLit, context: EscapeContext) RETURNS !Void ->

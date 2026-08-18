@@ -1276,7 +1276,7 @@ PRIVATE FN ownershipDataflow__collect_explicit_in(self: OwnershipDataflow, node:
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    ownershipDataflow__walk_expr_node(rtoc_self_view, node, TRUE, %(n: Locatable) USE(step, rtoc_self_view) -> {
+    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, node, TRUE, %(n: Locatable) USE(step, rtoc_self_view) -> {
     IF !((IF n IS_A Identifier AS identifier THEN (identifier.was_moved != NIL) ELSE FALSE END)) THEN
         RETURN;
     END
@@ -1289,7 +1289,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     &step.consumed.insert(COPY place);
     rubyToClearVoid()
-    });
+    }));
     TRY (ownershipDataflow__collect_share_transfers_in(rtoc_self_view, node, step));
 }
 END
@@ -1332,12 +1332,12 @@ PRIVATE FN ownershipDataflow__collect_share_transfers_in(self: OwnershipDataflow
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    ownershipDataflow__walk_expr_node(rtoc_self_view, node, %(n: Locatable) USE(step, rtoc_self_view) -> {
+    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, node, %(n: Locatable) USE(step, rtoc_self_view) -> {
     IF n IS_A ShareNode AS share_node THEN
         TRY (ownershipDataflow__collect_share_transfer(rtoc_self_view, share_node, step));
     END
     rubyToClearVoid()
-    });
+    }));
 }
 END
 PRIVATE FN ownershipDataflow__collect_share_transfer(self: OwnershipDataflow, node: ShareNode, step: DataflowStep) RETURNS !Void
@@ -1370,7 +1370,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE consumed: []PlaceId = ( { MUTABLE rtoc_empty_list_17: []PlaceId = List[]; rtoc_empty_list_17 } );
     MUTABLE args = (stmt.args() OR List[]);
     FOR _ IN args DO
-    ownershipDataflow__walk_expr_node(rtoc_self_view, _, %(expr: Locatable) USE(MUTABLE consumed, state, rtoc_self_view) -> {
+    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, _, %(expr: Locatable) USE(MUTABLE consumed, state, rtoc_self_view) -> {
     IF !((expr IS_A BgBlock OR expr IS_A BgStreamBlock)) THEN
         RETURN;
     END
@@ -1387,7 +1387,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     rubyToClearVoid()
-    });
+    }));
     END
     RETURN consumed;
 }
@@ -1449,7 +1449,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node EXISTS AS node_value THEN
       block(node_value);
       FOR _ IN (TRY (mIRControlFlowExpr__children(node_value, skip_copy))) DO
-      ownershipDataflow__walk_expr_node(rtoc_self_view, _, skip_copy, block);
+      TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, _, skip_copy, block));
       END
       NIL;
     ELSE
@@ -1728,7 +1728,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node EXISTS AS node_value THEN
       block(node_value);
       FOR _ IN (TRY (mIRControlFlowExpr__children(node_value, skip_copy))) DO
-      useAfterMoveChecker__walk_expr_node(rtoc_self_view, _, skip_copy, block);
+      TRY (useAfterMoveChecker__walk_expr_node(rtoc_self_view, _, skip_copy, block));
       END
       NIL;
     ELSE
@@ -2331,7 +2331,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node EXISTS AS node_value THEN
       block(node_value);
       FOR _ IN (TRY (mIRControlFlowExpr__children(node_value, skip_copy))) DO
-      borrowChecker__walk_expr_node(rtoc_self_view, _, skip_copy, block);
+      TRY (borrowChecker__walk_expr_node(rtoc_self_view, _, skip_copy, block));
       END
       NIL;
     ELSE

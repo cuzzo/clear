@@ -124,12 +124,12 @@ END
 PRIVATE FN pipelineScalarLowerer__with_iteration_rewind(self: PipelineScalarLowerer, body: []Emittable) RETURNS ![]Emittable ->
   MUTABLE found: Bool = FALSE;
   MUTABLE boundary = %(node: Emittable) -> (node IS_A MIRBgBlock OR node IS_A LambdaExpr);
-  mIR__each_node_until(NodeRoot{ ArrayValue: COPY body }, boundary, %(node: Emittable) -> {
+  TRY (mIR__each_node_until(NodeRoot{ ArrayValue: COPY body }, boundary, %(node: Emittable) -> {
   IF (IF node IS_A AllocMark AS alloc_mark THEN placement__frame?(alloc_mark.alloc) ELSE FALSE END) THEN
       found = TRUE;
   END
   rubyToClearVoid()
-  });
+  }));
   IF !(found) THEN
     RETURN COPY body;
   END

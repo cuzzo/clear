@@ -1298,7 +1298,7 @@ PRIVATE FN typeAnalysisSession__local_resolution_session(self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN resolutionSession__new(typeAnalysisSession__active_importer(rtoc_self_view), typeAnalysisSession__import_source_dir(rtoc_self_view), rtoc_self_view.config.source_code, typeAnalysisSession__current_scope(rtoc_self_view), typeAnalysisSession__semantic_function_registry(rtoc_self_view), FALSE);
+    RETURN TRY (resolutionSession__new(typeAnalysisSession__active_importer(rtoc_self_view), typeAnalysisSession__import_source_dir(rtoc_self_view), rtoc_self_view.config.source_code, typeAnalysisSession__current_scope(rtoc_self_view), typeAnalysisSession__semantic_function_registry(rtoc_self_view), FALSE));
 }
 END
 PRIVATE FN typeAnalysisSession__record_ownership_transport_fact_mut(self: TypeAnalysisSession, node: Locatable) RETURNS Void
@@ -12998,7 +12998,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__finalize_scope(rtoc_self_view, Locatable{ IfStatement: COPY node }, :else));
     node.else_drops
     })];
-    typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branch_logic);
+    TRY (typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branch_logic));
     node.then_result_type = TRY (typeAnalysisSession__expr_result_type(rtoc_self_view, node.then_branch));
     node.else_result_type = TRY (typeAnalysisSession__expr_result_type(rtoc_self_view, node.else_branch));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ IfStatement: COPY node }, :Void));
@@ -13396,7 +13396,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, node.else_branch));
     NIL
     })];
-    typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branch_logic);
+    TRY (typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branch_logic));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ IfBind: COPY node }, :Void));
 }
 END

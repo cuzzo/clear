@@ -292,10 +292,10 @@ PRIVATE FN emit__collect_ctx_field_reads(nodes: []Emittable, id: Int64) RETURNS 
 END
 PRIVATE FN emit__collect_fsm_nodes(roots: []Emittable) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_10: []Emittable = List[]; rtoc_empty_list_10 } );
-  mIR__each_node(NodeRoot{ ArrayValue: COPY roots }, %(node: Emittable) USE(MUTABLE out) -> {
+  TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY roots }, %(node: Emittable) USE(MUTABLE out) -> {
   &out.append(COPY node);
   rubyToClearVoid()
-  });
+  }));
   RETURN out;
 END
 PUB FN emit__ctx_field_name(expr: Emittable, id: Int64) RETURNS ?String ->
@@ -849,7 +849,7 @@ PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segme
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < seg_codes.length() DO
-  mIR__each_node(NodeRoot{ ArrayValue: COPY seg_codes[rtoc_idx]? }, %(node: Emittable) USE(forbidden_set, segments, rtoc_idx) -> {
+  TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY seg_codes[rtoc_idx]? }, %(node: Emittable) USE(forbidden_set, segments, rtoc_idx) -> {
     IF !((node IS_A Cleanup OR node IS_A ErrCleanup)) THEN
         RETURN;
     END
@@ -861,7 +861,7 @@ PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segme
     MUTABLE seg_idx = segment.index;
     panic("{}{}field. The defer would fire when this runSegN returns, before the BG body completes. Lift the cleanup to destroyTask via ctx[:fsm_destroy_actions].");
     rubyToClearVoid()
-  });
+  }));
   rtoc_idx = rtoc_idx + 1;
   END
 END

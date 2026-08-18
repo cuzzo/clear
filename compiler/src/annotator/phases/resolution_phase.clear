@@ -2065,13 +2065,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN params |> SELECT symbol(_);
 }
 END
-PUB FN resolutionSession__new(importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS ResolutionSession@multiowned ->
+PUB FN resolutionSession__new(importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS !ResolutionSession@multiowned ->
   MUTABLE self = ResolutionSession{ function_registry: (COPY function_registry OR_ELSE FunctionRegistry{ nodes: {}, synthetic_definitions: List[], body_summaries: {} }), importer: COPY importer, local_type_declaration_names: Set[], protocols: {}, root_scope: (root_scope OR_ELSE scope__new()), scope_stack: [root_scope], source_code: COPY source_code, source_dir: COPY source_dir };
   TRY (resolutionSession__initialize(&self, importer, source_dir, source_code, root_scope, function_registry, install_builtins));
   RETURN self @multiowned;
 END
 PUB FN resolutionPhase__run(program: Program, importer: ?ModuleImporter, source_dir: String, source_code: ?String) RETURNS !ResolutionFacts@multiowned ->
-  RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_63 = resolutionSession__new(importer, source_dir, source_code);
+  RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_63 = TRY (resolutionSession__new(importer, source_dir, source_code));
   TRY (resolutionSession__resolve_mut(&rtoc_mutable_receiver_63, program)) };
 END
 # End Ruby module Annotator::Phases

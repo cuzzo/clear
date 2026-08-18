@@ -12662,10 +12662,10 @@ PUB FN mIR__each_node_until(root: ?NodeRoot, stop: FN(Emittable) -> Bool, blk: F
 END
 PUB FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_197: []Emittable = List[]; rtoc_empty_list_197 } );
-  mIR__each_node(UNWRAP (root), %(node: Emittable) USE(MUTABLE out) -> {
+  TRY (mIR__each_node(UNWRAP (root), %(node: Emittable) USE(MUTABLE out) -> {
   &out.append(COPY node);
   rubyToClearVoid()
-  });
+  }));
   RETURN out;
 END
 PUB FN mIR__each_surface_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
@@ -12673,10 +12673,10 @@ PUB FN mIR__each_surface_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETUR
 END
 FN mIR__surface_nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_198: []Emittable = List[]; rtoc_empty_list_198 } );
-  mIR__each_surface_node(UNWRAP (root), %(node: Emittable) USE(MUTABLE out) -> {
+  TRY (mIR__each_surface_node(UNWRAP (root), %(node: Emittable) USE(MUTABLE out) -> {
   &out.append(COPY node);
   rubyToClearVoid()
-  });
+  }));
   RETURN out;
 END
 FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emittable) -> Bool = NIL, blk: FN(Emittable) -> Void) RETURNS !Void EFFECTS REENTRANT ->

@@ -1556,7 +1556,7 @@ PRIVATE FN mIREmitter__polymorphic_read_captures(self: MIREmitter, body: []Emitt
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE declared: [Set]String = excluded |> DISTINCT _;
     MUTABLE used: []String = ( { MUTABLE rtoc_empty_list_24: []String = List[]; rtoc_empty_list_24 } );
-    mIR__each_node(NodeRoot{ ArrayValue: COPY body }, %(part: Emittable) USE(MUTABLE declared, MUTABLE used) -> {
+    TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY body }, %(part: Emittable) USE(MUTABLE declared, MUTABLE used) -> {
     IF part IS_A Let AS let THEN
         &declared.insert(COPY CAST(let.name AS String));
     END
@@ -1567,7 +1567,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
     END
     rubyToClearVoid()
-    });
+    }));
     RETURN used |> WHERE !(declared.contains?(_));
 }
 END
@@ -1595,7 +1595,7 @@ PRIVATE FN mIREmitter__polymorphic_move_guard_captures(self: MIREmitter, body: [
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE declared: [Set]String = excluded |> DISTINCT _;
     MUTABLE moved: []String = ( { MUTABLE rtoc_empty_list_29: []String = List[]; rtoc_empty_list_29 } );
-    mIR__each_node(NodeRoot{ ArrayValue: COPY body }, %(part: Emittable) USE(MUTABLE declared, MUTABLE moved) -> {
+    TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY body }, %(part: Emittable) USE(MUTABLE declared, MUTABLE moved) -> {
     IF part IS_A Let AS let THEN
         &declared.insert(COPY CAST(let.name AS String));
     END
@@ -1607,7 +1607,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &moved.append(name);
     END
     rubyToClearVoid()
-    });
+    }));
     RETURN moved;
 }
 END

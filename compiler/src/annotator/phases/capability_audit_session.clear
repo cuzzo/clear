@@ -3674,7 +3674,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_26.length() DO
       MUTABLE call = COPY KEEP rtoc_each_items_26[rtoc_idx]?.call;
       MUTABLE callee = COPY rtoc_each_items_26[rtoc_idx]?.callee;
-      MUTABLE reason: ?String = capabilityAuditSession__predicate_impurity_reason(rtoc_self_view, call, callee);
+      MUTABLE reason: ?String = TRY (capabilityAuditSession__predicate_impurity_reason(rtoc_self_view, call, callee));
       IF !(reason) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -3696,7 +3696,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (capabilityAuditSession__predicate_call_sites(rtoc_self_view));
 }
 END
-PRIVATE FN capabilityAuditSession__predicate_impurity_reason(self: CapabilityAuditSession, call: CapabilityAuditCall, callee: String) RETURNS ?String
+PRIVATE FN capabilityAuditSession__predicate_impurity_reason(self: CapabilityAuditSession, call: CapabilityAuditCall, callee: String) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4313,7 +4313,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     TRY (capabilityAuditSession__restamp_requires_on_signatures_mut(rtoc_self_view));
     FOR _ IN fn_nodes.values() DO
-    withMatchCheck__check_call_sites_mut(body_summaries[_.name]?.call_site_facts, signature_lookup, error_handler);
+    TRY (withMatchCheck__check_call_sites_mut(body_summaries[_.name]?.call_site_facts, signature_lookup, error_handler));
     END
     TRY (concurrencyChecks__check_all_mut(fn_nodes, signature_lookup, error_handler, body_summaries, capabilityAuditSession__whole_program_lock_type_ranks(rtoc_self_view)));
 }
