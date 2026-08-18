@@ -1094,6 +1094,21 @@ class Type
     wrapped = Type.new(wrapped_type)
     return wrapped if wrapped.optional?
 
+    # CLEAR spells a fallible-optional `!?T`; `?!T` is not a type source can
+    # write and the tense planner rejects that order. Push the optional layer
+    # INSIDE an outer fallible rather than wrapping it.
+    if wrapped.error_union?
+      inner = wrapped.shape.expression.kind
+      payload = inner.is_a?(FallibleTypeExpression) ? inner.inner : nil
+      if payload
+        optional_payload = TypeExpression.of(OptionalTypeExpression.new(inner: payload))
+        t = Type.new(TypeExpression.of(FallibleTypeExpression.new(inner: optional_payload)))
+        t.merge_capabilities_from!(wrapped, include_affine_ownership: true)
+        t.copy_placement_from!(wrapped, preserve_existing: false)
+        return t
+      end
+    end
+
     t = Type.new(TypeExpression.of(OptionalTypeExpression.new(inner: wrapped.shape.expression)))
     t.merge_capabilities_from!(wrapped, include_affine_ownership: true)
     t.copy_placement_from!(wrapped, preserve_existing: false)
