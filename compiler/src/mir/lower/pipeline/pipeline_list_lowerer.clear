@@ -244,11 +244,11 @@ END
 PRIVATE FN pipelineListLowerer__lower_join(self: PipelineListLowerer, site: PipelineSite, join_node: JoinOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE left_type_info: ?Type = TRY (type__element_type(TRY (aST__full_type_mut(list_node))));
-  MUTABLE left_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY left_type_info.resolved() });
+  MUTABLE left_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY type__resolved(UNWRAP (left_type_info)) });
   MUTABLE right_src_mir = pipelineListLowerer__visit_mir_call(self, UNWRAP (join_node.right_source));
   MUTABLE right_type_info = TRY (aST__full_type_mut(UNWRAP (join_node.right_source)));
   MUTABLE right_element_type: ?Type = TRY (type__element_type(right_type_info));
-  MUTABLE right_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY right_element_type.resolved() });
+  MUTABLE right_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY type__resolved(UNWRAP (right_element_type)) });
   MUTABLE result_zig = "struct { left: ${left_zig}, right: ?${right_zig} }";
   MUTABLE alloc = pipelineListLowerer__pipeline_result_alloc_call(self);
   MUTABLE left_owns = pipelineListLowerer__cleanup_bearing_type_call(self, left_type_info);

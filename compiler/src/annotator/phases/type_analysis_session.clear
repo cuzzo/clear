@@ -10676,12 +10676,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN;
         END
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg_value_mutable));
-        IF !((element_type.resolved() == actual_type.resolved())) THEN
+        IF !((type__resolved(UNWRAP (element_type)) == actual_type.resolved())) THEN
           RETURN;
         END
         IF (element_type.indirect?() AND !(actual_type.indirect?())) THEN
           IF ((TRY (type__any_rc?(actual_type)) OR TRY (type__node_reference?(actual_type))) OR type__link?(actual_type)) THEN
-            typeAnalysisSession__error_mut(rtoc_self_view, value_arg_value_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], {:type: element_type.resolved(), :actual: typeAnalysisSession__indirect_identity_display(rtoc_self_view, actual_type)});
+            typeAnalysisSession__error_mut(rtoc_self_view, value_arg_value_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], {:type: type__resolved(UNWRAP (element_type)), :actual: typeAnalysisSession__indirect_identity_display(rtoc_self_view, actual_type)});
           ELSE_IF (typeAnalysisSession__language_mode(rtoc_self_view) != :easy) THEN
             typeAnalysisSession__emit_indirect_element_explicit_error_mut(rtoc_self_view, value_arg_value_mutable, element_type);
           ELSE
@@ -10691,7 +10691,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ELSE_IF (!(element_type.indirect?()) AND actual_type.indirect?()) THEN
           value_arg_value_mutable.layout_transport = :unbox;
         ELSE_IF ((element_type.indirect?() != actual_type.indirect?()) AND (((TRY (type__any_rc?(actual_type)) OR TRY (type__node_reference?(actual_type))) OR type__link?(actual_type)))) THEN
-          typeAnalysisSession__error_mut(rtoc_self_view, value_arg_value_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], {:type: element_type.resolved(), :actual: typeAnalysisSession__indirect_identity_display(rtoc_self_view, actual_type)});
+          typeAnalysisSession__error_mut(rtoc_self_view, value_arg_value_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], {:type: type__resolved(UNWRAP (element_type)), :actual: typeAnalysisSession__indirect_identity_display(rtoc_self_view, actual_type)});
         END
       ELSE
         RETURN;
@@ -16005,7 +16005,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
     IF target_type_info.promise_list?() THEN
         MUTABLE elem_t: ?Type = TRY (type__element_type((TRY (type__tense_type(target_type_info)))));
-        TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ GetIndex: COPY node }, TRY (type__optional_of(castTypeToTypeTypeInput(TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${elem_t.resolved()}") })))))));
+        TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ GetIndex: COPY node }, TRY (type__optional_of(castTypeToTypeTypeInput(TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${type__resolved(UNWRAP (elem_t))}") })))))));
     ELSE_IF (TRY (type__string?(target_type_info)) AND !(type__raw?(target_type_info))) THEN
         typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STRING_INDEX_BY_INT });
     ELSE_IF ((node.target.metatype() == :struct) AND TRY (type__element_type(target_type_info))) THEN
@@ -16216,9 +16216,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END) THEN
       MUTABLE element: ?Type = TRY (type__element_type(target_type));
-      MUTABLE slice_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${element.resolved()}[]") }));
+      MUTABLE slice_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(UNWRAP (element))}[]") }));
       TRY (type__set_elem_ownership(&slice_type, type__ownership(element)));
-      TRY (type__set_elem_sync(&slice_type, element.sync()));
+      TRY (type__set_elem_sync(&slice_type, type__sync(UNWRAP (element))));
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ Slice: COPY node }, slice_type));
       node.container_borrow = TRUE;
     ELSE
