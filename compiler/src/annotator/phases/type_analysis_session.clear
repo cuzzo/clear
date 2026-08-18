@@ -5696,7 +5696,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END))) THEN
       typeAnalysisSession__error_mut(rtoc_self_view, node.right.right_source(), TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_RIGHT_NEEDS_LIST }, [], {:got: node.right.right_source().resolved_type()});
     END
-    MUTABLE right_type = TRY (type__element_type(rhs_type_info)).resolved();
+    MUTABLE right_type: ?Type = TRY (type__element_type(rhs_type_info)).resolved();
     MUTABLE key_expr = node.right.key_expr();
     IF key_expr IS_A LambdaLit THEN
       MUTABLE params = key_expr.params();
@@ -10671,7 +10671,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE value_arg: ?Locatable = COPY node.args[value_index];
       IF value_arg EXISTS AS value_arg_value THEN
         MUTABLE value_arg_value_mutable = COPY value_arg_value;
-        MUTABLE element_type = TRY (type__element_type(receiver_type));
+        MUTABLE element_type: ?Type = TRY (type__element_type(receiver_type));
         IF !(element_type) THEN
           RETURN;
         END
@@ -12166,7 +12166,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF typeAnalysisSession__resolve_collection_method(&rtoc_self_view, &node) THEN
       typeAnalysisSession__validate_indirect_collection_insertion_mut(rtoc_self_view, &node);
       MUTABLE receiver_type = TRY (aST__full_type_mut(node.object));
-      MUTABLE element_type = TRY (type__element_type(receiver_type));
+      MUTABLE element_type: ?Type = TRY (type__element_type(receiver_type));
       IF ((((element_type != NIL) AND TRY (type__node_reference?((element_type?)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg));
@@ -12820,7 +12820,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         receiver_type
       END;
-      MUTABLE element_type = TRY (type__element_type(resolved_receiver_type));
+      MUTABLE element_type: ?Type = TRY (type__element_type(resolved_receiver_type));
       IF ((((element_type != NIL) AND TRY (type__node_reference?((element_type?)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg));
@@ -16004,7 +16004,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     ELSE
     IF target_type_info.promise_list?() THEN
-        MUTABLE elem_t = TRY (type__element_type((TRY (type__tense_type(target_type_info)))));
+        MUTABLE elem_t: ?Type = TRY (type__element_type((TRY (type__tense_type(target_type_info)))));
         TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ GetIndex: COPY node }, TRY (type__optional_of(castTypeToTypeTypeInput(TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${elem_t.resolved()}") })))))));
     ELSE_IF (TRY (type__string?(target_type_info)) AND !(type__raw?(target_type_info))) THEN
         typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STRING_INDEX_BY_INT });
@@ -16215,7 +16215,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) THEN
-      MUTABLE element = TRY (type__element_type(target_type));
+      MUTABLE element: ?Type = TRY (type__element_type(target_type));
       MUTABLE slice_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${element.resolved()}[]") }));
       TRY (type__set_elem_ownership(&slice_type, type__ownership(element)));
       TRY (type__set_elem_sync(&slice_type, element.sync()));
