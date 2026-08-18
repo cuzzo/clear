@@ -704,7 +704,7 @@ END
 PUB FN type__copy_type(type: Type) RETURNS !Type ->
   MUTABLE copy = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
   type__replace_shape_mut(&copy, typeShape__copy(type.shape));
-  type__replace_capabilities_mut(&copy, typeCapabilities__copy(type.capabilities));
+  TRY (type__replace_capabilities_mut(&copy, typeCapabilities__copy(type.capabilities)));
   type__replace_placement_mut(&copy, typePlacement__copy(type.placement));
   RETURN copy;
 END
@@ -2299,7 +2299,7 @@ PUB FN type__any_sync?(self: Type) RETURNS Bool ->
 END
 PUB FN type__bare_data_type(self: Type) RETURNS !Type ->
   MUTABLE bare = TRY (type__copy_type(self));
-  type__strip_runtime_capabilities_mut(&bare);
+  TRY (type__strip_runtime_capabilities_mut(&bare));
   type__reset_to_bare_data_placement_mut(&bare);
   type__clear_zig_type_cache_mut(bare);
   RETURN bare;

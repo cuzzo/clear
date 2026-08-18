@@ -13,7 +13,7 @@ PUB FN clearParser__parse_comptime_statement(MUTABLE self: ClearParser) RETURNS 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "COMPTIME"));
     IF !(clearParser__match?(rtoc_self_view, :KEYWORD, "IF")) THEN
-      clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "IF", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()});
+      TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "IF", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()}));
     END
     RETURN TRY (clearParser__parse_if_statement(&rtoc_self_view, TRUE));
 }
@@ -44,11 +44,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN ClearParserReturnValue{ IfStatement: COPY node };
     END
     IF clearParser__match?(rtoc_self_view, :KEYWORD, "AS") THEN
-      clearParser__emit_legacy_optional_binding_mut(rtoc_self_view, clearParser__current(rtoc_self_view));
+      TRY (clearParser__emit_legacy_optional_binding_mut(rtoc_self_view, clearParser__current(rtoc_self_view)));
       TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "AS"));
       MUTABLE name_tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
       IF (clearParser__match?(rtoc_self_view, :KEYWORD, "AND") OR clearParser__match?(rtoc_self_view, :LEGACY_LOGICAL, "&&")) THEN
-        clearParser__error_mut(rtoc_self_view, if_token, CodeOrMessage{ SymbolValue: :MULTIPLE_BINDINGS_NEED_PARENS });
+        TRY (clearParser__error_mut(rtoc_self_view, if_token, CodeOrMessage{ SymbolValue: :MULTIPLE_BINDINGS_NEED_PARENS }));
       END
       MUTABLE bindings = [Binding{ expr: COPY condition, name: COPY TRY (token__text_mut(name_tok)), name_token: name_tok, unwrapped_type: type__new(TypeConstructionInput{ SymbolValue: :Untyped }), symbol: NIL, capture: NIL, predicate: :exists, mir_binding_entry: NIL }];
       RETURN ClearParserReturnValue{ IfBind: COPY TRY (clearParser__parse_if_bind_body(&rtoc_self_view, if_token, bindings)) };
@@ -89,7 +89,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE operator = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD));
       IF (token__text_is?(operator, "OR")) THEN
-        clearParser__error_mut(rtoc_self_view, operator, CodeOrMessage{ SymbolValue: :CONDITIONAL_BINDING_UNDER_OR });
+        TRY (clearParser__error_mut(rtoc_self_view, operator, CodeOrMessage{ SymbolValue: :CONDITIONAL_BINDING_UNDER_OR }));
       END
     END
     IF clearParser__match?(rtoc_self_view, :ARROW, "->") THEN
@@ -162,7 +162,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN [StepsItem{ Binding: COPY Binding{ expr: COPY binary_op.left, name: COPY right.name, name_token: right.token, predicate: COPY predicate, unwrapped_type: type__new(TypeConstructionInput{ SymbolValue: :Untyped }), symbol: NIL, capture: NIL, mir_binding_entry: NIL } }];
       END
       IF ((binary_op.op == symbol("OR")) AND clearParser__contains_refinement_binding?(rtoc_self_view, Locatable{ BinaryOp: COPY binary_op })) THEN
-        clearParser__error_mut(rtoc_self_view, binary_op.token, CodeOrMessage{ SymbolValue: :CONDITIONAL_BINDING_UNDER_OR });
+        TRY (clearParser__error_mut(rtoc_self_view, binary_op.token, CodeOrMessage{ SymbolValue: :CONDITIONAL_BINDING_UNDER_OR }));
       END
       IF !((binary_op.op == symbol("AND"))) THEN
         RETURN [StepsItem{ BinaryOp: COPY binary_op }];
@@ -327,7 +327,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE body = TRY (clearParser__parse_keyword_block(&rtoc_self_view, "DO"));
       RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(name_tok)), binding_token: name_tok, do_branch: COPY body, deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
     ELSE_IF clearParser__match?(rtoc_self_view, :KEYWORD, "AS") THEN
-      clearParser__emit_legacy_optional_binding_mut(rtoc_self_view, clearParser__current(rtoc_self_view));
+      TRY (clearParser__emit_legacy_optional_binding_mut(rtoc_self_view, clearParser__current(rtoc_self_view)));
       TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "AS"));
       MUTABLE name_tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
       IF clearParser__match?(rtoc_self_view, :ARROW, "->") THEN

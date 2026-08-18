@@ -209,7 +209,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__with_fiber_capture_map(rtoc_self_view.lowering, new_entries, capture_symbols, rt_override, blk);
 }
 END
-PUB FN pipelineLoweringBridge__execution_boundary_fact(self: PipelineLoweringBridge, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS ExecutionBoundaryFact
+PUB FN pipelineLoweringBridge__execution_boundary_fact(self: PipelineLoweringBridge, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS !ExecutionBoundaryFact
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

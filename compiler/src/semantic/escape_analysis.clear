@@ -136,7 +136,7 @@ PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schem
   END
   FOR _ IN facts_by_name.values() DO
   escapeAnalysis__record_placement_phase_mut(&placements, _, :receiver_backing_storage, %() USE(_) -> {
-    escapeAnalysis__mark_param_receiver_allocations_heap_mut(_.escape_nodes);
+    TRY (escapeAnalysis__mark_param_receiver_allocations_heap_mut(_.escape_nodes));
     rubyToClearVoid()
   });
   escapeAnalysis__record_placement_phase_mut(&placements, _, :recursive_aggregate_owner, %() USE(schema_lookup, _) -> {
@@ -172,7 +172,7 @@ END
 PRIVATE FN escapeAnalysis__record_placement_phase_mut(MUTABLE placements: EscapePlacementFacts, facts: FunctionFacts, reason: String@symbol, blk: FN() -> Void) RETURNS !Void ->
   MUTABLE before = TRY (functionFacts__heap_symbol_ids(facts));
   blk();
-  escapePlacementFacts__record_new_heap_symbols_mut(&placements, facts, before, reason);
+  TRY (escapePlacementFacts__record_new_heap_symbols_mut(&placements, facts, before, reason));
 END
 PUB FN escapeAnalysis__validate_escape_sink_handlers_mut() RETURNS !Void ->
   TRY (escapeAnalysis__validate_handler_registry_mut("EscapeAnalysis sink registry", CAST({:owning_return: [symbol("mark_heap_return_facts!"), symbol("mark_body_escapes!")], :enclosing_scope_store: [symbol("mark_body_escapes!")], :binding_result: [symbol("mark_body_escapes!")], :execution_boundary_capture: [symbol("mark_body_escapes!")], :lambda_capture: [symbol("mark_body_escapes!")], :takes_or_mutable_arg: [symbol("mark_body_escapes!")], :receiver_backing_storage: [symbol("mark_param_receiver_allocations_heap!"), symbol("mark_loop_receiver_allocations_heap!")]} AS {String@symbol}[]String@symbol)));
@@ -452,7 +452,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
     CONTINUE;
         END
         IF !(already_rc) THEN
-            escapeAnalysis__promote_kept_binding_mut(_, fn_nodes, &entry, &arg);
+            TRY (escapeAnalysis__promote_kept_binding_mut(_, fn_nodes, &entry, &arg));
         END
         op = IF last_use THEN
             :move_handle
@@ -505,7 +505,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   END
   MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[summary.name];
   IF owner_fn EXISTS AS owner_fn_value THEN
-    escapeAnalysis__restamp_promoted_uses_mut(COPY owner_fn_value.body, arg.name, entry);
+    TRY (escapeAnalysis__restamp_promoted_uses_mut(COPY owner_fn_value.body, arg.name, entry));
   END
   arg.symbol = COPY entry;
 END
@@ -577,9 +577,9 @@ PUB FN keptEdgeLiveness__new(body: []Locatable) RETURNS KeptEdgeLiveness@multiow
   keptEdgeLiveness__initialize(&self, body);
   RETURN self @multiowned;
 END
-PUB FN escapeAnalysis__restamp_promoted_uses_mut(body: []Locatable, name: String, entry: SymbolEntry) RETURNS Void ->
+PUB FN escapeAnalysis__restamp_promoted_uses_mut(body: []Locatable, name: String, entry: SymbolEntry) RETURNS !Void ->
   FOR _ IN body DO
-  escapeAnalysis__restamp_promoted_uses_in_node_mut(_, name, entry);
+  TRY (escapeAnalysis__restamp_promoted_uses_in_node_mut(_, name, entry));
   END
 END
 PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: String, entry: SymbolEntry) RETURNS !Void EFFECTS REENTRANT ->
@@ -596,7 +596,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
     END
   END
   aST__each_child_node(node, %(child: Locatable) USE(entry, name) -> {
-  escapeAnalysis__restamp_promoted_uses_in_node_mut(child, name, entry);
+  TRY (escapeAnalysis__restamp_promoted_uses_in_node_mut(child, name, entry));
   rubyToClearVoid()
   });
 END

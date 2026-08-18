@@ -142,7 +142,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.current_transform_fn = COPY function;
     function.body = TRY (mIRPass__transform_body(rtoc_self_view, function.body, WalkCtx{ cleanup_facts: COPY cleanup_facts }));
     rtoc_self_view.current_transform_fn = NIL;
-    mIRPass__stamp_moved_guard_info_mut(rtoc_self_view, &function, cleanup_facts);
+    TRY (mIRPass__stamp_moved_guard_info_mut(rtoc_self_view, &function, cleanup_facts));
     NIL;
 }
 END

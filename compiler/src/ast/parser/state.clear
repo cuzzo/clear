@@ -163,7 +163,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF prev_tok EXISTS AS prev_suffix_tok THEN
      IF ((((token.type == :CHAR) AND (TRY (token__text_mut(token)) == "!")) AND ([:VAR_ID, :TYPE_ID]).contains?(prev_suffix_tok.type)) AND (prev_suffix_tok.end_offset == token.start_offset)) THEN
-      clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :LEGACY_MUTATION_NAME_SUFFIX });
+      TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :LEGACY_MUTATION_NAME_SUFFIX }));
      END
     END
     TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "${(expected_value OR_ELSE expected_type)}", :got: "${token__display_value(token)}", :type: "${token.type}", :line: token.line.toString()}));
@@ -1198,7 +1198,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(raise_in_collector) THEN
         RETURN;
       END
-      clearParser__raise_source_error_mut(rtoc_self_view, source_token, rendered_message);
+      TRY (clearParser__raise_source_error_mut(rtoc_self_view, source_token, rendered_message));
     END
     IF (level == :hint) OR (level == :info) OR (level == :warning) THEN
       MUTABLE loc: String = "";

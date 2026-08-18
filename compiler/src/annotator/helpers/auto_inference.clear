@@ -646,7 +646,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF (slot.kind == :param) THEN
       MUTABLE fn: FunctionDef = COPY castAutoConstraintCollectorSlotDeclNodeToFunctionDef(slot.decl_node);
-      param__set_type(UNWRAP (fn.params[UNWRAP (slot.index)]), castTypeToTypeTypeInput(resolved_type));
+      TRY (param__set_type(UNWRAP (fn.params[UNWRAP (slot.index)]), castTypeToTypeTypeInput(resolved_type)));
     ELSE_IF (slot.kind == :return) THEN
       MUTABLE rtoc_writer_receiver_15: FunctionDef = castAutoConstraintCollectorSlotDeclNodeToFunctionDef(slot.decl_node);
       rtoc_writer_receiver_15.return_type = resolved_type;

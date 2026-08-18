@@ -42,12 +42,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (clearParser__consume(&rtoc_self_view, abi_token.type));
       abi = symbol((TRY (token__text_mut(abi_token))).downcase());
       IF !((abi == :c)) THEN
-        clearParser__error_mut(rtoc_self_view, abi_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "C", :got: "${token__display_value(abi_token)}", :type: "${abi_token.type}", :line: abi_token.line.toString()});
+        TRY (clearParser__error_mut(rtoc_self_view, abi_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "C", :got: "${token__display_value(abi_token)}", :type: "${abi_token.type}", :line: abi_token.line.toString()}));
       END
     END
     rtoc_cur_0 = clearParser__current(rtoc_self_view);
     IF (clearParser__match?(rtoc_self_view, :VAR_ID) AND (["@reentrant", "@nonReentrant"]).contains?(token__display_value(rtoc_cur_0))) THEN
-      clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "supported function type annotation", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()});
+      TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "supported function type annotation", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()}));
     END
     RETURN TRY (type__function_type_from_parts(param_types, return_type, FALSE, NIL, abi));
 }
@@ -112,7 +112,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF ((optional_prefix == "?") AND clearParser__match?(rtoc_self_view, :CHAR, "(")) THEN
       IF ((tense_prefix != "") OR (error_prefix != "")) THEN
-        clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "a grouped optional without an outer tense/error prefix", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()});
+        TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "a grouped optional without an outer tense/error prefix", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()}));
       END
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
       MUTABLE wrapped = TRY (clearParser__parse_type_annotation(&rtoc_self_view, FALSE));
@@ -121,12 +121,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF (clearParser__match?(rtoc_self_view, :KEYWORD, "Auto") AND ("${tense_prefix}${error_prefix}${optional_prefix}" != "")) THEN
       MUTABLE prefix_chars = "${tense_prefix}${error_prefix}${optional_prefix}";
-      clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :AUTO_PREFIX_NOT_SUPPORTED }, [], {:prefix: "${prefix_chars}", :prefix2: prefix_chars, :prefix3: prefix_chars, :prefix4: prefix_chars});
+      TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :AUTO_PREFIX_NOT_SUPPORTED }, [], {:prefix: "${prefix_chars}", :prefix2: prefix_chars, :prefix3: prefix_chars, :prefix4: prefix_chars}));
     END
     IF clearParser__match?(rtoc_self_view, :KEYWORD, "FN") THEN
       MUTABLE fn_type = TRY (clearParser__parse_fn_type_annotation(&rtoc_self_view));
       IF ((tense_prefix != "") OR (error_prefix != "")) THEN
-        clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "plain or optional function type annotation", :got: "${tense_prefix}${error_prefix}FN", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()});
+        TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "plain or optional function type annotation", :got: "${tense_prefix}${error_prefix}FN", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()}));
       END
       IF (optional_prefix == "?") THEN
         RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY fn_type }));
@@ -180,13 +180,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, "]"));
         inner = "[${size.toString()}]";
       ELSE_IF clearParser__match?(rtoc_self_view, :CHAR, "?") THEN
-        clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "[~]T, [~N]T, or [~INF]T stream syntax", :got: "[?]", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()});
+        TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "[~]T, [~N]T, or [~INF]T stream syntax", :got: "[?]", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()}));
       ELSE_IF (clearParser__match?(rtoc_self_view, :TYPE_ID) AND (token__text_is?(clearParser__current(rtoc_self_view), "INF"))) THEN
         TRY (clearParser__consume(&rtoc_self_view, :TYPE_ID));
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, "]"));
         inner = "[INF]";
       ELSE
-        clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :ARRAY_TYPE_BAD });
+        TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :ARRAY_TYPE_BAD }));
       END
       WHILE clearParser__match?(rtoc_self_view, :CHAR, "[") DO
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, "["));
@@ -197,14 +197,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (clearParser__consume(&rtoc_self_view, :CHAR, "]"));
           inner = (inner $+ "[${size.toString()}]");
         ELSE
-          clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :ARRAY_TYPE_EXPECTED_SIZE });
+          TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :ARRAY_TYPE_EXPECTED_SIZE }));
         END
       END
     END
     MUTABLE legacy_card: ?String = regexMatchGroup(inner, "\\A\\[(\\d*|INF)\\]\\z", 1);
     IF (((tense_prefix == "~") AND (optional_prefix == "?")) AND (error_prefix == "")) THEN
       IF legacy_card EXISTS AS legacy_card_value THEN
-        clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :RETIRED_OPTIONAL_STREAM_SYNTAX }, [], {:got: "~?${base}${inner}", :replacement: "[~${legacy_card_value}]${base}"});
+        TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :RETIRED_OPTIONAL_STREAM_SYNTAX }, [], {:got: "~?${base}${inner}", :replacement: "[~${legacy_card_value}]${base}"}));
       END
     END
     MUTABLE caps = TRY (clearParser__parse_capabilities(&rtoc_self_view));
@@ -372,7 +372,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner = TRY (clearParser__parse_inline_type_expression(&rtoc_self_view));
     IF (prefix == "?") THEN
       IF inner.kind IS_A StreamTypeExpression THEN
-        clearParser__error_mut(rtoc_self_view, prefix_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "an optional stream item such as [~]?T", :got: "?[~]T", :type: "${prefix_token.type}", :line: prefix_token.line.toString()});
+        TRY (clearParser__error_mut(rtoc_self_view, prefix_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "an optional stream item such as [~]?T", :got: "?[~]T", :type: "${prefix_token.type}", :line: prefix_token.line.toString()}));
       END
       RETURN typeExpression__of(TypeExpressionKind{ OptionalTypeExpression: OptionalTypeExpression{ inner: COPY inner } });
     END
@@ -454,20 +454,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         dimension = TypeExpressionDimension{ Int64Value: TRY (token__number_as_integer(TRY (clearParser__consume_number(&rtoc_self_view)))) };
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, ")"));
       ELSE
-        clearParser__error_mut(rtoc_self_view, clearParser__previous(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "an Inline Pivot dimension", :got: "${COPY layout}", :type: "${clearParser__previous(rtoc_self_view).type}", :line: clearParser__previous(rtoc_self_view).line.toString()});
+        TRY (clearParser__error_mut(rtoc_self_view, clearParser__previous(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "an Inline Pivot dimension", :got: "${COPY layout}", :type: "${clearParser__previous(rtoc_self_view).type}", :line: clearParser__previous(rtoc_self_view).line.toString()}));
       END
     END
     &dimensions.append(UNWRAP (dimension));
     WHILE castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ","))) DO
       IF ((!((allocation_hint == NIL)) OR (kind == :set)) OR (kind == :pool)) THEN
-        clearParser__error_mut(rtoc_self_view, clearParser__previous(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "integer or List dimensions in a flat rank", :got: "${token__display_value(clearParser__previous(rtoc_self_view))}", :type: "${clearParser__previous(rtoc_self_view).type}", :line: clearParser__previous(rtoc_self_view).line.toString()});
+        TRY (clearParser__error_mut(rtoc_self_view, clearParser__previous(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "integer or List dimensions in a flat rank", :got: "${token__display_value(clearParser__previous(rtoc_self_view))}", :type: "${clearParser__previous(rtoc_self_view).type}", :line: clearParser__previous(rtoc_self_view).line.toString()}));
       END
       IF (clearParser__match?(rtoc_self_view, :NUMBER) OR clearParser__match?(rtoc_self_view, :INT64)) THEN
         &dimensions.append(TypeExpressionDimension{ Int64Value: TRY (token__number_as_integer(TRY (clearParser__consume_number(&rtoc_self_view)))) });
       ELSE
         layout = TRY (token__text_mut((TRY (clearParser__consume(&rtoc_self_view, :TYPE_ID)))));
         IF !((layout == "List")) THEN
-          clearParser__error_mut(rtoc_self_view, clearParser__previous(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "integer or List dimensions in a flat rank", :got: "${COPY layout}", :type: "${clearParser__previous(rtoc_self_view).type}", :line: clearParser__previous(rtoc_self_view).line.toString()});
+          TRY (clearParser__error_mut(rtoc_self_view, clearParser__previous(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "integer or List dimensions in a flat rank", :got: "${COPY layout}", :type: "${clearParser__previous(rtoc_self_view).type}", :line: clearParser__previous(rtoc_self_view).line.toString()}));
         END
         &dimensions.append(TypeExpressionDimension{ SymbolValue: :LIST });
       END
@@ -496,7 +496,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       MUTABLE parsed_key = TRY (clearParser__parse_inline_type_expression(&rtoc_self_view));
       IF clearParser__match?(rtoc_self_view, :CHAR, ",") THEN
-        clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "a closing brace; nested maps use separate brace layers", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()});
+        TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "a closing brace; nested maps use separate brace layers", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()}));
       END
       key_branch_value = parsed_key;
     END
@@ -513,7 +513,7 @@ PRIVATE FN clearParser__parse_inline_capabilities(MUTABLE self: ClearParser, col
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE parsed = TRY (clearParser__parse_capabilities(&rtoc_self_view));
     IF !((parsed.collection == NIL)) THEN
-      clearParser__error_mut(rtoc_self_view, clearParser__previous(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "collection topology in the Inline Pivot layer sigil", :got: "${token__display_value(clearParser__previous(rtoc_self_view))}", :type: "${clearParser__previous(rtoc_self_view).type}", :line: clearParser__previous(rtoc_self_view).line.toString()});
+      TRY (clearParser__error_mut(rtoc_self_view, clearParser__previous(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "collection topology in the Inline Pivot layer sigil", :got: "${token__display_value(clearParser__previous(rtoc_self_view))}", :type: "${clearParser__previous(rtoc_self_view).type}", :line: clearParser__previous(rtoc_self_view).line.toString()}));
     END
     MUTABLE effective_collection: ?String@symbol = COPY collection;
     IF effective_collection == NIL THEN
@@ -536,11 +536,11 @@ PRIVATE FN clearParser__validate_type_expression_budget_mut(self: ClearParser, t
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node_count = TRY (typeExpressionTree__node_count(expression));
     IF (node_count > 32) THEN
-      clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TYPE_NODE_LIMIT }, [], {:count: "${node_count.toString()}", :limit: "32"});
+      TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TYPE_NODE_LIMIT }, [], {:count: "${node_count.toString()}", :limit: "32"}));
     END
     MUTABLE capability_sites = TRY (typeExpressionTree__capability_site_count(expression));
     IF (capability_sites > 3) THEN
-      clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TYPE_CAPABILITY_SITE_LIMIT }, [], {:count: "${capability_sites.toString()}", :limit: "3"});
+      TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TYPE_CAPABILITY_SITE_LIMIT }, [], {:count: "${capability_sites.toString()}", :limit: "3"}));
     END
 }
 END

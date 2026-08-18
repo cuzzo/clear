@@ -258,12 +258,12 @@ PUB FN tenseOperationPlanner__try_value(type: Type) RETURNS !TenseOperationPlan 
   MUTABLE first: ?TenseLayer = COPY envelope.layers.first();
   IF (first?.kind == TenseLayerKind.Fallible) THEN
     MUTABLE result = TRY (tenseEnvelope__without_layer(envelope, 0));
-    tenseOperationPlanner__preserve_value_metadata_mut(CAST(result AS Type), type);
+    TRY (tenseOperationPlanner__preserve_value_metadata_mut(CAST(result AS Type), type));
     RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Try, type, CAST(result AS Type), TenseBackendForm.ZigTry, [first?], envelope.layers |> SKIP 1, ( { MUTABLE rtoc_empty_list_4: []TenseLayer = List[]; rtoc_empty_list_4 } ), TensePropagation.Failure, TenseRecovery.None, TenseHandleUse.None, FALSE, TRUE);
   END
   IF (first?.kind == TenseLayerKind.Optional) THEN
     MUTABLE result = TRY (tenseEnvelope__without_layer(envelope, 0));
-    tenseOperationPlanner__preserve_value_metadata_mut(CAST(result AS Type), type);
+    TRY (tenseOperationPlanner__preserve_value_metadata_mut(CAST(result AS Type), type));
     RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Try, type, CAST(result AS Type), TenseBackendForm.OptionalTry, [first?], envelope.layers |> SKIP 1, ( { MUTABLE rtoc_empty_list_5: []TenseLayer = List[]; rtoc_empty_list_5 } ), TensePropagation.AbsenceAsFailure, TenseRecovery.None, TenseHandleUse.None, FALSE, TRUE);
   END
   panic("TRY requires an outer fallible or optional layer, got {}");
@@ -353,7 +353,7 @@ PUB FN tenseOperationPlanner__navigate(receiver_type: Type, mapped_type: Type, m
   END
   MUTABLE combined = TRY (tenseOperationPlanner__normalize_navigation_layers((receiver.layers + mapped.layers)));
   MUTABLE result = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(mapped.payload_expression, combined)) }));
-  tenseOperationPlanner__preserve_value_metadata_mut(&result, mapped_type);
+  TRY (tenseOperationPlanner__preserve_value_metadata_mut(&result, mapped_type));
   MUTABLE handle_use = TenseHandleUse.None;
   IF tenseEnvelope__asynchronous?(receiver) THEN
     handle_use =     IF shared_value THEN

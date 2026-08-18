@@ -47,7 +47,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.semantic_index = NIL;
     MUTABLE pipeline = annotationPipeline__new(KEEP rtoc_self_view.config.importer, rtoc_self_view.config.source_dir, rtoc_self_view.config.source_code, rtoc_self_view.config.strict_test);
     DEFER rtoc_self_view.annotation_products = COPY KEEP pipeline.products;
-    annotationPipeline__run(&pipeline, program);
+    TRY (annotationPipeline__run(&pipeline, program));
     IF !(annotationProducts__complete?(rtoc_self_view.annotation_products)) THEN
       panic("annotation pipeline did not publish complete products");
     END
@@ -95,6 +95,6 @@ PUB FN semanticAnnotator__new(importer: ?ModuleImporter = NIL, compiler: ?Module
 ELSE
   TRY (pwd())
 END, strict_test: COPY strict_test, source_code: COPY source_code }, semantic_index: NIL };
-  semanticAnnotator__initialize(&self, importer, compiler, source_dir, strict_test, source_code);
+  TRY (semanticAnnotator__initialize(&self, importer, compiler, source_dir, strict_test, source_code));
   RETURN self @multiowned;
 END

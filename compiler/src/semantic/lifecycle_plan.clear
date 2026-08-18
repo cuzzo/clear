@@ -365,7 +365,7 @@ PUB FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbo
     MUTABLE type_info = COPY UNWRAP (types[type_key]);
     plans[type_key] = TRY (lifecyclePlanner__plan(type_info, schema_lookup, resource_facts));
   END
-  lifecycleRegistry__add_monomorphic_carrier_plans_mut(&plans, program);
+  TRY (lifecycleRegistry__add_monomorphic_carrier_plans_mut(&plans, program));
   MUTABLE binding_plans: {Int64}LifecyclePlan = {};
   MUTABLE inventoried_bindings: []SemanticLifecycleRegistryBindingNode = COPY binding_nodes;
   aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE inventoried_bindings) -> {

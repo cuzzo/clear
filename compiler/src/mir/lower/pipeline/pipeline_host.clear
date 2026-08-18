@@ -767,7 +767,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan = BgStreamPlan{ id: (10000 + id), ctx_type: COPY ctx_type, alloc_var: COPY alloc_var, stream_var: COPY stream_var, ctx_var: COPY ctx_var, blk_label: COPY label, stream_zig: COPY stream_zig, local_stream: COPY local_stream, capture_fields: COPY capture_fields, capture_inits: COPY capture_inits, promoted_decls: COPY caps.specs |> UNNEST _.setup_mir, capture_cleanups: COPY caps.specs |> SELECT:? TRY (captureSpec__cleanup_mir_for(_, "ctx")) |> WHERE _ != NIL, body: [loop], spawn_call: COPY spawn_call, rt_name: "rt" };
     MUTABLE bg = MIRBgBlock{ code: BgBlockPlan{ BgStreamPlan: COPY plan }, captures: COPY (analysis?.captures OR_ELSE {}), run_body: [loop], fsm_structure: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
     bg.result_type = result_type;
-    bg.boundary_fact = pipelineLoweringBridge__execution_boundary_fact(rtoc_self_view.lowering_bridge, :bg_stream, :local, analysis);
+    bg.boundary_fact = TRY (pipelineLoweringBridge__execution_boundary_fact(rtoc_self_view.lowering_bridge, :bg_stream, :local, analysis));
     RETURN bg;
 }
 END
