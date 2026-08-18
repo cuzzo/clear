@@ -164,7 +164,7 @@ PRIVATE FN fsmTransform__foreach_local_entry(node: ForEach) RETURNS !?PromotedLo
   IF !(node.var_name) THEN
     RETURN NIL;
   END
-  MUTABLE ct = TRY (type__new(TRY (aST__full_type_mut(node.collection))));
+  MUTABLE ct = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.collection)) }));
   MUTABLE desc: ?TypeFsmForEachDescriptor = TRY (type__fsm_foreach_descriptor(ct));
   MUTABLE elem_zig = { MUTABLE rtoc_value_block_marker = 0; MUTABLE elem_t: ?Type = TRY (type__element_type(ct));
   (IF elem_t != NIL THEN

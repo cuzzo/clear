@@ -5459,7 +5459,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (respondsTo?(stripped, "result_type") AND stripped.result_type()) THEN
       out.result_type = TRY (type__new(stripped.result_type()));
     ELSE_IF ((fallback != NIL) AND respondsTo?(fallback, "full_type!")) THEN
-      out.result_type = TRY (type__new(TRY (aST__full_type_mut(fallback))));
+      out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(fallback)) }));
     END
     RETURN out;
 }
