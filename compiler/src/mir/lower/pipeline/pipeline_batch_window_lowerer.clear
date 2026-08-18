@@ -52,7 +52,7 @@ PRIVATE FN pipelineBatchWindowLowerer__lower_source_plan(self: PipelineBatchWind
   ELSE_IF (source_kind == PipelineBatchWindowSourceKind.ZigMaterialized) THEN
     RETURN TRY (pipelineBatchWindowLowerer__lower_zig_materialized(self, plan));
   ELSE
-    RETURN NIL;
+    panic("batch window: unsupported source kind");
   END
 END
 PRIVATE FN pipelineBatchWindowLowerer__source_kind_for(self: PipelineBatchWindowLowerer, list_node: Locatable, lhs_type: Type) RETURNS !PipelineBatchWindowSourceKind ->
