@@ -155,7 +155,7 @@ PRIVATE FN pipelineSetIndexLowerer__distinct_set_transfer_marks(self: PipelineSe
 END
 PRIVATE FN pipelineSetIndexLowerer__distinct_insert_stmt(self: PipelineSetIndexLowerer, alloc: String@symbol, insert_value: Emittable, uses_allocator: Bool, consumes: ?OwnershipOperandFact = NIL) RETURNS !ExprStmt ->
   MUTABLE args =   IF uses_allocator THEN
-    CAST(Tuple{AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL }, insert_value} AS Tuple<AllocatorRef, Emittable>)
+    [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, insert_value]
   ELSE
     [insert_value]
   END;
