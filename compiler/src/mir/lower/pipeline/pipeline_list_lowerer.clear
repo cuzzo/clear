@@ -243,7 +243,7 @@ PRIVATE FN pipelineListLowerer__lower_order_by(self: PipelineListLowerer, site: 
 END
 PRIVATE FN pipelineListLowerer__lower_join(self: PipelineListLowerer, site: PipelineSite, join_node: JoinOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
-  MUTABLE left_type_info = type__element_type(TRY (aST__full_type_mut(list_node)));
+  MUTABLE left_type_info = TRY (type__element_type(TRY (aST__full_type_mut(list_node))));
   MUTABLE left_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY left_type_info.resolved() });
   MUTABLE right_src_mir = pipelineListLowerer__visit_mir_call(self, UNWRAP (join_node.right_source));
   MUTABLE right_type_info = TRY (aST__full_type_mut(UNWRAP (join_node.right_source)));

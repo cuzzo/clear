@@ -998,7 +998,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN ownershipDataflow__make_owner_entry(self: OwnershipDataflow, MUTABLE node: Locatable) RETURNS ?OwnerEntry
+PRIVATE FN ownershipDataflow__make_owner_entry(self: OwnershipDataflow, MUTABLE node: Locatable) RETURNS !?OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1172,7 +1172,7 @@ PRIVATE FN ownershipDataflow__update_declared_owner_mut(self: OwnershipDataflow,
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE place = ownershipDataflow__place_for_binding_node(name, node);
-    MUTABLE entry: ?OwnerEntry = ownershipDataflow__make_owner_entry(rtoc_self_view, &node);
+    MUTABLE entry: ?OwnerEntry = TRY (ownershipDataflow__make_owner_entry(rtoc_self_view, &node));
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
       ownershipDataflow__set_state_entry_mut(rtoc_self_view, &state, place, entry_value_mutable);

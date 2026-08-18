@@ -77,10 +77,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN declarations.imports DO
     resolutionSession__visit_RequireNode(rtoc_self_view, _);
     END
-    resolutionSession__register_type_declarations(&rtoc_self_view, declarations);
+    TRY (resolutionSession__register_type_declarations(&rtoc_self_view, declarations));
     MUTABLE conformance_resolutions = TRY (resolutionSession__resolve_conformance_declarations_mut(rtoc_self_view, declarations));
     MUTABLE implementation_resolutions = TRY (resolutionSession__resolve_implementation_declarations_mut(rtoc_self_view, declarations));
-    resolutionSession__prepare_conformance_members_mut(rtoc_self_view, declarations, conformance_resolutions, program);
+    TRY (resolutionSession__prepare_conformance_members_mut(rtoc_self_view, declarations, conformance_resolutions, program));
     resolutionSession__prepare_implementation_members_mut(rtoc_self_view, declarations, implementation_resolutions, program);
     resolutionSession__register_program_signatures(&rtoc_self_view, declarations);
     RETURN resolutionFacts__new(program, declarations, rtoc_self_view.root_scope, rtoc_self_view.function_registry, rtoc_self_view.root_scope.types.keys(), TRY (resolutionSession__resolved_function_names(rtoc_self_view)), implementation_resolutions, conformance_resolutions, rtoc_self_view.protocols);
@@ -709,7 +709,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     } };
 }
 END
-PRIVATE FN resolutionSession__prepare_conformance_members_mut(self: ResolutionSession, declarations: DeclarationIndex, resolutions: []ConformanceResolution, program: Program) RETURNS Void
+PRIVATE FN resolutionSession__prepare_conformance_members_mut(self: ResolutionSession, declarations: DeclarationIndex, resolutions: []ConformanceResolution, program: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1142,7 +1142,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_29, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: rtoc_mutable_block_param_29.owner.name, :name: source_name});
       END
       &member_names.insert(source_name);
-      resolutionSession__prepare_implementation_member_mut(rtoc_self_view, &rtoc_mutable_block_param_29, rtoc_mutable_block_param_29, source_name);
+      TRY (resolutionSession__prepare_implementation_member_mut(rtoc_self_view, &rtoc_mutable_block_param_29, rtoc_mutable_block_param_29, source_name));
       &declarations.function_declarations.append(rtoc_mutable_block_param_29);
       &declarations.body_statements.append(Locatable{ FunctionDef: COPY rtoc_mutable_block_param_29 });
       &program.statements.append(Locatable{ FunctionDef: COPY rtoc_mutable_block_param_29 });
@@ -1150,7 +1150,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__prepare_implementation_member_mut(self: ResolutionSession, MUTABLE member: FunctionDef, resolution: ImplementationResolution, source_name: String) RETURNS Void
+PRIVATE FN resolutionSession__prepare_implementation_member_mut(self: ResolutionSession, MUTABLE member: FunctionDef, resolution: ImplementationResolution, source_name: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1585,7 +1585,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__register_type_declarations(MUTABLE self: ResolutionSession, declarations: DeclarationIndex) RETURNS Void
+PRIVATE FN resolutionSession__register_type_declarations(MUTABLE self: ResolutionSession, declarations: DeclarationIndex) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

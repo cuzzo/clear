@@ -149,7 +149,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view.lowering, body));
 }
 END
-PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(self: PipelineLoweringBridge, value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS ?PipelineBridgeAllocationFact
+PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(self: PipelineLoweringBridge, value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS !?PipelineBridgeAllocationFact
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

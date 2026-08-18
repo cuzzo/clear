@@ -75,7 +75,7 @@ PUB FN capabilityAuditSession__audit_mut(MUTABLE self: CapabilityAuditSession) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    capabilityAuditSession__finalize_program_audit_mut(&rtoc_self_view, CAST(capabilityAuditSession__semantic_program(rtoc_self_view) AS Program));
+    TRY (capabilityAuditSession__finalize_program_audit_mut(&rtoc_self_view, CAST(capabilityAuditSession__semantic_program(rtoc_self_view) AS Program)));
     capabilityAuditSession__run_whole_program_semantics_mut(rtoc_self_view);
     capabilityAuditSession__run_deferred_validations_mut(rtoc_self_view);
 }
@@ -4251,7 +4251,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (TRY (capabilityAuditSession__deferred_with_validations(rtoc_self_view))).clear();
 }
 END
-PRIVATE FN capabilityAuditSession__finalize_program_audit_mut(MUTABLE self: CapabilityAuditSession, program: Program) RETURNS Void
+PRIVATE FN capabilityAuditSession__finalize_program_audit_mut(MUTABLE self: CapabilityAuditSession, program: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

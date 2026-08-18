@@ -754,7 +754,7 @@ PUB FN escapeAnalysis__apply_lambda_escape_sink_mut(node: LambdaLit, context: Es
   TRY (escapeAnalysis__mark_lambda_captures_heap_mut(node, context.bg_heap, context.facts));
 END
 PUB FN escapeAnalysis__apply_func_call_escape_sink_mut(node: FuncCall, context: EscapeContext) RETURNS Void ->
-  escapeAnalysis__mark_takes_args_heap_mut(node.args, escapeAnalysis__params_for_call(node, context.fn_nodes), COPY context.schema_lookup);
+  TRY (escapeAnalysis__mark_takes_args_heap_mut(node.args, escapeAnalysis__params_for_call(node, context.fn_nodes), COPY context.schema_lookup));
 END
 PUB FN escapeAnalysis__apply_method_call_escape_sink_mut(node: MethodCall, context: EscapeContext) RETURNS !Void ->
   TRY (escapeAnalysis__mark_method_takes_heap_mut(node, escapeAnalysis__params_for_method_call(node), context.fn_nodes, context.facts_by_name, COPY context.schema_lookup));
@@ -1077,7 +1077,7 @@ PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup
   escapeAnalysis__mark_symbol_heap_mut(child.symbol())
   });
 END
-PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Param, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void ->
+PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Param, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
     MUTABLE arg: ?Locatable = COPY args[rtoc_idx];
@@ -1104,7 +1104,7 @@ PUB FN escapeAnalysis__mark_method_takes_heap_mut(call: MethodCall, params: []Pa
     escapeAnalysis__mark_expr_roots_heap_mut(call.object);
   END
   MUTABLE value_params = params |> SKIP 1;
-  escapeAnalysis__mark_takes_args_heap_mut(call.args, value_params, schema_lookup);
+  TRY (escapeAnalysis__mark_takes_args_heap_mut(call.args, value_params, schema_lookup));
   TRY (escapeAnalysis__mark_receiver_for_owned_sink_mut(call.object, call.args, value_params, fn_nodes, facts_by_name, schema_lookup));
   TRY (escapeAnalysis__mark_receiver_scope_escapes_mut(call.object, call.args, value_params));
 END
@@ -1708,7 +1708,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
   IF TRY (borrowed_return?(fn_value, expr)) THEN
     RETURN FALSE;
   END
-  MUTABLE ti = escapeAnalysis__owning_return_type(fn_value, &expr);
+  MUTABLE ti = TRY (escapeAnalysis__owning_return_type(fn_value, &expr));
   IF !(ti) THEN
     RETURN FALSE;
   END
@@ -1734,7 +1734,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
   END
   RETURN (((top_heap_ptr OR (type__ownership(ti) != :affine)) OR TRY (type__ownership_bearing?(ti, schema_lookup))) OR TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup)));
 END
-PUB FN escapeAnalysis__owning_return_type(fn_value: FunctionDef, MUTABLE expr: Locatable) RETURNS ?Type ->
+PUB FN escapeAnalysis__owning_return_type(fn_value: FunctionDef, MUTABLE expr: Locatable) RETURNS !?Type ->
   MUTABLE declared = functionDef__declared_return_type(fn_value);
   RETURN (declared OR (TRY (aST__full_type_mut(expr))));
 END
