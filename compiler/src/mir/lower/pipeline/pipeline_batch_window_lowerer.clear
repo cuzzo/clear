@@ -106,11 +106,11 @@ PRIVATE FN pipelineBatchWindowLowerer__batch_expr_builder(self: PipelineBatchWin
   };
 END
 PRIVATE FN pipelineBatchWindowLowerer__batch_size_mir(self: PipelineBatchWindowLowerer, bw_node: BatchWindowOp) RETURNS Emittable ->
-  MUTABLE size = bw_node.options["size"];
-  IF !(size) THEN
-    RETURN Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } };
+  MUTABLE size: ?Locatable = COPY bw_node.options["size"];
+  IF size EXISTS AS size_value THEN
+    RETURN pipelineBatchWindowLowerer__visit_mir_call(self, size_value);
   END
-  RETURN pipelineBatchWindowLowerer__visit_mir_call(self, size);
+  RETURN Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } };
 END
 PRIVATE FN pipelineBatchWindowLowerer__batch_window_timeout_ns(self: PipelineBatchWindowLowerer, bw_node: BatchWindowOp) RETURNS String ->
   MUTABLE time: ?Literal = CAST(bw_node.options["time"] AS ?Literal);
