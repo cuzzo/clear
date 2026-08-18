@@ -56,7 +56,7 @@ PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, li
     RETURN TRY (pipelineSetIndexLowerer__lower_range_distinct(self, range_chain_value_mutable, &smooth_node, distinct_node, set_zig, alloc));
   END
   MUTABLE insert_body = TRY (pipelineSetIndexLowerer__distinct_insert_body(self, expr_mir, UNWRAP (distinct_node.expression), elem_type, elem_zig, alloc, TRUE));
-  RETURN pipelineSetIndexLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, insert_body, set_zig, MUTABLE smooth_node, self) -> {
+  RETURN pipelineSetIndexLowerer__pipeline_block_call(self, list_node, %(items: String, label: String) USE(alloc, insert_body, set_zig, MUTABLE smooth_node, self) -> {
   rtoc_lambda_result_1 = (TRY (pipelineSetIndexLowerer__distinct_set_alloc_stmts(self, &smooth_node, set_zig, alloc)) + [Emittable{ ForStmt: COPY ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: insert_body, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + TRY (pipelineSetIndexLowerer__distinct_set_transfer_marks(self, alloc)) + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "dist_set", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
   rtoc_lambda_result_1
   });
@@ -77,7 +77,7 @@ PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTAB
   elem_zig = pipelineSetIndexLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY type__resolved(elem_type) });
   MUTABLE expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, expr_node, "it");
   MUTABLE map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(${elem_zig}))";
-  RETURN pipelineSetIndexLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, elem_type, expr_mir, expr_node, map_type, self) -> {
+  RETURN pipelineSetIndexLowerer__pipeline_block_call(self, list_node, %(items: String, label: String) USE(alloc, elem_type, expr_mir, expr_node, map_type, self) -> {
   rtoc_lambda_result_2 = [Emittable{ Let: COPY TRY (pipelineSetIndexLowerer__index_result_let(self, map_type, alloc)) }, Emittable{ ForStmt: COPY ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: COPY items, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "it", body: TRY (pipelineSetIndexLowerer__build_index_gop_body(self, expr_mir, alloc, "it", expr_node, CAST(elem_type AS ?Type), PipelineIndexValueOwnership.Borrowed)), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
   rtoc_lambda_result_2
   });
