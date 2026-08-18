@@ -180,7 +180,7 @@ PRIVATE FN liveness__collect_defs(MUTABLE stmt: Stmt, into: Any) RETURNS !Void -
 END
 PRIVATE FN liveness__stmt_decl_type(MUTABLE stmt: BindingStmt) RETURNS !?Type ->
   MUTABLE candidates: []?TypeTypeInput = List[];
-  &candidates.append(&stmt.full_type_mut("FSM liveness declaration"));
+  &candidates.append(TRY (aST__full_type_mut(stmt)));
   &candidates.append(UNWRAP (CAST((MATCH stmt START BindingStmt.VarDecl AS item -> item.type, BindingStmt.BindExpr AS item -> item.type, BindingStmt.DestructureTarget AS item -> item.type END) AS ?TypeTypeInput)));
   IF respondsTo?(stmt, "declared_type") THEN
     &candidates.append(UNWRAP (CAST(stmt.declared_type() AS ?TypeTypeInput)));
@@ -191,7 +191,7 @@ PRIVATE FN liveness__stmt_decl_type(MUTABLE stmt: BindingStmt) RETURNS !?Type ->
   END
   IF value EXISTS AS value_value THEN
     MUTABLE value_value_mutable = COPY value_value;
-    &candidates.append(&value_value_mutable.full_type_mut("FSM liveness declaration value"));
+    &candidates.append(TRY (aST__full_type_mut(value_value_mutable)));
   END
   RETURN CAST(TRY (liveness__normalize_decl_type((candidates |> WHERE _ != NIL).first())) AS ?Type);
 END

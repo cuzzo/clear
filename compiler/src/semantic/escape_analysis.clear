@@ -838,7 +838,7 @@ PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionF
   IF !(((((node != NIL) AND (node IS_A VarDecl)) OR ((node != NIL) AND (node IS_A DestructureTarget))) OR ((IF node? IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :decl) ELSE FALSE END)))) THEN
       CONTINUE;
   END
-  MUTABLE ti = &node.full_type_mut("recursive aggregate owner");
+  MUTABLE ti = TRY (aST__full_type_mut(node));
   IF !((aggregate_owner_requires_heap?(ti, schema_lookup) OR (values |> ANY aggregate_contains_heap_owned_value?(_)))) THEN
       CONTINUE;
   END
@@ -1062,7 +1062,7 @@ PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup
   IF !((child IS_A VarDecl OR ((child IS_A BindExpr AND (child.mode() == :decl))))) THEN
       RETURN NIL;
   END
-  MUTABLE ti = TRY (type__success_type((&child.full_type_mut({:context: "FSM context local"}))));
+  MUTABLE ti = TRY (type__success_type((TRY (aST__full_type_mut(child)))));
   IF !(((IF ti != NIL THEN
       TRY (type__heap_ptr?(ti))
     ELSE
@@ -1086,7 +1086,7 @@ PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Par
   CONTINUE;
     END
     MUTABLE arg_type = IF (arg != NIL) THEN
-        &arg.full_type_mut("TAKES argument")
+        TRY (aST__full_type_mut(arg))
       ELSE
         NIL
       END;
@@ -1174,7 +1174,7 @@ PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Lo
   cleanupEntry__present?(rtoc_local_receiver_14) }) AND cleanupEntry__frame?(entry)) THEN
     RETURN TRUE;
   END
-  MUTABLE ti = &node.full_type_mut("loop receiver heap promotion");
+  MUTABLE ti = TRY (aST__full_type_mut(node));
   RETURN (ti.needs_cleanup?() AND (TRY (type__cleanup_allocator(ti)) == :frame));
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
@@ -1217,12 +1217,12 @@ PUB FN escapeAnalysis__each_loop_body_node(body: []Node, block: FN(Locatable) ->
 END
 PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
   IF arg? IS_A MoveNode AS move_node THEN
-    RETURN type_requires_owned_storage?(&move_node.value.full_type_mut("moved transfer value"), schema_lookup);
+    RETURN type_requires_owned_storage?(TRY (aST__full_type_mut(move_node.value)), schema_lookup);
   END
   IF heap_owned_transfer_source?(arg) THEN
     RETURN TRUE;
   END
-  IF ((ownership_transferring_expr?(arg, TRUE) AND (arg != NIL)) AND type_requires_owned_storage?(&arg.full_type_mut("ownership transfer expression"), schema_lookup)) THEN
+  IF ((ownership_transferring_expr?(arg, TRUE) AND (arg != NIL)) AND type_requires_owned_storage?(TRY (aST__full_type_mut(arg)), schema_lookup)) THEN
     RETURN TRUE;
   END
   RETURN FALSE;
@@ -1402,7 +1402,7 @@ PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_al
   IF !(value IS_A Locatable) THEN
     RETURN FALSE;
   END
-  MUTABLE ti = &value.full_type_mut({:context: "ownership transferring expression"});
+  MUTABLE ti = TRY (aST__full_type_mut(value));
   RETURN !(!(((((!(TRY (type__string?(ti))) AND !(ti.rodata?())) AND (ti.provenance() != :borrow)) AND TRY (type__heap_ptr?(ti))))));
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
@@ -1464,7 +1464,7 @@ PUB FN escapeAnalysis__expr_has_owned_inline_value?(expr: ?Locatable) RETURNS !B
         RETURN TRUE;
       END
       END
-      MUTABLE ti = &node.full_type_mut({:context: "owned inline value"});
+      MUTABLE ti = TRY (aST__full_type_mut(node));
       IF ((!(ti.rodata?()) AND (ti.provenance() != :borrow)) AND TRY (type__heap_ptr?(ti))) THEN
         RETURN TRUE;
       END
@@ -1725,7 +1725,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
       RETURN TRUE;
     END
   END
-  MUTABLE expr_t = &expr.full_type_mut("escaping expression");
+  MUTABLE expr_t = TRY (aST__full_type_mut(expr));
   IF (!(expr IS_A Identifier) AND ((expr_t != NIL) AND (expr_t?).rodata?())) THEN
     RETURN FALSE;
   END
@@ -1736,7 +1736,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
 END
 PUB FN escapeAnalysis__owning_return_type(fn_value: FunctionDef, MUTABLE expr: Locatable) RETURNS ?Type ->
   MUTABLE declared = functionDef__declared_return_type(fn_value);
-  RETURN (declared OR (&expr.full_type_mut("owning return expression")));
+  RETURN (declared OR (TRY (aST__full_type_mut(expr))));
 END
 PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatable) RETURNS !Void ->
   MUTABLE fn = COPY facts.fn;
@@ -1844,7 +1844,7 @@ PUB FN escapeAnalysis__heap_destination?(facts: FunctionFacts, target: Locatable
     IF target IS_A Identifier AS identifier THEN
       RETURN FALSE;
     END
-    MUTABLE ti = &root_value_mutable.full_type_mut("escape destination allocator");
+    MUTABLE ti = TRY (aST__full_type_mut(root_value_mutable));
     RETURN (TRY (type__cleanup_allocator(ti, schema_lookup)) == :heap);
   ELSE
     RETURN FALSE;
@@ -1989,7 +1989,7 @@ PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
   IF !(node IS_A Locatable) THEN
     RETURN FALSE;
   END
-  MUTABLE ti = &node.full_type_mut({:context: "heap-producing expression"});
+  MUTABLE ti = TRY (aST__full_type_mut(node));
   RETURN (TRY (type__heap_ptr?(ti)) OR TRY (type__recursive_cleanup_shape?(ti, NIL)));
 END
 PUB FN escapeAnalysis__function_def_has_return_lifetime?(fn_value: FunctionDef) RETURNS Bool ->

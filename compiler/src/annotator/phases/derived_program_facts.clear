@@ -43,7 +43,7 @@ PUB FN derivedProgramFacts__capture(nodes: {String}FunctionDef) RETURNS !Derived
   MUTABLE functions: {String}DerivedFunctionFacts = {};
   (nodes |> ORDER_BY _).keys() |> EACH {
   MUTABLE node: Any = ((nodes |> ORDER_BY _)[_] OR_ELSE panic("missing hash key"));
-  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(&node.full_type_mut({:context: "derived function facts for ${_}"}));
+  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (aST__full_type_mut(node)));
   IF !(signature) THEN
       panic("missing finalized function signature for {}");
   END

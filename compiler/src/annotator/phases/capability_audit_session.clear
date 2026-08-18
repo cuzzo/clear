@@ -1223,7 +1223,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE tok = node.token();
       fix = TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_RETURN_WITH_COPY), [edit__new(span__new(NIL, tok.line(), tok.column(), 0), "COPY ")], :auto));
     END
-    MUTABLE kw = {:type: &node.full_type_mut("borrowed return diagnostic")};
+    MUTABLE kw = {:type: TRY (aST__full_type_mut(node))};
     IF !(fix) THEN
       RETURN capabilityAuditSession__error_mut(rtoc_self_view, node, CapabilityAuditCodeOrMessage{ SymbolValue: :RETURN_BORROWED_NO_COPY_OR_LIFETIME }, [], kw);
     END
@@ -2442,7 +2442,7 @@ PRIVATE FN capabilityAuditSession__function_needs_runtime_directly?(self: Capabi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fsig: ?FunctionSignature@multiowned = functionSignature__unwrap(castTypeToOptionalX(&fn_node.full_type_mut("needs_rt function signature")));
+    MUTABLE fsig: ?FunctionSignature@multiowned = functionSignature__unwrap(castTypeToOptionalX(TRY (aST__full_type_mut(Locatable{ FunctionDef: COPY fn_node }))));
     MUTABLE ret_type: ?Type@multiowned = NIL;
     IF fsig != NIL THEN
       ret_type = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_14 = (fsig?);
@@ -4279,7 +4279,7 @@ PRIVATE FN capabilityAuditSession__restamp_function_metadata_mut(self: Capabilit
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (capabilityAuditSession__semantic_function_nodes(rtoc_self_view))).values() DO
     MUTABLE rtoc_mutable_block_param_46 = COPY _;
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(&rtoc_mutable_block_param_46.full_type_mut({:context: "program function signature"}));
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (aST__full_type_mut(rtoc_mutable_block_param_46)));
     IF !(signature) THEN
         CONTINUE;
     END

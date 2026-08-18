@@ -1002,7 +1002,7 @@ PRIVATE FN ownershipDataflow__make_owner_entry(self: OwnershipDataflow, MUTABLE 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ti = &node.full_type_mut("ownership dataflow owner");
+    MUTABLE ti = TRY (aST__full_type_mut(node));
     IF (respondsTo?(node, "borrow_provenance?") AND node.borrow_provenance?()) THEN
       RETURN NIL;
     END
@@ -1407,7 +1407,7 @@ PRIVATE FN ownershipDataflow__copy_type?(self: OwnershipDataflow, MUTABLE ident:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ti = &ident.full_type_mut("ownership dataflow copy type");
+    MUTABLE ti = TRY (aST__full_type_mut(Locatable{ Identifier: COPY ident }));
     IF (TRY (type__string?(ti)) AND ((ident.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_18 = ((ident.symbol)?);
     symbolEntry__heap_storage?(rtoc_local_receiver_18) })) THEN
       RETURN FALSE;
@@ -1425,7 +1425,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF aST__container_borrow?(Locatable{ GetField: COPY get_field_mutable }) THEN
         RETURN FALSE;
       END
-      MUTABLE ti = &get_field_mutable.full_type_mut("ownership dataflow field move");
+      MUTABLE ti = TRY (aST__full_type_mut(get_field_mutable));
       RETURN type__indirect_type?(CAST(ti AS Type));
     ELSE
       RETURN FALSE;
@@ -1900,7 +1900,7 @@ PUB FN loopFrameAnalysis__expression_allocates_frame_value?(MUTABLE node: Locata
   IF placement__frame?(storage) THEN
     RETURN TRUE;
   END
-  MUTABLE type_info = &node.full_type_mut("loop frame allocation");
+  MUTABLE type_info = TRY (aST__full_type_mut(node));
   IF type_info.frame?() THEN
     RETURN TRUE;
   END
@@ -1971,7 +1971,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
 END
 PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Bool ->
   IF loop_node IS_A WhileBindLoop AS while_bind_loop THEN
-    MUTABLE cond_t = &while_bind_loop.condition.full_type_mut("loop capture condition");
+    MUTABLE cond_t = TRY (aST__full_type_mut(while_bind_loop.condition));
     MUTABLE inner = TRY (type__wrapped_type(cond_t));
     IF !(inner IS_A Type) THEN
       RETURN FALSE;
@@ -2035,7 +2035,7 @@ PUB FN loopFrameAnalysis__key_allocates_frame?(expr: Locatable, fn_nodes: {Strin
   IF (storage == :frame) THEN
       found = TRUE;
   END
-  MUTABLE ti = &node.full_type_mut("SHARD frame allocation");
+  MUTABLE ti = TRY (aST__full_type_mut(node));
   IF (ti.needs_cleanup?() AND (TRY (type__cleanup_allocator(ti)) == :frame)) THEN
       found = TRUE;
   END

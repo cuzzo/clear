@@ -477,7 +477,7 @@ PRIVATE FN mIRPass__owning_field_move?(self: MIRPass, MUTABLE node: Locatable) R
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A GetField AS get_field THEN
       MUTABLE get_field_mutable = COPY get_field;
-      MUTABLE ti = &get_field_mutable.full_type_mut("MIR pass field move");
+      MUTABLE ti = TRY (aST__full_type_mut(get_field_mutable));
       RETURN type__indirect_type?(CAST(ti AS Type));
     ELSE
       RETURN FALSE;
@@ -574,7 +574,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE destructure = match_statement_mutable.cases[rtoc_idx].destructure();
         MUTABLE alloc_type_branch_value: ?Type = NIL;
                 IF destructure THEN
-                  alloc_type_branch_value = &destructure.full_type_mut({:context: "match AS allocation marker"});
+                  alloc_type_branch_value = TRY (aST__full_type_mut(destructure));
                 ELSE
                   alloc_type_branch_value = TRY (type__from_node_mut(identifier_mutable, "match AS allocation marker"));
                 END

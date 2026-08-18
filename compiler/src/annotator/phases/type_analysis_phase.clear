@@ -100,7 +100,7 @@ PRIVATE FN annotationTypeInventory__node_type(MUTABLE node: Locatable) RETURNS !
   IF !(node.typed?()) THEN
     RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped }));
   END
-  RETURN &node.full_type_mut("annotation type inventory");
+  RETURN TRY (aST__full_type_mut(node));
 END
 PRIVATE FN annotationTypeInventory__class_name(node: Locatable) RETURNS String ->
   RETURN (((node.class().name() OR CAST(node.class() AS String))).split("::").last() OR CAST(node.class() AS String));

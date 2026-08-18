@@ -17,12 +17,12 @@ PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: Annota
     IF !(typedProgramFacts__program(typed_program_value_mutable).equal?(program)) THEN
       panic("annotation boundary received a different program");
     END
-    &program.full_type_mut("annotation boundary program");
+    TRY (aST__full_type_mut(Locatable{ Program: COPY program }));
     MUTABLE rtoc_local_receiver_1 = (TRY (annotationTypeInventory__scan(program)));
     TRY (annotationTypeInventory__verify_resolved_mut(rtoc_local_receiver_1));
     FOR rtoc_each_key IN typed_program_value_mutable.resolution.function_registry.nodes.keys() DO
   MUTABLE fn_value: FunctionDef@multiowned = COPY UNWRAP (typed_program_value_mutable.resolution.function_registry.nodes[rtoc_each_key]);
-  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY &fn_value.full_type_mut("annotation boundary function ${rtoc_each_key}") });
+  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY TRY (aST__full_type_mut(fn_value)) });
   IF !(signature) THEN
         panic("annotation boundary missing function signature for {}");
   END
