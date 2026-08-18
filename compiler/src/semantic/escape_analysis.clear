@@ -278,9 +278,12 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
 END
 PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary, on_mutable_violation: ?FN(SymbolEntry, Identifier, String) -> Void = NIL, on_family_violation: ?FN(Locatable, String@symbol, String@symbol, String) -> Void = NIL, imported_params: {String}[]Param) RETURNS !Void ->
   MUTABLE kept_contracts: {String}{Int64}KeptIdentityContract = {};
-  MUTABLE all_params = ( { MUTABLE rtoc_transform_values_result_4: {String}Any = {}; FOR rtoc_key IN fn_nodes.keys() DO rtoc_transform_values_result_4[rtoc_key] = COPY UNWRAP (fn_nodes[rtoc_key]).params; END rtoc_transform_values_result_4 } ).keys() |> REDUCE(COPY imported_params) { acc[_] = COPY UNWRAP (( { MUTABLE rtoc_transform_values_result_4: {String}Any = {}; FOR rtoc_key IN fn_nodes.keys() DO rtoc_transform_values_result_4[rtoc_key] = COPY UNWRAP (fn_nodes[rtoc_key]).params; END rtoc_transform_values_result_4 } )[_]); acc };
+  MUTABLE all_params: {String}[]Param = COPY imported_params;
+  FOR rtoc_key IN fn_nodes.keys() DO
+    all_params[rtoc_key] = COPY (UNWRAP (fn_nodes[rtoc_key])).params;
+  END
   FOR rtoc_key IN all_params.keys() DO
-  MUTABLE params: Any = COPY UNWRAP (all_params[rtoc_key]);
+  MUTABLE params: []Param = COPY UNWRAP (all_params[rtoc_key]);
   MUTABLE by_index: {Int64}KeptIdentityContract = {};
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
