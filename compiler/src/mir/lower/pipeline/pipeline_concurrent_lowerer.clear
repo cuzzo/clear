@@ -130,7 +130,7 @@ PRIVATE FN pipelineConcurrentLowerer__concurrent_plan(self: PipelineConcurrentLo
   MUTABLE lhs_type = TRY (aST__full_type_mut(lhs));
   MUTABLE real_lhs_type = TRY (aST__full_type_mut(real_lhs));
   MUTABLE terminal_kind = pipelineConcurrentLowerer__concurrent_terminal_kind(self, inner);
-  MUTABLE source_kind: ?PipelineConcurrentSourceKind = TRY (pipelineConcurrentLowerer__concurrent_source_kind(self, lhs, real_lhs, lhs_type, real_lhs_type, conc_op));
+  MUTABLE source_kind: ?PipelineConcurrentSourceKind = pipelineConcurrentLowerer__concurrent_source_kind(self, lhs, real_lhs, lhs_type, real_lhs_type, conc_op);
   IF !(source_kind) THEN
     TRY (pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self, lhs, lhs_type, inner));
   END
@@ -154,7 +154,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(self: PipelineConcurrent
     RETURN NIL;
   END
 END
-PRIVATE FN pipelineConcurrentLowerer__concurrent_source_kind(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, real_lhs: Locatable, lhs_type: Type, real_lhs_type: Type, conc_op: ConcurrentOp) RETURNS !?PipelineConcurrentSourceKind ->
+PRIVATE FN pipelineConcurrentLowerer__concurrent_source_kind(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable, real_lhs: Locatable, lhs_type: Type, real_lhs_type: Type, conc_op: ConcurrentOp) RETURNS ?PipelineConcurrentSourceKind ->
   IF pipelineConcurrentLowerer__shard_context(self, conc_op) THEN
     RETURN PipelineConcurrentSourceKind.ShardEach;
   END

@@ -532,7 +532,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END;
     MUTABLE decl = symbol.reg();
-    MUTABLE entry: ?CleanupEntry@multiowned = TRY (localBindingAnalysis__binding_entry(decl));
+    MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(decl);
     IF entry EXISTS AS entry_value THEN
       RETURN KEEP entry_value;
     END
@@ -728,7 +728,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF _.symbol != NIL THEN
         decl = COPY ((_.symbol)?).reg;
       END
-    MUTABLE entry: ?CleanupEntry@multiowned = TRY (localBindingAnalysis__binding_entry(castOptionalSymbolEntryRegInputToOptionalLocatable(decl)));
+    MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(castOptionalSymbolEntryRegInputToOptionalLocatable(decl));
     MUTABLE cleanup_entry = (entry OR_ELSE frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY n }, Locatable{ Identifier: COPY _ }));
     (((cleanupEntry__has_moved_guard?(cleanup_entry) AND cleanupEntry__needs_cleanup?(cleanup_entry))) OR (((n.startsWith?("__hoist_") AND aST__moved?(Locatable{ Identifier: COPY _ })) AND cleanupEntry__needs_cleanup?(cleanup_entry))))
     })) |> SELECT identifier__name(_)) |> DISTINCT _) AS []String);

@@ -125,7 +125,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &rtoc_self_view.mutations.append(COPY Event{ node: COPY node, binding_id: COPY binding_id, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, escape: FALSE });
 }
 END
-PUB FN ownershipTransportFacts__record_alias(MUTABLE self: OwnershipTransportFacts, node: Node, ancestors: []Locatable) RETURNS !Void
+PUB FN ownershipTransportFacts__record_alias(MUTABLE self: OwnershipTransportFacts, node: Node, ancestors: []Locatable) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -334,8 +334,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE conditional = COPY left.ancestors[rtoc_idx]?;
-      MUTABLE left_side: ?String@symbol = TRY (ownershipTransportFacts__conditional_side(rtoc_self_view, left, castLocatableToIfStatement(conditional)));
-      MUTABLE right_side: ?String@symbol = TRY (ownershipTransportFacts__conditional_side(rtoc_self_view, right, castLocatableToIfStatement(conditional)));
+      MUTABLE left_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, left, castLocatableToIfStatement(conditional));
+      MUTABLE right_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, right, castLocatableToIfStatement(conditional));
       IF (((left_side != NIL) AND (right_side != NIL)) AND (left_side != right_side)) THEN
           RETURN TRUE;
       END
@@ -344,11 +344,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN ownershipTransportFacts__conditional_side(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS !?String@symbol
+PRIVATE FN ownershipTransportFacts__conditional_side(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE index: ?Int64 = TRY (ownershipTransportFacts__conditional_index(rtoc_self_view, event, conditional));
+    MUTABLE index: ?Int64 = ownershipTransportFacts__conditional_index(rtoc_self_view, event, conditional);
     IF index EXISTS AS index_value THEN
       MUTABLE child: Locatable = COPY event.node;
       MUTABLE child_index = (index_value + 1);
@@ -370,7 +370,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN ownershipTransportFacts__conditional_index(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS !?Int64
+PRIVATE FN ownershipTransportFacts__conditional_index(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS ?Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

@@ -659,13 +659,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     &seen.insert(aST__node_identity(entry));
     rubyToClearVoid()
     });
-    TRY (frozenCleanupFacts__each_entry(facts, %(place: PlaceId, entry: CleanupEntry) USE(MUTABLE pairs, seen) -> {
+    frozenCleanupFacts__each_entry(facts, %(place: PlaceId, entry: CleanupEntry) USE(MUTABLE pairs, seen) -> {
     IF seen.contains?(aST__node_identity(entry)) THEN
         RETURN;
     END
     &pairs.append(CleanupEntryPair{ place: COPY place, name: COPY place.path, entry: entry });
     rubyToClearVoid()
-    }));
+    });
     RETURN pairs;
 }
 END
@@ -1776,7 +1776,7 @@ PUB FN loopFrameAnalysis__process_loop_mut(MUTABLE loop_node: LoopNode, body: []
   MUTABLE local_names = COPY local_facts.names;
   MUTABLE has_iteration_frame_locals = ((((local_facts.iteration_frame_decls |> ANY _) OR loopFrameAnalysis__loop_capture_frame_alloc?(castLoopNodeToLocatable(loop_node), schema_lookup))) OR TRY (loopFrameAnalysis__direct_loop_expression_frame_alloc?(body, fn_nodes, local_names)));
   MUTABLE has_extended_frame_locals = ((local_facts.frame_decls |> ANY {
-  MUTABLE entry: ?CleanupEntry@multiowned = TRY (localBindingAnalysis__binding_entry(_));
+  MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(_);
   ((((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_24 = UNWRAP (entry);
   cleanupEntry__present?(rtoc_local_receiver_24) }) AND cleanupEntry__frame?(entry)) AND (cleanupEntry__scope(entry) != :iteration))
   }) OR TRY (loopFrameAnalysis__outer_frame_receiver_alloc?(body, local_names)));
@@ -2773,11 +2773,11 @@ END
 FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
-PUB FN ownershipDataflow__schema_lookup_call(self: OwnershipDataflow, arg0: String@symbol) RETURNS !?TypeSchemaLookupResult ->
+PUB FN ownershipDataflow__schema_lookup_call(self: OwnershipDataflow, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
   MUTABLE fn_value = UNWRAP (self.schema_lookup);
   RETURN fn_value(arg0);
 END
-PUB FN borrowChecker__schema_lookup_call(self: BorrowChecker, arg0: String@symbol) RETURNS !?TypeSchemaLookupResult ->
+PUB FN borrowChecker__schema_lookup_call(self: BorrowChecker, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
   MUTABLE fn_value = UNWRAP (self.schema_lookup);
   RETURN fn_value(arg0);
 END

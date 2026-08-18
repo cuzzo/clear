@@ -7,7 +7,7 @@ REQUIRE "../annotator/annotator.clear"
 REQUIRE "../ast/symbol_entry.clear"
 REQUIRE "../ast/param.clear"
 # Ruby module KeepAnalysis
-PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary) RETURNS !Void ->
+PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary) RETURNS Void ->
   MUTABLE caller_params: {String}{String}SymbolEntry@multiowned = {};
   FOR rtoc_key IN fn_nodes.keys() DO
   MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);

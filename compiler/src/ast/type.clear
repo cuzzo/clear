@@ -100,7 +100,7 @@ FN type__unwrap_fallible_kind(kind: TypeExpressionKind) RETURNS TypeExpressionKi
   END
   panic("expected a fallible type expression");
 END
-FN type__unwrap_optional_kind(kind: TypeExpressionKind) RETURNS !TypeExpressionKind ->
+FN type__unwrap_optional_kind(kind: TypeExpressionKind) RETURNS TypeExpressionKind ->
   IF !(kind IS_A OptionalTypeExpression) THEN
     RETURN COPY kind;
   END
@@ -181,7 +181,7 @@ FN typeShape__array(self: TypeShape) RETURNS Bool ->
   RETURN !((typeShape__linear_expression(self) == NIL));
 END
 FN typeShape__map(self: TypeShape) RETURNS Bool ->
-  RETURN TRY (typeShape__structural_expression(self)).kind IS_A MapTypeExpression;
+  RETURN typeShape__structural_expression(self).kind IS_A MapTypeExpression;
 END
 FN typeShape__optional(self: TypeShape) RETURNS Bool ->
   MUTABLE current = COPY self.expression;
@@ -205,8 +205,8 @@ FN typeShape__tense(self: TypeShape) RETURNS Bool ->
   MUTABLE kind = COPY self.expression.kind;
   RETURN (kind IS_A FutureTypeExpression OR kind IS_A StreamTypeExpression);
 END
-FN typeShape__generic_instance(self: TypeShape) RETURNS !Bool ->
-  MUTABLE structural = COPY TRY (typeShape__structural_expression(self)).kind;
+FN typeShape__generic_instance(self: TypeShape) RETURNS Bool ->
+  MUTABLE structural = COPY typeShape__structural_expression(self).kind;
   IF structural IS_A TupleTypeExpression THEN
     RETURN TRUE;
   END
@@ -290,21 +290,21 @@ FN typeShape__element_type_raw(self: TypeShape) RETURNS !?String@symbol ->
   END
 END
 FN typeShape__key_type_raw(self: TypeShape) RETURNS !?String@symbol ->
-  MUTABLE structural = COPY TRY (typeShape__structural_expression(self)).kind;
+  MUTABLE structural = COPY typeShape__structural_expression(self).kind;
   IF !(structural IS_A MapTypeExpression) THEN
     RETURN NIL;
   END
   RETURN symbol((TRY (typeExpressionPrinter__legacy((UNWRAP (typeExpressionKind__map(structural))).key))));
 END
 FN typeShape__value_type_raw(self: TypeShape) RETURNS !?String@symbol ->
-  MUTABLE structural = COPY TRY (typeShape__structural_expression(self)).kind;
+  MUTABLE structural = COPY typeShape__structural_expression(self).kind;
   IF !(structural IS_A MapTypeExpression) THEN
     RETURN NIL;
   END
   RETURN symbol((TRY (typeExpressionPrinter__legacy((UNWRAP (typeExpressionKind__map(structural))).value))));
 END
-FN typeShape__generic_base_raw(self: TypeShape) RETURNS !?String@symbol ->
-  MUTABLE structural = COPY TRY (typeShape__structural_expression(self)).kind;
+FN typeShape__generic_base_raw(self: TypeShape) RETURNS ?String@symbol ->
+  MUTABLE structural = COPY typeShape__structural_expression(self).kind;
   IF structural IS_A TupleTypeExpression THEN
     RETURN :Tuple;
   END
@@ -317,7 +317,7 @@ FN typeShape__generic_base_raw(self: TypeShape) RETURNS !?String@symbol ->
   RETURN NIL;
 END
 FN typeShape__generic_args_raw(self: TypeShape) RETURNS ![]String@symbol ->
-  MUTABLE structural = COPY TRY (typeShape__structural_expression(self)).kind;
+  MUTABLE structural = COPY typeShape__structural_expression(self).kind;
   MUTABLE items: []TypeExpression = ( { MUTABLE rtoc_empty_list_2: []TypeExpression = List[]; rtoc_empty_list_2 } );
   IF structural IS_A TupleTypeExpression THEN
     FOR _ IN ((UNWRAP (typeExpressionKind__tuple(structural))).items) DO
@@ -353,13 +353,13 @@ FN typeShape__numeric_map?(self: TypeShape) RETURNS !Bool ->
   RETURN (typeShape__map(self) AND (TRY (typeShape__key_type_raw(self)) != :String));
 END
 PRIVATE FN typeShape__linear_expression(self: TypeShape) RETURNS ?LinearTypeExpression ->
-  MUTABLE structural = COPY TRY (typeShape__structural_expression(self)).kind;
+  MUTABLE structural = COPY typeShape__structural_expression(self).kind;
   IF structural IS_A LinearTypeExpression AS structural_linear THEN
     RETURN COPY structural_linear;
   END
   RETURN NIL;
 END
-PRIVATE FN typeShape__structural_expression(self: TypeShape) RETURNS !TypeExpression ->
+PRIVATE FN typeShape__structural_expression(self: TypeShape) RETURNS TypeExpression ->
   MUTABLE structural: TypeExpression = COPY self.expression;
   MUTABLE fallible_kind = COPY structural.kind;
   IF fallible_kind IS_A FallibleTypeExpression AS fallible_structural THEN
@@ -729,7 +729,7 @@ PUB FN type__inline_migration_name(type: Type) RETURNS !?String ->
   IF (typeExpressionTree__tense_wrapper?(expression) AND typeCapabilities__explicit_layer_capability?(expression.capabilities)) THEN
     RETURN NIL;
   END
-  MUTABLE projected: ?TypeExpression = TRY (type__project_inline_collection(expression, type));
+  MUTABLE projected: ?TypeExpression = type__project_inline_collection(expression, type);
   IF projected EXISTS AS projected_value THEN
     RETURN TRY (typeExpressionPrinter__inline(projected_value));
   ELSE
@@ -758,14 +758,14 @@ PUB FN type__bare_legacy_slice?(node: TypeExpression, type: Type) RETURNS Bool -
   END
   RETURN FALSE;
 END
-PRIVATE FN type__project_inline_collection(expression: TypeExpression, type: Type) RETURNS !?TypeExpression EFFECTS REENTRANT ->
+PRIVATE FN type__project_inline_collection(expression: TypeExpression, type: Type) RETURNS ?TypeExpression EFFECTS REENTRANT ->
   MUTABLE inner: ?TypeExpression = NIL;
   MUTABLE collection: ?String@symbol = type__collection(type);
   IF collection EXISTS AS collection_value THEN
     MUTABLE kind = COPY expression.kind;
     MUTABLE cap = COPY expression.capabilities;
     IF kind IS_A OptionalTypeExpression THEN
-      inner = TRY (type__project_inline_collection((UNWRAP (typeExpressionKind__optional(kind))).inner, type));
+      inner = type__project_inline_collection((UNWRAP (typeExpressionKind__optional(kind))).inner, type);
       IF (inner == NIL) THEN
         RETURN NIL;
       ELSE
@@ -774,7 +774,7 @@ PRIVATE FN type__project_inline_collection(expression: TypeExpression, type: Typ
     END
     IF kind IS_A FallibleTypeExpression THEN
       MUTABLE fallible_kind: FallibleTypeExpression = UNWRAP (typeExpressionKind__fallible(kind));
-      inner = TRY (type__project_inline_collection(fallible_kind.inner, type));
+      inner = type__project_inline_collection(fallible_kind.inner, type);
       IF (inner == NIL) THEN
         RETURN NIL;
       ELSE
@@ -1692,7 +1692,7 @@ PUB FN type__apply_finalized_value_shape_mut(MUTABLE self: Type, final_type: Typ
     value_elem_ownership = type__elem_ownership(value_type_value);
     value_elem_sync = type__elem_sync(value_type_value);
     value_elem_layout = type__elem_layout(value_type_value);
-    IF !(TRY (type__rank?(final_type))) THEN
+    IF !(type__rank?(final_type)) THEN
       value_collection = type__collection(value_type_value);
     END
     IF type__link?(value_type_value) THEN
@@ -1805,13 +1805,13 @@ PUB FN type__equals?(self: Type, other: TypeTypeInput) RETURNS !Bool EFFECTS REE
       IF !(type__fn_type?(type)) THEN
         RETURN FALSE;
       END
-      RETURN (TRY (type__semantic_type_key(self)) == TRY (type__semantic_type_key(type)));
+      RETURN (type__semantic_type_key(self) == type__semantic_type_key(type));
     ELSE
       RETURN FALSE;
     END
   END
   MUTABLE other_type = TRY (type__from_input(other));
-  RETURN ((type__resolved(self) == type__to_sym(other_type)) OR (TRY (type__semantic_type_key(self)) == TRY (type__semantic_type_key(other_type))));
+  RETURN ((type__resolved(self) == type__to_sym(other_type)) OR (type__semantic_type_key(self) == type__semantic_type_key(other_type)));
 END
 PUB FN type__raw(self: Type) RETURNS TypeShapeRaw EFFECTS REENTRANT ->
   RETURN typeShape__raw(self.shape);
@@ -1842,9 +1842,9 @@ PUB FN type__resolved(self: Type) RETURNS String@symbol EFFECTS REENTRANT ->
   RETURN typeShape__resolved(self.shape);
 END
 PRIVATE FN type__type_id(self: Type) RETURNS TypeId ->
-  RETURN TypeId{ key: COPY TRY (type__semantic_type_key(self)) };
+  RETURN TypeId{ key: COPY type__semantic_type_key(self) };
 END
-PUB FN type__semantic_type_key(self: Type) RETURNS !String EFFECTS REENTRANT ->
+PUB FN type__semantic_type_key(self: Type) RETURNS String EFFECTS REENTRANT ->
   MUTABLE ownership_key: String = "";
   IF (type__ownership(self) == NIL) THEN
     ownership_key = "affine";
@@ -1898,7 +1898,7 @@ PUB FN type__lifecycle_type_key(self: Type) RETURNS String ->
       DEFAULT -> "owned"
     END;
   END
-  RETURN regexReplaceFirst(TRY (type__semantic_type_key(self)), "\\|loc=[^|]+", "|loc=${location}");
+  RETURN regexReplaceFirst(type__semantic_type_key(self), "\\|loc=[^|]+", "|loc=${location}");
 END
 PUB FN type__base_type(self: Type) RETURNS !String@symbol ->
   MUTABLE element_raw: ?String@symbol = TRY (typeShape__element_type_raw(self.shape));
@@ -2097,7 +2097,7 @@ END
 PUB FN type__array?(self: Type) RETURNS Bool ->
   RETURN typeShape__array(self.shape);
 END
-PUB FN type__rank?(self: Type) RETURNS !Bool ->
+PUB FN type__rank?(self: Type) RETURNS Bool ->
   MUTABLE kind = type__unwrap_fallible_kind(self.shape.expression.kind);
   IF kind IS_A OptionalTypeExpression THEN
     MUTABLE optional_inner = COPY ((UNWRAP (typeExpressionKind__optional(kind))).inner).kind;
@@ -2111,20 +2111,20 @@ PUB FN type__rank?(self: Type) RETURNS !Bool ->
   RETURN FALSE;
 END
 PUB FN type__rank_dimensions(self: Type) RETURNS ![]TypeExpressionDimension ->
-  IF !(TRY (type__rank?(self))) THEN
+  IF !(type__rank?(self)) THEN
     RETURN CAST(( { MUTABLE rtoc_empty_list_5: []TypeExpressionDimension = List[]; rtoc_empty_list_5 } ) AS []TypeExpressionDimension);
   END
-  MUTABLE kind = TRY (type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind)));
+  MUTABLE kind = type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind));
   RETURN COPY (UNWRAP (typeExpressionKind__linear(kind))).dimensions;
 END
 PUB FN type__rank(self: Type) RETURNS !Int64 ->
   RETURN (TRY (type__rank_dimensions(self))).length();
 END
 PUB FN type__dynamic_rank?(self: Type) RETURNS !Bool ->
-  RETURN (TRY (type__rank?(self)) AND ((TRY (type__rank_dimensions(self))) |> ANY ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(_, :LIST)));
+  RETURN (type__rank?(self) AND ((TRY (type__rank_dimensions(self))) |> ANY ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(_, :LIST)));
 END
 PUB FN type__fixed_rank?(self: Type) RETURNS !Bool ->
-  RETURN (TRY (type__rank?(self)) AND !(TRY (type__dynamic_rank?(self))));
+  RETURN (type__rank?(self) AND !(TRY (type__dynamic_rank?(self))));
 END
 PUB FN type__fixed_position_count(self: Type) RETURNS !?Int64 ->
   IF type__tuple?(self) THEN
@@ -2344,7 +2344,7 @@ PUB FN type__plain_numeric_map?(self: Type) RETURNS !Bool ->
   RETURN ((TRY (type__numeric_map?(self)) AND !(type__sharded?(self))) AND !(type__striped?(self)));
 END
 PUB FN type__key_type(self: Type) RETURNS !Type ->
-  MUTABLE kind = TRY (type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind)));
+  MUTABLE kind = type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind));
   IF kind IS_A MapTypeExpression THEN
     RETURN TRY (type__from_child_expression((UNWRAP (typeExpressionKind__map(kind))).key));
   END
@@ -2564,14 +2564,14 @@ PUB FN type__striped?(self: Type) RETURNS Bool ->
   RETURN (type__sharded?(self) AND type__any_sync?(self));
 END
 PUB FN type__value_type(self: Type) RETURNS !Type ->
-  MUTABLE kind = TRY (type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind)));
+  MUTABLE kind = type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind));
   IF kind IS_A MapTypeExpression THEN
     RETURN TRY (type__from_child_expression((UNWRAP (typeExpressionKind__map(kind))).value));
   END
   RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
 END
 PUB FN type__generic_instance?(self: Type) RETURNS Bool ->
-  RETURN TRY (typeShape__generic_instance(self.shape));
+  RETURN typeShape__generic_instance(self.shape);
 END
 PUB FN type__projection?(self: Type) RETURNS Bool ->
   RETURN self.shape.expression.kind IS_A TypeProjectionExpression;
@@ -2596,7 +2596,7 @@ PUB FN type__specialization_may_need_cleanup?(self: Type) RETURNS !Bool EFFECTS 
   END
   RETURN FALSE;
 END
-PUB FN type__projection_owner(self: Type) RETURNS !?String@symbol ->
+PUB FN type__projection_owner(self: Type) RETURNS ?String@symbol ->
   MUTABLE kind = COPY self.shape.expression.kind;
   IF kind IS_A TypeProjectionExpression THEN
     RETURN (UNWRAP (typeExpressionKind__projection(kind))).owner;
@@ -2604,7 +2604,7 @@ PUB FN type__projection_owner(self: Type) RETURNS !?String@symbol ->
     RETURN NIL;
   END
 END
-PUB FN type__projection_member(self: Type) RETURNS !?String@symbol ->
+PUB FN type__projection_member(self: Type) RETURNS ?String@symbol ->
   MUTABLE kind = COPY self.shape.expression.kind;
   IF kind IS_A TypeProjectionExpression THEN
     RETURN (UNWRAP (typeExpressionKind__projection(kind))).member;
@@ -2612,7 +2612,7 @@ PUB FN type__projection_member(self: Type) RETURNS !?String@symbol ->
     RETURN NIL;
   END
 END
-PUB FN type__projection_protocol(self: Type) RETURNS !?String@symbol ->
+PUB FN type__projection_protocol(self: Type) RETURNS ?String@symbol ->
   MUTABLE kind = COPY self.shape.expression.kind;
   IF kind IS_A TypeProjectionExpression THEN
     RETURN (UNWRAP (typeExpressionKind__projection(kind))).protocol;
@@ -2621,13 +2621,13 @@ PUB FN type__projection_protocol(self: Type) RETURNS !?String@symbol ->
   END
 END
 PUB FN type__generic_base(self: Type) RETURNS String@symbol ->
-  RETURN type__symbol_or_default(TRY (typeShape__generic_base_raw(self.shape)), type__resolved(self));
+  RETURN type__symbol_or_default(typeShape__generic_base_raw(self.shape), type__resolved(self));
 END
 PUB FN type__tuple?(self: Type) RETURNS Bool ->
   RETURN (type__generic_instance?(self) AND (type__generic_base(self) == :Tuple));
 END
 PUB FN type__id_handle?(self: Type) RETURNS Bool ->
-  RETURN (type__generic_instance?(self) AND (TRY (typeShape__generic_base_raw(self.shape)) == :Id));
+  RETURN (type__generic_instance?(self) AND (typeShape__generic_base_raw(self.shape) == :Id));
 END
 PUB FN type__ownership_surface_name(self: Type) RETURNS ?String ->
   MUTABLE own: ?String@symbol = type__ownership(self);
@@ -2654,7 +2654,7 @@ PUB FN type__sync_family_name(self: Type) RETURNS ?String ->
   END
 END
 PUB FN type__generic_args(self: Type) RETURNS ![]Type ->
-  MUTABLE kind = TRY (type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind)));
+  MUTABLE kind = type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind));
   MUTABLE items: []TypeExpression = ( { MUTABLE rtoc_empty_list_6: []TypeExpression = List[]; rtoc_empty_list_6 } );
   IF kind IS_A TupleTypeExpression THEN
     FOR _ IN ((UNWRAP (typeExpressionKind__tuple(kind))).items) DO
@@ -4196,15 +4196,15 @@ PRIVATE FN type__parse_raw_string_mut(MUTABLE self: Type, raw_str: String, auto:
 END
 PRIVATE FN type__semantic_shape_key(self: Type) RETURNS String EFFECTS REENTRANT ->
   IF type__fn_type?(self) THEN
-    RETURN TRY (type__function_type_key(self));
+    RETURN type__function_type_key(self);
   END
   RETURN typeShape__semantic_key(self.shape);
 END
-PRIVATE FN type__function_type_key(self: Type) RETURNS !String EFFECTS REENTRANT ->
+PRIVATE FN type__function_type_key(self: Type) RETURNS String EFFECTS REENTRANT ->
   MUTABLE sig = UNWRAP (type__function_type(self));
-  MUTABLE param_keys = sig.params |> SELECT TRY (type__semantic_type_key(_.type));
+  MUTABLE param_keys = sig.params |> SELECT type__semantic_type_key(_.type);
   MUTABLE params_key = param_keys.join(",");
-  RETURN "fn(${params_key})->${TRY (type__semantic_type_key(sig.return_type))};reentrant=${(IF sig.reentrant THEN "true" ELSE "false" END)};abi=${sig.abi}";
+  RETURN "fn(${params_key})->${type__semantic_type_key(sig.return_type)};reentrant=${(IF sig.reentrant THEN "true" ELSE "false" END)};abi=${sig.abi}";
 END
 PUB FN type__strip_capability_suffix_from(str: String) RETURNS TypeCapabilitySuffix ->
   IF !(str.contains?("@")) THEN
@@ -4430,7 +4430,7 @@ PRIVATE FN type__compute_zig_type(self: Type, MUTABLE is_param: Bool = FALSE, MU
   MUTABLE inner_zig: String = "";
   MUTABLE zig: String = "";
   IF type__projection?(self) THEN
-    MUTABLE protocol: ?String@symbol = TRY (type__projection_protocol(self));
+    MUTABLE protocol: ?String@symbol = type__projection_protocol(self);
     MUTABLE facts: String = "CheatLib.MapFacts";
     IF !((protocol == NIL)) THEN
       MUTABLE protocol_value: String@symbol = CAST(protocol AS String@symbol);
@@ -4438,7 +4438,7 @@ PRIVATE FN type__compute_zig_type(self: Type, MUTABLE is_param: Bool = FALSE, MU
         facts = "__clearProtocolFacts_${protocol_value}";
       END
     END
-    RETURN "${facts}(${symbol(UNWRAP (TRY (type__projection_owner(self))))}).${symbol(UNWRAP (TRY (type__projection_member(self))))}";
+    RETURN "${facts}(${symbol(UNWRAP (type__projection_owner(self)))}).${symbol(UNWRAP (type__projection_member(self)))}";
   END
   IF type__tense?(self) THEN
     RETURN TRY (type__tense_zig_type(self, is_param, is_field));
@@ -4502,7 +4502,7 @@ PRIVATE FN type__compute_zig_type(self: Type, MUTABLE is_param: Bool = FALSE, MU
   IF ((type__resolved(self) == :String) OR TRY (type__string?(self))) THEN
     RETURN "[]const u8";
   END
-  IF TRY (type__rank?(self)) THEN
+  IF type__rank?(self) THEN
     base_zig = TRY (type__nested_zig_type(UNWRAP (TRY (type__element_type(self))), is_param, is_field));
     IF TRY (type__dynamic_rank?(self)) THEN
       MUTABLE rank_value = TRY (type__rank(self));
@@ -4588,7 +4588,7 @@ PRIVATE FN type__generic_instance_zig_type(self: Type) RETURNS !?String EFFECTS 
   IF (type__generic_base(self) == :StreamStep) THEN
     RETURN "CheatLib.StreamStep(${args_zig})";
   END
-  MUTABLE base_name = type__symbol_or_default(TRY (typeShape__generic_base_raw(self.shape)), type__resolved(self));
+  MUTABLE base_name = type__symbol_or_default(typeShape__generic_base_raw(self.shape), type__resolved(self));
   RETURN "${base_name}(${args_zig})";
 END
 PUB FN type__new(raw_input: TypeConstructionInput, ownership: ?String@symbol = NIL, sync: ?String@symbol = NIL, layout: ?String@symbol = NIL, location: ?String@symbol = NIL, collection: ?String@symbol = NIL, shard_count: ?Int64 = NIL, stripe_count: ?Int64 = NIL, observable: ?Bool = NIL, observable_terminal: ?String@symbol = NIL, auto: Bool = FALSE) RETURNS !Type EFFECTS REENTRANT ->

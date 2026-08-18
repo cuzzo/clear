@@ -33,7 +33,7 @@ PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: Annota
   IF !(derived) THEN
         panic("annotation boundary missing derived function facts for {}");
   END
-  IF !((derived.return_type_key == TRY (type__semantic_type_key(functionSignature__return_type(signature))))) THEN
+  IF !((derived.return_type_key == type__semantic_type_key(functionSignature__return_type(signature)))) THEN
         panic("annotation boundary derived return contract mismatch for {}");
   END
     END

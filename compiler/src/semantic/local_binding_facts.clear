@@ -23,7 +23,7 @@ PUB FN localBindingAnalysis__direct_loop_body_facts(body: []Locatable) RETURNS !
   END
   MUTABLE name: String = COPY UNWRAP (name_opt);
   &names.insert(COPY name);
-  MUTABLE entry: ?CleanupEntry@multiowned = TRY (localBindingAnalysis__binding_entry(node));
+  MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
   IF entry EXISTS AS entry_value THEN
     IF cleanupEntry__present?(entry_value) THEN
       entries[name] = KEEP entry_value;
@@ -260,7 +260,7 @@ PUB FN localBindingAnalysis__binding_decl_name(node: Locatable) RETURNS ?String 
     RETURN NIL;
   END
 END
-PUB FN localBindingAnalysis__binding_entry(node_opt: ?Locatable) RETURNS !?CleanupEntry@multiowned ->
+PUB FN localBindingAnalysis__binding_entry(node_opt: ?Locatable) RETURNS ?CleanupEntry@multiowned ->
   IF (node_opt == NIL) THEN
     RETURN NIL;
   END

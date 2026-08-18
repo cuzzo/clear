@@ -1140,8 +1140,8 @@ FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotI
   MUTABLE label = TRY (auto_slot_label(slot));
   MUTABLE observed = COPY ambiguity.observed_types;
   MUTABLE observed_strs = observed |> SELECT auto_type_source_form(_);
-  MUTABLE message = TRY (build_auto_ambiguity_message(label, observed_strs, slot));
-  MUTABLE slot_id = TRY (slot_id_for(slot));
+  MUTABLE message = build_auto_ambiguity_message(label, observed_strs, slot);
+  MUTABLE slot_id = slot_id_for(slot);
   MUTABLE ops: [Set]Any = Set[];
   IF slot_id THEN
     ops = ((op_evidence[slot_id] OR_ELSE Set[]));
@@ -1167,7 +1167,7 @@ END
 FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS !Void ->
   MUTABLE label = TRY (auto_slot_label(slot));
   MUTABLE base_msg = "Cannot infer type for ${label} \u{2014} no observed uses to drive inference.";
-  MUTABLE slot_id = TRY (slot_id_for(slot));
+  MUTABLE slot_id = slot_id_for(slot);
   MUTABLE ops: [Set]Any = Set[];
   IF slot_id THEN
     ops = ((op_evidence[slot_id] OR_ELSE Set[]));
@@ -1193,7 +1193,7 @@ FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]St
   MUTABLE auto_tok = auto_token_for(slot);
   fixable_mut((auto_tok OR slot.decl_node), {:code: :AUTO_UNRESOLVED_TYPE, :detail: message, :category: :type, :level: :error, :fixes: fixes});
 END
-FN slot_id_for(slot: Slot) RETURNS !?AutoSlotId@multiowned ->
+FN slot_id_for(slot: Slot) RETURNS ?AutoSlotId@multiowned ->
   MUTABLE kind = COPY slot.kind;
   IF ((kind == :param) AND !((((slot.fn_name != NIL) AND (slot.index != NIL))))) THEN
     RETURN NIL;
@@ -1224,7 +1224,7 @@ FN auto_slot_label(slot: Slot) RETURNS !?String ->
     RETURN auto_shape_slot_label(slot);
   END
   IF (slot.kind == :param) THEN
-    RETURN TRY (auto_param_slot_label(slot));
+    RETURN auto_param_slot_label(slot);
   ELSE_IF (slot.kind == :return) THEN
     RETURN "return type of `${slot.fn_name}`";
   ELSE_IF (slot.kind == :local) THEN
@@ -1251,7 +1251,7 @@ FN auto_shape_slot_label(slot: Slot) RETURNS ?String ->
     RETURN NIL;
   END
 END
-FN auto_param_slot_label(slot: Slot) RETURNS !String ->
+FN auto_param_slot_label(slot: Slot) RETURNS String ->
   MUTABLE fn: FunctionDef = COPY CAST(slot.decl_node AS FunctionDef);
   MUTABLE param = COPY UNWRAP (fn.params[UNWRAP (slot.index)]);
   RETURN "parameter '${param.name}' of `${slot.fn_name}`";
@@ -1269,7 +1269,7 @@ END
 FN auto_token_for(slot: Slot) RETURNS ?Token ->
   RETURN COPY slot.auto_token;
 END
-FN build_auto_ambiguity_message(label: String, observed_strs: []String, slot: Slot) RETURNS !String ->
+FN build_auto_ambiguity_message(label: String, observed_strs: []String, slot: Slot) RETURNS String ->
   MUTABLE types_list = observed_strs.join(", ");
   MUTABLE msg = "Ambiguous Auto for ${label}: observed as ${types_list}.\n";
   msg = (msg $+ "  Option 1 (recommended): pin one concrete type at the\n");

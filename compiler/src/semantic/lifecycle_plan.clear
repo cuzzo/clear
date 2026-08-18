@@ -115,7 +115,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 FN linearResourceFacts__fact_key(type_info: Type) RETURNS String ->
-  RETURN regexReplaceFirst(TRY (type__semantic_type_key(type_info)), "\\|loc=[^|]+", "|loc=any");
+  RETURN regexReplaceFirst(type__semantic_type_key(type_info), "\\|loc=[^|]+", "|loc=any");
 END
 PRIVATE FN linearResourceFacts__resource_seed_and_dependencies(type_info: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Tuple<Bool, []Type> ->
   IF type__resource?(type_info) THEN
@@ -666,12 +666,12 @@ PRIVATE FN lifecycleRegistry__substitute_schema_type(raw_type: TypeTypeInput, su
   MUTABLE type_info = TRY (type__from_input(raw_type));
   MUTABLE replacement_branch_value: ?Type = NIL;
   IF type__projection?(type_info) THEN
-    MUTABLE owner = symbol(UNWRAP (TRY (type__projection_owner(type_info))));
+    MUTABLE owner = symbol(UNWRAP (type__projection_owner(type_info)));
     MUTABLE concrete_input: ?Type = COPY subst[owner];
     IF concrete_input EXISTS AS concrete_input_value THEN
       MUTABLE concrete = TRY (type__new(TypeConstructionInput{ Type: COPY concrete_input_value }));
       MUTABLE projected: ?Type = NIL;
-      MUTABLE member: ?String@symbol = TRY (type__projection_member(type_info));
+      MUTABLE member: ?String@symbol = type__projection_member(type_info);
       IF type__map?(concrete) THEN
         IF (member == :Key) THEN
           projected = TRY (type__key_type(concrete));
@@ -682,7 +682,7 @@ PRIVATE FN lifecycleRegistry__substitute_schema_type(raw_type: TypeTypeInput, su
       IF projected EXISTS AS projected_value THEN
         replacement_branch_value = COPY projected_value;
       ELSE
-        replacement_branch_value = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY symbol(UNWRAP (TRY (type__projection_member(type_info)))), protocol: COPY TRY (type__projection_protocol(type_info)) } }) }));
+        replacement_branch_value = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY symbol(UNWRAP (type__projection_member(type_info))), protocol: COPY type__projection_protocol(type_info) } }) }));
       END
     ELSE
       replacement_branch_value = COPY type_info;

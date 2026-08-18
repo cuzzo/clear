@@ -43,14 +43,14 @@ END
 FN lightweightSnapshot__move_action_for_place(self: LightweightSnapshot, place: PlaceId) RETURNS ?String@symbol ->
   RETURN COPY self.move_actions[place];
 END
-PUB FN lightweightSnapshot__each_state(self: LightweightSnapshot, block: FN(String, String@symbol) -> Void) RETURNS !Void ->
+PUB FN lightweightSnapshot__each_state(self: LightweightSnapshot, block: FN(String, String@symbol) -> Void) RETURNS Void ->
   FOR rtoc_each_key IN self.states.keys() DO
   MUTABLE state: String@symbol = COPY UNWRAP (self.states[rtoc_each_key]);
   block(rtoc_each_key.path, state);
   END
   RETURN NIL;
 END
-FN lightweightSnapshot__each_place_state(self: LightweightSnapshot, block: FN(PlaceId, String@symbol) -> Void) RETURNS !Void ->
+FN lightweightSnapshot__each_place_state(self: LightweightSnapshot, block: FN(PlaceId, String@symbol) -> Void) RETURNS Void ->
   FOR rtoc_inner_key IN self.states.keys() DO
   MUTABLE state: String@symbol = COPY UNWRAP (self.states[rtoc_inner_key]);
   block(rtoc_inner_key, state);
@@ -178,16 +178,16 @@ FN ownershipGraph__remove_edge(MUTABLE self: OwnershipGraph, edge: Edge) RETURNS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE edge_index: ?Int64 = TRY (ownershipGraph__edge_index_in(rtoc_self_view, rtoc_self_view.edges, edge));
+    MUTABLE edge_index: ?Int64 = ownershipGraph__edge_index_in(rtoc_self_view, rtoc_self_view.edges, edge);
     IF edge_index EXISTS AS edge_index_value THEN
       MUTABLE removed = &rtoc_self_view.edges.remove(edge_index_value);
       MUTABLE to_edges = TRY (ownershipGraph__edges_to(rtoc_self_view, Path{ StringValue: COPY edge.to }));
-      MUTABLE to_index: ?Int64 = TRY (ownershipGraph__edge_index_in(rtoc_self_view, to_edges, edge));
+      MUTABLE to_index: ?Int64 = ownershipGraph__edge_index_in(rtoc_self_view, to_edges, edge);
       IF to_index EXISTS AS to_index_value THEN
         &to_edges.remove(to_index_value);
       END
       MUTABLE from_edges = TRY (ownershipGraph__edges_from(rtoc_self_view, Path{ StringValue: COPY edge.from }));
-      MUTABLE from_index: ?Int64 = TRY (ownershipGraph__edge_index_in(rtoc_self_view, from_edges, edge));
+      MUTABLE from_index: ?Int64 = ownershipGraph__edge_index_in(rtoc_self_view, from_edges, edge);
       IF from_index EXISTS AS from_index_value THEN
         &from_edges.remove(from_index_value);
       END
@@ -197,7 +197,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN ownershipGraph__edge_index_in(self: OwnershipGraph, edges: []Edge, edge: Edge) RETURNS !?Int64
+FN ownershipGraph__edge_index_in(self: OwnershipGraph, edges: []Edge, edge: Edge) RETURNS ?Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -218,7 +218,7 @@ PUB FN ownershipGraph__declare(MUTABLE self: OwnershipGraph, path: String, kind:
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE place = ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY path });
     rtoc_self_view.nodes[place] = COPY OwnershipNode{ path: COPY path, kind: COPY kind, state: :live, type_info: COPY type_info, scope_depth: COPY scope_depth, line: COPY line, move_line: NIL, move_col: NIL, move_action: NIL, move_consumer_param_type: NIL };
-    MUTABLE parent: ?PlaceId = TRY (placeId__parent(place));
+    MUTABLE parent: ?PlaceId = placeId__parent(place);
     IF parent EXISTS AS parent_value THEN
       MUTABLE parent_children: [Set]PlaceId = COPY (rtoc_self_view.children[parent_value] OR_ELSE Set[]);
       &parent_children.insert(place);
@@ -405,7 +405,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (TRY (ownershipGraph__edges_to(rtoc_self_view, Path{ PlaceId: COPY current }))) |> ANY ((_.kind == :borrows) OR (_.kind == :borrows_mut)) THEN
         RETURN FALSE;
       END
-      IF TRY (placeId__parent(current)) EXISTS AS parent THEN
+      IF placeId__parent(current) EXISTS AS parent THEN
         current = COPY parent;
       ELSE
         BREAK;
@@ -436,7 +436,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PUB FN ownershipGraph__fork_lightweight(self: OwnershipGraph) RETURNS !LightweightSnapshot
+PUB FN ownershipGraph__fork_lightweight(self: OwnershipGraph) RETURNS LightweightSnapshot
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -467,7 +467,7 @@ PUB FN ownershipGraph__restore_lightweight(MUTABLE self: OwnershipGraph, snapsho
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (lightweightSnapshot__each_place_state(snapshot_value, %(place: PlaceId, state: String@symbol) USE(snapshot_value, rtoc_self_view) -> {
+    lightweightSnapshot__each_place_state(snapshot_value, %(place: PlaceId, state: String@symbol) USE(snapshot_value, rtoc_self_view) -> {
     IF rtoc_self_view.nodes.contains?(place) THEN
       MUTABLE node: OwnershipNode = COPY UNWRAP (rtoc_self_view.nodes[place]);
       node.state = COPY state;
@@ -477,7 +477,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_self_view.nodes[place] = node;
     END
     rubyToClearVoid()
-    }));
+    });
     MUTABLE target_count = snapshot_value.edge_count;
     WHILE (rtoc_self_view.edges.length() > target_count) DO
       MUTABLE rtoc_mutable_alias_arg_9 = COPY UNWRAP (rtoc_self_view.edges.last());

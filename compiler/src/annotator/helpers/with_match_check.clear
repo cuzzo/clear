@@ -262,7 +262,7 @@ PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_look
                   family_names = "${family_names} | ${family}";
                 END
               END
-              MUTABLE arg_family: ?String@symbol = TRY (withMatchCheck__family_of_arg(arg_value));
+              MUTABLE arg_family: ?String@symbol = withMatchCheck__family_of_arg(arg_value);
               IF arg_family EXISTS AS arg_family_value THEN
                 IF !(withMatchCheck__disjunction_admits?(declared_families, arg_family_value)) THEN
                   error_handler(COPY call_site.node, "Call to '${call_site.callee_name}' requires parameter '${param_name}' to be bound under one of: ${family_names}. The argument here is in family ${arg_family_value}, which is not accepted by this function.");
@@ -279,7 +279,7 @@ PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_look
   END
   RETURN;
 END
-PUB FN withMatchCheck__family_of_arg(arg: Locatable) RETURNS !?String@symbol ->
+PUB FN withMatchCheck__family_of_arg(arg: Locatable) RETURNS ?String@symbol ->
   MUTABLE sym_opt: ?SymbolEntry@multiowned = withMatchCheck__capability_argument_symbol(arg);
   IF sym_opt == NIL THEN
     RETURN NIL;
@@ -340,7 +340,7 @@ PUB FN withMatchCheck__family_of_arg_set(arg: Locatable) RETURNS ![Set]String@sy
       END
     END
   END
-  MUTABLE fam: ?String@symbol = TRY (withMatchCheck__family_of_arg(arg));
+  MUTABLE fam: ?String@symbol = withMatchCheck__family_of_arg(arg);
   IF fam EXISTS AS fam_value THEN
     MUTABLE single_family: [Set]String@symbol = Set[];
     &single_family.insert(COPY fam_value);

@@ -178,7 +178,7 @@ FN clearParser__parse_type_syntax_document(MUTABLE self: ClearParser) RETURNS !P
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE syntax = TRY (clearParser__parse_type_annotation_syntax(&rtoc_self_view));
-    MUTABLE current_token = TRY (clearParser__current(rtoc_self_view));
+    MUTABLE current_token = clearParser__current(rtoc_self_view);
     IF !((current_token.type == :EOF)) THEN
       TRY (clearParser__error_mut(rtoc_self_view, current_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "end of type", :got: "${token__display_value(current_token)}", :type: "${current_token.type}", :line: current_token.line.toString()}));
     END
@@ -226,11 +226,11 @@ FN clearParser__parse_program(MUTABLE self: ClearParser) RETURNS !Program
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE stmts: []Locatable = List[];
-    WHILE (TRY (clearParser__current(rtoc_self_view)).type != :EOF) DO
+    WHILE (clearParser__current(rtoc_self_view).type != :EOF) DO
       MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
       &stmts.append(stmt);
     END
-    end_tok = TRY (clearParser__current(rtoc_self_view));
+    end_tok = clearParser__current(rtoc_self_view);
     MUTABLE program = Program{ token: COPY end_tok, statements: COPY stmts, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, sync_policy: NIL, mir_pass_state: NIL, language_mode: :default };
     MUTABLE first = (rtoc_self_view.tokens.first() OR_ELSE COPY end_tok);
     clearParser__stamp_source_range_mut(rtoc_self_view, Locatable{ Program: COPY program }, first, COPY end_tok);
@@ -242,14 +242,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN program;
 }
 END
-PRIVATE FN clearParser__closest_name(self: ClearParser, input: NameCandidate, candidates: []NameCandidate, max_distance: Int64 = 3) RETURNS !?String
+PRIVATE FN clearParser__closest_name(self: ClearParser, input: NameCandidate, candidates: []NameCandidate, max_distance: Int64 = 3) RETURNS ?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE best: ?NameCandidate = NIL;
     MUTABLE best_distance: Int64 = (max_distance + 1);
     FOR _ IN candidates DO
-    MUTABLE distance = TRY (clearParser__suggestion_levenshtein(rtoc_self_view, nameCandidate__text(input), nameCandidate__text(_)));
+    MUTABLE distance = clearParser__suggestion_levenshtein(rtoc_self_view, nameCandidate__text(input), nameCandidate__text(_));
     IF (distance < best_distance) THEN
         best = COPY _;
         best_distance = distance;
@@ -276,7 +276,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE token_line: Int64 = anchor.line;
     MUTABLE token_column: Int64 = anchor.column;
     MUTABLE named: []NameCandidate = candidates |> SELECT NameCandidate{ StringValue: COPY _ };
-    MUTABLE best: ?String = TRY (clearParser__closest_name(rtoc_self_view, NameCandidate{ StringValue: COPY name }, named));
+    MUTABLE best: ?String = clearParser__closest_name(rtoc_self_view, NameCandidate{ StringValue: COPY name }, named);
     MUTABLE fixes: []Fix = List[];
     IF best EXISTS AS best_value THEN
       &fixes.append(TRY (fix__new(TRY (diagnosticRegistry__fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: "${COPY name}", :best: "${best_value}", :label: "${fix_label}"})), [edit__new(span__new(NIL, token_line, token_column, name.codepointCount()), best_value)], :auto)));
@@ -287,7 +287,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (clearParser__fixable_mut(rtoc_self_view, token, category, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: "${message}"}));
 }
 END
-PRIVATE FN clearParser__suggestion_levenshtein(self: ClearParser, left: String, right: String) RETURNS !Int64
+PRIVATE FN clearParser__suggestion_levenshtein(self: ClearParser, left: String, right: String) RETURNS Int64
   REQUIRES self: LOCAL
 ->
   IF (left.length() == 0) THEN

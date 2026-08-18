@@ -80,7 +80,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN rtoc_tuple_return_2;
 }
 END
-FN scopeBindings__each(self: ScopeBindings, block: FN(String, SymbolEntry) -> Void) RETURNS !Void
+FN scopeBindings__each(self: ScopeBindings, block: FN(String, SymbolEntry) -> Void) RETURNS Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -269,7 +269,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN KEEP scopeBindings__get_index(rtoc_self_view.bindings, name);
 }
 END
-PUB FN scope__local_entry_mut(self: Scope, name: String) RETURNS !SymbolEntry@multiowned
+PUB FN scope__local_entry_mut(self: Scope, name: String) RETURNS SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -296,7 +296,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN scope__resolve_entry_mut(self: Scope, name: String) RETURNS !SymbolEntry@multiowned
+FN scope__resolve_entry_mut(self: Scope, name: String) RETURNS SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -336,7 +336,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN scope__entry_for_write_mut(MUTABLE self: Scope, name: String) RETURNS !SymbolEntry@multiowned
+PUB FN scope__entry_for_write_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -521,7 +521,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN scope__declare_with_new_capability(MUTABLE self: Scope, capability: Capability) RETURNS !?SymbolEntry@multiowned
+PUB FN scope__declare_with_new_capability(MUTABLE self: Scope, capability: Capability) RETURNS ?SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

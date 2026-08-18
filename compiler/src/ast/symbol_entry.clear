@@ -491,7 +491,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN symbolEntry__write_locked_sync?(symbolEntry__sync(rtoc_self_view));
 }
 END
-PUB FN symbolEntry__declared_sync_contract?(self: SymbolEntry) RETURNS !Bool
+PUB FN symbolEntry__declared_sync_contract?(self: SymbolEntry) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
