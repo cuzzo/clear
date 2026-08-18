@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f7265636f7264732e636c656172" AS pipeline_records
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
 REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
@@ -7,7 +8,6 @@ REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatchGroup(subject: String, regex: CompilerRegex, index: Int64) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
-PUB UNION PipelineSetIndexTypeInput { TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Type: Type }
 PUB ENUM PipelineIndexValueOwnership { Owned, Borrowed }
 PUB STRUCT PipelineIndexAllocationFact {
   alloc: String@symbol,
@@ -24,7 +24,7 @@ PUB STRUCT PipelineSetIndexLowerer {
   visit_mir: FN(Locatable) -> Emittable,
   visit_mir_with_placeholder: FN(Locatable, String) -> Emittable,
   pipeline_block: FN(Locatable, FN(String, String) -> !Emittable[]) -> MIRBlockExpr,
-  transpile_type: FN(PipelineSetIndexTypeInput) -> String,
+  transpile_type: FN(PipelineTypeInput) -> String,
   pipeline_alloc: FN(BinaryOp) -> String@symbol,
   next_label: FN() -> String,
   typed_block_expr: FN(String, Emittable[], Type) -> MIRBlockExpr,
@@ -309,7 +309,7 @@ PUB FN pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self: PipelineSe
   MUTABLE fn_value = self.visit_mir_with_placeholder;
   RETURN fn_value(arg0, arg1);
 END
-PUB FN pipelineSetIndexLowerer__transpile_type_call(self: PipelineSetIndexLowerer, arg0: PipelineSetIndexTypeInput) RETURNS String ->
+PUB FN pipelineSetIndexLowerer__transpile_type_call(self: PipelineSetIndexLowerer, arg0: PipelineTypeInput) RETURNS String ->
   MUTABLE fn_value = self.transpile_type;
   RETURN fn_value(arg0);
 END

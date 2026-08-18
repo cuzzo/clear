@@ -2,7 +2,6 @@ REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
 REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
 REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f7265636f7264732e636c656172" AS pipeline_records
-PUB UNION PipelineBatchWindowTypeInput { TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Type: Type }
 PUB ENUM PipelineBatchWindowSourceKind { BcInfiniteStream, BcMaterialized, ZigRuntimeStream, ZigBoundedStream, ZigMaterialized }
 PUB STRUCT PipelineBatchWindowPlan {
   source_kind: PipelineBatchWindowSourceKind,
@@ -25,7 +24,7 @@ PUB STRUCT PipelineBatchWindowLowerer {
   pipeline_block: FN(Locatable, FN(String, String) -> !Emittable[]) -> MIRBlockExpr,
   next_label: FN() -> String,
   set_current_label: FN(String) -> Void,
-  transpile_type: FN(PipelineBatchWindowTypeInput) -> String,
+  transpile_type: FN(PipelineTypeInput) -> String,
   pipeline_alloc: FN(BinaryOp) -> String@symbol
 }
 
@@ -36,7 +35,7 @@ END
 PRIVATE FN pipelineBatchWindowLowerer__batch_window_plan(self: PipelineBatchWindowLowerer, MUTABLE list_node: Locatable, smooth_node: BinaryOp, bw_node: BatchWindowOp) RETURNS !PipelineBatchWindowPlan ->
   MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE placeholder_var = "__bw_batch";
-  RETURN PipelineBatchWindowPlan{ source_kind: COPY pipelineBatchWindowLowerer__source_kind_for(self, list_node, lhs_type), list_node: COPY list_node, smooth_node: COPY smooth_node, element_zig: COPY pipelineBatchWindowLowerer__transpile_type_call(self, PipelineBatchWindowTypeInput{ StringValue: COPY type__to_s(TRY (pipelineBatchWindowLowerer__batch_element_type(self, lhs_type))) }), result_zig: COPY pipelineBatchWindowLowerer__transpile_type_call(self, PipelineTypeInput{ Type: COPY (TRY (aST__full_type_mut(UNWRAP (bw_node.expression)))) }), size_mir: COPY pipelineBatchWindowLowerer__batch_size_mir(self, bw_node), make_expr: COPY pipelineBatchWindowLowerer__batch_expr_builder(self, bw_node, placeholder_var), alloc: COPY pipelineBatchWindowLowerer__pipeline_alloc_call(self, smooth_node), placeholder_var: COPY placeholder_var, timeout_ns: COPY pipelineBatchWindowLowerer__batch_window_timeout_ns(self, bw_node), stream_pop_method: COPY pipelineBatchWindowLowerer__runtime_stream_pop_method(self, lhs_type) };
+  RETURN PipelineBatchWindowPlan{ source_kind: COPY pipelineBatchWindowLowerer__source_kind_for(self, list_node, lhs_type), list_node: COPY list_node, smooth_node: COPY smooth_node, element_zig: COPY pipelineBatchWindowLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY type__to_s(TRY (pipelineBatchWindowLowerer__batch_element_type(self, lhs_type))) }), result_zig: COPY pipelineBatchWindowLowerer__transpile_type_call(self, PipelineTypeInput{ Type: COPY (TRY (aST__full_type_mut(UNWRAP (bw_node.expression)))) }), size_mir: COPY pipelineBatchWindowLowerer__batch_size_mir(self, bw_node), make_expr: COPY pipelineBatchWindowLowerer__batch_expr_builder(self, bw_node, placeholder_var), alloc: COPY pipelineBatchWindowLowerer__pipeline_alloc_call(self, smooth_node), placeholder_var: COPY placeholder_var, timeout_ns: COPY pipelineBatchWindowLowerer__batch_window_timeout_ns(self, bw_node), stream_pop_method: COPY pipelineBatchWindowLowerer__runtime_stream_pop_method(self, lhs_type) };
 END
 PRIVATE FN pipelineBatchWindowLowerer__lower_plan(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS !MIRBlockExpr ->
   RETURN TRY (pipelineBatchWindowLowerer__lower_source_plan(self, plan.source_kind, plan));
@@ -247,7 +246,7 @@ PUB FN pipelineBatchWindowLowerer__set_current_label_call(self: PipelineBatchWin
   MUTABLE fn_value = self.set_current_label;
   RETURN fn_value(arg0);
 END
-PUB FN pipelineBatchWindowLowerer__transpile_type_call(self: PipelineBatchWindowLowerer, arg0: PipelineBatchWindowTypeInput) RETURNS String ->
+PUB FN pipelineBatchWindowLowerer__transpile_type_call(self: PipelineBatchWindowLowerer, arg0: PipelineTypeInput) RETURNS String ->
   MUTABLE fn_value = self.transpile_type;
   RETURN fn_value(arg0);
 END
