@@ -421,7 +421,11 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
-        liveness = (liveness OR_ELSE keptEdgeLiveness__new((owner_fn?.body OR_ELSE List[])));
+        MUTABLE owner_body: []Locatable = List[];
+        IF owner_fn EXISTS AS owner_fn_value THEN
+          owner_body = COPY owner_fn_value.body;
+        END
+        liveness = (liveness OR_ELSE keptEdgeLiveness__new(owner_body));
         MUTABLE last_use = (given OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_6 = NIL;
         keptEdgeLiveness__last_use?(rtoc_local_receiver_6, arg) });
         IF symbolEntry__is_param(entry) THEN
@@ -500,8 +504,8 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
     END
   END
   MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[summary.name];
-  IF owner_fn?.body THEN
-    escapeAnalysis__restamp_promoted_uses_mut(owner_fn.body, arg.name, entry);
+  IF owner_fn EXISTS AS owner_fn_value THEN
+    escapeAnalysis__restamp_promoted_uses_mut(COPY owner_fn_value.body, arg.name, entry);
   END
   arg.symbol = COPY entry;
 END
@@ -698,16 +702,16 @@ PUB FN escapeAnalysis__apply_destructuring_escape_sink_mut(node: DestructuringAs
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < node.targets.length() DO
-    IF (CAST((node.targets[rtoc_idx]?.name) AS String) == "_") THEN
+    IF (CAST((UNWRAP (node.targets[rtoc_idx])).name AS String) == "_") THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE ti = TRY (type__from_node_mut(node.targets[rtoc_idx]?, "destructured target placement"));
+    MUTABLE ti = TRY (type__from_node_mut(UNWRAP (node.targets[rtoc_idx]), "destructured target placement"));
     IF !(TRY (type__needs_explicit_cleanup?(ti, :heap, COPY context.schema_lookup))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    escapeAnalysis__mark_symbol_heap_mut(node.targets[rtoc_idx]?.symbol);
+    escapeAnalysis__mark_symbol_heap_mut((UNWRAP (node.targets[rtoc_idx])).symbol);
   rtoc_idx = rtoc_idx + 1;
   END
 END
