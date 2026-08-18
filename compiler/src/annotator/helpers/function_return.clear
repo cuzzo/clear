@@ -406,7 +406,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF type EXISTS AS type_value THEN
         IF TRY (type__element_type(type_value)) != NIL THEN
-    RETURN (TRY (type__element_type(type_value)))?;
+    RETURN UNWRAP (TRY (type__element_type(type_value)));
         ELSE
     RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
         END

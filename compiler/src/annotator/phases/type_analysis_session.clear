@@ -1693,7 +1693,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF move_col THEN
         MUTABLE fanout_entry: ?SymbolEntry@multiowned = NIL;
         IF TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, name)) != NIL THEN
-          fanout_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_35 = ((TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, name)))?);
+          fanout_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_35 = (UNWRAP (TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, name))));
         scope__resolve_entry(rtoc_local_receiver_35, name) };
         END
         IF (((fanout_entry != NIL) AND symbolEntry__is_param(fanout_entry)) AND (symbolEntry__carrier_contract(fanout_entry) == :polymorphic)) THEN
@@ -4737,7 +4737,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_idx < captures.length() DO
       MUTABLE owner_entry: ?SymbolEntry@multiowned = NIL;
       IF TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, captures[rtoc_idx].name())) != NIL THEN
-          owner_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_97 = ((TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, captures[rtoc_idx].name())))?);
+          owner_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_97 = (UNWRAP (TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, captures[rtoc_idx].name()))));
       scope__resolve_entry(rtoc_local_receiver_97, captures[rtoc_idx].name()) };
         END
       MUTABLE capture_entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_98 = typeAnalysisSession__current_scope(rtoc_self_view);
@@ -10478,7 +10478,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF ((ti != NIL) AND type__promise_list?(ti)) THEN
           RETURN;
         END
-        IF !((((ti != NIL) AND (type__collection(ti) != NIL)) AND ((TRY (type__element_type(ti)) != NIL) AND (type__resolved(((TRY (type__element_type(ti)))?)) == :Any)))) THEN
+        IF !((((ti != NIL) AND (type__collection(ti) != NIL)) AND ((TRY (type__element_type(ti)) != NIL) AND (type__resolved((UNWRAP (TRY (type__element_type(ti))))) == :Any)))) THEN
           RETURN;
         END
         MUTABLE val_arg = COPY UNWRAP (args[1]);
@@ -10738,7 +10738,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((node.args.length() == 1)) THEN
       RETURN;
     END
-    IF !(((TRY (type__element_type(obj_type)) != NIL) AND (type__resolved(((TRY (type__element_type(obj_type)))?)) == :Any))) THEN
+    IF !(((TRY (type__element_type(obj_type)) != NIL) AND (type__resolved((UNWRAP (TRY (type__element_type(obj_type))))) == :Any))) THEN
       RETURN;
     END
     MUTABLE val_type = (UNWRAP (node.args[0])).resolved_type();

@@ -641,7 +641,7 @@ PRIVATE FN pipelineConcurrentLowerer__concurrent_list_item_type(self: PipelineCo
   IF lhs IS_A RangeLit THEN
     MUTABLE elem = lhs.start().full_type_mut();
     IF TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))) != NIL THEN
-      elem = type__resolved(((TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))))?));
+      elem = type__resolved((UNWRAP (TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))))));
     END
     RETURN TRY (type__new(elem));
   END

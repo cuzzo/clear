@@ -89,7 +89,7 @@ PRIVATE FN pipelineBatchWindowLowerer__batch_element_type(self: PipelineBatchWin
     RETURN TRY (type__new(TypeConstructionInput{ StringValue: CAST(type__resolved((CAST(TRY (type__stream_element_type(lhs_type)) AS Type))) AS String) }));
   END
   IF TRY (type__runtime_stream_storage_element_type(lhs_type)) != NIL THEN
-  RETURN (TRY (type__runtime_stream_storage_element_type(lhs_type)))?;
+  RETURN UNWRAP (TRY (type__runtime_stream_storage_element_type(lhs_type)));
   ELSE
   RETURN UNWRAP (TRY (type__element_type(lhs_type)));
   END

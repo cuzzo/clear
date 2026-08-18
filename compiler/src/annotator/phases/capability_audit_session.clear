@@ -701,7 +701,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF move_col THEN
         MUTABLE fanout_entry: ?SymbolEntry@multiowned = NIL;
         IF TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name)) != NIL THEN
-          fanout_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = ((TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name)))?);
+          fanout_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (UNWRAP (TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name))));
         scope__resolve_entry(rtoc_local_receiver_2, name) };
         END
         IF (((fanout_entry != NIL) AND symbolEntry__is_param(fanout_entry)) AND (symbolEntry__carrier_contract(fanout_entry) == :polymorphic)) THEN

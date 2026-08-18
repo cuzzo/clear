@@ -5311,7 +5311,7 @@ PRIVATE FN mIRLowering__zig_format_for_type(self: MIRLowering, flux_type: Type) 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (TRY (type__string?(flux_type)) OR ((type__array?(flux_type) AND ((TRY (type__element_type(flux_type)) != NIL) AND type__byte?(((TRY (type__element_type(flux_type)))?)))))) THEN
+    IF (TRY (type__string?(flux_type)) OR ((type__array?(flux_type) AND ((TRY (type__element_type(flux_type)) != NIL) AND type__byte?((UNWRAP (TRY (type__element_type(flux_type))))))))) THEN
       RETURN "{s}";
     END
     IF (((type__resolved(flux_type) == :Number) OR (type__resolved(flux_type) == :Int64)) OR type__byte?(flux_type)) THEN
@@ -16626,7 +16626,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (lifecycle.copy_strategy == :forbidden) THEN
       panic("annotation admitted COPY of linear type {}");
     ELSE_IF (lifecycle.copy_strategy == :retain) THEN
-      IF (type__optional?(ti) AND ((TRY (type__wrapped_type(ti)) != NIL) AND TRY (type__any_rc?(((TRY (type__wrapped_type(ti)))?))))) THEN
+      IF (type__optional?(ti) AND ((TRY (type__wrapped_type(ti)) != NIL) AND TRY (type__any_rc?((UNWRAP (TRY (type__wrapped_type(ti)))))))) THEN
         MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type(ti)));
         MUTABLE capture = "__copy_rc_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_609 = mIRLowering__lowering_counters(rtoc_self_view);
         mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_609) }}";
@@ -16754,7 +16754,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((lifecycle.copy_strategy == :retain)) THEN
       panic("annotation admitted KEEP without retain lifecycle for {}");
     END
-    IF (type__optional?(ti) AND ((TRY (type__wrapped_type(ti)) != NIL) AND TRY (type__any_rc?(((TRY (type__wrapped_type(ti)))?))))) THEN
+    IF (type__optional?(ti) AND ((TRY (type__wrapped_type(ti)) != NIL) AND TRY (type__any_rc?((UNWRAP (TRY (type__wrapped_type(ti)))))))) THEN
       MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type(ti)));
       MUTABLE capture = "__clone_rc_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_611 = mIRLowering__lowering_counters(rtoc_self_view);
       mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_611) }}";
@@ -16922,7 +16922,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRUE AND !(TRUE)) THEN
       source_ti = TRY (type__new(TypeConstructionInput{ Type: COPY source_ti }));
     END
-    IF (type__optional?(source_ti) AND ((TRY (type__wrapped_type(source_ti)) != NIL) AND TRY (type__any_rc?(((TRY (type__wrapped_type(source_ti)))?))))) THEN
+    IF (type__optional?(source_ti) AND ((TRY (type__wrapped_type(source_ti)) != NIL) AND TRY (type__any_rc?((UNWRAP (TRY (type__wrapped_type(source_ti)))))))) THEN
       MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type(source_ti)));
       source = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
       MUTABLE capture = "__share_rc_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_619 = mIRLowering__lowering_counters(rtoc_self_view);
@@ -19794,7 +19794,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRY (type__success_type(ti));
     ELSE
       IF TRY (type__wrapped_type(ti)) != NIL THEN
-    RETURN (TRY (type__wrapped_type(ti)))?;
+    RETURN UNWRAP (TRY (type__wrapped_type(ti)));
       ELSE
     RETURN ti;
       END

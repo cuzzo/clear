@@ -278,7 +278,7 @@ PRIVATE FN resolutionSession__validate_union_method_mut(MUTABLE self: Resolution
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entry: ?SymbolEntry@multiowned = NIL;
     IF TRY (resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name)) != NIL THEN
-      entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = ((TRY (resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name)))?);
+      entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (UNWRAP (TRY (resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name))));
     scope__resolve_entry(rtoc_local_receiver_2, requirement.name) };
     END
     IF entry EXISTS AS entry_value THEN
