@@ -300,13 +300,13 @@ PRIVATE FN clearParser__parse_extern_return_lifetime(MUTABLE self: ClearParser) 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names: []Locatable = List[];
     IF clearParser__match?(rtoc_self_view, :CHAR, "(") THEN
-      clearParser__consume(&rtoc_self_view, :CHAR, "(");
+      TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
       names = List[];
       WHILE !(clearParser__match?(rtoc_self_view, :CHAR, ")")) DO
         &names.append(clearParser__parse_var_id(&rtoc_self_view));
         TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ","));
       END
-      clearParser__consume(&rtoc_self_view, :CHAR, ")");
+      TRY (clearParser__consume(&rtoc_self_view, :CHAR, ")"));
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, ":"));
       RETURN ClearParserReturnLifetime{ ArrayValue: COPY names };
     END
@@ -726,7 +726,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           &names.append(clearParser__parse_var_id(&rtoc_self_view));
           TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ","));
         END
-        clearParser__consume(&rtoc_self_view, :CHAR, ")");
+        TRY (clearParser__consume(&rtoc_self_view, :CHAR, ")"));
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, ":"));
         return_lifetime = ClearParserReturnLifetime{ ArrayValue: COPY names };
       ELSE_IF clearParser__match?(rtoc_self_view, :CHAR, "*") THEN
@@ -797,12 +797,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE filters: []CatchFilter = List[];
         IF clearParser__match?(rtoc_self_view, :KEYWORD, "WITH") THEN
           TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "WITH"));
-          clearParser__consume(&rtoc_self_view, :CHAR, "(");
+          TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
           &filters.append(TRY (clearParser__parse_catch_filter(&rtoc_self_view)));
           WHILE castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :CHAR, ",")) DO
             &filters.append(TRY (clearParser__parse_catch_filter(&rtoc_self_view)));
           END
-          clearParser__consume(&rtoc_self_view, :CHAR, ")");
+          TRY (clearParser__consume(&rtoc_self_view, :CHAR, ")"));
         END
         MUTABLE clause_body = TRY (clearParser__parse_block_body(&rtoc_self_view, ["CATCH", "DEFAULT", "END"]));
         &catch_clauses.append(CatchClause{ items: COPY items, filters: COPY filters, body: COPY clause_body, kinds: List[], types: List[], filter_types: List[], filter_messages: List[] });
@@ -1017,7 +1017,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     span_end_tok = variant_tok;
     MUTABLE max_depth_n: ?Int64 = NIL;
     IF (kind == :reentrant_max_depth) THEN
-      clearParser__consume(&rtoc_self_view, :CHAR, "(");
+      TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
       MUTABLE n_tok = clearParser__current(rtoc_self_view);
       MUTABLE n_lit = TRY (clearParser__consume_number(&rtoc_self_view));
       max_depth_n = TRY (token__integer_mut(n_lit));

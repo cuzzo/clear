@@ -51,7 +51,7 @@ PUB STRUCT ResolutionSession {
 }
 
 builtin_type_parameter_names = [:Number, :Bool, :Byte, :Int8, :Int16, :Int32, :Int64, :UInt8, :UInt16, :UInt32, :UInt64, :Float32, :Float64, :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong, :TargetULongLong, :String, :Any, :Void, :Range, :Map];
-PUB FN resolutionSession__initialize(MUTABLE self: ResolutionSession, importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS Void
+PUB FN resolutionSession__initialize(MUTABLE self: ResolutionSession, importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1313,7 +1313,7 @@ PRIVATE FN resolutionSession__register_program_signatures(MUTABLE self: Resoluti
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    resolutionSession__reject_duplicate_program_signatures_mut(rtoc_self_view, declarations);
+    TRY (resolutionSession__reject_duplicate_program_signatures_mut(rtoc_self_view, declarations));
     FOR _ IN declarations.function_declarations DO
     TRY (resolutionSession__register_function_signature(rtoc_self_view, CAST(COPY _ AS FunctionDef)));
     END
@@ -1483,7 +1483,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN resolutionSession__reject_duplicate_program_signatures_mut(self: ResolutionSession, declarations: DeclarationIndex) RETURNS Void
+PRIVATE FN resolutionSession__reject_duplicate_program_signatures_mut(self: ResolutionSession, declarations: DeclarationIndex) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2067,7 +2067,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PUB FN resolutionSession__new(importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS ResolutionSession@multiowned ->
   MUTABLE self = ResolutionSession{ function_registry: (COPY function_registry OR_ELSE FunctionRegistry{ nodes: {}, synthetic_definitions: List[], body_summaries: {} }), importer: COPY importer, local_type_declaration_names: Set[], protocols: {}, root_scope: (root_scope OR_ELSE scope__new()), scope_stack: [root_scope], source_code: COPY source_code, source_dir: COPY source_dir };
-  resolutionSession__initialize(&self, importer, source_dir, source_code, root_scope, function_registry, install_builtins);
+  TRY (resolutionSession__initialize(&self, importer, source_dir, source_code, root_scope, function_registry, install_builtins));
   RETURN self @multiowned;
 END
 PUB FN resolutionPhase__run(program: Program, importer: ?ModuleImporter, source_dir: String, source_code: ?String) RETURNS !ResolutionFacts@multiowned ->

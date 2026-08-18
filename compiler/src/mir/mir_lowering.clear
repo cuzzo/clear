@@ -13498,13 +13498,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE analysis: ?PassStateValue = COPY node.capture_analysis;
     MUTABLE rt_name = mIRLowering__runtime_binding_name(rtoc_self_view);
-    mIRLowering__enforce_bg_capture_strategies_mut(rtoc_self_view, Node{ BgStreamBlock: COPY node }, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_520: ?{Any}Any = NIL;
+    TRY (mIRLowering__enforce_bg_capture_strategies_mut(rtoc_self_view, Node{ BgStreamBlock: COPY node }, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_520: ?{Any}Any = NIL;
     IF analysis THEN
       rtoc_ternary_value_520 = analysis.captures();
     ELSE
       rtoc_ternary_value_520 = {};
     END
-    rtoc_ternary_value_520? });
+    rtoc_ternary_value_520? }));
     MUTABLE promoted_names: {String}String = {};
     MUTABLE caps = TRY (fiberCtxBuilder__build(analysis, "ctx", promoted_names, alloc_var, id.value, mIRLowering__fiber_capture_source_overrides(rtoc_self_view, analysis), mIRLowering__mir_schema_lookup(rtoc_self_view)));
     MUTABLE capture_fields = ((caps.specs |> SELECT mIRLowering__context_field_decl(rtoc_self_view, _.name, _.field_type_zig)) + mIRLowering__capture_moved_guard_fields(rtoc_self_view, caps.specs));

@@ -266,14 +266,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF result.shard_count EXISTS AS shard_count_value THEN
         TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :DUPLICATE_SHARD_COUNT_CAP }));
       END
-      clearParser__consume(&rtoc_self_view, :CHAR, "(");
+      TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
       MUTABLE count_tok = TRY (clearParser__consume_number(&rtoc_self_view));
       MUTABLE count = TRY (token__number_as_integer(count_tok));
       IF (validate_shard_count AND (count < 2)) THEN
         TRY (clearParser__error_mut(rtoc_self_view, count_tok, CodeOrMessage{ SymbolValue: :SHARDED_TOO_FEW }, [], {:count: "${count.toString()}"}));
       END
       result.shard_count = count;
-      clearParser__consume(&rtoc_self_view, :CHAR, ")");
+      TRY (clearParser__consume(&rtoc_self_view, :CHAR, ")"));
     ELSE_IF (value == "@observable") THEN
       IF result.observable THEN
         TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :DUPLICATE_OBSERVABLE_CAP }));
@@ -541,13 +541,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :KEYWORD, "RETRY"))) THEN
       RETURN NIL;
     END
-    clearParser__consume(&rtoc_self_view, :CHAR, "(");
+    TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
     MUTABLE tok = TRY (clearParser__consume_number(&rtoc_self_view));
     MUTABLE n = TRY (token__number_as_integer(tok));
     IF (n <= 0) THEN
       TRY (clearParser__error_mut(rtoc_self_view, tok, CodeOrMessage{ SymbolValue: :RETRY_N_NONPOSITIVE }, [], {:got: "${n.toString()}"}));
     END
-    clearParser__consume(&rtoc_self_view, :CHAR, ")");
+    TRY (clearParser__consume(&rtoc_self_view, :CHAR, ")"));
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "THEN"));
     RETURN n;
 }
@@ -713,7 +713,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(clearParser__match?(rtoc_self_view, :CHAR, "(")) THEN
       RETURN NIL;
     END
-    clearParser__consume(&rtoc_self_view, :CHAR, "(");
+    TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
     IF !(clearParser__match?(rtoc_self_view, :VAR_ID, "rank")) THEN
       TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :EXPECTED_RANK_KEYWORD }, [], {:sigil: "${attrs.val OR_ELSE ""}"}));
     END
@@ -725,7 +725,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF castClearParserReturnValueToBool(neg) THEN
       rank = (-rank);
     END
-    clearParser__consume(&rtoc_self_view, :CHAR, ")");
+    TRY (clearParser__consume(&rtoc_self_view, :CHAR, ")"));
     IF dims.lock_rank EXISTS AS lock_rank_value THEN
       TRY (clearParser__error_mut(rtoc_self_view, sigil_tok, CodeOrMessage{ SymbolValue: :DUPLICATE_LOCK_RANK }, [], {:current: "${lock_rank_value.toString()}", :attempted: "${rank.toString()}"}));
     END

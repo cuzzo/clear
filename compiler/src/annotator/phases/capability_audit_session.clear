@@ -3703,7 +3703,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (IF capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) != NIL THEN capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) ELSE capabilityAuditSession__matched_stdlib_impurity_reason(rtoc_self_view, call) END) != NIL THEN
     RETURN ((IF capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) != NIL THEN capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) ELSE capabilityAuditSession__matched_stdlib_impurity_reason(rtoc_self_view, call) END))?;
     ELSE
-    RETURN capabilityAuditSession__semantic_function_impurity_reason(rtoc_self_view, callee);
+    RETURN TRY (capabilityAuditSession__semantic_function_impurity_reason(rtoc_self_view, callee));
     END
 }
 END
@@ -3753,7 +3753,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN capabilityAuditSession__semantic_function_impurity_reason(self: CapabilityAuditSession, callee: String) RETURNS ?String
+PRIVATE FN capabilityAuditSession__semantic_function_impurity_reason(self: CapabilityAuditSession, callee: String) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
