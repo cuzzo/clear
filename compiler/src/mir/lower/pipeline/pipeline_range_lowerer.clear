@@ -579,7 +579,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     label = runtimeHost__range_next_label(rtoc_self_view.host);
     MUTABLE acc_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineRangeTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ ReduceOp: COPY reduce_op })))) });
     MUTABLE init_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, UNWRAP (reduce_op.initial_value));
-    MUTABLE expr_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, reduce_op.expression, item_var, "acc");
+    MUTABLE expr_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (reduce_op.expression), item_var, "acc");
     MUTABLE plan = PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY "acc", init: COPY init_mir, mutable: TRUE, annotation: COPY TRY (type__new(acc_zig)), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY expr_mir, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } ), result_expr: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } } };
     RETURN pipelineRangeLowerer__range_accumulating_block(rtoc_self_view, &range_lit, prefix, label, plan, prefix.initial_capture);
 }

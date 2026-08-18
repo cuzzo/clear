@@ -49,7 +49,7 @@ PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, li
   MUTABLE elem_zig = pipelineSetIndexLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY type__resolved(elem_type) });
   MUTABLE set_zig = "CheatLib.Set(${elem_zig})";
   MUTABLE alloc = pipelineSetIndexLowerer__pipeline_alloc_call(self, smooth_node);
-  MUTABLE expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, distinct_node.expression, "it");
+  MUTABLE expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, UNWRAP (distinct_node.expression), "it");
   MUTABLE range_chain: ?PipelineRangeChain = pipelineSetIndexLowerer__range_chain_call(self, list_node);
   IF range_chain EXISTS AS range_chain_value THEN
     MUTABLE range_chain_value_mutable = COPY range_chain_value;
