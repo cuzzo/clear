@@ -576,7 +576,7 @@ PUB FN cleanupClassifier__moved_payload_alloc(node: ?Locatable, bindings: {Strin
     ELSE
       NIL
     END) THEN
-      cleanupEntry__alloc(UNWRAP (entry))
+      cleanupEntry__alloc(entry)
     ELSE
       NIL
     END)
@@ -804,7 +804,7 @@ PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_looku
       END
       MUTABLE src_entry: ?CleanupEntry = COPY bindings[CAST(expr.name() AS String)];
       IF (e AND (src_entry != NIL)) THEN
-          cleanupEntry__set_alloc_mut(&e, cleanupEntry__alloc(UNWRAP (src_entry)));
+          cleanupEntry__set_alloc_mut(&e, cleanupEntry__alloc(src_entry));
       END
       IF e THEN
           bindings[rtoc_each_items_11[rtoc_idx].binding()] = e;
@@ -1225,7 +1225,7 @@ PUB FN cleanupClassifier__storage_from_symbol(sym: ?SymbolEntry, node: Any) RETU
   END
   MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
   MUTABLE storage: ?String@symbol = (IF symbol != NIL THEN
-    symbolEntry__storage(UNWRAP (symbol))
+    symbolEntry__storage(symbol)
   ELSE
     NIL
   END);
@@ -1473,7 +1473,7 @@ PUB FN cleanupClassifier__optional_payload_needs_cleanup?(inner: Type, schema_lo
   IF TRY (type__needs_cleanup?(inner, schema_lookup)) THEN
     RETURN TRUE;
   END
-  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(UNWRAP (inner))) OR_ELSE NIL);
+  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(inner)) OR_ELSE NIL);
   IF schemas__union?(schema) THEN
     RETURN TRY (union_variants_need_cleanup?(schema, schema_lookup));
   END
@@ -1688,7 +1688,7 @@ PUB FN cleanupClassifier__elem_type_needs_cleanup?(et: Type, schema_lookup: FN(S
   IF TRY (type__needs_cleanup?(et, schema_lookup)) THEN
     RETURN TRUE;
   END
-  MUTABLE elem_schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(UNWRAP (et))) OR_ELSE NIL);
+  MUTABLE elem_schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(et)) OR_ELSE NIL);
   IF schemas__union?(elem_schema) THEN
     RETURN TRY (union_variants_need_cleanup?(elem_schema, schema_lookup));
   END
@@ -1722,7 +1722,7 @@ PUB FN cleanupClassifier__elem_has_cleanup_fields?(schema: ?FieldBearingSchema, 
     RETURN FALSE;
   END
   MUTABLE concrete_schema: ?FieldBearingSchema = COPY schema;
-  MUTABLE borrowed = TRY (cleanupClassifier__borrowed_field_names(UNWRAP (concrete_schema)));
+  MUTABLE borrowed = TRY (cleanupClassifier__borrowed_field_names(concrete_schema));
   RETURN concrete_schema.fields() |> ANY (IF borrowed.contains?(CAST(_._0 AS String)) THEN FALSE ELSE (IF cleanup_field_borrowed?(_._1) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanupClassifier__cleanup_field_type(_._1)); (((((((TRY (type__string?(t)) OR TRY (type__non_string_array?(t))) OR type__collection?(t)) OR t.indirect?()) OR TRY (type__any_rc?(t))) OR type__link?(t)) OR (((schema_lookup != NIL) AND TRY (type__recursive_cleanup_shape?(t, schema_lookup))))) OR (((schema_lookup != NIL) AND t.needs_cleanup?(schema_lookup)))) } END) END);
 END
 PUB FN cleanupClassifier__cleanup_field_borrowed?(field: Field) RETURNS Bool ->

@@ -584,7 +584,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE first: ?Token = clearParser__peek_at(rtoc_self_view, 1);
-    IF (((first != NIL) AND (first.type == :KEYWORD)) AND VALUE_BLOCK_STATEMENT_KEYWORDS.contains?(token__display_value(UNWRAP (first)))) THEN
+    IF (((first != NIL) AND (first.type == :KEYWORD)) AND VALUE_BLOCK_STATEMENT_KEYWORDS.contains?(token__display_value(first))) THEN
       RETURN FALSE;
     END
     MUTABLE depth = 0;

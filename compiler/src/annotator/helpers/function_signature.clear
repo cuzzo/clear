@@ -316,7 +316,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE emit: ?IntrinsicEmit = COPY rtoc_self_view.facts.emit;
       rtoc_self_view.intrinsic_contract = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_1: ?IntrinsicContract = NIL;
         IF emit != NIL THEN
-          rtoc_ternary_value_1 = TRY (intrinsicContract__from_emit(UNWRAP (emit), rtoc_self_view.contract.params));
+          rtoc_ternary_value_1 = TRY (intrinsicContract__from_emit(emit, rtoc_self_view.contract.params));
         ELSE
           rtoc_ternary_value_1 = intrinsicContract__empty();
         END

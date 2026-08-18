@@ -150,7 +150,7 @@ PRIVATE FN pipelineBindingChainLowerer__inner_capture_required?(self: PipelineBi
     RETURN TRUE;
   END
   MUTABLE fold_expr: ?Locatable = pipelineBindingChainLowerer__fold_expression(self, chain.fold);
-  IF ((fold_expr != NIL) AND pipelineBindingChainLowerer__ast_uses_placeholder_call(self, UNWRAP (fold_expr))) THEN
+  IF ((fold_expr != NIL) AND pipelineBindingChainLowerer__ast_uses_placeholder_call(self, fold_expr)) THEN
     RETURN TRUE;
   END
   RETURN chain.stages |> ANY (IF _ IS_A WhereOp AS where_op THEN pipelineBindingChainLowerer__ast_uses_placeholder_call(self, whereOp__expression(where_op)) ELSE FALSE END);

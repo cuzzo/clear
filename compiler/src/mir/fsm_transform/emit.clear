@@ -241,7 +241,7 @@ PRIVATE FN emit__collect_move_guard_writes(nodes: []Emittable, id: Int64) RETURN
     field.endsWith?("_moved")
   ELSE
     NIL
-  END)) THEN NIL ELSE rtoc_delete_suffix(UNWRAP (field), "_moved") END) } END) END) } |> WHERE _ != NIL).flatten() |> DISTINCT _) AS []String);
+  END)) THEN NIL ELSE rtoc_delete_suffix(field, "_moved") END) } END) END) } |> WHERE _ != NIL).flatten() |> DISTINCT _) AS []String);
 END
 PUB FN emit__normalized_ctx_field_name(name: String, id: Int64) RETURNS String ->
   RETURN name.deletePrefix("__ctx_${id.toString()}.");

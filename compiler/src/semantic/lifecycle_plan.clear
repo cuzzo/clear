@@ -533,7 +533,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
     IF (symbol != NIL) THEN
-      RETURN symbolEntry__semantic_place_id(UNWRAP (symbol));
+      RETURN symbolEntry__semantic_place_id(symbol);
     ELSE
       RETURN NIL;
     END
@@ -577,7 +577,7 @@ PRIVATE FN lifecycleRegistry__class_binding_place_id(node: Locatable) RETURNS ?I
   END
   MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
   IF (symbol != NIL) THEN
-    RETURN symbolEntry__semantic_place_id(UNWRAP (symbol));
+    RETURN symbolEntry__semantic_place_id(symbol);
   ELSE
     RETURN NIL;
   END

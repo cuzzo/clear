@@ -1070,7 +1070,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         depth = (depth - step);
         IF (depth == 0) THEN
           MUTABLE following: ?Token = clearParser__peek_at(rtoc_self_view, (offset + 1));
-          RETURN ((!((following == NIL)) AND (following.type == :CHAR)) AND (token__display_value(UNWRAP (following)) == end_char));
+          RETURN ((!((following == NIL)) AND (following.type == :CHAR)) AND (token__display_value(following) == end_char));
         END
       END
       offset = (offset + 1);

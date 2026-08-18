@@ -1007,7 +1007,7 @@ PRIVATE FN typeExpressionPrinter__capability_suffix(capabilities: TypeCapabiliti
   MUTABLE parts: []String = ( { MUTABLE rtoc_empty_list_5: []String = List[]; rtoc_empty_list_5 } );
   MUTABLE ownership: ?String@symbol = COPY capabilities.ownership;
   IF ((ownership != NIL) AND (ownership != :affine)) THEN
-    &parts.append(UNWRAP (typeCapabilities__ownership_surface_name_for(UNWRAP (ownership))));
+    &parts.append(UNWRAP (typeCapabilities__ownership_surface_name_for(ownership)));
   END
   IF (capabilities.layout == :indirect) THEN
     &parts.append("@boxed");
@@ -1020,7 +1020,7 @@ PRIVATE FN typeExpressionPrinter__capability_suffix(capabilities: TypeCapabiliti
   END
   MUTABLE sync: ?String@symbol = COPY capabilities.sync;
   IF !((sync == NIL)) THEN
-    &parts.append(UNWRAP (typeCapabilities__sync_surface_name_for(UNWRAP (sync))));
+    &parts.append(UNWRAP (typeCapabilities__sync_surface_name_for(sync)));
   END
   IF capabilities.observable THEN
     &parts.append("@observable");

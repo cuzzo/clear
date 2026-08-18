@@ -74,7 +74,7 @@ PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTAB
     RETURN TRY (pipelineSetIndexLowerer__lower_stream_index(self, range_chain_value_mutable, expr_node, elem_zig, CAST(elem_type AS Type), alloc, map_type, TRY (type__from_node_mut(smooth_node, "INDEX result"))));
   END
   MUTABLE elem_type: ?Type = TRY (type__element_type((TRY (aST__full_type_mut(list_node)))));
-  elem_zig = pipelineSetIndexLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY type__resolved(UNWRAP (elem_type)) });
+  elem_zig = pipelineSetIndexLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY type__resolved(elem_type) });
   MUTABLE expr_mir = pipelineSetIndexLowerer__visit_mir_with_placeholder_call(self, expr_node, "it");
   MUTABLE map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(${elem_zig}))";
   RETURN pipelineSetIndexLowerer__pipeline_block_call(self, list_node, %(items: String, label: String) USE(alloc, elem_type, expr_mir, expr_node, map_type, self) -> {
@@ -231,7 +231,7 @@ PRIVATE FN pipelineSetIndexLowerer__build_index_gop_body(self: PipelineSetIndexL
 END
 PRIVATE FN pipelineSetIndexLowerer__index_prepared_value(self: PipelineSetIndexLowerer, item_var: String, elem_zig_type: String, alloc: String@symbol, item_type: ?Type, value_ownership: PipelineIndexValueOwnership) RETURNS !PipelineIndexPreparedValue ->
   MUTABLE item_owns = IF item_type != NIL THEN
-    pipelineSetIndexLowerer__cleanup_bearing_type_call(self, UNWRAP (item_type))
+    pipelineSetIndexLowerer__cleanup_bearing_type_call(self, item_type)
   ELSE
     TRUE
   END;

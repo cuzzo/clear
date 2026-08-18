@@ -747,7 +747,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF (TRUE AND consumed_by_call) THEN
           MUTABLE pt: ?TypeTypeInput = COPY og_node.move_consumer_param_type;
           IF ((pt != NIL) AND !(pt IS_A Type)) THEN
-            pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(UNWRAP (pt)))));
+            pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(pt))));
           END
           MUTABLE param_admits_shared = ((pt != NIL) AND (IF respondsTo?(pt, "shared?") THEN
             type__shared?(pt)
@@ -833,7 +833,7 @@ PRIVATE FN capabilityAuditSession__emit_use_of_moved_in_loop_error_mut(self: Cap
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE loop_move_line: ?Int64 = og_node?.move_line;
     MUTABLE consumer: ?String = IF loop_move_line != NIL THEN
-      capabilityAuditSession__consumer_source_text(rtoc_self_view, UNWRAP (loop_move_line))
+      capabilityAuditSession__consumer_source_text(rtoc_self_view, loop_move_line)
     ELSE
       NIL
     END;
@@ -1055,7 +1055,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END;
         MUTABLE start_col = ((idx_value + 1) - lead);
         MUTABLE length = ((6 + lead) + trail);
-        &fixes.append(TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_LOCAL_CAPABILITY, {:name: DiagnosticKwValue{ StringValue: COPY name }}), [edit__new(span__new(NIL, UNWRAP (line), start_col, length), "")], :auto)));
+        &fixes.append(TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_LOCAL_CAPABILITY, {:name: DiagnosticKwValue{ StringValue: COPY name }}), [edit__new(span__new(NIL, line, start_col, length), "")], :auto)));
       END
     END
     MUTABLE anchor_branch_value: ?AnchorToken = NIL;
@@ -3043,7 +3043,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE return_t: ?Type = functionSignature__return_type(fn_node);
     IF ((return_t != NIL) AND !(TRUE)) THEN
-        return_t = TRY (type__new(castTypeToTypeConstructionInput(UNWRAP (return_t))));
+        return_t = TRY (type__new(castTypeToTypeConstructionInput(return_t)));
     END
     MUTABLE declared_runtime_return = !(!((((return_t != NIL) AND (((type__heap?(return_t) OR type__indirect?(return_t)) OR TRY (type__needs_escape_promotion?(return_t))))))));
     MUTABLE tier =   IF (((effs.contains?(heap) OR effs.contains?(blocking)) OR effs.contains?(extern_value)) OR functionDef__runtime_stack_required?(fn_node, capabilityAuditSession__recursion_yield_needed?(rtoc_self_view, fn_node), declared_runtime_return)) THEN
@@ -3234,7 +3234,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE plain_reentrant_callee: ?String = TRY (capabilityAuditSession__find_plain_reentrant_callee(&rtoc_self_view, call_names));
     IF ((plain_reentrant_callee != NIL) AND (user_size != :service)) THEN
-      capabilityAuditSession__emit_service_required_error_mut(rtoc_self_view, node, UNWRAP (plain_reentrant_callee), user_size);
+      capabilityAuditSession__emit_service_required_error_mut(rtoc_self_view, node, plain_reentrant_callee, user_size);
       RETURN;
     END
     MUTABLE raw = TRY (capabilityAuditSession__max_tier_for_calls(&rtoc_self_view, call_names));

@@ -232,7 +232,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE t = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY base_sym }, ownership, sync, layout, loc, collection, shard_count, NIL, observable, NIL, auto_type));
     IF !((generic_base == NIL)) THEN
-      MUTABLE expression = typeExpressionTree__with_nominal_arguments(t.shape.expression, UNWRAP (generic_base), generic_argument_expressions);
+      MUTABLE expression = typeExpressionTree__with_nominal_arguments(t.shape.expression, generic_base, generic_argument_expressions);
       MUTABLE rtoc_mutable_alias_arg_4 = COPY TRY (typeShape__with_expression(t.shape, expression));
       type__replace_shape_mut(&t, rtoc_mutable_alias_arg_4);
     END
