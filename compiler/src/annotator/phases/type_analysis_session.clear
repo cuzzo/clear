@@ -6396,8 +6396,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE entry: ?SymbolEntry@multiowned = scope__resolve_entry(scope_value_mutable, map_name);
         MUTABLE map_type: ?Type@multiowned = NIL;
         IF entry != NIL THEN
-          map_type = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_153 = (entry?);
-        symbolEntry__type(rtoc_local_receiver_153) };
+          map_type = COPY symbolEntry__type(UNWRAP (entry));
         END
         IF !((map_type != NIL)) THEN
           map_type = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (map_type) }));
@@ -10111,8 +10110,7 @@ PRIVATE FN typeAnalysisSession__non_escaping_fiber_capture?(self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((((symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_232 = (symbol?);
-    symbolEntry__borrowed_alias(rtoc_local_receiver_232) }) AND symbolEntry__non_escaping(symbol))) THEN
+    IF !((((symbol != NIL) AND symbolEntry__borrowed_alias(UNWRAP (symbol))) AND symbolEntry__non_escaping(symbol))) THEN
       RETURN FALSE;
     END
     RETURN (((!(symbolEntry__locked?(symbol)) AND !(symbolEntry__write_locked?(symbol))) AND !(symbolEntry__local?(symbol))) AND !(symbolEntry__atomic?(symbol)));

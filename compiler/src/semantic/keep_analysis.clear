@@ -71,8 +71,7 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
                 RETURN;
             END
             MUTABLE entry: ?SymbolEntry@multiowned = COPY params[arg.name()];
-            IF ((entry == NIL) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_4 = (entry?);
-            symbolEntry__kept_identity(rtoc_local_receiver_4) }) THEN
+            IF ((entry == NIL) OR symbolEntry__kept_identity(UNWRAP (entry))) THEN
                 RETURN;
             END
             MUTABLE callee_param = ((fn_nodes[summary.call_site_facts[rtoc_idx]?.callee_name])?.params[kept[rtoc_idx]] OR_ELSE NIL);

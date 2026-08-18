@@ -2444,8 +2444,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fsig: ?FunctionSignature@multiowned = functionSignature__unwrap(castTypeToOptionalX(TRY (aST__full_type_mut(Locatable{ FunctionDef: COPY fn_node }))));
     MUTABLE ret_type: ?Type@multiowned = NIL;
     IF fsig != NIL THEN
-      ret_type = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_14 = (fsig?);
-    functionSignature__return_type(rtoc_local_receiver_14) };
+      ret_type = COPY functionSignature__return_type(UNWRAP (fsig));
     END
     MUTABLE heap_return = ((ret_type != NIL) AND ((type__heap?(ret_type) OR type__dynamic?(ret_type))));
     MUTABLE has_takes_heap = fn_node.params |> ANY (_.takes AND !(((type__primitive?(_.type) OR type__id_handle?(_.type)))));

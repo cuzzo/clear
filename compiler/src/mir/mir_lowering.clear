@@ -5848,8 +5848,7 @@ PRIVATE FN mIRLowering__owned_parameter_source_node?(self: MIRLowering, source_n
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF source_node IS_A Identifier AS identifier THEN
       MUTABLE symbol: ?SymbolEntry = identifier.symbol;
-      RETURN !(!(((((symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_185 = (symbol?);
-      symbolEntry__is_param(rtoc_local_receiver_185) }) AND symbolEntry__takes(symbol)))));
+      RETURN !(!(((((symbol != NIL) AND symbolEntry__is_param(UNWRAP (symbol))) AND symbolEntry__takes(symbol)))));
     ELSE
       RETURN FALSE;
     END
@@ -10405,8 +10404,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE raw_ti: ?Type@multiowned = NIL;
     IF sig != NIL THEN
-      raw_ti = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_381 = (sig?);
-    functionSignature__return_type(rtoc_local_receiver_381) };
+      raw_ti = COPY functionSignature__return_type(UNWRAP (sig));
     END
     MUTABLE ti_branch_value: ?Type = NIL;
     IF (raw_ti != NIL) THEN
@@ -12900,8 +12898,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN :multiowned;
     END
     IF symbol != NIL THEN
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_498 = (symbol?);
-    symbolEntry__storage(rtoc_local_receiver_498) };
+    RETURN symbolEntry__storage(UNWRAP (symbol));
     ELSE
     RETURN NIL;
     END
@@ -13865,8 +13862,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE binding_type: ?Type@multiowned = NIL;
     IF symbol != NIL THEN
-      binding_type = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_539 = (symbol?);
-    symbolEntry__type(rtoc_local_receiver_539) };
+      binding_type = COPY symbolEntry__type(UNWRAP (symbol));
     END
     IF ((binding_type != NIL) AND type__optional?(binding_type)) THEN
       MUTABLE stamped = TRY (aST__full_type_mut(Locatable{ Identifier: COPY node }));
@@ -16814,8 +16810,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(binary_op_mutable.right.matched_signature());
             MUTABLE rt: ?Type@multiowned = NIL;
             IF sig != NIL THEN
-              rt = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_612 = (sig?);
-            functionSignature__return_type(rtoc_local_receiver_612) };
+              rt = COPY functionSignature__return_type(UNWRAP (sig));
             END
             default_rc = IF rt != NIL THEN
               ((TRY (type__any_rc?((TRY (type__new(TypeConstructionInput{ Type: COPY rt }))))) OR_ELSE FALSE))
