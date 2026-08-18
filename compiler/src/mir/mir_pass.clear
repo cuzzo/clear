@@ -451,7 +451,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(cleanupEntry__present?(entry)) THEN
       RETURN;
     END
-    MUTABLE ti = TRY (aST__full_type_mut(ident));
+    MUTABLE ti = TRY (aST__full_type_mut(Locatable{ Identifier: COPY ident }));
     MUTABLE owns_transferable_value = (TRUE AND TRY (type__needs_cleanup?(ti, rtoc_self_view.schema_lookup)));
     IF !((cleanupEntry__needs_cleanup?(entry) OR owns_transferable_value)) THEN
       RETURN;

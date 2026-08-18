@@ -183,7 +183,7 @@ END
 PRIVATE FN pipelineListLowerer__lower_unnest(self: PipelineListLowerer, site: PipelineSite, MUTABLE unnest_node: UnnestOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
-  MUTABLE inner_elem_type = COPY CAST((type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(unnest_node)))))))) AS String);
+  MUTABLE inner_elem_type = COPY CAST((type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(Locatable{ UnnestOp: COPY unnest_node })))))))) AS String);
   MUTABLE inner_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY inner_elem_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
   MUTABLE elem_ti = TRY (type__new(TypeConstructionInput{ StringValue: COPY inner_elem_type }));
@@ -206,7 +206,7 @@ PRIVATE FN pipelineListLowerer__lower_unnest(self: PipelineListLowerer, site: Pi
 END
 PRIVATE FN pipelineListLowerer__lower_reduce(self: PipelineListLowerer, site: PipelineSite, MUTABLE reduce_node: ReduceOp) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
-  MUTABLE acc_zig = pipelineListLowerer__transpile_type_call(self, TRY (aST__full_type_mut(reduce_node)));
+  MUTABLE acc_zig = pipelineListLowerer__transpile_type_call(self, TRY (aST__full_type_mut(Locatable{ ReduceOp: COPY reduce_node })));
   MUTABLE init_mir = pipelineListLowerer__visit_mir_call(self, UNWRAP (reduce_node.initial_value));
   MUTABLE expr_mir = pipelineListLowerer__visit_reduce_expr_call(self, reduce_node.expression, "it", "acc");
   RETURN pipelineListLowerer__pipeline_block_call(self, list_node, %(items, label) USE(acc_zig, expr_mir, init_mir) -> {

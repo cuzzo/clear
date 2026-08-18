@@ -518,7 +518,7 @@ PUB FN pipelineHost__lower_pipeline_body(MUTABLE self: PipelineHost, MUTABLE nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF (node.right IS_A SelectOp AND TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) })))))) THEN
+    IF (node.right IS_A SelectOp AND TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })) })))))) THEN
       RETURN PipelineLoweringResult{ MIRBgBlock: COPY TRY (pipelineHost__lower_stream_select(&rtoc_self_view, PipelineSite{ list: COPY node.left, options: COPY node }, castLocatableToSelectOp(node.right))) };
     END
     MUTABLE plan: ?PipelineOperationPlan = TRY (pipelinePlanBuilder__build(rtoc_self_view.plan_builder, node));
@@ -547,7 +547,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(tenseSelectorPlan__asynchronous?((TRY (pipelineHost__select_tense_plan(rtoc_self_view, select))))) THEN
         RETURN FALSE;
       END
-      MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) }));
+      MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })) }));
       RETURN (TRY (type__canonical_stream_result?(result_type)) AND TRY (type__dynamic_stream?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_26: ?Type = NIL;
       IF type__error_union?(result_type) THEN
         rtoc_ternary_value_26 = UNWRAP (TRY (type__payload_type(result_type)));
@@ -564,7 +564,7 @@ PUB FN pipelineHost__lower_concurrent_async_stream_result(MUTABLE self: Pipeline
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) }));
+    MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })) }));
     MUTABLE stream_type_branch_value: ?Type = NIL;
     IF type__error_union?(result_type) THEN
       stream_type_branch_value = UNWRAP (TRY (type__payload_type(result_type)));
