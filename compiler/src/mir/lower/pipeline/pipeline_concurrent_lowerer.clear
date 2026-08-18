@@ -376,7 +376,7 @@ PRIVATE FN pipelineConcurrentLowerer__bounded_concurrent_task_cfg_mir(self: Pipe
   ELSE
     NIL
   END;
-  RETURN StructInit{ zig_type: NIL, fields: [CAST(mIR__named_field(Name{ StringValue: COPY "stack_size" }, Emittable{ EnumTag: COPY EnumTag{ variant: COPY pipelineConcurrentLowerer__task_config_variant_call(self, size_name) } }) AS Any)], lowered_node_id: NIL, ownership_consumption: NIL };
+  RETURN StructInit{ zig_type: NIL, fields: [CAST(mIR__named_field(symbol("stack_size"), Emittable{ EnumTag: COPY EnumTag{ variant: COPY pipelineConcurrentLowerer__task_config_variant_call(self, size_name) } }) AS Any)], lowered_node_id: NIL, ownership_consumption: NIL };
 END
 PRIVATE FN pipelineConcurrentLowerer__build_bounded_concurrent_callback(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp, item_type: Type, return_type: ReturnType, body_kind: PipelineConcurrentCallbackBodyKind) RETURNS !PipelineConcurrentCallback ->
   MUTABLE id = TRY (pipelineConcurrentLowerer__numeric_label_id(self, pipelineConcurrentLowerer__next_label_call(self)));

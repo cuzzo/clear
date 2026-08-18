@@ -17354,7 +17354,7 @@ PRIVATE FN mIRLowering__hash_literal_init_struct(self: MIRLowering, zig_type: St
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fields = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_638: ?[]StructInitField = NIL;
     IF needs_alloc THEN
-      rtoc_ternary_value_638 = [mIR__named_field(Name{ StringValue: COPY "alloc" }, Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } })];
+      rtoc_ternary_value_638 = [mIR__named_field(symbol("alloc"), Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } })];
     ELSE
       rtoc_ternary_value_638 = List[];
     END
