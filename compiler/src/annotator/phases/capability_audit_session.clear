@@ -2290,10 +2290,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(([:reentrant, :reentrant_tail_call, :reentrant_thunk, :reentrant_max_depth]).contains?(kind)) THEN
         CONTINUE;
     END
-    IF resolved[rtoc_each_6] == NIL THEN
-        resolved[rtoc_each_6] = Set[];
-      END
-    (resolved[rtoc_each_6])?.insert(yield_value);
+    MUTABLE resolved_entry = COPY (resolved[rtoc_each_6] OR_ELSE Set[]);
+    &resolved_entry.insert(yield_value);
+    resolved[rtoc_each_6] = COPY resolved_entry;
         END
     MUTABLE changed: Bool = TRUE;
     WHILE changed DO
@@ -3575,10 +3574,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() |> EACH {
     MUTABLE callees: [Set]String = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[_] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
     FOR _ IN callees DO
-    IF reverse_graph[CAST(_ AS String)] == NIL THEN
-      reverse_graph[CAST(_ AS String)] = Set[];
-    END
-    (reverse_graph[CAST(_ AS String)])?.insert(_);
+    MUTABLE reverse_key: String = COPY CAST(_ AS String);
+    MUTABLE reverse_entry = COPY (reverse_graph[reverse_key] OR_ELSE Set[]);
+    &reverse_entry.insert(COPY _);
+    reverse_graph[reverse_key] = COPY reverse_entry;
     END
     };
     MUTABLE backward = TRY (capabilityAuditSession__compute_reachable(rtoc_self_view, reverse_graph, start_s));

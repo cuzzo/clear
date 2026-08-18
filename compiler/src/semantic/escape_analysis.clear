@@ -1569,10 +1569,10 @@ PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbol
   IF !((value != NIL)) THEN
     RETURN;
   END
-  IF binding_values[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] == NIL THEN
-    binding_values[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = List[];
-  END
-  (binding_values[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)])?.append(value);
+  MUTABLE binding_key: String = (MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END);
+  MUTABLE binding_entry = COPY (binding_values[binding_key] OR_ELSE List[]);
+  &binding_entry.append(value);
+  binding_values[binding_key] = COPY binding_entry;
 END
 PUB FN escapeAnalysis__receiver_is_param?(receiver: Locatable) RETURNS Bool ->
   MUTABLE root: ?Identifier = aST__root_identifier(receiver);

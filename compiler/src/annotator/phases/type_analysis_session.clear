@@ -11780,20 +11780,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &summary.escape_nodes.append(COPY node);
         IF _.track_with_scope_stack THEN
           FOR _ IN _.with_scope_stack DO
-          IF summary.with_scope_nodes[aST__node_identity(_)] == NIL THEN
-            summary.with_scope_nodes[aST__node_identity(_)] = List[];
-          END
-          (summary.with_scope_nodes[aST__node_identity(_)])?.append(node);
+          MUTABLE with_scope_key = aST__node_identity(_);
+          MUTABLE with_scope_entry = COPY (summary.with_scope_nodes[with_scope_key] OR_ELSE List[]);
+          &with_scope_entry.append(COPY node);
+          summary.with_scope_nodes[with_scope_key] = COPY with_scope_entry;
           END
         END
     END
     IF node IS_A Identifier AS identifier THEN
         MUTABLE lambda_node: ?LambdaLit = COPY _.lambda_body_stack.last();
         IF lambda_node EXISTS AS lambda_node_value THEN
-          IF summary.lambda_body_identifier_refs[aST__node_identity(lambda_node_value)] == NIL THEN
-            summary.lambda_body_identifier_refs[aST__node_identity(lambda_node_value)] = List[];
-          END
-          (summary.lambda_body_identifier_refs[aST__node_identity(lambda_node_value)])?.append(identifier);
+          MUTABLE lambda_refs_key = aST__node_identity(lambda_node_value);
+          MUTABLE lambda_refs_entry = COPY (summary.lambda_body_identifier_refs[lambda_refs_key] OR_ELSE List[]);
+          &lambda_refs_entry.append(COPY identifier);
+          summary.lambda_body_identifier_refs[lambda_refs_key] = COPY lambda_refs_entry;
         END
     END
     IF suspend_kind EXISTS AS suspend_kind_value THEN
