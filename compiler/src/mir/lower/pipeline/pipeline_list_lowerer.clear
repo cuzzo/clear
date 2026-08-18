@@ -292,13 +292,13 @@ PRIVATE FN pipelineListLowerer__visit_pipeline_expr_mir(self: PipelineListLowere
   RETURN pipelineListLowerer__visit_expr_call(self, list_node, expr_node, placeholder);
 END
 PRIVATE FN pipelineListLowerer__join_predicate_mir(self: PipelineListLowerer, list_node: Locatable, join_node: JoinOp) RETURNS Emittable ->
-  MUTABLE key_expr: ?Locatable@boxed = COPY join_node.key_expr;
-  IF key_expr IS_A LambdaLit THEN
-    MUTABLE params = key_expr.params();
-    MUTABLE left_param = params[0].name();
-    MUTABLE right_param = params[1].name();
+  MUTABLE key_expr: Locatable = COPY UNWRAP (join_node.key_expr);
+  IF key_expr IS_A LambdaLit AS key_lambda THEN
+    MUTABLE params: []Param = COPY key_lambda.params;
+    MUTABLE left_param: String = COPY CAST((UNWRAP (params[0])).name AS String);
+    MUTABLE right_param: String = COPY CAST((UNWRAP (params[1])).name AS String);
     MUTABLE join_params: {String}String = CAST({left_param: "__jl", right_param: "__jr"} AS {String}String);
-    RETURN pipelineListLowerer__visit_join_lambda_call(self, CAST(key_expr.body() AS Locatable), join_params);
+    RETURN pipelineListLowerer__visit_join_lambda_call(self, COPY key_lambda.body, join_params);
   END
   MUTABLE left_key_mir = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "__jl");
   MUTABLE right_key_mir = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "__jr");
