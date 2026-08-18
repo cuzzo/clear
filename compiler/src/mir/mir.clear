@@ -2620,7 +2620,7 @@ FN debugOnly__stmt?(self: DebugOnly) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT Sort {
-  elem_type: Any@multiowned,
+  elem_type: String,
   items_expr: Emittable,
   key_a: Emittable,
   key_b: Emittable,
