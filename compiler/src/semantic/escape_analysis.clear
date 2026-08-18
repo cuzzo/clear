@@ -788,8 +788,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
         MUTABLE root: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable(assignment.name));
         MUTABLE ti: ?Type@multiowned = NIL;
         IF root?.symbol != NIL THEN
-          ti = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_10 = ((root?.symbol)?);
-        symbolEntry__type(rtoc_local_receiver_10) };
+          ti = COPY symbolEntry__type(UNWRAP (UNWRAP (root).symbol));
         END
         IF !(((ti != NIL) AND type__collection?(ti))) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -924,8 +923,7 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
       MUTABLE root: ?Identifier = aST__root_identifier(node.name());
       MUTABLE ti: ?Type@multiowned = NIL;
       IF root?.symbol != NIL THEN
-        ti = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12 = ((root?.symbol)?);
-      symbolEntry__type(rtoc_local_receiver_12) };
+        ti = COPY symbolEntry__type(UNWRAP (UNWRAP (root).symbol));
       END
       IF !(((ti != NIL) AND type__collection?(ti))) THEN
         RETURN NIL;
