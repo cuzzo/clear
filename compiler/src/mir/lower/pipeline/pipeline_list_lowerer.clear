@@ -233,7 +233,7 @@ PRIVATE FN pipelineListLowerer__lower_order_by(self: PipelineListLowerer, site: 
   MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(list_node)))))) AS String);
   MUTABLE elem_zig = pipelineListLowerer__transpile_type_call(self, PipelineTypeInput{ StringValue: COPY elem_type });
   MUTABLE alloc = pipelineListLowerer__pipeline_alloc_call(self, smooth_node);
-  MUTABLE key_expr = COPY order_node.expression;
+  MUTABLE key_expr = COPY UNWRAP (order_node.expression);
   MUTABLE key_a = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "a");
   MUTABLE key_b = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "b");
   RETURN pipelineListLowerer__pipeline_block_call(self, list_node, %(items, label) USE(alloc, elem_type, elem_zig, key_a, key_b, MUTABLE key_expr, MUTABLE smooth_node, self) -> {
