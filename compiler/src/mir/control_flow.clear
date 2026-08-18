@@ -1134,7 +1134,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE loop_name: ?String = COPY header_value.loop_name;
         MUTABLE loop_binding: ?Locatable = COPY header_value.loop_binding;
         IF ((loop_name != NIL) AND (loop_binding != NIL)) THEN
-          ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, loop_name, loop_binding);
+          ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, UNWRAP (loop_name), UNWRAP (loop_binding));
         END
       ELSE
         FOR _ IN (TRY (ownershipDataflow__collect_explicit_move_places(rtoc_self_view, stmt, state))) DO
@@ -2257,7 +2257,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             &rtoc_self_view.errors.append("[ALIAS_VIOLATION] ${rtoc_self_view.fn_name}::${source} -- immutable borrow while mutably borrowed (RESTRICT)${borrowChecker__line_info(rtoc_self_view, token)}");
           END
       END
-      body_state = borrowState__add(body_state, source, kind);
+      body_state = borrowState__add(body_state, UNWRAP (source), kind);
     rtoc_idx = rtoc_idx + 1;
     END
     TRY (borrowChecker__check_stmts(&rtoc_self_view, stmt.body, body_state));

@@ -245,7 +245,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
           MUTABLE t = s.type();
           t.sync()
             });
-            IF ((unified AND (symbolEntry__sync(entry) != unified)) AND param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, unified)) THEN
+            IF ((unified AND (symbolEntry__sync(UNWRAP (entry)) != unified)) AND param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, unified)) THEN
               symbolEntry__set_sync(&entry, unified);
               changed = TRUE;
             END
@@ -263,7 +263,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
           END
           NIL
         });
-        IF (unified_storage AND (symbolEntry__storage(entry) != unified_storage)) THEN
+        IF (unified_storage AND (symbolEntry__storage(UNWRAP (entry)) != unified_storage)) THEN
             symbolEntry__set_storage(&entry, unified_storage);
             changed = TRUE;
         END
@@ -1086,7 +1086,7 @@ PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Par
   CONTINUE;
     END
     MUTABLE arg_type = IF (arg != NIL) THEN
-        TRY (aST__full_type_mut(arg))
+        TRY (aST__full_type_mut(UNWRAP (arg)))
       ELSE
         NIL
       END;
@@ -1222,7 +1222,7 @@ PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable,
   IF heap_owned_transfer_source?(arg) THEN
     RETURN TRUE;
   END
-  IF ((ownership_transferring_expr?(arg, TRUE) AND (arg != NIL)) AND type_requires_owned_storage?(TRY (aST__full_type_mut(arg)), schema_lookup)) THEN
+  IF ((ownership_transferring_expr?(arg, TRUE) AND (arg != NIL)) AND type_requires_owned_storage?(TRY (aST__full_type_mut(UNWRAP (arg))), schema_lookup)) THEN
     RETURN TRUE;
   END
   RETURN FALSE;
@@ -1580,7 +1580,7 @@ PUB FN escapeAnalysis__receiver_is_param?(receiver: Locatable) RETURNS Bool ->
   IF root != NIL THEN
     sym = COPY (root?).symbol;
   END
-  RETURN !(!(((((sym != NIL) AND TRUE) AND symbolEntry__is_param(sym)))));
+  RETURN !(!(((((sym != NIL) AND TRUE) AND symbolEntry__is_param(UNWRAP (sym))))));
 END
 PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg_heap: [Set]String, facts: ?FunctionFacts) RETURNS !Void ->
   MUTABLE names: [Set]String = Set[];

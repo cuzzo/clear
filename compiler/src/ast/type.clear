@@ -1837,7 +1837,7 @@ END
 PUB FN type__resolved(self: Type) RETURNS String@symbol EFFECTS REENTRANT ->
   MUTABLE fn: ?FunctionType = type__function_type(self);
   IF !((fn == NIL)) THEN
-    RETURN type__function_return_symbol(fn);
+    RETURN type__function_return_symbol(UNWRAP (fn));
   END
   RETURN typeShape__resolved(self.shape);
 END
@@ -1927,10 +1927,10 @@ PUB FN type__accepts?(self: Type, other_type: Type) RETURNS !Bool EFFECTS REENTR
   IF TRY (type__node_reference?(self)) THEN
     MUTABLE payload: ?Type = TRY (type__node_payload_type(self));
     MUTABLE other_payload: ?Type = TRY (type__node_payload_type(other_type));
-    IF (((payload != NIL) AND (other_payload != NIL)) AND (type__resolved(payload) == type__resolved(other_payload))) THEN
+    IF (((payload != NIL) AND (other_payload != NIL)) AND (type__resolved(UNWRAP (payload)) == type__resolved(UNWRAP (other_payload)))) THEN
       RETURN TRUE;
     END
-    IF ((payload != NIL) AND (type__resolved(payload) == type__resolved(other_type))) THEN
+    IF ((payload != NIL) AND (type__resolved(UNWRAP (payload)) == type__resolved(other_type))) THEN
       RETURN TRUE;
     END
   END
@@ -3027,7 +3027,7 @@ PUB FN type__stream_element_type(self: Type) RETURNS !?Type ->
   MUTABLE optional_shape: ?Type = TRY (type__optional_stream_shape_type(self));
   IF !((optional_shape == NIL)) THEN
     IF type__fixed?(optional_shape) THEN
-      MUTABLE element: ?Type = TRY (type__element_type(optional_shape));
+      MUTABLE element: ?Type = TRY (type__element_type(UNWRAP (optional_shape)));
       IF element EXISTS AS element_value THEN
         RETURN TRY (type__optional_of(type__type_input_string(TRY (type__surface_name_type(element_value)))));
       ELSE
@@ -3043,7 +3043,7 @@ PUB FN type__stream_capacity(self: Type) RETURNS !?TypeArrayCapacity ->
   END
   MUTABLE optional_shape: ?Type = TRY (type__optional_stream_shape_type(self));
   IF !((optional_shape == NIL)) THEN
-    RETURN type__capacity(optional_shape);
+    RETURN type__capacity(UNWRAP (optional_shape));
   END
   RETURN type__capacity((TRY (type__tense_type(self))));
 END

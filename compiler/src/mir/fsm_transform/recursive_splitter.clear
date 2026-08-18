@@ -196,7 +196,7 @@ PRIVATE FN recursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int64,
   END
   MUTABLE pivot_ast: ?SegmentStmt = pivot_ast_branch_value;
   MUTABLE sus = IF pivot_ast != NIL THEN
-    Segments.classify_suspend(castSegmentStmtToLocatable(pivot_ast))
+    Segments.classify_suspend(castSegmentStmtToLocatable(UNWRAP (pivot_ast)))
   ELSE
     NIL
   END;

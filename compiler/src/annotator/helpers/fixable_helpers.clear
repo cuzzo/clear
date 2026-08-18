@@ -189,7 +189,7 @@ FN emit_use_of_moved_error_mut(use_node: Identifier, og_node: OwnershipNode) RET
         NIL
       END);
       IF ((fanout_entry IS_A SymbolEntry@multiowned AND symbolEntry__is_param(fanout_entry)) AND (symbolEntry__carrier_contract(fanout_entry) == :polymorphic)) THEN
-        RETURN emit_carrier_fanout_error_mut(use_node, og_node, name, move_line_value, move_col);
+        RETURN emit_carrier_fanout_error_mut(use_node, og_node, name, move_line_value, UNWRAP (move_col));
       END
       MUTABLE type = ownershipNode__full_type(og_node);
       MUTABLE is_shared = type__shared?(type);
@@ -231,7 +231,7 @@ FN emit_use_of_moved_error_mut(use_node: Identifier, og_node: OwnershipNode) RET
       IF (TRUE AND consumed_by_call) THEN
         MUTABLE pt: ?TypeTypeInput = COPY og_node.move_consumer_param_type;
         IF ((pt != NIL) AND !(pt IS_A Type)) THEN
-          pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(pt))));
+          pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(UNWRAP (pt)))));
         END
         MUTABLE param_admits_shared = ((pt != NIL) AND (IF respondsTo?(pt, "shared?") THEN
           type__shared?(pt)
@@ -303,7 +303,7 @@ END
 FN emit_use_of_moved_in_loop_error_mut(node: Node, name: String, og_node: ?OwnershipNode = NIL, code: String@symbol = :USE_OF_MOVED_IN_LOOP) RETURNS Void ->
   MUTABLE loop_move_line: ?Int64 = og_node?.move_line;
   MUTABLE consumer = IF loop_move_line != NIL THEN
-    consumer_source_text(loop_move_line)
+    consumer_source_text(UNWRAP (loop_move_line))
   ELSE
     NIL
   END;
@@ -434,7 +434,7 @@ FN emit_int_overflow_error_mut(node: Literal, val: Int64, target_type: String@sy
     MUTABLE new_suffix: ?String = COPY (CAST({:Int8: "i8", :Byte: "u8", :Int16: "i16", :UInt16: "u16", :Int32: "i32", :UInt32: "u32", :Int64: "i64", :UInt64: "u64"} AS {String@symbol}String))[best];
     IF ((new_suffix != NIL) AND (new_suffix != old_suffix)) THEN
       MUTABLE suffix_col = ((tok.column + scopeBindings__length(m[1])) + 1);
-      RETURN emit_overflow_suffix_fix_mut(node, target_type, min_value, max_value, tok, suffix_col, old_suffix, new_suffix, val);
+      RETURN emit_overflow_suffix_fix_mut(node, target_type, min_value, max_value, tok, suffix_col, old_suffix, UNWRAP (new_suffix), val);
     END
   END
   MUTABLE target_name = COPY CAST(target_type AS String);
@@ -474,7 +474,7 @@ FN emit_local_never_shared_finding_mut(info: BindingAuditRecord) RETURNS !Void -
       END;
       MUTABLE start_col = ((idx + 1) - lead);
       MUTABLE length = ((6 + lead) + trail);
-      &fixes.append(TRY (fix__new(fix_description(:REMOVE_LOCAL_CAPABILITY, {:name: name}), [edit__new(span__new(NIL, line, start_col, length), "")], :auto)));
+      &fixes.append(TRY (fix__new(fix_description(:REMOVE_LOCAL_CAPABILITY, {:name: name}), [edit__new(span__new(NIL, UNWRAP (line), start_col, length), "")], :auto)));
     END
   END
   MUTABLE anchor = IF line != NIL THEN
