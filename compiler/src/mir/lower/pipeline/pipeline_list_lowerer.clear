@@ -253,7 +253,7 @@ PRIVATE FN pipelineListLowerer__lower_join(self: PipelineListLowerer, site: Pipe
   MUTABLE alloc = pipelineListLowerer__pipeline_result_alloc_call(self);
   MUTABLE left_owns = pipelineListLowerer__cleanup_bearing_type_call(self, UNWRAP (left_type_info));
   MUTABLE right_owns = pipelineListLowerer__cleanup_bearing_type_call(self, UNWRAP (right_element_type));
-  MUTABLE pred_mir = pipelineListLowerer__join_predicate_mir(self, list_node, join_node);
+  MUTABLE pred_mir = TRY (pipelineListLowerer__join_predicate_mir(self, list_node, join_node));
   MUTABLE label = pipelineListLowerer__next_label_call(self);
   MUTABLE source_mir = pipelineListLowerer__visit_mir_call(self, list_node);
   pipelineListLowerer__set_current_label_call(self, label);
@@ -291,7 +291,7 @@ END
 PRIVATE FN pipelineListLowerer__visit_pipeline_expr_mir(self: PipelineListLowerer, list_node: Locatable, expr_node: Locatable, placeholder: String = "it") RETURNS Emittable ->
   RETURN pipelineListLowerer__visit_expr_call(self, list_node, expr_node, placeholder);
 END
-PRIVATE FN pipelineListLowerer__join_predicate_mir(self: PipelineListLowerer, list_node: Locatable, join_node: JoinOp) RETURNS Emittable ->
+PRIVATE FN pipelineListLowerer__join_predicate_mir(self: PipelineListLowerer, list_node: Locatable, join_node: JoinOp) RETURNS !Emittable ->
   MUTABLE key_expr: Locatable = COPY UNWRAP (join_node.key_expr);
   IF key_expr IS_A LambdaLit AS key_lambda THEN
     MUTABLE params: []Param = COPY UNWRAP (key_lambda.params);
