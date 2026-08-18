@@ -33,7 +33,7 @@ PUB FN placeId__from_symbol(path: Path, symbol: ?SymbolEntry) RETURNS PlaceId ->
     RETURN placeId__from_path(path);
   END
 END
-PUB FN placeId__binding_identity(self: PlaceId) RETURNS ?BindingId ->
+PUB FN placeId__binding_identity(self: PlaceId) RETURNS !?BindingId ->
   MUTABLE name: ?String = COPY self.binding_name;
   MUTABLE id: ?Int64 = self.binding_id;
   IF name EXISTS AS name_value THEN
@@ -49,7 +49,7 @@ END
 PRIVATE FN placeId__child?(self: PlaceId) RETURNS Bool ->
   RETURN self.path.contains?(".");
 END
-PUB FN placeId__parent(self: PlaceId) RETURNS ?PlaceId ->
+PUB FN placeId__parent(self: PlaceId) RETURNS !?PlaceId ->
   IF !(placeId__child?(self)) THEN
     RETURN NIL;
   END

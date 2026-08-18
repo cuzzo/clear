@@ -210,7 +210,7 @@ PUB FN escapeAnalysis__validate_handler_registry_mut(label: String, registry: {S
   END
   panic("{} is incomplete: {}");
 END
-PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary) RETURNS Void ->
+PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary) RETURNS !Void ->
   MUTABLE callsites: {String}[]CallSiteFact = {};
   FOR _ IN body_summaries.values() DO
   MUTABLE rtoc_idx = 0;
@@ -751,7 +751,7 @@ PUB FN escapeAnalysis__mark_value_position_heap_mut(expr: ?Locatable) RETURNS Vo
   END
 END
 PUB FN escapeAnalysis__apply_execution_boundary_escape_sink_mut(node: Node, context: EscapeContext) RETURNS !Void ->
-  escapeAnalysis__mark_capture_analysis_heap_mut(node.capture_analysis(), context.bg_heap);
+  TRY (escapeAnalysis__mark_capture_analysis_heap_mut(node.capture_analysis(), context.bg_heap));
   IF node IS_A BgBlock AS bg_block THEN
     TRY (escapeAnalysis__mark_fsm_ctx_locals_heap_mut(bg_block, COPY context.schema_lookup));
   END
@@ -1047,7 +1047,7 @@ PUB FN escapeAnalysis__push_locatable_children_mut(node: Locatable, MUTABLE stac
   MUTABLE value = COPY node.substr(_, 1);
   END
 END
-PUB FN escapeAnalysis__mark_capture_analysis_heap_mut(analysis: ?CaptureAnalysis, MUTABLE bg_heap: [Set]String) RETURNS Void ->
+PUB FN escapeAnalysis__mark_capture_analysis_heap_mut(analysis: ?CaptureAnalysis, MUTABLE bg_heap: [Set]String) RETURNS !Void ->
   IF analysis EXISTS AS analysis_value THEN
     MUTABLE analysis_value_mutable = COPY analysis_value;
     FOR rtoc_key IN analysis_value_mutable.capture_symbols.keys() DO
@@ -1173,7 +1173,7 @@ PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Lo
   IF (unwrapped IS_A Locatable AND string_concat_expr?(unwrapped)) THEN
     RETURN TRUE;
   END
-  MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
+  MUTABLE entry: ?CleanupEntry@multiowned = TRY (localBindingAnalysis__binding_entry(node));
   IF (((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_14 = UNWRAP (entry);
   cleanupEntry__present?(rtoc_local_receiver_14) }) AND cleanupEntry__frame?(entry)) THEN
     RETURN TRUE;
@@ -1233,7 +1233,7 @@ PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable,
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
-PUB FN escapeAnalysis__heap_owned_transfer_source?(arg: ?Locatable) RETURNS Bool ->
+PUB FN escapeAnalysis__heap_owned_transfer_source?(arg: ?Locatable) RETURNS !Bool ->
   IF (((arg != NIL) AND (arg IS_A CopyNode)) OR ((arg != NIL) AND (arg IS_A KeepNode))) THEN
     RETURN FALSE;
   END
@@ -1578,7 +1578,7 @@ PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbol
   &binding_entry.append(value);
   binding_values[binding_key] = COPY binding_entry;
 END
-PUB FN escapeAnalysis__receiver_is_param?(receiver: Locatable) RETURNS Bool ->
+PUB FN escapeAnalysis__receiver_is_param?(receiver: Locatable) RETURNS !Bool ->
   MUTABLE root: ?Identifier = aST__root_identifier(receiver);
   MUTABLE sym: ?SymbolEntry = NIL;
   IF root != NIL THEN
@@ -2787,7 +2787,7 @@ FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@m
   END
   NIL;
 END
-PUB FN escapeContext__schema_lookup_call(self: EscapeContext, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
+PUB FN escapeContext__schema_lookup_call(self: EscapeContext, arg0: String@symbol) RETURNS !?TypeSchemaLookupResult ->
   MUTABLE fn_value = UNWRAP (self.schema_lookup);
   RETURN fn_value(arg0);
 END

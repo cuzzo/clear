@@ -448,7 +448,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN functionSignature__unwrap(sig);
 }
 END
-FN mIRLowering__initialize(MUTABLE self: MIRLowering, input: MIRLoweringInput = MIRLoweringInput{ struct_schemas: {}, enum_schemas: {}, union_schemas: {}, schema_lookup: NIL, lifecycle_registry: lifecycleRegistry__empty(), fn_sigs: {}, moved_guard_info: {}, importer: NIL, source_dir: NIL, debug_mode: FALSE, target: :zig, function_counter_seeds: {} }) RETURNS Void
+FN mIRLowering__initialize(MUTABLE self: MIRLowering, input: MIRLoweringInput = MIRLoweringInput{ struct_schemas: {}, enum_schemas: {}, union_schemas: {}, schema_lookup: NIL, lifecycle_registry: lifecycleRegistry__empty(), fn_sigs: {}, moved_guard_info: {}, importer: NIL, source_dir: NIL, debug_mode: FALSE, target: :zig, function_counter_seeds: {} }) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -525,7 +525,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__lowering_schemas(rtoc_self_view).lookup_proc;
 }
 END
-FN mIRLowering__lifecycle_registry(self: MIRLowering) RETURNS LifecycleRegistry@multiowned
+FN mIRLowering__lifecycle_registry(self: MIRLowering) RETURNS !LifecycleRegistry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1731,7 +1731,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY mir;
     END
     MUTABLE actual_type = TRY (aST__full_type_mut(node));
-    IF (type__semantic_type_key(coerced_type) == type__semantic_type_key(actual_type)) THEN
+    IF (TRY (type__semantic_type_key(coerced_type)) == TRY (type__semantic_type_key(actual_type))) THEN
       RETURN COPY mir;
     END
     IF TRY (mIRLowering__stack_fixed_array_coercion?(rtoc_self_view, &node)) THEN
@@ -2689,10 +2689,10 @@ FN mIRLowering__dedupe_ownership_facts(self: MIRLowering, facts: []MIRLoweringOw
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen: [Set]String = Set[];
-    RETURN facts |> WHERE { MUTABLE rtoc_value_block_marker = 0; MUTABLE key: ?String = mIRLowering__ownership_fact_dedupe_key(rtoc_self_view, _); (IF !(key) THEN TRUE ELSE (IF seen.contains?(key) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; &seen.insert(UNWRAP (key)); TRUE } END) END) };
+    RETURN facts |> WHERE { MUTABLE rtoc_value_block_marker = 0; MUTABLE key: ?String = TRY (mIRLowering__ownership_fact_dedupe_key(rtoc_self_view, _)); (IF !(key) THEN TRUE ELSE (IF seen.contains?(key) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; &seen.insert(UNWRAP (key)); TRUE } END) END) };
 }
 END
-FN mIRLowering__ownership_fact_dedupe_key(self: MIRLowering, fact: MIRLoweringOwnershipFact) RETURNS ?String
+FN mIRLowering__ownership_fact_dedupe_key(self: MIRLowering, fact: MIRLoweringOwnershipFact) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3421,7 +3421,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF mIRLowering__mir_produces_owned_result?(rtoc_self_view, value_mir) THEN
       RETURN CAST([ownershipOperandFact__owned_result(ti, source, target_alloc)] AS []OwnershipOperandFact);
     END
-    IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti)) THEN
+    IF !(TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti))) THEN
       RETURN CAST([ownershipOperandFact__non_owning(ti, source)] AS []OwnershipOperandFact);
     END
     MUTABLE visible_name: ?String = TRY (mIRLowering__mir_ident_names(rtoc_self_view, value_mir)) |> FIND mIRLowering__owned_binding_visible?(rtoc_self_view, _);
@@ -3434,7 +3434,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF mIRLowering__non_consuming_owned_value_expr?(rtoc_self_view, value_mir) THEN
       RETURN CAST([ownershipOperandFact__non_owning(ti, source)] AS []OwnershipOperandFact);
     END
-    IF mIRLowering__borrowed_ownership_ast?(rtoc_self_view, ast_value) THEN
+    IF TRY (mIRLowering__borrowed_ownership_ast?(rtoc_self_view, ast_value)) THEN
       RETURN CAST([ownershipOperandFact__borrowed_access(mIRLowering__ownership_root_name(rtoc_self_view, ast_value), ti, source, target_alloc)] AS []OwnershipOperandFact);
     END
     MUTABLE root: ?String = mIRLowering__ownership_root_name(rtoc_self_view, ast_value);
@@ -3462,7 +3462,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ast_value IS_A MoveNode AS move_node THEN
       MUTABLE move_node = move_node.value;
     END
-    RETURN !(!(((((IF ast_value IS_A Identifier AS identifier THEN value_mir IS_A Ident ELSE FALSE END) AND (CAST(value_mir.name() AS String) == mapped)) AND !(mIRLowering__borrowed_ownership_ast?(rtoc_self_view, ast_value))))));
+    RETURN !(!(((((IF ast_value IS_A Identifier AS identifier THEN value_mir IS_A Ident ELSE FALSE END) AND (CAST(value_mir.name() AS String) == mapped)) AND !(TRY (mIRLowering__borrowed_ownership_ast?(rtoc_self_view, ast_value)))))));
 }
 END
 FN mIRLowering__retarget_ownership_operands(self: MIRLowering, operands: []OwnershipOperandFact, target_alloc: ?String@symbol) RETURNS ![]OwnershipOperandFact
@@ -3541,7 +3541,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.contains?(name);
 }
 END
-FN mIRLowering__borrowed_ownership_ast?(self: MIRLowering, MUTABLE node: ?Locatable) RETURNS Bool
+FN mIRLowering__borrowed_ownership_ast?(self: MIRLowering, MUTABLE node: ?Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3621,16 +3621,16 @@ FN mIRLowering__collect_stdlib_consumed_roots(self: MIRLowering, stmt: ?Locatabl
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_86: []String = List[]; rtoc_empty_list_86 } );
-    mIRLowering__walk_ast_calls(rtoc_self_view, stmt, %(call: Locatable) USE(MUTABLE names, rtoc_self_view) -> {
+    TRY (mIRLowering__walk_ast_calls(rtoc_self_view, stmt, %(call: Locatable) USE(MUTABLE names, rtoc_self_view) -> {
     FOR _ IN mIRLowering__stdlib_call_ownership_facts(rtoc_self_view, call).consumed_names DO
     &names.append(COPY _);
     END
     rubyToClearVoid()
-    });
+    }));
     RETURN dedupeStrings(names);
 }
 END
-FN mIRLowering__walk_ast_calls(self: MIRLowering, node: ?Locatable, blk: FN(Locatable) -> Void) RETURNS Void
+FN mIRLowering__walk_ast_calls(self: MIRLowering, node: ?Locatable, blk: FN(Locatable) -> Void) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -3642,7 +3642,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       blk(node);
     END
     aST__each_child_node(UNWRAP (node), %(child: Locatable) USE(blk, rtoc_self_view) -> {
-    mIRLowering__walk_ast_calls(rtoc_self_view, child, blk);
+    TRY (mIRLowering__walk_ast_calls(rtoc_self_view, child, blk));
     rubyToClearVoid()
     });
 }
@@ -3658,14 +3658,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIRLoweringOwnershipScanner__collect_moved_arg_roots(mIRLowering__ownership_scanner(rtoc_self_view), UNWRAP (stmt)));
 }
 END
-FN mIRLowering__ownership_tracked_transfer_type?(self: MIRLowering, ti: Type) RETURNS Bool
+FN mIRLowering__ownership_tracked_transfer_type?(self: MIRLowering, ti: Type) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) OR type__id_handle?(ti)) THEN
       RETURN FALSE;
     END
-    RETURN lifecyclePlan__needs_drop?((UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[ti])));
+    RETURN lifecyclePlan__needs_drop?((UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[ti])));
 }
 END
 FN mIRLowering__walk_ast_for_moved_args(self: MIRLowering, node: Locatable, blk: FN(Locatable) -> Void) RETURNS Void
@@ -3712,7 +3712,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (type__ownership_bearing?(type_info, mIRLowering__mir_schema_lookup(rtoc_self_view)));
 }
 END
-FN mIRLowering__consumed_binding_root(self: MIRLowering, arg: ?Locatable) RETURNS ?String
+FN mIRLowering__consumed_binding_root(self: MIRLowering, arg: ?Locatable) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4291,7 +4291,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A MoveNode AS move_node THEN
       MUTABLE move_node = move_node.value;
     END
-    MUTABLE root = (mIRLowering__root_receiver_node(rtoc_self_view, node) OR_ELSE node);
+    MUTABLE root = (TRY (mIRLowering__root_receiver_node(rtoc_self_view, node)) OR_ELSE node);
     IF root IS_A Identifier THEN
       MUTABLE alias_alloc: ?String@symbol = COPY (IF mIRLowering__capability_state(rtoc_self_view).with_alias_alloc_map != NIL THEN
         (mIRLowering__capability_state(rtoc_self_view).with_alias_alloc_map)[CAST(root.name() AS String)]
@@ -4361,7 +4361,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (IF node? IS_A FuncCall AS func_call THEN (func_call.mutates_receiver != NIL) ELSE FALSE END) THEN
         receiver = (receiver OR_ELSE node.args().first());
       END
-      MUTABLE root: ?Identifier = mIRLowering__root_receiver_node(rtoc_self_view, receiver);
+      MUTABLE root: ?Identifier = TRY (mIRLowering__root_receiver_node(rtoc_self_view, receiver));
       MUTABLE selected: Locatable = CAST(((IF root != NIL THEN root ELSE receiver END) OR node) AS Locatable);
       MUTABLE selected_type = TRY (type__from_node_mut(selected, "allocator receiver"));
       IF TRY (type__node_reference?(selected_type)) THEN
@@ -4379,7 +4379,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__root_receiver_node(self: MIRLowering, node: ?Locatable) RETURNS ?Identifier
+PRIVATE FN mIRLowering__root_receiver_node(self: MIRLowering, node: ?Locatable) RETURNS !?Identifier
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -4392,7 +4392,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY root_value;
     END
     IF (node IS_A GetField) OR (node IS_A GetIndex) OR (node IS_A OptionalUnwrap) OR (node IS_A Slice) THEN
-      RETURN mIRLowering__root_receiver_node(rtoc_self_view, node.target());
+      RETURN TRY (mIRLowering__root_receiver_node(rtoc_self_view, node.target()));
     ELSE
       RETURN NIL;
     END
@@ -4402,7 +4402,7 @@ PRIVATE FN mIRLowering__extract_root_var_name(self: MIRLowering, node: Locatable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE root: ?Identifier = mIRLowering__root_receiver_node(rtoc_self_view, node);
+    MUTABLE root: ?Identifier = TRY (mIRLowering__root_receiver_node(rtoc_self_view, node));
     IF !((root != NIL)) THEN
       RETURN NIL;
     END
@@ -4436,7 +4436,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_120 = TRY (type__new(castTypeTypeInputToTypeConstructionInput(to_type)));
     END
     rtoc_ternary_value_120? };
-    IF (type__semantic_type_key(from_t) == type__semantic_type_key(to_t)) THEN
+    IF (TRY (type__semantic_type_key(from_t)) == TRY (type__semantic_type_key(to_t))) THEN
       RETURN NIL;
     END
     IF ((to_t.indirect?() AND !(type__indirect?(from_t))) AND (type__resolved(from_t) == to_t.resolved())) THEN
@@ -4494,10 +4494,10 @@ PRIVATE FN mIRLowering__build_drop_entry_mut(self: MIRLowering, MUTABLE entry: C
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE plan = (cleanupEntry__lifecycle_plan(entry) OR_ELSE ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_122: ?LifecyclePlan = NIL;
     IF source_node != NIL THEN
-      rtoc_ternary_value_122 = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_121 = mIRLowering__lifecycle_registry(rtoc_self_view);
+      rtoc_ternary_value_122 = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_121 = TRY (mIRLowering__lifecycle_registry(rtoc_self_view));
     TRY (lifecycleRegistry__fetch_binding(rtoc_local_receiver_121, Locatable{ VarDecl: COPY source_node }, ti)) };
     ELSE
-      rtoc_ternary_value_122 = UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[ti]);
+      rtoc_ternary_value_122 = UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[ti]);
     END
     rtoc_ternary_value_122? }));
     IF !(lifecyclePlan__needs_drop?(plan)) THEN
@@ -4646,13 +4646,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       CONTINUE;
     END
     MUTABLE field_type = structField__type(field);
-    MUTABLE plan = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[field_type]);
+    MUTABLE plan = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[field_type]);
     MUTABLE field_ref = FieldGet{ object: Emittable{ Ident: COPY self_ref }, field: COPY rtoc_key, lowered_node_id: NIL, ownership_consumption: NIL };
     IF (plan.drop_strategy == :resource_close) THEN
         &drop_statements.append(Stmt{ Emittable: COPY CAST(ResourceClose{ target: Emittable{ FieldGet: COPY field_ref }, close_plan: UNWRAP (plan.resource_close_plan), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) });
     ELSE_IF type__optional?(field_type) THEN
         MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type(field_type)));
-        MUTABLE wrapped_plan = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[wrapped]);
+        MUTABLE wrapped_plan = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[wrapped]);
         IF (wrapped_plan.drop_strategy == :resource_close) THEN
           MUTABLE capture = "__close_${mIRLowering__zig_safe_name(rtoc_self_view, rtoc_key)}";
           &drop_statements.append(Stmt{ Emittable: COPY CAST(IfBindStmt{ bindings: COPY [{:expr: field_ref, :capture: capture, :pointer_capture: TRUE}], then_body: [Emittable{ ResourceClose: COPY ResourceClose{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, close_plan: UNWRAP (wrapped_plan.resource_close_plan), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) });
@@ -4818,7 +4818,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           MUTABLE inline: InlineStructVariant@multiowned = castOptionalMIRLoweringUnionVariantPayloadToInlineStructVariantMultiowned(data);
           MUTABLE drop_payload: Bool = inline.deinit_entries |> ANY _;
           FOR _ IN inline.fields.values() DO
-        MUTABLE plan = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[TRY (type__from_input(_))]);
+        MUTABLE plan = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[TRY (type__from_input(_))]);
         copy_forbidden = (copy_forbidden OR (plan.copy_strategy == :forbidden));
         IF (plan.copy_strategy != :bit_copy) THEN
               copy_strategy = :deep_clone;
@@ -4830,7 +4830,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
       ELSE
           MUTABLE variant_type = TRY (type__from_variant_input(castOptionalMIRLoweringUnionVariantPayloadToOptionalSchemasUnionSchemaVariantValue(data)));
-          MUTABLE plan = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[variant_type]);
+          MUTABLE plan = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[variant_type]);
           copy_forbidden = (copy_forbidden OR (plan.copy_strategy == :forbidden));
           copy_strategy = COPY plan.copy_strategy;
           IF (plan.drop_strategy == :resource_close) THEN
@@ -5082,7 +5082,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE enum_schemas = mod_value.enum_schemas;
     MUTABLE union_schemas = mod_value.union_schemas;
     MUTABLE rtoc_mutable_receiver_152 = mIRLowering__lowering_schemas(rtoc_self_view);
-    mIRLoweringSchemas__merge_mut(&rtoc_mutable_receiver_152, struct_schemas, enum_schemas, union_schemas);
+    TRY (mIRLoweringSchemas__merge_mut(&rtoc_mutable_receiver_152, struct_schemas, enum_schemas, union_schemas));
 }
 END
 PRIVATE FN mIRLowering__visible_type_items(self: MIRLowering, mod_value: CompiledModule, same_dir: Bool = FALSE) RETURNS ![]Emittable
@@ -5716,7 +5716,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       ti
     END;
-    MUTABLE lifecycle = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[ti]);
+    MUTABLE lifecycle = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[ti]);
     MUTABLE keep = OwnedSinkPlan{ action: :keep, target_alloc: COPY sink_alloc, zig_type: NIL, copy_mode: NIL, rc_func: NIL, source_slice_view: FALSE };
     IF TRY (type__node_reference?(ti)) THEN
       RETURN keep;
@@ -5797,7 +5797,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_node = mIRLowering__owned_sink_source_node(rtoc_self_view, ast_node);
     MUTABLE entry = TRY (mIRLowering__owned_sink_source_entry(rtoc_self_view, source_node));
     MUTABLE value_alloc = (mIRLowering__mir_owned_alloc(rtoc_self_view, value) OR_ELSE mIRLowering__placement_for_node(rtoc_self_view, ast_node));
-    RETURN OwnedSinkSourceFact{ source_alloc: COPY value_alloc, moved_without_copy: TRY (mIRLowering__explicit_owned_sink_transfer?(rtoc_self_view, ast_node, source_node)), owned_parameter: mIRLowering__owned_parameter_source_node?(rtoc_self_view, source_node), needs_heap_create: !(!(((respondsTo?(ast_node, "needs_heap_create") AND ast_node.needs_heap_create())))), same_alloc_verifiable: cleanupEntry__needs_cleanup?(entry), same_alloc_transfer_source: cleanupEntry__present?(entry), transfer_without_local_cleanup: (cleanupEntry__present?(entry) AND !(cleanupEntry__needs_cleanup?(entry))), already_owned_value: TRY (mIRLowering__owned_sink_value?(rtoc_self_view, value, ast_node)), existing_owned_source: TRY (mIRLowering__existing_owned_source_node?(rtoc_self_view, source_node)), borrowed_union_sink: TRY (mIRLowering__borrowed_union_sink_source?(rtoc_self_view, ast_node, source_node, ti)) };
+    RETURN OwnedSinkSourceFact{ source_alloc: COPY value_alloc, moved_without_copy: TRY (mIRLowering__explicit_owned_sink_transfer?(rtoc_self_view, ast_node, source_node)), owned_parameter: TRY (mIRLowering__owned_parameter_source_node?(rtoc_self_view, source_node)), needs_heap_create: !(!(((respondsTo?(ast_node, "needs_heap_create") AND ast_node.needs_heap_create())))), same_alloc_verifiable: cleanupEntry__needs_cleanup?(entry), same_alloc_transfer_source: cleanupEntry__present?(entry), transfer_without_local_cleanup: (cleanupEntry__present?(entry) AND !(cleanupEntry__needs_cleanup?(entry))), already_owned_value: TRY (mIRLowering__owned_sink_value?(rtoc_self_view, value, ast_node)), existing_owned_source: TRY (mIRLowering__existing_owned_source_node?(rtoc_self_view, source_node)), borrowed_union_sink: TRY (mIRLowering__borrowed_union_sink_source?(rtoc_self_view, ast_node, source_node, ti)) };
 }
 END
 PRIVATE FN mIRLowering__owned_sink_source_node(self: MIRLowering, ast_node: Locatable) RETURNS Locatable
@@ -5842,7 +5842,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__owned_parameter_source_node?(self: MIRLowering, source_node: Locatable) RETURNS Bool
+PRIVATE FN mIRLowering__owned_parameter_source_node?(self: MIRLowering, source_node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5870,7 +5870,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF ast_node IS_A CopyNode AS copy_node THEN
       MUTABLE copy_type = TRY (mIRLowering__copy_source_type_info(rtoc_self_view, &copy_node.value));
-      RETURN ((UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[copy_type])).copy_strategy != :bit_copy);
+      RETURN ((UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[copy_type])).copy_strategy != :bit_copy);
     END
     IF mIRLowering__mir_allocates?(rtoc_self_view, value) THEN
       RETURN TRUE;
@@ -6122,7 +6122,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF last_mir EXISTS AS last_mir_value THEN
           MUTABLE last_mir_value = TRY (mIRLowering__place_value_for_destination(rtoc_self_view, last_mir_value, last_step_value_mutable.expr, result_alloc, TypeTypeInput{ Type: COPY result_destination_type }));
         END
-        IF ((last_mir != NIL) AND ((mIRLowering__mir_allocates?(rtoc_self_view, last_mir) OR lifecyclePlan__needs_drop?((UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[result_destination_type])))))) THEN
+        IF ((last_mir != NIL) AND ((mIRLowering__mir_allocates?(rtoc_self_view, last_mir) OR lifecyclePlan__needs_drop?((UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[result_destination_type])))))) THEN
           last_mir = mIRLowering__hoist_alloc(rtoc_self_view, last_mir, last_step_value_mutable.expr, TRUE, FALSE, TRUE, result_alloc);
         END
         MUTABLE last_pending = TRY (mIRLowering__flush_pending(rtoc_self_view));
@@ -6262,7 +6262,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     MUTABLE result_type = (destination_type OR_ELSE TRY (type__from_node_mut(ast_node, "FSM result owner")));
-    IF (IF result_owner IS_A Ident AS ident THEN mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type) ELSE FALSE END) THEN
+    IF (IF result_owner IS_A Ident AS ident THEN TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type)) ELSE FALSE END) THEN
       MUTABLE owner_name = COPY CAST(result_owner.name() AS String);
       owner_name = COPY (rename_map[owner_name] OR_ELSE owner_name);
       MUTABLE mir_entry = ((IF bindings[CAST(result_owner.name() AS String)] != NIL THEN bindings[CAST(result_owner.name() AS String)] ELSE bindings[owner_name] END) OR_ELSE mIRLowering__new());
@@ -6388,7 +6388,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rename_map = TRY (mIRLowering__fsm_fn_name_rename_map(rtoc_self_view));
     MUTABLE bindings = TRY (mIRLowering__fsm_current_bindings(rtoc_self_view));
     MUTABLE ti = TRY (aST__full_type_mut(Locatable{ Identifier: COPY node }));
-    IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti)) THEN
+    IF !(TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti))) THEN
       RETURN FALSE;
     END
     MUTABLE safe = mIRLowering__fsm_zig_safe_name(rtoc_self_view, node.name);
@@ -7218,7 +7218,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         MUTABLE type_info = TRY (type__from_node_mut(ast_node, "owned composite argument materialization"));
         type_info = TRY (type__success_type(type_info));
-        MUTABLE lifecycle_plan = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[type_info]);
+        MUTABLE lifecycle_plan = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[type_info]);
         IF !(lifecyclePlan__needs_drop?(lifecycle_plan)) THEN
           RETURN NIL;
         END
@@ -8067,7 +8067,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF alloc EXISTS AS alloc_value THEN
         IF KEEP registry_call_mutable.allocs != NIL THEN
           registry_call_mutable.allocs = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_284 = ((KEEP registry_call_mutable.allocs)?);
-        inlineAllocMetadata__with_all(rtoc_local_receiver_284, alloc_value) };
+        TRY (inlineAllocMetadata__with_all(rtoc_local_receiver_284, alloc_value)) };
         ELSE
           registry_call_mutable.allocs = NIL;
         END
@@ -8617,7 +8617,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &params_mir.unshift(MIRParam{ name: "rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL });
     END
     MUTABLE comptime_params = node.type_params |> SELECT "comptime ${_}: type";
-    MUTABLE tied_shared_return: ?String = mIRLowering__tied_shared_family_return_param(rtoc_self_view, UNWRAP (node), context.mutable_scalar_params);
+    MUTABLE tied_shared_return: ?String = TRY (mIRLowering__tied_shared_family_return_param(rtoc_self_view, UNWRAP (node), context.mutable_scalar_params));
     MUTABLE final_zig_type = zigType__new(final_type);
     MUTABLE return_type_str =   IF tied_shared_return THEN
       tied_shared_return
@@ -9129,7 +9129,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       symbolEntry__kept_identity(rtoc_local_receiver_317) }
         ELSE
           NIL
-        END) != NIL) OR mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti)) OR ((cleanupEntry__present?(entry) AND entry.heap?())))) THEN
+        END) != NIL) OR TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti))) OR ((cleanupEntry__present?(entry) AND entry.heap?())))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -9418,7 +9418,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF mIRLowering__owned_slice_argument_required?(rtoc_self_view, callee_param, moved_arg, ti, callee_param_type) THEN
       MUTABLE sink_alloc = TRY (mIRLowering__allocator_for_takes_param_mut(rtoc_self_view, callee_param));
       MUTABLE owned_slice = OwnedSlice{ expr: COPY arg, alloc: COPY sink_alloc, lowered_node_id: NIL, ownership_consumption: NIL };
-      MUTABLE owns_slice_input = (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti) OR (mIRLowering__mir_ident_names(rtoc_self_view, arg) |> ANY mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.contains?(_)));
+      MUTABLE owns_slice_input = (TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti)) OR (mIRLowering__mir_ident_names(rtoc_self_view, arg) |> ANY mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.contains?(_)));
       IF !(owns_slice_input) THEN
         RETURN Emittable{ OwnedSlice: COPY owned_slice };
       END
@@ -9549,7 +9549,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
           rtoc_ternary_value_335? } }));
       &takes_indices.insert(COPY rtoc_idx);
-      IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, arg_type)) THEN
+      IF !(TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, arg_type))) THEN
             &operands.append(ownershipOperandFact__non_owning(arg_type, "call argument ${rtoc_idx}"));
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -9652,7 +9652,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         rtoc_ternary_value_340? } }));
       &takes_indices.insert(COPY rtoc_idx);
-      IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, arg_type)) THEN
+      IF !(TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, arg_type))) THEN
           &operands.append(ownershipOperandFact__non_owning(arg_type, "call argument ${rtoc_idx}"));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -10073,7 +10073,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE protocol_name_value_mutable = COPY protocol_name_value;
       MUTABLE receiver_index = UNWRAP (node.protocol_receiver_index);
       MUTABLE receiver = COPY UNWRAP (node.args[receiver_index]);
-      RETURN mIRLowering__lower_user_protocol_call(&rtoc_self_view, CallNode{ FuncCall: COPY node }, node.args, TRY (aST__full_type_mut(receiver)));
+      RETURN TRY (mIRLowering__lower_user_protocol_call(&rtoc_self_view, CallNode{ FuncCall: COPY node }, node.args, TRY (aST__full_type_mut(receiver))));
     END
     IF node.zig_pattern EXISTS AS zig_pattern_value THEN
       MUTABLE zig_pattern_value_mutable = COPY zig_pattern_value;
@@ -10257,10 +10257,10 @@ PRIVATE FN mIRLowering__lower_user_protocol_method_call(MUTABLE self: MIRLowerin
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ast_args = ([node.object] + node.args);
     MUTABLE receiver_type = TRY (aST__full_type_mut(node.object));
-    RETURN mIRLowering__lower_user_protocol_call(&rtoc_self_view, CallNode{ MethodCall: COPY node }, ast_args, receiver_type);
+    RETURN TRY (mIRLowering__lower_user_protocol_call(&rtoc_self_view, CallNode{ MethodCall: COPY node }, ast_args, receiver_type));
 }
 END
-PRIVATE FN mIRLowering__lower_user_protocol_call(MUTABLE self: MIRLowering, node: CallNode, ast_args: []Locatable, receiver_type: Type) RETURNS Emittable
+PRIVATE FN mIRLowering__lower_user_protocol_call(MUTABLE self: MIRLowering, node: CallNode, ast_args: []Locatable, receiver_type: Type) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -10334,7 +10334,7 @@ PRIVATE FN mIRLowering__protocol_map_allocator_for(self: MIRLowering, node: Loca
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE root: ?Identifier = mIRLowering__root_receiver_node(rtoc_self_view, node);
+    MUTABLE root: ?Identifier = TRY (mIRLowering__root_receiver_node(rtoc_self_view, node));
     IF root EXISTS AS root_value THEN
       MUTABLE hidden: ?String = mIRLowering__current_function_protocol_map_allocator(rtoc_self_view, root_value.name);
       IF hidden EXISTS AS hidden_value THEN
@@ -11532,14 +11532,14 @@ PRIVATE FN mIRLowering__materialize_sorted_lock_bindings(MUTABLE self: MIRLoweri
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF clause EXISTS AS clause_value THEN
       MUTABLE clause_value_mutable = COPY clause_value;
-      withBindingMaterialization__add_binding(materialization, WithBindingNode{ Emittable: COPY CAST(mIRLowering__sorted_lock_acquire(&rtoc_self_view, fallible_caps, clause_value_mutable, with_label, node) AS Emittable) });
+      withBindingMaterialization__add_binding(materialization, WithBindingNode{ Emittable: COPY CAST(TRY (mIRLowering__sorted_lock_acquire(&rtoc_self_view, fallible_caps, clause_value_mutable, with_label, node)) AS Emittable) });
       FOR _ IN fallible_caps DO
     MUTABLE var_name = COPY _.target_label;
     MUTABLE alias_name = COPY _.alias_name;
     withBindingMaterialization__add_fallible_clause(materialization, mIRLowering__build_fallible_clause_mir(&rtoc_self_view, var_name, alias_name, clause_value_mutable));
       END
     ELSE
-      withBindingMaterialization__add_binding(materialization, WithBindingNode{ Emittable: COPY CAST(mIRLowering__sorted_lock_acquire(&rtoc_self_view, fallible_caps, NIL, with_label, node) AS Emittable) });
+      withBindingMaterialization__add_binding(materialization, WithBindingNode{ Emittable: COPY CAST(TRY (mIRLowering__sorted_lock_acquire(&rtoc_self_view, fallible_caps, NIL, with_label, node)) AS Emittable) });
     END
 }
 END
@@ -12122,7 +12122,7 @@ PRIVATE FN mIRLowering__lower_with_match_block(MUTABLE self: MIRLowering, node: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE cap = withCapabilityPlan__first_transition((TRY (capabilityPlan__require_for(node))));
+    MUTABLE cap = TRY (withCapabilityPlan__first_transition((TRY (capabilityPlan__require_for(node)))));
     MUTABLE var_node: CapabilityVarNode = COPY castLocatableToCapabilityVarNode(cap.var_node);
     MUTABLE cell = TRY (mIRLowering__with_capability_source_mir(rtoc_self_view, var_node, TRUE));
     MUTABLE alias_name = COPY cap.alias_name;
@@ -12136,7 +12136,7 @@ PRIVATE FN mIRLowering__lower_polymorphic_universal(MUTABLE self: MIRLowering, n
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE cap = withCapabilityPlan__first_transition((TRY (capabilityPlan__require_for(node))));
+    MUTABLE cap = TRY (withCapabilityPlan__first_transition((TRY (capabilityPlan__require_for(node)))));
     MUTABLE var_node: CapabilityVarNode = COPY castLocatableToCapabilityVarNode(cap.var_node);
     MUTABLE var_name = COPY cap.target_label;
     MUTABLE alias_name = COPY cap.alias_name;
@@ -12553,7 +12553,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN mIRLowering__sorted_lock_acquire(MUTABLE self: MIRLowering, fallible_caps: []CapabilityTransition, clause: ?ErrorClause, with_label: ?String, with_node: WithBlock) RETURNS SortedLockAcquire
+PRIVATE FN mIRLowering__sorted_lock_acquire(MUTABLE self: MIRLowering, fallible_caps: []CapabilityTransition, clause: ?ErrorClause, with_label: ?String, with_node: WithBlock) RETURNS !SortedLockAcquire
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -12763,7 +12763,7 @@ PRIVATE FN mIRLowering__boundary_capture_fact(self: MIRLowering, name: String, s
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE storage: ?String@symbol = mIRLowering__boundary_capture_storage(rtoc_self_view, symbol, captured_type);
+    MUTABLE storage: ?String@symbol = TRY (mIRLowering__boundary_capture_storage(rtoc_self_view, symbol, captured_type));
     MUTABLE sync: ?String@symbol = (IF symbol != NIL THEN
       symbolEntry__sync(symbol)
     ELSE
@@ -12887,7 +12887,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__boundary_capture_storage(self: MIRLowering, symbol: ?SymbolEntry, captured_type: ?Type) RETURNS ?String@symbol
+PRIVATE FN mIRLowering__boundary_capture_storage(self: MIRLowering, symbol: ?SymbolEntry, captured_type: ?Type) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13103,7 +13103,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       NIL
     END END) |> WHERE _ != NIL;
-    MUTABLE capture_finalizers = caps.specs |> SELECT:? (IF capture_close_plans.contains?(_.name) THEN NIL ELSE captureSpec__finalizer_mir_for(_, "__ctx_${names.id.toString()}") END) |> WHERE _ != NIL;
+    MUTABLE capture_finalizers = caps.specs |> SELECT:? (IF capture_close_plans.contains?(_.name) THEN NIL ELSE TRY (captureSpec__finalizer_mir_for(_, "__ctx_${names.id.toString()}")) END) |> WHERE _ != NIL;
     MUTABLE capture_frees = captured |> SELECT:? {
     MUTABLE close_plan: ?ResourceClosePlan = COPY capture_close_plans[_._0];
     (  IF close_plan THEN
@@ -13434,7 +13434,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE fsm_structure = COPY transform_result.structure;
     MUTABLE result_type = TRY (type__tense_type((TRY (type__from_node_mut(node, "FSM BG result")))));
-    fsm_structure.owned_result_required = !(!(((TRUE AND mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type)))));
+    fsm_structure.owned_result_required = !(!(((TRUE AND TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type))))));
     TRY (mIRChecker__check_fsm_structure_mut(fsm_structure, node));
     MUTABLE bg = MIRBgBlock{ code: castFsmBodyToBgBlockPlan(COPY transform_result.body), captures: COPY captured, run_body: ( { MUTABLE rtoc_empty_list_516: []Emittable = List[]; rtoc_empty_list_516 } ), fsm_structure: Emittable{ FsmStructure: COPY fsm_structure }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
     bg.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BgBlock: COPY node })) }));
@@ -13835,7 +13835,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE capture_map = (mIRLowering__capture_state(rtoc_self_view).do_capture_map OR_ELSE {});
     IF capture_map.contains?(node.name) THEN
       MUTABLE ident = Ident{ name: COPY capture_map[node.name], lowered_node_id: NIL, ownership_consumption: NIL };
-      IF mIRLowering__atomic_capture_load?(rtoc_self_view, node) THEN
+      IF TRY (mIRLowering__atomic_capture_load?(rtoc_self_view, node)) THEN
         RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY ident }, method: "load", args: ( { MUTABLE rtoc_empty_list_536: []Any = List[]; rtoc_empty_list_536 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
       END
       RETURN Emittable{ Ident: COPY ident };
@@ -13887,7 +13887,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((codepoint >= 97) AND (codepoint <= 122));
 }
 END
-PRIVATE FN mIRLowering__atomic_capture_load?(self: MIRLowering, node: Identifier) RETURNS Bool
+PRIVATE FN mIRLowering__atomic_capture_load?(self: MIRLowering, node: Identifier) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14288,9 +14288,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF (plan.kind == :unit_variant_comparison) THEN
       RETURN Emittable{ MIRBinOp: COPY mIRLowering__emit_unit_variant_comparison(rtoc_self_view, plan) };
     ELSE_IF (plan.kind == :union_equality_error) THEN
-      RETURN mIRLowering__raise_union_equality_error(rtoc_self_view, plan);
+      RETURN TRY (mIRLowering__raise_union_equality_error(rtoc_self_view, plan));
     ELSE_IF (plan.kind == :standard) THEN
-      RETURN Emittable{ MIRBinOp: COPY mIRLowering__emit_standard_binary_plan(rtoc_self_view, plan) };
+      RETURN Emittable{ MIRBinOp: COPY TRY (mIRLowering__emit_standard_binary_plan(rtoc_self_view, plan)) };
     ELSE
       panic("MIRLowering: unknown binary operation plan {}");
     END
@@ -14412,7 +14412,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__emit_symbol_binary_comparison(rtoc_self_view, plan.facts);
 }
 END
-PRIVATE FN mIRLowering__emit_standard_binary_plan(self: MIRLowering, plan: BinaryOperationPlan) RETURNS MIRBinOp
+PRIVATE FN mIRLowering__emit_standard_binary_plan(self: MIRLowering, plan: BinaryOperationPlan) RETURNS !MIRBinOp
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14490,7 +14490,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN MIRBinOp{ op: COPY UNWRAP (plan.op_str), left: Emittable{ Call: COPY TRY (mIRLowering__active_tag_call(rtoc_self_view, tag_target)) }, right: Emittable{ EnumTag: COPY EnumTag{ variant: COPY (UNWRAP (plan.variant)).variant_name } }, lowered_node_id: NIL, ownership_consumption: NIL };
 }
 END
-PRIVATE FN mIRLowering__raise_union_equality_error(self: MIRLowering, plan: BinaryOperationPlan) RETURNS Void
+PRIVATE FN mIRLowering__raise_union_equality_error(self: MIRLowering, plan: BinaryOperationPlan) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14615,13 +14615,13 @@ PRIVATE FN mIRLowering__complex_pipeline_sink_alloc(self: MIRLowering, mir_resul
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF ownershipEffect__borrowed_view_result?(castOptionalPipelineLoweringResultToOptionalEmittable(mir_result)) THEN
+    IF TRY (ownershipEffect__borrowed_view_result?(castOptionalPipelineLoweringResultToOptionalEmittable(mir_result))) THEN
       RETURN;
     END
     IF type__observable?(result_type) THEN
       RETURN :heap;
     END
-    IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type)) THEN
+    IF !(TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type))) THEN
       RETURN;
     END
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_550 = (TRY (mIRLowering__pipeline_host(rtoc_self_view)));
@@ -15083,7 +15083,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source_prefix, normalized_source = TRY (mIRLowering__normalize_allocating_used_expr(rtoc_self_view, source, (future_map AND tenseOperationPlan__consumes_handle?(plan_value))));
     mIRLowering__function_state(rtoc_self_view).pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(rtoc_self_view).pending_stmts, CAST(source_prefix AS []Stmt));
     source = COPY normalized_source;
-    MUTABLE split = tenseEnvelope__split_future((TRY (tenseEnvelope__from_type(plan_value.input_type))));
+    MUTABLE split = TRY (tenseEnvelope__split_future((TRY (tenseEnvelope__from_type(plan_value.input_type)))));
     MUTABLE id = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_560 = mIRLowering__lowering_counters(rtoc_self_view);
     mIRLoweringCounters__next_background_block_id(&rtoc_mutable_receiver_560) };
     MUTABLE raw_id = id.value;
@@ -15130,7 +15130,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       mapped_root = COPY UNWRAP (inner_bindings.last());
     END
     MUTABLE result_envelope = TRY (tenseEnvelope__from_type(operation.result_type));
-    MUTABLE result_split = tenseEnvelope__split_future(result_envelope);
+    MUTABLE result_split = TRY (tenseEnvelope__split_future(result_envelope));
     MUTABLE inner_result_expression = TRY (tenseEnvelope__wrap_layers(result_envelope.payload_expression, result_split.inner));
     MUTABLE inner_result_type = TRY (type__from_child_expression(inner_result_expression));
     MUTABLE future_layer = UNWRAP (result_envelope.layers |> FIND (_.kind == TenseLayerKind.Future));
@@ -15140,7 +15140,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE promise_zig = TRY (asyncResultShape__handle_zig_type(result_shape));
     MUTABLE names = mIRLowering__bg_lowering_names(rtoc_self_view, MIRLoweringGeneratedId{ kind: COPY MIRLoweringCounterKind.BackgroundBlock, value: COPY id });
     MUTABLE source_envelope = TRY (tenseEnvelope__from_type(operation.input_type));
-    MUTABLE source_split = tenseEnvelope__split_future(source_envelope);
+    MUTABLE source_split = TRY (tenseEnvelope__split_future(source_envelope));
     MUTABLE source_result_type = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(source_envelope.payload_expression, source_split.inner)) }));
     MUTABLE run_body = mIRLowering__with_bg_fiber_body_context(rtoc_self_view, Set[], %() USE(id, inner_bindings, inner_layers, inner_result_type, mapped_root, mapper, names, node, operation, result_shape, source_result_type, source_value, rtoc_self_view) -> {
     rtoc_lambda_result_564 = mIRLowering__with_runtime_binding_name(rtoc_self_view, names.bg_rt, %() USE(id, inner_bindings, inner_layers, inner_result_type, mapped_root, mapper, node, operation, result_shape, source_result_type, source_value, rtoc_self_view) -> {
@@ -15153,7 +15153,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     MUTABLE source_guard: DeferStmt = source_guard_branch_value?;
     MUTABLE source_shape = TRY (asyncResultShape__promise(source_result_type, (operation.handle_use == TenseHandleUse.SharedRead)));
-    MUTABLE source_lifecycle = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[source_result_type]);
+    MUTABLE source_lifecycle = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[source_result_type]);
     MUTABLE next_call = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY source_receiver }, method: "next", args: ( { MUTABLE rtoc_empty_list_562: []Any = List[]; rtoc_empty_list_562 } ), try_wrap: !(asyncResultShape__boxes_fallible_payload?(source_shape)), callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: IF lifecyclePlan__needs_drop?(source_lifecycle) THEN
         :heap
       ELSE
@@ -15187,7 +15187,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         mIRLowering__direct_tense_map(rtoc_self_view, Emittable{ Ident: COPY Ident{ name: COPY source_value, lowered_node_id: NIL, ownership_consumption: NIL } }, mapped_value, inner_layers, inner_bindings, id, inner_result_type, "inner")
       END;
     MUTABLE placed = TRY (mIRLowering__place_value_for_destination(rtoc_self_view, inner_map, node, :heap, TypeTypeInput{ Type: COPY inner_result_type }));
-    MUTABLE result_lifecycle = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[inner_result_type]);
+    MUTABLE result_lifecycle = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[inner_result_type]);
     IF ((mIRLowering__mir_allocates?(rtoc_self_view, placed) OR placed IS_A Call) OR placed IS_A MIRMethodCall) THEN
         IF lifecyclePlan__needs_drop?(result_lifecycle) THEN
           placed = mIRLowering__hoist_alloc(rtoc_self_view, placed, node, TRUE);
@@ -15450,10 +15450,10 @@ PRIVATE FN mIRLowering__binary_int_arithmetic_facts(self: MIRLowering, node: Bin
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE left_ti = TRY (aST__full_type_mut(node.left));
     MUTABLE right_ti = TRY (aST__full_type_mut(node.right));
-    RETURN BinaryIntArithmeticFacts{ both_int: (((left_ti != NIL) AND (type__integer?(left_ti) == TRUE)) AND ((right_ti != NIL) AND (type__integer?(right_ti) == TRUE))), has_comptime_number_literal: (mIRLowering__comptime_number_literal?(rtoc_self_view, node.left, left_ti) OR mIRLowering__comptime_number_literal?(rtoc_self_view, node.right, right_ti)), has_float_coercion: (mIRLowering__float_coercion?(rtoc_self_view, node.left) OR mIRLowering__float_coercion?(rtoc_self_view, node.right)) };
+    RETURN BinaryIntArithmeticFacts{ both_int: (((left_ti != NIL) AND (type__integer?(left_ti) == TRUE)) AND ((right_ti != NIL) AND (type__integer?(right_ti) == TRUE))), has_comptime_number_literal: (TRY (mIRLowering__comptime_number_literal?(rtoc_self_view, node.left, left_ti)) OR TRY (mIRLowering__comptime_number_literal?(rtoc_self_view, node.right, right_ti))), has_float_coercion: (mIRLowering__float_coercion?(rtoc_self_view, node.left) OR mIRLowering__float_coercion?(rtoc_self_view, node.right)) };
 }
 END
-PRIVATE FN mIRLowering__comptime_number_literal?(self: MIRLowering, node: Locatable, ti: ?Type) RETURNS Bool
+PRIVATE FN mIRLowering__comptime_number_literal?(self: MIRLowering, node: Locatable, ti: ?Type) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -15538,7 +15538,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       target_type = UNWRAP (TRY (type__wrapped_type(target_type)));
     END
     MUTABLE rank_indices: []Emittable = List[];
-    IF type__rank?(target_type) THEN
+    IF TRY (type__rank?(target_type)) THEN
       MUTABLE index_nodes: []Locatable = List[];
       IF node.index IS_A TupleLit THEN
         index_nodes = node.index.items();
@@ -15570,7 +15570,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE target = COPY plan.target;
     MUTABLE index = COPY plan.index;
     MUTABLE ti = COPY plan.type_info;
-    IF type__rank?(ti) THEN
+    IF TRY (type__rank?(ti)) THEN
       RETURN Emittable{ RuntimeCall: COPY TRY (mIRLowering__rank_index_value(rtoc_self_view, target, ti, UNWRAP (plan.rank_indices))) };
     END
     IF (TRY (type__any_rc?(ti)) AND !(mIRLowering__bc_target?(rtoc_self_view))) THEN
@@ -15813,12 +15813,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN StructLitFieldType{ TypeMultiowned: COPY replacement };
       END
       IF type__projection?(t) THEN
-        MUTABLE owner = symbol(UNWRAP (type__projection_owner(t)));
+        MUTABLE owner = symbol(UNWRAP (TRY (type__projection_owner(t))));
         MUTABLE concrete_input: ?TypeTypeInput = COPY subst[owner];
         IF concrete_input EXISTS AS concrete_input_value THEN
           MUTABLE concrete = TRY (type__new(castTypeTypeInputToTypeConstructionInput(concrete_input_value)));
           MUTABLE projected_branch_value: ?Type = NIL;
-          PARTIAL MATCH type__projection_member(t) START
+          PARTIAL MATCH TRY (type__projection_member(t)) START
             :Key ->
             IF type__map?(concrete) THEN
               projected_branch_value = TRY (type__key_type(concrete));
@@ -15838,7 +15838,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF projected THEN
             RETURN StructLitFieldType{ TypeMultiowned: COPY projected };
           END
-          RETURN StructLitFieldType{ TypeMultiowned: COPY TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY symbol(UNWRAP (type__projection_member(t))), protocol: COPY type__projection_protocol(t) }) })) };
+          RETURN StructLitFieldType{ TypeMultiowned: COPY TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeProjectionExpression{ owner: COPY type__resolved(concrete), member: COPY symbol(UNWRAP (TRY (type__projection_member(t)))), protocol: COPY TRY (type__projection_protocol(t)) }) })) };
         ELSE
           RETURN COPY raw_type_value;
         END
@@ -16298,7 +16298,7 @@ PRIVATE FN mIRLowering__aggregate_field_sink_alloc(self: MIRLowering, ignored_fi
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF value IS_A Identifier AS identifier THEN
       MUTABLE ti = TRY (type__from_node_mut(identifier, "aggregate field sink"));
-      IF (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti) AND ((aST__moved?(Locatable{ Identifier: COPY identifier }) OR (IF identifier.symbol != NIL THEN
+      IF (TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti)) AND ((aST__moved?(Locatable{ Identifier: COPY identifier }) OR (IF identifier.symbol != NIL THEN
         symbolEntry__heap_storage?(identifier.symbol)
       ELSE
         NIL
@@ -16601,7 +16601,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRY (type__any_rc?(ti)) AND !(TRY (type__any_rc?(source_ti)))) THEN
       ti = KEEP source_ti;
     END
-    MUTABLE lifecycle = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[ti]);
+    MUTABLE lifecycle = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[ti]);
     MUTABLE sink_type: ?Type = (IF mIRLowering__function_state(rtoc_self_view).current_sink_type != NIL THEN mIRLowering__function_state(rtoc_self_view).current_sink_type ELSE mIRLowering__function_state(rtoc_self_view).current_expected_type END);
     MUTABLE dst_ti_branch_value: ?Type@multiowned = NIL;
     IF sink_type EXISTS AS sink_type_value THEN
@@ -16743,7 +16743,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.carrier_op == :deferred_specialization) THEN
       panic("KEEP on a carrier-polymorphic parameter requires carrier {}");
     END
-    MUTABLE lifecycle = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[ti]);
+    MUTABLE lifecycle = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[ti]);
     IF (lifecycle.copy_strategy == :bit_copy) THEN
       RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY TRY (mIRLowering__lower(&rtoc_self_view, node.value)), zig_type: NIL, elem_type: NIL, strategy: :passthrough, alloc: NIL, copy_shape: deepCopy__copy_shape_for_zig_type(NIL), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
@@ -17409,7 +17409,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       rtoc_ternary_value_644? }));
     END
-    MUTABLE result = mIRLowering__hash_literal_result(rtoc_self_view, Emittable{ Ident: COPY Ident{ name: COPY hm_name, lowered_node_id: NIL, ownership_consumption: NIL } }, plan, capability);
+    MUTABLE result = TRY (mIRLowering__hash_literal_result(rtoc_self_view, Emittable{ Ident: COPY Ident{ name: COPY hm_name, lowered_node_id: NIL, ownership_consumption: NIL } }, plan, capability));
     IF hashLiteralCapabilityPlan__wraps_result?(capability) THEN
       MUTABLE wrapped_name = "__hm_wrapped_${literal_id}";
       &items.append(Emittable{ Let: COPY Let{ name: COPY wrapped_name, init: COPY result, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ Type: COPY plan.type_info })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
@@ -17461,7 +17461,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY hm_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "put", args: [CAST(alloc_expr AS Any), CAST(alloc_expr AS Any), CAST(key_mir AS Any), CAST(value_mir AS Any)], try_wrap: TRUE, callable_contract: COPY put_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
-PRIVATE FN mIRLowering__hash_literal_result(self: MIRLowering, result: Emittable, plan: HashLiteralPlan, capability: HashLiteralCapabilityPlan) RETURNS Emittable
+PRIVATE FN mIRLowering__hash_literal_result(self: MIRLowering, result: Emittable, plan: HashLiteralPlan, capability: HashLiteralCapabilityPlan) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17569,7 +17569,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END };
 }
 END
-PRIVATE FN mIRLowering__tied_shared_family_return_param(self: MIRLowering, node: FunctionDef, mutable_scalar_params: [Set]String) RETURNS ?String
+PRIVATE FN mIRLowering__tied_shared_family_return_param(self: MIRLowering, node: FunctionDef, mutable_scalar_params: [Set]String) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17912,7 +17912,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE ti = TRY (type__from_node_mut(node, "owned binding source"));
-    IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti)) THEN
+    IF !(TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, ti))) THEN
       RETURN NIL;
     END
     MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST(node.name() AS String)];
@@ -17943,7 +17943,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF init_effect.produces_owned THEN
       RETURN FALSE;
     END
-    RETURN mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, facts.ft);
+    RETURN TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, facts.ft));
 }
 END
 PRIVATE FN mIRLowering__var_decl_source_borrowed?(self: MIRLowering, node: VarDecl) RETURNS Bool
@@ -18101,7 +18101,7 @@ PRIVATE FN mIRLowering__mutated_owned_var_decl?(self: MIRLowering, facts: VarDec
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_666 = (COPY facts.binding_entry);
     cleanupEntry__present?(rtoc_local_receiver_666) } AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_667 = (COPY facts.binding_entry);
-    cleanupEntry__needs_cleanup?(rtoc_local_receiver_667) })) AND facts.actually_mutated) AND lifecyclePlan__needs_drop?((UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[facts.ft])))) AND (((!(TRY (type__string?(facts.ft))) OR mIRLowering__mir_allocates?(rtoc_self_view, init)) OR mIRLowering__owned_return_call_init?(rtoc_self_view, init))));
+    cleanupEntry__needs_cleanup?(rtoc_local_receiver_667) })) AND facts.actually_mutated) AND lifecyclePlan__needs_drop?((UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[facts.ft])))) AND (((!(TRY (type__string?(facts.ft))) OR mIRLowering__mir_allocates?(rtoc_self_view, init)) OR mIRLowering__owned_return_call_init?(rtoc_self_view, init))));
 }
 END
 PRIVATE FN mIRLowering__mutated_owned_var_decl_plan(self: MIRLowering, MUTABLE node: VarDecl, facts: VarDeclFacts, safe_name: String, init: Emittable, let_node: Let) RETURNS !MaterializationPacket
@@ -18134,7 +18134,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ((mIRLowering__mir_owned_alloc(rtoc_self_view, init) OR_ELSE facts.decl_alloc))
     END;
     MUTABLE alloc_mark = mIRLowering__var_decl_alloc_mark(rtoc_self_view, safe_name, mir_alloc, facts.ft, binding_entry);
-    IF !(lifecyclePlan__needs_drop?((UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[facts.ft])))) THEN
+    IF !(lifecyclePlan__needs_drop?((UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[facts.ft])))) THEN
       RETURN materializationPacket__owned(alloc_mark, Stmt{ Emittable: Emittable{ Let: COPY let_node } });
     END
     MUTABLE cleanup_entry = TRY (mIRLowering__moved_guard_cleanup_entry(rtoc_self_view, facts.ft, mir_alloc, &node));
@@ -18151,7 +18151,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF type__rodata?(facts.ft) THEN
       RETURN materializationPacket__value_only(Stmt{ Emittable: Emittable{ Let: COPY let_node } });
     END
-    IF !(mIRLowering__type_requires_alloc_cleanup?(rtoc_self_view, facts.ft, mir_alloc)) THEN
+    IF !(TRY (mIRLowering__type_requires_alloc_cleanup?(rtoc_self_view, facts.ft, mir_alloc))) THEN
       RETURN materializationPacket__owned(alloc_mark, Stmt{ Emittable: Emittable{ Let: COPY let_node } });
     END
     MUTABLE cleanup_entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_669 = UNWRAP (mIRLowering__hoist_cleanup_entry(rtoc_self_view, init, Locatable{ VarDecl: COPY node }));
@@ -18185,12 +18185,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN entry;
 }
 END
-PRIVATE FN mIRLowering__type_requires_alloc_cleanup?(self: MIRLowering, ft: Type, alloc: String@symbol) RETURNS Bool
+PRIVATE FN mIRLowering__type_requires_alloc_cleanup?(self: MIRLowering, ft: Type, alloc: String@symbol) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE _ = COPY alloc;
-    RETURN lifecyclePlan__needs_drop?((UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[ft])));
+    RETURN lifecyclePlan__needs_drop?((UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[ft])));
 }
 END
 PRIVATE FN mIRLowering__var_decl_alloc_mark(self: MIRLowering, name: String, alloc: String@symbol, type_info: Type, binding_entry: CleanupEntry) RETURNS AllocMark
@@ -18635,7 +18635,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     ReassignWithCleanup{ name: COPY target_name, value: COPY value, zig_type: &rp.zig_type_mut(), alloc: mIRLowering__alloc_from_sym(rtoc_self_view, &rp.alloc_mut()), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
       }
-      ELSE_IF (heap_return_var AND lifecyclePlan__needs_drop?((UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[TRY (aST__full_type_mut(Locatable{ BindExpr: COPY node }))])))) THEN
+      ELSE_IF (heap_return_var AND lifecyclePlan__needs_drop?((UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[TRY (aST__full_type_mut(Locatable{ BindExpr: COPY node }))])))) THEN
         {
     MUTABLE rtoc_value_block_marker = 0;
     target_type = TRY (aST__full_type_mut(Locatable{ BindExpr: COPY node }));
@@ -18873,7 +18873,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE value = (kept_value OR_ELSE mIRLowering__assignment_value(&rtoc_self_view, node));
     MUTABLE result = Set{ target: COPY plan.target, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     MUTABLE target_alloc =   IF plan.cleanup_field THEN
-      mIRLowering__placement_for_node(rtoc_self_view, (mIRLowering__root_receiver_node(rtoc_self_view, Locatable{ GetField: COPY UNWRAP (plan.cleanup_field) }) OR_ELSE UNWRAP (plan.cleanup_field)))
+      mIRLowering__placement_for_node(rtoc_self_view, (TRY (mIRLowering__root_receiver_node(rtoc_self_view, Locatable{ GetField: COPY UNWRAP (plan.cleanup_field) })) OR_ELSE UNWRAP (plan.cleanup_field)))
     ELSE_IF (node.name IS_A String OR node.name IS_A Identifier) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
@@ -18983,7 +18983,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((field.safe_nav_chain == TRUE) AND type__optional?(field_type)) THEN
       field_type = UNWRAP (TRY (type__wrapped_type(field_type)));
     END
-    MUTABLE field_lifecycle = COPY UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[field_type]);
+    MUTABLE field_lifecycle = COPY UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[field_type]);
     MUTABLE value, value_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(field_lifecycle, field_type, node, target_alloc, MUTABLE rtoc_self_view) -> {
     MUTABLE lowered = mIRLowering__with_decl_alloc(rtoc_self_view, target_alloc, %() USE(field_type, node, target_alloc, MUTABLE rtoc_self_view) -> {
       MUTABLE raw = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
@@ -19056,7 +19056,7 @@ PRIVATE FN mIRLowering__mark_field_assignment_cleanup_mut(self: MIRLowering, MUT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE field: ?GetField = COPY plan.cleanup_field;
-    IF ((field != NIL) AND lifecyclePlan__needs_drop?((UNWRAP (mIRLowering__lifecycle_registry(rtoc_self_view)[TRY (aST__full_type_mut(Locatable{ GetField: COPY field }))])))) THEN
+    IF ((field != NIL) AND lifecyclePlan__needs_drop?((UNWRAP (TRY (mIRLowering__lifecycle_registry(rtoc_self_view))[TRY (aST__full_type_mut(Locatable{ GetField: COPY field }))])))) THEN
       result.needs_field_cleanup = TRUE;
     END
     NIL;
@@ -19114,7 +19114,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN Emittable{ Set: COPY mIRLowering__lower_direct_indexed_set(&rtoc_self_view, node, FALSE) };
     END
     MUTABLE receiver_type = TRY (type__new(ti));
-    IF type__rank?(receiver_type) THEN
+    IF TRY (type__rank?(receiver_type)) THEN
       MUTABLE target = AddressOf{ expr: COPY CAST(TRY (mIRLowering__lower(&rtoc_self_view, target_node)) AS Emittable), lowered_node_id: NIL, ownership_consumption: NIL };
       MUTABLE index_nodes: []?Int64 = List[];
       IF FALSE THEN
@@ -19170,7 +19170,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_lambda_result_694 = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
     rtoc_lambda_result_694
     });
-    IF mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, value_type) THEN
+    IF TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, value_type)) THEN
       val = TRY (mIRLowering__place_value_for_destination(rtoc_self_view, val, node.value, target_alloc, TypeTypeInput{ Type: COPY value_type }));
       val = TRY (mIRLowering__materialize_owned_sink_value(rtoc_self_view, val, node.value, target_alloc, TypeTypeInput{ Type: COPY value_type }));
       IF mIRLowering__mir_allocates?(rtoc_self_view, val) THEN
@@ -19234,7 +19234,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       sink_type_branch_value = TRY (type__value_type(receiver_type));
     END
     MUTABLE sink_type: Type = sink_type_branch_value?;
-    MUTABLE owns_transferred_value = mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, sink_type);
+    MUTABLE owns_transferred_value = TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, sink_type));
     MUTABLE val = mIRLowering__with_decl_alloc(rtoc_self_view, dispatch.sink_alloc, %() USE(node, sink_type, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_698 = mIRLowering__with_sink_type(rtoc_self_view, sink_type, %() USE(node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_697 = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
@@ -19265,7 +19265,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     };
     IF ((kind == :array) OR (kind == :list)) THEN
       MUTABLE elem_ti = UNWRAP (TRY (type__element_type(receiver_type)));
-      IF mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, elem_ti) THEN
+      IF TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, elem_ti)) THEN
         MUTABLE elem_zig = TRY (type__zig_type(elem_ti));
         MUTABLE cleanup_call = TRY (mIRLowering__emit_builtin(rtoc_self_view, :cleanupAt, [Emittable{ Ident: COPY Ident{ name: COPY elem_zig, lowered_node_id: NIL, ownership_consumption: NIL } }, target, Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY dispatch.sink_alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, idx]));
         RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY ([Emittable{ ExprStmt: COPY ExprStmt{ expr: castMIRLoweringReturnValueToEmittable(COPY cleanup_call), discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY setAt_stmt }] + post_transfer_marks), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
@@ -19357,7 +19357,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END)) THEN
       panic("field cleanup lacks annotation lifecycle plan");
     END
-    MUTABLE alloc_sym = TRY (mIRLowering__placement_for_node(rtoc_self_view, (mIRLowering__root_receiver_node(rtoc_self_view, castAssignmentNameToOptionalLocatable(node.name)) OR_ELSE node.name)));
+    MUTABLE alloc_sym = TRY (mIRLowering__placement_for_node(rtoc_self_view, (TRY (mIRLowering__root_receiver_node(rtoc_self_view, castAssignmentNameToOptionalLocatable(node.name))) OR_ELSE node.name)));
     MUTABLE receiver_type = TRY (type__from_node_mut(node.name.target(), "field assignment receiver"));
     IF TRY (type__node_reference?(receiver_type)) THEN
       alloc_sym = :heap;
@@ -19446,7 +19446,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       (mIRLowering__capture_state(rtoc_self_view).do_capture_map)[var_name]
     ELSE
       NIL
-    END) OR_ELSE var_name)) AS String), field: COPY CAST(node.name.field() AS String), cleanup_alloc: COPY cleanup_alloc, alloc_sym: COPY (cleanup_alloc OR_ELSE mIRLowering__placement_for_node(rtoc_self_view, (mIRLowering__root_receiver_node(rtoc_self_view, castAssignmentNameToOptionalLocatable(node.name)) OR_ELSE node.name))) };
+    END) OR_ELSE var_name)) AS String), field: COPY CAST(node.name.field() AS String), cleanup_alloc: COPY cleanup_alloc, alloc_sym: COPY (cleanup_alloc OR_ELSE mIRLowering__placement_for_node(rtoc_self_view, (TRY (mIRLowering__root_receiver_node(rtoc_self_view, castAssignmentNameToOptionalLocatable(node.name))) OR_ELSE node.name))) };
 }
 END
 PRIVATE FN mIRLowering__auto_lock_assignment_value(MUTABLE self: MIRLowering, node: Assignment, alloc_sym: String@symbol) RETURNS !Emittable
@@ -20990,7 +20990,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF entry EXISTS AS entry_value THEN
       IF (entry_value[:source_kind] == :takes_param) THEN
         MUTABLE ti: ?Type@multiowned = COPY (TRY (functionState__binding_types(mIRLowering__function_state(rtoc_self_view))))[name];
-        RETURN (!(ti) OR mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, CAST(ti AS Type)));
+        RETURN (!(ti) OR TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, CAST(ti AS Type))));
       ELSE
         RETURN FALSE;
       END
@@ -21028,7 +21028,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       cleanupEntry__lifecycle_plan(entry)
     ELSE
       NIL
-    END)) AND (ti != NIL)) AND !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, CAST(ti AS Type)))) THEN
+    END)) AND (ti != NIL)) AND !(TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, CAST(ti AS Type))))) THEN
       RETURN FALSE;
     END
     IF mIRLowering__owned_binding_visible?(rtoc_self_view, name) THEN
@@ -21212,7 +21212,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 FN mIRLowering__new(input: MIRLoweringInput = MIRLoweringInput{ struct_schemas: {}, enum_schemas: {}, union_schemas: {}, schema_lookup: NIL, lifecycle_registry: lifecycleRegistry__empty(), fn_sigs: {}, moved_guard_info: {}, importer: NIL, source_dir: NIL, debug_mode: FALSE, target: :zig, function_counter_seeds: {} }) RETURNS MIRLowering@multiowned ->
   MUTABLE self = MIRLowering{ active_lifecycle_registry: NIL, state: MIRLoweringState{ input: COPY input, schemas: schemas, counters: mIRLoweringCounters__new(), function_state: COPY FunctionState{ current_function_context: NIL, pending_stmts: List[], current_decl_alloc: NIL, current_expected_type: NIL, current_sink_type: NIL, current_reassignment_target: NIL, current_bindings: {}, current_binding_types: {}, fn_alloc_marked_names: {}, lowered_alloc_names: Set[], lowered_guarded_cleanup_names: Set[], decl_zig_name_map: {}, guarded_cleanup_names: {}, fn_name_rename_map: {}, node_store_types: Set[] }, runtime: COPY MIRLoweringRuntimeState{ rt_name: "rt", emitter: NIL }, program: COPY MIRLoweringProgramState{ fn_sigs: COPY ((COPY input).fn_sigs), importer: COPY (COPY input).importer, source_dir: COPY (COPY input).source_dir, debug_mode: (COPY input).debug_mode, target: COPY (COPY input).target, shard_context: NIL, emitted_extern_modules: Set[], pipeline_host: NIL, emitted_types: Set[], emitted_require_modules: Set[], emitted_import_type_aliases: Set[], used_sharded_map: FALSE, use_debug_allocator: NIL, fn_nodes: {}, function_counter_snapshots: {}, runtime_init_consts: List[], module_const_inits: Set[], module_global_names: Set[] }, capture: MIRLoweringCaptureState{ current_bg_pointer_captures: NIL, current_lambda_pointer_params: Set[], current_fiber_capture_symbols: {}, do_capture_map: NIL, current_stream_is_inf: NIL, current_stream_local: NIL, current_stream_close_label: NIL, current_fsm_inherited_alloc_names: Set[], current_fsm_inherited_guarded_names: Set[], current_fsm_owned_result_guards: {}, last_fsm_result_transfer_facts: List[] }, capabilities: COPY MIRLoweringCapabilityState{ locked_unwrap_map: NIL, rc_unwrap_map: NIL, with_alias_alloc_map: NIL, with_alias_owner_map: NIL, polymorphic_alias_type_map: NIL, if_bind_aliases: Set[], if_bind_pointer_aliases: Set[], atomic_emit_raw: FALSE }, ownership: COPY MIRLoweringOwnershipState{ next_lowered_node_id: 0, finalized_body_ids: Set[], finalized_node_ids: Set[] }, test: COPY MIRLoweringTestState{ active_stubs: {}, stub_label_counter: 0 } } };
-  mIRLowering__initialize(&self, input);
+  TRY (mIRLowering__initialize(&self, input));
   RETURN self @multiowned;
 END
 FN castAssignmentNameToGetField(value: AssignmentName) RETURNS GetField ->

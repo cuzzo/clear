@@ -51,7 +51,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(annotationProducts__complete?(rtoc_self_view.annotation_products)) THEN
       panic("annotation pipeline did not publish complete products");
     END
-    rtoc_self_view.semantic_index = TRY (semanticIndex__from_products(rtoc_self_view.annotation_products, semanticAnnotator__semantic_id_index(rtoc_self_view)));
+    rtoc_self_view.semantic_index = TRY (semanticIndex__from_products(rtoc_self_view.annotation_products, TRY (semanticAnnotator__semantic_id_index(rtoc_self_view))));
     TRY (annotationBoundary__verify_mut(&program, rtoc_self_view.annotation_products));
 }
 END
@@ -80,7 +80,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     scope__resolve_type_definition(rtoc_local_receiver_3, base_name) };
 }
 END
-PRIVATE FN semanticAnnotator__semantic_id_index(self: SemanticAnnotator) RETURNS SemanticIdIndex
+PRIVATE FN semanticAnnotator__semantic_id_index(self: SemanticAnnotator) RETURNS !SemanticIdIndex
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

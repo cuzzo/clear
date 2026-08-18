@@ -44,7 +44,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, MUTABLE mi
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
   MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
-  IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
+  IF !(TRY (fsmWrapperEmitter__empty?(capture_fields))) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
   &parts.append("");
@@ -81,7 +81,7 @@ END
 PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions: []FsmDestroyAction, MUTABLE mir_emitter: MIREmitter) RETURNS String ->
   MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, &mir_emitter);
   MUTABLE extra: String = "";
-  IF !(fsmWrapperEmitter__empty?(extra_zig)) THEN
+  IF !(TRY (fsmWrapperEmitter__empty?(extra_zig))) THEN
     extra = (((extra_zig.split("\n") |> SELECT "    ${_.trim()}").join("\n")) $+ "\n");
   ELSE
     extra = "";
@@ -99,12 +99,12 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emi
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
   MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
-  IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
+  IF !(TRY (fsmWrapperEmitter__empty?(capture_fields))) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
   &parts.append("        step: u8 = 0,");
   MUTABLE state_fields: String = TRY (fsmWrapperEmitter__render_fsm_state_field_decls(COPY s.state_decls, mir_emitter));
-  IF !(fsmWrapperEmitter__empty?(state_fields)) THEN
+  IF !(TRY (fsmWrapperEmitter__empty?(state_fields))) THEN
     &parts.append(fsmWrapperEmitter__indent_block(state_fields, 8));
   END
   FOR _ IN s.promoted_field_decls DO
@@ -172,15 +172,15 @@ PRIVATE FN fsmWrapperEmitter__render_generic_ctx_struct(s: FsmGenericCtxStruct, 
   &parts.append("        inner: *${s.promise_zig}.Inner,");
   &parts.append("        alloc: std.mem.Allocator,");
   MUTABLE capture_fields = TRY (fsmWrapperEmitter__render_context_field_decls(s.capture_fields, mir_emitter));
-  IF !(fsmWrapperEmitter__empty?(capture_fields)) THEN
+  IF !(TRY (fsmWrapperEmitter__empty?(capture_fields))) THEN
     &parts.append(fsmWrapperEmitter__indent_block(capture_fields, 8));
   END
   MUTABLE extra_fields: String = TRY (fsmWrapperEmitter__render_context_field_decls(COPY s.extra_field_decls, mir_emitter));
-  IF !(fsmWrapperEmitter__empty?(extra_fields)) THEN
+  IF !(TRY (fsmWrapperEmitter__empty?(extra_fields))) THEN
     &parts.append(fsmWrapperEmitter__indent_block(extra_fields, 8));
   END
   MUTABLE promoted_fields: String = TRY (fsmWrapperEmitter__render_context_field_decls(COPY s.promoted_field_decls, mir_emitter));
-  IF !(fsmWrapperEmitter__empty?(promoted_fields)) THEN
+  IF !(TRY (fsmWrapperEmitter__empty?(promoted_fields))) THEN
     &parts.append(fsmWrapperEmitter__indent_block(promoted_fields, 8));
   END
   &parts.append("");
@@ -221,11 +221,11 @@ PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int6
     MUTABLE tail_kind: String@symbol = fsmWrapperEmitter__tail_kind(arm.tail);
     MUTABLE arm_cleanups: String = TRY (fsmWrapperEmitter__render_resume_fn_cleanups(COPY arm.err_cleanups));
     MUTABLE err_action: []String = List[];
-    IF ((tail_kind == :done) AND fsmWrapperEmitter__empty?(arm_cleanups)) THEN
+    IF ((tail_kind == :done) AND TRY (fsmWrapperEmitter__empty?(arm_cleanups))) THEN
       err_action = ["if (@This().${arm.body_fn_name}(__ctx_${ctx_id.toString()})) |_| {} else |err| {", "    __ctx_${ctx_id.toString()}.inner.result = err;", "}"];
     ELSE
       MUTABLE inner = List[];
-      IF !(fsmWrapperEmitter__empty?(arm_cleanups)) THEN
+      IF !(TRY (fsmWrapperEmitter__empty?(arm_cleanups))) THEN
         &inner.append(fsmWrapperEmitter__indent_block(arm_cleanups, 4));
       END
       &inner.append("    __ctx_${ctx_id.toString()}.inner.result = err;");
@@ -236,7 +236,7 @@ PRIVATE FN fsmWrapperEmitter__render_dispatch_arm(arm: FsmStateArm, ctx_id: Int6
     body_lines = ruby_array_concat_Any(body_lines, CAST(err_action AS []Any));
   END
   &body_lines.append(TRY (fsmWrapperEmitter__render_tail(arm.tail, ctx_id)));
-  MUTABLE body_kept: []String = body_lines |> WHERE !(fsmWrapperEmitter__empty?(_));
+  MUTABLE body_kept: []String = body_lines |> WHERE !(TRY (fsmWrapperEmitter__empty?(_)));
   MUTABLE body: String = body_kept.join("\n");
   RETURN (["    ${arm.index.toString()} => {", fsmWrapperEmitter__indent_block(body, 8), "    },"]).join("\n");
 END
@@ -315,7 +315,7 @@ PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: St
   &parts.append("    const ${s.alloc_var} = ${alloc_expr};");
   &parts.append("    const ${s.promise_var} = try ${s.promise_zig}.spawn(${s.alloc_var}, ${s.rt_name}.getSched());");
   MUTABLE promoted_decls = (((COPY s.promoted_field_decls)) |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE out: ?String = TRY (mIREmitter__emit(&mir_emitter, _)); (IF ((out == NIL) OR (UNWRAP (out).trim().length() == 0)) THEN NIL ELSE out END) } |> WHERE _ != NIL).join("\n");
-  IF !(fsmWrapperEmitter__empty?(promoted_decls)) THEN
+  IF !(TRY (fsmWrapperEmitter__empty?(promoted_decls))) THEN
     &parts.append(fsmWrapperEmitter__indent_block(promoted_decls, 4));
   END
   &parts.append("    const ${s.ctx_var}_task = try CheatHeader.allocFsmTask(${s.rt_name}, &${s.ctx_type}.resumeFn);");
@@ -337,7 +337,7 @@ PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: St
   &parts.append("    break :${blk_label} ${s.promise_var};");
   RETURN parts.join("\n");
 END
-PRIVATE FN fsmWrapperEmitter__empty?(s: ?String) RETURNS Bool EFFECTS REENTRANT ->
+PRIVATE FN fsmWrapperEmitter__empty?(s: ?String) RETURNS !Bool EFFECTS REENTRANT ->
   RETURN ((s == NIL) OR (UNWRAP (s).trim().length() == 0));
 END
 PUB FN fsmWrapperEmitter__render_stmt_array(stmts: []Emittable, rt_name: String) RETURNS !String ->
@@ -461,7 +461,7 @@ mir_emitter.rt_name = COPY rt_name;
 RETURN TRY (blk());
 END
 PRIVATE FN fsmWrapperEmitter__indent_block(text: String, n: Int64) RETURNS String ->
-  IF fsmWrapperEmitter__empty?(text) THEN
+  IF TRY (fsmWrapperEmitter__empty?(text)) THEN
     RETURN "";
   END
   MUTABLE pad = compilerRepeatString(" ", n);

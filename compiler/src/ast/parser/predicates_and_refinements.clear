@@ -13,7 +13,7 @@ PUB FN clearParser__parse_comptime_statement(MUTABLE self: ClearParser) RETURNS 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "COMPTIME"));
     IF !(clearParser__match?(rtoc_self_view, :KEYWORD, "IF")) THEN
-      TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "IF", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()}));
+      TRY (clearParser__error_mut(rtoc_self_view, TRY (clearParser__current(rtoc_self_view)), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "IF", :got: "${token__display_value(TRY (clearParser__current(rtoc_self_view)))}", :type: "${TRY (clearParser__current(rtoc_self_view)).type}", :line: TRY (clearParser__current(rtoc_self_view)).line.toString()}));
     END
     RETURN TRY (clearParser__parse_if_statement(&rtoc_self_view, TRUE));
 }
@@ -44,7 +44,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN ClearParserReturnValue{ IfStatement: COPY node };
     END
     IF clearParser__match?(rtoc_self_view, :KEYWORD, "AS") THEN
-      TRY (clearParser__emit_legacy_optional_binding_mut(rtoc_self_view, clearParser__current(rtoc_self_view)));
+      TRY (clearParser__emit_legacy_optional_binding_mut(rtoc_self_view, TRY (clearParser__current(rtoc_self_view))));
       TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "AS"));
       MUTABLE name_tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
       IF (clearParser__match?(rtoc_self_view, :KEYWORD, "AND") OR clearParser__match?(rtoc_self_view, :LEGACY_LOGICAL, "&&")) THEN
@@ -57,7 +57,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE then_branch = TRY (clearParser__parse_block_body(&rtoc_self_view, ["ELSE", "ELSE_IF", "END"]));
     MUTABLE else_branch: []Locatable = List[];
     IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "ELSE_IF"))) THEN
-      MUTABLE nested_if = TRY (clearParser__parse_if_chain(&rtoc_self_view, clearParser__previous(rtoc_self_view), is_comptime));
+      MUTABLE nested_if = TRY (clearParser__parse_if_chain(&rtoc_self_view, TRY (clearParser__previous(rtoc_self_view)), is_comptime));
       &else_branch.append(castClearParserReturnValueToLocatable(nested_if));
     ELSE_IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "ELSE"))) THEN
       else_branch = TRY (clearParser__parse_block_body(&rtoc_self_view, ["END"]));
@@ -95,20 +95,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF clearParser__match?(rtoc_self_view, :ARROW, "->") THEN
       TRY (clearParser__consume(&rtoc_self_view, :ARROW, "->"));
       MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
-      RETURN clearParser__build_refined_if_tree(rtoc_self_view, if_token, steps, ([stmt]), List[], is_comptime);
+      RETURN TRY (clearParser__build_refined_if_tree(rtoc_self_view, if_token, steps, ([stmt]), List[], is_comptime));
     END
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "THEN"));
     MUTABLE then_branch = TRY (clearParser__parse_block_body(&rtoc_self_view, ["ELSE", "ELSE_IF", "END"]));
     MUTABLE else_branch: []Locatable = List[];
     IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "ELSE_IF"))) THEN
-      &else_branch.append(castClearParserReturnValueToNode(TRY (clearParser__parse_if_chain(&rtoc_self_view, clearParser__previous(rtoc_self_view), is_comptime))));
+      &else_branch.append(castClearParserReturnValueToNode(TRY (clearParser__parse_if_chain(&rtoc_self_view, TRY (clearParser__previous(rtoc_self_view)), is_comptime))));
     ELSE_IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "ELSE"))) THEN
       else_branch = TRY (clearParser__parse_block_body(&rtoc_self_view, ["END"]));
       TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "END"));
     ELSE
       TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "END"));
     END
-    RETURN clearParser__build_refined_if_tree(rtoc_self_view, if_token, steps, then_branch, else_branch, is_comptime);
+    RETURN TRY (clearParser__build_refined_if_tree(rtoc_self_view, if_token, steps, then_branch, else_branch, is_comptime));
 }
 END
 PRIVATE FN clearParser__conditional_capture_ahead?(self: ClearParser) RETURNS !Bool
@@ -188,7 +188,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN clearParser__build_refined_if_tree(self: ClearParser, if_token: Token, steps: []StepsItem, then_branch: []Locatable, else_branch: []Locatable, is_comptime: Bool) RETURNS ClearParserReturnValue
+PRIVATE FN clearParser__build_refined_if_tree(self: ClearParser, if_token: Token, steps: []StepsItem, then_branch: []Locatable, else_branch: []Locatable, is_comptime: Bool) RETURNS !ClearParserReturnValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -231,7 +231,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         nested_branch_value = Locatable{ IfStatement: item };
       END
       MUTABLE nested: Locatable = UNWRAP (nested_branch_value);
-      clearParser__stamp_source_range_mut(rtoc_self_view, COPY nested, if_token, clearParser__previous(rtoc_self_view));
+      clearParser__stamp_source_range_mut(rtoc_self_view, COPY nested, if_token, TRY (clearParser__previous(rtoc_self_view)));
       body = [COPY nested];
     END
     RETURN castLocatableToClearParserReturnValue(UNWRAP (body[0]));
@@ -297,7 +297,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &then_branch.append(TRY (clearParser__parse_expression(&rtoc_self_view)));
     MUTABLE else_branch: []Locatable = List[];
     IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "ELSE_IF"))) THEN
-      MUTABLE nested = TRY (clearParser__parse_if_chain_expr(&rtoc_self_view, clearParser__previous(rtoc_self_view)));
+      MUTABLE nested = TRY (clearParser__parse_if_chain_expr(&rtoc_self_view, TRY (clearParser__previous(rtoc_self_view))));
       &else_branch.append(Locatable{ IfStatement: COPY nested });
     ELSE_IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "ELSE"))) THEN
       &else_branch.append(TRY (clearParser__parse_expression(&rtoc_self_view)));
@@ -327,7 +327,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE body = TRY (clearParser__parse_keyword_block(&rtoc_self_view, "DO"));
       RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(name_tok)), binding_token: name_tok, do_branch: COPY body, deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
     ELSE_IF clearParser__match?(rtoc_self_view, :KEYWORD, "AS") THEN
-      TRY (clearParser__emit_legacy_optional_binding_mut(rtoc_self_view, clearParser__current(rtoc_self_view)));
+      TRY (clearParser__emit_legacy_optional_binding_mut(rtoc_self_view, TRY (clearParser__current(rtoc_self_view))));
       TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "AS"));
       MUTABLE name_tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
       IF clearParser__match?(rtoc_self_view, :ARROW, "->") THEN

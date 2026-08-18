@@ -67,7 +67,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.union_schemas[mIRLoweringSchemas__schema_key(rtoc_self_view, name)] = schema;
 }
 END
-PUB FN mIRLoweringSchemas__merge_mut(MUTABLE self: MIRLoweringSchemas, struct_schemas: {String@symbol}StructSchema, enum_schemas: {String@symbol}[]TypeEnumVariantsItem, union_schemas: {String@symbol}UnionSchema) RETURNS Void
+PUB FN mIRLoweringSchemas__merge_mut(MUTABLE self: MIRLoweringSchemas, struct_schemas: {String@symbol}StructSchema, enum_schemas: {String@symbol}[]TypeEnumVariantsItem, union_schemas: {String@symbol}UnionSchema) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

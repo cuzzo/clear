@@ -135,10 +135,10 @@ PRIVATE FN pipelineHost__with_named_bindings(MUTABLE self: PipelineHost, binding
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entries = bindings.keys() |> SELECT PipelineNamedBinding{ name: COPY _, zig: COPY (bindings[_] OR_ELSE CAST(panic("missing hash key") AS String)) };
-    RETURN pipelineHost__apply_named_bindings(&rtoc_self_view, entries, 0, blk);
+    RETURN TRY (pipelineHost__apply_named_bindings(&rtoc_self_view, entries, 0, blk));
 }
 END
-PRIVATE FN pipelineHost__apply_named_bindings(MUTABLE self: PipelineHost, entries: []PipelineNamedBinding, index_value: Int64, blk: FN() -> MIRBlockExpr) RETURNS MIRBlockExpr
+PRIVATE FN pipelineHost__apply_named_bindings(MUTABLE self: PipelineHost, entries: []PipelineNamedBinding, index_value: Int64, blk: FN() -> MIRBlockExpr) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -147,7 +147,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN blk();
     END
     MUTABLE entry = COPY UNWRAP (entries[index_value]);
-    RETURN pipelineHost__with_named_binding(&rtoc_self_view, entry.name, entry.zig, %() USE(blk, entries, index_value, MUTABLE rtoc_self_view) -> pipelineHost__apply_named_bindings(&rtoc_self_view, entries, (index_value + 1), blk));
+    RETURN pipelineHost__with_named_binding(&rtoc_self_view, entry.name, entry.zig, %() USE(blk, entries, index_value, MUTABLE rtoc_self_view) -> TRY (pipelineHost__apply_named_bindings(&rtoc_self_view, entries, (index_value + 1), blk)));
 }
 END
 PRIVATE FN pipelineHost__build_each_lowerer(MUTABLE self: PipelineHost) RETURNS !PipelineEachLowerer
@@ -666,7 +666,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         expression_type_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (op.expression))) }));
       END
       MUTABLE expression_type: Type = expression_type_branch_value?;
-      MUTABLE outer_fallible = tenseEnvelope__split_future(tense_plan.envelope).outer |> ANY (_.kind == TenseLayerKind.Fallible);
+      MUTABLE outer_fallible = TRY (tenseEnvelope__split_future(tense_plan.envelope)).outer |> ANY (_.kind == TenseLayerKind.Fallible);
       MUTABLE promise_source =     IF selector IS_A TryExpr THEN
         selector.expr().without_try()
       ELSE

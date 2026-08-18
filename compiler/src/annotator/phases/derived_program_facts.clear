@@ -64,7 +64,7 @@ PRIVATE FN derivedProgramFacts__capture_function(name: String, node: FunctionDef
   MUTABLE capabilities: Any = (((TRY (functionSignature__requires(signature))) |> ORDER_BY _)[_] OR_ELSE panic("missing hash key"));
   requires[_] = (capabilities |> SELECT _.toString()) |> ORDER_BY _;
   };
-  RETURN DerivedFunctionFacts{ name: COPY name, return_type_key: COPY type__semantic_type_key(functionSignature__return_type(signature)), needs_runtime: (functionSignature__needs_rt(signature) == TRUE), can_fail: (functionSignature__can_fail(signature) == TRUE), allocation_fault: (functionSignature__alloc_fault(signature) == TRUE), error_fallible: (functionSignature__error_fallible(signature) == TRUE), effects: COPY ((TRY (functionSignature__effects(signature)) OR_ELSE Set[])) |> SELECT _.toString() |> ORDER_BY _, return_strategy: COPY (IF functionSignature__return_strategy(signature) != NIL THEN
+  RETURN DerivedFunctionFacts{ name: COPY name, return_type_key: COPY TRY (type__semantic_type_key(functionSignature__return_type(signature))), needs_runtime: (functionSignature__needs_rt(signature) == TRUE), can_fail: (functionSignature__can_fail(signature) == TRUE), allocation_fault: (functionSignature__alloc_fault(signature) == TRUE), error_fallible: (functionSignature__error_fallible(signature) == TRUE), effects: COPY ((TRY (functionSignature__effects(signature)) OR_ELSE Set[])) |> SELECT _.toString() |> ORDER_BY _, return_strategy: COPY (IF functionSignature__return_strategy(signature) != NIL THEN
     CAST((functionSignature__return_strategy(signature)) AS String)
   ELSE
     NIL

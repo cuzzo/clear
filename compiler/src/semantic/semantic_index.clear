@@ -30,20 +30,20 @@ PUB FN semanticIndex__from_products(annotation_products: AnnotationProducts, id_
   END
   RETURN SemanticIndex{ program: CAST(COPY COPY resolution.program AS Program), root_scope: KEEP resolution.root_scope, function_registry: COPY resolution.function_registry, id_index: COPY id_index, annotation_products: annotation_products };
 END
-PUB FN semanticIndex__typed_program(self: SemanticIndex) RETURNS TypedProgramFacts@multiowned EFFECTS REENTRANT ->
+PUB FN semanticIndex__typed_program(self: SemanticIndex) RETURNS !TypedProgramFacts@multiowned EFFECTS REENTRANT ->
   MUTABLE rtoc_owned_return_1: TypedProgramFacts@multiowned = UNWRAP ((KEEP self.annotation_products).typed_program);
   RETURN rtoc_owned_return_1;
 END
-PUB FN semanticIndex__capability_audit(self: SemanticIndex) RETURNS CapabilityAuditReport@multiowned EFFECTS REENTRANT ->
+PUB FN semanticIndex__capability_audit(self: SemanticIndex) RETURNS !CapabilityAuditReport@multiowned EFFECTS REENTRANT ->
   MUTABLE rtoc_owned_return_2: CapabilityAuditReport@multiowned = UNWRAP ((KEEP self.annotation_products).capability_audit);
   RETURN rtoc_owned_return_2;
 END
 PUB FN semanticIndex__function_nodes(self: SemanticIndex) RETURNS !{String}FunctionDef ->
   RETURN COPY self.function_registry.nodes;
 END
-PUB FN semanticIndex__function_node(self: SemanticIndex, name: String) RETURNS ?FunctionDef ->
+PUB FN semanticIndex__function_node(self: SemanticIndex, name: String) RETURNS !?FunctionDef ->
   RETURN CAST(COPY UNWRAP (self.function_registry[name]) AS ?FunctionDef);
 END
 PUB FN semanticIndex__body_summaries(self: SemanticIndex) RETURNS !{String}FunctionBodySummary EFFECTS REENTRANT ->
-  RETURN COPY semanticIndex__typed_program(self).body_summaries;
+  RETURN COPY TRY (semanticIndex__typed_program(self)).body_summaries;
 END

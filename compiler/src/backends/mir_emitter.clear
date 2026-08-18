@@ -774,23 +774,23 @@ FN mIREmitter__emit_protocol_adapter_def(self: MIREmitter, node: ProtocolAdapter
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE facts_name = "__clearProtocolFacts_${node.protocol}";
-    MUTABLE facts_cases = node.conformances |> SELECT mIREmitter__protocol_conformance_branch(rtoc_self_view, _, %(bindings: String) USE(node, _) -> {
+    MUTABLE facts_cases = node.conformances |> SELECT TRY (mIREmitter__protocol_conformance_branch(rtoc_self_view, _, %(bindings: String) USE(node, _) -> {
     MUTABLE fields = (node.associated_types |> SELECT {
       MUTABLE value = COPY _.associated_types[_]?;
       "pub const ${_} = ${value};"
     }).join(" ");
     "${bindings}return struct { ${fields} };"
-    });
+    }));
     MUTABLE facts_body = ((facts_cases + ["@compileError(\"No ${node.protocol} conformance for \" ++ @typeName(T));"])).join("\n    ");
     MUTABLE facts = "fn ${facts_name}(comptime T: type) type {\n    ${facts_body}\n}";
     MUTABLE operations = node.requirements |> SELECT {
     MUTABLE params = (1 ..< _.argument_count) |> SELECT "arg${_}: anytype";
     MUTABLE all_params = (["comptime T: type", "rt: *Runtime", "self: anytype"] + params);
-    MUTABLE branches = node.conformances |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE target: ?String = COPY _.operations[_.name]; (IF !(target) THEN NIL ELSE mIREmitter__protocol_conformance_branch(rtoc_self_view, _, %(bindings: String) USE(target, _) -> {
+    MUTABLE branches = node.conformances |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE target: ?String = COPY _.operations[_.name]; (IF !(target) THEN NIL ELSE TRY (mIREmitter__protocol_conformance_branch(rtoc_self_view, _, %(bindings: String) USE(target, _) -> {
       MUTABLE type_args = COPY _.type_params;
       MUTABLE call_args = ((type_args + ["rt", "self"]) + ((1 ..< _.argument_count) |> SELECT "arg${_}"));
       "${bindings}return ${target}(${call_args.join(", ")});"
-    }) END) } |> WHERE _ != NIL;
+    })) END) } |> WHERE _ != NIL;
     MUTABLE suppressions =   IF (branches.length() == 0) THEN
         ((["rt", "self"] + ((1 ..< _.argument_count) |> SELECT "arg${_}"))) |> SELECT "_ = ${_};"
       ELSE
@@ -802,7 +802,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (([facts] + operations)).join("\n\n");
 }
 END
-FN mIREmitter__protocol_conformance_branch(self: MIREmitter, conformance: ProtocolConformanceCase, block: FN(String) -> String) RETURNS String
+FN mIREmitter__protocol_conformance_branch(self: MIREmitter, conformance: ProtocolConformanceCase, block: FN(String) -> String) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -870,10 +870,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       pattern = pattern.replace("{val_zig}", (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> TRY (type__zig_type(item.value_type)), MIREmitterShardedMapNode.ShardedMapGet AS item -> TRY (type__zig_type(item.value_type)) END));
     END
     MUTABLE rtoc_local_receiver_7 = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.resolved_allocs, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.resolved_allocs END);
-    inlineAllocMetadata__each(rtoc_local_receiver_7, %(alloc_key: String@symbol, sym: String@symbol) USE(MUTABLE pattern, rtoc_self_view) -> {
+    TRY (inlineAllocMetadata__each(rtoc_local_receiver_7, %(alloc_key: String@symbol, sym: String@symbol) USE(MUTABLE pattern, rtoc_self_view) -> {
     pattern = pattern.replace("{${alloc_key}}", TRY (mIREmitter__alloc_zig(rtoc_self_view, sym)));
     rubyToClearVoid()
-    });
+    }));
     RETURN COPY pattern;
 }
 END
@@ -930,10 +930,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       out = out.replace("{val_zig}", TRY (type__zig_type(value_type_value)));
     END
     IF allocs != NIL THEN
-        inlineAllocMetadata__each(allocs, %(key: String@symbol, sym: String@symbol) USE(MUTABLE out, rtoc_self_view) -> {
+        TRY (inlineAllocMetadata__each(allocs, %(key: String@symbol, sym: String@symbol) USE(MUTABLE out, rtoc_self_view) -> {
         out = out.replace("{${key}}", TRY (mIREmitter__alloc_zig(rtoc_self_view, sym)));
         rubyToClearVoid()
-        });
+        }));
     END
     RETURN out;
 }
@@ -1021,7 +1021,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(returns_void) THEN
       &fields.append("ret: ${TRY (type__zig_type(payload_t))} = undefined");
     END
-    MUTABLE call_zig = mIREmitter__extern_trampoline_call(rtoc_self_view, node, comptime_codes, runtime_arg_codes.length());
+    MUTABLE call_zig = TRY (mIREmitter__extern_trampoline_call(rtoc_self_view, node, comptime_codes, runtime_arg_codes.length()));
     MUTABLE call_stmt: String = "";
     IF can_fail THEN
       IF returns_void THEN
@@ -1118,7 +1118,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "&struct { fn run(${params.join(", ")}) callconv(.c) ${TRY (type__zig_type(return_type))} { ${body} } }.run";
 }
 END
-PRIVATE FN mIREmitter__extern_trampoline_call(self: MIREmitter, node: ExternTrampoline, comptime_codes: []String, runtime_arg_count: Int64) RETURNS String
+PRIVATE FN mIREmitter__extern_trampoline_call(self: MIREmitter, node: ExternTrampoline, comptime_codes: []String, runtime_arg_count: Int64) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2122,7 +2122,7 @@ PRIVATE FN mIREmitter__emit_program(MUTABLE self: MIREmitter, node: MIRProgram) 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE parts = node.items |> SELECT:? TRY (mIREmitter__emit_container_item(&rtoc_self_view, _)) |> WHERE _ != NIL;
-    MUTABLE symbol_pool = mIREmitter__symbol_pool_declarations(rtoc_self_view);
+    MUTABLE symbol_pool = TRY (mIREmitter__symbol_pool_declarations(rtoc_self_view));
     IF !((symbol_pool.length() == 0)) THEN
       &parts.unshift(symbol_pool);
     END
@@ -2141,7 +2141,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN out.join("");
 }
 END
-FN mIREmitter__symbol_pool_declarations(self: MIREmitter) RETURNS String
+FN mIREmitter__symbol_pool_declarations(self: MIREmitter) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2830,7 +2830,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN meta.types DO
     &item_checks.append("${rt_name}.__error.matchesName(@intFromEnum(ErrorName.${_}))");
     END
-    MUTABLE item_cond = mIREmitter__emit_catch_condition_group(rtoc_self_view, item_checks, "true");
+    MUTABLE item_cond = TRY (mIREmitter__emit_catch_condition_group(rtoc_self_view, item_checks, "true"));
     MUTABLE filter_checks: []String = ( { MUTABLE rtoc_empty_list_39: []String = List[]; rtoc_empty_list_39 } );
     FOR _ IN meta.filter_types DO
     &filter_checks.append("${rt_name}.__error.matchesName(@intFromEnum(ErrorName.${_}))");
@@ -2841,11 +2841,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (filter_checks.length() == 0) THEN
       RETURN item_cond;
     END
-    MUTABLE filter_cond = mIREmitter__emit_catch_condition_group(rtoc_self_view, filter_checks, "true");
+    MUTABLE filter_cond = TRY (mIREmitter__emit_catch_condition_group(rtoc_self_view, filter_checks, "true"));
     RETURN "${item_cond} and ${filter_cond}";
 }
 END
-PRIVATE FN mIREmitter__emit_catch_condition_group(self: MIREmitter, checks: []String, default_value: String) RETURNS String
+PRIVATE FN mIREmitter__emit_catch_condition_group(self: MIREmitter, checks: []String, default_value: String) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

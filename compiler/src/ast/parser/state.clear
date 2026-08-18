@@ -74,7 +74,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF token EXISTS AS token_value THEN
       RETURN COPY token_value;
     END
-    RETURN Token{ type: :EOF, value: TokenValue{ StringValue: COPY "" }, line: clearParser__current(rtoc_self_view).line, column: clearParser__current(rtoc_self_view).column, file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
+    RETURN Token{ type: :EOF, value: TokenValue{ StringValue: COPY "" }, line: TRY (clearParser__current(rtoc_self_view)).line, column: TRY (clearParser__current(rtoc_self_view)).column, file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
 }
 END
 PUB FN clearParser__peek_at(self: ClearParser, n: Int64) RETURNS ?Token
@@ -84,14 +84,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.tokens[(rtoc_self_view.pos + n)];
 }
 END
-PUB FN clearParser__current(self: ClearParser) RETURNS Token
+PUB FN clearParser__current(self: ClearParser) RETURNS !Token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY UNWRAP (rtoc_self_view.tokens[rtoc_self_view.pos]);
 }
 END
-PUB FN clearParser__previous(self: ClearParser) RETURNS Token
+PUB FN clearParser__previous(self: ClearParser) RETURNS !Token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -102,14 +102,14 @@ PUB FN clearParser__consume_number(MUTABLE self: ClearParser) RETURNS !Token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_cur_0 = clearParser__current(rtoc_self_view);
+    rtoc_cur_0 = TRY (clearParser__current(rtoc_self_view));
     IF ((rtoc_cur_0.type == :NUMBER) OR (rtoc_cur_0.type == :INT64)) THEN
-      MUTABLE tok = clearParser__current(rtoc_self_view);
+      MUTABLE tok = TRY (clearParser__current(rtoc_self_view));
       rtoc_self_view.pos = (rtoc_self_view.pos + 1);
       RETURN tok;
     ELSE
-      TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :EXPECTED_NUMBER }, [], {:value: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}"}));
-      RETURN clearParser__current(rtoc_self_view);
+      TRY (clearParser__error_mut(rtoc_self_view, TRY (clearParser__current(rtoc_self_view)), CodeOrMessage{ SymbolValue: :EXPECTED_NUMBER }, [], {:value: "${token__display_value(TRY (clearParser__current(rtoc_self_view)))}", :type: "${TRY (clearParser__current(rtoc_self_view)).type}"}));
+      RETURN TRY (clearParser__current(rtoc_self_view));
     END
 }
 END
@@ -117,7 +117,7 @@ PUB FN clearParser__consume(MUTABLE self: ClearParser, type: String@symbol, valu
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE token = clearParser__current(rtoc_self_view);
+    MUTABLE token = TRY (clearParser__current(rtoc_self_view));
     MUTABLE matches_value: Bool = FALSE;
     IF value EXISTS AS value_value THEN
       MUTABLE expected_value = COPY value_value;
@@ -199,7 +199,7 @@ PUB FN clearParser__match?(self: ClearParser, type: String@symbol, val: ?String 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token = clearParser__current(rtoc_self_view);
+    MUTABLE token = TRY (clearParser__current(rtoc_self_view));
     IF !((token.type == type)) THEN
       RETURN FALSE;
     END
@@ -225,7 +225,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(clearParser__match?(rtoc_self_view, :CHAR, ">>")) THEN
       RETURN TRY (clearParser__consume(&rtoc_self_view, :CHAR, ">"));
     END
-    MUTABLE combined = clearParser__current(rtoc_self_view);
+    MUTABLE combined = TRY (clearParser__current(rtoc_self_view));
     MUTABLE first: Token = OWN COPY combined;
     MUTABLE second: Token = OWN COPY combined;
     first.value = TokenValue{ StringValue: COPY ">" };

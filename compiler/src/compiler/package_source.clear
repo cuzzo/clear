@@ -62,9 +62,9 @@ PUB FN packageSource__merge(member_paths: []String, resolve_pkg: FN(String) -> ?
   &bodies.append("# FILE: ${_}\n");
   &bodies.append(body_lines.join(""));
   END
-  RETURN MergedPackage{ source: COPY packageSource__dedupe_generated_functions((((external_requires + ["\n"]) + bodies)).join("")), member_paths: COPY members };
+  RETURN MergedPackage{ source: COPY TRY (packageSource__dedupe_generated_functions((((external_requires + ["\n"]) + bodies)).join(""))), member_paths: COPY members };
 END
-PUB FN packageSource__dedupe_generated_functions(source: String) RETURNS String ->
+PUB FN packageSource__dedupe_generated_functions(source: String) RETURNS !String ->
   MUTABLE seen: {String}String = {};
   MUTABLE out: []String = ( { MUTABLE rtoc_empty_list_5: []String = List[]; rtoc_empty_list_5 } );
   MUTABLE lines = source.split("\n");

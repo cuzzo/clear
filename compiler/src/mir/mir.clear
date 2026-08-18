@@ -12461,7 +12461,7 @@ END
 PRIVATE FN ownershipEffect__borrowed_break_value?(value: ?Emittable) RETURNS Bool ->
   RETURN ((value != NIL) AND (value IS_A SliceExpr));
 END
-FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS Bool ->
+FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS !Bool ->
   IF node EXISTS AS node_value THEN
     IF node_value IS_A MIRBlockExpr AS block THEN
       IF block.borrowed_view THEN
@@ -12777,7 +12777,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (rtoc_self_view.slots.count() == 0);
 }
 END
-PUB FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS Void
+PUB FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -12881,7 +12881,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (TRY (inlineAllocMetadata__values(rtoc_self_view))).contains?(:frame);
 }
 END
-PUB FN inlineAllocMetadata__with_all(self: InlineAllocMetadata, alloc: String@symbol) RETURNS InlineAllocMetadata@multiowned
+PUB FN inlineAllocMetadata__with_all(self: InlineAllocMetadata, alloc: String@symbol) RETURNS !InlineAllocMetadata@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

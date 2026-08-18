@@ -34,7 +34,7 @@ PUB STRUCT MutualThunkPlan {
   own_plan: MutualPlan
 }
 supported_ops = [:ADD, :SUB, :MUL, :DIV];
-PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS ?Plan ->
+PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS !?Plan ->
   IF (body.length() == 0) THEN
     RETURN NIL;
   END
@@ -43,7 +43,7 @@ PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS ?Pla
   MUTABLE i = 0;
   WHILE (i < (stmts.length() - 1)) DO
     MUTABLE stmt = COPY UNWRAP (stmts[i]);
-    MUTABLE bc: ?BaseCase = recursiveSplitter__match_base_case(stmt, fn_name);
+    MUTABLE bc: ?BaseCase = TRY (recursiveSplitter__match_base_case(stmt, fn_name));
     IF bc EXISTS AS bc_value THEN
       &base_cases.append(COPY bc_value);
       i = (i + 1);
@@ -67,7 +67,7 @@ PUB FN recursiveSplitter__split(body: []Locatable, fn_name: String) RETURNS ?Pla
     RETURN NIL;
   END
 END
-PUB FN recursiveSplitter__split_mutual(body: []Locatable, fn_name: String, partner_names: []String) RETURNS ?MutualPlan ->
+PUB FN recursiveSplitter__split_mutual(body: []Locatable, fn_name: String, partner_names: []String) RETURNS !?MutualPlan ->
   IF (body.length() == 0) THEN
     RETURN NIL;
   END
@@ -77,7 +77,7 @@ PUB FN recursiveSplitter__split_mutual(body: []Locatable, fn_name: String, partn
   MUTABLE i = 0;
   WHILE (i < (stmts.length() - 1)) DO
     MUTABLE stmt = COPY UNWRAP (stmts[i]);
-    MUTABLE bc: ?BaseCase = recursiveSplitter__match_mutual_base_case(stmt, cycle);
+    MUTABLE bc: ?BaseCase = TRY (recursiveSplitter__match_mutual_base_case(stmt, cycle));
     IF bc EXISTS AS bc_value THEN
       &base_cases.append(COPY bc_value);
       i = (i + 1);
@@ -101,7 +101,7 @@ PUB FN recursiveSplitter__split_mutual(body: []Locatable, fn_name: String, partn
     RETURN NIL;
   END
 END
-PRIVATE FN recursiveSplitter__match_mutual_base_case(stmt: Locatable, cycle_names: [Set]String) RETURNS ?BaseCase ->
+PRIVATE FN recursiveSplitter__match_mutual_base_case(stmt: Locatable, cycle_names: [Set]String) RETURNS !?BaseCase ->
   IF stmt IS_A IfStatement AS if_statement THEN
     IF (!((if_statement.else_branch == NIL)) AND !((UNWRAP (if_statement.else_branch)).empty?())) THEN
       RETURN NIL;
@@ -114,10 +114,10 @@ PRIVATE FN recursiveSplitter__match_mutual_base_case(stmt: Locatable, cycle_name
       MUTABLE ret: Locatable = COPY UNWRAP (then_b_value.first());
       IF ret IS_A ReturnNode AS ret_node THEN
         IF ret_node.value EXISTS AS ret_value THEN
-          IF recursiveSplitter__contains_any_call?(castLocatableToOptionalThunkScanNode(if_statement.condition), cycle_names) THEN
+          IF TRY (recursiveSplitter__contains_any_call?(castLocatableToOptionalThunkScanNode(if_statement.condition), cycle_names)) THEN
             RETURN NIL;
           END
-          IF recursiveSplitter__contains_any_call?(castLocatableToOptionalThunkScanNode(ret_value), cycle_names) THEN
+          IF TRY (recursiveSplitter__contains_any_call?(castLocatableToOptionalThunkScanNode(ret_value), cycle_names)) THEN
             RETURN NIL;
           END
           RETURN BaseCase{ cond_ast: COPY if_statement.condition, value_ast: COPY ret_value };
@@ -143,7 +143,7 @@ PRIVATE FN recursiveSplitter__match_tail_mutual_call(node: Locatable, partner_na
     RETURN NIL;
   END
 END
-PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set: [Set]String) RETURNS Bool ->
+PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set: [Set]String) RETURNS !Bool ->
   IF node EXISTS AS node_value THEN
     MUTABLE stack: []Locatable = ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } );
     IF node_value IS_A []Node AS array THEN
@@ -177,7 +177,7 @@ PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set
     RETURN FALSE;
   END
 END
-PRIVATE FN recursiveSplitter__match_base_case(stmt: Locatable, fn_name: String) RETURNS ?BaseCase ->
+PRIVATE FN recursiveSplitter__match_base_case(stmt: Locatable, fn_name: String) RETURNS !?BaseCase ->
   IF stmt IS_A IfStatement AS if_statement THEN
     IF (!((if_statement.else_branch == NIL)) AND !((UNWRAP (if_statement.else_branch)).empty?())) THEN
       RETURN NIL;
@@ -237,7 +237,7 @@ PRIVATE FN recursiveSplitter__direct_self_call(node: Locatable, fn_name: String)
   END
 END
 PRIVATE FN recursiveSplitter__contains_self_call?(node: ?ThunkScanNode, fn_name: String) RETURNS Bool ->
-  RETURN recursiveSplitter__contains_any_call?(node, [fn_name] |> DISTINCT _);
+  RETURN TRY (recursiveSplitter__contains_any_call?(node, [fn_name] |> DISTINCT _));
 END
 # End Ruby module ThunkTransform::RecursiveSplitter
 # End Ruby module ThunkTransform

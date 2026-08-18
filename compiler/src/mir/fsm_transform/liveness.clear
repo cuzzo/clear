@@ -29,7 +29,7 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
     TRY (liveness__collect_defs(_, defs_by_seg[_.index]));
     liveness__collect_uses(_, &uses_by_seg[_.index]);
   END
-  liveness__collect_tail_uses(_, uses_by_seg);
+  TRY (liveness__collect_tail_uses(_, uses_by_seg));
   IF ((((_.tail IS_A NextSuspend OR _.tail IS_A IoSuspend)) AND _.tail.result_var()) AND (_.tail.kind() != :io)) THEN
       MUTABLE rtoc_index_receiver_1 = UNWRAP (defs_by_seg[_.index]);
       rtoc_index_receiver_1[_.tail.result_var()] = NIL;
@@ -119,7 +119,7 @@ PRIVATE FN liveness__tail_targets(seg: Segment) RETURNS ![]Int64 ->
     END
   END
 END
-PRIVATE FN liveness__collect_tail_uses(seg: Segment, uses_by_seg: {Int64}[Set]String) RETURNS Void ->
+PRIVATE FN liveness__collect_tail_uses(seg: Segment, uses_by_seg: {Int64}[Set]String) RETURNS !Void ->
   MUTABLE tail = seg.tail;
   IF (tail IS_A IoSuspend) THEN
     MUTABLE next_idx = (seg.index + 1);
@@ -127,16 +127,16 @@ PRIVATE FN liveness__collect_tail_uses(seg: Segment, uses_by_seg: {Int64}[Set]St
     MUTABLE bucket: ?[Set]String = COPY uses_by_seg[next_idx];
     MUTABLE call_node = tail.call_node();
     IF call_node IS_A MethodCall THEN
-      liveness__walk_idents(call_node.object(), %(name: String) USE(bucket) -> {
+      TRY (liveness__walk_idents(call_node.object(), %(name: String) USE(bucket) -> {
   UNWRAP (bucket).insert(COPY name);
   rubyToClearVoid()
-      });
+      }));
     END
     FOR _ IN call_node.args() DO
-    liveness__walk_idents(_, %(name: String) USE(bucket) -> {
+    TRY (liveness__walk_idents(_, %(name: String) USE(bucket) -> {
   UNWRAP (bucket).insert(COPY name);
   rubyToClearVoid()
-    });
+    }));
     END
   END
 END
@@ -205,15 +205,15 @@ END
 PRIVATE FN liveness__collect_uses(stmt: Any, MUTABLE into: ?[Set]String) RETURNS Void ->
   IF into EXISTS AS into_value THEN
     MUTABLE into_value_mutable = COPY into_value;
-    liveness__walk_idents(stmt, %(name: String) USE(MUTABLE into_value_mutable) -> {
+    TRY (liveness__walk_idents(stmt, %(name: String) USE(MUTABLE into_value_mutable) -> {
   &into_value_mutable.insert(COPY name);
   rubyToClearVoid()
-    });
+    }));
   ELSE
     RETURN;
   END
 END
-PUB FN liveness__walk_idents(node: ?AstIdentWalkRoot, block: FN(String) -> Void) RETURNS Void ->
+PUB FN liveness__walk_idents(node: ?AstIdentWalkRoot, block: FN(String) -> Void) RETURNS !Void ->
   IF node EXISTS AS node_value THEN
     MUTABLE stack: []CollectValue = ( { MUTABLE rtoc_empty_list_5: []CollectValue = List[]; rtoc_empty_list_5 } );
     IF node_value IS_A []Node AS array THEN

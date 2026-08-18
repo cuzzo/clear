@@ -107,7 +107,7 @@ END
 FN capabilityTransition__declared_sync_contract?(self: CapabilityTransition) RETURNS Bool EFFECTS REENTRANT ->
   MUTABLE entry: ?SymbolEntry@multiowned = COPY KEEP self.source_entry;
   IF entry EXISTS AS entry_value THEN
-    RETURN symbolEntry__declared_sync_contract?(entry_value);
+    RETURN TRY (symbolEntry__declared_sync_contract?(entry_value));
   ELSE
     RETURN FALSE;
   END
@@ -218,7 +218,7 @@ END
 FN withCapabilityPlan__mutable_snapshot?(self: WithCapabilityPlan) RETURNS !Bool ->
   RETURN (TRY (withCapabilityPlan__snapshot_transitions(self))) |> ANY _.alias_mutable;
 END
-PUB FN withCapabilityPlan__first_transition(self: WithCapabilityPlan) RETURNS CapabilityTransition ->
+PUB FN withCapabilityPlan__first_transition(self: WithCapabilityPlan) RETURNS !CapabilityTransition ->
   RETURN COPY UNWRAP (self.all.first());
 END
 FN withCapabilityPlan__refresh_live_symbols(self: WithCapabilityPlan, live_symbols: {String}SymbolEntry) RETURNS !WithCapabilityPlan ->
