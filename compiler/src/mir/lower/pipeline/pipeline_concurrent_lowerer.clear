@@ -860,7 +860,7 @@ PRIVATE FN pipelineConcurrentLowerer__callback_body(self: PipelineConcurrentLowe
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__callback_expression(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS !Locatable ->
-  MUTABLE op = COPY conc_op.op;
+  MUTABLE op: ?ClearParserConcurrentPipelineOp@boxed = COPY conc_op.op;
   IF (op IS_A AverageOp) OR (op IS_A CountOp) OR (op IS_A MaxOp) OR (op IS_A MinOp) OR (op IS_A SelectOp) OR (op IS_A SumOp) OR (op IS_A WhereOp) THEN
     RETURN op.expression();
   ELSE

@@ -3024,7 +3024,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_node: FunctionDef = (fn_nodes[rtoc_each_16] OR_ELSE CAST(panic("missing hash key") AS FunctionDef));
     MUTABLE effs = (fn_node.effects OR Set[]);
     MUTABLE stack_bytes = (fn_node.stack_vars_bytes OR 0);
-    MUTABLE kind = fn_node.reentrance_kind;
+    MUTABLE kind: ?String@symbol = COPY fn_node.reentrance_kind;
     IF (kind == :reentrant) THEN
         fn_node.stack_tier = :unbounded;
         fn_node.stack_vars_bytes = stack_bytes;
@@ -3628,7 +3628,7 @@ PRIVATE FN capabilityAuditSession__effects_clause_edits(self: CapabilityAuditSes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE span = fn_node.effects_span;
+    MUTABLE span: ?EffectSpan = COPY fn_node.effects_span;
     IF !(span) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_24: []Edit = List[]; rtoc_empty_list_24 } ) AS []Edit);
     END

@@ -3856,7 +3856,7 @@ PRIVATE FN mIREmitter__emit_cast(MUTABLE self: MIREmitter, node: MIRCast) RETURN
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.expr)));
-    MUTABLE target_t = node.target_type;
+    MUTABLE target_t: ?String = COPY node.target_type;
     IF target_t THEN
       target_t = zigType__cast_target_type(zigType__new(target_t));
     END

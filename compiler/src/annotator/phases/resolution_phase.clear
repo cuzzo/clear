@@ -208,7 +208,7 @@ PUB FN resolutionSession__get_lifetime_path(self: ResolutionSession, node: Funct
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE lifetime = node.return_lifetime;
+    MUTABLE lifetime: ?ClearParserReturnLifetime = COPY node.return_lifetime;
     IF ((lifetime == NIL) OR (lifetime == :wildcard)) THEN
       RETURN NIL;
     END

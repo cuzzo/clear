@@ -20,7 +20,7 @@ PUB FN suspendResolvers__resolve(seg: Segment, ctx: FsmEmitContext, lowering: An
   END
 END
 PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext, lowering: MIRLowering) RETURNS !SuspendDescriptor ->
-  MUTABLE stdlib_def = io_tail.stdlib_def;
+  MUTABLE stdlib_def: ?FunctionSignature = COPY io_tail.stdlib_def;
   IF !(stdlib_def) THEN
     panic("IoSuspend missing stdlib_def");
   END
@@ -63,7 +63,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
   MUTABLE bind_stmts = List[];
   bind_stmts = ruby_array_concat_Any(bind_stmts, CAST(state_finalize_m AS []Any));
   bind_stmts = ruby_array_concat_Any(bind_stmts, CAST(finish_block_mir AS []Any));
-  MUTABLE result_var = io_tail.result_var;
+  MUTABLE result_var: ?String = COPY io_tail.result_var;
   MUTABLE result_zig_type = NIL;
   MUTABLE result_needs_cleanup = FALSE;
   MUTABLE ctx_field_decls = state_decls |> SELECT suspendResolvers__state_field_decl(_);
@@ -106,7 +106,7 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
   END
   MUTABLE register_expr = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "wg", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "registerFsmWaiter", args: [CAST(FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: "task", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
   MUTABLE tail = FsmTailRegisterYield{ next_step: NIL, register_expr: register_expr, yield_reason: "WaitForLock" };
-  MUTABLE result_var = next_tail.result_var;
+  MUTABLE result_var: ?String = COPY next_tail.result_var;
   MUTABLE promise_ft = TRY (type__from_node_mut(next_tail.promise_ast, "FSM NEXT tail promise"));
   MUTABLE sp_zig = TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput(promise_ft))))));
   MUTABLE inner_type_info: ?Type = NIL;

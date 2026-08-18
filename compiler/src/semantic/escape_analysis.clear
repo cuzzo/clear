@@ -664,7 +664,7 @@ PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, 
   NIL;
 END
 PUB FN escapeAnalysis__apply_return_escape_sink_mut(node: ReturnNode, context: EscapeContext) RETURNS !Void ->
-  MUTABLE value = node.value;
+  MUTABLE value: ?Locatable@boxed = COPY node.value;
   IF !(value) THEN
     RETURN;
   END

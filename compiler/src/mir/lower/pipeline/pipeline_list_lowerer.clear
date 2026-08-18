@@ -292,7 +292,7 @@ PRIVATE FN pipelineListLowerer__visit_pipeline_expr_mir(self: PipelineListLowere
   RETURN pipelineListLowerer__visit_expr_call(self, list_node, expr_node, placeholder);
 END
 PRIVATE FN pipelineListLowerer__join_predicate_mir(self: PipelineListLowerer, list_node: Locatable, join_node: JoinOp) RETURNS Emittable ->
-  MUTABLE key_expr = join_node.key_expr;
+  MUTABLE key_expr: ?Locatable@boxed = COPY join_node.key_expr;
   IF key_expr IS_A LambdaLit THEN
     MUTABLE params = key_expr.params();
     MUTABLE left_param = params[0].name();
