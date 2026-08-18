@@ -284,12 +284,11 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
   MUTABLE by_index: {Int64}KeptIdentityContract = {};
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
-      MUTABLE entry = params[rtoc_idx].symbol();
+      MUTABLE entry: ?SymbolEntry@multiowned = COPY params[rtoc_idx].symbol;
       MUTABLE contract: ?KeptIdentityContract = NIL;
-      IF entry != NIL THEN
-          contract = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = (entry?);
-      symbolEntry__kept_identity(rtoc_local_receiver_5) };
-        END
+      IF entry EXISTS AS entry_value THEN
+        contract = COPY symbolEntry__kept_identity(entry_value);
+      END
       IF !((entry AND (contract != NIL))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
