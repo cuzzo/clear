@@ -71,7 +71,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.derived_call_views_source = NIL;
 }
 END
-PUB FN capabilityAuditSession__audit_mut(MUTABLE self: CapabilityAuditSession) RETURNS Void
+PUB FN capabilityAuditSession__audit_mut(MUTABLE self: CapabilityAuditSession) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

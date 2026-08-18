@@ -681,7 +681,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names[name] == TRUE);
 }
 END
-PUB FN mIRLowering__pipeline_execution_boundary_fact(self: MIRLowering, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS ExecutionBoundaryFact
+PUB FN mIRLowering__pipeline_execution_boundary_fact(self: MIRLowering, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS !ExecutionBoundaryFact
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2499,7 +2499,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     TRY (mIRLowering__finalize_nested_mir_bodies_mut(rtoc_self_view, node, state, state.inherited_alloc_names, state.guarded_cleanup_names));
-    mIRLowering__append_implicit_alloc_fact_mut(rtoc_self_view, node, state);
+    TRY (mIRLowering__append_implicit_alloc_fact_mut(rtoc_self_view, node, state));
     TRY (mIRLowering__append_block_result_transfer_mut(rtoc_self_view, node, body, state));
     TRY (mIRLowering__append_transfer_marks_mut(rtoc_self_view, TRY (mIRLowering__pre_terminator_transfer_marks(rtoc_self_view, node, state.out, body)), state));
     IF node IS_A BreakStmt AS break_stmt THEN
@@ -2588,7 +2588,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN mIRLowering__append_implicit_alloc_fact_mut(self: MIRLowering, node: Emittable, state: OwnershipFinalizationContext) RETURNS Void
+FN mIRLowering__append_implicit_alloc_fact_mut(self: MIRLowering, node: Emittable, state: OwnershipFinalizationContext) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

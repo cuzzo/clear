@@ -213,7 +213,7 @@ PUB FN pipelineLoweringBridge__execution_boundary_fact(self: PipelineLoweringBri
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN mIRLowering__pipeline_execution_boundary_fact(rtoc_self_view.lowering, kind, dispatch, analysis);
+    RETURN TRY (mIRLowering__pipeline_execution_boundary_fact(rtoc_self_view.lowering, kind, dispatch, analysis));
 }
 END
 PUB FN pipelineLoweringBridge__with_shard_context<U>(MUTABLE self: PipelineLoweringBridge, context: ?{String@symbol}String, blk: FN() -> U) RETURNS !U

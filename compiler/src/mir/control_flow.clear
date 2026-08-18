@@ -1067,7 +1067,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ownershipDataflow__mark_moved_mut(rtoc_self_view, state, _);
         END
       END
-      ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, CAST(var_decl.name AS String), Locatable{ VarDecl: COPY var_decl });
+      TRY (ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, CAST(var_decl.name AS String), Locatable{ VarDecl: COPY var_decl }));
     ELSE_IF stmt IS_A BindExpr AS bind_expr THEN
       MUTABLE plan = bind_expr.ownership_transport_plan;
       IF !((plan IS_A OwnershipTransportPlan AND (plan.action() != :move))) THEN
@@ -1076,7 +1076,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
       END
       IF (bind_expr.mode == :decl) THEN
-        ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, CAST(bind_expr.name AS String), Locatable{ BindExpr: COPY bind_expr });
+        TRY (ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, CAST(bind_expr.name AS String), Locatable{ BindExpr: COPY bind_expr }));
       END
     ELSE_IF stmt IS_A Assignment AS assignment THEN
       FOR _ IN (TRY (ownershipDataflow__collect_binding_move_places(rtoc_self_view, assignment.value, state))) DO
@@ -1134,7 +1134,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE loop_name: ?String = COPY header_value.loop_name;
         MUTABLE loop_binding: ?Locatable = COPY header_value.loop_binding;
         IF ((loop_name != NIL) AND (loop_binding != NIL)) THEN
-          ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, loop_name, loop_binding);
+          TRY (ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, loop_name, loop_binding));
         END
       ELSE
         FOR _ IN (TRY (ownershipDataflow__collect_explicit_move_places(rtoc_self_view, stmt, state))) DO
@@ -1167,7 +1167,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN ownershipDataflow__update_declared_owner_mut(self: OwnershipDataflow, MUTABLE state: {PlaceId}OwnerEntry, name: String, MUTABLE node: Locatable) RETURNS Void
+PRIVATE FN ownershipDataflow__update_declared_owner_mut(self: OwnershipDataflow, MUTABLE state: {PlaceId}OwnerEntry, name: String, MUTABLE node: Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

@@ -81,7 +81,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE conformance_resolutions = TRY (resolutionSession__resolve_conformance_declarations_mut(rtoc_self_view, declarations));
     MUTABLE implementation_resolutions = TRY (resolutionSession__resolve_implementation_declarations_mut(rtoc_self_view, declarations));
     TRY (resolutionSession__prepare_conformance_members_mut(rtoc_self_view, declarations, conformance_resolutions, program));
-    resolutionSession__prepare_implementation_members_mut(rtoc_self_view, declarations, implementation_resolutions, program);
+    TRY (resolutionSession__prepare_implementation_members_mut(rtoc_self_view, declarations, implementation_resolutions, program));
     resolutionSession__register_program_signatures(&rtoc_self_view, declarations);
     RETURN resolutionFacts__new(program, declarations, rtoc_self_view.root_scope, rtoc_self_view.function_registry, rtoc_self_view.root_scope.types.keys(), TRY (resolutionSession__resolved_function_names(rtoc_self_view)), implementation_resolutions, conformance_resolutions, rtoc_self_view.protocols);
 }
@@ -1129,7 +1129,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN resolutionSession__prepare_implementation_members_mut(self: ResolutionSession, declarations: DeclarationIndex, resolutions: []ImplementationResolution, program: Program) RETURNS Void
+PRIVATE FN resolutionSession__prepare_implementation_members_mut(self: ResolutionSession, declarations: DeclarationIndex, resolutions: []ImplementationResolution, program: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

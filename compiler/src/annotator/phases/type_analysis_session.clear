@@ -2391,7 +2391,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     typeAnalysisSession__fixable_mut(rtoc_self_view, node, :capability, [fix], NIL, :WITH_GUARD_MUTABLE_MUTATED, :error, TRUE, kw);
 }
 END
-PRIVATE FN typeAnalysisSession__emit_with_read_needs_write_lock_mut(self: TypeAnalysisSession, node: WithBlock, name: String, MUTABLE var_node: Locatable) RETURNS Void
+PRIVATE FN typeAnalysisSession__emit_with_read_needs_write_lock_mut(self: TypeAnalysisSession, node: WithBlock, name: String, MUTABLE var_node: Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5367,12 +5367,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (scope__declare(&rtoc_mutable_receiver_112, "_", NIL, castTypeToOptionalSymbolEntryTypeInput(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     IF (node.right IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR node.right.stream_mode()))) THEN
         MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, %() USE(item_type, node, rtoc_self_view) -> {
-      typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()));
+      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression())));
       rubyToClearVoid()
         });
         node.right.capture_analysis = (typeAnalysisSession__validate_capture_analysis_mut(rtoc_self_view, castLocatableToNode(node.right), analysis, FALSE, FALSE) OR_ELSE analysis);
     ELSE
-        typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()));
+        TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression())));
     END
     selector_effect = typeAnalysisSession__selector_effect_fact(rtoc_self_view, node.right.expression());
     IF node.right IS_A WhereOp THEN
@@ -6037,12 +6037,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_138 = typeAnalysisSession__current_scope(rtoc_self_view);
     TRY (scope__declare(&rtoc_mutable_receiver_138, "_", NIL, castTypeToOptionalSymbolEntryTypeInput(item_type), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
-    typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
+    TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
       FOR _ IN node.right.body() DO
       TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
       END
       NIL
-    })
+    }))
     });
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Void));
     node.storage = :frame;
@@ -6197,7 +6197,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_144 = typeAnalysisSession__current_scope(rtoc_self_view);
     TRY (scope__declare(&rtoc_mutable_receiver_144, "_", NIL, castTypeToOptionalSymbolEntryTypeInput(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))
+    TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression())))
     });
     MUTABLE expr_type = node.right.expression().resolved_type();
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6220,7 +6220,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_145 = typeAnalysisSession__current_scope(rtoc_self_view);
     TRY (scope__declare(&rtoc_mutable_receiver_145, "_", NIL, castTypeToOptionalSymbolEntryTypeInput(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))
+    TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression())))
     });
     MUTABLE expr_type = node.right.expression().resolved_type();
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6243,7 +6243,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_146 = typeAnalysisSession__current_scope(rtoc_self_view);
     TRY (scope__declare(&rtoc_mutable_receiver_146, "_", NIL, castTypeToOptionalSymbolEntryTypeInput(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))
+    TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression())))
     });
     MUTABLE expr_type = node.right.expression().resolved_type();
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6266,7 +6266,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_147 = typeAnalysisSession__current_scope(rtoc_self_view);
     TRY (scope__declare(&rtoc_mutable_receiver_147, "_", NIL, castTypeToOptionalSymbolEntryTypeInput(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))
+    TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression())))
     });
     MUTABLE expr_type = node.right.expression().resolved_type();
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6382,7 +6382,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE sharded_accesses: []PipelineShardedAccess = ( { MUTABLE rtoc_empty_list_152: []PipelineShardedAccess = List[]; rtoc_empty_list_152 } );
-    typeAnalysisSession__walk_for_sharded_access(rtoc_self_view, each_op.body(), &sharded_accesses);
+    TRY (typeAnalysisSession__walk_for_sharded_access(rtoc_self_view, each_op.body(), &sharded_accesses));
     IF (sharded_accesses.length() == 0) THEN
       RETURN;
     END
@@ -6435,7 +6435,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__walk_for_sharded_access(self: TypeAnalysisSession, nodes: []Locatable, MUTABLE results: []PipelineShardedAccess) RETURNS Void
+PRIVATE FN typeAnalysisSession__walk_for_sharded_access(self: TypeAnalysisSession, nodes: []Locatable, MUTABLE results: []PipelineShardedAccess) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -6885,10 +6885,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_157 = typeAnalysisSession__current_scope(rtoc_self_view);
       TRY (scope__declare(&rtoc_mutable_receiver_157, "_", NIL, item_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-      typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
+      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
         rtoc_lambda_result_158 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.op().expression()));
         rtoc_lambda_result_158
-      })
+      }))
     });
     rubyToClearVoid()
     });
@@ -6915,12 +6915,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_160 = typeAnalysisSession__current_scope(rtoc_self_view);
       TRY (scope__declare(&rtoc_mutable_receiver_160, "_", NIL, item_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
-      typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
+      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
         FOR _ IN node.right.op().body() DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
         END
         NIL
-      })
+      }))
     });
     rubyToClearVoid()
     });
@@ -6941,10 +6941,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_161 = typeAnalysisSession__current_scope(rtoc_self_view);
       TRY (scope__declare(&rtoc_mutable_receiver_161, "_", NIL, castTypeToOptionalSymbolEntryTypeInput(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-      typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
+      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
         rtoc_lambda_result_162 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.op().expression()));
         rtoc_lambda_result_162
-      })
+      }))
     });
     rubyToClearVoid()
     });
@@ -7002,12 +7002,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_164 = typeAnalysisSession__current_scope(rtoc_self_view);
       TRY (scope__declare(&rtoc_mutable_receiver_164, "_", NIL, castTypeToOptionalSymbolEntryTypeInput(item_type), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
-      typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
+      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
         FOR _ IN node.right.op().body() DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
         END
         NIL
-      })
+      }))
     });
     rubyToClearVoid()
     });
@@ -7100,7 +7100,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__with_soa_tracking(self: TypeAnalysisSession, node: BinaryOp, item_type: Type, blk: Any) RETURNS Void
+PRIVATE FN typeAnalysisSession__with_soa_tracking(self: TypeAnalysisSession, node: BinaryOp, item_type: Type, blk: Any) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -9291,7 +9291,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           typeAnalysisSession__record_deferred_with_validation_mut(rtoc_self_view, node, fact);
         ELSE
           MUTABLE name = COPY fact.target_label;
-          typeAnalysisSession__emit_with_read_needs_write_lock_mut(rtoc_self_view, node, name, var_node);
+          TRY (typeAnalysisSession__emit_with_read_needs_write_lock_mut(rtoc_self_view, node, name, var_node));
         END
       END
     ELSE_IF (fact.capability == symbol("RESTRICT")) THEN

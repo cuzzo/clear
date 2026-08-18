@@ -655,7 +655,7 @@ PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, 
   ELSE_IF (sink.handler == symbol("apply_lambda_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_lambda_escape_sink_mut(castLocatableToLambdaLit(node), context));
   ELSE_IF (sink.handler == symbol("apply_func_call_escape_sink!")) THEN
-    escapeAnalysis__apply_func_call_escape_sink_mut(castLocatableToFuncCall(node), context);
+    TRY (escapeAnalysis__apply_func_call_escape_sink_mut(castLocatableToFuncCall(node), context));
   ELSE_IF (sink.handler == symbol("apply_method_call_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_method_call_escape_sink_mut(CAST(node AS MethodCall), context));
   ELSE
@@ -759,7 +759,7 @@ END
 PUB FN escapeAnalysis__apply_lambda_escape_sink_mut(node: LambdaLit, context: EscapeContext) RETURNS !Void ->
   TRY (escapeAnalysis__mark_lambda_captures_heap_mut(node, context.bg_heap, context.facts));
 END
-PUB FN escapeAnalysis__apply_func_call_escape_sink_mut(node: FuncCall, context: EscapeContext) RETURNS Void ->
+PUB FN escapeAnalysis__apply_func_call_escape_sink_mut(node: FuncCall, context: EscapeContext) RETURNS !Void ->
   TRY (escapeAnalysis__mark_takes_args_heap_mut(node.args, escapeAnalysis__params_for_call(node, context.fn_nodes), COPY context.schema_lookup));
 END
 PUB FN escapeAnalysis__apply_method_call_escape_sink_mut(node: MethodCall, context: EscapeContext) RETURNS !Void ->
