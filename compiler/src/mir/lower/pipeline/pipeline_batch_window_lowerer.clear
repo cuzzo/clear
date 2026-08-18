@@ -116,10 +116,11 @@ PRIVATE FN pipelineBatchWindowLowerer__batch_window_timeout_ns(self: PipelineBat
   MUTABLE time: ?Literal = CAST(bw_node.options["time"] AS ?Literal);
   IF time EXISTS AS time_value THEN
     MUTABLE raw_value = COPY CAST(time_value.value AS String);
-    MUTABLE unit = batch_window_time_units |> FIND raw_value.endsWith?(_);
-    IF !(unit) THEN
+    MUTABLE unit_opt: ?String = batch_window_time_units |> FIND raw_value.endsWith?(_);
+    IF (unit_opt == NIL) THEN
       RETURN "0";
     END
+    MUTABLE unit: String = COPY UNWRAP (unit_opt);
     MUTABLE amount = raw_value.substr(0, (raw_value.codepointCount() - unit.length()));
     IF !(pipelineBatchWindowLowerer__decimal_literal?(self, amount)) THEN
       RETURN "0";
