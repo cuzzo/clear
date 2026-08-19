@@ -138,19 +138,21 @@ PRIVATE FN pipelineBatchWindowLowerer__decimal_literal?(self: PipelineBatchWindo
   END
   MUTABLE saw_digit: Bool = FALSE;
   MUTABLE saw_dot: Bool = FALSE;
-  value.each_char(%(char) USE(MUTABLE saw_dot) -> {
-  IF (char == ".") THEN
+  MUTABLE char_index: Int64 = 0;
+  WHILE char_index < value.codepointCount() DO
+    MUTABLE char: String = value.substr(char_index, 1);
+    IF (char == ".") THEN
       IF saw_dot THEN
         RETURN FALSE;
       END
       saw_dot = TRUE;
-  ELSE_IF ((char >= "0") AND (char <= "9")) THEN
+    ELSE_IF ((char >= "0") AND (char <= "9")) THEN
       saw_digit = TRUE;
-  ELSE
+    ELSE
       RETURN FALSE;
+    END
+    char_index = char_index + 1;
   END
-  rubyToClearVoid()
-  });
   RETURN saw_digit;
 END
 PRIVATE FN pipelineBatchWindowLowerer__lower_bc_infinite_stream(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS !MIRBlockExpr ->
