@@ -201,7 +201,7 @@ PRIVATE FN pipelineBatchWindowLowerer__bc_append_value_stmt(self: PipelineBatchW
   MUTABLE append_args =   IF append_uses_allocator THEN
     [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL } }]
   ELSE
-    [Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL }]
+    [Emittable{ Ident: COPY Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL } }]
   END;
   RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "append", args: COPY append_args, try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(append_args.length())), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END

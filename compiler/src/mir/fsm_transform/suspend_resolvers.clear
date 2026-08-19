@@ -139,7 +139,7 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
   stmts
   }
   ELSE
-    [ExprStmt{ expr: Emittable{ TryCatch: COPY finish_expr }, discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }]
+    [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ TryCatch: COPY finish_expr }, discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]
   END;
   MUTABLE ctx_field_decls = [suspendResolvers__ctx_field_decl(sp_field, sp_zig, Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } })];
   IF captured_promise_guard_name EXISTS AS captured_promise_guard_name_value THEN
