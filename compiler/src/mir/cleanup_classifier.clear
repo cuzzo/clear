@@ -212,8 +212,8 @@ PUB FN cleanupClassifier__stamp_default_scopes_mut(body: []AstBodyNode, loop_dep
     ELSE
       loop_depth
     END;
-  FOR _ IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(_)))) DO
-  TRY (cleanupClassifier__stamp_default_scopes_mut(_, child_depth));
+  FOR child_body IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(_)))) DO
+  TRY (cleanupClassifier__stamp_default_scopes_mut(child_body |> SELECT castLocatableToAstBodyNode(_), child_depth));
   END
   END
 END
@@ -224,33 +224,35 @@ PUB FN cleanupClassifier__stamp_binding_default_scope_mut(node: AstBodyNode, loo
   IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
     RETURN;
   END
-  MUTABLE entry = IF respondsTo?(node, "mir_binding_entry") THEN
-    node.mir_binding_entry()
-  ELSE
-    NIL
-  END;
-  IF !(entry) THEN
-    RETURN;
+  MUTABLE entry: ?CleanupEntry@multiowned = NIL;
+  IF node IS_A VarDecl AS var_decl THEN
+    entry = KEEP var_decl.mir_binding_entry;
+  ELSE_IF node IS_A BindExpr AS bind_expr THEN
+    entry = KEEP bind_expr.mir_binding_entry;
   END
-  IF entry.none?() THEN
-    RETURN;
+  IF entry EXISTS AS entry_value THEN
+    MUTABLE entry_mutable = KEEP entry_value;
+    IF cleanupEntry__none?(entry_mutable) THEN
+      RETURN;
+    END
+    MUTABLE scope: String@symbol = :function;
+    IF cleanupEntry__heap?(entry_mutable) THEN
+      scope = :heap;
+    ELSE_IF (loop_depth > 0) THEN
+      scope = :iteration;
+    END
+    cleanupEntry__set_cleanup_scope_mut(&entry_mutable, scope);
   END
-  MUTABLE scope =   IF entry.heap?() THEN
-    :heap
-  ELSE_IF loop_depth.positive?() THEN
-    :iteration
-  ELSE
-    :function
-  END;
-  &entry.set_cleanup_scope_mut(scope);
 END
 PUB FN cleanupClassifier__stamp_extended_loop_lifetimes_mut(body: []AstBodyNode, bindings: {String}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
-  FOR _ IN body DO
-  FOR _ IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(_)))) DO
-  IF aST__loop_node?(castAstBodyNodeToLocatable(_)) THEN
-      TRY (cleanupClassifier__stamp_loop_extensions_mut(_, bindings));
+  FOR node IN body DO
+  MUTABLE is_loop = aST__loop_node?(castAstBodyNodeToLocatable(node));
+  FOR child_body IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(node)))) DO
+  MUTABLE child_nodes: []AstBodyNode = child_body |> SELECT castLocatableToAstBodyNode(_);
+  IF is_loop THEN
+      TRY (cleanupClassifier__stamp_loop_extensions_mut(child_nodes, bindings));
   END
-  TRY (cleanupClassifier__stamp_extended_loop_lifetimes_mut(_, bindings));
+  TRY (cleanupClassifier__stamp_extended_loop_lifetimes_mut(child_nodes, bindings));
   END
   END
 END
