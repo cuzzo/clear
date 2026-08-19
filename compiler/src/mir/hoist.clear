@@ -359,40 +359,44 @@ PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []Va
   IF node IS_A StructLit AS struct_lit THEN
     MUTABLE struct_lit_mutable = COPY struct_lit;
     FOR _ IN struct_lit_mutable.fields.keys() DO
-  MUTABLE v = struct_lit_mutable.fields[_];
+  MUTABLE v = COPY UNWRAP (struct_lit_mutable.fields[_]);
   IF hoist__concat?(v) THEN
         struct_lit_mutable.fields[_] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
   ELSE
-        TRY (hoist__hoist_concats_within_mut(v, hoists, &counter));
+        TRY (hoist__hoist_concats_within_mut(v, &hoists, &counter));
   END
     END
   ELSE_IF node IS_A UnionVariantLit AS union_variant_lit THEN
     MUTABLE union_variant_lit_mutable = COPY union_variant_lit;
     FOR _ IN union_variant_lit_mutable.fields.keys() DO
-  MUTABLE v = union_variant_lit_mutable.fields[_];
+  MUTABLE v = COPY UNWRAP (union_variant_lit_mutable.fields[_]);
   IF hoist__concat?(v) THEN
         union_variant_lit_mutable.fields[_] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
   ELSE
-        TRY (hoist__hoist_concats_within_mut(v, hoists, &counter));
+        TRY (hoist__hoist_concats_within_mut(v, &hoists, &counter));
   END
     END
   ELSE_IF node IS_A ListLit AS list_lit THEN
     MUTABLE list_lit_mutable = COPY list_lit;
-    list_lit_mutable.items.each_index(%(idx) USE(MUTABLE counter, MUTABLE hoists, list_lit_mutable) -> {
-  MUTABLE v = COPY UNWRAP (list_lit_mutable.items[idx]);
-  IF hoist__concat?(v) THEN
-    list_lit_mutable.items[idx] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
-    RETURN NIL;
-  ELSE
-    RETURN TRY (hoist__hoist_concats_within_mut(v, hoists, &counter));
-  END
-  NIL
-    });
+    MUTABLE rtoc_idx = 0;
+    WHILE rtoc_idx < list_lit_mutable.items.length() DO
+      MUTABLE v = COPY UNWRAP (list_lit_mutable.items[rtoc_idx]);
+      IF hoist__concat?(v) THEN
+        list_lit_mutable.items[rtoc_idx] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
+      ELSE
+        TRY (hoist__hoist_concats_within_mut(v, &hoists, &counter));
+      END
+      rtoc_idx = rtoc_idx + 1;
+    END
   END
   NIL;
 END
 PRIVATE FN hoist__composite_element_store?(call: MethodCall) RETURNS !Bool ->
-  MUTABLE ti = TRY (type__from_node_mut(call.object, "composite element-store receiver"));
+  MUTABLE ti_opt: ?Type = TRY (type__from_node_mut(call.object, "composite element-store receiver"));
+  IF !(ti_opt EXISTS) THEN
+    RETURN FALSE;
+  END
+  MUTABLE ti: Type = COPY UNWRAP (ti_opt);
   IF !(type__collection?(ti)) THEN
     RETURN FALSE;
   END
@@ -403,26 +407,13 @@ PRIVATE FN hoist__empty_list_literal?(node: ?Locatable) RETURNS Bool ->
   RETURN (IF node? IS_A ListLit AS list_lit THEN list_lit.items.empty?() ELSE FALSE END);
 END
 PRIVATE FN hoist__callee_param_type(call: Locatable, idx: Int64) RETURNS !?Type ->
-  IF !(TRUE) THEN
-    RETURN NIL;
-  END
-  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(aST__node__matched_signature(call));
-  IF signature != NIL THEN
-  IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = UNWRAP (signature);
-  TRY (functionSignature__params(rtoc_local_receiver_9)) } != NIL THEN
-    IF (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = UNWRAP (signature);
-    TRY (functionSignature__params(rtoc_local_receiver_9)) })?)[idx] != NIL THEN
-      RETURN (((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = UNWRAP (signature);
-    TRY (functionSignature__params(rtoc_local_receiver_9)) })?)[idx])?).type();
-    ELSE
-      RETURN NIL;
+  IF aST__node__matched_signature(call) EXISTS AS signature THEN
+    MUTABLE params: []Param = TRY (functionSignature__params(signature));
+    IF params[idx] EXISTS AS param THEN
+      RETURN COPY param.type;
     END
-  ELSE
-    RETURN NIL;
   END
-  ELSE
   RETURN NIL;
-  END
 END
 PRIVATE FN hoist__collection_value_store_call?(call: MethodCall) RETURNS !Bool ->
   MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_stdlib_def));
