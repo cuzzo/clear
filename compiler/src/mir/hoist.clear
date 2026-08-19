@@ -530,15 +530,16 @@ PRIVATE FN hoist__ast_borrow_expr?(ast_node: Locatable, moved: Bool) RETURNS Boo
   RETURN hoist__ast_container_borrow_expr?(ast_node);
 END
 PRIVATE FN hoist__ast_access_path?(ast_node: Locatable) RETURNS Bool ->
-  MUTABLE node = COPY ast_node;
-  IF (IF node IS_A BinaryOp AS binary_op THEN (((binary_op.op == symbol("OR")) OR (binary_op.op == symbol("OR_ELSE")))) ELSE FALSE END) THEN
-    node = node.left();
+  MUTABLE node: Locatable = COPY ast_node;
+  IF node IS_A BinaryOp AS binary_op THEN
+    IF ((binary_op.op == symbol("OR")) OR (binary_op.op == symbol("OR_ELSE"))) THEN
+      node = COPY binary_op.left;
+    END
   END
   RETURN (node IS_A GetField OR node IS_A GetIndex);
 END
 # End Ruby module Hoist
 # Ruby module MIRHoistLowering
-alloc_mir_classes = [MIR.DupeSlice, MIR.AllocSlice, MIR.MakeList, MIR.CapWrap, MIR.SharePromote, MIR.RcRetain, MIR.RcDowngrade, MIR.WeakUpgrade, MIR.DeepCopy, MIR.ConcatStr, MIR.ContainerInit, MIR.MonomorphicKeep];
 PUB UNION MirAggregate { ArrayValue: []Any@multiowned, HashMapValue: {Any@multiowned}Any@multiowned }
 # End Ruby module MIRHoistLowering
 FN castCallLikeToLocatable(value: CallLike) RETURNS Locatable ->
@@ -688,12 +689,6 @@ FN ruby_array_concat_VarDecl(left: []VarDecl, right: []VarDecl) RETURNS []VarDec
     &result.append(COPY rtoc_right_item);
   END
   RETURN result;
-END
-FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
-  IF value EXISTS AS optional_payload THEN
-    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
-  END
-  NIL;
 END
 FN ruby_wrap_optional_Type_TypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
   IF value EXISTS AS optional_payload THEN

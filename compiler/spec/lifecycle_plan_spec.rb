@@ -1,4 +1,5 @@
 require "rspec"
+require "tmpdir"
 
 require_relative "../ruby/semantic/lifecycle_plan"
 require_relative "../ruby/backends/transpiler"
@@ -218,6 +219,31 @@ RSpec.describe Semantic::LifecyclePlan do
     CLEAR
 
     expect { ZigTranspiler.new.transpile(source) }.not_to raise_error
+  end
+
+  it "inventories an imported callee's parameter types for hoisted argument temps" do
+    Dir.mktmpdir("clear-lifecycle-imported-param") do |dir|
+      File.write(File.join(dir, "lib.clear"), <<~CLEAR)
+        PUB FN takesSet(names: [Set]String) RETURNS Int64 ->
+          RETURN names.length();
+        END
+      CLEAR
+
+      # `Set[]` is typed only from the imported parameter, and Hoist lifts it
+      # into a temp AFTER annotation. Without the callee's param type in the
+      # inventory the lifecycle registry fails closed on that temp.
+      source = <<~CLEAR
+        REQUIRE "lib.clear";
+        FN main() RETURNS Void ->
+          n = takesSet(Set[]);
+          ASSERT n == 0;
+          RETURN;
+        END
+      CLEAR
+
+      importer = ModuleImporter.new(base_dir: dir, use_mir: true)
+      expect { CompilerFrontend.compile(source, importer: importer, source_dir: dir) }.not_to raise_error
+    end
   end
 
   it "inventories typed map keys as well as values before MIR lowering" do

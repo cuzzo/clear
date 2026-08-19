@@ -1818,7 +1818,7 @@ PUB FN loopFrameAnalysis__direct_loop_expression_frame_alloc?(body: []Locatable,
   }));
   RETURN found;
 END
-PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names: [Set]String = Set[], block: FN(Locatable) -> Void) RETURNS !Void ->
+PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names: [Set]String, block: FN(Locatable) -> Void) RETURNS !Void ->
   MUTABLE stack: []Locatable = [root];
   MUTABLE seen: [Set]Int64 = Set[];
   WHILE !((stack.length() == 0)) DO

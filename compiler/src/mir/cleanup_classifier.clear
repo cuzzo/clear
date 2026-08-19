@@ -1743,7 +1743,8 @@ PUB FN cleanupClassifier__borrowed_field_names(schema: FieldBearingSchema) RETUR
   IF schema IS_A StructSchema AS struct_schema THEN
     RETURN TRY (structSchema__borrowed_fields(struct_schema));
   END
-  RETURN Set[];
+  MUTABLE empty: [Set]String = Set[];
+  RETURN empty;
 END
 # End Ruby module CleanupClassifier
 FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->

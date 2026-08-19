@@ -164,9 +164,6 @@ FN concurrencyChecks__each_with_scope(with_blocks: []WithBlock, with_scope_nodes
   END
 END
 PRIVATE FN concurrencyChecks__collect_held_params(with_block: WithBlock, fn_value: FunctionDef) RETURNS ![Set]String ->
-  IF !(TRUE) THEN
-    RETURN Set[];
-  END
   MUTABLE param_names = (fn_value.params |> SELECT CAST(_.name AS String)) |> DISTINCT _;
   MUTABLE out = Set[];
   FOR _ IN (TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_block)))))) DO

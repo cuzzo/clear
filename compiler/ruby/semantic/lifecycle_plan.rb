@@ -574,6 +574,16 @@ module Semantic
             statement.params.each { |param| add_type!(types, param.type) }
             add_type!(types, Type.new(statement.return_type)) if statement.return_type
           end
+          # A call to an IMPORTED function contributes types this module never
+          # declares: Hoist stamps an argument temp with the callee's param
+          # type, so a `Set[]` passed to an imported `[Set]String` parameter
+          # needs that plan even though no local declaration mentions it.
+          signature = T.unsafe(statement).respond_to?(:matched_signature) ? T.unsafe(statement).matched_signature : nil
+          signature = FunctionSignature.unwrap(signature)
+          next unless signature
+
+          signature.params.each { |param| add_type!(types, param.type) }
+          add_type!(types, signature.return_type)
         end
       end
 
