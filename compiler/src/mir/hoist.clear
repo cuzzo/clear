@@ -172,7 +172,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
           expected_branch_value = NIL;
         END
       MUTABLE expected: ?Type = expected_branch_value;
-      MUTABLE replacement = TRY (hoist__make_temp_mut(COPY UNWRAP (rtoc_each_items_6[rtoc_idx]), &hoists, hoistCounter__next_name(&counter), hoist__moved_arg?(rtoc_each_items_6[rtoc_idx]), ruby_wrap_optional_Type_TypeTypeInput(expected), schema_lookup));
+      MUTABLE replacement = TRY (hoist__make_temp_mut(COPY UNWRAP (rtoc_each_items_6[rtoc_idx]), &hoists, hoistCounter__next_name(&counter), hoist__moved_arg?(rtoc_each_items_6[rtoc_idx]), COPY expected, schema_lookup));
       IF call IS_A FuncCall AS func_call THEN
           func_call.args[rtoc_idx] = replacement;
       ELSE_IF call IS_A MethodCall AS method_call THEN
@@ -234,7 +234,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
         END
       END
     END
-    return_node_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY UNWRAP (return_node_mutable.value), &hoists, &counter, schema_lookup, ruby_wrap_optional_Type_TypeTypeInput(expected)));
+    return_node_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY UNWRAP (return_node_mutable.value), &hoists, &counter, schema_lookup, COPY expected));
   ELSE_IF stmt IS_A YieldExpr AS yield_expr THEN
     MUTABLE yield_expr_mutable = COPY yield_expr;
     yield_expr_mutable.expr = TRY (hoist__hoist_escape_value_mut(COPY yield_expr_mutable.expr, &hoists, &counter, schema_lookup));
@@ -242,7 +242,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
     MUTABLE assignment_mutable = COPY assignment;
     IF assignment_mutable.name IS_A GetField AS assign_field THEN
       MUTABLE dest_type: Type = TRY (aST__full_type_mut(Locatable{ GetField: COPY assign_field }));
-      assignment_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY assignment_mutable.value, &hoists, &counter, schema_lookup, TypeTypeInput{ Type: COPY dest_type }));
+      assignment_mutable.value = TRY (hoist__hoist_escape_value_mut(COPY assignment_mutable.value, &hoists, &counter, schema_lookup, COPY dest_type));
     END
   ELSE_IF stmt IS_A DestructuringAssignment AS destructuring_assignment THEN
     MUTABLE destructuring_assignment_mutable = COPY destructuring_assignment;
@@ -252,7 +252,7 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
   END
   NIL;
 END
-PRIVATE FN hoist__hoist_escape_value_mut(MUTABLE value: Locatable, MUTABLE hoists: []VarDecl, MUTABLE counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, expected_type: ?TypeTypeInput = NIL) RETURNS !Locatable ->
+PRIVATE FN hoist__hoist_escape_value_mut(MUTABLE value: Locatable, MUTABLE hoists: []VarDecl, MUTABLE counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, expected_type: ?Type = NIL) RETURNS !Locatable ->
   IF value IS_A MoveNode AS move_node THEN
   IF move_node.value IS_A Identifier THEN
     RETURN COPY CAST(move_node AS Locatable);
@@ -416,67 +416,85 @@ PRIVATE FN hoist__callee_param_type(call: Locatable, idx: Int64) RETURNS !?Type 
   RETURN NIL;
 END
 PRIVATE FN hoist__collection_value_store_call?(call: MethodCall) RETURNS !Bool ->
-  MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP call.matched_stdlib_def));
-  sig = (sig OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY call.matched_signature)));
-  IF !((((((sig != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_10 = UNWRAP (sig);
-  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_10)) }) AND TRY (functionSignature__takes_ownership?(&sig)))) OR TRY (intrinsicRegistry__collection_value_store_method?(Name{ StringValue: COPY call.name }, call.args.length())))) THEN
+  MUTABLE sig: ?FunctionSignature@multiowned = COPY (call.matched_stdlib_def OR_ELSE call.matched_signature);
+  MUTABLE store_method = FALSE;
+  IF sig EXISTS AS sig_value THEN
+    MUTABLE sig_mutable = KEEP sig_value;
+    store_method = (TRY (functionSignature__mutates_receiver?(&sig_mutable)) AND TRY (functionSignature__takes_ownership?(&sig_mutable)));
+  END
+  IF !(store_method) THEN
+    store_method = TRY (intrinsicRegistry__collection_value_store_method?(Name{ StringValue: COPY call.name }, call.args.length()));
+  END
+  IF !(store_method) THEN
     RETURN FALSE;
   END
-  MUTABLE ti = TRY (type__from_node_mut(call.object, "collection value-store receiver"));
-  RETURN !(!(((TRUE AND type__collection?(ti)))));
+  MUTABLE ti: ?Type = TRY (type__from_node_mut(call.object, "collection value-store receiver"));
+  IF ti EXISTS AS ti_value THEN
+    RETURN type__collection?(ti_value);
+  END
+  RETURN FALSE;
 END
 PUB FN hoist__noreturn_value?(node: ?Locatable) RETURNS Bool ->
-  IF !(respondsTo?(node, "resolved_type")) THEN
-    RETURN FALSE;
+  IF node EXISTS AS node_value THEN
+    IF aST__node_type_object(node_value) EXISTS AS resolved THEN
+      RETURN (type__resolved(resolved) == :NoReturn);
+    END
   END
-  MUTABLE resolved = node.resolved_type();
-  IF resolved IS_A Type THEN
-    resolved = resolved.resolved();
-  END
-  RETURN (resolved == :NoReturn);
+  RETURN FALSE;
 END
 PRIVATE FN hoist__concat?(node: ?Locatable) RETURNS Bool ->
   RETURN (((node != NIL) AND (node IS_A StringConcat)) OR ((IF node? IS_A BinaryOp AS binary_op THEN !(!(binary_op.string_concat)) ELSE FALSE END)));
 END
-PRIVATE FN hoist__make_temp_mut(concat: Locatable, MUTABLE hoists: []VarDecl, name: String, moved: Bool = TRUE, expected_type: ?TypeTypeInput = NIL, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Identifier ->
-  MUTABLE tok = IF TRUE THEN
-    aST__node__token(concat)
-  ELSE
-    NIL
-  END;
+PRIVATE FN hoist__node_storage(node: Locatable) RETURNS ?String@symbol ->
+  PARTIAL MATCH node START
+    Locatable.Literal AS item -> RETURN COPY item.storage;,
+    Locatable.ListLit AS item -> RETURN COPY item.storage;,
+    Locatable.TupleLit AS item -> RETURN COPY item.storage;,
+    Locatable.DefaultArrayLit AS item -> RETURN COPY item.storage;,
+    Locatable.HashLit AS item -> RETURN COPY item.storage;,
+    Locatable.StructLit AS item -> RETURN COPY item.storage;,
+    Locatable.LambdaLit AS item -> RETURN COPY item.storage;,
+    Locatable.UnionVariantLit AS item -> RETURN COPY item.storage;
+  END
+  RETURN NIL;
+END
+PRIVATE FN hoist__node_needs_heap_create?(node: Locatable) RETURNS Bool ->
+  RETURN (aST__node_needs_heap_create(node) OR_ELSE FALSE);
+END
+PRIVATE FN hoist__make_temp_mut(concat: Locatable, MUTABLE hoists: []VarDecl, name: String, moved: Bool = TRUE, expected_type: ?Type = NIL, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Identifier ->
+  MUTABLE tok: Token = COPY aST__node__token(concat);
   MUTABLE expected: ?Type = TRY (type__from_node(expected_type));
-  MUTABLE ti =   IF ((expected != NIL) AND (IF concat IS_A BgStreamBlock THEN
-    TRY (type__stream?(expected))
+  MUTABLE ti: ?Type = TRY (type__from_node_mut(concat, "AST hoist temp"));
+  IF expected EXISTS AS expected_value THEN
+    IF (IF concat IS_A BgStreamBlock THEN TRY (type__stream?(expected_value)) ELSE TRUE END) THEN
+      ti = COPY expected;
+    END
+  END
+  MUTABLE ti_value: Type = COPY UNWRAP (ti);
+  MUTABLE storage: String@symbol = :frame;
+  IF TRY (hoist__owned_fallback_temp?(concat, schema_lookup)) THEN
+    storage = :heap;
+  ELSE_IF (hoist__ast_borrow_expr?(concat, moved) OR (aST__node__container_borrow(concat) OR_ELSE FALSE)) THEN
+    storage = :borrow;
+  ELSE_IF (moved AND TRY (type__needs_explicit_cleanup?(ti_value, :heap, schema_lookup))) THEN
+    storage = :heap;
   ELSE
-    TRUE
-  END)) THEN
-    expected
-  ELSE
-    TRY (type__from_node_mut(concat, "AST hoist temp"))
-  END;
-  MUTABLE storage =   IF TRY (hoist__owned_fallback_temp?(concat, schema_lookup)) THEN
-    :heap
-  ELSE_IF (hoist__ast_borrow_expr?(concat, moved) OR ((TRUE AND aST__node__container_borrow(concat)))) THEN
-    :borrow
-  ELSE_IF (moved AND TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup))) THEN
-    :heap
-  ELSE
-    (((respondsTo?(concat, "storage") AND concat.storage())) OR :frame)
-  END;
+    storage = (hoist__node_storage(concat) OR_ELSE :frame);
+  END
   MUTABLE decl = VarDecl{ token: COPY tok, name: COPY name, type: NIL, value: COPY concat, mutable: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
-  TRY (aST__stamp_synthetic_type_mut(Locatable{ VarDecl: COPY decl }, ti, "synthetic AST type"));
+  TRY (aST__stamp_synthetic_type_mut(Locatable{ VarDecl: COPY decl }, ti_value, "synthetic AST type"));
   decl.var_used = TRUE;
-  MUTABLE sym = TRY (symbolEntry__new(SymbolEntryRegInput{ VarDecl: COPY decl }, ti, FALSE, storage));
+  MUTABLE sym = TRY (symbolEntry__new(SymbolEntryRegInput{ VarDecl: COPY decl }, SymbolEntryTypeInput{ TypeMultiowned: COPY ti_value }, FALSE, storage));
   decl.symbol = sym;
-  IF (symbolEntry__borrow_provenance?(sym) AND TRUE) THEN
+  IF symbolEntry__borrow_provenance?(sym) THEN
     decl.container_borrow = TRUE;
   END
   &hoists.append(decl);
   MUTABLE ident = Identifier{ token: COPY tok, name: COPY name, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
-  TRY (aST__stamp_synthetic_type_mut(Locatable{ Identifier: COPY ident }, ti, "synthetic AST type"));
+  TRY (aST__stamp_synthetic_type_mut(Locatable{ Identifier: COPY ident }, ti_value, "synthetic AST type"));
   ident.symbol = sym;
   ident.was_moved = COPY moved;
-  IF (respondsTo?(concat, "needs_heap_create") AND concat.needs_heap_create()) THEN
+  IF hoist__node_needs_heap_create?(concat) THEN
     ident.needs_heap_create = TRUE;
   END
   RETURN ident;
@@ -487,8 +505,11 @@ PRIVATE FN hoist__owned_fallback_temp?(ast_node: Locatable, schema_lookup: ?FN(S
       IF !(hoist__ast_container_borrow_expr?(binary_op.left)) THEN
         RETURN FALSE;
       END
-      MUTABLE ti = TRY (type__from_node_mut(binary_op, "owned fallback temp"));
-      RETURN (((TRY (type__string?(ti)) OR TRY (type__heap_ptr?(ti))) OR TRY (type__collection_value?(ti))) OR TRY (type__recursive_cleanup_shape?(ti, schema_lookup)));
+      MUTABLE ti: ?Type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY binary_op }, "owned fallback temp"));
+      IF ti EXISTS AS ti_value THEN
+        RETURN (((TRY (type__string?(ti_value)) OR TRY (type__heap_ptr?(ti_value))) OR TRY (type__collection_value?(ti_value))) OR TRY (type__recursive_cleanup_shape?(ti_value, schema_lookup)));
+      END
+      RETURN FALSE;
     ELSE
       RETURN FALSE;
     END
