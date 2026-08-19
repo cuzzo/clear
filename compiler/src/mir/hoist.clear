@@ -319,10 +319,13 @@ PRIVATE FN hoist__each_call(node: Locatable, blk: FN(CallLike) -> Void) RETURNS 
   rubyToClearVoid()
   }));
 END
-PRIVATE FN hoist__each_call_like(node: ?Locatable, matches: FN(Locatable) -> Bool, blk: FN(Locatable) -> Void) RETURNS !Void ->
+PRIVATE FN hoist__call_like_boundary?(node: Locatable) RETURNS Bool ->
+  RETURN (node IS_A FunctionDef OR node IS_A LambdaLit OR node IS_A BgBlock OR node IS_A BgStreamBlock OR node IS_A WithBlock OR node IS_A DoBlock);
+END
+PRIVATE FN hoist__each_call_like(node: ?Locatable, matches: FN(Locatable) -> Bool, blk: FN(Locatable) -> Void) RETURNS !Void EFFECTS REENTRANT ->
   IF node EXISTS AS node_value THEN
     # Separate frames -- their bodies are walked independently.
-    IF aST__call_like_boundary?(node_value) THEN
+    IF hoist__call_like_boundary?(node_value) THEN
       RETURN;
     END
     IF matches(node_value) THEN
@@ -338,18 +341,18 @@ PRIVATE FN hoist__non_body_exprs(node: Locatable) RETURNS ![]Locatable ->
   IF hoist__pipeline_stage_node?(node) THEN
     RETURN List[];
   END
-  RETURN PARTIAL MATCH node START
-    Locatable.IfStatement AS if_statement -> [COPY if_statement.condition],
-    Locatable.WhileLoop AS while_loop -> [COPY while_loop.condition],
-    Locatable.WhileBindLoop AS while_bind_loop -> [COPY while_bind_loop.condition],
-    Locatable.IfBind AS if_bind -> if_bind.bindings |> SELECT COPY _.expr,
-    Locatable.ForRange AS for_range -> [COPY for_range.start_expr, COPY for_range.end_expr],
-    Locatable.ForEach AS for_each -> [COPY for_each.collection],
-    Locatable.MatchStatement AS match_statement -> [COPY match_statement.expr],
-    DEFAULT -> rtocChildrenLocatable(node)
-  END;
+  PARTIAL MATCH node START
+    Locatable.IfStatement AS if_statement -> RETURN CAST([COPY if_statement.condition] AS []Locatable);,
+    Locatable.WhileLoop AS while_loop -> RETURN CAST([COPY while_loop.condition] AS []Locatable);,
+    Locatable.WhileBindLoop AS while_bind_loop -> RETURN CAST([COPY while_bind_loop.condition] AS []Locatable);,
+    Locatable.IfBind AS if_bind -> RETURN CAST(if_bind.bindings |> SELECT COPY _.expr AS []Locatable);,
+    Locatable.ForRange AS for_range -> RETURN CAST([COPY for_range.start_expr, COPY for_range.end_expr] AS []Locatable);,
+    Locatable.ForEach AS for_each -> RETURN CAST([COPY for_each.collection] AS []Locatable);,
+    Locatable.MatchStatement AS match_statement -> RETURN CAST([COPY match_statement.expr] AS []Locatable);
+  END
+  RETURN rtocChildrenLocatable(node);
 END
-PUB FN hoist__pipeline_stage_node?(node: ?Locatable) RETURNS Bool ->
+PUB FN hoist__pipeline_stage_node?(node: Locatable) RETURNS Bool ->
   RETURN (node IS_A SelectOp OR node IS_A WhereOp OR node IS_A EachOp OR node IS_A TapOp OR node IS_A AllOp OR node IS_A AnyOp OR node IS_A FindOp OR node IS_A CountOp OR node IS_A SumOp OR node IS_A AverageOp OR node IS_A MinOp OR node IS_A MaxOp OR node IS_A TakeWhileOp OR node IS_A SkipOp OR node IS_A OrderByOp OR node IS_A DistinctOp OR node IS_A UnnestOp OR node IS_A IndexOp OR node IS_A ReduceOp);
 END
 PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []VarDecl, MUTABLE counter: HoistCounter) RETURNS !Void EFFECTS REENTRANT ->
