@@ -2551,7 +2551,7 @@ PRIVATE FN mIREmitter__emit_if_stmt(MUTABLE self: MIREmitter, node: IfStmt) RETU
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cond: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.cond));
-    IF node.comptime THEN
+    IF (node.comptime OR_ELSE FALSE) THEN
       cond = "comptime ${cond}";
     END
     MUTABLE then_body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.then_body));

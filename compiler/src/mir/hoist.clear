@@ -321,63 +321,36 @@ PRIVATE FN hoist__each_call(node: Locatable, blk: FN(CallLike) -> Void) RETURNS 
 END
 PRIVATE FN hoist__each_call_like(node: ?Locatable, matches: FN(Locatable) -> Bool, blk: FN(Locatable) -> Void) RETURNS !Void ->
   IF node EXISTS AS node_value THEN
-    IF node_value IS_A []Any THEN
+    # Separate frames -- their bodies are walked independently.
+    IF aST__call_like_boundary?(node_value) THEN
       RETURN;
-    ELSE
-      IF !(node_value IS_A Struct) THEN
-        RETURN;
-      END
-      IF aST__call_like_boundary?(node_value) THEN
-        RETURN;
-      END
-      IF matches(node_value) THEN
-        blk(node_value);
-      END
-      MUTABLE children: []Any@multiowned = TRY (hoist__non_body_exprs(node_value));
-      FOR _ IN children DO
-      TRY (hoist__each_call_like_child(_, matches, blk));
-      END
     END
-  ELSE
-    RETURN;
+    IF matches(node_value) THEN
+      blk(node_value);
+    END
+    MUTABLE children: []Locatable = TRY (hoist__non_body_exprs(node_value));
+    FOR _ IN children DO
+    TRY (hoist__each_call_like(_, matches, blk));
+    END
   END
 END
-PRIVATE FN hoist__each_call_like_child(child: Any, matches: FN(Locatable) -> Bool, blk: FN(Locatable) -> Void) RETURNS !Void EFFECTS REENTRANT ->
-  IF (child == Array) THEN
-    FOR _ IN child DO
-    TRY (hoist__each_call_like_child(_, matches, blk));
-    END
-  ELSE_IF (child == Hash) THEN
-    FOR _ IN child.values() DO
-    TRY (hoist__each_call_like_child(_, matches, blk));
-    END
-  ELSE_IF (child IS_A Locatable) THEN
-    TRY (hoist__each_call_like(child, matches, blk));
+PRIVATE FN hoist__non_body_exprs(node: Locatable) RETURNS ![]Locatable ->
+  IF hoist__pipeline_stage_node?(node) THEN
+    RETURN List[];
   END
+  RETURN PARTIAL MATCH node START
+    Locatable.IfStatement AS if_statement -> [COPY if_statement.condition],
+    Locatable.WhileLoop AS while_loop -> [COPY while_loop.condition],
+    Locatable.WhileBindLoop AS while_bind_loop -> [COPY while_bind_loop.condition],
+    Locatable.IfBind AS if_bind -> if_bind.bindings |> SELECT COPY _.expr,
+    Locatable.ForRange AS for_range -> [COPY for_range.start_expr, COPY for_range.end_expr],
+    Locatable.ForEach AS for_each -> [COPY for_each.collection],
+    Locatable.MatchStatement AS match_statement -> [COPY match_statement.expr],
+    DEFAULT -> rtocChildrenLocatable(node)
+  END;
 END
 PUB FN hoist__pipeline_stage_node?(node: ?Locatable) RETURNS Bool ->
   RETURN (node IS_A SelectOp OR node IS_A WhereOp OR node IS_A EachOp OR node IS_A TapOp OR node IS_A AllOp OR node IS_A AnyOp OR node IS_A FindOp OR node IS_A CountOp OR node IS_A SumOp OR node IS_A AverageOp OR node IS_A MinOp OR node IS_A MaxOp OR node IS_A TakeWhileOp OR node IS_A SkipOp OR node IS_A OrderByOp OR node IS_A DistinctOp OR node IS_A UnnestOp OR node IS_A IndexOp OR node IS_A ReduceOp);
-END
-PRIVATE FN hoist__non_body_exprs(node: Locatable) RETURNS ![]Any@multiowned ->
-  IF hoist__pipeline_stage_node?(node) THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_7: []Any@multiowned = List[]; rtoc_empty_list_7 } ) AS []Any@multiowned);
-  END
-  RETURN PARTIAL MATCH node START
-    Locatable.IfStatement AS if_statement -> [node.condition()],
-    Locatable.WhileLoop AS while_loop -> [node.condition()],
-    Locatable.WhileBindLoop AS while_bind_loop -> [node.condition()],
-    Locatable.IfBind AS if_bind -> if_bind.bindings |> SELECT binding__expr(_),
-    Locatable.ForRange AS for_range -> [node.start_expr(), node.end_expr()],
-    Locatable.ForEach AS for_each -> [node.collection()],
-    Locatable.MatchStatement AS match_statement -> [node.expr()],
-    DEFAULT -> ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_8: ?[]Any@multiowned = NIL;
-      IF node IS_A Struct THEN
-        rtoc_ternary_value_8 = CAST(node.to_a() AS []Any@multiowned);
-      ELSE
-        rtoc_ternary_value_8 = List[];
-      END
-      rtoc_ternary_value_8? })
-  END;
 END
 PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []VarDecl, MUTABLE counter: HoistCounter) RETURNS !Void EFFECTS REENTRANT ->
   IF node IS_A StructLit AS struct_lit THEN
