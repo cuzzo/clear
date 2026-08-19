@@ -66,7 +66,7 @@ PUB FN capabilityAuditSession__initialize(MUTABLE self: CapabilityAuditSession, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.context = Context{ typed_program: typed_program, inputs: COPY inputs, source_code: COPY source_code, language_mode: COPY language_mode, strict_test: COPY strict_test };
+    rtoc_self_view.context = Context{ typed_program: typed_program, inputs: COPY inputs, source_code: COPY source_code, language_mode: COPY language_mode, strict_test: strict_test };
     rtoc_self_view.derived_call_views = {};
     rtoc_self_view.derived_call_views_source = NIL;
 }
@@ -4368,7 +4368,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN capabilityAuditSession__new(typed_program: TypedProgramFacts, inputs: CapabilityAuditInputs, source_code: ?String, language_mode: String@symbol, strict_test: Bool) RETURNS CapabilityAuditSession@multiowned ->
-  MUTABLE self = CapabilityAuditSession{ context: Context{ typed_program: typed_program, inputs: COPY inputs, source_code: COPY source_code, language_mode: COPY language_mode, strict_test: COPY strict_test }, derived_call_views: {}, derived_call_views_source: NIL };
+  MUTABLE self = CapabilityAuditSession{ context: Context{ typed_program: typed_program, inputs: COPY inputs, source_code: COPY source_code, language_mode: COPY language_mode, strict_test: strict_test }, derived_call_views: {}, derived_call_views_source: NIL };
   capabilityAuditSession__initialize(&self, typed_program, inputs, source_code, language_mode, strict_test);
   RETURN self @multiowned;
 END

@@ -131,7 +131,7 @@ FN typeShape__from_raw(raw: TypeShapeRaw, auto: Bool = FALSE, expression: ?TypeE
     END
     END
   END
-  RETURN TypeShape{ auto: COPY auto, expression: COPY parsed, legacy_raw: COPY TRY (typeShape__render_legacy_raw(parsed)), semantic_key_value: COPY TRY (typeExpressionPrinter__semantic(parsed)) };
+  RETURN TypeShape{ auto: auto, expression: COPY parsed, legacy_raw: COPY TRY (typeShape__render_legacy_raw(parsed)), semantic_key_value: COPY TRY (typeExpressionPrinter__semantic(parsed)) };
 END
 FN typeShape__from_core(core_str: String, auto: Bool = FALSE) RETURNS !TypeShape EFFECTS REENTRANT ->
   MUTABLE shape = TRY (typeShape__from_raw(TypeShapeRaw{ SymbolValue: COPY symbol(core_str) }, auto));
@@ -921,7 +921,7 @@ PUB FN type__function_type_from_parts(param_types: []Type, return_type: Type, re
     &params.append(FunctionTypeParam{ type: COPY TRY (type__copy_type(UNWRAP (param_types[i]))) });
     i = (i + 1);
   END
-  RETURN TRY (type__new(TypeConstructionInput{ FunctionType: COPY FunctionType{ params: COPY params, return_type: COPY TRY (type__copy_type(return_type)), reentrant: COPY reentrant, source_signature: COPY source_signature, abi: COPY abi_value } }));
+  RETURN TRY (type__new(TypeConstructionInput{ FunctionType: COPY FunctionType{ params: COPY params, return_type: COPY TRY (type__copy_type(return_type)), reentrant: reentrant, source_signature: COPY source_signature, abi: COPY abi_value } }));
 END
 PUB FN type__array_capacity_suffix(capacity: ?TypeArrayCapacity) RETURNS String ->
   IF capacity EXISTS AS capacity_value THEN

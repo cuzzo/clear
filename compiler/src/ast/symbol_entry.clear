@@ -796,14 +796,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.binding_id = symbolEntry__next_binding_id();
     rtoc_self_view.ownership_binding_id = rtoc_self_view.binding_id;
     rtoc_self_view.reg = COPY reg;
-    rtoc_self_view.lifecycle = BindingLifecycleFacts{ type: COPY TRY (symbolEntry__normalize_type_input(type)), storage: COPY storage, sync: COPY sync_value, layout: COPY layout, resource: COPY resource, close_plan: COPY close_plan, semantic_place_id: NIL, ownership_kind: NIL, takes: FALSE, is_param: FALSE, link_source: NIL, async_result_shape: NIL, foreign_out_owner: FALSE, owned_optional_capture: FALSE, kept_identity: NIL, carrier_contract: :polymorphic, carrier_polymorphic: FALSE };
+    rtoc_self_view.lifecycle = BindingLifecycleFacts{ type: COPY TRY (symbolEntry__normalize_type_input(type)), storage: COPY storage, sync: COPY sync_value, layout: COPY layout, resource: resource, close_plan: COPY close_plan, semantic_place_id: NIL, ownership_kind: NIL, takes: FALSE, is_param: FALSE, link_source: NIL, async_result_shape: NIL, foreign_out_owner: FALSE, owned_optional_capture: FALSE, kept_identity: NIL, carrier_contract: :polymorphic, carrier_polymorphic: FALSE };
     rtoc_self_view.mutable = COPY mutable_value;
     rtoc_self_view.rebindable = COPY rebindable;
     rtoc_self_view.reassigned = FALSE;
     rtoc_self_view.size = COPY size;
     rtoc_self_view.capabilities = COPY capabilities;
     rtoc_self_view.lifetime = List[];
-    rtoc_self_view.flow = BindingFlowFacts{ valid: COPY valid, invalid_reason: COPY invalid_reason, non_escaping: FALSE, borrowed_alias: FALSE, read: FALSE, mutated: FALSE, mutable_ref_target: FALSE, poly_borrow_target: FALSE, init_contents_heap: FALSE };
+    rtoc_self_view.flow = BindingFlowFacts{ valid: valid, invalid_reason: COPY invalid_reason, non_escaping: FALSE, borrowed_alias: FALSE, read: FALSE, mutated: FALSE, mutable_ref_target: FALSE, poly_borrow_target: FALSE, init_contents_heap: FALSE };
     rtoc_self_view.sync_families = NIL;
     rtoc_self_view.scope = NIL;
     rtoc_self_view.scope_depth = NIL;
@@ -865,7 +865,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN symbolEntry__new(reg: ?SymbolEntryRegInput, type: ?SymbolEntryTypeInput, mutable: Bool, storage: String@symbol, sync: ?String@symbol = NIL, layout: ?String@symbol = NIL, rebindable: Bool = FALSE, size: Int64 = 0, capabilities: [Set]String@symbol = Set[], valid: Bool = TRUE, invalid_reason: ?String = NIL, resource: ?Bool = NIL, close_plan: ?ResourceClosePlan = NIL) RETURNS !SymbolEntry@multiowned ->
-  MUTABLE self = SymbolEntry{ binding_id: 0_i64, capabilities: COPY capabilities, flow: BindingFlowFacts{ valid: COPY valid, invalid_reason: COPY invalid_reason, non_escaping: FALSE, borrowed_alias: FALSE, read: FALSE, mutated: FALSE, mutable_ref_target: FALSE, poly_borrow_target: FALSE, init_contents_heap: FALSE }, lifecycle: BindingLifecycleFacts{ type: COPY TRY (symbolEntry__normalize_type_input(COPY type)), storage: COPY storage, sync: COPY sync, layout: COPY layout, resource: COPY resource, close_plan: COPY close_plan, semantic_place_id: NIL, ownership_kind: NIL, takes: FALSE, is_param: FALSE, link_source: NIL, async_result_shape: NIL, foreign_out_owner: FALSE, owned_optional_capture: FALSE, kept_identity: NIL, carrier_contract: :polymorphic, carrier_polymorphic: FALSE }, lifetime: List[], mutable: mutable, ownership_binding_id: 0_i64, param_decl_token: NIL, reassigned: FALSE, rebindable: rebindable, reg: COPY reg, scope: NIL, scope_depth: NIL, size: size, sync_families: NIL };
+  MUTABLE self = SymbolEntry{ binding_id: 0_i64, capabilities: COPY capabilities, flow: BindingFlowFacts{ valid: valid, invalid_reason: COPY invalid_reason, non_escaping: FALSE, borrowed_alias: FALSE, read: FALSE, mutated: FALSE, mutable_ref_target: FALSE, poly_borrow_target: FALSE, init_contents_heap: FALSE }, lifecycle: BindingLifecycleFacts{ type: COPY TRY (symbolEntry__normalize_type_input(COPY type)), storage: COPY storage, sync: COPY sync, layout: COPY layout, resource: resource, close_plan: COPY close_plan, semantic_place_id: NIL, ownership_kind: NIL, takes: FALSE, is_param: FALSE, link_source: NIL, async_result_shape: NIL, foreign_out_owner: FALSE, owned_optional_capture: FALSE, kept_identity: NIL, carrier_contract: :polymorphic, carrier_polymorphic: FALSE }, lifetime: List[], mutable: mutable, ownership_binding_id: 0_i64, param_decl_token: NIL, reassigned: FALSE, rebindable: rebindable, reg: COPY reg, scope: NIL, scope_depth: NIL, size: size, sync_families: NIL };
   TRY (symbolEntry__initialize(&self, reg, type, mutable, storage, sync, layout, rebindable, size, capabilities, valid, invalid_reason, resource, close_plan));
   RETURN self @multiowned;
 END

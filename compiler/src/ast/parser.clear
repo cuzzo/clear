@@ -131,7 +131,7 @@ element_capability_tokens = ["@shared", "@multiowned", "@node", "@locked", "@wri
 element_sync_tokens = ["@locked", "@writeLocked", "@alwaysMutable", "locked", "writeLocked", "alwaysMutable"];
 capability_tokens = ["@multiowned", "@shared", "@node", "@split", "@locked", "@writeLocked", "@alwaysMutable", "@local", "@versioned", "@atomic", "@boxed", "@indirect", "@link", "@raw", "@symbol", "@c", "@size", "@list", "@pool", "@set", "@soa", "@sharded", "@observable"];
 PUB FN clearParser__sigil_attrs(dim: ?String@symbol = NIL, val: ?String@symbol = NIL, stack_size: ?String@symbol = NIL, pinned: Bool = FALSE, parallel: Bool = FALSE, arena: Bool = FALSE, can_smash: Bool = FALSE) RETURNS SigilAttrs ->
-  RETURN SigilAttrs{ dim: COPY dim, val: COPY val, stack_size: COPY stack_size, pinned: COPY pinned, parallel: COPY parallel, arena: COPY arena, can_smash: COPY can_smash };
+  RETURN SigilAttrs{ dim: COPY dim, val: COPY val, stack_size: COPY stack_size, pinned: pinned, parallel: parallel, arena: arena, can_smash: can_smash };
 END
 FN clearParser__initialize(MUTABLE self: ClearParser, tokens: []Token, source_code: String = "", gradual: ?Bool = NIL, budget: ?FrontendResourceBudget = NIL) RETURNS !Void
   REQUIRES self: LOCAL

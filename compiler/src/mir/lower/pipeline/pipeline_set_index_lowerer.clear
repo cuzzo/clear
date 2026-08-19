@@ -253,9 +253,9 @@ PRIVATE FN pipelineSetIndexLowerer__copied_index_value(self: PipelineSetIndexLow
     IF entry EXISTS AS entry_value THEN
       &setup_stmts.append(Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY value_name, cleanup_entry: cleanupEntry__with_moved_guard(entry_value), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
-    RETURN PipelineIndexPreparedValue{ value: Emittable{ Ident: COPY Ident{ name: COPY value_name, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_stmts: COPY setup_stmts, owns_heap: COPY item_owns };
+    RETURN PipelineIndexPreparedValue{ value: Emittable{ Ident: COPY Ident{ name: COPY value_name, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_stmts: COPY setup_stmts, owns_heap: item_owns };
   ELSE
-    RETURN PipelineIndexPreparedValue{ value: COPY item_value, setup_stmts: ( { MUTABLE rtoc_empty_list_4: []Emittable = List[]; rtoc_empty_list_4 } ), owns_heap: COPY item_owns };
+    RETURN PipelineIndexPreparedValue{ value: COPY item_value, setup_stmts: ( { MUTABLE rtoc_empty_list_4: []Emittable = List[]; rtoc_empty_list_4 } ), owns_heap: item_owns };
   END
 END
 PRIVATE FN pipelineSetIndexLowerer__index_item_value(self: PipelineSetIndexLowerer, item_var: String, elem_zig_type: String, alloc: String@symbol, value_ownership: PipelineIndexValueOwnership) RETURNS Emittable ->

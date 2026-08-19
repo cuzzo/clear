@@ -132,7 +132,7 @@ PUB FN dSL__defer_free_field(field: String) RETURNS DeferFreeField ->
   RETURN DeferFreeField{ field: COPY field };
 END
 PUB FN dSL__stmt_call(fn_value: FunctionPath, args: []Expr, is_try: Bool = FALSE) RETURNS StmtCall ->
-  RETURN StmtCall{ fn: COPY fn_value, args: COPY args, is_try: COPY is_try };
+  RETURN StmtCall{ fn: COPY fn_value, args: COPY args, is_try: is_try };
 END
 PUB FN dSL__io_submit(verb: String@symbol, waiter: Waiter, extra_args: []Expr) RETURNS IoSubmit ->
   MUTABLE waiter_op_branch_value: ?StateField = NIL;
@@ -172,7 +172,7 @@ PUB FN dSL__intcast(zig_type: String, expr: Expr) RETURNS IntCast ->
   RETURN IntCast{ zig_type: COPY zig_type, expr: COPY expr };
 END
 PUB FN dSL__call(fn_value: FunctionPath, args: []Expr, is_try: Bool = FALSE) RETURNS CallExpr ->
-  RETURN CallExpr{ fn: COPY fn_value, args: COPY args, is_try: COPY is_try };
+  RETURN CallExpr{ fn: COPY fn_value, args: COPY args, is_try: is_try };
 END
 PUB FN dSL__alloc_expr(elem_type: String, count_value: LocalRef) RETURNS AllocExpr ->
   RETURN AllocExpr{ elem_type: COPY elem_type, count: COPY count_value };

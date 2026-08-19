@@ -34,7 +34,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       expand(source_dir)
     ELSE
       TRY (pwd())
-    END, strict_test: COPY strict_test, source_code: COPY source_code };
+    END, strict_test: strict_test, source_code: COPY source_code };
     rtoc_self_view.annotation_products = annotationProducts__new();
     rtoc_self_view.semantic_index = NIL;
 }
@@ -94,7 +94,7 @@ PUB FN semanticAnnotator__new(importer: ?ModuleImporter = NIL, compiler: ?Module
   expand(COPY source_dir)
 ELSE
   TRY (pwd())
-END, strict_test: COPY strict_test, source_code: COPY source_code }, semantic_index: NIL };
+END, strict_test: strict_test, source_code: COPY source_code }, semantic_index: NIL };
   TRY (semanticAnnotator__initialize(&self, importer, compiler, source_dir, strict_test, source_code));
   RETURN self @multiowned;
 END

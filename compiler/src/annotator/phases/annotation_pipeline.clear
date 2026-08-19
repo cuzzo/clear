@@ -24,7 +24,7 @@ PUB FN annotationPipeline__initialize(MUTABLE self: AnnotationPipeline, importer
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.config = AnnotatorPhasesAnnotationPipelineConfig{ importer: importer, source_dir: COPY source_dir, source_code: COPY source_code, strict_test: COPY strict_test };
+    rtoc_self_view.config = AnnotatorPhasesAnnotationPipelineConfig{ importer: importer, source_dir: COPY source_dir, source_code: COPY source_code, strict_test: strict_test };
     rtoc_self_view.products = annotationProducts__new();
 }
 END
@@ -45,7 +45,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN annotationPipeline__new(importer: ?ModuleImporter, source_dir: String, source_code: ?String, strict_test: Bool) RETURNS AnnotationPipeline@multiowned ->
-  MUTABLE self = AnnotationPipeline{ config: AnnotatorPhasesAnnotationPipelineConfig{ importer: importer, source_dir: COPY source_dir, source_code: COPY source_code, strict_test: COPY strict_test }, products: annotationProducts__new() };
+  MUTABLE self = AnnotationPipeline{ config: AnnotatorPhasesAnnotationPipelineConfig{ importer: importer, source_dir: COPY source_dir, source_code: COPY source_code, strict_test: strict_test }, products: annotationProducts__new() };
   annotationPipeline__initialize(&self, importer, source_dir, source_code, strict_test);
   RETURN self @multiowned;
 END

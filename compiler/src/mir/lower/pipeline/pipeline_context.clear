@@ -26,7 +26,7 @@ PUB FN pipelineContextState__with_join_params(self: PipelineContextState, join_p
   RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY join_params, named_bindings: COPY self.named_bindings, soa_each_mode: self.soa_each_mode, soa_rewrite_active: self.soa_rewrite_active, soa_needed_fields: COPY self.soa_needed_fields };
 END
 PUB FN pipelineContextState__with_soa_rewrite(self: PipelineContextState, each_mode: Bool, fields: [Set]PipelineSoaFieldSetItem) RETURNS PipelineContextState ->
-  RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY self.join_param_map, named_bindings: COPY self.named_bindings, soa_each_mode: COPY each_mode, soa_rewrite_active: TRUE, soa_needed_fields: COPY fields };
+  RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY self.join_param_map, named_bindings: COPY self.named_bindings, soa_each_mode: each_mode, soa_rewrite_active: TRUE, soa_needed_fields: COPY fields };
 END
 PUB FN pipelineContextState__active?(self: PipelineContextState) RETURNS Bool ->
   IF !((self.placeholder_name == NIL)) THEN

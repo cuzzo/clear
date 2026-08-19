@@ -448,7 +448,7 @@ PUB FN tenseOperationPlanner__join_async_results(types: []Type) RETURNS !TenseJo
   RETURN TenseJoinPlan{ result_type: COPY joined, reason: NIL };
 END
 PRIVATE FN tenseOperationPlanner__operation_plan(operation: TenseOperationKind, input: Type, result: Type, backend: TenseBackendForm, consumed: []TenseLayer, preserved: []TenseLayer, navigation: []TenseLayer, propagation: TensePropagation = TensePropagation.None, recovery: TenseRecovery = TenseRecovery.None, handle_use: TenseHandleUse = TenseHandleUse.None, suspends: Bool = FALSE, may_terminate: Bool = FALSE, refinement: ?Type = NIL) RETURNS TenseOperationPlan ->
-  RETURN TenseOperationPlan{ operation: COPY operation, input_type: COPY input, result_type: COPY result, backend_form: COPY backend, consumed_layers: COPY consumed, preserved_layers: COPY preserved, navigation_layers: COPY navigation, propagation: COPY propagation, recovery: COPY recovery, handle_use: COPY handle_use, suspends: COPY suspends, may_terminate_current_flow: COPY may_terminate, refinement_type: COPY refinement };
+  RETURN TenseOperationPlan{ operation: COPY operation, input_type: COPY input, result_type: COPY result, backend_form: COPY backend, consumed_layers: COPY consumed, preserved_layers: COPY preserved, navigation_layers: COPY navigation, propagation: COPY propagation, recovery: COPY recovery, handle_use: COPY handle_use, suspends: suspends, may_terminate_current_flow: may_terminate, refinement_type: COPY refinement };
 END
 PRIVATE FN tenseOperationPlanner__normalize_navigation_layers(layers: []TenseLayer) RETURNS ![]TenseLayer ->
   MUTABLE future_count = layers |> COUNT (_.kind == TenseLayerKind.Future);

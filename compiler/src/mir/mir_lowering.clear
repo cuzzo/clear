@@ -3293,7 +3293,7 @@ FN mIRLowering__ownership_transfer_marks(self: MIRLowering, name: String, target
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: COPY target, target_alloc: COPY target_alloc, move_guarded: COPY move_guarded })));
+    RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: COPY target, target_alloc: COPY target_alloc, move_guarded: move_guarded })));
 }
 END
 FN mIRLowering__ownership_contract_consumes(self: MIRLowering, node: Emittable) RETURNS ![]String
@@ -7459,7 +7459,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         cleanupEntry__clear_moved_guard_mut(&entry_value_mutable);
       END
     END
-    RETURN BindingMaterialization{ name: "__tmp_${tmp_id}", expr: COPY expr, alloc: COPY ((IF alloc != NIL THEN alloc ELSE mIRLowering__mir_owned_alloc(rtoc_self_view, expr) END) OR_ELSE :heap), type_info: COPY type_info, mutable: COPY mutable_value, cleanup_entry: entry, cleanup_mode: IF transfer_on_success THEN
+    RETURN BindingMaterialization{ name: "__tmp_${tmp_id}", expr: COPY expr, alloc: COPY ((IF alloc != NIL THEN alloc ELSE mIRLowering__mir_owned_alloc(rtoc_self_view, expr) END) OR_ELSE :heap), type_info: COPY type_info, mutable: mutable_value, cleanup_entry: entry, cleanup_mode: IF transfer_on_success THEN
       :err
     ELSE
       :normal
@@ -9974,7 +9974,7 @@ PRIVATE FN mIRLowering__finalize_call_result(self: MIRLowering, node: CallNode, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE call = Call{ callee: COPY callee, args: COPY args, try_wrap: COPY can_fail, owned_return: COPY owned_return, callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
+    MUTABLE call = Call{ callee: COPY callee, args: COPY args, try_wrap: can_fail, owned_return: owned_return, callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
     call.never_success = mIRLowering__call_never_returns_success?(rtoc_self_view, node);
     IF respondsTo?(node, "full_type!") THEN
       MUTABLE retained_error =     IF ((TRUE AND ((MATCH node START CallNode.FuncCall AS item -> item.retain_error_channel, CallNode.MethodCall AS item -> item.retain_error_channel END) == TRUE)) AND TRUE) THEN
@@ -11550,7 +11550,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE var_node: CapabilityVarNode = COPY castLocatableToCapabilityVarNode(cap.var_node);
     MUTABLE var_name = COPY cap.target_label;
     MUTABLE alias_name = COPY cap.alias_name;
-    RETURN WithCapabilityBindingContext{ node: node, cap: COPY cap, var_node: COPY var_node, var_name: COPY var_name, alias_name: COPY alias_name, resolved_type: COPY cap.resolved_type, var_sync: COPY cap.sync, var_storage: COPY cap.storage, zig_var: COPY mIRLowering__with_cap_zig_target(rtoc_self_view, var_node, var_name), clause: COPY clause, with_label: COPY with_label, needs_sort: COPY needs_sort, rt_name: COPY rt_name };
+    RETURN WithCapabilityBindingContext{ node: node, cap: COPY cap, var_node: COPY var_node, var_name: COPY var_name, alias_name: COPY alias_name, resolved_type: COPY cap.resolved_type, var_sync: COPY cap.sync, var_storage: COPY cap.storage, zig_var: COPY mIRLowering__with_cap_zig_target(rtoc_self_view, var_node, var_name), clause: COPY clause, with_label: COPY with_label, needs_sort: needs_sort, rt_name: COPY rt_name };
 }
 END
 PRIVATE FN mIRLowering__materialize_with_capability_binding(MUTABLE self: MIRLowering, materialization: WithBindingMaterialization, context: WithCapabilityBindingContext) RETURNS !Void
@@ -17562,7 +17562,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       placement__cleanup_scope(alloc)
     END;
-    RETURN BindingFact{ name: COPY CAST(node.name AS String), type_info: COPY type_info, storage: COPY storage, alloc: COPY alloc, scope: COPY scope, heap_return: COPY heap_return_var, escape_reason: IF (storage == :heap) THEN
+    RETURN BindingFact{ name: COPY CAST(node.name AS String), type_info: COPY type_info, storage: COPY storage, alloc: COPY alloc, scope: COPY scope, heap_return: heap_return_var, escape_reason: IF (storage == :heap) THEN
       :symbol_storage
     ELSE
       NIL
@@ -20255,7 +20255,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF match_case.binding EXISTS AS binding_value THEN
       MUTABLE safe_binding = TRY (mIRLowering__payload_binding_name(rtoc_self_view, UNWRAP (binding_value), match_case, NIL));
-      RETURN CAST([Emittable{ Let: COPY Let{ name: COPY safe_binding, init: COPY payload, mutable: COPY is_mutable, annotation: NIL, suppression: "_ = &${safe_binding};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
+      RETURN CAST([Emittable{ Let: COPY Let{ name: COPY safe_binding, init: COPY payload, mutable: is_mutable, annotation: NIL, suppression: "_ = &${safe_binding};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
     END
     MUTABLE destructure: ?StructPattern = COPY match_case.destructure;
     IF destructure EXISTS AS destructure_value THEN

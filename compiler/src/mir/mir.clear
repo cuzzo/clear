@@ -12242,7 +12242,7 @@ PUB FN ownershipEffect__none() RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN OwnershipEffect{ produces_owned: FALSE, alloc: NIL, cleanup_kind: NIL, requires_hoist: FALSE, target_var: NIL };
 END
 PUB FN ownershipEffect__owned(alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform, requires_hoist: Bool = TRUE, target_var: ?String = NIL) RETURNS OwnershipEffect EFFECTS REENTRANT ->
-  RETURN OwnershipEffect{ produces_owned: TRUE, alloc: COPY alloc, cleanup_kind: COPY cleanup_kind, requires_hoist: COPY requires_hoist, target_var: COPY target_var };
+  RETURN OwnershipEffect{ produces_owned: TRUE, alloc: COPY alloc, cleanup_kind: COPY cleanup_kind, requires_hoist: requires_hoist, target_var: COPY target_var };
 END
 FN ownershipEffect__from_callable_facts(emits_allocating: Bool, MUTABLE heap_return_alloc: Bool, fixed_void_without_alloc_metadata: Bool, mutates_receiver_without_heap_return: Bool, result_owns: ?Bool, result_type: ?Type, alloc: ?String@symbol, target_var: ?String) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE active = (emits_allocating OR heap_return_alloc);
@@ -13893,7 +13893,7 @@ PUB FN mIR__kept_edge_transfer_boundary(names: []String) RETURNS ![]Emittable ->
   RETURN marks;
 END
 PUB FN mIR__ownership_transfer_marks(name: String, target: String@symbol, target_alloc: ?String@symbol = NIL, move_guarded: Bool = FALSE) RETURNS ![]Emittable ->
-  RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: COPY target, target_alloc: COPY target_alloc, move_guarded: COPY move_guarded })));
+  RETURN TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY name, target: COPY target, target_alloc: COPY target_alloc, move_guarded: move_guarded })));
 END
 PUB STRUCT RuntimeCallSpec {
   callee: String,

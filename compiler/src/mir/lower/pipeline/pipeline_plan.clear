@@ -87,7 +87,7 @@ END
 PRIVATE FN pipelinePlanBuilder__operation(self: PipelinePlanBuilder, execution: PipelineExecutionKind, site: PipelineSite, rhs: Locatable, terminal_kind: PipelineTerminalKind, bc_target: Bool, source_kind: PipelineSourceKind = PipelineSourceKind.Materialized, range_chain: ?PipelineRangeChain = NIL, binding_chain: ?PipelineBindingUnnestChain = NIL) RETURNS PipelineOperationPlan ->
   MUTABLE source = PipelineSourcePlan{ kind: COPY source_kind, node: COPY site.list, range_chain: COPY range_chain, binding_chain: COPY binding_chain };
   MUTABLE terminal = PipelineTerminalPlan{ kind: COPY terminal_kind, node: COPY rhs };
-  MUTABLE facts = PipelineSemanticFacts{ bc_target: COPY bc_target, source_kind: COPY source_kind, terminal_kind: COPY terminal_kind };
+  MUTABLE facts = PipelineSemanticFacts{ bc_target: bc_target, source_kind: COPY source_kind, terminal_kind: COPY terminal_kind };
   RETURN PipelineOperationPlan{ execution: COPY execution, site: COPY site, rhs: COPY rhs, source: COPY source, terminal: COPY terminal, facts: COPY facts };
 END
 PRIVATE FN pipelinePlanBuilder__terminal_kind(self: PipelinePlanBuilder, rhs: Locatable) RETURNS ?PipelineTerminalKind ->

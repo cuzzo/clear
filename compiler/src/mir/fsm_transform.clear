@@ -208,7 +208,7 @@ PUB FN fsmTransform__local_entry(name: String, type_obj: Type, is_suspend_result
   ELSE
     zig_t = "anyopaque";
   END
-  RETURN PromotedLocalFact{ name: COPY name, type_zig: COPY zig_t, is_suspend_result: COPY is_suspend_result };
+  RETURN PromotedLocalFact{ name: COPY name, type_zig: COPY zig_t, is_suspend_result: is_suspend_result };
 END
 # End Ruby module FsmTransform
 FN castContextFieldListItemToOptionalContextFieldInput(value: ContextFieldListItem) RETURNS ?ContextFieldInput ->
