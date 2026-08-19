@@ -420,6 +420,20 @@ module MIRLoweringExpressions
       return MIR::ConcatStr.new([left, right], alloc, nil)
     end
 
+    # List concat (`a + b`): Type.resolve_add_op already types this as the
+    # left operand's list type. It allocates a new list that owns copies of
+    # both operands' elements.
+    if node.op == :ADD
+      result_ti = node.full_type!(context: "binary result")
+      elem_ti = result_ti.is_a?(Type) && result_ti.array? ? result_ti.element_type : nil
+      if elem_ti
+        alloc = alloc_for_node(node)
+        left = hoist_alloc(T.cast(lower(node.left), MIR::Node), node.left)
+        right = hoist_alloc(T.cast(lower(node.right), MIR::Node), node.right)
+        return MIR::ConcatList.new(transpile_type(elem_ti), left, right, alloc)
+      end
+    end
+
     emit_binary_operation_plan(binary_operation_plan(node))
   end
 

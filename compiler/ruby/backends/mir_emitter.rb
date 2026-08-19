@@ -232,6 +232,7 @@ class MIREmitter
     when MIR::SliceExpr        then emit_slice_expr(node)
     when MIR::BlockExpr        then emit_block_expr(node)
     when MIR::ConcatStr        then emit_concat(node)
+    when MIR::ConcatList       then emit_concat_list(node)
     when MIR::Cast             then emit_cast(node)
     when MIR::TryExpr
       # `TRY UNWRAP !?T` must apply `try` to the error union before `.?' to
@@ -3376,6 +3377,11 @@ class MIREmitter
     body = emit_body(node.body)
     label_prefix = node.label ? "#{node.label}: " : ""
     "#{label_prefix}{\n#{body}\n}"
+  end
+
+  sig { params(node: MIR::ConcatList).returns(String) }
+  def emit_concat_list(node)
+    "try CheatLib.listConcat(#{node.elem_type}, #{alloc_zig(node.alloc)}, #{emit(node.left)}, #{emit(node.right)})"
   end
 
   sig { params(node: MIR::ConcatStr).returns(String) }

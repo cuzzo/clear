@@ -781,6 +781,41 @@ pub const CheatLib = struct {
         return list;
     }
 
+    // List concatenation (`a + b`). Accepts either operand as an ArrayList,
+    // a slice, or a fixed array so a literal can be concatenated onto a
+    // built list without an intermediate materialization.
+    pub fn listConcat(comptime T: type, allocator: std.mem.Allocator, a: anytype, b: anytype) !std.ArrayListUnmanaged(T) {
+        var list = try std.ArrayListUnmanaged(T).initCapacity(allocator, concatOperandLen(a) + concatOperandLen(b));
+        errdefer list.deinit(allocator);
+        try appendConcatOperand(T, &list, allocator, a);
+        try appendConcatOperand(T, &list, allocator, b);
+        return list;
+    }
+
+    fn concatOperandLen(operand: anytype) usize {
+        const value = if (@typeInfo(@TypeOf(operand)) == .optional) operand.? else operand;
+        const V = @TypeOf(value);
+        if (@typeInfo(V) == .pointer and @typeInfo(V).pointer.size == .one) return concatOperandLen(value.*);
+        if (@typeInfo(V) == .@"struct" and @hasField(V, "items")) return value.items.len;
+        return value.len;
+    }
+
+    // An array operand arrives by value, so its slice may only be taken from a
+    // binding that outlives the append -- never returned to the caller.
+    // Elements are duplicated: the concatenation owns its contents outright,
+    // so cleaning it up cannot free memory an operand still owns.
+    fn appendConcatOperand(comptime T: type, list: *std.ArrayListUnmanaged(T), allocator: std.mem.Allocator, operand: anytype) !void {
+        const value = if (@typeInfo(@TypeOf(operand)) == .optional) operand.? else operand;
+        const V = @TypeOf(value);
+        if (@typeInfo(V) == .pointer and @typeInfo(V).pointer.size == .one) {
+            return appendConcatOperand(T, list, allocator, value.*);
+        }
+        const items: []const T = if (@typeInfo(V) == .@"struct" and @hasField(V, "items"))
+            value.items
+        else if (@typeInfo(V) == .array) &value else value;
+        for (items) |item| list.appendAssumeCapacity(try dupeValue(T, item, allocator));
+    }
+
     pub fn makeListCapacity(comptime T: type, allocator: std.mem.Allocator, items: []const T, minimum_capacity: usize) !std.ArrayListUnmanaged(T) {
         var list = try std.ArrayListUnmanaged(T).initCapacity(allocator, @max(items.len, minimum_capacity));
         list.appendSliceAssumeCapacity(items);

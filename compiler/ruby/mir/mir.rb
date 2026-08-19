@@ -3458,6 +3458,28 @@ module MIR
     end
   end
 
+  # List concatenation (`a + b`).
+  # Zig: try CheatLib.listConcat(T, alloc, a, b)
+  ConcatList = Struct.new(:elem_type, :left, :right, :alloc) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
+    sig { params(elem_type: String, left: Emittable, right: Emittable, alloc: Symbol).void }
+    def initialize(elem_type, left, right, alloc)
+      super(elem_type, left, right, alloc)
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([left, right])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      owned_effect_for_alloc(alloc)
+    end
+  end
+
   # Frame mark save.
   # Zig: const frame_mark = rt.saveFrameMark();
   FrameSave = Struct.new(:rt_expr) do
@@ -5530,7 +5552,7 @@ module MIR
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain, RcRelease,
     ComptimeCarrierPayload, MonomorphicKeep,
-    RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, OwnedSlice,
+    RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, ConcatList, OwnedSlice,
     NextPromiseList,
     IndexInsert, BatchWindowPush, BatchWindowFlush,
     SnapshotTransaction, SnapshotMultiTxn,

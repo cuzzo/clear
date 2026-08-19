@@ -1,0 +1,37 @@
+# Test: `a + b` on lists allocates a new list that owns copies of both
+# operands' elements, so freeing it cannot free memory an operand still owns.
+
+STRUCT Item { name: String, size: Int64 }
+
+FN suffix() RETURNS ![]Item ->
+    MUTABLE tail: []Item = List[];
+    &tail.append(Item{ name: "third", size: 3 });
+    RETURN tail;
+END
+
+FN joined() RETURNS ![]Item ->
+    MUTABLE head: []Item = List[];
+    &head.append(Item{ name: "first", size: 1 });
+    &head.append(Item{ name: "second", size: 2 });
+    RETURN head + TRY suffix();
+END
+
+FN main() RETURNS Void ->
+    all = TRY joined();
+    ASSERT all.length() == 3;
+    MUTABLE total = 0;
+    FOR item IN all DO
+        total = total + item.size;
+    END
+    ASSERT total == 6;
+    ASSERT all[2]?.name == "third";
+
+    MUTABLE nums: []Int64 = List[];
+    &nums.append(1);
+    with_literal = nums + [2, 3];
+    ASSERT with_literal.length() == 3;
+    ASSERT nums.length() == 1;
+
+    empty: []Int64 = List[];
+    ASSERT (empty + with_literal).length() == 3;
+END

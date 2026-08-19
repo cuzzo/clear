@@ -29,6 +29,43 @@ test "makeListCapacity honors a minimum above the initial item count" {
     try std.testing.expect(list.capacity >= 16);
 }
 
+test "listConcat joins a list, a slice, and an array literal into one owned list" {
+    const allocator = std.testing.allocator;
+    var left = try CheatLib.makeList(u64, allocator, &[_]u64{ 1, 2 });
+    defer left.deinit(allocator);
+    const right = [_]u64{ 3, 4, 5 };
+
+    var joined = try CheatLib.listConcat(u64, allocator, left, right);
+    defer joined.deinit(allocator);
+    try std.testing.expectEqualSlices(u64, &[_]u64{ 1, 2, 3, 4, 5 }, joined.items);
+
+    // The result owns its buffer: mutating it must not disturb either operand.
+    joined.items[0] = 99;
+    try std.testing.expectEqualSlices(u64, &[_]u64{ 1, 2 }, left.items);
+
+    // Elements are duplicated, so the result can be freed without touching
+    // memory an operand still owns.
+    var strings = try CheatLib.makeList([]const u8, allocator, &[_][]const u8{try allocator.dupe(u8, "ab")});
+    defer {
+        for (strings.items) |s| allocator.free(s);
+        strings.deinit(allocator);
+    }
+    var joined_strings = try CheatLib.listConcat([]const u8, allocator, strings, [_][]const u8{});
+    for (joined_strings.items) |s| allocator.free(s);
+    joined_strings.deinit(allocator);
+    try std.testing.expectEqualStrings("ab", strings.items[0]);
+
+    var through_ptr = try CheatLib.listConcat(u64, allocator, &left, joined);
+    defer through_ptr.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 7), through_ptr.items.len);
+
+    var empty = try CheatLib.makeList(u64, allocator, &[_]u64{});
+    defer empty.deinit(allocator);
+    var only_right = try CheatLib.listConcat(u64, allocator, empty, right);
+    defer only_right.deinit(allocator);
+    try std.testing.expectEqualSlices(u64, &right, only_right.items);
+}
+
 test "Grid is empty by default and rankGet uses checked row-major offsets" {
     var grid: CheatLib.Grid(u64, 2) = .empty;
     defer grid.deinit(std.testing.allocator);

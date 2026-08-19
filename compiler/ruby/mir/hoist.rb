@@ -529,7 +529,7 @@ module MIRHoistLowering
   ALLOC_MIR_CLASSES = [
     MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::CapWrap,
     MIR::SharePromote, MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade,
-    MIR::DeepCopy, MIR::ConcatStr, MIR::ContainerInit, MIR::MonomorphicKeep,
+    MIR::DeepCopy, MIR::ConcatStr, MIR::ConcatList, MIR::ContainerInit, MIR::MonomorphicKeep,
   ].freeze
 
   sig { returns(T::Array[MIR::Stmt]) }
@@ -838,7 +838,7 @@ module MIRHoistLowering
       Type.new("#{mir.elem_type}[]", location: alloc)
     when MIR::OwnedSlice
       Type.new(:Slice, location: alloc)
-    when MIR::MakeList
+    when MIR::MakeList, MIR::ConcatList
       Type.new("#{mir.elem_type}[]", collection: :list, location: alloc)
     when MIR::HeapCreate
       Type.new(mir.zig_type.to_s.delete_prefix("*").to_sym, layout: :indirect)
@@ -1579,7 +1579,7 @@ module MIRHoistLowering
       e = uniform_cleanup_entry("[]#{mir.elem_type}", alloc: alloc)
       e[:elem_zig_type] = mir.elem_type
       e
-    when MIR::MakeList
+    when MIR::MakeList, MIR::ConcatList
       uniform_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})", alloc: alloc)
     when MIR::OwnedSlice
       uniform_cleanup_entry("[]", alloc: alloc)

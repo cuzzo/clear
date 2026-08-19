@@ -136,7 +136,7 @@ class MIRChecker
     MIR::BatchWindowPush, MIR::BgBlock, MIR::BinOp, MIR::BlockExpr, MIR::BreakExpr,
     MIR::BreakStmt, MIR::Call, MIR::CapWrap, MIR::CapabilityLockAddress,
     MIR::CapabilityLockTarget, MIR::CapabilityUnwrap, MIR::Cast, MIR::CatchWrapper,
-    MIR::Cleanup, MIR::Comment, MIR::Comptime, MIR::ConcatStr, MIR::Conditional,
+    MIR::Cleanup, MIR::Comment, MIR::Comptime, MIR::ConcatList, MIR::ConcatStr, MIR::Conditional,
     MIR::ConstCast, MIR::ContainerInit, MIR::ContinueStmt, MIR::DebugOnly, MIR::DeepCopy,
     MIR::DefaultStreamCapacity, MIR::DeferStmt, MIR::Deref, MIR::DestroyPtr,
     MIR::DestructureSet, MIR::DestructureTarget, MIR::DiscardOwned, MIR::DoBlock,
@@ -2961,7 +2961,7 @@ class MIRChecker
     end
 
     case expr
-    when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
+    when MIR::DupeSlice, MIR::ConcatStr, MIR::ConcatList, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap
       MIR::Placement.frame?(expr.alloc)
     else
