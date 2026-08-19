@@ -198,11 +198,11 @@ PRIVATE FN pipelineBatchWindowLowerer__bc_batch_end_expr(self: PipelineBatchWind
   RETURN Conditional{ cond: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "<", left: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: "__bw_offset", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "__bw_step", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "__bw_total", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_val: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: "__bw_offset", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: "__bw_step", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, else_val: Emittable{ Ident: COPY Ident{ name: "__bw_total", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
 END
 PRIVATE FN pipelineBatchWindowLowerer__bc_append_value_stmt(self: PipelineBatchWindowLowerer, alloc: String@symbol, append_uses_allocator: Bool) RETURNS !ExprStmt ->
-  MUTABLE append_args =   IF append_uses_allocator THEN
-    [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL } }]
-  ELSE
-    [Emittable{ Ident: COPY Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL } }]
-  END;
+  MUTABLE append_args: []Emittable = [];
+  IF append_uses_allocator THEN
+    &append_args.append(Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } });
+  END
+  &append_args.append(Emittable{ Ident: COPY Ident{ name: "__bw_val", lowered_node_id: NIL, ownership_consumption: NIL } });
   RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "res_list", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "append", args: COPY append_args, try_wrap: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(append_args.length())), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN pipelineBatchWindowLowerer__batch_window_setup_stmts(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS ![]Emittable ->

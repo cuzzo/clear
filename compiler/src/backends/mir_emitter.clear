@@ -3158,7 +3158,7 @@ PRIVATE FN mIREmitter__emit_expr_stmt(MUTABLE self: MIREmitter, node: ExprStmt) 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE code: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
-    IF node.discard THEN
+    IF (node.discard OR_ELSE FALSE) THEN
       RETURN "_ = ${code};";
     ELSE
       RETURN "${code};";

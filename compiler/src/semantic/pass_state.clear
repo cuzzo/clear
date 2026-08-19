@@ -11,7 +11,9 @@ PUB STRUCT StageSpec {
   producer: String,
   requires: ?String@symbol
 }
-stages: [12]StageSpec = [StageSpec{ name: :annotated, producer: "SemanticAnnotator", requires: NIL }, StageSpec{ name: :pipeline_rewritten, producer: "PipelineRewriter", requires: :annotated }, StageSpec{ name: :string_concat_rewritten, producer: "StringConcatRewriter", requires: :pipeline_rewritten }, StageSpec{ name: :hoisted, producer: "Hoist", requires: :string_concat_rewritten }, StageSpec{ name: :premir_type_checked, producer: "PreMirTypeCheck", requires: :hoisted }, StageSpec{ name: :escape_analyzed, producer: "MIRPass/EscapeAnalysis", requires: :premir_type_checked }, StageSpec{ name: :cleanup_classified, producer: "MIRPass/CleanupClassifier", requires: :escape_analyzed }, StageSpec{ name: :loop_frame_analyzed, producer: "MIRPass/LoopFrameAnalysis", requires: :cleanup_classified }, StageSpec{ name: :needs_rt_finalized, producer: "MIRPass#finalize_needs_rt!", requires: :loop_frame_analyzed }, StageSpec{ name: :mir_pass_complete, producer: "MIRPass", requires: :needs_rt_finalized }, StageSpec{ name: :mir_lowered, producer: "MIRLowering", requires: :mir_pass_complete }, StageSpec{ name: :mir_checked, producer: "MIRChecker", requires: :mir_lowered }];
+PRIVATE FN passStages() RETURNS [12]StageSpec ->
+  RETURN [StageSpec{ name: :annotated, producer: "SemanticAnnotator", requires: NIL }, StageSpec{ name: :pipeline_rewritten, producer: "PipelineRewriter", requires: :annotated }, StageSpec{ name: :string_concat_rewritten, producer: "StringConcatRewriter", requires: :pipeline_rewritten }, StageSpec{ name: :hoisted, producer: "Hoist", requires: :string_concat_rewritten }, StageSpec{ name: :premir_type_checked, producer: "PreMirTypeCheck", requires: :hoisted }, StageSpec{ name: :escape_analyzed, producer: "MIRPass/EscapeAnalysis", requires: :premir_type_checked }, StageSpec{ name: :cleanup_classified, producer: "MIRPass/CleanupClassifier", requires: :escape_analyzed }, StageSpec{ name: :loop_frame_analyzed, producer: "MIRPass/LoopFrameAnalysis", requires: :cleanup_classified }, StageSpec{ name: :needs_rt_finalized, producer: "MIRPass#finalize_needs_rt!", requires: :loop_frame_analyzed }, StageSpec{ name: :mir_pass_complete, producer: "MIRPass", requires: :needs_rt_finalized }, StageSpec{ name: :mir_lowered, producer: "MIRLowering", requires: :mir_pass_complete }, StageSpec{ name: :mir_checked, producer: "MIRChecker", requires: :mir_lowered }];
+END
 PUB FN mIRPassState__initialize(MUTABLE self: MIRPassState) RETURNS Void
   REQUIRES self: LOCAL
 ->
@@ -51,7 +53,7 @@ PRIVATE FN mIRPassState__completed_stages(self: MIRPassState) RETURNS ![]String@
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE done: []String@symbol = [];
-    FOR stage IN stages DO
+    FOR stage IN passStages() DO
       IF rtoc_self_view.completed.contains?(stage.name) THEN
         &done.append(COPY stage.name);
       END
@@ -102,7 +104,7 @@ PUB FN mIRPassState__validate_stage_mut(self: MIRPassState, stage: String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR spec IN stages DO
+    FOR spec IN passStages() DO
       IF (spec.name == stage) THEN
         RETURN;
       END
@@ -114,7 +116,7 @@ PRIVATE FN mIRPassState__stage_spec_mut(self: MIRPassState, stage: String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR spec IN stages DO
+    FOR spec IN passStages() DO
       IF (spec.name == stage) THEN
         RETURN COPY spec;
       END
@@ -126,7 +128,7 @@ PRIVATE FN mIRPassState__next_unmarked_stage(self: MIRPassState) RETURNS ?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR spec IN stages DO
+    FOR spec IN passStages() DO
       IF !(rtoc_self_view.completed.contains?(spec.name)) THEN
         RETURN COPY spec.name;
       END

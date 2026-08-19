@@ -106,7 +106,7 @@ FN fnDef__append_child_expr<T>(self: FnDef, MUTABLE children: []Emittable, value
     fnDef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -190,7 +190,7 @@ FN param__append_child_expr<T>(self: MIRParam, MUTABLE children: []Emittable, va
     param__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -289,7 +289,7 @@ FN structDef__append_child_expr<T>(self: MIRStructDef, MUTABLE children: []Emitt
     structDef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -358,7 +358,7 @@ FN fieldDef__append_child_expr<T>(self: FieldDef, MUTABLE children: []Emittable,
     fieldDef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -447,7 +447,7 @@ FN enumDef__append_child_expr<T>(self: MIREnumDef, MUTABLE children: []Emittable
     enumDef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -518,7 +518,7 @@ FN unionTypeDef__append_child_expr<T>(self: UnionTypeDef, MUTABLE children: []Em
     unionTypeDef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -585,7 +585,7 @@ FN import__append_child_expr<T>(self: Import, MUTABLE children: []Emittable, val
     import__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -654,7 +654,7 @@ FN typeAlias__append_child_expr<T>(self: TypeAlias, MUTABLE children: []Emittabl
     typeAlias__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -726,7 +726,7 @@ FN cExternFnDecl__append_child_expr<T>(self: CExternFnDecl, MUTABLE children: []
     cExternFnDecl__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -795,7 +795,7 @@ FN cExternStructDef__append_child_expr<T>(self: CExternStructDef, MUTABLE childr
     cExternStructDef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -860,7 +860,7 @@ FN moduleNamespace__append_child_expr<T>(self: ModuleNamespace, MUTABLE children
     moduleNamespace__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -941,7 +941,7 @@ FN testDef__append_child_expr<T>(self: TestDef, MUTABLE children: []Emittable, v
     testDef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1032,7 +1032,7 @@ FN let__append_child_expr<T>(self: Let, MUTABLE children: []Emittable, value: T)
     let__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1098,7 +1098,7 @@ FN set__append_child_expr<T>(self: Set, MUTABLE children: []Emittable, value: T)
     set__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1179,7 +1179,7 @@ FN destructureTarget__append_child_expr<T>(self: MIRDestructureTarget, MUTABLE c
     destructureTarget__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1244,7 +1244,7 @@ FN destructureSet__append_child_expr<T>(self: DestructureSet, MUTABLE children: 
     destructureSet__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1311,7 +1311,7 @@ FN reassignWithCleanup__append_child_expr<T>(self: ReassignWithCleanup, MUTABLE 
     reassignWithCleanup__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1376,7 +1376,7 @@ FN resourceClose__append_child_expr<T>(self: ResourceClose, MUTABLE children: []
     resourceClose__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1452,7 +1452,7 @@ FN ifStmt__append_child_expr<T>(self: IfStmt, MUTABLE children: []Emittable, val
     ifStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1536,7 +1536,7 @@ FN ifBindStmt__append_child_expr<T>(self: IfBindStmt, MUTABLE children: []Emitta
     ifBindStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1610,7 +1610,7 @@ FN whileStmt__append_child_expr<T>(self: WhileStmt, MUTABLE children: []Emittabl
     whileStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1684,7 +1684,7 @@ FN forStmt__append_child_expr<T>(self: ForStmt, MUTABLE children: []Emittable, v
     forStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1754,7 +1754,7 @@ FN scopeBlock__append_child_expr<T>(self: ScopeBlock, MUTABLE children: []Emitta
     scopeBlock__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1846,7 +1846,7 @@ FN switchStmt__append_child_expr<T>(self: SwitchStmt, MUTABLE children: []Emitta
     switchStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -1931,7 +1931,7 @@ FN unionMatchStmt__append_child_expr<T>(self: UnionMatchStmt, MUTABLE children: 
     unionMatchStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2016,7 +2016,7 @@ FN ifChain__append_child_expr<T>(self: IfChain, MUTABLE children: []Emittable, v
     ifChain__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2080,7 +2080,7 @@ FN returnStmt__append_child_expr<T>(self: ReturnStmt, MUTABLE children: []Emitta
     returnStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2145,7 +2145,7 @@ FN breakStmt__append_child_expr<T>(self: BreakStmt, MUTABLE children: []Emittabl
     breakStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2206,7 +2206,7 @@ FN breakExpr__append_child_expr<T>(self: BreakExpr, MUTABLE children: []Emittabl
     breakExpr__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2271,7 +2271,7 @@ FN continueStmt__append_child_expr<T>(self: ContinueStmt, MUTABLE children: []Em
     continueStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2336,7 +2336,7 @@ FN panic__append_child_expr<T>(self: Panic, MUTABLE children: []Emittable, value
     panic__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2401,7 +2401,7 @@ FN assertStmt__append_child_expr<T>(self: AssertStmt, MUTABLE children: []Emitta
     assertStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2471,7 +2471,7 @@ FN assertRaisesCheck__append_child_expr<T>(self: AssertRaisesCheck, MUTABLE chil
     assertRaisesCheck__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2536,7 +2536,7 @@ FN testPreamble__append_child_expr<T>(self: TestPreamble, MUTABLE children: []Em
     testPreamble__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2606,7 +2606,7 @@ FN debugOnly__append_child_expr<T>(self: DebugOnly, MUTABLE children: []Emittabl
     debugOnly__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2674,7 +2674,7 @@ FN sort__append_child_expr<T>(self: Sort, MUTABLE children: []Emittable, value: 
     sort__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2738,7 +2738,7 @@ FN soaFieldAccess__append_child_expr<T>(self: SoaFieldAccess, MUTABLE children: 
     soaFieldAccess__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2805,7 +2805,7 @@ FN tryOrPanic__append_child_expr<T>(self: TryOrPanic, MUTABLE children: []Emitta
     tryOrPanic__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2874,7 +2874,7 @@ FN indexInsert__append_child_expr<T>(self: IndexInsert, MUTABLE children: []Emit
     indexInsert__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -2943,7 +2943,7 @@ FN batchWindowPush__append_child_expr<T>(self: BatchWindowPush, MUTABLE children
     batchWindowPush__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3011,7 +3011,7 @@ FN batchWindowFlush__append_child_expr<T>(self: BatchWindowFlush, MUTABLE childr
     batchWindowFlush__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3107,7 +3107,7 @@ FN deferStmt__append_child_expr<T>(self: MIRDeferStmt, MUTABLE children: []Emitt
     deferStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3187,7 +3187,7 @@ FN errDeferStmt__append_child_expr<T>(self: ErrDeferStmt, MUTABLE children: []Em
     errDeferStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3202,7 +3202,7 @@ FN errDeferStmt__stmt?(self: ErrDeferStmt) RETURNS Bool ->
 END
 PUB STRUCT ExprStmt {
   expr: Emittable,
-  discard: Any@multiowned,
+  discard: ?Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -3259,7 +3259,7 @@ FN exprStmt__append_child_expr<T>(self: ExprStmt, MUTABLE children: []Emittable,
     exprStmt__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3328,7 +3328,7 @@ FN discardOwned__append_child_expr<T>(self: DiscardOwned, MUTABLE children: []Em
     discardOwned__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3460,7 +3460,7 @@ FN bgBlock__append_child_expr<T>(self: MIRBgBlock, MUTABLE children: []Emittable
     bgBlock__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3542,7 +3542,7 @@ FN streamSpawn__append_child_expr<T>(self: StreamSpawn, MUTABLE children: []Emit
     streamSpawn__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3654,7 +3654,7 @@ FN fsmStructure__append_child_expr<T>(self: FsmStructure, MUTABLE children: []Em
     fsmStructure__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3718,7 +3718,7 @@ FN fsmIoBody__append_child_expr<T>(self: FsmIoBody, MUTABLE children: []Emittabl
     fsmIoBody__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3782,7 +3782,7 @@ FN streamYield__append_child_expr<T>(self: StreamYield, MUTABLE children: []Emit
     streamYield__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3849,7 +3849,7 @@ FN fsmB1Body__append_child_expr<T>(self: FsmB1Body, MUTABLE children: []Emittabl
     fsmB1Body__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -3922,7 +3922,7 @@ FN fsmGenericBody__append_child_expr<T>(self: FsmGenericBody, MUTABLE children: 
     fsmGenericBody__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4134,7 +4134,7 @@ FN capabilityLockTarget__append_child_expr<T>(self: CapabilityLockTarget, MUTABL
     capabilityLockTarget__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4197,7 +4197,7 @@ FN capabilityLockAddress__append_child_expr<T>(self: CapabilityLockAddress, MUTA
     capabilityLockAddress__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4280,7 +4280,7 @@ FN sortedLockAcquire__append_child_expr<T>(self: SortedLockAcquire, MUTABLE chil
     sortedLockAcquire__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4352,7 +4352,7 @@ FN fallibleLockBinding__append_child_expr<T>(self: FallibleLockBinding, MUTABLE 
     fallibleLockBinding__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4454,7 +4454,7 @@ FN catchWrapper__append_child_expr<T>(self: CatchWrapper, MUTABLE children: []Em
     catchWrapper__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4561,7 +4561,7 @@ FN doBlock__append_child_expr<T>(self: MIRDoBlock, MUTABLE children: []Emittable
     doBlock__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4626,7 +4626,7 @@ FN noop__append_child_expr<T>(self: Noop, MUTABLE children: []Emittable, value: 
     noop__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4691,7 +4691,7 @@ FN comment__append_child_expr<T>(self: Comment, MUTABLE children: []Emittable, v
     comment__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4756,7 +4756,7 @@ FN suppress__append_child_expr<T>(self: Suppress, MUTABLE children: []Emittable,
     suppress__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4822,7 +4822,7 @@ FN pubConst__append_child_expr<T>(self: PubConst, MUTABLE children: []Emittable,
     pubConst__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4889,7 +4889,7 @@ FN moduleVar__append_child_expr<T>(self: ModuleVar, MUTABLE children: []Emittabl
     moduleVar__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -4954,7 +4954,7 @@ FN moduleConstFree__append_child_expr<T>(self: ModuleConstFree, MUTABLE children
     moduleConstFree__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5021,7 +5021,7 @@ FN heapCreate__append_child_expr<T>(self: HeapCreate, MUTABLE children: []Emitta
     heapCreate__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5087,7 +5087,7 @@ FN dupeSlice__append_child_expr<T>(self: DupeSlice, MUTABLE children: []Emittabl
     dupeSlice__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5154,7 +5154,7 @@ FN allocSlice__append_child_expr<T>(self: AllocSlice, MUTABLE children: []Emitta
     allocSlice__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5220,7 +5220,7 @@ FN freeSlice__append_child_expr<T>(self: FreeSlice, MUTABLE children: []Emittabl
     freeSlice__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5286,7 +5286,7 @@ FN destroyPtr__append_child_expr<T>(self: DestroyPtr, MUTABLE children: []Emitta
     destroyPtr__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5352,7 +5352,7 @@ FN cleanup__append_child_expr<T>(self: Cleanup, MUTABLE children: []Emittable, v
     cleanup__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5418,7 +5418,7 @@ FN errCleanup__append_child_expr<T>(self: ErrCleanup, MUTABLE children: []Emitta
     errCleanup__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5483,7 +5483,7 @@ FN moveMark__append_child_expr<T>(self: MoveMark, MUTABLE children: []Emittable,
     moveMark__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5561,7 +5561,7 @@ FN deepCopy__append_child_expr<T>(self: DeepCopy, MUTABLE children: []Emittable,
     deepCopy__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5629,7 +5629,7 @@ FN containerInit__append_child_expr<T>(self: ContainerInit, MUTABLE children: []
     containerInit__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5704,7 +5704,7 @@ FN capWrap__append_child_expr<T>(self: CapWrap, MUTABLE children: []Emittable, v
     capWrap__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5770,7 +5770,7 @@ FN sharePromote__append_child_expr<T>(self: SharePromote, MUTABLE children: []Em
     sharePromote__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5834,7 +5834,7 @@ FN rcRetain__append_child_expr<T>(self: RcRetain, MUTABLE children: []Emittable,
     rcRetain__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5896,7 +5896,7 @@ FN comptimeCarrierPayload__append_child_expr<T>(self: ComptimeCarrierPayload, MU
     comptimeCarrierPayload__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -5960,7 +5960,7 @@ FN monomorphicKeep__append_child_expr<T>(self: MonomorphicKeep, MUTABLE children
     monomorphicKeep__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6025,7 +6025,7 @@ FN rcRelease__append_child_expr<T>(self: RcRelease, MUTABLE children: []Emittabl
     rcRelease__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6090,7 +6090,7 @@ FN rcDowngrade__append_child_expr<T>(self: RcDowngrade, MUTABLE children: []Emit
     rcDowngrade__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6155,7 +6155,7 @@ FN weakUpgrade__append_child_expr<T>(self: WeakUpgrade, MUTABLE children: []Emit
     weakUpgrade__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6218,7 +6218,7 @@ FN allocatorRef__append_child_expr<T>(self: AllocatorRef, MUTABLE children: []Em
     allocatorRef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6287,7 +6287,7 @@ FN freezeExpr__append_child_expr<T>(self: FreezeExpr, MUTABLE children: []Emitta
     freezeExpr__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6354,7 +6354,7 @@ FN makeList__append_child_expr<T>(self: MakeList, MUTABLE children: []Emittable,
     makeList__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6419,7 +6419,7 @@ FN frameSave__append_child_expr<T>(self: FrameSave, MUTABLE children: []Emittabl
     frameSave__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6484,7 +6484,7 @@ FN frameRestore__append_child_expr<T>(self: FrameRestore, MUTABLE children: []Em
     frameRestore__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6546,7 +6546,7 @@ FN capabilityUnwrap__append_child_expr<T>(self: CapabilityUnwrap, MUTABLE childr
     capabilityUnwrap__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6622,7 +6622,7 @@ FN snapshotRead__append_child_expr<T>(self: SnapshotRead, MUTABLE children: []Em
     snapshotRead__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6708,7 +6708,7 @@ FN snapshotTransaction__append_child_expr<T>(self: SnapshotTransaction, MUTABLE 
     snapshotTransaction__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6792,7 +6792,7 @@ FN snapshotMultiTxn__append_child_expr<T>(self: SnapshotMultiTxn, MUTABLE childr
     snapshotMultiTxn__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6865,7 +6865,7 @@ FN polymorphicMutate__append_child_expr<T>(self: PolymorphicMutate, MUTABLE chil
     polymorphicMutate__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -6948,7 +6948,7 @@ FN polymorphicMutateFlow__append_child_expr<T>(self: PolymorphicMutateFlow, MUTA
     polymorphicMutateFlow__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7010,7 +7010,7 @@ FN polymorphicFlowSignal__append_child_expr<T>(self: PolymorphicFlowSignal, MUTA
     polymorphicFlowSignal__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7094,7 +7094,7 @@ FN withMatchDispatch__append_child_expr<T>(self: WithMatchDispatch, MUTABLE chil
     withMatchDispatch__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7174,7 +7174,7 @@ FN allocMark__append_child_expr<T>(self: AllocMark, MUTABLE children: []Emittabl
     allocMark__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7245,7 +7245,7 @@ FN ownedCreate__append_child_expr<T>(self: OwnedCreate, MUTABLE children: []Emit
     ownedCreate__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7315,7 +7315,7 @@ FN ownedDestroy__append_child_expr<T>(self: OwnedDestroy, MUTABLE children: []Em
     ownedDestroy__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7382,7 +7382,7 @@ FN ownedTransfer__append_child_expr<T>(self: OwnedTransfer, MUTABLE children: []
     ownedTransfer__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7448,7 +7448,7 @@ FN ownedBorrow__append_child_expr<T>(self: OwnedBorrow, MUTABLE children: []Emit
     ownedBorrow__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7519,7 +7519,7 @@ FN ownedStore__append_child_expr<T>(self: OwnedStore, MUTABLE children: []Emitta
     ownedStore__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7585,7 +7585,7 @@ FN ownedReturn__append_child_expr<T>(self: OwnedReturn, MUTABLE children: []Emit
     ownedReturn__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7650,7 +7650,7 @@ FN returnMark__append_child_expr<T>(self: ReturnMark, MUTABLE children: []Emitta
     returnMark__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7720,7 +7720,7 @@ FN transferMark__append_child_expr<T>(self: TransferMark, MUTABLE children: []Em
     transferMark__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7789,7 +7789,7 @@ FN reassignMark__append_child_expr<T>(self: ReassignMark, MUTABLE children: []Em
     reassignMark__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7859,7 +7859,7 @@ FN fieldCleanupMark__append_child_expr<T>(self: FieldCleanupMark, MUTABLE childr
     fieldCleanupMark__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7968,7 +7968,7 @@ FN call__append_child_expr<T>(self: Call, MUTABLE children: []Emittable, value: 
     call__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -7995,7 +7995,8 @@ FN runtimeCall__child_exprs(self: RuntimeCall) RETURNS ![]Emittable EFFECTS REEN
   RETURN runtimeCall__compact_child_exprs(self, [CAST(self.args AS Any)]);
 END
 FN runtimeCall__explicit_ownership_contract(self: RuntimeCall) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
-  MUTABLE rtoc_owned_return_123: ?OwnershipContract@multiowned = (KEEP self.spec.callable_contract).ownership_contract;
+  MUTABLE rtoc_contract_123: CallableContract@multiowned = KEEP self.spec.callable_contract;
+  MUTABLE rtoc_owned_return_123: ?OwnershipContract@multiowned = COPY rtoc_contract_123.ownership_contract;
   RETURN rtoc_owned_return_123;
 END
 FN runtimeCall__owned_return?(self: RuntimeCall) RETURNS Bool ->
@@ -8047,7 +8048,7 @@ FN runtimeCall__append_child_expr<T>(self: RuntimeCall, MUTABLE children: []Emit
     runtimeCall__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8118,7 +8119,7 @@ FN tailCall__append_child_expr<T>(self: TailCall, MUTABLE children: []Emittable,
     tailCall__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8241,7 +8242,7 @@ FN methodCall__append_child_expr<T>(self: MIRMethodCall, MUTABLE children: []Emi
     methodCall__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8304,7 +8305,7 @@ FN fieldGet__append_child_expr<T>(self: FieldGet, MUTABLE children: []Emittable,
     fieldGet__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8367,7 +8368,7 @@ FN unionPayloadGet__append_child_expr<T>(self: UnionPayloadGet, MUTABLE children
     unionPayloadGet__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8430,7 +8431,7 @@ FN indexGet__append_child_expr<T>(self: IndexGet, MUTABLE children: []Emittable,
     indexGet__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8495,7 +8496,7 @@ FN protocolCall__append_child_expr<T>(self: ProtocolCall, MUTABLE children: []Em
     protocolCall__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8575,7 +8576,7 @@ FN binOp__append_child_expr<T>(self: MIRBinOp, MUTABLE children: []Emittable, va
     binOp__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8651,7 +8652,7 @@ FN unaryOp__append_child_expr<T>(self: MIRUnaryOp, MUTABLE children: []Emittable
     unaryOp__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8713,7 +8714,7 @@ FN fallibleOk__append_child_expr<T>(self: FallibleOk, MUTABLE children: []Emitta
     fallibleOk__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8775,7 +8776,7 @@ FN futureReady__append_child_expr<T>(self: FutureReady, MUTABLE children: []Emit
     futureReady__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8838,7 +8839,7 @@ FN lit__append_child_expr<T>(self: Lit, MUTABLE children: []Emittable, value: T)
     lit__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8901,7 +8902,7 @@ FN symbolLit__append_child_expr<T>(self: SymbolLit, MUTABLE children: []Emittabl
     symbolLit__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -8963,7 +8964,7 @@ FN voidLiteral__append_child_expr<T>(self: VoidLiteral, MUTABLE children: []Emit
     voidLiteral__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9025,7 +9026,7 @@ FN enumOrdinal__append_child_expr<T>(self: EnumOrdinal, MUTABLE children: []Emit
     enumOrdinal__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9088,7 +9089,7 @@ FN ident__append_child_expr<T>(self: Ident, MUTABLE children: []Emittable, value
     ident__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9154,7 +9155,7 @@ FN tupleLiteral__append_child_expr<T>(self: TupleLiteral, MUTABLE children: []Em
     tupleLiteral__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9217,7 +9218,7 @@ FN fnRef__append_child_expr<T>(self: FnRef, MUTABLE children: []Emittable, value
     fnRef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9281,7 +9282,7 @@ FN lockAcquire__append_child_expr<T>(self: LockAcquire, MUTABLE children: []Emit
     lockAcquire__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9346,7 +9347,7 @@ FN typeOf__append_child_expr<T>(self: TypeOf, MUTABLE children: []Emittable, val
     typeOf__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9409,7 +9410,7 @@ FN typeEq__append_child_expr<T>(self: TypeEq, MUTABLE children: []Emittable, val
     typeEq__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9434,7 +9435,7 @@ FN structInit__child_exprs(self: StructInit) RETURNS ![]Emittable EFFECTS REENTR
   FOR _ IN self.fields DO
   MUTABLE value: ?Emittable = mIR__struct_init_field_value(_);
   IF value EXISTS AS value_value THEN
-      &values.append(value_value);
+      &values.append(COPY value_value);
   END
   END
   RETURN structInit__compact_child_exprs(self, values);
@@ -9478,7 +9479,7 @@ FN structInit__append_child_expr<T>(self: StructInit, MUTABLE children: []Emitta
     structInit__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9541,7 +9542,7 @@ FN arrayInit__append_child_expr<T>(self: ArrayInit, MUTABLE children: []Emittabl
     arrayInit__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9612,7 +9613,7 @@ FN arrayDefaultInit__append_child_expr<T>(self: ArrayDefaultInit, MUTABLE childr
     arrayDefaultInit__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9677,7 +9678,7 @@ FN sliceExpr__append_child_expr<T>(self: SliceExpr, MUTABLE children: []Emittabl
     sliceExpr__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9798,7 +9799,7 @@ FN blockExpr__append_child_expr<T>(self: MIRBlockExpr, MUTABLE children: []Emitt
     blockExpr__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9865,7 +9866,7 @@ FN concatStr__append_child_expr<T>(self: ConcatStr, MUTABLE children: []Emittabl
     concatStr__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -9946,7 +9947,7 @@ FN cast__append_child_expr<T>(self: MIRCast, MUTABLE children: []Emittable, valu
     cast__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10009,7 +10010,7 @@ FN tryExpr__append_child_expr<T>(self: TryExpr, MUTABLE children: []Emittable, v
     tryExpr__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10087,7 +10088,7 @@ PRIVATE FN tryCatch__append_child_expr<T>(self: TryCatch, MUTABLE children: []Em
     tryCatch__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10161,7 +10162,7 @@ FN orelse__append_child_expr<T>(self: Orelse, MUTABLE children: []Emittable, val
     orelse__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10223,7 +10224,7 @@ FN conditional__append_child_expr<T>(self: Conditional, MUTABLE children: []Emit
     conditional__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10296,7 +10297,7 @@ FN ifOptional__append_child_expr<T>(self: IfOptional, MUTABLE children: []Emitta
     ifOptional__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10359,7 +10360,7 @@ FN comptime__append_child_expr<T>(self: Comptime, MUTABLE children: []Emittable,
     comptime__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10423,7 +10424,7 @@ FN unionVariantGet__append_child_expr<T>(self: UnionVariantGet, MUTABLE children
     unionVariantGet__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10485,7 +10486,7 @@ FN listItems__append_child_expr<T>(self: ListItems, MUTABLE children: []Emittabl
     listItems__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10550,7 +10551,7 @@ FN listLength__append_child_expr<T>(self: ListLength, MUTABLE children: []Emitta
     listLength__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10615,7 +10616,7 @@ FN addressOf__append_child_expr<T>(self: AddressOf, MUTABLE children: []Emittabl
     addressOf__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10680,7 +10681,7 @@ FN deref__append_child_expr<T>(self: Deref, MUTABLE children: []Emittable, value
     deref__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10746,7 +10747,7 @@ FN pointerCast__append_child_expr<T>(self: PointerCast, MUTABLE children: []Emit
     pointerCast__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10811,7 +10812,7 @@ FN constCast__append_child_expr<T>(self: ConstCast, MUTABLE children: []Emittabl
     constCast__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10873,7 +10874,7 @@ FN defaultStreamCapacity__append_child_expr<T>(self: DefaultStreamCapacity, MUTA
     defaultStreamCapacity__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -10936,7 +10937,7 @@ FN undef__append_child_expr<T>(self: Undef, MUTABLE children: []Emittable, value
     undef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11000,7 +11001,7 @@ FN typeSentinel__append_child_expr<T>(self: TypeSentinel, MUTABLE children: []Em
     typeSentinel__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11065,7 +11066,7 @@ FN iterRange__append_child_expr<T>(self: IterRange, MUTABLE children: []Emittabl
     iterRange__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11138,7 +11139,7 @@ FN optionalUnwrap__append_child_expr<T>(self: MIROptionalUnwrap, MUTABLE childre
     optionalUnwrap__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11201,7 +11202,7 @@ FN tryOptional__append_child_expr<T>(self: TryOptional, MUTABLE children: []Emit
     tryOptional__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11262,7 +11263,7 @@ FN foreignOwnedUnwrap__append_child_expr<T>(self: ForeignOwnedUnwrap, MUTABLE ch
     foreignOwnedUnwrap__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11325,7 +11326,7 @@ FN foreignSliceView__append_child_expr<T>(self: ForeignSliceView, MUTABLE childr
     foreignSliceView__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11418,7 +11419,7 @@ FN rangeLit__append_child_expr<T>(self: MIRRangeLit, MUTABLE children: []Emittab
     rangeLit__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11484,7 +11485,7 @@ FN hasField__append_child_expr<T>(self: HasField, MUTABLE children: []Emittable,
     hasField__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11549,7 +11550,7 @@ FN itemsAccess__append_child_expr<T>(self: ItemsAccess, MUTABLE children: []Emit
     itemsAccess__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11617,7 +11618,7 @@ FN ownedSlice__append_child_expr<T>(self: OwnedSlice, MUTABLE children: []Emitta
     ownedSlice__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11681,7 +11682,7 @@ FN lambdaExpr__append_child_expr<T>(self: LambdaExpr, MUTABLE children: []Emitta
     lambdaExpr__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11748,7 +11749,7 @@ FN pipeline__append_child_expr<T>(self: Pipeline, MUTABLE children: []Emittable,
     pipeline__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11834,7 +11835,7 @@ FN inlineBc__append_child_expr<T>(self: InlineBc, MUTABLE children: []Emittable,
     inlineBc__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11904,7 +11905,7 @@ FN orElseExitBcRewrite__append_child_expr<T>(self: OrElseExitBcRewrite, MUTABLE 
     orElseExitBcRewrite__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -11994,7 +11995,7 @@ FN shardedMapPut__append_child_expr<T>(self: ShardedMapPut, MUTABLE children: []
     shardedMapPut__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -12068,7 +12069,7 @@ FN shardedMapGet__append_child_expr<T>(self: ShardedMapGet, MUTABLE children: []
     shardedMapGet__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -12266,7 +12267,8 @@ END
 FN ownershipEffect__owned_result_type?(type_info: Type) RETURNS !Bool ->
   MUTABLE ti = TRY (type__success_type(type_info));
   IF type__optional?(ti) THEN
-    IF (TRY (type__wrapped_type(ti))) EXISTS AS wrapped THEN
+    MUTABLE wrapped_ti: ?Type = TRY (type__wrapped_type(ti));
+    IF wrapped_ti EXISTS AS wrapped THEN
       ti = COPY wrapped;
     END
   END
@@ -13028,7 +13030,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       program__append_child_expr(rtoc_self_view, &children, _);
       END
     ELSE_IF T IS_A Emittable THEN
-      &children.append(value);
+      &children.append(COPY value);
     END
     NIL;
 }
@@ -13119,7 +13121,7 @@ FN protocolAdapterDef__append_child_expr<T>(self: ProtocolAdapterDef, MUTABLE ch
     protocolAdapterDef__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -13289,7 +13291,7 @@ FN thunkTrampoline__append_child_expr<T>(self: ThunkTrampoline, MUTABLE children
     thunkTrampoline__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -13360,7 +13362,7 @@ FN mutualThunkTrampoline__append_child_expr<T>(self: MutualThunkTrampoline, MUTA
     mutualThunkTrampoline__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -13605,7 +13607,7 @@ FN directTenseMap__append_child_expr<T>(self: DirectTenseMap, MUTABLE children: 
     directTenseMap__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -13667,7 +13669,7 @@ FN asyncPayloadTake__append_child_expr<T>(self: AsyncPayloadTake, MUTABLE childr
     asyncPayloadTake__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -13828,7 +13830,7 @@ FN failureAction__append_child_expr<T>(self: FailureAction, MUTABLE children: []
     failureAction__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -13976,7 +13978,7 @@ FN defaultValue__append_child_expr<T>(self: DefaultValue, MUTABLE children: []Em
     defaultValue__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -14039,7 +14041,7 @@ FN enumTag__append_child_expr<T>(self: EnumTag, MUTABLE children: []Emittable, v
     enumTag__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -14110,7 +14112,7 @@ FN nextPromiseList__append_child_expr<T>(self: NextPromiseList, MUTABLE children
     nextPromiseList__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -14226,7 +14228,7 @@ FN registryCall__append_child_expr<T>(self: RegistryCall, MUTABLE children: []Em
     registryCall__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -14326,7 +14328,7 @@ FN indexedStore__append_child_expr<T>(self: IndexedStore, MUTABLE children: []Em
     indexedStore__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -14394,7 +14396,7 @@ FN cFunctionAdapter__append_child_expr<T>(self: CFunctionAdapter, MUTABLE childr
     cFunctionAdapter__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -14426,7 +14428,7 @@ FN externTrampoline__child_exprs(self: ExternTrampoline) RETURNS ![]Emittable EF
   MUTABLE children: []Emittable = [];
   MUTABLE current_receiver: ?Emittable = COPY self.receiver;
   IF current_receiver EXISTS AS current_receiver_value THEN
-    &children.append(current_receiver_value);
+    &children.append(COPY current_receiver_value);
   END
   FOR _ IN self.comptime_args DO
   &children.append(COPY _);
@@ -14485,7 +14487,7 @@ FN externTrampoline__append_child_expr<T>(self: ExternTrampoline, MUTABLE childr
     externTrampoline__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -14558,7 +14560,7 @@ FN observableConsumerSpawn__append_child_expr<T>(self: ObservableConsumerSpawn, 
     observableConsumerSpawn__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END
@@ -14648,7 +14650,7 @@ FN shardConcurrentEach__append_child_expr<T>(self: ShardConcurrentEach, MUTABLE 
     shardConcurrentEach__append_child_expr(self, &children, _);
     END
   ELSE_IF T IS_A Emittable THEN
-    &children.append(value);
+    &children.append(COPY value);
   END
   RETURN NIL;
 END

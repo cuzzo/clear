@@ -1859,7 +1859,7 @@ PUB FN loopFrameAnalysis__loop_local_children(node: Locatable) RETURNS ![]Locata
       END
       END
   ELSE_IF (value IS_A Locatable) THEN
-      &children.append(value);
+      &children.append(COPY value);
   END
   END
   RETURN children;
