@@ -697,7 +697,7 @@ PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup:
   FOR param IN fn_node.params DO
     IF ((param.takes OR_ELSE FALSE) AND (param.carrier_contract == :monomorphic)) THEN
       IF !(bindings.contains?(COPY param.name)) THEN
-        MUTABLE base = cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: CleanupExtraValue{ SymbolValue: :heap }});
+        MUTABLE base = cleanupClassifier__rc_entry(:heap);
         cleanupEntry__mark_moved_guard_mut(&base);
         cleanupEntry__set_alloc_mut(&base, :heap);
         IF !(cleanupEntry__source_kind(base) EXISTS) THEN
@@ -718,7 +718,7 @@ PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup:
     IF !((param.takes OR_ELSE FALSE)) THEN
       IF param.symbol EXISTS AS symbol THEN
         IF symbolEntry__kept_identity(symbol) THEN
-          MUTABLE base = cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: CleanupExtraValue{ SymbolValue: :heap }});
+          MUTABLE base = cleanupClassifier__rc_entry(:heap);
           cleanupEntry__mark_moved_guard_mut(&base);
           cleanupEntry__set_alloc_mut(&base, :heap);
           IF !(cleanupEntry__source_kind(base) EXISTS) THEN
@@ -763,14 +763,16 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
   END
   MUTABLE schema: ?TypeSchemaLookupResult = schema_lookup(type__resolved(ti));
   IF (cleanupClassifier__schema_resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
-    RETURN cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: CleanupExtraValue{ ResourceClosePlan: COPY UNWRAP (cleanupClassifier__schema_close_plan(schema)) }});
+    RETURN cleanupClassifier__resource_entry(COPY UNWRAP (cleanupClassifier__schema_close_plan(schema)));
   END
   IF cleanupClassifier__schema_union?(schema) THEN
     # Heap variants pin the allocator exactly as classify_non_copy_union does
     # for a local of the same type: the payload is already on the heap, so a
     # consuming site must not rebase the recipe onto its own placement.
     IF TRY (cleanupClassifier__union_variants_need_cleanup?(cleanupClassifier__schema_union(schema), schema_lookup)) THEN
-      RETURN cleanupClassifier__entry(:takes_union, :heap, TRUE, {:fixed_alloc: CleanupExtraValue{ BoolValue: TRUE }});
+      MUTABLE union_entry = cleanupEntry__build(:takes_union, :heap, TRUE);
+      cleanupEntry__set_fixed_alloc_mut(&union_entry, TRUE);
+      RETURN KEEP union_entry;
     END
     RETURN NIL;
   END
@@ -788,7 +790,7 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
     IF (TRY (type__element_type(ti))) EXISTS AS elem_type THEN
       elem_zig = COPY TRY (type__zig_type(elem_type));
     END
-    RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:elem_zig_type: CleanupExtraValue{ StringValue: COPY elem_zig }});
+    RETURN cleanupClassifier__uniform_elem_entry(COPY elem_zig);
   END
   IF (TRY (cleanupClassifier__classify_struct_cleanup_fields(ti, NIL, schema_lookup))) EXISTS AS struct_entry THEN
     RETURN KEEP struct_entry;
@@ -870,7 +872,7 @@ PUB FN cleanupClassifier__match_as_entry_for(variant_type: ?SchemasUnionSchemaVa
     IF !(TRY (type__variant_has_heap?(SchemasUnionSchemaVariantValue{ InlineStructVariantMultiowned: COPY inline_struct_variant }))) THEN
       RETURN NIL;
     END
-    RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: CleanupExtraValue{ BoolValue: TRUE }});
+    RETURN cleanupClassifier__match_as_entry();
   END
   IF variant_type? IS_A Type AS type THEN
     IF type__indirect?(type) THEN
@@ -881,62 +883,82 @@ PUB FN cleanupClassifier__match_as_entry_for(variant_type: ?SchemasUnionSchemaVa
       IF (TRY (type__element_type(type))) EXISTS AS elem_type THEN
         elem_zig = COPY TRY (type__zig_type(elem_type));
       END
-      RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: CleanupExtraValue{ BoolValue: TRUE }, :elem_zig_type: CleanupExtraValue{ StringValue: COPY elem_zig }});
+      RETURN cleanupClassifier__uniform_elem_entry(COPY elem_zig, TRUE);
     ELSE_IF type__map?(type) THEN
-      RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: CleanupExtraValue{ BoolValue: TRUE }});
+      RETURN cleanupClassifier__match_as_entry();
     END
     RETURN NIL;
   ELSE
     RETURN NIL;
   END
 END
-PUB FN cleanupClassifier__walk_capture_bindings(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
-  cleanupClassifier__each_capture_binding(body, %(name, expr, anchor_node) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
-  IF !(TRY (aST__capture_expr_owns_result?(expr))) THEN
-      RETURN NIL;
+PUB FN cleanupClassifier__walk_capture_bindings(MUTABLE body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+  aST__each_locatable_list_mut(&body, FALSE, %(MUTABLE node: Locatable) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
+  PARTIAL MATCH node START
+    Locatable.WhileBindLoop AS while_bind -> cleanupClassifier__capture_binding_mut(COPY while_bind.binding_name, COPY while_bind.condition, COPY while_bind.condition, schema_lookup, lifecycle_registry, &bindings);,
+    Locatable.IfBind AS MUTABLE if_bind -> cleanupClassifier__if_bind_captures_mut(&if_bind, schema_lookup, lifecycle_registry, &bindings);
   END
-  MUTABLE expr_ti = TRY (aST__capture_expr_source_type(expr));
-  MUTABLE inner_ti =   IF TRY (type__stream_step?(expr_ti)) THEN
-      TRY (type__stream_step_item_type(expr_ti))
-    ELSE_IF type__error_union?(expr_ti) THEN
-      TRY (type__success_type(expr_ti))
-    ELSE
-      TRY (type__wrapped_type(expr_ti))
-    END;
-  IF !(inner_ti) THEN
-      RETURN NIL;
-  END
-  MUTABLE classification_node = IF anchor_node IS_A Binding THEN
-      anchor_node.expr()
-    ELSE
-      anchor_node
-    END;
-  MUTABLE e = TRY (cleanupClassifier__classify_binding(inner_ti, classification_node, schema_lookup, lifecycle_registry));
-  IF (lifecycle_registry == NIL) THEN
-      IF TRY (cleanupClassifier__cleanup_owned_string_type?(inner_ti)) THEN
-        e = (e OR cleanupClassifier__entry(:heap_string, :heap, TRUE));
-      END
-      IF TRY (type__needs_explicit_cleanup?(inner_ti, :heap, schema_lookup)) THEN
-        e = (e OR cleanupClassifier__entry(:uniform));
-      END
-  END
-  IF !(e) THEN
-      RETURN NIL;
-  END
-  MUTABLE capture_alloc = TRY (cleanupClassifier__capture_expr_owned_alloc(expr, schema_lookup));
-  IF capture_alloc THEN
-      cleanupEntry__set_alloc_mut(&e, capture_alloc);
-  END
-  e[:zig_type] = (e[:zig_type] OR_ELSE ((TRY (type__zig_type((TRY (type__new(inner_ti.resolved()))))) OR_ELSE CAST(inner_ti.resolved() AS String))));
-  IF TRY (type__element_type(inner_ti)) THEN
-      e[:elem_zig_type] = (e[:elem_zig_type] OR_ELSE ((TRY (type__zig_type((TRY (type__new(TRY (type__element_type(inner_ti))))))) OR_ELSE "UNKNOWN")));
-  END
-  IF anchor_node IS_A Binding THEN
-      anchor_node.mir_binding_entry = e;
-  END
-  bindings[name] = e;
-  NIL
+  rubyToClearVoid()
   });
+END
+PRIVATE FN cleanupClassifier__if_bind_captures_mut(MUTABLE if_bind: IfBind, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS Void ->
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < if_bind.bindings.length() DO
+    MUTABLE binding: Binding = COPY UNWRAP (if_bind.bindings[rtoc_idx]);
+    IF cleanupClassifier__capture_entry(COPY binding.expr, COPY binding.expr, schema_lookup, lifecycle_registry) EXISTS AS found THEN
+      binding.mir_binding_entry = KEEP found;
+      bindings[COPY binding.name] = KEEP found;
+      if_bind.bindings[rtoc_idx] = COPY binding;
+    END
+    rtoc_idx = rtoc_idx + 1;
+  END
+END
+PRIVATE FN cleanupClassifier__capture_binding_mut(name: String, expr: Locatable, classification_node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS Void ->
+  IF cleanupClassifier__capture_entry(expr, classification_node, schema_lookup, lifecycle_registry) EXISTS AS found THEN
+    bindings[COPY name] = KEEP found;
+  END
+END
+PRIVATE FN cleanupClassifier__capture_entry(expr: Locatable, classification_node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry) RETURNS ?CleanupEntry@multiowned ->
+  IF !(aST__capture_expr_owns_result?(expr)) THEN
+    RETURN NIL;
+  END
+  MUTABLE expr_ti: Type = aST__capture_expr_source_type(expr);
+  MUTABLE inner_opt: ?Type = type__wrapped_type(expr_ti);
+  IF type__stream_step?(expr_ti) THEN
+    inner_opt = type__stream_step_item_type(expr_ti);
+  ELSE_IF type__error_union?(expr_ti) THEN
+    inner_opt = type__success_type(expr_ti);
+  END
+  IF !(inner_opt EXISTS) THEN
+    RETURN NIL;
+  END
+  MUTABLE inner_ti: Type = COPY UNWRAP (inner_opt);
+  MUTABLE e: ?CleanupEntry@multiowned = cleanupClassifier__classify_binding(inner_ti, classification_node, schema_lookup, lifecycle_registry);
+  IF !(lifecycle_registry EXISTS) THEN
+    IF !(e EXISTS) THEN
+      IF cleanupClassifier__cleanup_owned_string_type?(inner_ti) THEN
+        e = KEEP cleanupClassifier__entry(:heap_string, :heap, TRUE);
+      ELSE_IF type__needs_explicit_cleanup?(inner_ti, :heap, schema_lookup) THEN
+        e = KEEP cleanupClassifier__entry(:uniform);
+      END
+    END
+  END
+  IF !(e EXISTS) THEN
+    RETURN NIL;
+  END
+  MUTABLE entry_value = KEEP UNWRAP (e);
+  IF cleanupClassifier__capture_expr_owned_alloc(expr, schema_lookup) EXISTS AS capture_alloc THEN
+    cleanupEntry__set_alloc_mut(&entry_value, capture_alloc);
+  END
+  IF !(cleanupEntry__zig_type(entry_value) EXISTS) THEN
+    cleanupEntry__set_zig_type_mut(&entry_value, type__zig_type(inner_ti));
+  END
+  IF type__element_type(inner_ti) EXISTS AS elem_type THEN
+    IF !(cleanupEntry__elem_zig_type(entry_value) EXISTS) THEN
+      cleanupEntry__set_elem_zig_type_mut(&entry_value, type__zig_type(elem_type));
+    END
+  END
+  RETURN KEEP entry_value;
 END
 PUB FN cleanupClassifier__capture_expr_heap?(expr: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN (TRY (cleanupClassifier__capture_expr_owned_alloc(expr, schema_lookup)) == :heap);
@@ -1129,7 +1151,7 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
   MUTABLE entry = NIL;
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
   IF (cleanupClassifier__schema_resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
-    entry = cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: CleanupExtraValue{ ResourceClosePlan: COPY UNWRAP (cleanupClassifier__schema_close_plan(schema)) }});
+    entry = cleanupClassifier__resource_entry(COPY UNWRAP (cleanupClassifier__schema_close_plan(schema)));
   END
   IF tuple_with_borrowed_element?(ti) THEN
     entry = (entry OR cleanupClassifier__classify_structural_product(ti, schema_lookup));
@@ -1145,7 +1167,7 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
     entry = (entry OR cleanupClassifier__entry(:uniform, :heap, TRUE));
   END
   IF (!(entry) AND cleanupEntry__resource_close_plan(facts)) THEN
-    entry = cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: CleanupExtraValue{ ResourceClosePlan: COPY UNWRAP (cleanupEntry__resource_close_plan(facts)) }});
+    entry = cleanupClassifier__resource_entry(COPY UNWRAP (cleanupEntry__resource_close_plan(facts)));
   END
   entry = (entry OR cleanupClassifier__classify_mutable_owning_slot(ti, node, schema_lookup));
   entry = (entry OR TRY (cleanupClassifier__classify_optional(ti, schema_lookup, node)));
@@ -1196,26 +1218,27 @@ PUB FN cleanupClassifier__classify_structural_product(ti: Type, schema_lookup: F
   IF !(type__tuple?(ti)) THEN
     RETURN NIL;
   END
-  MUTABLE fields: []{String@symbol}Any@multiowned = ( { MUTABLE rtoc_empty_list_14: []{String@symbol}Any@multiowned = List[]; rtoc_empty_list_14 } );
-  MUTABLE rtoc_each_items_15 = (TRY (type__generic_args(ti)));
+  MUTABLE fields: []TupleCleanupField = List[];
+  MUTABLE args: []Type = TRY (type__generic_args(ti));
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_15.length() DO
-    IF (type__symbol?(rtoc_each_items_15[rtoc_idx]?) OR type__borrowed_reference?(rtoc_each_items_15[rtoc_idx]?)) THEN
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+  WHILE rtoc_idx < args.length() DO
+    MUTABLE arg: Type = COPY UNWRAP (args[rtoc_idx]);
+    IF !((type__symbol?(arg) OR type__borrowed_reference?(arg))) THEN
+      MUTABLE close = TRY (type__resolve_resource_close(arg, schema_lookup));
+      IF (close.is_resource AND (close.close_plan EXISTS)) THEN
+        &fields.append(TupleCleanupField{ index: rtoc_idx, close_plan: COPY close.close_plan });
+      ELSE_IF TRY (type__recursive_cleanup_shape?(arg, schema_lookup)) THEN
+        &fields.append(TupleCleanupField{ index: rtoc_idx, close_plan: NIL });
+      END
     END
-    MUTABLE close = TRY (type__resolve_resource_close(rtoc_each_items_15[rtoc_idx]?, schema_lookup));
-    IF (close.is_resource AND (KEEP close.close_plan != NIL)) THEN
-        &fields.append(CAST({:index: rtoc_idx, :close_plan: KEEP close.close_plan} AS {String@symbol}Any@multiowned));
-    ELSE_IF TRY (type__recursive_cleanup_shape?(rtoc_each_items_15[rtoc_idx]?, schema_lookup)) THEN
-        &fields.append(CAST({:index: rtoc_idx} AS {String@symbol}Any@multiowned));
-    END
-  rtoc_idx = rtoc_idx + 1;
+    rtoc_idx = rtoc_idx + 1;
   END
   IF (fields.length() == 0) THEN
     RETURN NIL;
   END
-  RETURN cleanupClassifier__entry(:tuple, :heap, TRUE, {:tuple_cleanup_fields: fields});
+  MUTABLE tuple_entry = cleanupEntry__build(:tuple, :heap, TRUE);
+  cleanupEntry__set_tuple_cleanup_fields_mut(&tuple_entry, fields);
+  RETURN KEEP tuple_entry;
 END
 PUB FN cleanupClassifier__binding_cleanup_facts(node: Locatable) RETURNS BindingCleanupFacts ->
   MUTABLE symbol = aST__node__symbol(node);
@@ -1287,8 +1310,29 @@ PUB FN cleanupClassifier__storage_from_symbol(sym: ?SymbolEntry, node: Any) RETU
     END);
   END
 END
-PUB FN cleanupClassifier__entry(kind: String@symbol, alloc: String@symbol = :heap, has_moved_guard: Bool = TRUE, extra: {String@symbol}?CleanupExtraValue = {}) RETURNS CleanupEntry@multiowned ->
-  RETURN cleanupEntry__build(kind, alloc, has_moved_guard, extra);
+PUB FN cleanupClassifier__entry(kind: String@symbol, alloc: String@symbol = :heap, has_moved_guard: Bool = TRUE) RETURNS CleanupEntry@multiowned ->
+  RETURN cleanupEntry__build(kind, alloc, has_moved_guard);
+END
+PRIVATE FN cleanupClassifier__rc_entry(rc_alloc: String@symbol) RETURNS CleanupEntry@multiowned ->
+  MUTABLE built = cleanupEntry__build(:rc, :heap, TRUE);
+  cleanupEntry__set_rc_alloc_mut(&built, rc_alloc);
+  RETURN KEEP built;
+END
+PRIVATE FN cleanupClassifier__resource_entry(close_plan: ResourceClosePlan) RETURNS CleanupEntry@multiowned ->
+  MUTABLE built = cleanupEntry__build(:resource, :heap, TRUE);
+  cleanupEntry__set_resource_close_plan_mut(&built, close_plan);
+  RETURN KEEP built;
+END
+PRIVATE FN cleanupClassifier__uniform_elem_entry(elem_zig: String, match_as: Bool = FALSE) RETURNS CleanupEntry@multiowned ->
+  MUTABLE built = cleanupEntry__build(:uniform, :heap, TRUE);
+  cleanupEntry__set_elem_zig_type_mut(&built, elem_zig);
+  cleanupEntry__set_match_as_mut(&built, match_as);
+  RETURN KEEP built;
+END
+PRIVATE FN cleanupClassifier__match_as_entry() RETURNS CleanupEntry@multiowned ->
+  MUTABLE built = cleanupEntry__build(:uniform, :heap, TRUE);
+  cleanupEntry__set_match_as_mut(&built, TRUE);
+  RETURN KEEP built;
 END
 PUB FN cleanupClassifier__stream_handle_type?(ti: Type) RETURNS !Bool ->
   RETURN (((((TRY (type__dynamic_stream?(ti)) OR TRY (type__bounded_stream?(ti))) OR TRY (type__open_stream?(ti))) OR TRY (type__inf_stream?(ti))) OR TRY (type__split_open_stream?(ti))) OR type__shared_promise?(ti));
@@ -1374,7 +1418,9 @@ PUB FN cleanupClassifier__classify_collection(ti: Type, schema_lookup: FN(String
   MUTABLE is_heap = !(!(node_sym.heap_storage?()));
   IF ((type__list_collection?(ti) AND !(type__sharded?(ti))) AND !(is_heap)) THEN
     MUTABLE has_heap_elems = TRY (elem_needs_cleanup?(ti, schema_lookup));
-    RETURN cleanupClassifier__entry(:uniform, :frame, TRUE, {:elem_needs_cleanup: CleanupExtraValue{ BoolValue: has_heap_elems }});
+    MUTABLE frame_entry = cleanupEntry__build(:uniform, :frame, TRUE);
+    cleanupEntry__set_elem_needs_cleanup_mut(&frame_entry, has_heap_elems);
+    RETURN KEEP frame_entry;
   END
   IF type__list_collection?(ti) THEN
     RETURN cleanupClassifier__entry(:uniform, :heap, TRUE);
@@ -1453,10 +1499,10 @@ PUB FN cleanupClassifier__classify_rc_or_link(ti: Type, schema_lookup: FN(String
   IF type__link?(ti) THEN
     RETURN cleanupClassifier__entry(:rc);
   ELSE_IF type__optional?(ti) THEN
-    RETURN cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: CleanupExtraValue{ SymbolValue: COPY cleanupClassifier__wrapper_alloc(ti) }});
+    RETURN cleanupClassifier__rc_entry(COPY cleanupClassifier__wrapper_alloc(ti));
   ELSE
     MUTABLE rc_alloc = cleanupClassifier__wrapper_alloc(ti);
-    RETURN cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: CleanupExtraValue{ SymbolValue: COPY rc_alloc }});
+    RETURN cleanupClassifier__rc_entry(COPY rc_alloc);
   END
 END
 PUB FN cleanupClassifier__classify_optional(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, node: Any = NIL) RETURNS !?CleanupEntry@multiowned ->

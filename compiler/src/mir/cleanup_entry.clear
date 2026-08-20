@@ -10,6 +10,11 @@ REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172"
 # Only the fields the annotator closure reaches are declared. MIR lowering and
 # the cleanup classifier carry more keys (tuple_cleanup_fields, inner, ...);
 # add them as those files migrate, rather than reintroducing an untyped bag.
+PUB STRUCT TupleCleanupField {
+  index: Int64,
+  close_plan: ?ResourceClosePlan
+}
+
 PUB STRUCT CleanupEntry {
   needs_cleanup: Bool,
   alloc: String@symbol,
@@ -24,10 +29,12 @@ PUB STRUCT CleanupEntry {
   rc_alloc: ?String@symbol,
   base_zig: ?String,
   zig_type: ?String,
+  elem_zig_type: ?String,
   source_kind: ?String@symbol,
   sync: ?String@symbol,
   resource_close_plan: ?ResourceClosePlan,
-  lifecycle_plan: ?LifecyclePlan
+  lifecycle_plan: ?LifecyclePlan,
+  tuple_cleanup_fields: []TupleCleanupField
 }
 
 PUB FN cleanupEntry__blank() RETURNS CleanupEntry@multiowned ->
@@ -35,8 +42,8 @@ PUB FN cleanupEntry__blank() RETURNS CleanupEntry@multiowned ->
     needs_cleanup: FALSE, alloc: :none, scope: :function, kind: :none,
     has_moved_guard: FALSE, match_as: FALSE, via_pointer: FALSE,
     needs_release_fields: FALSE, fixed_alloc: FALSE, elem_needs_cleanup: FALSE,
-    rc_alloc: NIL, base_zig: NIL, zig_type: NIL, source_kind: NIL, sync: NIL,
-    resource_close_plan: NIL, lifecycle_plan: NIL
+    rc_alloc: NIL, base_zig: NIL, zig_type: NIL, elem_zig_type: NIL, source_kind: NIL, sync: NIL,
+    resource_close_plan: NIL, lifecycle_plan: NIL, tuple_cleanup_fields: List[]
   };
   RETURN blank @multiowned;
 END
@@ -74,6 +81,39 @@ PUB FN cleanupEntry__cleanup_scope_for_alloc(alloc: String@symbol, frame_scope: 
   RETURN COPY frame_scope;
 END
 
+PUB FN cleanupEntry__tuple_cleanup_fields(self: CleanupEntry) RETURNS []TupleCleanupField ->
+  RETURN COPY self.tuple_cleanup_fields;
+END
+PUB FN cleanupEntry__set_tuple_cleanup_fields_mut(MUTABLE self: CleanupEntry, fields: []TupleCleanupField) RETURNS Void ->
+  self.tuple_cleanup_fields = COPY fields;
+END
+PUB FN cleanupEntry__zig_type(self: CleanupEntry) RETURNS ?String ->
+  RETURN COPY self.zig_type;
+END
+PUB FN cleanupEntry__set_zig_type_mut(MUTABLE self: CleanupEntry, value: String) RETURNS Void ->
+  self.zig_type = COPY value;
+END
+PUB FN cleanupEntry__elem_zig_type(self: CleanupEntry) RETURNS ?String ->
+  RETURN COPY self.elem_zig_type;
+END
+PUB FN cleanupEntry__set_elem_zig_type_mut(MUTABLE self: CleanupEntry, value: String) RETURNS Void ->
+  self.elem_zig_type = COPY value;
+END
+PUB FN cleanupEntry__set_rc_alloc_mut(MUTABLE self: CleanupEntry, value: String@symbol) RETURNS Void ->
+  self.rc_alloc = COPY value;
+END
+PUB FN cleanupEntry__set_match_as_mut(MUTABLE self: CleanupEntry, value: Bool) RETURNS Void ->
+  self.match_as = value;
+END
+PUB FN cleanupEntry__set_fixed_alloc_mut(MUTABLE self: CleanupEntry, value: Bool) RETURNS Void ->
+  self.fixed_alloc = value;
+END
+PUB FN cleanupEntry__set_elem_needs_cleanup_mut(MUTABLE self: CleanupEntry, value: Bool) RETURNS Void ->
+  self.elem_needs_cleanup = value;
+END
+PUB FN cleanupEntry__set_resource_close_plan_mut(MUTABLE self: CleanupEntry, value: ResourceClosePlan) RETURNS Void ->
+  self.resource_close_plan = COPY value;
+END
 PUB FN cleanupEntry__kind(self: CleanupEntry) RETURNS String@symbol ->
   RETURN COPY self.kind;
 END

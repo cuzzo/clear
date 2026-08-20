@@ -9823,8 +9823,10 @@ PUB FN aST__capture_expr_owns_result?(node: ?Locatable) RETURNS !Bool ->
     RETURN FALSE;
   END
   MUTABLE current: Locatable = COPY UNWRAP (node);
-  WHILE current IS_A Cast AS cast_node DO
-    current = COPY cast_node.value;
+  WHILE current IS_A Cast DO
+    PARTIAL MATCH current START
+      Locatable.Cast AS cast_node -> current = COPY cast_node.value;
+    END
   END
   IF aST__borrowed_ownership_view?(current) THEN
     RETURN FALSE;
