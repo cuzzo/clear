@@ -415,7 +415,7 @@ PRIVATE FN cleanupClassifier__stamp_field_pre_cleanup_mut(MUTABLE assignment: As
     lifecycle = KEEP TRY (lifecycleRegistry__fetch(registry, field_ti));
     assignment.field_lifecycle_plan = KEEP lifecycle;
   END
-  IF ((assignment.auto_lock EXISTS) AND cleanup_owned_string_type?(field_ti)) THEN
+  IF ((assignment.auto_lock EXISTS) AND TRY (cleanupClassifier__cleanup_owned_string_type?(field_ti))) THEN
     assignment.field_pre_cleanup = :heap;
     RETURN;
   END
@@ -434,7 +434,7 @@ PRIVATE FN cleanupClassifier__stamp_field_pre_cleanup_mut(MUTABLE assignment: As
   END
 END
 PUB FN cleanupClassifier__heap_owned_field_pre_cleanup_alloc(field_ti: Type, target_node: Locatable, facts: FrozenCleanupFacts) RETURNS ?String@symbol ->
-  IF !(cleanup_owned_string_type?(field_ti)) THEN
+  IF !(TRY (cleanupClassifier__cleanup_owned_string_type?(field_ti))) THEN
     RETURN NIL;
   END
   IF (cleanupClassifier__field_owner_cleanup_alloc(target_node, facts) == :heap) THEN
@@ -446,7 +446,7 @@ END
 PUB FN cleanupClassifier__field_owner_cleanup_alloc(target_node: Locatable, facts: FrozenCleanupFacts) RETURNS String@symbol ->
   IF target_node IS_A Identifier AS identifier THEN
     MUTABLE target_entry = frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY identifier__name(identifier) }, Locatable{ Identifier: COPY identifier });
-    IF target_entry.heap?() THEN
+    IF cleanupEntry__heap?(target_entry) THEN
       RETURN :heap;
     ELSE
       RETURN :frame;
@@ -456,113 +456,156 @@ PUB FN cleanupClassifier__field_owner_cleanup_alloc(target_node: Locatable, fact
   END
 END
 PUB FN cleanupClassifier__walk_bindings(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS ![]CleanupEntry@multiowned ->
-  TRY (cleanupClassifier__classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
-  RETURN bindings.values();
+  MUTABLE body_mutable: []Locatable = COPY body;
+  TRY (cleanupClassifier__classify_cleanup_binding_body(&body_mutable, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+  MUTABLE result: []CleanupEntry@multiowned = bindings.values();
+  RETURN result;
 END
-PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
-  FOR _ IN body DO
-  MUTABLE rtoc_mutable_block_param_4 = COPY _;
-  IF (rtoc_mutable_block_param_4 IS_A VarDecl OR rtoc_mutable_block_param_4 IS_A BindExpr) THEN
-      TRY (cleanupClassifier__classify_cleanup_binding_node(&rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+PUB FN cleanupClassifier__classify_cleanup_binding_body(MUTABLE body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < body.length() DO
+    MUTABLE node: Locatable = COPY UNWRAP (body[rtoc_idx]);
+    TRY (cleanupClassifier__classify_binding_stmt_mut(&node, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+    TRY (cleanupClassifier__classify_inline_bg_binding_body(node, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+    FOR child_body IN (TRY (hoist__child_bodies(node))) DO
+      MUTABLE child_body_mutable: []Locatable = COPY child_body;
+      TRY (cleanupClassifier__classify_cleanup_binding_body(&child_body_mutable, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+    END
+    body[rtoc_idx] = COPY node;
+    rtoc_idx = rtoc_idx + 1;
   END
-  TRY (cleanupClassifier__classify_inline_bg_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
-  FOR rtoc_mutable_block_param_4 IN (TRY (hoist__child_bodies((rtoc_mutable_block_param_4)))) DO
-  TRY (cleanupClassifier__classify_cleanup_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+END
+PRIVATE FN cleanupClassifier__classify_binding_stmt_mut(MUTABLE node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void ->
+  PARTIAL MATCH node START
+    Locatable.VarDecl AS MUTABLE item -> TRY (cleanupClassifier__classify_var_decl_binding_mut(&item, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));,
+    Locatable.BindExpr AS MUTABLE item -> TRY (cleanupClassifier__classify_bind_expr_binding_mut(&item, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
   END
+END
+PRIVATE FN cleanupClassifier__classify_var_decl_binding_mut(MUTABLE decl: VarDecl, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void ->
+  MUTABLE binding: BindingNode = BindingNode{ VarDecl: COPY decl };
+  TRY (cleanupClassifier__classify_cleanup_binding_node(&binding, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+  PARTIAL MATCH binding START
+    BindingNode.VarDecl AS stamped -> decl = COPY stamped;
+  END
+END
+PRIVATE FN cleanupClassifier__classify_bind_expr_binding_mut(MUTABLE bind: BindExpr, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void ->
+  MUTABLE binding: BindingNode = BindingNode{ BindExpr: COPY bind };
+  TRY (cleanupClassifier__classify_cleanup_binding_node(&binding, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+  PARTIAL MATCH binding START
+    BindingNode.BindExpr AS stamped -> bind = COPY stamped;
   END
 END
 PUB FN cleanupClassifier__classify_inline_bg_binding_body(node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
-  MUTABLE rtoc_each_items_5 = (TRY (aST__expression_children((node))));
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_5.length() DO
-    IF !(TRUE) THEN
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+  FOR child IN (TRY (aST__expression_children(node))) DO
+    IF (child IS_A BgBlock OR child IS_A BgStreamBlock) THEN
+      MUTABLE bg_body: []Locatable = COPY cleanupClassifier__block_body(child);
+      TRY (cleanupClassifier__classify_cleanup_binding_body(&bg_body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+    ELSE_IF child IS_A BlockExpr AS block_expr THEN
+      # A value BlockExpr (`{ stmts...; result }`, e.g. a desugared pipeline
+      # fold) carries real bindings that need classification like any other
+      # statement sequence.
+      MUTABLE block_body: []Locatable = COPY block_expr.body;
+      TRY (cleanupClassifier__classify_cleanup_binding_body(&block_body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+      IF block_expr.result EXISTS AS block_result THEN
+        TRY (cleanupClassifier__classify_inline_bg_binding_body(block_result, schema_lookup, lifecycle_registry, bindings, entries_by_place));
+      END
+    ELSE
+      TRY (cleanupClassifier__classify_inline_bg_binding_body(child, schema_lookup, lifecycle_registry, bindings, entries_by_place));
     END
-    IF (rtoc_each_items_5[rtoc_idx]? IS_A BgBlock OR rtoc_each_items_5[rtoc_idx]? IS_A BgStreamBlock) THEN
-        MUTABLE body = rtoc_each_items_5[rtoc_idx]?.body();
-        IF body THEN
-          TRY (cleanupClassifier__classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
-        END
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    IF rtoc_each_items_5[rtoc_idx]? IS_A BlockExpr THEN
-        IF rtoc_each_items_5[rtoc_idx]?.body() THEN
-          TRY (cleanupClassifier__classify_cleanup_binding_body(rtoc_each_items_5[rtoc_idx]?.body(), schema_lookup, lifecycle_registry, bindings, entries_by_place));
-        END
-        IF rtoc_each_items_5[rtoc_idx]?.result() THEN
-          TRY (cleanupClassifier__classify_inline_bg_binding_body(rtoc_each_items_5[rtoc_idx]?.result(), schema_lookup, lifecycle_registry, bindings, entries_by_place));
-        END
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    TRY (cleanupClassifier__classify_inline_bg_binding_body(rtoc_each_items_5[rtoc_idx]?, schema_lookup, lifecycle_registry, bindings, entries_by_place));
-  rtoc_idx = rtoc_idx + 1;
   END
 END
+PRIVATE FN cleanupClassifier__block_body(node: Locatable) RETURNS []Locatable ->
+  PARTIAL MATCH node START
+    Locatable.BgBlock AS item -> RETURN COPY item.body;,
+    Locatable.BgStreamBlock AS item -> RETURN COPY item.body;
+  END
+  RETURN List[];
+END
 PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void ->
-  IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
-    RETURN;
+  IF node IS_A BindExpr AS bind_expr THEN
+    IF (bind_expr.mode == :assign) THEN
+      RETURN;
+    END
   END
-  MUTABLE var_name: String = "";
-  IF (MATCH node START BindingNode.VarDecl AS item -> item.name IS_A String, BindingNode.BindExpr AS item -> item.name IS_A String, BindingNode.MIRDestructureTarget AS item -> item.name IS_A String END) THEN
-    var_name = (MATCH node START BindingNode.VarDecl AS item -> item.name, BindingNode.BindExpr AS item -> item.name, BindingNode.MIRDestructureTarget AS item -> item.name END);
-  ELSE
-    var_name = COPY (MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String) END);
-  END
+  MUTABLE var_name: String = COPY cleanupClassifier__binding_node_name(node);
+  MUTABLE place = cleanupClassifier__place_for_binding_node(var_name, castBindingNodeToLocatable(node));
   IF binding_container_borrow?(node) THEN
     &bindings.delete(var_name);
-    &entries_by_place.delete(cleanupClassifier__place_for_binding_node(var_name, castBindingNodeToLocatable(node)));
-    IF respondsTo?(node, "mir_binding_entry=") THEN
-      node.mir_binding_entry = new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL});
-    END
+    &entries_by_place.delete(place);
+    cleanupClassifier__set_binding_entry_mut(&node, cleanupEntry__none());
     RETURN;
   END
-  MUTABLE value = node.value();
-  MUTABLE value_node_branch_value: ?Locatable = NIL;
-  IF value IS_A Locatable THEN
-    value_node_branch_value = value;
-  ELSE
-    value_node_branch_value = NIL;
+  MUTABLE full_type: Type = TRY (aST__full_type_mut(castBindingNodeToLocatable(node)));
+  MUTABLE value_node: ?Locatable = cleanupClassifier__binding_node_value(node);
+  MUTABLE moved_alloc: ?String@symbol = TRY (cleanupClassifier__moved_payload_alloc(value_node, bindings));
+  MUTABLE cleanup: ?CleanupEntry@multiowned = TRY (cleanupClassifier__classify_binding(full_type, node, schema_lookup, lifecycle_registry));
+  IF (!(cleanup EXISTS) AND (moved_alloc EXISTS)) THEN
+    cleanup = KEEP TRY (cleanupClassifier__transferred_payload_entry(full_type, schema_lookup, lifecycle_registry));
   END
-  MUTABLE value_node: ?Locatable = value_node_branch_value;
-  MUTABLE moved_alloc = TRY (cleanupClassifier__moved_payload_alloc(value_node, bindings));
-  MUTABLE cleanup = TRY (cleanupClassifier__classify_binding(TRY (aST__full_type_mut(node)), node, schema_lookup, lifecycle_registry));
-  IF moved_alloc THEN
-    cleanup = (cleanup OR TRY (cleanupClassifier__transferred_payload_entry(TRY (aST__full_type_mut(node)), schema_lookup, lifecycle_registry)));
-  END
-  IF ((cleanup AND (lifecycle_registry != NIL)) AND (cleanup.lifecycle_plan() == NIL)) THEN
-    cleanupEntry__set_lifecycle_plan_mut(&cleanup, TRY (lifecycleRegistry__fetch_binding(lifecycle_registry, castBindingNodeToLocatable(node), TRY (aST__full_type_mut(node)))));
-  END
-  IF !(cleanup) THEN
-    IF ((((lifecycle_registry == NIL) AND TRUE) AND ((aST__node__symbol(node) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_6 = ((aST__node__symbol(node))?);
-    symbolEntry__heap_storage?(rtoc_local_receiver_6) })) AND !(optional_empty_initializer?(value))) THEN
-      MUTABLE ti = TRY (aST__full_type_mut(node));
-      IF TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup)) THEN
-        cleanup = cleanupClassifier__entry(:uniform, :heap);
+  IF !(cleanup EXISTS) THEN
+    IF !(lifecycle_registry EXISTS) THEN
+      IF aST__node__symbol(castBindingNodeToLocatable(node)) EXISTS AS symbol THEN
+        IF (symbolEntry__heap_storage?(symbol) AND !(optional_empty_initializer?(value_node))) THEN
+          IF TRY (type__needs_explicit_cleanup?(full_type, :heap, schema_lookup)) THEN
+            cleanup = KEEP cleanupClassifier__entry(:uniform, :heap);
+          END
+        END
       END
     END
   END
-  IF cleanup THEN
-    IF moved_alloc THEN
-      cleanupEntry__set_alloc_mut(&cleanup, moved_alloc);
+  IF cleanup EXISTS AS with_alloc THEN
+    IF moved_alloc EXISTS AS alloc THEN
+      MUTABLE with_alloc_mutable = KEEP with_alloc;
+      cleanupEntry__set_alloc_mut(&with_alloc_mutable, alloc);
+      cleanup = KEEP with_alloc_mutable;
     END
   ELSE
-    cleanup = TRY (cleanupClassifier__no_cleanup_alloc_entry(TRY (aST__full_type_mut(node)), schema_lookup));
+    cleanup = KEEP TRY (cleanupClassifier__no_cleanup_alloc_entry(TypeTypeInput{ Type: COPY full_type }, schema_lookup));
   END
-  IF ((cleanup AND (lifecycle_registry != NIL)) AND (cleanup.lifecycle_plan() == NIL)) THEN
-    cleanupEntry__set_lifecycle_plan_mut(&cleanup, TRY (lifecycleRegistry__fetch_binding(lifecycle_registry, castBindingNodeToLocatable(node), TRY (aST__full_type_mut(node)))));
+  IF cleanup EXISTS AS planned THEN
+    IF lifecycle_registry EXISTS AS registry THEN
+      IF !(cleanupEntry__lifecycle_plan(planned) EXISTS) THEN
+        MUTABLE planned_mutable = KEEP planned;
+        cleanupEntry__set_lifecycle_plan_mut(&planned_mutable, TRY (lifecycleRegistry__fetch_binding(registry, castBindingNodeToLocatable(node), full_type)));
+        cleanup = KEEP planned_mutable;
+      END
+    END
   END
-  IF respondsTo?(node, "mir_binding_entry=") THEN
-    node.mir_binding_entry = (cleanup OR new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
-  END
-  IF cleanup THEN
-    bindings[var_name] = cleanup;
-    entries_by_place[cleanupClassifier__place_for_binding_node(var_name, castBindingNodeToLocatable(node))] = cleanup;
+  # Stamp every declaration, including the explicit NONE result: leaving a
+  # no-cleanup declaration unstamped makes lowering fall back to the legacy
+  # name-keyed view, where a cleanup-bearing sibling with the same display
+  # name contaminates this declaration.
+  IF cleanup EXISTS AS stamped THEN
+    cleanupClassifier__set_binding_entry_mut(&node, KEEP stamped);
+    bindings[var_name] = KEEP stamped;
+    entries_by_place[place] = KEEP stamped;
   ELSE
+    cleanupClassifier__set_binding_entry_mut(&node, cleanupEntry__none());
     &bindings.delete(var_name);
-    &entries_by_place.delete(cleanupClassifier__place_for_binding_node(var_name, castBindingNodeToLocatable(node)));
+    &entries_by_place.delete(place);
+  END
+END
+PRIVATE FN cleanupClassifier__binding_node_name(node: BindingNode) RETURNS String ->
+  PARTIAL MATCH node START
+    BindingNode.VarDecl AS item -> RETURN COPY item.name;,
+    BindingNode.BindExpr AS item -> RETURN COPY item.name;,
+    BindingNode.DestructureTarget AS item -> RETURN COPY item.name;
+  END
+  RETURN "";
+END
+PRIVATE FN cleanupClassifier__binding_node_value(node: BindingNode) RETURNS ?Locatable ->
+  PARTIAL MATCH node START
+    BindingNode.VarDecl AS item -> RETURN COPY item.value;,
+    BindingNode.BindExpr AS item -> RETURN COPY item.value;,
+    BindingNode.DestructureTarget AS item -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+PRIVATE FN cleanupClassifier__set_binding_entry_mut(MUTABLE node: BindingNode, entry: CleanupEntry@multiowned) RETURNS Void ->
+  PARTIAL MATCH node START
+    BindingNode.VarDecl AS MUTABLE item -> item.mir_binding_entry = KEEP entry;,
+    BindingNode.BindExpr AS MUTABLE item -> item.mir_binding_entry = KEEP entry;,
+    BindingNode.DestructureTarget AS MUTABLE item -> item.mir_binding_entry = KEEP entry;
   END
 END
 PUB FN cleanupClassifier__no_cleanup_alloc_entry(full_type: Any, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
@@ -737,7 +780,7 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
   IF opt THEN
     RETURN opt;
   END
-  IF cleanup_owned_string_type?(ti) THEN
+  IF TRY (cleanupClassifier__cleanup_owned_string_type?(ti)) THEN
     RETURN cleanupClassifier__entry(:heap_string);
   END
   MUTABLE coll = TRY (cleanupClassifier__classify_collection(ti, schema_lookup));
@@ -889,7 +932,7 @@ PUB FN cleanupClassifier__walk_capture_bindings(body: []Locatable, schema_lookup
     END;
   MUTABLE e = TRY (cleanupClassifier__classify_binding(inner_ti, classification_node, schema_lookup, lifecycle_registry));
   IF (lifecycle_registry == NIL) THEN
-      IF cleanup_owned_string_type?(inner_ti) THEN
+      IF TRY (cleanupClassifier__cleanup_owned_string_type?(inner_ti)) THEN
         e = (e OR cleanupClassifier__entry(:heap_string, :heap, TRUE));
       END
       IF TRY (type__needs_explicit_cleanup?(inner_ti, :heap, schema_lookup)) THEN
@@ -1487,7 +1530,7 @@ PUB FN cleanupClassifier__optional_empty_initializer?(value: ?Locatable) RETURNS
   END
 END
 PUB FN cleanupClassifier__optional_payload_needs_cleanup?(inner: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
-  IF cleanup_owned_string_type?(inner) THEN
+  IF TRY (cleanupClassifier__cleanup_owned_string_type?(inner)) THEN
     RETURN TRUE;
   END
   IF TRY (type__recursive_cleanup_shape?(inner, schema_lookup)) THEN
@@ -1506,7 +1549,7 @@ PUB FN cleanupClassifier__optional_payload_needs_cleanup?(inner: Type, schema_lo
   RETURN FALSE;
 END
 PUB FN cleanupClassifier__classify_owned_string(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
-  IF !(cleanup_owned_string_type?(ti)) THEN
+  IF !(TRY (cleanupClassifier__cleanup_owned_string_type?(ti))) THEN
     RETURN NIL;
   END
   MUTABLE value = IF respondsTo?(node, "value") THEN
@@ -1558,7 +1601,7 @@ PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schem
       RETURN NIL;
     END
   END
-  IF cleanup_owned_string_type?(ti) THEN
+  IF TRY (cleanupClassifier__cleanup_owned_string_type?(ti)) THEN
     RETURN cleanupClassifier__entry(:heap_string);
   END
   IF (type__array?(ti) AND !(type__collection?(ti))) THEN
