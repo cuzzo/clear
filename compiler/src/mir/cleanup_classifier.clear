@@ -747,6 +747,14 @@ PRIVATE FN cleanupClassifier__schema_close_plan(schema: ?TypeSchemaLookupResult)
   END
   RETURN NIL;
 END
+PRIVATE FN cleanupClassifier__schema_union(schema: ?TypeSchemaLookupResult) RETURNS ?UnionSchema@multiowned ->
+  IF schema EXISTS AS schema_value THEN
+    PARTIAL MATCH schema_value START
+      TypeSchemaLookupResult.UnionSchemaMultiowned AS union_schema -> RETURN KEEP union_schema;
+    END
+  END
+  RETURN NIL;
+END
 PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
   IF lifecycle_registry EXISTS AS registry THEN
     IF !(lifecyclePlan__needs_drop?(TRY (lifecycleRegistry__fetch(registry, ti)))) THEN
@@ -761,38 +769,32 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
     # Heap variants pin the allocator exactly as classify_non_copy_union does
     # for a local of the same type: the payload is already on the heap, so a
     # consuming site must not rebase the recipe onto its own placement.
-    IF TRY (cleanupClassifier__union_variants_need_cleanup?(schema, schema_lookup)) THEN
+    IF TRY (cleanupClassifier__union_variants_need_cleanup?(cleanupClassifier__schema_union(schema), schema_lookup)) THEN
       RETURN cleanupClassifier__entry(:takes_union, :heap, TRUE, {:fixed_alloc: CleanupExtraValue{ BoolValue: TRUE }});
     END
     RETURN NIL;
   END
-  MUTABLE opt = TRY (cleanupClassifier__classify_optional(ti, schema_lookup));
-  IF opt THEN
-    RETURN opt;
+  IF (TRY (cleanupClassifier__classify_optional(ti, schema_lookup))) EXISTS AS opt THEN
+    RETURN KEEP opt;
   END
   IF TRY (cleanupClassifier__cleanup_owned_string_type?(ti)) THEN
     RETURN cleanupClassifier__entry(:heap_string);
   END
-  MUTABLE coll = TRY (cleanupClassifier__classify_collection(ti, schema_lookup));
-  IF coll THEN
-    RETURN coll;
+  IF (TRY (cleanupClassifier__classify_collection(ti, schema_lookup))) EXISTS AS coll THEN
+    RETURN KEEP coll;
   END
   IF TRY (type__direct_indexable_collection?(ti)) THEN
-    MUTABLE elem_zig: String = "";
-    IF TRY (type__element_type(ti)) THEN
-      elem_zig = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (TRY (type__element_type(ti))) }))))) OR_ELSE type__to_s((TRY (type__element_type(ti))))));
-    ELSE
-      elem_zig = "UNKNOWN";
+    MUTABLE elem_zig: String = "UNKNOWN";
+    IF (TRY (type__element_type(ti))) EXISTS AS elem_type THEN
+      elem_zig = COPY TRY (type__zig_type(elem_type));
     END
-    RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:elem_zig_type: elem_zig});
+    RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:elem_zig_type: CleanupExtraValue{ StringValue: COPY elem_zig }});
   END
-  MUTABLE struct_entry = TRY (cleanupClassifier__classify_struct_cleanup_fields(ti, NIL, schema_lookup));
-  IF struct_entry THEN
-    RETURN struct_entry;
+  IF (TRY (cleanupClassifier__classify_struct_cleanup_fields(ti, NIL, schema_lookup))) EXISTS AS struct_entry THEN
+    RETURN KEEP struct_entry;
   END
-  MUTABLE structural_product = cleanupClassifier__classify_structural_product(ti, schema_lookup);
-  IF structural_product THEN
-    RETURN structural_product;
+  IF cleanupClassifier__classify_structural_product(ti, schema_lookup) EXISTS AS structural_product THEN
+    RETURN KEEP structural_product;
   END
   IF lifecycle_registry EXISTS AS registry THEN
     MUTABLE plan: LifecyclePlan = TRY (lifecycleRegistry__fetch(registry, ti));
@@ -805,70 +807,61 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
   RETURN NIL;
 END
 PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
-  aST__walk_body(COPY body, %(node: Locatable) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
-  IF !(node IS_A MatchStatement) THEN
-      RETURN;
-  END
-  IF !(node.takes()) THEN
-      RETURN;
-  END
-  IF !((node.expr() IS_A Identifier AND node.expr().was_moved())) THEN
-      RETURN;
-  END
-  MUTABLE source_ti = node.expr().full_type_mut();
-  MUTABLE union_lookup = IF type__generic_instance?(source_ti) THEN
-      type__generic_base(source_ti)
-    ELSE
-      source_ti.resolved()
-    END;
-  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), union_lookup) OR_ELSE NIL);
-  IF !(cleanupClassifier__schema_union?(schema)) THEN
-      RETURN;
-  END
-  MUTABLE rtoc_each_items_11 = node.cases();
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_11.length() DO
-      IF !(rtoc_each_items_11[rtoc_idx].binding()) THEN
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
+  aST__each_locatable_list(body, FALSE, %(node: Locatable) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
+  IF node IS_A MatchStatement AS match_stmt THEN
+    IF (match_stmt.takes OR_ELSE FALSE) THEN
+      IF match_stmt.expr IS_A Identifier AS subject THEN
+        IF (subject.was_moved OR_ELSE FALSE) THEN
+          cleanupClassifier__stamp_match_as_bindings_mut(match_stmt, subject, schema_lookup, lifecycle_registry, &bindings);
+        END
       END
-      MUTABLE case_value = rtoc_each_items_11[rtoc_idx].value();
-      MUTABLE variant_name = PARTIAL MATCH case_value START
-          AST.GetField -> case_value.field(),
-          AST.MethodCall -> case_value.name(),
-          DEFAULT -> NIL
-        END;
-      IF !(variant_name) THEN
-          RETURN;
-      END
-      MUTABLE variant_type = ((schema.variants() OR {}))[variant_name];
-      IF !(variant_type) THEN
-          RETURN;
-      END
-      MUTABLE e = TRY (cleanupClassifier__match_as_entry_for(variant_type, union_lookup, variant_name));
-      MUTABLE expr = node.expr();
-      IF !(expr IS_A Identifier) THEN
-          RETURN;
-      END
-      IF (e AND (lifecycle_registry != NIL)) THEN
-          MUTABLE variant_plan_type = IF variant_type IS_A Type THEN
-            variant_type
-          ELSE
-            source_ti
-          END;
-          cleanupEntry__set_lifecycle_plan_mut(&e, UNWRAP (lifecycle_registry[variant_plan_type]));
-      END
-      MUTABLE src_entry: ?CleanupEntry = COPY bindings[CAST(expr.name() AS String)];
-      IF (e AND (src_entry != NIL)) THEN
-          cleanupEntry__set_alloc_mut(&e, cleanupEntry__alloc(src_entry));
-      END
-      IF e THEN
-          bindings[rtoc_each_items_11[rtoc_idx].binding()] = e;
-      END
-    rtoc_idx = rtoc_idx + 1;
+    END
   END
   rubyToClearVoid()
   });
+END
+PRIVATE FN cleanupClassifier__stamp_match_as_bindings_mut(match_stmt: MatchStatement, subject: Identifier, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+  MUTABLE source_ti: Type = TRY (aST__full_type_mut(Locatable{ Identifier: COPY subject }));
+  MUTABLE union_lookup: String@symbol = type__resolved(source_ti);
+  IF type__generic_instance?(source_ti) THEN
+    union_lookup = COPY type__generic_base(source_ti);
+  END
+  MUTABLE schema: ?UnionSchema@multiowned = cleanupClassifier__schema_union(schema_lookup(union_lookup));
+  IF !(schema EXISTS) THEN
+    RETURN;
+  END
+  MUTABLE variants: {String@symbol}?SchemasUnionSchemaVariantValue = COPY UNWRAP (schema).variants;
+  FOR match_case IN match_stmt.cases DO
+    IF match_case.binding EXISTS AS binding_name THEN
+      IF cleanupClassifier__match_case_variant_name(match_case) EXISTS AS variant_name THEN
+        IF variants[variant_name] EXISTS AS variant_type THEN
+          IF (TRY (cleanupClassifier__match_as_entry_for(variant_type, UnionLookup{ SymbolValue: COPY union_lookup }, VariantName{ SymbolValue: COPY variant_name }))) EXISTS AS found THEN
+            MUTABLE e = KEEP found;
+            IF lifecycle_registry EXISTS AS registry THEN
+              MUTABLE variant_plan_type: Type = COPY source_ti;
+              PARTIAL MATCH variant_type START
+                SchemasUnionSchemaVariantValue.TypeMultiowned AS variant_ti -> variant_plan_type = COPY variant_ti;
+              END
+              cleanupEntry__set_lifecycle_plan_mut(&e, TRY (lifecycleRegistry__fetch(registry, variant_plan_type)));
+            END
+            IF bindings[COPY subject.name] EXISTS AS src_entry THEN
+              cleanupEntry__set_alloc_mut(&e, cleanupEntry__alloc(src_entry));
+            END
+            bindings[COPY binding_name] = KEEP e;
+          END
+        END
+      END
+    END
+  END
+END
+PRIVATE FN cleanupClassifier__match_case_variant_name(match_case: MatchCase) RETURNS ?String@symbol ->
+  IF match_case.value IS_A GetField AS get_field THEN
+    RETURN symbol(COPY get_field.field);
+  END
+  IF match_case.value IS_A MethodCall AS method_call THEN
+    RETURN symbol(COPY method_call.name);
+  END
+  RETURN NIL;
 END
 PUB FN cleanupClassifier__match_as_entry_for(variant_type: ?SchemasUnionSchemaVariantValue, union_lookup: UnionLookup, variant_name: VariantName) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE _ = COPY union_lookup;
