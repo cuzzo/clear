@@ -359,13 +359,7 @@ PUB FN cleanupClassifier__mark_iteration_values_function_mut(expr: Locatable, lo
   END
 END
 PUB FN cleanupClassifier__params_for_call(call: FuncCall) RETURNS ![]Param ->
-  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY call.matched_signature));
-  ELSE
-    sig_branch_value = NIL;
-  END
-  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  MUTABLE sig: ?FunctionSignature@multiowned = KEEP call.matched_signature;
   IF sig EXISTS AS sig_value THEN
     RETURN TRY (functionSignature__params(sig_value));
   ELSE
@@ -373,13 +367,7 @@ PUB FN cleanupClassifier__params_for_call(call: FuncCall) RETURNS ![]Param ->
   END
 END
 PUB FN cleanupClassifier__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
-  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY call.matched_signature));
-  ELSE
-    sig_branch_value = NIL;
-  END
-  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  MUTABLE sig: ?FunctionSignature@multiowned = KEEP call.matched_signature;
   IF sig EXISTS AS sig_value THEN
     RETURN TRY (functionSignature__params(sig_value));
   ELSE
@@ -965,55 +953,37 @@ PUB FN cleanupClassifier__capture_expr_heap?(expr: Locatable, schema_lookup: FN(
   RETURN (TRY (cleanupClassifier__capture_expr_owned_alloc(expr, schema_lookup)) == :heap);
 END
 PUB FN cleanupClassifier__capture_expr_owned_alloc(expr: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?String@symbol ->
-  IF expr IS_A NextExpr AS next_expr THEN
+  IF (expr IS_A NextExpr OR expr IS_A ResolveNode) THEN
+    # NEXT transfers an awaited value (or a popped stream item) into the
+    # receiving binding; async results are materialized in heap storage.
     RETURN :heap;
-  ELSE_IF expr IS_A ResolveNode AS resolve_node THEN
-    RETURN :heap;
-  ELSE_IF expr IS_A FuncCall AS func_call THEN
-    IF cleanupClassifier__call_has_return_lifetime?(func_call) THEN
-      RETURN NIL;
-    END
-    IF TRY (cleanupClassifier__call_returns_heap_owned?(func_call, schema_lookup)) THEN
-      RETURN :heap;
-    END
-    IF cleanupClassifier__call_returns_frame_owned?(func_call) THEN
-      RETURN :frame;
-    END
-    RETURN NIL;
-  ELSE_IF (expr IS_A MethodCall) THEN
-    IF cleanupClassifier__call_has_return_lifetime?(expr) THEN
-      RETURN NIL;
-    END
-    IF TRY (cleanupClassifier__call_returns_heap_owned?(expr, schema_lookup)) THEN
-      RETURN :heap;
-    END
-    IF cleanupClassifier__call_returns_frame_owned?(expr) THEN
-      RETURN :frame;
-    END
-    IF call_returns_receiver_owned?(expr) THEN
-      RETURN cleanupClassifier__receiver_storage_alloc(expr);
-    END
-    IF (respondsTo?(expr, "heap_storage?") AND expr.heap_storage?()) THEN
-      RETURN :heap;
-    END
-    MUTABLE receiver = expr.object();
-    IF (TRUE AND ((aST__node__symbol(receiver) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12 = ((aST__node__symbol(receiver))?);
-    symbolEntry__heap_storage?(rtoc_local_receiver_12) })) THEN
-      RETURN :heap;
-    END
-    RETURN NIL;
-  ELSE
+  END
+  IF !((expr IS_A FuncCall OR expr IS_A MethodCall)) THEN
     RETURN NIL;
   END
+  IF TRY (cleanupClassifier__call_has_return_lifetime?(expr)) THEN
+    RETURN NIL;
+  END
+  IF TRY (cleanupClassifier__call_returns_heap_owned?(expr, schema_lookup)) THEN
+    RETURN :heap;
+  END
+  IF TRY (cleanupClassifier__call_returns_frame_owned?(expr)) THEN
+    RETURN :frame;
+  END
+  IF expr IS_A MethodCall AS method_call THEN
+    IF TRY (cleanupClassifier__call_returns_receiver_owned?(expr)) THEN
+      RETURN cleanupClassifier__receiver_storage_alloc(method_call);
+    END
+    IF aST__node__symbol(method_call.object) EXISTS AS receiver_symbol THEN
+      IF symbolEntry__heap_storage?(receiver_symbol) THEN
+        RETURN :heap;
+      END
+    END
+  END
+  RETURN NIL;
 END
 PUB FN cleanupClassifier__call_returns_heap_owned?(expr: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
-  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(expr));
-  ELSE
-    sig_branch_value = NIL;
-  END
-  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  MUTABLE sig: ?FunctionSignature@multiowned = KEEP aST__node__matched_signature(expr);
   IF sig EXISTS AS sig_value THEN
     MUTABLE sig_value_mutable = COPY sig_value;
     IF (TRUE AND !(((TRY (functionSignature__return_lifetime(sig_value_mutable))).length() == 0))) THEN
@@ -1039,13 +1009,7 @@ PUB FN cleanupClassifier__call_returns_heap_owned?(expr: Locatable, schema_looku
   END
 END
 PUB FN cleanupClassifier__call_returns_frame_owned?(expr: Locatable) RETURNS !Bool ->
-  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(expr));
-  ELSE
-    sig_branch_value = NIL;
-  END
-  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  MUTABLE sig: ?FunctionSignature@multiowned = KEEP aST__node__matched_signature(expr);
   RETURN !(!((IF sig != NIL THEN
     TRY (functionSignature__frame_return_alloc?(&sig))
   ELSE
@@ -1053,23 +1017,15 @@ PUB FN cleanupClassifier__call_returns_frame_owned?(expr: Locatable) RETURNS !Bo
   END)));
 END
 PUB FN cleanupClassifier__call_returns_receiver_owned?(expr: Locatable) RETURNS !Bool ->
-  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(expr));
-  ELSE
-    sig_branch_value = NIL;
-  END
-  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+  MUTABLE sig: ?FunctionSignature@multiowned = KEEP aST__node__matched_signature(expr);
   RETURN ((sig != NIL) AND (TRY (functionSignature__return_alloc(&sig)) == :receiver_storage));
 END
 PUB FN cleanupClassifier__receiver_storage_alloc(expr: MethodCall) RETURNS ?String@symbol ->
   MUTABLE receiver = COPY expr.object;
-  MUTABLE symbol = IF TRUE THEN
-    aST__node__symbol(receiver)
-  ELSE
-    NIL
-  END;
-  MUTABLE storage: ?String@symbol = symbol.storage();
+  MUTABLE storage: ?String@symbol = NIL;
+  IF aST__node__symbol(receiver) EXISTS AS symbol THEN
+    storage = COPY symbolEntry__storage(symbol);
+  END
   IF (storage == :heap) THEN
     RETURN :heap;
   END
@@ -2121,12 +2077,6 @@ FN castVariantNameToUnionLookup(value: VariantName) RETURNS UnionLookup ->
 END
 FN rubyToClearVoid() RETURNS Void ->
   RETURN;
-END
-FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
-  IF value EXISTS AS optional_payload THEN
-    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
-  END
-  NIL;
 END
 FN ruby_wrap_optional_UnionSchema_SchemaValue(value: ?UnionSchema) RETURNS ?SchemaValue ->
   IF value EXISTS AS optional_payload THEN
