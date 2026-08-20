@@ -626,20 +626,16 @@ PUB FN cleanupClassifier__moved_payload_alloc(node: ?Locatable, bindings: {Strin
     RETURN NIL;
   END
   MUTABLE payload = COPY UNWRAP (node);
-  MUTABLE names = List[];
+  MUTABLE names: []String = List[];
   TRY (cleanupClassifier__collect_payload_binding_names(payload, &names));
-  MUTABLE allocs = names |> SELECT:? {
-  MUTABLE entry: ?CleanupEntry = COPY bindings[_];
-  (IF (IF entry != NIL THEN
-      cleanupEntry__needs_cleanup?(entry)
-    ELSE
-      NIL
-    END) THEN
-      cleanupEntry__alloc(entry)
-    ELSE
-      NIL
-    END)
-  } |> WHERE _ != NIL;
+  MUTABLE allocs: []String@symbol = List[];
+  FOR name IN names DO
+    IF bindings[name] EXISTS AS entry THEN
+      IF cleanupEntry__needs_cleanup?(entry) THEN
+        &allocs.append(COPY cleanupEntry__alloc(entry));
+      END
+    END
+  END
   IF (allocs.length() == 0) THEN
     RETURN NIL;
   END
@@ -657,7 +653,7 @@ PUB FN cleanupClassifier__ownership_transfer_payload?(node: ?Locatable) RETURNS 
     IF aST__moved?(node_value) THEN
       RETURN TRUE;
     END
-    RETURN (TRY (aST__wrapped_children(node_value))) |> ANY (TRUE AND TRY (cleanupClassifier__ownership_transfer_payload?(_)));
+    RETURN aST__wrapped_children(node_value) |> ANY TRY (cleanupClassifier__ownership_transfer_payload?(_));
   ELSE
     RETURN FALSE;
   END
@@ -667,7 +663,7 @@ PUB FN cleanupClassifier__collect_payload_binding_names(node: Locatable, MUTABLE
     &names.append(COPY identifier__name(identifier));
     RETURN;
   END
-  FOR _ IN (TRY (aST__wrapped_children(node))) DO
+  FOR _ IN aST__wrapped_children(node) DO
   TRY (cleanupClassifier__collect_payload_binding_names(_, &names));
   END
 END
@@ -675,7 +671,7 @@ PUB FN cleanupClassifier__transferred_payload_entry(ti: Type, schema_lookup: FN(
   RETURN TRY (cleanupClassifier__takes_param_base_entry(ti, schema_lookup, lifecycle_registry));
 END
 PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
-  MUTABLE rtoc_each_items_7 = (fn_node.params |> WHERE _.takes);
+  MUTABLE rtoc_each_items_7 = (fn_node.params |> WHERE (_.takes OR_ELSE FALSE));
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_7.length() DO
     MUTABLE ti = COPY rtoc_each_items_7[rtoc_idx]?.type;

@@ -7120,6 +7120,37 @@ PUB FN aST__each_locatable_list_mut(MUTABLE items: []Locatable, MUTABLE descend_
     rtoc_idx = rtoc_idx + 1;
   END
 END
+PUB FN aST__wrapped_children(expr: Locatable) RETURNS []Locatable ->
+  MUTABLE children: []Locatable = List[];
+  IF expr IS_A StructLit AS struct_lit THEN
+    children = children + struct_lit.fields.values();
+  ELSE_IF expr IS_A UnionVariantLit AS union_variant_lit THEN
+    children = children + union_variant_lit.fields.values();
+  ELSE_IF expr IS_A ListLit AS list_lit THEN
+    children = children + list_lit.items;
+  ELSE_IF expr IS_A Cast AS cast_node THEN
+    &children.append(COPY cast_node.value);
+  ELSE_IF expr IS_A MoveNode AS move_node THEN
+    &children.append(COPY move_node.value);
+  ELSE_IF expr IS_A CopyNode AS copy_node THEN
+    &children.append(COPY copy_node.value);
+  ELSE_IF expr IS_A KeepNode AS keep_node THEN
+    &children.append(COPY keep_node.value);
+  ELSE_IF expr IS_A ShareNode AS share_node THEN
+    &children.append(COPY share_node.value);
+  ELSE_IF expr IS_A LinkNode AS link_node THEN
+    &children.append(COPY link_node.value);
+  ELSE_IF expr IS_A ResolveNode AS resolve_node THEN
+    &children.append(COPY resolve_node.value);
+  ELSE_IF expr IS_A MutableBorrow AS mutable_borrow THEN
+    &children.append(COPY mutable_borrow.target);
+  ELSE_IF expr IS_A FreezeNode AS freeze_node THEN
+    &children.append(COPY freeze_node.value);
+  ELSE_IF expr IS_A CapabilityWrap AS capability_wrap THEN
+    &children.append(COPY capability_wrap.value);
+  END
+  RETURN children;
+END
 PUB FN aST__expression_children(node: Locatable) RETURNS []Locatable ->
   MUTABLE children: []Locatable = List[];
   IF node IS_A CopyNode AS copy_node THEN
