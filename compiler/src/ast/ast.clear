@@ -35,7 +35,7 @@ PUB UNION TensePlanValue { Unset: Bool }
 PUB UNION AssignmentName { StringValue: String, Identifier: Identifier, GetField: GetField, GetIndex: GetIndex }
 PUB UNION PipelineRewriteNode { Identifier: Identifier, FuncCall: FuncCall, MethodCall: MethodCall, BinaryOp: BinaryOp, GetField: GetField, GetIndex: GetIndex, BindExpr: BindExpr, Assignment: Assignment, UnaryOp: UnaryOp, CopyNode: CopyNode, MoveNode: MoveNode, KeepNode: KeepNode, ShareNode: ShareNode, WithBlock: WithBlock, StructLit: StructLit, HashLit: HashLit, ListLit: ListLit, BlockExpr: BlockExpr, Assert: Assert, IfStatement: IfStatement, StaticCall: StaticCall }
 PUB UNION BgNode { BgBlock: BgBlock, BgStreamBlock: BgStreamBlock }
-UNION BindingNode { VarDecl: VarDecl, BindExpr: BindExpr, DestructureTarget: DestructureTarget }
+PUB UNION BindingNode { VarDecl: VarDecl, BindExpr: BindExpr, DestructureTarget: DestructureTarget }
 UNION ScalarLiteralCandidate { Locatable: Locatable, Program: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, StructDef: StructDef, VarDecl: VarDecl, Assignment: Assignment, DestructureTarget: DestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, UnaryOp: UnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MethodCall: MethodCall, GetField: GetField, GetIndex: GetIndex, Cast: Cast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, DeferStmt: DeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, OptionalUnwrap: OptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, BlockExpr: BlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, RangeLit: RangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, EnumDef: EnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, DoBlock: DoBlock, BgBlock: BgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, ArrayValue: []Node, TypeMultiowned: Type@multiowned, StringValue: String, SymbolValue: String@symbol, Float64Value: Float64, BoolValue: Bool, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, ArrayValue2: []Locatable, Type: Type }
 STRUCT BodySlot {
   body: []Locatable,
@@ -7119,6 +7119,66 @@ PUB FN aST__each_locatable_list_mut(MUTABLE items: []Locatable, MUTABLE descend_
     items[rtoc_idx] = COPY child;
     rtoc_idx = rtoc_idx + 1;
   END
+END
+PUB FN aST__expression_children(node: Locatable) RETURNS []Locatable ->
+  MUTABLE children: []Locatable = List[];
+  IF node IS_A CopyNode AS copy_node THEN
+    &children.append(COPY copy_node.value);
+  ELSE_IF node IS_A KeepNode AS keep_node THEN
+    &children.append(COPY keep_node.value);
+  ELSE_IF node IS_A FreezeNode AS freeze_node THEN
+    &children.append(COPY freeze_node.value);
+  ELSE_IF node IS_A TenseNavigation AS tense_navigation THEN
+    &children.append(COPY tense_navigation.target);
+  ELSE_IF node IS_A MoveNode AS move_node THEN
+    &children.append(COPY move_node.value);
+  ELSE_IF node IS_A ShareNode AS share_node THEN
+    &children.append(COPY share_node.value);
+  ELSE_IF node IS_A CapabilityWrap AS capability_wrap THEN
+    &children.append(COPY capability_wrap.value);
+  ELSE_IF node IS_A Cast AS cast_node THEN
+    &children.append(COPY cast_node.value);
+  ELSE_IF node IS_A MutableBorrow AS mutable_borrow THEN
+    &children.append(COPY mutable_borrow.target);
+  ELSE_IF node IS_A ReturnNode AS return_node THEN
+    IF return_node.value EXISTS AS return_value THEN
+      &children.append(COPY return_value);
+    END
+  ELSE_IF node IS_A Assignment AS assignment THEN
+    &children.append(COPY assignment.value);
+  ELSE_IF node IS_A VarDecl AS var_decl THEN
+    &children.append(COPY var_decl.value);
+  ELSE_IF node IS_A BindExpr AS bind_expr THEN
+    &children.append(COPY bind_expr.value);
+  ELSE_IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
+    &children.append(COPY destructuring_assignment.value);
+  ELSE_IF node IS_A BinaryOp AS binary_op THEN
+    &children.append(COPY binary_op.left);
+    &children.append(COPY binary_op.right);
+  ELSE_IF node IS_A UnaryOp AS unary_op THEN
+    &children.append(COPY unary_op.right);
+  ELSE_IF node IS_A FuncCall AS func_call THEN
+    children = children + func_call.args;
+  ELSE_IF node IS_A StaticCall AS static_call THEN
+    children = children + static_call.args;
+  ELSE_IF node IS_A MethodCall AS method_call THEN
+    &children.append(COPY method_call.object);
+    children = children + method_call.args;
+  ELSE_IF node IS_A GetField AS get_field THEN
+    &children.append(COPY get_field.target);
+  ELSE_IF node IS_A GetIndex AS get_index THEN
+    &children.append(COPY get_index.target);
+    &children.append(COPY get_index.index);
+  ELSE_IF node IS_A StructLit AS struct_lit THEN
+    children = children + struct_lit.fields.values();
+  ELSE_IF node IS_A UnionVariantLit AS union_variant_lit THEN
+    children = children + union_variant_lit.fields.values();
+  ELSE_IF node IS_A ListLit AS list_lit THEN
+    children = children + list_lit.items;
+  ELSE_IF node IS_A Assert AS assert_node THEN
+    &children.append(COPY assert_node.condition);
+  END
+  RETURN children;
 END
 PUB FN aST__each_child_node(node: Locatable, visitor: FN(Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   FOR rtoc_walk_child IN rtocChildrenLocatable(node) DO
