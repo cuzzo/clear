@@ -560,7 +560,7 @@ PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNod
       cleanup = KEEP with_alloc_mutable;
     END
   ELSE
-    cleanup = KEEP TRY (cleanupClassifier__no_cleanup_alloc_entry(TypeTypeInput{ Type: COPY full_type }, schema_lookup));
+    cleanup = KEEP TRY (cleanupClassifier__no_cleanup_alloc_entry(full_type, schema_lookup));
   END
   IF cleanup EXISTS AS planned THEN
     IF lifecycle_registry EXISTS AS registry THEN
@@ -601,21 +601,14 @@ PRIVATE FN cleanupClassifier__binding_node_value(node: BindingNode) RETURNS ?Loc
   END
   RETURN NIL;
 END
-PRIVATE FN cleanupClassifier__set_binding_entry_mut(MUTABLE node: BindingNode, entry: CleanupEntry@multiowned) RETURNS Void ->
+PRIVATE FN cleanupClassifier__set_binding_entry_mut(MUTABLE node: BindingNode, entry: CleanupEntry) RETURNS Void ->
   PARTIAL MATCH node START
     BindingNode.VarDecl AS MUTABLE item -> item.mir_binding_entry = KEEP entry;,
     BindingNode.BindExpr AS MUTABLE item -> item.mir_binding_entry = KEEP entry;,
     BindingNode.DestructureTarget AS MUTABLE item -> item.mir_binding_entry = KEEP entry;
   END
 END
-PUB FN cleanupClassifier__no_cleanup_alloc_entry(full_type: Any, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
-  MUTABLE ti_branch_value: ?Type = NIL;
-  IF full_type IS_A Type THEN
-    ti_branch_value = COPY full_type;
-  ELSE
-    ti_branch_value = TRY (type__new(full_type));
-  END
-  MUTABLE ti: Type = ti_branch_value?;
+PUB FN cleanupClassifier__no_cleanup_alloc_entry(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   IF !((TRY (type__heap_ptr?(ti)) OR TRY (type__collection_value?(ti)))) THEN
     RETURN NIL;
   END
@@ -629,7 +622,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN NIL;
 END
 PUB FN cleanupClassifier__moved_payload_alloc(node: ?Locatable, bindings: {String}CleanupEntry) RETURNS !?String@symbol ->
-  IF !(TRY (ownership_transfer_payload?(node))) THEN
+  IF !(TRY (cleanupClassifier__ownership_transfer_payload?(node))) THEN
     RETURN NIL;
   END
   MUTABLE payload = COPY UNWRAP (node);
@@ -664,7 +657,7 @@ PUB FN cleanupClassifier__ownership_transfer_payload?(node: ?Locatable) RETURNS 
     IF aST__moved?(node_value) THEN
       RETURN TRUE;
     END
-    RETURN (TRY (aST__wrapped_children(node_value))) |> ANY (TRUE AND TRY (ownership_transfer_payload?(_)));
+    RETURN (TRY (aST__wrapped_children(node_value))) |> ANY (TRUE AND TRY (cleanupClassifier__ownership_transfer_payload?(_)));
   ELSE
     RETURN FALSE;
   END
