@@ -9818,6 +9818,26 @@ PUB FN unnestRightName(node: Locatable) RETURNS String ->
   END
   RETURN "";
 END
+PUB FN aST__capture_expr_owns_result?(node: ?Locatable) RETURNS !Bool ->
+  IF !(node EXISTS) THEN
+    RETURN FALSE;
+  END
+  MUTABLE current: Locatable = COPY UNWRAP (node);
+  WHILE current IS_A Cast AS cast_node DO
+    current = COPY cast_node.value;
+  END
+  IF aST__borrowed_ownership_view?(current) THEN
+    RETURN FALSE;
+  END
+  IF aST__call?(current) THEN
+    IF aST__node__matched_signature(current) EXISTS AS signature THEN
+      IF !((TRY (functionSignature__return_lifetime(signature))).empty?()) THEN
+        RETURN FALSE;
+      END
+    END
+  END
+  RETURN (((((aST__call?(current) OR current IS_A NextExpr) OR current IS_A ResolveNode) OR current IS_A CopyNode) OR current IS_A KeepNode) OR ((current IS_A MoveNode) OR (current IS_A ShareNode)));
+END
 PUB FN aST__call?(node: Locatable) RETURNS Bool ->
   RETURN ((node IS_A FuncCall) OR (node IS_A MethodCall));
 END

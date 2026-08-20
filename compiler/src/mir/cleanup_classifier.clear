@@ -870,22 +870,20 @@ PUB FN cleanupClassifier__match_as_entry_for(variant_type: ?SchemasUnionSchemaVa
     IF !(TRY (type__variant_has_heap?(SchemasUnionSchemaVariantValue{ InlineStructVariantMultiowned: COPY inline_struct_variant }))) THEN
       RETURN NIL;
     END
-    RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: TRUE});
+    RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: CleanupExtraValue{ BoolValue: TRUE }});
   END
   IF variant_type? IS_A Type AS type THEN
     IF type__indirect?(type) THEN
       RETURN NIL;
     END
     IF (type__array?(type) AND !(TRY (type__string?(type)))) THEN
-      MUTABLE elem_zig: String = "";
-      IF TRY (type__element_type(type)) THEN
-        elem_zig = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (TRY (type__element_type(type))) }))))) OR_ELSE type__to_s((TRY (type__element_type(type))))));
-      ELSE
-        elem_zig = "UNKNOWN";
+      MUTABLE elem_zig: String = "UNKNOWN";
+      IF (TRY (type__element_type(type))) EXISTS AS elem_type THEN
+        elem_zig = COPY TRY (type__zig_type(elem_type));
       END
-      RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: TRUE, :elem_zig_type: elem_zig});
+      RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: CleanupExtraValue{ BoolValue: TRUE }, :elem_zig_type: CleanupExtraValue{ StringValue: COPY elem_zig }});
     ELSE_IF type__map?(type) THEN
-      RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: TRUE});
+      RETURN cleanupClassifier__entry(:uniform, :heap, TRUE, {:match_as: CleanupExtraValue{ BoolValue: TRUE }});
     END
     RETURN NIL;
   ELSE
@@ -894,7 +892,7 @@ PUB FN cleanupClassifier__match_as_entry_for(variant_type: ?SchemasUnionSchemaVa
 END
 PUB FN cleanupClassifier__walk_capture_bindings(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
   cleanupClassifier__each_capture_binding(body, %(name, expr, anchor_node) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
-  IF !(aST__capture_expr_owns_result?(expr)) THEN
+  IF !(TRY (aST__capture_expr_owns_result?(expr))) THEN
       RETURN NIL;
   END
   MUTABLE expr_ti = TRY (aST__capture_expr_source_type(expr));
@@ -1147,7 +1145,7 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
     entry = (entry OR cleanupClassifier__entry(:uniform, :heap, TRUE));
   END
   IF (!(entry) AND cleanupEntry__resource_close_plan(facts)) THEN
-    entry = cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: cleanupEntry__resource_close_plan(facts)});
+    entry = cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: CleanupExtraValue{ ResourceClosePlan: COPY UNWRAP (cleanupEntry__resource_close_plan(facts)) }});
   END
   entry = (entry OR cleanupClassifier__classify_mutable_owning_slot(ti, node, schema_lookup));
   entry = (entry OR TRY (cleanupClassifier__classify_optional(ti, schema_lookup, node)));
@@ -1376,7 +1374,7 @@ PUB FN cleanupClassifier__classify_collection(ti: Type, schema_lookup: FN(String
   MUTABLE is_heap = !(!(node_sym.heap_storage?()));
   IF ((type__list_collection?(ti) AND !(type__sharded?(ti))) AND !(is_heap)) THEN
     MUTABLE has_heap_elems = TRY (elem_needs_cleanup?(ti, schema_lookup));
-    RETURN cleanupClassifier__entry(:uniform, :frame, TRUE, {:elem_needs_cleanup: has_heap_elems});
+    RETURN cleanupClassifier__entry(:uniform, :frame, TRUE, {:elem_needs_cleanup: CleanupExtraValue{ BoolValue: has_heap_elems }});
   END
   IF type__list_collection?(ti) THEN
     RETURN cleanupClassifier__entry(:uniform, :heap, TRUE);
@@ -1455,10 +1453,10 @@ PUB FN cleanupClassifier__classify_rc_or_link(ti: Type, schema_lookup: FN(String
   IF type__link?(ti) THEN
     RETURN cleanupClassifier__entry(:rc);
   ELSE_IF type__optional?(ti) THEN
-    RETURN cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: cleanupClassifier__wrapper_alloc(ti)});
+    RETURN cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: CleanupExtraValue{ SymbolValue: COPY cleanupClassifier__wrapper_alloc(ti) }});
   ELSE
     MUTABLE rc_alloc = cleanupClassifier__wrapper_alloc(ti);
-    RETURN cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: rc_alloc});
+    RETURN cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: CleanupExtraValue{ SymbolValue: COPY rc_alloc }});
   END
 END
 PUB FN cleanupClassifier__classify_optional(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, node: Any = NIL) RETURNS !?CleanupEntry@multiowned ->
