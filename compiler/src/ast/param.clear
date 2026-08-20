@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172"
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
 PUB STRUCT KeptIdentityContract {
   family: String@symbol,
@@ -22,7 +23,7 @@ PUB STRUCT Param {
   name_token: ?Token,
   required: ?Bool,
   sync: ?String@symbol,
-  symbol: ?String@symbol,
+  symbol: ?SymbolEntry@multiowned,
   carrier_contract: ?String@symbol
 }
 

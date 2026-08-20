@@ -671,99 +671,100 @@ PUB FN cleanupClassifier__transferred_payload_entry(ti: Type, schema_lookup: FN(
   RETURN TRY (cleanupClassifier__takes_param_base_entry(ti, schema_lookup, lifecycle_registry));
 END
 PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
-  MUTABLE rtoc_each_items_7 = (fn_node.params |> WHERE (_.takes OR_ELSE FALSE));
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < rtoc_each_items_7.length() DO
-    MUTABLE ti = COPY rtoc_each_items_7[rtoc_idx]?.type;
-    MUTABLE name = COPY (rtoc_each_items_7[rtoc_idx]?.name);
-    MUTABLE base = TRY (cleanupClassifier__takes_param_base_entry(ti, schema_lookup, lifecycle_registry));
-    IF !(base) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    IF lifecycle_registry EXISTS AS lifecycle_registry_value THEN
-        MUTABLE lifecycle_registry_value_mutable = COPY lifecycle_registry_value;
-        cleanupEntry__set_lifecycle_plan_mut(&base, UNWRAP (lifecycle_registry_value_mutable[ti]));
-    END
-    cleanupEntry__mark_moved_guard_mut(&base);
-    cleanupEntry__set_alloc_mut(&base, :heap);
-    base[:source_kind] = (base[:source_kind] OR_ELSE :takes_param);
-    IF (TRUE AND type__needs_pointer_passing?(ti)) THEN
-        base[:via_pointer] = TRUE;
-    END
-    bindings[name] = base;
-  rtoc_idx = rtoc_idx + 1;
-  END
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < fn_node.params.length() DO
-    IF !((fn_node.params[rtoc_idx]?.takes AND (fn_node.params[rtoc_idx]?.carrier_contract == :monomorphic))) THEN
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    IF bindings.contains?((fn_node.params[rtoc_idx]?.name)) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-    END
-    MUTABLE base = cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: :heap});
-    cleanupEntry__mark_moved_guard_mut(&base);
-    cleanupEntry__set_alloc_mut(&base, :heap);
-    base[:source_kind] = (base[:source_kind] OR_ELSE :takes_param);
-    MUTABLE plan_branch_value: ?LifecyclePlan = NIL;
-      IF lifecycle_registry EXISTS AS lifecycle_registry_value THEN
-        plan_branch_value = lifecycleRegistry__fetch_monomorphic(lifecycle_registry_value, fn_node.params[rtoc_idx]?.type);
-      ELSE
-        plan_branch_value = lifecyclePlanner__monomorphic_carrier_plan(fn_node.params[rtoc_idx]?.type);
+  FOR param IN fn_node.params DO
+    IF (param.takes OR_ELSE FALSE) THEN
+      IF (TRY (cleanupClassifier__takes_param_base_entry(param.type, schema_lookup, lifecycle_registry))) EXISTS AS found THEN
+        MUTABLE base = KEEP found;
+        IF lifecycle_registry EXISTS AS registry THEN
+          cleanupEntry__set_lifecycle_plan_mut(&base, TRY (lifecycleRegistry__fetch(registry, param.type)));
+        END
+        cleanupEntry__mark_moved_guard_mut(&base);
+        cleanupEntry__set_alloc_mut(&base, :heap);
+        IF !(cleanupEntry__source_kind(base) EXISTS) THEN
+          cleanupEntry__set_source_kind_mut(&base, :takes_param);
+        END
+        IF type__needs_pointer_passing?(param.type) THEN
+          cleanupEntry__set_via_pointer_mut(&base, TRUE);
+        END
+        bindings[COPY param.name] = KEEP base;
       END
-    MUTABLE plan: LifecyclePlan = plan_branch_value?;
-    cleanupEntry__set_lifecycle_plan_mut(&base, plan);
-    bindings[(fn_node.params[rtoc_idx]?.name)] = base;
-  rtoc_idx = rtoc_idx + 1;
+    END
   END
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < fn_node.params.length() DO
-    IF fn_node.params[rtoc_idx]?.takes THEN
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+  # A MONOMORPHIC TAKES param is emitted anytype and threads the caller's actual
+  # carrier. Its declared payload may need no drop while the carrier that arrives
+  # is an Rc/Arc handle that must be released, so take the carrier's release
+  # lifecycle from the registry rather than rebuilding memory logic here.
+  FOR param IN fn_node.params DO
+    IF ((param.takes OR_ELSE FALSE) AND (param.carrier_contract == :monomorphic)) THEN
+      IF !(bindings.contains?(COPY param.name)) THEN
+        MUTABLE base = cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: CleanupExtraValue{ SymbolValue: :heap }});
+        cleanupEntry__mark_moved_guard_mut(&base);
+        cleanupEntry__set_alloc_mut(&base, :heap);
+        IF !(cleanupEntry__source_kind(base) EXISTS) THEN
+          cleanupEntry__set_source_kind_mut(&base, :takes_param);
+        END
+        MUTABLE plan: LifecyclePlan = lifecyclePlanner__monomorphic_carrier_plan(param.type);
+        IF lifecycle_registry EXISTS AS registry THEN
+          plan = COPY lifecycleRegistry__fetch_monomorphic(registry, param.type);
+        END
+        cleanupEntry__set_lifecycle_plan_mut(&base, plan);
+        bindings[COPY param.name] = KEEP base;
+      END
     END
-    IF !((IF fn_node.params[rtoc_idx]?.symbol != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (fn_node.params[rtoc_idx]?.symbol);
-    symbolEntry__kept_identity(rtoc_local_receiver_8) }
-      ELSE
-        NIL
-      END)) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+  END
+  # Kept-identity params own the Rc handle their call edge normalized; release
+  # at scope exit unless a consumer moved it.
+  FOR param IN fn_node.params DO
+    IF !((param.takes OR_ELSE FALSE)) THEN
+      IF param.symbol EXISTS AS symbol THEN
+        IF symbolEntry__kept_identity(symbol) THEN
+          MUTABLE base = cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: CleanupExtraValue{ SymbolValue: :heap }});
+          cleanupEntry__mark_moved_guard_mut(&base);
+          cleanupEntry__set_alloc_mut(&base, :heap);
+          IF !(cleanupEntry__source_kind(base) EXISTS) THEN
+            cleanupEntry__set_source_kind_mut(&base, :kept_param);
+          END
+          bindings[COPY param.name] = KEEP base;
+        END
+      END
     END
-    MUTABLE base = cleanupClassifier__entry(:rc, :heap, TRUE, {:rc_alloc: :heap});
-    cleanupEntry__mark_moved_guard_mut(&base);
-    cleanupEntry__set_alloc_mut(&base, :heap);
-    base[:source_kind] = (base[:source_kind] OR_ELSE :kept_param);
-    bindings[(fn_node.params[rtoc_idx]?.name)] = base;
-  rtoc_idx = rtoc_idx + 1;
   END
 END
 PUB FN cleanupClassifier__owned_value_entry(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   RETURN TRY (cleanupClassifier__takes_param_base_entry(ti, schema_lookup));
 END
+PRIVATE FN cleanupClassifier__schema_resource?(schema: ?TypeSchemaLookupResult) RETURNS Bool ->
+  RETURN (schema? IS_A ResourceSchema);
+END
+PRIVATE FN cleanupClassifier__schema_union?(schema: ?TypeSchemaLookupResult) RETURNS Bool ->
+  RETURN (schema? IS_A UnionSchema);
+END
+PRIVATE FN cleanupClassifier__schema_close_plan(schema: ?TypeSchemaLookupResult) RETURNS ?ResourceClosePlan ->
+  IF schema EXISTS AS schema_value THEN
+    PARTIAL MATCH schema_value START
+      TypeSchemaLookupResult.ResourceSchemaMultiowned AS resource -> RETURN COPY resource.close_plan;
+    END
+  END
+  RETURN NIL;
+END
 PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
-  MUTABLE lifecycle: ?LifecyclePlan = NIL;
-  IF lifecycle_registry != NIL THEN
-    lifecycle = COPY UNWRAP (lifecycle_registry?[ti]);
-  END
-  IF ((lifecycle != NIL) AND !(lifecyclePlan__needs_drop?(lifecycle))) THEN
-    RETURN NIL;
-  END
-  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
-  IF (schemas__resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
-    RETURN cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: symbolEntry__close_plan(schema)});
-  END
-  IF schemas__union?(schema) THEN
-    MUTABLE has_heap = TRY (union_variants_need_cleanup?(schema, schema_lookup));
-    IF has_heap THEN
-      RETURN cleanupClassifier__entry(:takes_union);
-    ELSE
+  IF lifecycle_registry EXISTS AS registry THEN
+    IF !(lifecyclePlan__needs_drop?(TRY (lifecycleRegistry__fetch(registry, ti)))) THEN
       RETURN NIL;
     END
+  END
+  MUTABLE schema: ?TypeSchemaLookupResult = schema_lookup(type__resolved(ti));
+  IF (cleanupClassifier__schema_resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
+    RETURN cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: CleanupExtraValue{ ResourceClosePlan: COPY UNWRAP (cleanupClassifier__schema_close_plan(schema)) }});
+  END
+  IF cleanupClassifier__schema_union?(schema) THEN
+    # Heap variants pin the allocator exactly as classify_non_copy_union does
+    # for a local of the same type: the payload is already on the heap, so a
+    # consuming site must not rebase the recipe onto its own placement.
+    IF TRY (cleanupClassifier__union_variants_need_cleanup?(schema, schema_lookup)) THEN
+      RETURN cleanupClassifier__entry(:takes_union, :heap, TRUE, {:fixed_alloc: CleanupExtraValue{ BoolValue: TRUE }});
+    END
+    RETURN NIL;
   END
   MUTABLE opt = TRY (cleanupClassifier__classify_optional(ti, schema_lookup));
   IF opt THEN
@@ -793,12 +794,12 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
   IF structural_product THEN
     RETURN structural_product;
   END
-  IF lifecycle_registry EXISTS AS lifecycle_registry_value THEN
-    MUTABLE lifecycle_registry_value_mutable = COPY lifecycle_registry_value;
-    MUTABLE plan = COPY UNWRAP (lifecycle_registry_value_mutable[ti]);
+  IF lifecycle_registry EXISTS AS registry THEN
+    MUTABLE plan: LifecyclePlan = TRY (lifecycleRegistry__fetch(registry, ti));
     IF lifecyclePlan__needs_drop?(plan) THEN
-      RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_10 = cleanupClassifier__entry(:uniform, :heap, TRUE);
-      cleanupEntry__set_lifecycle_plan_mut(&rtoc_mutable_receiver_10, plan) };
+      MUTABLE fallback = cleanupClassifier__entry(:uniform, :heap, TRUE);
+      cleanupEntry__set_lifecycle_plan_mut(&fallback, plan);
+      RETURN KEEP fallback;
     END
   END
   RETURN NIL;
@@ -821,7 +822,7 @@ PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_looku
       source_ti.resolved()
     END;
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), union_lookup) OR_ELSE NIL);
-  IF !(schemas__union?(schema)) THEN
+  IF !(cleanupClassifier__schema_union?(schema)) THEN
       RETURN;
   END
   MUTABLE rtoc_each_items_11 = node.cases();
@@ -1136,8 +1137,8 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
   END
   MUTABLE entry = NIL;
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
-  IF (schemas__resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
-    entry = cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: symbolEntry__close_plan(schema)});
+  IF (cleanupClassifier__schema_resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
+    entry = cleanupClassifier__entry(:resource, :heap, TRUE, {:resource_close_plan: CleanupExtraValue{ ResourceClosePlan: COPY UNWRAP (cleanupClassifier__schema_close_plan(schema)) }});
   END
   IF tuple_with_borrowed_element?(ti) THEN
     entry = (entry OR cleanupClassifier__classify_structural_product(ti, schema_lookup));
@@ -1529,7 +1530,7 @@ PUB FN cleanupClassifier__optional_payload_needs_cleanup?(inner: Type, schema_lo
     RETURN TRUE;
   END
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(inner)) OR_ELSE NIL);
-  IF schemas__union?(schema) THEN
+  IF cleanupClassifier__schema_union?(schema) THEN
     RETURN TRY (union_variants_need_cleanup?(schema, schema_lookup));
   END
   IF schemas__field_bearing?(schema) THEN
@@ -1597,7 +1598,7 @@ PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schem
     RETURN cleanupClassifier__entry(:uniform);
   END
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
-  IF schemas__union?(schema) THEN
+  IF cleanupClassifier__schema_union?(schema) THEN
     MUTABLE has_heap = TRY (union_variants_need_cleanup?(schema, schema_lookup));
     IF has_heap THEN
       RETURN cleanupClassifier__entry(:uniform);
@@ -1636,7 +1637,7 @@ PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Any, schema_lo
     END
   END
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
-  IF schemas__union?(schema) THEN
+  IF cleanupClassifier__schema_union?(schema) THEN
     MUTABLE has_heap = TRY (union_variants_need_cleanup?(schema, schema_lookup));
     IF has_heap THEN
       RETURN cleanupClassifier__entry(:uniform);
@@ -1706,7 +1707,7 @@ PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locata
 END
 PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
-  IF !(schemas__union?(schema)) THEN
+  IF !(cleanupClassifier__schema_union?(schema)) THEN
     RETURN NIL;
   END
   MUTABLE is_copy = (TRY (type__implicitly_copyable?(ti, %(t) USE(schema_lookup) -> (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), t) OR_ELSE NIL))) OR_ELSE TRUE);

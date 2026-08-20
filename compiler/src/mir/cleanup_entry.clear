@@ -114,6 +114,15 @@ PUB FN cleanupEntry__match_as?(self: CleanupEntry) RETURNS Bool ->
   RETURN self.match_as;
 END
 
+PUB FN cleanupEntry__source_kind(self: CleanupEntry) RETURNS ?String@symbol ->
+  RETURN COPY self.source_kind;
+END
+PUB FN cleanupEntry__set_source_kind_mut(MUTABLE self: CleanupEntry, kind: String@symbol) RETURNS Void ->
+  self.source_kind = COPY kind;
+END
+PUB FN cleanupEntry__set_via_pointer_mut(MUTABLE self: CleanupEntry, value: Bool) RETURNS Void ->
+  self.via_pointer = value;
+END
 PUB FN cleanupEntry__via_pointer?(self: CleanupEntry) RETURNS Bool ->
   RETURN self.via_pointer;
 END
