@@ -1190,7 +1190,7 @@ PUB FN cleanupClassifier__binding_cleanup_facts(node: Locatable) RETURNS Binding
   END
   MUTABLE mutated = FALSE;
   IF node IS_A VarDecl AS var_decl THEN
-    mutated = ((var_decl.mutable OR_ELSE FALSE) AND (var_decl.var_mutated OR_ELSE FALSE));
+    mutated = (var_decl.mutable AND (var_decl.var_mutated OR_ELSE FALSE));
   END
   RETURN BindingCleanupFacts{
     container_borrow: cleanupClassifier__binding_container_borrow?(node),
@@ -1218,52 +1218,30 @@ PUB FN cleanupClassifier__binding_container_borrow?(node: Locatable) RETURNS Boo
   RETURN (aST__container_borrow?(node) OR aST__container_borrow?(cleanupClassifier__binding_value(node)));
 END
 PUB FN cleanupClassifier__finalize_alloc_from_storage_mut(MUTABLE entry: ?CleanupEntry, node: Locatable, ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
-  IF entry EXISTS AS entry_value THEN
-    MUTABLE entry_value_mutable = COPY entry_value;
-    IF !(TRUE) THEN
-      MUTABLE rtoc_owned_return_16: ?CleanupEntry@multiowned = entry_value_mutable;
-      RETURN rtoc_owned_return_16;
-    END
-    MUTABLE storage = cleanupClassifier__storage_from_symbol(aST__node__symbol(node), node);
-    MUTABLE type_alloc = TRY (type__cleanup_allocator(ti, schema_lookup));
-    IF entry_value_mutable[:fixed_alloc] THEN
-      MUTABLE rtoc_owned_return_17: ?CleanupEntry@multiowned = entry_value_mutable;
-      RETURN rtoc_owned_return_17;
-    END
-    cleanupEntry__set_alloc_mut(&entry_value_mutable, IF (((type_alloc == :heap) OR (storage == :heap))) THEN
-      :heap
-    ELSE
-      :frame
-    END);
-    MUTABLE rtoc_owned_return_18: ?CleanupEntry@multiowned = entry_value_mutable;
-    RETURN rtoc_owned_return_18;
-  ELSE
+  IF !(entry EXISTS) THEN
     RETURN NIL;
   END
+  MUTABLE finalized: CleanupEntry = COPY UNWRAP (entry);
+  IF cleanupEntry__fixed_alloc?(finalized) THEN
+    RETURN KEEP finalized;
+  END
+  MUTABLE storage: ?String@symbol = cleanupClassifier__storage_from_symbol(aST__node__symbol(node), node);
+  MUTABLE type_alloc: String@symbol = TRY (type__cleanup_allocator(ti, schema_lookup));
+  MUTABLE alloc: String@symbol = :frame;
+  IF ((type_alloc == :heap) OR (storage == :heap)) THEN
+    alloc = :heap;
+  END
+  cleanupEntry__set_alloc_mut(&finalized, alloc);
+  RETURN KEEP finalized;
 END
-PUB FN cleanupClassifier__storage_from_symbol(sym: ?SymbolEntry, node: Any) RETURNS ?String@symbol ->
-  MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
-  IF (sym != NIL) THEN
-    symbol_branch_value = ((IF aST__declaration_symbol(sym) != NIL THEN aST__declaration_symbol(sym) ELSE sym END));
-  ELSE
-    symbol_branch_value = COPY sym;
+PUB FN cleanupClassifier__storage_from_symbol(sym: ?SymbolEntry, node: Locatable) RETURNS ?String@symbol ->
+  IF sym EXISTS AS sym_value THEN
+    MUTABLE symbol: SymbolEntry = COPY (aST__declaration_symbol(sym_value) OR_ELSE sym_value);
+    IF symbolEntry__storage(symbol) EXISTS AS storage THEN
+      RETURN COPY storage;
+    END
   END
-  MUTABLE symbol: ?SymbolEntry = symbol_branch_value;
-  MUTABLE storage: ?String@symbol = (IF symbol != NIL THEN
-    symbolEntry__storage(symbol)
-  ELSE
-    NIL
-  END);
-  MUTABLE reflected = node;
-  IF storage != NIL THEN
-  RETURN storage;
-  ELSE
-  RETURN (IF respondsTo?(reflected, "storage") THEN
-      CAST(reflected.storage() AS ?String@symbol)
-    ELSE
-      NIL
-    END);
-  END
+  RETURN COPY aST__node_storage_override(node);
 END
 PUB FN cleanupClassifier__entry(kind: String@symbol, alloc: String@symbol = :heap, has_moved_guard: Bool = TRUE) RETURNS CleanupEntry@multiowned ->
   RETURN cleanupEntry__build(kind, alloc, has_moved_guard);

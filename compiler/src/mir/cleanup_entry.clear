@@ -105,6 +105,9 @@ END
 PUB FN cleanupEntry__set_match_as_mut(MUTABLE self: CleanupEntry, value: Bool) RETURNS Void ->
   self.match_as = value;
 END
+PUB FN cleanupEntry__fixed_alloc?(self: CleanupEntry) RETURNS Bool ->
+  RETURN self.fixed_alloc;
+END
 PUB FN cleanupEntry__set_fixed_alloc_mut(MUTABLE self: CleanupEntry, value: Bool) RETURNS Void ->
   self.fixed_alloc = value;
 END

@@ -8644,6 +8644,9 @@ PUB FN aST__node_resource_close_plan(node: Locatable) RETURNS ?ResourceClosePlan
   END
   RETURN NIL;
 END
+PUB FN aST__declaration_symbol(symbol: SymbolEntry) RETURNS ?SymbolEntry@multiowned ->
+  RETURN KEEP symbolEntry__reg_symbol(symbol);
+END
 PUB FN aST__node_heap_storage?(node: Locatable) RETURNS Bool ->
   IF aST__node__symbol(node) EXISTS AS symbol THEN
     IF symbolEntry__heap_storage?(symbol) THEN
