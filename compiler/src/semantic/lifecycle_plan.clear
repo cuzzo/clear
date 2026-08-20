@@ -200,7 +200,7 @@ PUB STRUCT LifecyclePlan {
   resource_close_plan: ?ResourceClosePlan
 }
 
-FN lifecyclePlan__needs_drop?(self: LifecyclePlan) RETURNS Bool ->
+PUB FN lifecyclePlan__needs_drop?(self: LifecyclePlan) RETURNS Bool ->
   RETURN (self.drop_strategy != :none);
 END
 FN lifecyclePlan__copyable?(self: LifecyclePlan) RETURNS Bool ->

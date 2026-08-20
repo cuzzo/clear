@@ -16,7 +16,6 @@ PUB UNION NamesItem { StringValue: String, SymbolValue: String@symbol, PlaceId: 
 PUB UNION UnionLookup { StringValue: String, SymbolValue: String@symbol }
 PUB UNION VariantName { StringValue: String, SymbolValue: String@symbol }
 # Ruby module CleanupClassifier
-PUB UNION AstBodyNode { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Struct: Struct, FunctionDef: FunctionDef, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
 PUB UNION SchemaShape { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
 PUB UNION CaptureBindingBlockParam3 { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, Raise: Raise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, OrElseRaise: OrElseRaise, OrElseExit: OrElseExit, OrElsePass: OrElsePass, OrElsePrune: OrElsePrune, OrElseBreak: OrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Binding: Binding, FunctionDef: FunctionDef, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
 PUB UNION CleanupExtraValue { StringValue: String, SymbolValue: String@symbol, BoolValue: Bool, TypeMultiowned: Type@multiowned, ResourceClosePlan: ResourceClosePlan, ArrayValue: []{String@symbol}Any@multiowned, Type: Type }
@@ -166,12 +165,12 @@ PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: FN(
   END
   MUTABLE bindings: {String}CleanupEntry@multiowned = {};
   MUTABLE entries_by_place: {PlaceId}CleanupEntry@multiowned = {};
-  TRY (cleanupClassifier__walk_bindings(fn_node.body |> SELECT castLocatableToAstBodyNode(_), schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
+  TRY (cleanupClassifier__walk_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
   TRY (cleanupClassifier__walk_takes_params(fn_node, schema_lookup, lifecycle_registry, &bindings));
   cleanupClassifier__walk_moved_source_guards(fn_node.body, bindings);
   TRY (cleanupClassifier__walk_match_as_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
   TRY (cleanupClassifier__walk_capture_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
-  TRY (cleanupClassifier__stamp_cleanup_scopes_mut(fn_node.body |> SELECT castLocatableToAstBodyNode(_), bindings));
+  TRY (cleanupClassifier__stamp_cleanup_scopes_mut(fn_node.body, bindings));
   RETURN cleanupClassificationPlan__from_function(fn_node, bindings, &entries_by_place);
 END
 PUB FN cleanupClassifier__place_for_binding_node(name: String, node: Locatable) RETURNS PlaceId ->
@@ -200,24 +199,24 @@ PUB FN cleanupClassifier__mark_moved_source_guards_in_node(node: Locatable, bind
   rubyToClearVoid()
   });
 END
-PUB FN cleanupClassifier__stamp_cleanup_scopes_mut(body: []AstBodyNode, bindings: {String}CleanupEntry) RETURNS !Void ->
+PUB FN cleanupClassifier__stamp_cleanup_scopes_mut(body: []Locatable, bindings: {String}CleanupEntry) RETURNS !Void ->
   TRY (cleanupClassifier__stamp_default_scopes_mut(body, 0));
   TRY (cleanupClassifier__stamp_extended_loop_lifetimes_mut(body, bindings));
 END
-PUB FN cleanupClassifier__stamp_default_scopes_mut(body: []AstBodyNode, loop_depth: Int64) RETURNS !Void EFFECTS REENTRANT ->
+PUB FN cleanupClassifier__stamp_default_scopes_mut(body: []Locatable, loop_depth: Int64) RETURNS !Void EFFECTS REENTRANT ->
   FOR _ IN body DO
   cleanupClassifier__stamp_binding_default_scope_mut(_, loop_depth);
-  MUTABLE child_depth = IF aST__loop_node?(castAstBodyNodeToLocatable(_)) THEN
+  MUTABLE child_depth = IF aST__loop_node?((_)) THEN
       (loop_depth + 1)
     ELSE
       loop_depth
     END;
-  FOR child_body IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(_)))) DO
-  TRY (cleanupClassifier__stamp_default_scopes_mut(child_body |> SELECT castLocatableToAstBodyNode(_), child_depth));
+  FOR child_body IN (TRY (hoist__child_bodies((_)))) DO
+  TRY (cleanupClassifier__stamp_default_scopes_mut(child_body, child_depth));
   END
   END
 END
-PUB FN cleanupClassifier__stamp_binding_default_scope_mut(node: AstBodyNode, loop_depth: Int64) RETURNS Void ->
+PUB FN cleanupClassifier__stamp_binding_default_scope_mut(node: Locatable, loop_depth: Int64) RETURNS Void ->
   IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
     RETURN;
   END
@@ -244,19 +243,18 @@ PUB FN cleanupClassifier__stamp_binding_default_scope_mut(node: AstBodyNode, loo
     cleanupEntry__set_cleanup_scope_mut(&entry_mutable, scope);
   END
 END
-PUB FN cleanupClassifier__stamp_extended_loop_lifetimes_mut(body: []AstBodyNode, bindings: {String}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+PUB FN cleanupClassifier__stamp_extended_loop_lifetimes_mut(body: []Locatable, bindings: {String}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
   FOR node IN body DO
-  MUTABLE is_loop = aST__loop_node?(castAstBodyNodeToLocatable(node));
-  FOR child_body IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(node)))) DO
-  MUTABLE child_nodes: []AstBodyNode = child_body |> SELECT castLocatableToAstBodyNode(_);
+  MUTABLE is_loop = aST__loop_node?((node));
+  FOR child_body IN (TRY (hoist__child_bodies((node)))) DO
   IF is_loop THEN
-      TRY (cleanupClassifier__stamp_loop_extensions_mut(child_nodes, bindings));
+      TRY (cleanupClassifier__stamp_loop_extensions_mut(child_body, bindings));
   END
-  TRY (cleanupClassifier__stamp_extended_loop_lifetimes_mut(child_nodes, bindings));
+  TRY (cleanupClassifier__stamp_extended_loop_lifetimes_mut(child_body, bindings));
   END
   END
 END
-PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []AstBodyNode, bindings: {String}CleanupEntry) RETURNS !Void ->
+PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []Locatable, bindings: {String}CleanupEntry) RETURNS !Void ->
   MUTABLE local_facts = TRY (localBindingAnalysis__direct_loop_body_facts(body));
   MUTABLE local_names = COPY local_facts.names;
   MUTABLE local_entries = COPY local_facts.entries;
@@ -270,31 +268,37 @@ PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []AstBodyNode, binding
         RETURN;
       END
       MUTABLE entry: ?CleanupEntry = COPY bindings[CAST(bind_expr_mutable.name AS String)];
-      IF ((entry != NIL) AND TRY (value_extends_loop?(bind_expr_mutable.value))) THEN
+      IF ((entry != NIL) AND TRY (cleanupClassifier__value_extends_loop?(bind_expr_mutable.value))) THEN
         TRY (cleanupClassifier__promote_entry_to_heap_cleanup_mut(&entry, bind_expr_mutable.value));
       END
   ELSE_IF node IS_A Assignment AS assignment THEN
       MUTABLE target: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable(assignment.name));
-      IF (((target != NIL) AND UNWRAP (target).name) AND local_names.contains?(target.name)) THEN
-        RETURN;
+      IF target EXISTS AS target_value THEN
+        IF local_names.contains?(COPY target_value.name) THEN
+          RETURN;
+        END
       END
       cleanupClassifier__mark_iteration_values_function_mut(assignment.value, local_entries);
   ELSE_IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
-      IF destructuring_assignment.value IS_A Locatable THEN
-        cleanupClassifier__mark_iteration_values_function_mut(destructuring_assignment.value, local_entries);
-      END
+      cleanupClassifier__mark_iteration_values_function_mut(COPY destructuring_assignment.value, local_entries);
   ELSE_IF node IS_A FuncCall AS func_call THEN
       cleanupClassifier__mark_call_lifetime_extensions_mut(func_call.args, cleanupClassifier__params_for_call(func_call), local_entries, NIL);
-  ELSE_IF (node IS_A MethodCall) THEN
-      MUTABLE receiver: ?Identifier = aST__root_identifier(node.object());
-      MUTABLE receiver_nonlocal = !(!(((((receiver != NIL) AND UNWRAP (receiver).name) AND !(local_names.contains?(receiver.name))))));
-      cleanupClassifier__mark_call_lifetime_extensions_mut(node.args(), cleanupClassifier__params_for_method_call(node) |> SKIP 1, local_entries, receiver_nonlocal);
+  ELSE_IF node IS_A MethodCall AS method_call THEN
+      MUTABLE receiver: ?Identifier = aST__root_identifier(method_call.object);
+      MUTABLE receiver_nonlocal = FALSE;
+      IF receiver EXISTS AS receiver_value THEN
+        receiver_nonlocal = !(local_names.contains?(COPY receiver_value.name));
+      END
+      cleanupClassifier__mark_call_lifetime_extensions_mut(COPY method_call.args, cleanupClassifier__params_for_method_call(method_call) |> SKIP 1, local_entries, receiver_nonlocal);
   END
   rubyToClearVoid()
   }));
 END
 PUB FN cleanupClassifier__value_extends_loop?(value: Locatable) RETURNS !Bool ->
-  RETURN TRY (type__heap_ptr?((TRY (type__from_node_mut(value, "cleanup lifetime extension")))));
+  IF (TRY (type__from_node_mut(value, "cleanup lifetime extension"))) EXISTS AS ti THEN
+    RETURN TRY (type__heap_ptr?(ti));
+  END
+  RETURN FALSE;
 END
 PUB FN cleanupClassifier__promote_entry_to_heap_cleanup_mut(MUTABLE entry_obj: CleanupEntry, value: Locatable) RETURNS !Void ->
   MUTABLE lifecycle: ?LifecyclePlan = cleanupEntry__lifecycle_plan(entry_obj);
@@ -434,24 +438,24 @@ PUB FN cleanupClassifier__field_owner_cleanup_alloc(target_node: Locatable, fact
     RETURN :frame;
   END
 END
-PUB FN cleanupClassifier__walk_bindings(body: []AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS ![]CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__walk_bindings(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS ![]CleanupEntry@multiowned ->
   TRY (cleanupClassifier__classify_cleanup_binding_body(body, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
   RETURN bindings.values();
 END
-PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+PUB FN cleanupClassifier__classify_cleanup_binding_body(body: []Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
   FOR _ IN body DO
   MUTABLE rtoc_mutable_block_param_4 = COPY _;
   IF (rtoc_mutable_block_param_4 IS_A VarDecl OR rtoc_mutable_block_param_4 IS_A BindExpr) THEN
       TRY (cleanupClassifier__classify_cleanup_binding_node(&rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, &bindings, &entries_by_place));
   END
   TRY (cleanupClassifier__classify_inline_bg_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
-  FOR rtoc_mutable_block_param_4 IN (TRY (hoist__child_bodies(castAstBodyNodeToLocatable(rtoc_mutable_block_param_4)))) DO
+  FOR rtoc_mutable_block_param_4 IN (TRY (hoist__child_bodies((rtoc_mutable_block_param_4)))) DO
   TRY (cleanupClassifier__classify_cleanup_binding_body(rtoc_mutable_block_param_4, schema_lookup, lifecycle_registry, bindings, entries_by_place));
   END
   END
 END
-PUB FN cleanupClassifier__classify_inline_bg_binding_body(node: AstBodyNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
-  MUTABLE rtoc_each_items_5 = (TRY (aST__expression_children(castAstBodyNodeToLocatable(node))));
+PUB FN cleanupClassifier__classify_inline_bg_binding_body(node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, bindings: {String}CleanupEntry, entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void EFFECTS REENTRANT ->
+  MUTABLE rtoc_each_items_5 = (TRY (aST__expression_children((node))));
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_5.length() DO
     IF !(TRUE) THEN
@@ -1758,127 +1762,6 @@ FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castAstBodyNodeToLocatable(value: AstBodyNode) RETURNS Locatable ->
-  PARTIAL MATCH value START
-    AstBodyNode.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
-    AstBodyNode.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
-    AstBodyNode.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
-    AstBodyNode.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
-    AstBodyNode.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
-    AstBodyNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
-    AstBodyNode.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
-    AstBodyNode.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
-    AstBodyNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
-    AstBodyNode.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
-    AstBodyNode.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
-    AstBodyNode.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
-    AstBodyNode.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
-    AstBodyNode.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
-    AstBodyNode.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
-    AstBodyNode.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
-    AstBodyNode.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
-    AstBodyNode.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
-    AstBodyNode.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
-    AstBodyNode.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
-    AstBodyNode.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
-    AstBodyNode.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
-    AstBodyNode.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
-    AstBodyNode.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
-    AstBodyNode.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
-    AstBodyNode.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
-    AstBodyNode.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
-    AstBodyNode.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
-    AstBodyNode.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
-    AstBodyNode.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
-    AstBodyNode.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
-    AstBodyNode.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
-    AstBodyNode.Raise AS cast_payload -> RETURN Locatable{ Raise: COPY cast_payload };,
-    AstBodyNode.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
-    AstBodyNode.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
-    AstBodyNode.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
-    AstBodyNode.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
-    AstBodyNode.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
-    AstBodyNode.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
-    AstBodyNode.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
-    AstBodyNode.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
-    AstBodyNode.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
-    AstBodyNode.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
-    AstBodyNode.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
-    AstBodyNode.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
-    AstBodyNode.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
-    AstBodyNode.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
-    AstBodyNode.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
-    AstBodyNode.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
-    AstBodyNode.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
-    AstBodyNode.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
-    AstBodyNode.OrElseRaise AS cast_payload -> RETURN Locatable{ OrElseRaise: COPY cast_payload };,
-    AstBodyNode.OrElseExit AS cast_payload -> RETURN Locatable{ OrElseExit: COPY cast_payload };,
-    AstBodyNode.OrElsePass AS cast_payload -> RETURN Locatable{ OrElsePass: COPY cast_payload };,
-    AstBodyNode.OrElsePrune AS cast_payload -> RETURN Locatable{ OrElsePrune: COPY cast_payload };,
-    AstBodyNode.OrElseBreak AS cast_payload -> RETURN Locatable{ OrElseBreak: COPY cast_payload };,
-    AstBodyNode.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
-    AstBodyNode.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
-    AstBodyNode.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
-    AstBodyNode.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
-    AstBodyNode.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
-    AstBodyNode.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
-    AstBodyNode.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
-    AstBodyNode.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
-    AstBodyNode.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
-    AstBodyNode.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
-    AstBodyNode.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
-    AstBodyNode.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
-    AstBodyNode.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
-    AstBodyNode.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
-    AstBodyNode.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
-    AstBodyNode.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
-    AstBodyNode.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
-    AstBodyNode.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
-    AstBodyNode.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
-    AstBodyNode.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
-    AstBodyNode.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
-    AstBodyNode.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
-    AstBodyNode.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
-    AstBodyNode.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
-    AstBodyNode.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
-    AstBodyNode.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
-    AstBodyNode.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
-    AstBodyNode.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
-    AstBodyNode.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
-    AstBodyNode.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
-    AstBodyNode.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
-    AstBodyNode.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
-    AstBodyNode.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
-    AstBodyNode.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
-    AstBodyNode.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
-    AstBodyNode.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
-    AstBodyNode.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
-    AstBodyNode.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
-    AstBodyNode.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
-    AstBodyNode.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
-    AstBodyNode.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
-    AstBodyNode.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
-    AstBodyNode.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
-    AstBodyNode.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
-    AstBodyNode.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
-    AstBodyNode.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
-    AstBodyNode.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
-    AstBodyNode.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
-    AstBodyNode.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
-    AstBodyNode.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
-    AstBodyNode.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
-    AstBodyNode.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
-    AstBodyNode.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
-    AstBodyNode.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
-    AstBodyNode.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
-    AstBodyNode.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
-    AstBodyNode.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
-    AstBodyNode.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
-    AstBodyNode.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to Locatable");
-  END
-  panic("Invalid cast to Locatable");
-END
 FN castBindingNodeToLocatable(value: BindingNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     BindingNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
@@ -2178,124 +2061,4 @@ FN ruby_wrap_optional_UnionSchema_SchemaValue(value: ?UnionSchema) RETURNS ?Sche
     RETURN SchemaValue{ UnionSchemaMultiowned: COPY optional_payload };
   END
   NIL;
-END
-PUB FN castLocatableToAstBodyNode(value: Locatable) RETURNS AstBodyNode ->
-  PARTIAL MATCH value START
-    Locatable.RequireNode AS item -> RETURN AstBodyNode{ RequireNode: COPY item };,
-    Locatable.ProtocolRequirement AS item -> RETURN AstBodyNode{ ProtocolRequirement: COPY item };,
-    Locatable.ProtocolDef AS item -> RETURN AstBodyNode{ ProtocolDef: COPY item };,
-    Locatable.ImplementationDef AS item -> RETURN AstBodyNode{ ImplementationDef: COPY item };,
-    Locatable.ConformanceDef AS item -> RETURN AstBodyNode{ ConformanceDef: COPY item };,
-    Locatable.VarDecl AS item -> RETURN AstBodyNode{ VarDecl: COPY item };,
-    Locatable.Assignment AS item -> RETURN AstBodyNode{ Assignment: COPY item };,
-    Locatable.DestructuringAssignment AS item -> RETURN AstBodyNode{ DestructuringAssignment: COPY item };,
-    Locatable.BindExpr AS item -> RETURN AstBodyNode{ BindExpr: COPY item };,
-    Locatable.BinaryOp AS item -> RETURN AstBodyNode{ BinaryOp: COPY item };,
-    Locatable.IsA AS item -> RETURN AstBodyNode{ IsA: COPY item };,
-    Locatable.CallSiteOverride AS item -> RETURN AstBodyNode{ CallSiteOverride: COPY item };,
-    Locatable.Identifier AS item -> RETURN AstBodyNode{ Identifier: COPY item };,
-    Locatable.Literal AS item -> RETURN AstBodyNode{ Literal: COPY item };,
-    Locatable.ListLit AS item -> RETURN AstBodyNode{ ListLit: COPY item };,
-    Locatable.TupleLit AS item -> RETURN AstBodyNode{ TupleLit: COPY item };,
-    Locatable.DefaultArrayLit AS item -> RETURN AstBodyNode{ DefaultArrayLit: COPY item };,
-    Locatable.HashLit AS item -> RETURN AstBodyNode{ HashLit: COPY item };,
-    Locatable.DefaultLit AS item -> RETURN AstBodyNode{ DefaultLit: COPY item };,
-    Locatable.StructLit AS item -> RETURN AstBodyNode{ StructLit: COPY item };,
-    Locatable.LambdaLit AS item -> RETURN AstBodyNode{ LambdaLit: COPY item };,
-    Locatable.IfStatement AS item -> RETURN AstBodyNode{ IfStatement: COPY item };,
-    Locatable.IfBind AS item -> RETURN AstBodyNode{ IfBind: COPY item };,
-    Locatable.WhileLoop AS item -> RETURN AstBodyNode{ WhileLoop: COPY item };,
-    Locatable.WhileBindLoop AS item -> RETURN AstBodyNode{ WhileBindLoop: COPY item };,
-    Locatable.BreakNode AS item -> RETURN AstBodyNode{ BreakNode: COPY item };,
-    Locatable.ContinueNode AS item -> RETURN AstBodyNode{ ContinueNode: COPY item };,
-    Locatable.FuncCall AS item -> RETURN AstBodyNode{ FuncCall: COPY item };,
-    Locatable.GetField AS item -> RETURN AstBodyNode{ GetField: COPY item };,
-    Locatable.GetIndex AS item -> RETURN AstBodyNode{ GetIndex: COPY item };,
-    Locatable.ReturnNode AS item -> RETURN AstBodyNode{ ReturnNode: COPY item };,
-    Locatable.Assert AS item -> RETURN AstBodyNode{ Assert: COPY item };,
-    Locatable.Raise AS item -> RETURN AstBodyNode{ Raise: COPY item };,
-    Locatable.ThrowNode AS item -> RETURN AstBodyNode{ ThrowNode: COPY item };,
-    Locatable.DieNode AS item -> RETURN AstBodyNode{ DieNode: COPY item };,
-    Locatable.Slice AS item -> RETURN AstBodyNode{ Slice: COPY item };,
-    Locatable.Require AS item -> RETURN AstBodyNode{ Require: COPY item };,
-    Locatable.WithBlock AS item -> RETURN AstBodyNode{ WithBlock: COPY item };,
-    Locatable.SyncPolicyDecl AS item -> RETURN AstBodyNode{ SyncPolicyDecl: COPY item };,
-    Locatable.LimitOp AS item -> RETURN AstBodyNode{ LimitOp: COPY item };,
-    Locatable.EachOp AS item -> RETURN AstBodyNode{ EachOp: COPY item };,
-    Locatable.TapOp AS item -> RETURN AstBodyNode{ TapOp: COPY item };,
-    Locatable.SkipOp AS item -> RETURN AstBodyNode{ SkipOp: COPY item };,
-    Locatable.CollectOp AS item -> RETURN AstBodyNode{ CollectOp: COPY item };,
-    Locatable.JoinOp AS item -> RETURN AstBodyNode{ JoinOp: COPY item };,
-    Locatable.ShardOp AS item -> RETURN AstBodyNode{ ShardOp: COPY item };,
-    Locatable.ConcurrentOp AS item -> RETURN AstBodyNode{ ConcurrentOp: COPY item };,
-    Locatable.Placeholder AS item -> RETURN AstBodyNode{ Placeholder: COPY item };,
-    Locatable.Copy AS item -> RETURN AstBodyNode{ Copy: COPY item };,
-    Locatable.TenseNavigation AS item -> RETURN AstBodyNode{ TenseNavigation: COPY item };,
-    Locatable.MutableBorrow AS item -> RETURN AstBodyNode{ MutableBorrow: COPY item };,
-    Locatable.OrElseRaise AS item -> RETURN AstBodyNode{ OrElseRaise: COPY item };,
-    Locatable.OrElseExit AS item -> RETURN AstBodyNode{ OrElseExit: COPY item };,
-    Locatable.OrElsePass AS item -> RETURN AstBodyNode{ OrElsePass: COPY item };,
-    Locatable.OrElsePrune AS item -> RETURN AstBodyNode{ OrElsePrune: COPY item };,
-    Locatable.OrElseBreak AS item -> RETURN AstBodyNode{ OrElseBreak: COPY item };,
-    Locatable.CatchBlock AS item -> RETURN AstBodyNode{ CatchBlock: COPY item };,
-    Locatable.RecoverOp AS item -> RETURN AstBodyNode{ RecoverOp: COPY item };,
-    Locatable.StringConcat AS item -> RETURN AstBodyNode{ StringConcat: COPY item };,
-    Locatable.CapabilityWrap AS item -> RETURN AstBodyNode{ CapabilityWrap: COPY item };,
-    Locatable.MoveNode AS item -> RETURN AstBodyNode{ MoveNode: COPY item };,
-    Locatable.CopyNode AS item -> RETURN AstBodyNode{ CopyNode: COPY item };,
-    Locatable.KeepNode AS item -> RETURN AstBodyNode{ KeepNode: COPY item };,
-    Locatable.ShareNode AS item -> RETURN AstBodyNode{ ShareNode: COPY item };,
-    Locatable.LinkNode AS item -> RETURN AstBodyNode{ LinkNode: COPY item };,
-    Locatable.ResolveNode AS item -> RETURN AstBodyNode{ ResolveNode: COPY item };,
-    Locatable.FreezeNode AS item -> RETURN AstBodyNode{ FreezeNode: COPY item };,
-    Locatable.PassStmt AS item -> RETURN AstBodyNode{ PassStmt: COPY item };,
-    Locatable.StructPattern AS item -> RETURN AstBodyNode{ StructPattern: COPY item };,
-    Locatable.ExternFnDecl AS item -> RETURN AstBodyNode{ ExternFnDecl: COPY item };,
-    Locatable.ExternStructDecl AS item -> RETURN AstBodyNode{ ExternStructDecl: COPY item };,
-    Locatable.UnionDef AS item -> RETURN AstBodyNode{ UnionDef: COPY item };,
-    Locatable.UnionVariantLit AS item -> RETURN AstBodyNode{ UnionVariantLit: COPY item };,
-    Locatable.StaticCall AS item -> RETURN AstBodyNode{ StaticCall: COPY item };,
-    Locatable.ThenChain AS item -> RETURN AstBodyNode{ ThenChain: COPY item };,
-    Locatable.BgStreamBlock AS item -> RETURN AstBodyNode{ BgStreamBlock: COPY item };,
-    Locatable.YieldExpr AS item -> RETURN AstBodyNode{ YieldExpr: COPY item };,
-    Locatable.CloseStream AS item -> RETURN AstBodyNode{ CloseStream: COPY item };,
-    Locatable.NextExpr AS item -> RETURN AstBodyNode{ NextExpr: COPY item };,
-    Locatable.MatchStatement AS item -> RETURN AstBodyNode{ MatchStatement: COPY item };,
-    Locatable.ForRange AS item -> RETURN AstBodyNode{ ForRange: COPY item };,
-    Locatable.ForEach AS item -> RETURN AstBodyNode{ ForEach: COPY item };,
-    Locatable.TestBlock AS item -> RETURN AstBodyNode{ TestBlock: COPY item };,
-    Locatable.WhenBlock AS item -> RETURN AstBodyNode{ WhenBlock: COPY item };,
-    Locatable.LetBinding AS item -> RETURN AstBodyNode{ LetBinding: COPY item };,
-    Locatable.TestThat AS item -> RETURN AstBodyNode{ TestThat: COPY item };,
-    Locatable.StubDecl AS item -> RETURN AstBodyNode{ StubDecl: COPY item };,
-    Locatable.Drop AS item -> RETURN AstBodyNode{ Drop: COPY item };,
-    Locatable.SuppressCleanup AS item -> RETURN AstBodyNode{ SuppressCleanup: COPY item };,
-    Locatable.Return AS item -> RETURN AstBodyNode{ Return: COPY item };,
-    Locatable.ReassignCleanup AS item -> RETURN AstBodyNode{ ReassignCleanup: COPY item };,
-    Locatable.FieldCleanup AS item -> RETURN AstBodyNode{ FieldCleanup: COPY item };,
-    Locatable.FunctionDef AS item -> RETURN AstBodyNode{ FunctionDef: COPY item };,
-    Locatable.SelectOp AS item -> RETURN AstBodyNode{ SelectOp: COPY item };,
-    Locatable.WhereOp AS item -> RETURN AstBodyNode{ WhereOp: COPY item };,
-    Locatable.IndexOp AS item -> RETURN AstBodyNode{ IndexOp: COPY item };,
-    Locatable.ReduceOp AS item -> RETURN AstBodyNode{ ReduceOp: COPY item };,
-    Locatable.OrderByOp AS item -> RETURN AstBodyNode{ OrderByOp: COPY item };,
-    Locatable.UnnestOp AS item -> RETURN AstBodyNode{ UnnestOp: COPY item };,
-    Locatable.DistinctOp AS item -> RETURN AstBodyNode{ DistinctOp: COPY item };,
-    Locatable.TakeWhileOp AS item -> RETURN AstBodyNode{ TakeWhileOp: COPY item };,
-    Locatable.WindowOp AS item -> RETURN AstBodyNode{ WindowOp: COPY item };,
-    Locatable.BatchWindowOp AS item -> RETURN AstBodyNode{ BatchWindowOp: COPY item };,
-    Locatable.FindOp AS item -> RETURN AstBodyNode{ FindOp: COPY item };,
-    Locatable.AnyOp AS item -> RETURN AstBodyNode{ AnyOp: COPY item };,
-    Locatable.AllOp AS item -> RETURN AstBodyNode{ AllOp: COPY item };,
-    Locatable.CountOp AS item -> RETURN AstBodyNode{ CountOp: COPY item };,
-    Locatable.SumOp AS item -> RETURN AstBodyNode{ SumOp: COPY item };,
-    Locatable.AverageOp AS item -> RETURN AstBodyNode{ AverageOp: COPY item };,
-    Locatable.MinOp AS item -> RETURN AstBodyNode{ MinOp: COPY item };,
-    Locatable.MaxOp AS item -> RETURN AstBodyNode{ MaxOp: COPY item };,
-    Locatable.AssertRaises AS item -> RETURN AstBodyNode{ AssertRaises: COPY item };,
-    Locatable.BenchmarkStmt AS item -> RETURN AstBodyNode{ BenchmarkStmt: COPY item };,
-    Locatable.SmashStmt AS item -> RETURN AstBodyNode{ SmashStmt: COPY item };,
-    Locatable.ProfileStmt AS item -> RETURN AstBodyNode{ ProfileStmt: COPY item };
-  END
-  RETURN CAST(panic("not a body node") AS AstBodyNode);
 END
