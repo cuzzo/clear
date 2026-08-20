@@ -479,7 +479,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.binding_plans = COPY binding_plans;
 }
 END
-FN lifecycleRegistry__fetch(self: LifecycleRegistry, type_info: Type) RETURNS !LifecyclePlan
+PUB FN lifecycleRegistry__fetch(self: LifecycleRegistry, type_info: Type) RETURNS !LifecyclePlan
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

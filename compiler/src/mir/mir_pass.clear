@@ -126,7 +126,9 @@ PRIVATE FN mIRPass__transform_function_mut(MUTABLE self: MIRPass, MUTABLE functi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cleanup_facts = COPY cleanup_plan.facts;
-    TRY (cleanupClassifier__stamp_field_pre_cleanups_mut(function.body, cleanup_facts, rtoc_self_view.schema_lookup, rtoc_self_view.lifecycle_registry));
+    MUTABLE function_body: []Locatable = COPY function.body;
+    TRY (cleanupClassifier__stamp_field_pre_cleanups_mut(&function_body, cleanup_facts, rtoc_self_view.schema_lookup, rtoc_self_view.lifecycle_registry));
+    function.body = COPY function_body;
     IF cleanupClassificationPlan__empty?(cleanup_plan) THEN
       RETURN;
     END

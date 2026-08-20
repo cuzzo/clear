@@ -491,14 +491,14 @@ PUB STRUCT Assignment {
   value: Locatable@boxed,
   compound_op: ?String@symbol,
   auto_atomic_op: ?String@symbol,
-  auto_lock: ?PassStateValue,
+  auto_lock: ?AutoLockPlan,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,
   container_borrow: ?Bool,
   error_kind: ?String@symbol,
   error_type: ?String@symbol,
-  field_lifecycle_plan: ?PassStateValue,
+  field_lifecycle_plan: ?LifecyclePlan@multiowned,
   field_pre_cleanup: ?String@symbol,
   implicit_layout_cost: ?Bool,
   kept_edge_plan: ?CallEdgeOwnershipPlan,
@@ -6406,6 +6406,720 @@ PUB STRUCT ReturnFact {
   type: String@symbol,
   metatype: ?String@symbol
 }
+PRIVATE FN aST__walk_children_Program_mut(MUTABLE item: Program, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE statements_items: []Locatable = COPY item.statements;
+  aST__each_locatable_list_mut(&statements_items, &descend_functions, visitor);
+  item.statements = COPY statements_items;
+END
+PRIVATE FN aST__walk_children_FunctionDef_mut(MUTABLE item: FunctionDef, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+  IF item.default_catch EXISTS THEN
+    MUTABLE default_catch_items: []Locatable = COPY UNWRAP (item.default_catch);
+    aST__each_locatable_list_mut(&default_catch_items, &descend_functions, visitor);
+    item.default_catch = COPY default_catch_items;
+  END
+END
+PRIVATE FN aST__walk_children_VarDecl_mut(MUTABLE item: VarDecl, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_Assignment_mut(MUTABLE item: Assignment, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_DestructuringAssignment_mut(MUTABLE item: DestructuringAssignment, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_BindExpr_mut(MUTABLE item: BindExpr, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_BinaryOp_mut(MUTABLE item: BinaryOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE left_child: Locatable = COPY item.left;
+  aST__each_locatable_mut(&left_child, &descend_functions, visitor);
+  item.left = COPY left_child;
+  MUTABLE right_child: Locatable = COPY item.right;
+  aST__each_locatable_mut(&right_child, &descend_functions, visitor);
+  item.right = COPY right_child;
+END
+PRIVATE FN aST__walk_children_IsA_mut(MUTABLE item: IsA, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE left_child: Locatable = COPY item.left;
+  aST__each_locatable_mut(&left_child, &descend_functions, visitor);
+  item.left = COPY left_child;
+END
+PRIVATE FN aST__walk_children_UnaryOp_mut(MUTABLE item: UnaryOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE right_child: Locatable = COPY item.right;
+  aST__each_locatable_mut(&right_child, &descend_functions, visitor);
+  item.right = COPY right_child;
+END
+PRIVATE FN aST__walk_children_CallSiteOverride_mut(MUTABLE item: CallSiteOverride, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE inner_child: Locatable = COPY item.inner;
+  aST__each_locatable_mut(&inner_child, &descend_functions, visitor);
+  item.inner = COPY inner_child;
+END
+PRIVATE FN aST__walk_children_ListLit_mut(MUTABLE item: ListLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE items_items: []Locatable = COPY item.items;
+  aST__each_locatable_list_mut(&items_items, &descend_functions, visitor);
+  item.items = COPY items_items;
+END
+PRIVATE FN aST__walk_children_TupleLit_mut(MUTABLE item: TupleLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE items_items: []Locatable = COPY item.items;
+  aST__each_locatable_list_mut(&items_items, &descend_functions, visitor);
+  item.items = COPY items_items;
+END
+PRIVATE FN aST__walk_children_LambdaLit_mut(MUTABLE item: LambdaLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.deferred_drops EXISTS THEN
+    MUTABLE deferred_drops_items: []Locatable = COPY UNWRAP (item.deferred_drops);
+    aST__each_locatable_list_mut(&deferred_drops_items, &descend_functions, visitor);
+    item.deferred_drops = COPY deferred_drops_items;
+  END
+END
+PRIVATE FN aST__walk_children_IfStatement_mut(MUTABLE item: IfStatement, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE condition_child: Locatable = COPY item.condition;
+  aST__each_locatable_mut(&condition_child, &descend_functions, visitor);
+  item.condition = COPY condition_child;
+  MUTABLE then_branch_items: []Locatable = COPY item.then_branch;
+  aST__each_locatable_list_mut(&then_branch_items, &descend_functions, visitor);
+  item.then_branch = COPY then_branch_items;
+  IF item.else_branch EXISTS THEN
+    MUTABLE else_branch_items: []Locatable = COPY UNWRAP (item.else_branch);
+    aST__each_locatable_list_mut(&else_branch_items, &descend_functions, visitor);
+    item.else_branch = COPY else_branch_items;
+  END
+END
+PRIVATE FN aST__walk_children_IfBind_mut(MUTABLE item: IfBind, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE then_branch_items: []Locatable = COPY item.then_branch;
+  aST__each_locatable_list_mut(&then_branch_items, &descend_functions, visitor);
+  item.then_branch = COPY then_branch_items;
+  MUTABLE else_branch_items: []Locatable = COPY item.else_branch;
+  aST__each_locatable_list_mut(&else_branch_items, &descend_functions, visitor);
+  item.else_branch = COPY else_branch_items;
+END
+PRIVATE FN aST__walk_children_WhileLoop_mut(MUTABLE item: WhileLoop, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE condition_child: Locatable = COPY item.condition;
+  aST__each_locatable_mut(&condition_child, &descend_functions, visitor);
+  item.condition = COPY condition_child;
+  MUTABLE do_branch_items: []Locatable = COPY item.do_branch;
+  aST__each_locatable_list_mut(&do_branch_items, &descend_functions, visitor);
+  item.do_branch = COPY do_branch_items;
+END
+PRIVATE FN aST__walk_children_WhileBindLoop_mut(MUTABLE item: WhileBindLoop, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE condition_child: Locatable = COPY item.condition;
+  aST__each_locatable_mut(&condition_child, &descend_functions, visitor);
+  item.condition = COPY condition_child;
+  MUTABLE do_branch_items: []Locatable = COPY item.do_branch;
+  aST__each_locatable_list_mut(&do_branch_items, &descend_functions, visitor);
+  item.do_branch = COPY do_branch_items;
+END
+PRIVATE FN aST__walk_children_FuncCall_mut(MUTABLE item: FuncCall, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE args_items: []Locatable = COPY item.args;
+  aST__each_locatable_list_mut(&args_items, &descend_functions, visitor);
+  item.args = COPY args_items;
+  IF item.pipe_lhs EXISTS THEN
+    MUTABLE pipe_lhs_child: Locatable = COPY UNWRAP (item.pipe_lhs);
+    aST__each_locatable_mut(&pipe_lhs_child, &descend_functions, visitor);
+    item.pipe_lhs = COPY pipe_lhs_child;
+  END
+END
+PRIVATE FN aST__walk_children_MethodCall_mut(MUTABLE item: MethodCall, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE object_child: Locatable = COPY item.object;
+  aST__each_locatable_mut(&object_child, &descend_functions, visitor);
+  item.object = COPY object_child;
+  MUTABLE args_items: []Locatable = COPY item.args;
+  aST__each_locatable_list_mut(&args_items, &descend_functions, visitor);
+  item.args = COPY args_items;
+END
+PRIVATE FN aST__walk_children_GetField_mut(MUTABLE item: GetField, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE target_child: Locatable = COPY item.target;
+  aST__each_locatable_mut(&target_child, &descend_functions, visitor);
+  item.target = COPY target_child;
+END
+PRIVATE FN aST__walk_children_GetIndex_mut(MUTABLE item: GetIndex, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE target_child: Locatable = COPY item.target;
+  aST__each_locatable_mut(&target_child, &descend_functions, visitor);
+  item.target = COPY target_child;
+  MUTABLE index_child: Locatable = COPY item.index;
+  aST__each_locatable_mut(&index_child, &descend_functions, visitor);
+  item.index = COPY index_child;
+END
+PRIVATE FN aST__walk_children_Cast_mut(MUTABLE item: Cast, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_ReturnNode_mut(MUTABLE item: ReturnNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.value EXISTS THEN
+    MUTABLE value_child: Locatable = COPY UNWRAP (item.value);
+    aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+    item.value = COPY value_child;
+  END
+END
+PRIVATE FN aST__walk_children_Assert_mut(MUTABLE item: Assert, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE condition_child: Locatable = COPY item.condition;
+  aST__each_locatable_mut(&condition_child, &descend_functions, visitor);
+  item.condition = COPY condition_child;
+END
+PRIVATE FN aST__walk_children_Raise_mut(MUTABLE item: Raise, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.message_expr EXISTS THEN
+    MUTABLE message_expr_child: Locatable = COPY UNWRAP (item.message_expr);
+    aST__each_locatable_mut(&message_expr_child, &descend_functions, visitor);
+    item.message_expr = COPY message_expr_child;
+  END
+END
+PRIVATE FN aST__walk_children_ThrowNode_mut(MUTABLE item: ThrowNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.value EXISTS THEN
+    MUTABLE value_child: Locatable = COPY UNWRAP (item.value);
+    aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+    item.value = COPY value_child;
+  END
+END
+PRIVATE FN aST__walk_children_DieNode_mut(MUTABLE item: DieNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.status EXISTS THEN
+    MUTABLE status_child: Locatable = COPY UNWRAP (item.status);
+    aST__each_locatable_mut(&status_child, &descend_functions, visitor);
+    item.status = COPY status_child;
+  END
+END
+PRIVATE FN aST__walk_children_Slice_mut(MUTABLE item: Slice, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE target_child: Locatable = COPY item.target;
+  aST__each_locatable_mut(&target_child, &descend_functions, visitor);
+  item.target = COPY target_child;
+  IF item.start EXISTS THEN
+    MUTABLE start_child: Locatable = COPY UNWRAP (item.start);
+    aST__each_locatable_mut(&start_child, &descend_functions, visitor);
+    item.start = COPY start_child;
+  END
+  IF item.end EXISTS THEN
+    MUTABLE end_child: Locatable = COPY UNWRAP (item.end);
+    aST__each_locatable_mut(&end_child, &descend_functions, visitor);
+    item.end = COPY end_child;
+  END
+END
+PRIVATE FN aST__walk_children_DeferStmt_mut(MUTABLE item: DeferStmt, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+END
+PRIVATE FN aST__walk_children_WithBlock_mut(MUTABLE item: WithBlock, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+END
+PRIVATE FN aST__walk_children_SelectOp_mut(MUTABLE item: SelectOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expression_child: Locatable = COPY item.expression;
+  aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+  item.expression = COPY expression_child;
+END
+PRIVATE FN aST__walk_children_WhereOp_mut(MUTABLE item: WhereOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expression_child: Locatable = COPY item.expression;
+  aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+  item.expression = COPY expression_child;
+END
+PRIVATE FN aST__walk_children_IndexOp_mut(MUTABLE item: IndexOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_ReduceOp_mut(MUTABLE item: ReduceOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.initial_value EXISTS THEN
+    MUTABLE initial_value_child: Locatable = COPY UNWRAP (item.initial_value);
+    aST__each_locatable_mut(&initial_value_child, &descend_functions, visitor);
+    item.initial_value = COPY initial_value_child;
+  END
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_OrderByOp_mut(MUTABLE item: OrderByOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_LimitOp_mut(MUTABLE item: LimitOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.count EXISTS THEN
+    MUTABLE count_child: Locatable = COPY UNWRAP (item.count);
+    aST__each_locatable_mut(&count_child, &descend_functions, visitor);
+    item.count = COPY count_child;
+  END
+END
+PRIVATE FN aST__walk_children_UnnestOp_mut(MUTABLE item: UnnestOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_DistinctOp_mut(MUTABLE item: DistinctOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_EachOp_mut(MUTABLE item: EachOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+END
+PRIVATE FN aST__walk_children_TapOp_mut(MUTABLE item: TapOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+END
+PRIVATE FN aST__walk_children_SkipOp_mut(MUTABLE item: SkipOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.count EXISTS THEN
+    MUTABLE count_child: Locatable = COPY UNWRAP (item.count);
+    aST__each_locatable_mut(&count_child, &descend_functions, visitor);
+    item.count = COPY count_child;
+  END
+END
+PRIVATE FN aST__walk_children_TakeWhileOp_mut(MUTABLE item: TakeWhileOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_WindowOp_mut(MUTABLE item: WindowOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.size EXISTS THEN
+    MUTABLE size_child: Locatable = COPY UNWRAP (item.size);
+    aST__each_locatable_mut(&size_child, &descend_functions, visitor);
+    item.size = COPY size_child;
+  END
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_BatchWindowOp_mut(MUTABLE item: BatchWindowOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_JoinOp_mut(MUTABLE item: JoinOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.right_source EXISTS THEN
+    MUTABLE right_source_child: Locatable = COPY UNWRAP (item.right_source);
+    aST__each_locatable_mut(&right_source_child, &descend_functions, visitor);
+    item.right_source = COPY right_source_child;
+  END
+  IF item.key_expr EXISTS THEN
+    MUTABLE key_expr_child: Locatable = COPY UNWRAP (item.key_expr);
+    aST__each_locatable_mut(&key_expr_child, &descend_functions, visitor);
+    item.key_expr = COPY key_expr_child;
+  END
+END
+PRIVATE FN aST__walk_children_FindOp_mut(MUTABLE item: FindOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_AnyOp_mut(MUTABLE item: AnyOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_AllOp_mut(MUTABLE item: AllOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_CountOp_mut(MUTABLE item: CountOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_SumOp_mut(MUTABLE item: SumOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_AverageOp_mut(MUTABLE item: AverageOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_MinOp_mut(MUTABLE item: MinOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_MaxOp_mut(MUTABLE item: MaxOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.expression EXISTS THEN
+    MUTABLE expression_child: Locatable = COPY UNWRAP (item.expression);
+    aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+    item.expression = COPY expression_child;
+  END
+END
+PRIVATE FN aST__walk_children_ShardOp_mut(MUTABLE item: ShardOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.key_expr EXISTS THEN
+    MUTABLE key_expr_child: Locatable = COPY UNWRAP (item.key_expr);
+    aST__each_locatable_mut(&key_expr_child, &descend_functions, visitor);
+    item.key_expr = COPY key_expr_child;
+  END
+  IF item.target_map EXISTS THEN
+    MUTABLE target_map_child: Locatable = COPY UNWRAP (item.target_map);
+    aST__each_locatable_mut(&target_map_child, &descend_functions, visitor);
+    item.target_map = COPY target_map_child;
+  END
+END
+PRIVATE FN aST__walk_children_Copy_mut(MUTABLE item: Copy, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_OptionalUnwrap_mut(MUTABLE item: OptionalUnwrap, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE target_child: Locatable = COPY item.target;
+  aST__each_locatable_mut(&target_child, &descend_functions, visitor);
+  item.target = COPY target_child;
+END
+PRIVATE FN aST__walk_children_TenseNavigation_mut(MUTABLE item: TenseNavigation, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE target_child: Locatable = COPY item.target;
+  aST__each_locatable_mut(&target_child, &descend_functions, visitor);
+  item.target = COPY target_child;
+END
+PRIVATE FN aST__walk_children_MutableBorrow_mut(MUTABLE item: MutableBorrow, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE target_child: Locatable = COPY item.target;
+  aST__each_locatable_mut(&target_child, &descend_functions, visitor);
+  item.target = COPY target_child;
+END
+PRIVATE FN aST__walk_children_OrElseExit_mut(MUTABLE item: OrElseExit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.message EXISTS THEN
+    MUTABLE message_child: Locatable = COPY UNWRAP (item.message);
+    aST__each_locatable_mut(&message_child, &descend_functions, visitor);
+    item.message = COPY message_child;
+  END
+END
+PRIVATE FN aST__walk_children_CatchBlock_mut(MUTABLE item: CatchBlock, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.default_body EXISTS THEN
+    MUTABLE default_body_items: []Locatable = COPY UNWRAP (item.default_body);
+    aST__each_locatable_list_mut(&default_body_items, &descend_functions, visitor);
+    item.default_body = COPY default_body_items;
+  END
+END
+PRIVATE FN aST__walk_children_RecoverOp_mut(MUTABLE item: RecoverOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.default_expr EXISTS THEN
+    MUTABLE default_expr_child: Locatable = COPY UNWRAP (item.default_expr);
+    aST__each_locatable_mut(&default_expr_child, &descend_functions, visitor);
+    item.default_expr = COPY default_expr_child;
+  END
+END
+PRIVATE FN aST__walk_children_BlockExpr_mut(MUTABLE item: BlockExpr, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+  IF item.result EXISTS THEN
+    MUTABLE result_child: Locatable = COPY UNWRAP (item.result);
+    aST__each_locatable_mut(&result_child, &descend_functions, visitor);
+    item.result = COPY result_child;
+  END
+END
+PRIVATE FN aST__walk_children_StringConcat_mut(MUTABLE item: StringConcat, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE parts_items: []Locatable = COPY item.parts;
+  aST__each_locatable_list_mut(&parts_items, &descend_functions, visitor);
+  item.parts = COPY parts_items;
+END
+PRIVATE FN aST__walk_children_CapabilityWrap_mut(MUTABLE item: CapabilityWrap, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_MoveNode_mut(MUTABLE item: MoveNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_CopyNode_mut(MUTABLE item: CopyNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_KeepNode_mut(MUTABLE item: KeepNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_ShareNode_mut(MUTABLE item: ShareNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_LinkNode_mut(MUTABLE item: LinkNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_ResolveNode_mut(MUTABLE item: ResolveNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_FreezeNode_mut(MUTABLE item: FreezeNode, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE value_child: Locatable = COPY item.value;
+  aST__each_locatable_mut(&value_child, &descend_functions, visitor);
+  item.value = COPY value_child;
+END
+PRIVATE FN aST__walk_children_RangeLit_mut(MUTABLE item: RangeLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE start_child: Locatable = COPY item.start;
+  aST__each_locatable_mut(&start_child, &descend_functions, visitor);
+  item.start = COPY start_child;
+  MUTABLE finish_child: Locatable = COPY item.finish;
+  aST__each_locatable_mut(&finish_child, &descend_functions, visitor);
+  item.finish = COPY finish_child;
+END
+PRIVATE FN aST__walk_children_StaticCall_mut(MUTABLE item: StaticCall, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE type_name_child: Locatable = COPY item.type_name;
+  aST__each_locatable_mut(&type_name_child, &descend_functions, visitor);
+  item.type_name = COPY type_name_child;
+  MUTABLE args_items: []Locatable = COPY item.args;
+  aST__each_locatable_list_mut(&args_items, &descend_functions, visitor);
+  item.args = COPY args_items;
+END
+PRIVATE FN aST__walk_children_BgBlock_mut(MUTABLE item: BgBlock, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+END
+PRIVATE FN aST__walk_children_BgStreamBlock_mut(MUTABLE item: BgStreamBlock, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+END
+PRIVATE FN aST__walk_children_YieldExpr_mut(MUTABLE item: YieldExpr, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expr_child: Locatable = COPY item.expr;
+  aST__each_locatable_mut(&expr_child, &descend_functions, visitor);
+  item.expr = COPY expr_child;
+END
+PRIVATE FN aST__walk_children_NextExpr_mut(MUTABLE item: NextExpr, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expr_child: Locatable = COPY item.expr;
+  aST__each_locatable_mut(&expr_child, &descend_functions, visitor);
+  item.expr = COPY expr_child;
+END
+PRIVATE FN aST__walk_children_MatchStatement_mut(MUTABLE item: MatchStatement, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expr_child: Locatable = COPY item.expr;
+  aST__each_locatable_mut(&expr_child, &descend_functions, visitor);
+  item.expr = COPY expr_child;
+  IF item.default_case EXISTS THEN
+    MUTABLE default_case_items: []Locatable = COPY UNWRAP (item.default_case);
+    aST__each_locatable_list_mut(&default_case_items, &descend_functions, visitor);
+    item.default_case = COPY default_case_items;
+  END
+END
+PRIVATE FN aST__walk_children_ForRange_mut(MUTABLE item: ForRange, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE start_expr_child: Locatable = COPY item.start_expr;
+  aST__each_locatable_mut(&start_expr_child, &descend_functions, visitor);
+  item.start_expr = COPY start_expr_child;
+  MUTABLE end_expr_child: Locatable = COPY item.end_expr;
+  aST__each_locatable_mut(&end_expr_child, &descend_functions, visitor);
+  item.end_expr = COPY end_expr_child;
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+  IF item.deferred_drops EXISTS THEN
+    MUTABLE deferred_drops_items: []Locatable = COPY UNWRAP (item.deferred_drops);
+    aST__each_locatable_list_mut(&deferred_drops_items, &descend_functions, visitor);
+    item.deferred_drops = COPY deferred_drops_items;
+  END
+END
+PRIVATE FN aST__walk_children_ForEach_mut(MUTABLE item: ForEach, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE collection_child: Locatable = COPY item.collection;
+  aST__each_locatable_mut(&collection_child, &descend_functions, visitor);
+  item.collection = COPY collection_child;
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+  IF item.deferred_drops EXISTS THEN
+    MUTABLE deferred_drops_items: []Locatable = COPY UNWRAP (item.deferred_drops);
+    aST__each_locatable_list_mut(&deferred_drops_items, &descend_functions, visitor);
+    item.deferred_drops = COPY deferred_drops_items;
+  END
+END
+PRIVATE FN aST__walk_children_TestBlock_mut(MUTABLE item: TestBlock, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.setup EXISTS THEN
+    MUTABLE setup_items: []Locatable = COPY UNWRAP (item.setup);
+    aST__each_locatable_list_mut(&setup_items, &descend_functions, visitor);
+    item.setup = COPY setup_items;
+  END
+END
+PRIVATE FN aST__walk_children_WhenBlock_mut(MUTABLE item: WhenBlock, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.setup EXISTS THEN
+    MUTABLE setup_items: []Locatable = COPY UNWRAP (item.setup);
+    aST__each_locatable_list_mut(&setup_items, &descend_functions, visitor);
+    item.setup = COPY setup_items;
+  END
+END
+PRIVATE FN aST__walk_children_LetBinding_mut(MUTABLE item: LetBinding, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expr_child: Locatable = COPY item.expr;
+  aST__each_locatable_mut(&expr_child, &descend_functions, visitor);
+  item.expr = COPY expr_child;
+END
+PRIVATE FN aST__walk_children_TestThat_mut(MUTABLE item: TestThat, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE body_items: []Locatable = COPY item.body;
+  aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
+  item.body = COPY body_items;
+END
+PRIVATE FN aST__walk_children_AssertRaises_mut(MUTABLE item: AssertRaises, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expression_child: Locatable = COPY item.expression;
+  aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+  item.expression = COPY expression_child;
+END
+PRIVATE FN aST__walk_children_BenchmarkStmt_mut(MUTABLE item: BenchmarkStmt, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expression_child: Locatable = COPY item.expression;
+  aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+  item.expression = COPY expression_child;
+END
+PRIVATE FN aST__walk_children_SmashStmt_mut(MUTABLE item: SmashStmt, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expression_child: Locatable = COPY item.expression;
+  aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+  item.expression = COPY expression_child;
+END
+PRIVATE FN aST__walk_children_ProfileStmt_mut(MUTABLE item: ProfileStmt, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE expression_child: Locatable = COPY item.expression;
+  aST__each_locatable_mut(&expression_child, &descend_functions, visitor);
+  item.expression = COPY expression_child;
+END
+PRIVATE FN aST__walk_children_FieldCleanup_mut(MUTABLE item: FieldCleanup, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF item.field EXISTS THEN
+    MUTABLE field_child: Locatable = COPY UNWRAP (item.field);
+    aST__each_locatable_mut(&field_child, &descend_functions, visitor);
+    item.field = COPY field_child;
+  END
+END
+PUB FN aST__each_locatable_mut(MUTABLE root: Locatable, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  visitor(&root);
+  IF !(descend_functions) AND (root IS_A FunctionDef) THEN
+    RETURN;
+  END
+  PARTIAL MATCH root START
+    Locatable.Program AS MUTABLE item -> aST__walk_children_Program_mut(&item, &descend_functions, visitor);,
+    Locatable.FunctionDef AS MUTABLE item -> aST__walk_children_FunctionDef_mut(&item, &descend_functions, visitor);,
+    Locatable.VarDecl AS MUTABLE item -> aST__walk_children_VarDecl_mut(&item, &descend_functions, visitor);,
+    Locatable.Assignment AS MUTABLE item -> aST__walk_children_Assignment_mut(&item, &descend_functions, visitor);,
+    Locatable.DestructuringAssignment AS MUTABLE item -> aST__walk_children_DestructuringAssignment_mut(&item, &descend_functions, visitor);,
+    Locatable.BindExpr AS MUTABLE item -> aST__walk_children_BindExpr_mut(&item, &descend_functions, visitor);,
+    Locatable.BinaryOp AS MUTABLE item -> aST__walk_children_BinaryOp_mut(&item, &descend_functions, visitor);,
+    Locatable.IsA AS MUTABLE item -> aST__walk_children_IsA_mut(&item, &descend_functions, visitor);,
+    Locatable.UnaryOp AS MUTABLE item -> aST__walk_children_UnaryOp_mut(&item, &descend_functions, visitor);,
+    Locatable.CallSiteOverride AS MUTABLE item -> aST__walk_children_CallSiteOverride_mut(&item, &descend_functions, visitor);,
+    Locatable.ListLit AS MUTABLE item -> aST__walk_children_ListLit_mut(&item, &descend_functions, visitor);,
+    Locatable.TupleLit AS MUTABLE item -> aST__walk_children_TupleLit_mut(&item, &descend_functions, visitor);,
+    Locatable.LambdaLit AS MUTABLE item -> aST__walk_children_LambdaLit_mut(&item, &descend_functions, visitor);,
+    Locatable.IfStatement AS MUTABLE item -> aST__walk_children_IfStatement_mut(&item, &descend_functions, visitor);,
+    Locatable.IfBind AS MUTABLE item -> aST__walk_children_IfBind_mut(&item, &descend_functions, visitor);,
+    Locatable.WhileLoop AS MUTABLE item -> aST__walk_children_WhileLoop_mut(&item, &descend_functions, visitor);,
+    Locatable.WhileBindLoop AS MUTABLE item -> aST__walk_children_WhileBindLoop_mut(&item, &descend_functions, visitor);,
+    Locatable.FuncCall AS MUTABLE item -> aST__walk_children_FuncCall_mut(&item, &descend_functions, visitor);,
+    Locatable.MethodCall AS MUTABLE item -> aST__walk_children_MethodCall_mut(&item, &descend_functions, visitor);,
+    Locatable.GetField AS MUTABLE item -> aST__walk_children_GetField_mut(&item, &descend_functions, visitor);,
+    Locatable.GetIndex AS MUTABLE item -> aST__walk_children_GetIndex_mut(&item, &descend_functions, visitor);,
+    Locatable.Cast AS MUTABLE item -> aST__walk_children_Cast_mut(&item, &descend_functions, visitor);,
+    Locatable.ReturnNode AS MUTABLE item -> aST__walk_children_ReturnNode_mut(&item, &descend_functions, visitor);,
+    Locatable.Assert AS MUTABLE item -> aST__walk_children_Assert_mut(&item, &descend_functions, visitor);,
+    Locatable.Raise AS MUTABLE item -> aST__walk_children_Raise_mut(&item, &descend_functions, visitor);,
+    Locatable.ThrowNode AS MUTABLE item -> aST__walk_children_ThrowNode_mut(&item, &descend_functions, visitor);,
+    Locatable.DieNode AS MUTABLE item -> aST__walk_children_DieNode_mut(&item, &descend_functions, visitor);,
+    Locatable.Slice AS MUTABLE item -> aST__walk_children_Slice_mut(&item, &descend_functions, visitor);,
+    Locatable.DeferStmt AS MUTABLE item -> aST__walk_children_DeferStmt_mut(&item, &descend_functions, visitor);,
+    Locatable.WithBlock AS MUTABLE item -> aST__walk_children_WithBlock_mut(&item, &descend_functions, visitor);,
+    Locatable.SelectOp AS MUTABLE item -> aST__walk_children_SelectOp_mut(&item, &descend_functions, visitor);,
+    Locatable.WhereOp AS MUTABLE item -> aST__walk_children_WhereOp_mut(&item, &descend_functions, visitor);,
+    Locatable.IndexOp AS MUTABLE item -> aST__walk_children_IndexOp_mut(&item, &descend_functions, visitor);,
+    Locatable.ReduceOp AS MUTABLE item -> aST__walk_children_ReduceOp_mut(&item, &descend_functions, visitor);,
+    Locatable.OrderByOp AS MUTABLE item -> aST__walk_children_OrderByOp_mut(&item, &descend_functions, visitor);,
+    Locatable.LimitOp AS MUTABLE item -> aST__walk_children_LimitOp_mut(&item, &descend_functions, visitor);,
+    Locatable.UnnestOp AS MUTABLE item -> aST__walk_children_UnnestOp_mut(&item, &descend_functions, visitor);,
+    Locatable.DistinctOp AS MUTABLE item -> aST__walk_children_DistinctOp_mut(&item, &descend_functions, visitor);,
+    Locatable.EachOp AS MUTABLE item -> aST__walk_children_EachOp_mut(&item, &descend_functions, visitor);,
+    Locatable.TapOp AS MUTABLE item -> aST__walk_children_TapOp_mut(&item, &descend_functions, visitor);,
+    Locatable.SkipOp AS MUTABLE item -> aST__walk_children_SkipOp_mut(&item, &descend_functions, visitor);,
+    Locatable.TakeWhileOp AS MUTABLE item -> aST__walk_children_TakeWhileOp_mut(&item, &descend_functions, visitor);,
+    Locatable.WindowOp AS MUTABLE item -> aST__walk_children_WindowOp_mut(&item, &descend_functions, visitor);,
+    Locatable.BatchWindowOp AS MUTABLE item -> aST__walk_children_BatchWindowOp_mut(&item, &descend_functions, visitor);,
+    Locatable.JoinOp AS MUTABLE item -> aST__walk_children_JoinOp_mut(&item, &descend_functions, visitor);,
+    Locatable.FindOp AS MUTABLE item -> aST__walk_children_FindOp_mut(&item, &descend_functions, visitor);,
+    Locatable.AnyOp AS MUTABLE item -> aST__walk_children_AnyOp_mut(&item, &descend_functions, visitor);,
+    Locatable.AllOp AS MUTABLE item -> aST__walk_children_AllOp_mut(&item, &descend_functions, visitor);,
+    Locatable.CountOp AS MUTABLE item -> aST__walk_children_CountOp_mut(&item, &descend_functions, visitor);,
+    Locatable.SumOp AS MUTABLE item -> aST__walk_children_SumOp_mut(&item, &descend_functions, visitor);,
+    Locatable.AverageOp AS MUTABLE item -> aST__walk_children_AverageOp_mut(&item, &descend_functions, visitor);,
+    Locatable.MinOp AS MUTABLE item -> aST__walk_children_MinOp_mut(&item, &descend_functions, visitor);,
+    Locatable.MaxOp AS MUTABLE item -> aST__walk_children_MaxOp_mut(&item, &descend_functions, visitor);,
+    Locatable.ShardOp AS MUTABLE item -> aST__walk_children_ShardOp_mut(&item, &descend_functions, visitor);,
+    Locatable.Copy AS MUTABLE item -> aST__walk_children_Copy_mut(&item, &descend_functions, visitor);,
+    Locatable.OptionalUnwrap AS MUTABLE item -> aST__walk_children_OptionalUnwrap_mut(&item, &descend_functions, visitor);,
+    Locatable.TenseNavigation AS MUTABLE item -> aST__walk_children_TenseNavigation_mut(&item, &descend_functions, visitor);,
+    Locatable.MutableBorrow AS MUTABLE item -> aST__walk_children_MutableBorrow_mut(&item, &descend_functions, visitor);,
+    Locatable.OrElseExit AS MUTABLE item -> aST__walk_children_OrElseExit_mut(&item, &descend_functions, visitor);,
+    Locatable.CatchBlock AS MUTABLE item -> aST__walk_children_CatchBlock_mut(&item, &descend_functions, visitor);,
+    Locatable.RecoverOp AS MUTABLE item -> aST__walk_children_RecoverOp_mut(&item, &descend_functions, visitor);,
+    Locatable.BlockExpr AS MUTABLE item -> aST__walk_children_BlockExpr_mut(&item, &descend_functions, visitor);,
+    Locatable.StringConcat AS MUTABLE item -> aST__walk_children_StringConcat_mut(&item, &descend_functions, visitor);,
+    Locatable.CapabilityWrap AS MUTABLE item -> aST__walk_children_CapabilityWrap_mut(&item, &descend_functions, visitor);,
+    Locatable.MoveNode AS MUTABLE item -> aST__walk_children_MoveNode_mut(&item, &descend_functions, visitor);,
+    Locatable.CopyNode AS MUTABLE item -> aST__walk_children_CopyNode_mut(&item, &descend_functions, visitor);,
+    Locatable.KeepNode AS MUTABLE item -> aST__walk_children_KeepNode_mut(&item, &descend_functions, visitor);,
+    Locatable.ShareNode AS MUTABLE item -> aST__walk_children_ShareNode_mut(&item, &descend_functions, visitor);,
+    Locatable.LinkNode AS MUTABLE item -> aST__walk_children_LinkNode_mut(&item, &descend_functions, visitor);,
+    Locatable.ResolveNode AS MUTABLE item -> aST__walk_children_ResolveNode_mut(&item, &descend_functions, visitor);,
+    Locatable.FreezeNode AS MUTABLE item -> aST__walk_children_FreezeNode_mut(&item, &descend_functions, visitor);,
+    Locatable.RangeLit AS MUTABLE item -> aST__walk_children_RangeLit_mut(&item, &descend_functions, visitor);,
+    Locatable.StaticCall AS MUTABLE item -> aST__walk_children_StaticCall_mut(&item, &descend_functions, visitor);,
+    Locatable.BgBlock AS MUTABLE item -> aST__walk_children_BgBlock_mut(&item, &descend_functions, visitor);,
+    Locatable.BgStreamBlock AS MUTABLE item -> aST__walk_children_BgStreamBlock_mut(&item, &descend_functions, visitor);,
+    Locatable.YieldExpr AS MUTABLE item -> aST__walk_children_YieldExpr_mut(&item, &descend_functions, visitor);,
+    Locatable.NextExpr AS MUTABLE item -> aST__walk_children_NextExpr_mut(&item, &descend_functions, visitor);,
+    Locatable.MatchStatement AS MUTABLE item -> aST__walk_children_MatchStatement_mut(&item, &descend_functions, visitor);,
+    Locatable.ForRange AS MUTABLE item -> aST__walk_children_ForRange_mut(&item, &descend_functions, visitor);,
+    Locatable.ForEach AS MUTABLE item -> aST__walk_children_ForEach_mut(&item, &descend_functions, visitor);,
+    Locatable.TestBlock AS MUTABLE item -> aST__walk_children_TestBlock_mut(&item, &descend_functions, visitor);,
+    Locatable.WhenBlock AS MUTABLE item -> aST__walk_children_WhenBlock_mut(&item, &descend_functions, visitor);,
+    Locatable.LetBinding AS MUTABLE item -> aST__walk_children_LetBinding_mut(&item, &descend_functions, visitor);,
+    Locatable.TestThat AS MUTABLE item -> aST__walk_children_TestThat_mut(&item, &descend_functions, visitor);,
+    Locatable.AssertRaises AS MUTABLE item -> aST__walk_children_AssertRaises_mut(&item, &descend_functions, visitor);,
+    Locatable.BenchmarkStmt AS MUTABLE item -> aST__walk_children_BenchmarkStmt_mut(&item, &descend_functions, visitor);,
+    Locatable.SmashStmt AS MUTABLE item -> aST__walk_children_SmashStmt_mut(&item, &descend_functions, visitor);,
+    Locatable.ProfileStmt AS MUTABLE item -> aST__walk_children_ProfileStmt_mut(&item, &descend_functions, visitor);,
+    Locatable.FieldCleanup AS MUTABLE item -> aST__walk_children_FieldCleanup_mut(&item, &descend_functions, visitor);
+  END
+END
+PUB FN aST__each_locatable_list_mut(MUTABLE items: []Locatable, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < items.length() DO
+    MUTABLE child: Locatable = COPY UNWRAP (items[rtoc_idx]);
+    aST__each_locatable_mut(&child, &descend_functions, visitor);
+    items[rtoc_idx] = COPY child;
+    rtoc_idx = rtoc_idx + 1;
+  END
+END
 PUB FN aST__each_child_node(node: Locatable, visitor: FN(Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   FOR rtoc_walk_child IN rtocChildrenLocatable(node) DO
     visitor(rtoc_walk_child);
@@ -6457,7 +7171,7 @@ PUB STRUCT ProtocolRequirement {
   max_depth_n: ?Int64,
   tight_reentrance: Bool
 }
-STRUCT AutoLockPlan {
+PUB STRUCT AutoLockPlan {
   var: String,
   sync: String@symbol
 }

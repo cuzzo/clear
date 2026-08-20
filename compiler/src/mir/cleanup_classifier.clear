@@ -302,24 +302,31 @@ PUB FN cleanupClassifier__value_extends_loop?(value: Locatable) RETURNS !Bool ->
 END
 PUB FN cleanupClassifier__promote_entry_to_heap_cleanup_mut(MUTABLE entry_obj: CleanupEntry, value: Locatable) RETURNS !Void ->
   MUTABLE lifecycle: ?LifecyclePlan = cleanupEntry__lifecycle_plan(entry_obj);
-  IF ((lifecycle != NIL) AND !(lifecyclePlan__needs_drop?(lifecycle))) THEN
+  IF lifecycle EXISTS AS lifecycle_value THEN
+    IF !(lifecyclePlan__needs_drop?(lifecycle_value)) THEN
+      RETURN;
+    END
+  END
+  MUTABLE ti_opt: ?Type = TRY (type__from_node_mut(value, "cleanup lifetime promotion"));
+  IF !(ti_opt EXISTS) THEN
     RETURN;
   END
-  MUTABLE ti = TRY (type__from_node_mut(value, "cleanup lifetime promotion"));
-  IF (type__symbol?(ti) OR ((TRY (type__string?(ti)) AND type__rodata?(ti)))) THEN
+  MUTABLE ti: Type = COPY UNWRAP (ti_opt);
+  MUTABLE is_string = TRY (type__string?(ti));
+  IF (type__symbol?(ti) OR (is_string AND type__rodata?(ti))) THEN
     RETURN;
   END
-  cleanupEntry__promote_to_cleanup_mut(&entry_obj, IF TRY (type__string?(ti)) THEN
-    :heap_string
-  ELSE
-    :uniform
-  END, :heap, TRUE);
+  MUTABLE kind: String@symbol = :uniform;
+  IF is_string THEN
+    kind = :heap_string;
+  END
+  cleanupEntry__promote_to_cleanup_mut(&entry_obj, kind, :heap, TRUE);
 END
 PUB FN cleanupClassifier__mark_call_lifetime_extensions_mut(args: []Locatable, params: []Param, local_entries: {String}CleanupEntry, receiver_nonlocal: ?Bool) RETURNS Void ->
   IF receiver_nonlocal EXISTS AS receiver_nonlocal_value THEN
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < params.length() DO
-    IF !((params[rtoc_idx]?.takes OR params[rtoc_idx]?.mutable)) THEN
+    IF !(((params[rtoc_idx]?.takes OR_ELSE FALSE) OR (params[rtoc_idx]?.mutable OR_ELSE FALSE))) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -378,43 +385,53 @@ PUB FN cleanupClassifier__params_for_method_call(call: MethodCall) RETURNS ![]Pa
     RETURN CAST(( { MUTABLE rtoc_empty_list_3: []Param = List[]; rtoc_empty_list_3 } ) AS []Param);
   END
 END
-PUB FN cleanupClassifier__stamp_field_pre_cleanups_mut(body: []Locatable, facts: FrozenCleanupFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !Void ->
-  aST__each_locatable(body, FALSE, %(stmt: Locatable) USE(facts, lifecycle_registry, schema_lookup) -> {
-  IF !(stmt IS_A Assignment) THEN
-      RETURN;
+PUB FN cleanupClassifier__stamp_field_pre_cleanups_mut(MUTABLE body: []Locatable, facts: FrozenCleanupFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !Void ->
+  aST__each_locatable_list_mut(&body, FALSE, %(MUTABLE stmt: Locatable) USE(facts, lifecycle_registry, schema_lookup) -> {
+  PARTIAL MATCH stmt START
+    Locatable.Assignment AS MUTABLE assignment -> cleanupClassifier__stamp_field_pre_cleanup_mut(&assignment, facts, schema_lookup, lifecycle_registry);
   END
-  IF !(stmt.name() IS_A GetField) THEN
-      RETURN;
-  END
-  MUTABLE target_node = stmt.name().target();
-  MUTABLE field_ti = TRY (type__from_node_mut(stmt.name(), "field pre-cleanup"));
-  MUTABLE lifecycle: ?LifecyclePlan = NIL;
-  IF lifecycle_registry != NIL THEN
-      lifecycle = COPY UNWRAP (lifecycle_registry?[field_ti]);
-    END
-  IF lifecycle EXISTS AS lifecycle_value THEN
-      stmt.field_lifecycle_plan = lifecycle_value;
-  END
-  IF (stmt.auto_lock() AND cleanup_owned_string_type?(field_ti)) THEN
-      stmt.field_pre_cleanup = :heap;
-      RETURN;
-  END
-  MUTABLE heap_field_alloc = cleanupClassifier__heap_owned_field_pre_cleanup_alloc(field_ti, target_node, facts);
-  IF heap_field_alloc THEN
-      stmt.field_pre_cleanup = heap_field_alloc;
-      RETURN;
-  END
-  MUTABLE field_needs_cleanup =   IF lifecycle THEN
-      lifecyclePlan__needs_drop?(lifecycle)
-    ELSE
-      (TRY (type__needs_cleanup?(field_ti, schema_lookup)) OR TRY (type__recursive_cleanup_shape?(field_ti, schema_lookup)))
-    END;
-  IF !(field_needs_cleanup) THEN
-      RETURN;
-  END
-  stmt.field_pre_cleanup = cleanupClassifier__field_owner_cleanup_alloc(target_node, facts);
   rubyToClearVoid()
   });
+END
+PRIVATE FN cleanupClassifier__assignment_get_field(name: AssignmentName) RETURNS ?GetField ->
+  PARTIAL MATCH name START
+    AssignmentName.GetField AS get_field -> RETURN COPY get_field;
+  END
+  RETURN NIL;
+END
+PRIVATE FN cleanupClassifier__stamp_field_pre_cleanup_mut(MUTABLE assignment: Assignment, facts: FrozenCleanupFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry) RETURNS !Void ->
+  IF !(assignment.name IS_A GetField) THEN
+    RETURN;
+  END
+  MUTABLE get_field: GetField = COPY UNWRAP (cleanupClassifier__assignment_get_field(assignment.name));
+  MUTABLE target_node: Locatable = COPY get_field.target;
+  MUTABLE field_ti_opt: ?Type = TRY (type__from_node_mut(Locatable{ GetField: COPY get_field }, "field pre-cleanup"));
+  IF !(field_ti_opt EXISTS) THEN
+    RETURN;
+  END
+  MUTABLE field_ti: Type = COPY UNWRAP (field_ti_opt);
+  MUTABLE lifecycle: ?LifecyclePlan@multiowned = NIL;
+  IF lifecycle_registry EXISTS AS registry THEN
+    lifecycle = KEEP TRY (lifecycleRegistry__fetch(registry, field_ti));
+    assignment.field_lifecycle_plan = KEEP lifecycle;
+  END
+  IF ((assignment.auto_lock EXISTS) AND cleanup_owned_string_type?(field_ti)) THEN
+    assignment.field_pre_cleanup = :heap;
+    RETURN;
+  END
+  IF cleanupClassifier__heap_owned_field_pre_cleanup_alloc(field_ti, target_node, facts) EXISTS AS heap_alloc THEN
+    assignment.field_pre_cleanup = COPY heap_alloc;
+    RETURN;
+  END
+  MUTABLE field_needs_cleanup = FALSE;
+  IF lifecycle EXISTS AS lifecycle_value THEN
+    field_needs_cleanup = lifecyclePlan__needs_drop?(lifecycle_value);
+  ELSE
+    field_needs_cleanup = (TRY (type__needs_cleanup?(field_ti, schema_lookup)) OR TRY (type__recursive_cleanup_shape?(field_ti, schema_lookup)));
+  END
+  IF field_needs_cleanup THEN
+    assignment.field_pre_cleanup = cleanupClassifier__field_owner_cleanup_alloc(target_node, facts);
+  END
 END
 PUB FN cleanupClassifier__heap_owned_field_pre_cleanup_alloc(field_ti: Type, target_node: Locatable, facts: FrozenCleanupFacts) RETURNS ?String@symbol ->
   IF !(cleanup_owned_string_type?(field_ti)) THEN
