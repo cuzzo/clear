@@ -9818,6 +9818,12 @@ PUB FN unnestRightName(node: Locatable) RETURNS String ->
   END
   RETURN "";
 END
+PUB FN aST__capture_expr_source_type(node: Locatable) RETURNS !Type ->
+  IF aST__node_error_union_type(node) EXISTS AS fallible THEN
+    RETURN COPY fallible;
+  END
+  RETURN TRY (aST__full_type_mut(node));
+END
 PUB FN aST__capture_expr_owns_result?(node: ?Locatable) RETURNS !Bool ->
   IF !(node EXISTS) THEN
     RETURN FALSE;

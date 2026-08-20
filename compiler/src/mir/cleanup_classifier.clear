@@ -169,7 +169,8 @@ PUB FN cleanupClassifier__classify_plan(fn_node: FunctionDef, schema_lookup: FN(
   TRY (cleanupClassifier__walk_takes_params(fn_node, schema_lookup, lifecycle_registry, &bindings));
   cleanupClassifier__walk_moved_source_guards(fn_node.body, bindings);
   TRY (cleanupClassifier__walk_match_as_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
-  TRY (cleanupClassifier__walk_capture_bindings(fn_node.body, schema_lookup, lifecycle_registry, &bindings));
+  MUTABLE capture_body: []Locatable = COPY fn_node.body;
+  TRY (cleanupClassifier__walk_capture_bindings(&capture_body, schema_lookup, lifecycle_registry, &bindings));
   TRY (cleanupClassifier__stamp_cleanup_scopes_mut(fn_node.body, bindings));
   RETURN cleanupClassificationPlan__from_function(fn_node, bindings, &entries_by_place);
 END
@@ -922,7 +923,7 @@ PRIVATE FN cleanupClassifier__capture_entry(expr: Locatable, classification_node
   IF !(aST__capture_expr_owns_result?(expr)) THEN
     RETURN NIL;
   END
-  MUTABLE expr_ti: Type = aST__capture_expr_source_type(expr);
+  MUTABLE expr_ti: Type = TRY (aST__capture_expr_source_type(expr));
   MUTABLE inner_opt: ?Type = type__wrapped_type(expr_ti);
   IF type__stream_step?(expr_ti) THEN
     inner_opt = type__stream_step_item_type(expr_ti);
@@ -969,24 +970,24 @@ PUB FN cleanupClassifier__capture_expr_owned_alloc(expr: Locatable, schema_looku
   ELSE_IF expr IS_A ResolveNode AS resolve_node THEN
     RETURN :heap;
   ELSE_IF expr IS_A FuncCall AS func_call THEN
-    IF call_has_return_lifetime?(func_call) THEN
+    IF cleanupClassifier__call_has_return_lifetime?(func_call) THEN
       RETURN NIL;
     END
-    IF TRY (call_returns_heap_owned?(func_call, schema_lookup)) THEN
+    IF TRY (cleanupClassifier__call_returns_heap_owned?(func_call, schema_lookup)) THEN
       RETURN :heap;
     END
-    IF call_returns_frame_owned?(func_call) THEN
+    IF cleanupClassifier__call_returns_frame_owned?(func_call) THEN
       RETURN :frame;
     END
     RETURN NIL;
   ELSE_IF (expr IS_A MethodCall) THEN
-    IF call_has_return_lifetime?(expr) THEN
+    IF cleanupClassifier__call_has_return_lifetime?(expr) THEN
       RETURN NIL;
     END
-    IF TRY (call_returns_heap_owned?(expr, schema_lookup)) THEN
+    IF TRY (cleanupClassifier__call_returns_heap_owned?(expr, schema_lookup)) THEN
       RETURN :heap;
     END
-    IF call_returns_frame_owned?(expr) THEN
+    IF cleanupClassifier__call_returns_frame_owned?(expr) THEN
       RETURN :frame;
     END
     IF call_returns_receiver_owned?(expr) THEN
@@ -1095,26 +1096,10 @@ PUB FN cleanupClassifier__receiver_storage_alloc(expr: MethodCall) RETURNS ?Stri
   RETURN NIL;
 END
 PUB FN cleanupClassifier__call_has_return_lifetime?(expr: Locatable) RETURNS !Bool ->
-  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(expr));
-  ELSE
-    sig_branch_value = NIL;
+  IF aST__node__matched_signature(expr) EXISTS AS sig THEN
+    RETURN !(((TRY (functionSignature__return_lifetime(sig))).length() == 0));
   END
-  MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
-  RETURN (!(!(sig)) AND !(((TRY (functionSignature__return_lifetime(sig))).length() == 0)));
-END
-PUB FN cleanupClassifier__each_capture_binding(body: []Node, block: FN(String, Locatable, CaptureBindingBlockParam3) -> Void) RETURNS Void ->
-  aST__walk_body(body |> SELECT castNodeToLocatable(_), %(node: Locatable) -> {
-  IF node IS_A WhileBindLoop AS while_bind_loop THEN
-      block(CAST(while_bind_loop.binding_name AS String), while_bind_loop.condition, while_bind_loop);
-  ELSE_IF node IS_A IfBind AS if_bind THEN
-      FOR _ IN if_bind.bindings DO
-      block(binding__name(_), binding__expr(_), _);
-      END
-  END
-  rubyToClearVoid()
-  });
+  RETURN FALSE;
 END
 PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !?CleanupEntry@multiowned ->
   IF TRY (type__node_reference?(ti)) THEN
