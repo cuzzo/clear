@@ -1067,7 +1067,7 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
     IF facts.borrow_provenance THEN
       RETURN NIL;
     END
-    IF (TRY (type__string?(ti)) AND !(cleanupClassifier__mutable_owning_slot?(ti, node, schema_lookup))) THEN
+    IF (TRY (type__string?(ti)) AND !(TRY (cleanupClassifier__mutable_owning_slot?(ti, node, schema_lookup)))) THEN
       IF facts.rodata_provenance THEN
         RETURN NIL;
       END
@@ -1221,7 +1221,7 @@ PUB FN cleanupClassifier__finalize_alloc_from_storage_mut(MUTABLE entry: ?Cleanu
   IF !(entry EXISTS) THEN
     RETURN NIL;
   END
-  MUTABLE finalized: CleanupEntry = COPY UNWRAP (entry);
+  MUTABLE finalized: CleanupEntry@multiowned = KEEP UNWRAP (entry);
   IF cleanupEntry__fixed_alloc?(finalized) THEN
     RETURN KEEP finalized;
   END
@@ -1237,9 +1237,7 @@ END
 PUB FN cleanupClassifier__storage_from_symbol(sym: ?SymbolEntry, node: Locatable) RETURNS ?String@symbol ->
   IF sym EXISTS AS sym_value THEN
     MUTABLE symbol: SymbolEntry = COPY (aST__declaration_symbol(sym_value) OR_ELSE sym_value);
-    IF symbolEntry__storage(symbol) EXISTS AS storage THEN
-      RETURN COPY storage;
-    END
+    RETURN COPY symbolEntry__storage(symbol);
   END
   RETURN COPY aST__node_storage_override(node);
 END
@@ -1270,11 +1268,11 @@ END
 PUB FN cleanupClassifier__stream_handle_type?(ti: Type) RETURNS !Bool ->
   RETURN (((((TRY (type__dynamic_stream?(ti)) OR TRY (type__bounded_stream?(ti))) OR TRY (type__open_stream?(ti))) OR TRY (type__inf_stream?(ti))) OR TRY (type__split_open_stream?(ti))) OR type__shared_promise?(ti));
 END
-PUB FN cleanupClassifier__mutable_owning_slot?(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
-  IF !((node.var_mutated() == TRUE)) THEN
+PUB FN cleanupClassifier__mutable_owning_slot?(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  IF !((aST__node_var_mutated(node) OR_ELSE FALSE)) THEN
     RETURN FALSE;
   END
-  RETURN cleanupClassifier__ownership_bearing_type?(ti, schema_lookup);
+  RETURN TRY (cleanupClassifier__ownership_bearing_type?(ti, schema_lookup));
 END
 PUB FN cleanupClassifier__ownership_bearing_type?(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN TRY (type__ownership_bearing?(ti, schema_lookup));
@@ -1283,7 +1281,7 @@ PUB FN cleanupClassifier__cleanup_owned_string_type?(ti: Type) RETURNS !Bool ->
   RETURN ((TRY (type__string?(ti)) AND !(type__symbol?(ti))) AND !(type__raw?(ti)));
 END
 PUB FN cleanupClassifier__classify_mutable_owning_slot(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
-  IF !(cleanupClassifier__mutable_owning_slot?(ti, node, schema_lookup)) THEN
+  IF !(TRY (cleanupClassifier__mutable_owning_slot?(ti, node, schema_lookup))) THEN
     RETURN NIL;
   END
   MUTABLE kind = IF TRY (type__string?(ti)) THEN
@@ -1296,34 +1294,29 @@ PUB FN cleanupClassifier__classify_mutable_owning_slot(ti: Type, node: Locatable
   RETURN e;
 END
 PUB FN cleanupClassifier__classify_owned_return_call(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
-  MUTABLE value = IF respondsTo?(node, "value") THEN
-    node.value()
-  ELSE
-    NIL
-  END;
-  IF !((TRUE AND cleanupClassifier__contains_call?(value))) THEN
+  IF !(cleanupClassifier__binding_value(node) EXISTS) THEN
     RETURN NIL;
   END
-  MUTABLE sym = IF TRUE THEN
-    aST__node__symbol(node)
-  ELSE
-    NIL
-  END;
-  IF !(((sym != NIL) AND (sym.storage() == :heap))) THEN
+  IF !(cleanupClassifier__contains_call?(COPY UNWRAP (cleanupClassifier__binding_value(node)))) THEN
     RETURN NIL;
   END
-  MUTABLE ret = TRY (type__success_type(ti));
-  IF !((TRUE AND (((TRY (type__needs_explicit_cleanup?(ret, :heap, schema_lookup)) OR TRY (type__heap_ptr?(ret))) OR TRY (type__recursive_cleanup_shape?(ret, schema_lookup)))))) THEN
+  IF !(aST__node__symbol(node) EXISTS) THEN
     RETURN NIL;
   END
-  MUTABLE kind = IF TRY (type__string?(ret)) THEN
-    :heap_string
-  ELSE
-    :uniform
-  END;
+  IF !((symbolEntry__storage(COPY UNWRAP (aST__node__symbol(node))) == :heap)) THEN
+    RETURN NIL;
+  END
+  MUTABLE ret: Type = TRY (type__success_type(ti));
+  IF !(((TRY (type__needs_explicit_cleanup?(ret, :heap, schema_lookup)) OR TRY (type__heap_ptr?(ret))) OR TRY (type__recursive_cleanup_shape?(ret, schema_lookup)))) THEN
+    RETURN NIL;
+  END
+  MUTABLE kind: String@symbol = :uniform;
+  IF TRY (type__string?(ret)) THEN
+    kind = :heap_string;
+  END
   MUTABLE e = cleanupClassifier__entry(kind, :heap, TRUE);
-  e[:fixed_alloc] = TRUE;
-  RETURN e;
+  cleanupEntry__set_fixed_alloc_mut(&e, TRUE);
+  RETURN KEEP e;
 END
 PUB FN cleanupClassifier__contains_call?(node: Locatable) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
