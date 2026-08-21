@@ -72,7 +72,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN EmissionState{ symbol_literals: COPY rtoc_self_view.symbol_literals, uses_c_callback: rtoc_self_view.uses_c_callback, if_bind_counter: rtoc_self_view.if_bind_counter, discard_counter: rtoc_self_view.discard_counter, deep_copy_counter: rtoc_self_view.deep_copy_counter, items_block_counter: rtoc_self_view.items_block_counter, owned_slice_counter: rtoc_self_view.owned_slice_counter };
 }
 END
-PUB FN mIREmitter__emit(MUTABLE self: MIREmitter, MUTABLE node: ?Emittable) RETURNS !String
+PUB FN mIREmitter__emit(MUTABLE self: MIREmitter, node: ?Emittable) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -118,7 +118,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A IfBindStmt) THEN
       RETURN TRY (mIREmitter__emit_if_bind_stmt(&rtoc_self_view, node));
     ELSE_IF (node IS_A WhileStmt) THEN
-      RETURN TRY (mIREmitter__emit_while(&rtoc_self_view, &node));
+      RETURN TRY (mIREmitter__emit_while(&rtoc_self_view, node));
     ELSE_IF (node IS_A ForStmt) THEN
       RETURN TRY (mIREmitter__emit_for(&rtoc_self_view, node));
     ELSE_IF (node IS_A SwitchStmt) THEN
@@ -2641,7 +2641,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__emit_while(MUTABLE self: MIREmitter, MUTABLE node: WhileStmt) RETURNS !String
+PRIVATE FN mIREmitter__emit_while(MUTABLE self: MIREmitter, node: WhileStmt) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
