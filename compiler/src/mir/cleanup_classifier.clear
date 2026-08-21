@@ -1778,12 +1778,33 @@ PUB FN cleanupClassifier__elem_has_string_fields?(schema: ?FieldBearingSchema) R
   RETURN TRY (cleanupClassifier__elem_has_cleanup_fields?(schema, NIL));
 END
 PUB FN cleanupClassifier__elem_has_cleanup_fields?(schema: ?FieldBearingSchema, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
-  IF !(((((schema != NIL) AND (schema IS_A InlineStructVariant)) OR ((schema != NIL) AND (schema IS_A StructSchema))) OR ((schema != NIL) AND (schema IS_A ResourceSchema)))) THEN
+  IF !(schema EXISTS) THEN
     RETURN FALSE;
   END
-  MUTABLE concrete_schema: ?FieldBearingSchema = COPY schema;
-  MUTABLE borrowed = TRY (cleanupClassifier__borrowed_field_names(concrete_schema));
-  RETURN concrete_schema.fields() |> ANY (IF borrowed.contains?(CAST(_._0 AS String)) THEN FALSE ELSE (IF cleanupClassifier__cleanup_field_borrowed?(_._1) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanupClassifier__cleanup_field_type(_._1)); (((((((TRY (type__string?(t)) OR TRY (type__non_string_array?(t))) OR type__collection?(t)) OR t.indirect?()) OR TRY (type__any_rc?(t))) OR type__link?(t)) OR (((schema_lookup != NIL) AND TRY (type__recursive_cleanup_shape?(t, schema_lookup))))) OR (((schema_lookup != NIL) AND t.needs_cleanup?(schema_lookup)))) } END) END);
+  MUTABLE concrete_schema: FieldBearingSchema = COPY UNWRAP (schema);
+  MUTABLE borrowed: [Set]String = TRY (cleanupClassifier__borrowed_field_names(concrete_schema));
+  FOR field_name IN cleanupClassifier__schema_field_names(concrete_schema) DO
+    IF !(borrowed.contains?(COPY field_name)) THEN
+      IF !(cleanupClassifier__schema_field_borrowed?(concrete_schema, field_name)) THEN
+        MUTABLE t: Type = TRY (cleanupClassifier__schema_field_type(concrete_schema, field_name));
+        MUTABLE owns = ((((((TRY (type__string?(t)) OR TRY (type__non_string_array?(t))) OR type__collection?(t)) OR type__indirect?(t)) OR TRY (type__any_rc?(t))) OR type__link?(t)));
+        IF (!(owns) AND (schema_lookup EXISTS AS lookup)) THEN
+          owns = (TRY (type__recursive_cleanup_shape?(t, lookup)) OR TRY (type__needs_cleanup?(t, lookup)));
+        END
+        IF owns THEN
+          RETURN TRUE;
+        END
+      END
+    END
+  END
+  RETURN FALSE;
+END
+PRIVATE FN cleanupClassifier__schema_field_borrowed?(schema: FieldBearingSchema, field_name: String) RETURNS Bool ->
+  PARTIAL MATCH schema START
+    FieldBearingSchema.StructSchemaMultiowned AS struct_schema -> IF struct_schema.fields[field_name] EXISTS AS field THEN RETURN (structField__borrowed(field) == TRUE); END,
+    FieldBearingSchema.ResourceSchemaMultiowned AS resource_schema -> IF resource_schema.fields[field_name] EXISTS AS field THEN RETURN (structField__borrowed(field) == TRUE); END
+  END
+  RETURN FALSE;
 END
 PUB FN cleanupClassifier__cleanup_field_borrowed?(field: Field) RETURNS Bool ->
   IF field IS_A StructField AS struct_field THEN
