@@ -57,8 +57,8 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, MUTABLE mi
   RETURN parts.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_run_body(step: FsmStep, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
-  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
-  rtoc_lambda_result_2 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, mir_emitter));
+  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(MUTABLE mir_emitter, step) -> {
+  rtoc_lambda_result_2 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, &mir_emitter));
   rtoc_lambda_result_2
   }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
@@ -122,8 +122,8 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emi
   RETURN parts.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_step(step: FsmStep, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
-  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(mir_emitter, step) -> {
-  rtoc_lambda_result_4 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, mir_emitter));
+  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, step.bg_rt, %() USE(MUTABLE mir_emitter, step) -> {
+  rtoc_lambda_result_4 = TRY (fsmWrapperEmitter__render_body_items(COPY step.body_stmts, &mir_emitter));
   rtoc_lambda_result_4
   }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
@@ -281,8 +281,8 @@ PRIVATE FN fsmWrapperEmitter__render_tail(t: FsmTail, ctx_id: Int64) RETURNS !St
   END
 END
 PRIVATE FN fsmWrapperEmitter__render_member_fn(fn_value: FsmMemberFn, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
-  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value, mir_emitter) -> {
-  rtoc_lambda_result_5 = TRY (fsmWrapperEmitter__render_body_items(COPY fn_value.body_stmts, mir_emitter));
+  MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value, MUTABLE mir_emitter) -> {
+  rtoc_lambda_result_5 = TRY (fsmWrapperEmitter__render_body_items(COPY fn_value.body_stmts, &mir_emitter));
   rtoc_lambda_result_5
   }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
@@ -356,12 +356,12 @@ PUB FN fsmWrapperEmitter__render_stmt_array(stmts: []Emittable, rt_name: String)
     RETURN "";
   END
   MUTABLE emitter = mIREmitter__new();
-  RETURN TRY (fsmWrapperEmitter__with_rt_name_text(&emitter, rt_name, %() USE(emitter, stmts) -> {
-  rtoc_lambda_result_7 = (TRY (fsmWrapperEmitter__render_body_items(stmts, emitter))).join("\n");
+  RETURN TRY (fsmWrapperEmitter__with_rt_name_text(&emitter, rt_name, %() USE(MUTABLE emitter, stmts) -> {
+  rtoc_lambda_result_7 = (TRY (fsmWrapperEmitter__render_body_items(stmts, &emitter))).join("\n");
   rtoc_lambda_result_7
   }));
 END
-PRIVATE FN fsmWrapperEmitter__render_body_items(stmts: []Emittable, mir_emitter: MIREmitter) RETURNS ![]String ->
+PRIVATE FN fsmWrapperEmitter__render_body_items(stmts: []Emittable, MUTABLE mir_emitter: MIREmitter) RETURNS ![]String ->
   FOR _ IN stmts DO
   IF !(TRUE) THEN
     panic("FSM body item must be structural MIR, got {}");
@@ -421,7 +421,7 @@ PRIVATE FN fsmWrapperEmitter__render_destroy_actions(ctx_id: Int64, destroy_acti
   IF (destroy_actions.length() == 0) THEN
     RETURN "";
   END
-  RETURN CAST(fsmWrapperEmitter__with_rt_name(&mir_emitter, "__ctx_${ctx_id.toString()}.rt", %() USE(ctx_id, destroy_actions, mir_emitter) -> ((destroy_actions |> SELECT PARTIAL MATCH _ START
+  RETURN CAST(fsmWrapperEmitter__with_rt_name(&mir_emitter, "__ctx_${ctx_id.toString()}.rt", %() USE(ctx_id, destroy_actions, MUTABLE mir_emitter) -> ((destroy_actions |> SELECT PARTIAL MATCH _ START
     FsmDestroyAction.FsmDestroyCleanup AS fsm_destroy_cleanup -> fsmWrapperEmitter__render_destroy_cleanup_action(fsm_destroy_cleanup, mir_emitter),
     FsmDestroyAction.FsmDestroyStmt AS fsm_destroy_stmt -> fsmWrapperEmitter__render_destroy_stmt_action(fsm_destroy_stmt, mir_emitter),
     FsmDestroyAction.FsmDestroyLockRelease AS fsm_destroy_lock_release -> fsmWrapperEmitter__render_destroy_lock_action(ctx_id, fsm_destroy_lock_release, mir_emitter),
