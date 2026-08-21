@@ -422,9 +422,6 @@ float_types = [:Float32, :Float64];
 PUB UNION TypeEnumVariantsItem { StringValue: String, SymbolValue: String@symbol }
 PUB UNION TypeSchemaLookupResult { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, ArrayValue: []TypeEnumVariantsItem }
 PUB FN type__indirect_type?(value: Type) RETURNS Bool ->
-  IF !(TRUE) THEN
-    RETURN FALSE;
-  END
   RETURN (type__indirect?(value) == TRUE);
 END
 PUB FN type__from_input(type: TypeTypeInput) RETURNS !Type ->

@@ -251,9 +251,6 @@ PUB FN liveness__walk_idents(node: ?AstIdentWalkRoot, block: FN(String) -> Void)
         END
         CONTINUE;
       END
-      IF !(TRUE) THEN
-        CONTINUE;
-      END
       FOR rtoc_walk_child_8 IN rtocChildrenCollectValue(current) DO
       IF (rtoc_walk_child_8 == Array) THEN
         FOR _ IN rtoc_walk_child_8.reverse() DO

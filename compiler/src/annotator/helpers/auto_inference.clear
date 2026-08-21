@@ -66,9 +66,6 @@ FN autoSlotId__eql?(self: AutoSlotId, other: AutoSlotId) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(TRUE) THEN
-      RETURN FALSE;
-    END
     RETURN ((((rtoc_self_view.kind == other.kind) AND (rtoc_self_view.fn_name == other.fn_name)) AND (rtoc_self_view.index == other.index)) AND (rtoc_self_view.decl_id == other.decl_id));
 }
 END

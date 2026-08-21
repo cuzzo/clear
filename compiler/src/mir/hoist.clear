@@ -66,9 +66,6 @@ PRIVATE FN hoist__synthesized_body?(fn_value: FunctionDef) RETURNS Bool ->
   RETURN !(!(((((TRUE AND fn_value.thunk_plan)) OR ((TRUE AND fn_value.mutual_thunk_plan))))));
 END
 PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, MUTABLE counter: HoistCounter, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, MUTABLE generated: []VarDecl, return_type: ?TypeTypeInput = NIL) RETURNS !Void EFFECTS REENTRANT ->
-  IF !(TRUE) THEN
-    RETURN;
-  END
   MUTABLE i = 0;
   WHILE (i < body.length()) DO
     MUTABLE stmt = COPY UNWRAP (body[i]);
@@ -288,9 +285,6 @@ PRIVATE FN hoist__allocating?(MUTABLE node: ?Locatable, schema_lookup: ?FN(Strin
     END
     IF ((hoist__concat?(node_value_mutable) OR node_value_mutable IS_A ListLit) OR node_value_mutable IS_A HashLit) THEN
       RETURN TRUE;
-    END
-    IF !(TRUE) THEN
-      RETURN FALSE;
     END
     MUTABLE ti = TRY (aST__full_type_mut(node_value_mutable));
     IF TRY (type__c_string?(ti)) THEN

@@ -363,9 +363,6 @@ PUB FN fsmWrapperEmitter__render_stmt_array(stmts: []Emittable, rt_name: String)
 END
 PRIVATE FN fsmWrapperEmitter__render_body_items(stmts: []Emittable, MUTABLE mir_emitter: MIREmitter) RETURNS ![]String ->
   FOR _ IN stmts DO
-  IF !(TRUE) THEN
-    panic("FSM body item must be structural MIR, got {}");
-  END
   END
   MUTABLE rendered = TRY (mIREmitter__emit_statements(&mir_emitter, stmts));
   IF (rendered.length() == 0) THEN

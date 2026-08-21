@@ -884,9 +884,6 @@ PUB STRUCT TestDef {
 }
 
 FN testDef__needs_scheduler(MUTABLE self: TestDef) RETURNS Bool ->
-  IF !(TRUE) THEN
-    self.needs_scheduler = NIL;
-  END
   RETURN (self.needs_scheduler == TRUE);
 END
 FN testDef__set_needs_scheduler(MUTABLE self: TestDef, value: Bool) RETURNS Void ->
@@ -3391,9 +3388,6 @@ FN bgBlock__initialize(MUTABLE self: MIRBgBlock, code: BgBlockPlan, captures_val
   END
 END
 FN bgBlock__result_type(MUTABLE self: MIRBgBlock) RETURNS ?Type ->
-  IF !(TRUE) THEN
-    self.result_type = NIL;
-  END
   RETURN COPY self.result_type;
 END
 FN bgBlock__set_result_type(MUTABLE self: MIRBgBlock, value: ?Type) RETURNS ?Type ->
@@ -3401,9 +3395,6 @@ FN bgBlock__set_result_type(MUTABLE self: MIRBgBlock, value: ?Type) RETURNS ?Typ
   RETURN COPY value;
 END
 FN bgBlock__boundary_fact(MUTABLE self: MIRBgBlock) RETURNS ?ExecutionBoundaryFact ->
-  IF !(TRUE) THEN
-    self.boundary_fact = NIL;
-  END
   RETURN COPY self.boundary_fact;
 END
 FN bgBlock__set_boundary_fact(MUTABLE self: MIRBgBlock, value: ?ExecutionBoundaryFact) RETURNS ?ExecutionBoundaryFact ->
@@ -3484,9 +3475,6 @@ PUB STRUCT StreamSpawn {
 }
 
 FN streamSpawn__boundary_fact(MUTABLE self: StreamSpawn) RETURNS ?ExecutionBoundaryFact ->
-  IF !(TRUE) THEN
-    self.boundary_fact = NIL;
-  END
   RETURN COPY self.boundary_fact;
 END
 FN streamSpawn__set_boundary_fact(MUTABLE self: StreamSpawn, value: ?ExecutionBoundaryFact) RETURNS ?ExecutionBoundaryFact ->
@@ -7882,9 +7870,6 @@ PUB STRUCT Call {
 }
 
 FN call__result_type(MUTABLE self: Call) RETURNS ?Type ->
-  IF !(TRUE) THEN
-    self.result_type = NIL;
-  END
   RETURN COPY self.result_type;
 END
 FN call__set_result_type(MUTABLE self: Call, value: ?Type) RETURNS ?Type ->
@@ -8173,9 +8158,6 @@ PUB FN mIRMethodCall__result_type(self: MIRMethodCall) RETURNS ?Type ->
 END
 
 FN methodCall__result_type(MUTABLE self: MIRMethodCall) RETURNS ?Type ->
-  IF !(TRUE) THEN
-    self.result_type = NIL;
-  END
   RETURN COPY self.result_type;
 END
 FN methodCall__set_result_type(MUTABLE self: MIRMethodCall, value: ?Type) RETURNS ?Type ->
@@ -9724,27 +9706,18 @@ PUB FN mIRBlockExpr__result_type(self: MIRBlockExpr) RETURNS ?Type ->
 END
 
 PUB FN blockExpr__lazy_boundary(MUTABLE self: MIRBlockExpr) RETURNS Bool ->
-  IF !(TRUE) THEN
-    self.lazy_boundary = NIL;
-  END
   RETURN (self.lazy_boundary == TRUE);
 END
 FN blockExpr__set_lazy_boundary(MUTABLE self: MIRBlockExpr, value: Bool) RETURNS Void ->
   self.lazy_boundary = COPY value;
 END
 FN blockExpr__result_type(MUTABLE self: MIRBlockExpr) RETURNS ?Type ->
-  IF !(TRUE) THEN
-    self.result_type = NIL;
-  END
   RETURN COPY self.result_type;
 END
 FN blockExpr__set_result_type(MUTABLE self: MIRBlockExpr, value: ?Type) RETURNS Void ->
   self.result_type = COPY value;
 END
 FN blockExpr__borrowed_view(MUTABLE self: MIRBlockExpr) RETURNS Bool ->
-  IF !(TRUE) THEN
-    self.borrowed_view = NIL;
-  END
   RETURN (self.borrowed_view == TRUE);
 END
 FN blockExpr__set_borrowed_view(MUTABLE self: MIRBlockExpr, value: Bool) RETURNS Void ->
@@ -10033,9 +10006,6 @@ PUB STRUCT TryCatch {
 }
 
 FN tryCatch__result_type(MUTABLE self: TryCatch) RETURNS ?Type ->
-  IF !(TRUE) THEN
-    self.result_type = NIL;
-  END
   RETURN COPY self.result_type;
 END
 FN tryCatch__set_result_type(MUTABLE self: TryCatch, value: ?Type) RETURNS Void ->
@@ -10110,9 +10080,6 @@ PUB STRUCT Orelse {
 }
 
 FN orelse__result_type(MUTABLE self: Orelse) RETURNS ?Type ->
-  IF !(TRUE) THEN
-    self.result_type = NIL;
-  END
   RETURN COPY self.result_type;
 END
 FN orelse__set_result_type(MUTABLE self: Orelse, value: ?Type) RETURNS Void ->
@@ -10248,9 +10215,6 @@ PUB STRUCT IfOptional {
 }
 
 FN ifOptional__result_type(MUTABLE self: IfOptional) RETURNS ?Type ->
-  IF !(TRUE) THEN
-    self.result_type = NIL;
-  END
   RETURN COPY self.result_type;
 END
 FN ifOptional__set_result_type(MUTABLE self: IfOptional, value: ?Type) RETURNS Void ->
@@ -11368,9 +11332,6 @@ PUB FN mIRRangeLit__result_type(self: MIRRangeLit) RETURNS ?Type ->
 END
 
 FN rangeLit__result_type(MUTABLE self: MIRRangeLit) RETURNS ?Type ->
-  IF !(TRUE) THEN
-    self.result_type = NIL;
-  END
   RETURN COPY self.result_type;
 END
 FN rangeLit__set_result_type(MUTABLE self: MIRRangeLit, value: ?Type) RETURNS Void ->

@@ -138,11 +138,7 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
           IF !(arg) THEN
               RETURN;
           END
-          MUTABLE arg_name = IF respondsTo?(arg, "name") THEN
-              arg.name()
-            ELSE
-              NIL
-            END;
+          MUTABLE arg_name = aST__node_name(arg);
           IF !((TRUE AND held_params.contains?(arg_name))) THEN
               RETURN;
           END

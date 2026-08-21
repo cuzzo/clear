@@ -124,7 +124,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.entries[name];
 }
 END
-# keys() hands back map-owned Strings, not interned handles; see KeyList.
+# scopeTypes__keys() hands back map-owned Strings, not interned handles; see KeyList.
 FN scopeTypes__keys(self: ScopeTypes) RETURNS ![]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
@@ -192,9 +192,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN scope__live_param_syms(fn_value: FunctionDef) RETURNS !{String}SymbolEntry@multiowned ->
-  IF !(TRUE) THEN
-    RETURN {};
-  END
   RETURN fn_value.params |> REDUCE({}) {
   IF _.symbol THEN
       acc[CAST(_.name AS String)] = _.symbol;

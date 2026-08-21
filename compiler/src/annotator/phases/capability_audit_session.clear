@@ -1450,11 +1450,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
-      MUTABLE token = IF TRUE THEN
-        aST__node__token(decl)
-      ELSE
-        NIL
-      END;
+      MUTABLE token = aST__node__token(decl);
       IF token THEN
         MUTABLE dline = token.line();
         MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
@@ -2739,7 +2735,7 @@ PRIVATE FN capabilityAuditSession__fallible_call_site_fact?(self: CapabilityAudi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node = COPY COPY fact.node;
-    IF (respondsTo?(node, "error_union_type") AND node.error_union_type()) THEN
+    IF (aST__node_error_union_type(node) OR_ELSE FALSE) THEN
       RETURN TRUE;
     END
     MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature());
@@ -2825,7 +2821,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
     fn_nodes.keys() |> EACH {
     MUTABLE fn_node: Any = (fn_nodes[_] OR_ELSE panic("missing hash key"));
-    MUTABLE effs = (fn_node.effects() OR Set[]);
+    MUTABLE effs = (fn_node.effects() OR_ELSE Set[]);
     MUTABLE reason = NIL;
     IF (effs.contains?(reentrant) OR fn_node.plain_reentrant?()) THEN
         reason = :reentrant;
@@ -2981,7 +2977,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(fn) THEN
         CONTINUE;
       END
-      MUTABLE effs = (fn.effects() OR Set[]);
+      MUTABLE effs = (fn.effects() OR_ELSE Set[]);
       IF (effs.contains?(reentrant) OR fn.plain_reentrant?()) THEN
         RETURN BgSpawnDecision{ spawn_form: :stackful, reason: :reentrant };
       END
@@ -3022,7 +3018,7 @@ PRIVATE FN capabilityAuditSession__assign_base_stack_tiers_mut(MUTABLE self: Cap
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR rtoc_each_16 IN fn_nodes.keys() DO
     MUTABLE fn_node: FunctionDef = (fn_nodes[rtoc_each_16] OR_ELSE CAST(panic("missing hash key") AS FunctionDef));
-    MUTABLE effs = (fn_node.effects OR Set[]);
+    MUTABLE effs = (fn_node.effects OR_ELSE Set[]);
     MUTABLE stack_bytes = (fn_node.stack_vars_bytes OR 0);
     MUTABLE kind: ?String@symbol = COPY fn_node.reentrance_kind;
     IF (kind == :reentrant) THEN
@@ -3765,7 +3761,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF functionSignature__can_fail(fn) THEN
       RETURN "can fail";
     END
-    MUTABLE effects = (fn.effects() OR Set[]);
+    MUTABLE effects = (fn.effects() OR_ELSE Set[]);
     IF effects.empty?() THEN
       RETURN NIL;
     END
@@ -3851,7 +3847,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     state.held_calls.keys() |> EACH {
     MUTABLE sites: []LockHeldCallSite = (state.held_calls[_] OR_ELSE CAST(panic("missing hash key") AS []LockHeldCallSite));
     FOR _ IN sites DO
-    FOR _ IN ((transitive_acquires[_.callee] OR Set[])) DO
+    FOR _ IN ((transitive_acquires[_.callee] OR_ELSE Set[])) DO
     IF state.direct_edges[_] EXISTS AS rtoc_map_slot_28 THEN
       &rtoc_map_slot_28.append(LockEdge{ held: COPY _.held, acquired: COPY _, site_token: COPY _.site_token, fn_name: COPY _, opted_out: _.opted_out });
     ELSE

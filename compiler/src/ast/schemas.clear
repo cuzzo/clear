@@ -595,25 +595,25 @@ PUB FN structSchema__new(fields: {String@symbol}SchemasStructSchemaFieldInput, t
 END
 PUB UNION SchemaValue { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
 PUB UNION FieldBearingSchema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, InlineStructVariantMultiowned: InlineStructVariant@multiowned }
-PUB FN struct?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN resourceSchema__struct?(s: ?SchemaValue) RETURNS Bool ->
   IF s EXISTS AS schema_value THEN
     RETURN schema_value IS_A StructSchema;
   END
   RETURN FALSE;
 END
-PUB FN union?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN unionSchema__union?(s: ?SchemaValue) RETURNS Bool ->
   IF s EXISTS AS schema_value THEN
     RETURN schema_value IS_A UnionSchema;
   END
   RETURN FALSE;
 END
-PUB FN enum?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN resourceSchema__enum?(s: ?SchemaValue) RETURNS Bool ->
   IF s EXISTS AS schema_value THEN
     RETURN schema_value IS_A EnumSchema;
   END
   RETURN FALSE;
 END
-PUB FN resource?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN unionSchema__resource?(s: ?SchemaValue) RETURNS Bool ->
   IF s EXISTS AS schema_value THEN
     RETURN schema_value IS_A ResourceSchema;
   END

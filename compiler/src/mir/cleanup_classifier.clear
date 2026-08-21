@@ -998,9 +998,6 @@ PUB FN cleanupClassifier__call_returns_heap_owned?(expr: Locatable, schema_looku
     IF TRY (functionSignature__frame_return_alloc?(&sig_value_mutable)) THEN
       RETURN FALSE;
     END
-    IF !(TRUE) THEN
-      RETURN FALSE;
-    END
     MUTABLE ret = TRY (type__new(TypeConstructionInput{ Type: COPY functionSignature__return_type(sig_value_mutable) }));
     ret = TRY (type__success_type(ret));
     RETURN (!(!(ret)) AND TRY (type__needs_explicit_cleanup?(ret, :heap, schema_lookup)));

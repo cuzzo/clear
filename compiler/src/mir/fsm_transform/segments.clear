@@ -151,9 +151,6 @@ PUB FN segments__split(body_input: []Locatable, lowering: Any) RETURNS !?SplitRe
   RETURN SplitResult{ segments: COPY segments };
 END
 PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitResult ->
-  IF !(TRUE) THEN
-    RETURN NIL;
-  END
   MUTABLE loop_idx: ?Int64 = NIL;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < body.length() DO
@@ -406,9 +403,6 @@ PUB FN segments__suspending_call?(expr: Locatable) RETURNS !Bool ->
   RETURN ((aST__call?(expr)) AND segments__io_suspending_call?(castLocatableToCallNode(expr)));
 END
 PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable ->
-  IF !(TRUE) THEN
-    RETURN COPY body;
-  END
   MUTABLE out = List[];
   MUTABLE pipe_counter = 0;
   FOR _ IN body DO

@@ -113,9 +113,6 @@ END
 PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: BasicBlock, exit_target: BasicBlock, cfg: FunctionCFG, break_target: ?BasicBlock = NIL, continue_target: ?BasicBlock = NIL) RETURNS !?BasicBlock@multiowned EFFECTS REENTRANT ->
   MUTABLE current_block = COPY current_block_input;
   MUTABLE stmts = COPY stmts_input;
-  IF !(TRUE) THEN
-    stmts = [stmts];
-  END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < stmts.length() DO
   IF (stmts[rtoc_idx]? IS_A IfStatement) THEN
@@ -397,11 +394,7 @@ PUB FN ownershipDataflow__state_from_names(state: {String}OwnerEntry) RETURNS !{
   RETURN entries;
 END
 PUB FN ownershipDataflow__place_for_binding_node(name: String, node: Node) RETURNS PlaceId ->
-  MUTABLE sym = IF TRUE THEN
-    aST__node__symbol(node)
-  ELSE
-    NIL
-  END;
+  MUTABLE sym = aST__node__symbol(node);
   MUTABLE symbol = IF sym IS_A SymbolEntry THEN
     sym
   ELSE
@@ -499,9 +492,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     &order.append(COPY block)
     };
-    runtimeCallSpec__call(CAST(visit AS RuntimeCallSpec), KEEP rtoc_self_view.cfg.entry);
+    visit(KEEP rtoc_self_view.cfg.entry);
     FOR _ IN rtoc_self_view.cfg.blocks DO
-    runtimeCallSpec__call(CAST(visit AS RuntimeCallSpec), _);
+    visit(_);
     END
     RETURN {
     MUTABLE rtoc_value_block_marker = 0;
@@ -1003,7 +996,7 @@ PRIVATE FN ownershipDataflow__make_owner_entry(self: OwnershipDataflow, MUTABLE 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE ti = TRY (aST__full_type_mut(node));
-    IF (respondsTo?(node, "borrow_provenance?") AND node.borrow_provenance?()) THEN
+    IF aST__node_borrow_provenance?(node) THEN
       RETURN NIL;
     END
     MUTABLE is_heap: Bool = FALSE;
@@ -1048,11 +1041,7 @@ PUB FN ownershipDataflow__resource_captures(self: OwnershipDataflow, node: Locat
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE analysis = IF respondsTo?(node, "capture_analysis") THEN
-      node.capture_analysis()
-    ELSE
-      NIL
-    END;
+    MUTABLE analysis = aST__node_capture_analysis(node);
     RETURN (analysis.resource_captures() OR_ELSE List[]);
 }
 END
@@ -1556,7 +1545,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         NIL
       END) OR_ELSE List[]); rtoc_pipe_src |> DISTINCT _ } );
-      FOR _ IN ((captures OR {})).keys() DO
+      FOR _ IN ((captures OR_ELSE {})).keys() DO
     IF resource_captures.contains?(_) THEN
       CONTINUE;
     END
@@ -1892,11 +1881,7 @@ PUB FN loopFrameAnalysis__expression_allocates_frame_value?(MUTABLE node: Locata
       RETURN TRUE;
     END
   END
-  MUTABLE storage: ?String@symbol = IF respondsTo?(node, "storage") THEN
-    node.storage()
-  ELSE
-    NIL
-  END;
+  MUTABLE storage: ?String@symbol = aST__node_storage(node);
   IF placement__frame?(storage) THEN
     RETURN TRUE;
   END
@@ -1998,7 +1983,7 @@ PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {Str
   END
   MUTABLE ctx: PipelineShardContext = CAST(dynamic_node.shard_context() AS PipelineShardContext);
   MUTABLE key_allocates_frame = loopFrameAnalysis__key_allocates_frame?(ctx.key_expr, fn_nodes);
-  MUTABLE each_body = IF (respondsTo?(node, "op") AND respondsTo?(dynamic_node.op(), "body")) THEN
+  MUTABLE each_body = IF ((aST__node_op(node) EXISTS) AND respondsTo?(dynamic_node.op(), "body")) THEN
       dynamic_node.op().body()
     ELSE
       NIL
@@ -2015,9 +2000,6 @@ END
 PUB FN loopFrameAnalysis__key_allocates_frame?(expr: Locatable, fn_nodes: {String}FunctionDef) RETURNS !Bool ->
   MUTABLE found: Bool = FALSE;
   loopFrameAnalysis__walk_all_nodes(castLocatableToOptionalControlFlowNodeInput(expr), %(node: Locatable) USE(fn_nodes) -> {
-  IF !(TRUE) THEN
-      RETURN;
-  END
   IF node IS_A FuncCall AS func_call THEN
       MUTABLE fn: ?FunctionDef = COPY fn_nodes[funcCall__name(func_call)];
       IF fn?.uses_frame THEN
@@ -2027,11 +2009,7 @@ PUB FN loopFrameAnalysis__key_allocates_frame?(expr: Locatable, fn_nodes: {Strin
   IF !(loopFrameAnalysis__expression_node_allocates_value?(node)) THEN
       RETURN;
   END
-  MUTABLE storage: ?String@symbol = IF respondsTo?(node, "storage") THEN
-      node.storage()
-    ELSE
-      NIL
-    END;
+  MUTABLE storage: ?String@symbol = aST__node_storage(node);
   IF (storage == :frame) THEN
       found = TRUE;
   END
