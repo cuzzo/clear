@@ -1,0 +1,118 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172"
+REQUIRE "pkg:rtoc_6261636b656e64732f6d69725f656d69747465722e636c656172"
+REQUIRE "pkg:rtoc_6d69722f6c6f7765722f706970656c696e652f706970656c696e655f686f73742e636c656172"
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172"
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6966656379636c655f706c616e2e636c656172"
+REQUIRE "pkg:rtoc_636f6d70696c65722f6d6f64756c655f696d706f727465722e636c656172"
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f636f756e746572732e636c656172"
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f736368656d615f72656769737472792e636c656172"
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f66756e6374696f6e732e636c656172"
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f6361706162696c69746965732e636c656172"
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172"
+STRUCT MIRLoweringInput {
+  struct_schemas: {String@symbol}StructSchema@multiowned,
+  enum_schemas: {String@symbol}[]MIRLoweringSchemasEnumVariantsItem,
+  union_schemas: {String@symbol}UnionSchema@multiowned,
+  schema_lookup: ?FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult,
+  lifecycle_registry: LifecycleRegistry@multiowned,
+  fn_sigs: {String@symbol}FunctionSignature@multiowned,
+  moved_guard_info: {String}{String}Bool,
+  importer: ?ModuleImporter@multiowned,
+  source_dir: ?String,
+  debug_mode: Bool,
+  target: String@symbol,
+  function_counter_seeds: {String}MIRLoweringCounterSnapshot
+}
+STRUCT MIRLoweringRuntimeState {
+  rt_name: String,
+  emitter: ?MIREmitter@multiowned
+}
+
+FN mIRLoweringRuntimeState__emitter_mut(MUTABLE self: MIRLoweringRuntimeState) RETURNS MIREmitter@multiowned ->
+  MUTABLE current: ?MIREmitter@multiowned = COPY KEEP self.emitter;
+  IF current EXISTS AS current_value THEN
+    RETURN KEEP current_value;
+  END
+  current = mIREmitter__new();
+  self.emitter = current;
+  RETURN UNWRAP (current);
+END
+FN mIRLoweringRuntimeState__with_rt_name<U>(MUTABLE self: MIRLoweringRuntimeState, rt_name: String, blk: FN() -> U) RETURNS U ->
+MUTABLE previous = COPY self.rt_name;
+DEFER self.rt_name = previous;
+self.rt_name = COPY rt_name;
+RETURN blk();
+END
+STRUCT ConstInitEntry {
+  name: String,
+  zig_type: String,
+  init: Emittable,
+  type_info: Any@multiowned,
+  prelude: []Emittable
+}
+STRUCT MIRLoweringProgramState {
+  fn_sigs: {String@symbol}FunctionSignature@multiowned,
+  shard_context: ?{String@symbol}String,
+  emitted_extern_modules: [Set]String,
+  pipeline_host: ?PipelineHost@multiowned,
+  importer: ?ModuleImporter@multiowned,
+  source_dir: ?String,
+  emitted_types: [Set]String,
+  emitted_require_modules: [Set]String,
+  emitted_import_type_aliases: [Set]String,
+  debug_mode: Bool,
+  target: String@symbol,
+  used_sharded_map: Bool,
+  use_debug_allocator: ?Bool,
+  fn_nodes: {String}FunctionDef@multiowned,
+  function_counter_snapshots: {String}MIRLoweringCounterSnapshot,
+  runtime_init_consts: []ConstInitEntry,
+  module_const_inits: [Set]String,
+  module_global_names: [Set]String
+}
+STRUCT MIRLoweringCaptureState {
+  current_bg_pointer_captures: ?[Set]String,
+  current_lambda_pointer_params: [Set]String,
+  current_fiber_capture_symbols: {String}SymbolEntry@multiowned,
+  do_capture_map: ?{String}String,
+  current_stream_is_inf: ?Bool,
+  current_stream_local: ?String,
+  current_stream_close_label: ?String,
+  current_fsm_inherited_alloc_names: [Set]String,
+  current_fsm_inherited_guarded_names: [Set]String,
+  current_fsm_owned_result_guards: {String}String,
+  last_fsm_result_transfer_facts: []FsmResultTransferFact
+}
+STRUCT MIRLoweringCapabilityState {
+  locked_unwrap_map: ?{String}LockedUnwrapMapValue,
+  rc_unwrap_map: ?{String}String,
+  with_alias_alloc_map: ?{String}?String@symbol,
+  with_alias_owner_map: ?{String}String,
+  polymorphic_alias_type_map: ?{String}String,
+  if_bind_aliases: [Set]String,
+  if_bind_pointer_aliases: [Set]String,
+  atomic_emit_raw: Bool
+}
+STRUCT MIRLoweringOwnershipState {
+  next_lowered_node_id: Int64,
+  finalized_body_ids: [Set]LoweredBodyId,
+  finalized_node_ids: [Set]LoweredNodeId
+}
+STRUCT MIRLoweringTestState {
+  active_stubs: Any@multiowned,
+  stub_label_counter: Int64
+}
+STRUCT MIRLoweringState {
+  input: MIRLoweringInput,
+  schemas: MIRLoweringSchemas@multiowned,
+  counters: MIRLoweringCounters@multiowned,
+  function_state: FunctionState,
+  runtime: MIRLoweringRuntimeState,
+  program: MIRLoweringProgramState,
+  capture: MIRLoweringCaptureState,
+  capabilities: MIRLoweringCapabilityState,
+  ownership: MIRLoweringOwnershipState,
+  test: MIRLoweringTestState
+}
