@@ -1709,7 +1709,7 @@ PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: FN(St
   IF !(cleanupClassifier__schema_union?(schema)) THEN
     RETURN NIL;
   END
-  MUTABLE is_copy = (TRY (type__implicitly_copyable?(ti, %(t) USE(schema_lookup) -> schema_lookup(t))) OR_ELSE TRUE);
+  MUTABLE is_copy = TRY (type__implicitly_copyable?(ti, schema_lookup));
   IF is_copy THEN
     RETURN NIL;
   END
@@ -1721,9 +1721,9 @@ PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: FN(St
   END;
   MUTABLE e = cleanupClassifier__entry(:uniform, alloc);
   IF has_heap_variants THEN
-    e[:fixed_alloc] = TRUE;
+    cleanupEntry__set_fixed_alloc_mut(&e, TRUE);
   END
-  RETURN e;
+  RETURN KEEP e;
 END
 PUB FN cleanupClassifier__elem_needs_cleanup?(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE et: ?Type = TRY (type__element_type(ti));
@@ -1756,8 +1756,13 @@ PUB FN cleanupClassifier__union_variants_need_cleanup?(schema: ?UnionSchema, sch
   IF !(schema EXISTS) THEN
     RETURN FALSE;
   END
-  MUTABLE concrete_schema = COPY schema?;
-  RETURN (concrete_schema.variants) |> ANY TRY (cleanupClassifier__variant_type_needs_cleanup?(_._1, schema_lookup));
+  MUTABLE concrete_schema: UnionSchema@multiowned = KEEP UNWRAP (schema);
+  FOR variant_name IN concrete_schema.variants.keys() DO
+    IF TRY (cleanupClassifier__variant_type_needs_cleanup?(COPY concrete_schema.variants[variant_name], schema_lookup)) THEN
+      RETURN TRUE;
+    END
+  END
+  RETURN FALSE;
 END
 PUB FN cleanupClassifier__variant_type_needs_cleanup?(vt: ?SchemasUnionSchemaVariantValue, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF vt? IS_A InlineStructVariant AS inline_struct_variant THEN
