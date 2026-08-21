@@ -3946,12 +3946,12 @@ PUB STRUCT FsmGenericCtxStruct {
   destroy_actions: []FsmDestroyAction
 }
 PUB STRUCT FsmMemberFn {
-  fn_name: Any@multiowned,
+  fn_name: String,
   ctx_id: Int64,
   bg_rt: String,
   suppress_runtime_ref: ?Bool,
   body_stmts: []Emittable,
-  extra_prologue_stmts: Any@multiowned
+  extra_prologue_stmts: []Emittable
 }
 PUB STRUCT FsmCtxStruct {
   type_name: String,
