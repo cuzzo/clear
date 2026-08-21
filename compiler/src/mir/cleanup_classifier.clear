@@ -1320,10 +1320,9 @@ PUB FN cleanupClassifier__classify_owned_return_call(ti: Type, node: Locatable, 
 END
 PUB FN cleanupClassifier__contains_call?(node: Locatable) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
-  aST__each_locatable(node, %(cur: Locatable) -> {
+  aST__each_locatable(node, TRUE, %(cur: Locatable) USE(MUTABLE found) -> {
   IF aST__call?(cur) THEN
       found = TRUE;
-      BREAK;
   END
   rubyToClearVoid()
   });
@@ -1336,12 +1335,10 @@ PUB FN cleanupClassifier__classify_collection(ti: Type, schema_lookup: FN(String
   IF type__fixed_soa?(ti) THEN
     RETURN cleanupClassifier__entry(:uniform, cleanupClassifier__wrapper_alloc(ti), FALSE);
   END
-  MUTABLE node_sym = IF TRUE THEN
-    aST__node__symbol(node)
-  ELSE
-    NIL
-  END;
-  MUTABLE is_heap = !(!(node_sym.heap_storage?()));
+  MUTABLE is_heap = FALSE;
+  IF node EXISTS AS node_value THEN
+    is_heap = aST__node_heap_storage?(node_value);
+  END
   IF ((type__list_collection?(ti) AND !(type__sharded?(ti))) AND !(is_heap)) THEN
     MUTABLE has_heap_elems = TRY (cleanupClassifier__elem_needs_cleanup?(ti, schema_lookup));
     MUTABLE frame_entry = cleanupEntry__build(:uniform, :frame, TRUE);
@@ -1369,38 +1366,20 @@ PUB FN cleanupClassifier__wrapper_alloc(ti: Type) RETURNS String@symbol ->
   RETURN :heap;
   END
 END
-PUB FN cleanupClassifier__classify_array_struct_strings(ti: Type, node: Any, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
-  MUTABLE val = IF respondsTo?(node, "value") THEN
-    node.value()
-  ELSE
-    NIL
-  END;
-  IF !(((TRY (type__non_string_array?(ti)) AND !(type__collection?(ti))) AND ((val IS_A ListLit OR val IS_A DefaultArrayLit)))) THEN
+PUB FN cleanupClassifier__classify_array_struct_strings(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE val: ?Locatable = cleanupClassifier__binding_value(node);
+  IF !(((TRY (type__non_string_array?(ti)) AND !(type__collection?(ti))) AND ((val? IS_A ListLit OR val? IS_A DefaultArrayLit)))) THEN
     RETURN NIL;
   END
-  MUTABLE et: ?Type = TRY (type__element_type(ti));
-  IF et EXISTS AS et_value THEN
+  IF (TRY (type__element_type(ti))) EXISTS AS et_value THEN
     IF TRY (cleanupClassifier__elem_type_needs_cleanup?(et_value, schema_lookup)) THEN
-      MUTABLE sym = IF TRUE THEN
-        aST__node__symbol(node)
-      ELSE
-        NIL
-      END;
-      MUTABLE container_alloc = cleanupClassifier__container_alloc_from(sym, node);
-      RETURN cleanupClassifier__entry(:uniform, container_alloc, FALSE);
-    ELSE
-      RETURN NIL;
+      RETURN cleanupClassifier__entry(:uniform, cleanupClassifier__container_alloc_from(aST__node__symbol(node), node), FALSE);
     END
-  ELSE
-    RETURN NIL;
   END
+  RETURN NIL;
 END
 PUB FN cleanupClassifier__literal_only_list?(node: Any) RETURNS Bool ->
-  MUTABLE val = IF respondsTo?(node, "value") THEN
-    node.value()
-  ELSE
-    NIL
-  END;
+  MUTABLE val = cleanupClassifier__binding_value(node);
   IF !(val IS_A ListLit) THEN
     RETURN FALSE;
   END
@@ -1441,25 +1420,16 @@ PUB FN cleanupClassifier__classify_optional(ti: Type, schema_lookup: FN(String@s
     IF !(TRY (cleanupClassifier__optional_payload_needs_cleanup?(inner_value_mutable, schema_lookup))) THEN
       RETURN NIL;
     END
-    MUTABLE node_sym = IF TRUE THEN
-      aST__node__symbol(node)
-    ELSE
-      NIL
-    END;
-    MUTABLE value = IF respondsTo?(node, "value") THEN
-      node.value()
-    ELSE
-      NIL
-    END;
+    MUTABLE value = cleanupClassifier__binding_value(node);
     IF cleanupClassifier__optional_empty_initializer?(value) THEN
       RETURN NIL;
     END
-    MUTABLE is_rodata = !(!(node_sym.rodata_provenance?()));
-    MUTABLE is_borrow = !(!(node_sym.borrow_provenance?()));
+    MUTABLE is_rodata = aST__node_rodata_provenance?(node);
+    MUTABLE is_borrow = aST__node_borrow_provenance?(node);
     IF (is_rodata OR is_borrow) THEN
       RETURN NIL;
     END
-    MUTABLE storage: ?String@symbol = node_sym.storage();
+    MUTABLE storage: ?String@symbol = cleanupClassifier__storage_from_symbol(aST__node__symbol(node), node);
     MUTABLE alloc = IF (storage == :heap) THEN
       :heap
     ELSE
@@ -1505,38 +1475,31 @@ PUB FN cleanupClassifier__classify_owned_string(ti: Type, node: Locatable, schem
   IF !(TRY (cleanupClassifier__cleanup_owned_string_type?(ti))) THEN
     RETURN NIL;
   END
-  MUTABLE value = IF respondsTo?(node, "value") THEN
-    node.value()
-  ELSE
-    NIL
-  END;
-  MUTABLE node_sym = IF TRUE THEN
-    aST__node__symbol(node)
-  ELSE
-    NIL
-  END;
-  IF (!(node_sym.heap_storage?()) AND ((node_sym.rodata_provenance?() OR_ELSE node_sym.borrow_provenance?()))) THEN
+  MUTABLE value: ?Locatable = cleanupClassifier__binding_value(node);
+  IF (!(aST__node_heap_storage?(node)) AND (aST__node_rodata_provenance?(node) OR aST__node_borrow_provenance?(node))) THEN
     RETURN NIL;
   END
-  MUTABLE fixed_heap = (value IS_A NextExpr OR TRY (cleanupClassifier__capture_expr_heap?(value, schema_lookup)));
-  MUTABLE owns_heap = ((((value IS_A CopyNode OR fixed_heap) OR node_sym.heap_storage?()) OR value IS_A StringConcat) OR ((value IS_A BinaryOp AND value.string_concat())));
+  MUTABLE fixed_heap = FALSE;
+  MUTABLE owns_heap = aST__node_heap_storage?(node);
+  IF value EXISTS AS value_node THEN
+    fixed_heap = ((value_node IS_A NextExpr) OR TRY (cleanupClassifier__capture_expr_heap?(value_node, schema_lookup)));
+    MUTABLE string_concat_op = FALSE;
+    IF value_node IS_A BinaryOp AS binary_op THEN
+      string_concat_op = (binary_op.string_concat OR_ELSE FALSE);
+    END
+    owns_heap = ((((owns_heap OR fixed_heap) OR (value_node IS_A CopyNode)) OR (value_node IS_A StringConcat)) OR string_concat_op);
+  END
   IF !(owns_heap) THEN
     RETURN NIL;
   END
   MUTABLE e = cleanupClassifier__entry(:heap_string, :heap, TRUE);
   IF fixed_heap THEN
-    e[:fixed_alloc] = TRUE;
+    cleanupEntry__set_fixed_alloc_mut(&e, TRUE);
   END
-  RETURN e;
+  RETURN KEEP e;
 END
 PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
-  MUTABLE node_sym = IF TRUE THEN
-    aST__node__symbol(node)
-  ELSE
-    NIL
-  END;
-  MUTABLE is_heap = node_sym.heap_storage?();
-  IF !(is_heap) THEN
+  IF !(aST__node_heap_storage?(node)) THEN
     RETURN NIL;
   END
   IF ((TRY (type__any_rc?(ti)) OR type__link?(ti)) OR symbolEntry__cleanup_sync?(sync_value)) THEN
@@ -1579,9 +1542,8 @@ PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schem
   END
   RETURN NIL;
 END
-PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Any, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
-  IF !((respondsTo?(node, "heap_storage?") AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = CAST(node AS SymbolEntry);
-  symbolEntry__heap_storage?(rtoc_local_receiver_19) })) THEN
+PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, sync_value: ?String@symbol = NIL) RETURNS !?CleanupEntry@multiowned ->
+  IF !(aST__node_heap_storage?(node)) THEN
     RETURN NIL;
   END
   IF ((TRY (type__any_rc?(ti)) OR type__link?(ti)) OR symbolEntry__cleanup_sync?(sync_value)) THEN
@@ -1617,11 +1579,7 @@ PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Any, schema_lo
   RETURN cleanupClassifier__entry(:uniform);
 END
 PUB FN cleanupClassifier__struct_lit_borrows_cleanup_fields?(node: Any, schema: FieldBearingSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
-  MUTABLE value = IF respondsTo?(node, "value") THEN
-    node.value()
-  ELSE
-    NIL
-  END;
+  MUTABLE value = cleanupClassifier__binding_value(node);
   IF !(value IS_A StructLit) THEN
     RETURN FALSE;
   END
@@ -1634,11 +1592,7 @@ PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locata
   IF !(schemas__field_bearing?(schema)) THEN
     RETURN NIL;
   END
-  MUTABLE value = IF respondsTo?(node, "value") THEN
-    node.value()
-  ELSE
-    NIL
-  END;
+  MUTABLE value = cleanupClassifier__binding_value(node);
   MUTABLE struct_lit = IF value IS_A StructLit THEN
     value
   ELSE
