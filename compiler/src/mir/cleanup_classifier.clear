@@ -1378,19 +1378,19 @@ PUB FN cleanupClassifier__classify_array_struct_strings(ti: Type, node: Locatabl
   END
   RETURN NIL;
 END
-PUB FN cleanupClassifier__literal_only_list?(node: Any) RETURNS Bool ->
-  MUTABLE val = cleanupClassifier__binding_value(node);
-  IF !(val IS_A ListLit) THEN
-    RETURN FALSE;
+PUB FN cleanupClassifier__literal_only_list?(node: Locatable) RETURNS Bool ->
+  IF cleanupClassifier__binding_value(node) EXISTS AS val THEN
+    IF val IS_A ListLit AS list_lit THEN
+      IF (list_lit.items.length() == 0) THEN
+        RETURN FALSE;
+      END
+      RETURN list_lit.items |> ALL _ IS_A Literal;
+    END
   END
-  MUTABLE items = val.items();
-  IF ((items == NIL) OR items.empty?()) THEN
-    RETURN FALSE;
-  END
-  RETURN items |> ALL _ IS_A Literal;
+  RETURN FALSE;
 END
-PUB FN cleanupClassifier__container_alloc_from(sym: ?SymbolEntry, node: Any) RETURNS String@symbol ->
-  MUTABLE storage = cleanupClassifier__storage_from_symbol(sym, node);
+PUB FN cleanupClassifier__container_alloc_from(sym: ?SymbolEntry, node: Locatable) RETURNS String@symbol ->
+  MUTABLE storage: ?String@symbol = cleanupClassifier__storage_from_symbol(sym, node);
   RETURN PARTIAL MATCH storage START
     :frame -> :frame,
     :stack -> :frame,
@@ -1420,7 +1420,7 @@ PUB FN cleanupClassifier__classify_optional(ti: Type, schema_lookup: FN(String@s
     IF !(TRY (cleanupClassifier__optional_payload_needs_cleanup?(inner_value_mutable, schema_lookup))) THEN
       RETURN NIL;
     END
-    MUTABLE value = cleanupClassifier__binding_value(node);
+    MUTABLE value: ?Locatable = cleanupClassifier__binding_value(node);
     IF cleanupClassifier__optional_empty_initializer?(value) THEN
       RETURN NIL;
     END
@@ -1578,49 +1578,128 @@ PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Locatable, sch
   END
   RETURN cleanupClassifier__entry(:uniform);
 END
-PUB FN cleanupClassifier__struct_lit_borrows_cleanup_fields?(node: Any, schema: FieldBearingSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
-  MUTABLE value = cleanupClassifier__binding_value(node);
+PUB FN cleanupClassifier__struct_lit_borrows_cleanup_fields?(node: Locatable, schema: FieldBearingSchema, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  IF !(cleanupClassifier__binding_value(node) EXISTS) THEN
+    RETURN FALSE;
+  END
+  MUTABLE value: Locatable = COPY UNWRAP (cleanupClassifier__binding_value(node));
   IF !(value IS_A StructLit) THEN
     RETURN FALSE;
   END
-  MUTABLE borrowed = TRY (cleanupClassifier__borrowed_field_names(schema));
-  RETURN schema.fields() |> ALL { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanupClassifier__cleanup_field_type(_._1)); (IF !(TRY (cleanupClassifier__elem_type_needs_cleanup?(t, schema_lookup))) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fval = (value.fields()[CAST(_._0 AS String)] OR value.fields()[_._0]); (((cleanupClassifier__cleanup_field_borrowed?(_._1) OR borrowed.contains?(CAST(_._0 AS String))) OR ((TRUE AND ((aST__node__symbol(fval) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_20 = ((aST__node__symbol(fval))?);
-  symbolEntry__borrow_provenance?(rtoc_local_receiver_20) })))) OR ((fval AND type__borrowed_reference?((TRY (type__from_node_mut(fval, "struct literal borrowed field"))))))) } END) };
-END
-PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
-  MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
-  IF !(schemas__field_bearing?(schema)) THEN
-    RETURN NIL;
-  END
-  MUTABLE value = cleanupClassifier__binding_value(node);
-  MUTABLE struct_lit = IF value IS_A StructLit THEN
-    value
-  ELSE
-    NIL
-  END;
-  MUTABLE borrowed = TRY (cleanupClassifier__borrowed_field_names(schema));
-  MUTABLE has_cleanup = schema.fields() |> ANY (IF borrowed.contains?(CAST(_._0 AS String)) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE t = TRY (cleanupClassifier__cleanup_field_type(_._1)); { MUTABLE rtoc_value_block_marker = 0; IF struct_lit THEN
-    MUTABLE fval = (struct_lit.fields()[CAST(_._0 AS String)] OR struct_lit.fields()[_._0]);
-    IF (TRUE AND ((aST__node__symbol(fval) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = ((aST__node__symbol(fval))?);
-    symbolEntry__borrow_provenance?(rtoc_local_receiver_21) })) THEN
-      CONTINUE;
-    END
-    IF fval THEN
-      MUTABLE fval_ti = TRY (type__from_node_mut(fval, "struct cleanup field"));
-      IF (type__rodata?(fval_ti) OR type__borrowed_reference?(fval_ti)) THEN
-        CONTINUE;
+  MUTABLE struct_lit: StructLit = COPY UNWRAP (cleanupClassifier__struct_literal(value));
+  MUTABLE borrowed: [Set]String = TRY (cleanupClassifier__borrowed_field_names(schema));
+  FOR field_name IN cleanupClassifier__schema_field_names(schema) DO
+    MUTABLE field_type: Type = TRY (cleanupClassifier__schema_field_type(schema, field_name));
+    IF TRY (cleanupClassifier__elem_type_needs_cleanup?(field_type, schema_lookup)) THEN
+      IF !(borrowed.contains?(COPY field_name)) THEN
+        IF !(TRY (cleanupClassifier__struct_lit_field_borrowed?(struct_lit, field_name))) THEN
+          RETURN FALSE;
+        END
       END
     END
-  END TRY (cleanupClassifier__elem_type_needs_cleanup?(t, schema_lookup)) } } END);
+  END
+  RETURN TRUE;
+END
+PRIVATE FN cleanupClassifier__struct_literal(value: Locatable) RETURNS ?StructLit ->
+  PARTIAL MATCH value START
+    Locatable.StructLit AS struct_lit -> RETURN COPY struct_lit;
+  END
+  RETURN NIL;
+END
+PRIVATE FN cleanupClassifier__struct_lit_field_borrowed?(struct_lit: StructLit, field_name: String) RETURNS !Bool ->
+  IF struct_lit.fields[field_name] EXISTS AS fval THEN
+    IF aST__node_borrow_provenance?(fval) THEN
+      RETURN TRUE;
+    END
+    IF (TRY (type__from_node_mut(fval, "struct literal borrowed field"))) EXISTS AS fval_ti THEN
+      RETURN type__borrowed_reference?(fval_ti);
+    END
+    RETURN FALSE;
+  END
+  RETURN TRUE;
+END
+PRIVATE FN cleanupClassifier__schema_field_names(schema: FieldBearingSchema) RETURNS []String ->
+  PARTIAL MATCH schema START
+    FieldBearingSchema.StructSchemaMultiowned AS struct_schema -> RETURN struct_schema.fields.keys();,
+    FieldBearingSchema.ResourceSchemaMultiowned AS resource_schema -> RETURN resource_schema.fields.keys();,
+    FieldBearingSchema.InlineStructVariantMultiowned AS inline_variant -> RETURN inline_variant.fields.keys();
+  END
+  RETURN List[];
+END
+PRIVATE FN cleanupClassifier__schema_field(schema: FieldBearingSchema, field_name: String) RETURNS ?StructField ->
+  PARTIAL MATCH schema START
+    FieldBearingSchema.StructSchemaMultiowned AS struct_schema -> RETURN COPY struct_schema.fields[field_name];,
+    FieldBearingSchema.ResourceSchemaMultiowned AS resource_schema -> RETURN COPY resource_schema.fields[field_name];,
+    FieldBearingSchema.InlineStructVariantMultiowned AS inline_variant -> RETURN COPY inline_variant.fields[field_name];
+  END
+  RETURN NIL;
+END
+PRIVATE FN cleanupClassifier__schema_field_type(schema: FieldBearingSchema, field_name: String) RETURNS !Type ->
+  IF cleanupClassifier__schema_field(schema, field_name) EXISTS AS field THEN
+    RETURN TRY (cleanupClassifier__cleanup_field_type(Field{ StructField: COPY field }));
+  END
+  RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+END
+PUB FN cleanupClassifier__classify_struct_cleanup_fields(ti: Type, node: ?Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
+  MUTABLE schema_result: ?TypeSchemaLookupResult = schema_lookup(type__resolved(ti));
+  IF !(cleanupClassifier__field_bearing_schema(schema_result) EXISTS) THEN
+    RETURN NIL;
+  END
+  MUTABLE schema: FieldBearingSchema = COPY UNWRAP (cleanupClassifier__field_bearing_schema(schema_result));
+  # WHILE-bind / IF-bind capture nodes carry no `.value`; only VarDecl and
+  # BindExpr do, so a struct literal is only consulted when one is present.
+  MUTABLE struct_lit: ?StructLit = NIL;
+  IF node EXISTS AS node_value THEN
+    IF cleanupClassifier__binding_value(node_value) EXISTS AS value THEN
+      struct_lit = COPY cleanupClassifier__struct_literal(value);
+    END
+  END
+  MUTABLE borrowed: [Set]String = TRY (cleanupClassifier__borrowed_field_names(schema));
+  MUTABLE has_cleanup = FALSE;
+  FOR field_name IN cleanupClassifier__schema_field_names(schema) DO
+    IF !(borrowed.contains?(COPY field_name)) THEN
+      MUTABLE field_owns = TRY (cleanupClassifier__elem_type_needs_cleanup?(TRY (cleanupClassifier__schema_field_type(schema, field_name)), schema_lookup));
+      IF struct_lit EXISTS AS literal THEN
+        IF TRY (cleanupClassifier__struct_lit_field_static?(literal, field_name)) THEN
+          field_owns = FALSE;
+        END
+      END
+      IF field_owns THEN
+        has_cleanup = TRUE;
+      END
+    END
+  END
   IF !(has_cleanup) THEN
     RETURN NIL;
   END
-  MUTABLE alloc = IF placement__frame?(type__provenance_alloc(ti)) THEN
-    :frame
-  ELSE
-    :heap
-  END;
+  # A frame struct's nested collection/string fields are frame-allocated by the
+  # same escape-analysis decision that places direct @list bindings, and the
+  # runtime's frame free is a no-op for them, so the arena reclaim is correct.
+  MUTABLE alloc: String@symbol = :heap;
+  IF placement__frame?(type__provenance_alloc(ti)) THEN
+    alloc = :frame;
+  END
   RETURN cleanupClassifier__entry(:uniform, alloc);
+END
+PRIVATE FN cleanupClassifier__struct_lit_field_static?(struct_lit: StructLit, field_name: String) RETURNS !Bool ->
+  IF struct_lit.fields[field_name] EXISTS AS fval THEN
+    IF aST__node_borrow_provenance?(fval) THEN
+      RETURN TRUE;
+    END
+    IF (TRY (type__from_node_mut(fval, "struct cleanup field"))) EXISTS AS fval_ti THEN
+      RETURN (type__rodata?(fval_ti) OR type__borrowed_reference?(fval_ti));
+    END
+  END
+  RETURN FALSE;
+END
+PRIVATE FN cleanupClassifier__field_bearing_schema(schema: ?TypeSchemaLookupResult) RETURNS ?FieldBearingSchema ->
+  IF schema EXISTS AS schema_value THEN
+    PARTIAL MATCH schema_value START
+      TypeSchemaLookupResult.StructSchemaMultiowned AS struct_schema -> RETURN FieldBearingSchema{ StructSchemaMultiowned: KEEP struct_schema };,
+      TypeSchemaLookupResult.ResourceSchemaMultiowned AS resource_schema -> RETURN FieldBearingSchema{ ResourceSchemaMultiowned: KEEP resource_schema };
+    END
+  END
+  RETURN NIL;
 END
 PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   MUTABLE schema = (runtimeCallSpec__call(CAST(schema_lookup AS RuntimeCallSpec), type__resolved(ti)) OR_ELSE NIL);
