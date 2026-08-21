@@ -1531,8 +1531,8 @@ PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schem
     END
   END
   IF (cleanupClassifier__field_bearing_schema(schema) EXISTS) THEN
-    MUTABLE has_escapable = TRY (cleanupClassifier__elem_has_cleanup_fields?(schema, schema_lookup));
-    IF (has_escapable AND TRY (cleanupClassifier__struct_lit_borrows_cleanup_fields?(node, schema, schema_lookup))) THEN
+    MUTABLE has_escapable = TRY (cleanupClassifier__elem_has_cleanup_fields?(cleanupClassifier__field_bearing_schema(schema), schema_lookup));
+    IF (has_escapable AND TRY (cleanupClassifier__struct_lit_borrows_cleanup_fields?(node, COPY UNWRAP (cleanupClassifier__field_bearing_schema(schema)), schema_lookup))) THEN
       has_escapable = FALSE;
     END
     IF has_escapable THEN
@@ -1569,10 +1569,10 @@ PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Locatable, sch
     END
   END
   IF (cleanupClassifier__field_bearing_schema(schema) EXISTS) THEN
-    IF !(TRY (cleanupClassifier__elem_has_cleanup_fields?(schema, schema_lookup))) THEN
+    IF !(TRY (cleanupClassifier__elem_has_cleanup_fields?(cleanupClassifier__field_bearing_schema(schema), schema_lookup))) THEN
       RETURN NIL;
     END
-    IF TRY (cleanupClassifier__struct_lit_borrows_cleanup_fields?(node, schema, schema_lookup)) THEN
+    IF TRY (cleanupClassifier__struct_lit_borrows_cleanup_fields?(node, COPY UNWRAP (cleanupClassifier__field_bearing_schema(schema)), schema_lookup)) THEN
       RETURN NIL;
     END
   END
@@ -1622,21 +1622,24 @@ PRIVATE FN cleanupClassifier__schema_field_names(schema: FieldBearingSchema) RET
   PARTIAL MATCH schema START
     FieldBearingSchema.StructSchemaMultiowned AS struct_schema -> RETURN struct_schema.fields.keys();,
     FieldBearingSchema.ResourceSchemaMultiowned AS resource_schema -> RETURN resource_schema.fields.keys();,
-    FieldBearingSchema.InlineStructVariantMultiowned AS inline_variant -> RETURN inline_variant.fields.keys();
+    FieldBearingSchema.InlineStructVariantMultiowned AS inline_variant -> RETURN inline_variant.fields.keys() |> SELECT CAST(_ AS String);
   END
   RETURN List[];
 END
-PRIVATE FN cleanupClassifier__schema_field(schema: FieldBearingSchema, field_name: String) RETURNS ?StructField ->
-  PARTIAL MATCH schema START
-    FieldBearingSchema.StructSchemaMultiowned AS struct_schema -> RETURN COPY struct_schema.fields[field_name];,
-    FieldBearingSchema.ResourceSchemaMultiowned AS resource_schema -> RETURN COPY resource_schema.fields[field_name];,
-    FieldBearingSchema.InlineStructVariantMultiowned AS inline_variant -> RETURN COPY inline_variant.fields[field_name];
+PRIVATE FN cleanupClassifier__type_input_to_construction(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    TypeTypeInput.FunctionType AS payload -> RETURN TypeConstructionInput{ FunctionType: COPY payload };,
+    TypeTypeInput.Type AS payload -> RETURN TypeConstructionInput{ Type: COPY payload };,
+    TypeTypeInput.SymbolValue AS payload -> RETURN TypeConstructionInput{ SymbolValue: COPY payload };,
+    TypeTypeInput.StringValue AS payload -> RETURN TypeConstructionInput{ StringValue: COPY payload };
   END
-  RETURN NIL;
+  RETURN TypeConstructionInput{ SymbolValue: :Any };
 END
 PRIVATE FN cleanupClassifier__schema_field_type(schema: FieldBearingSchema, field_name: String) RETURNS !Type ->
-  IF cleanupClassifier__schema_field(schema, field_name) EXISTS AS field THEN
-    RETURN TRY (cleanupClassifier__cleanup_field_type(Field{ StructField: COPY field }));
+  PARTIAL MATCH schema START
+    FieldBearingSchema.StructSchemaMultiowned AS struct_schema -> IF struct_schema.fields[field_name] EXISTS AS field THEN RETURN TRY (cleanupClassifier__cleanup_field_type(Field{ StructField: COPY field })); END,
+    FieldBearingSchema.ResourceSchemaMultiowned AS resource_schema -> IF resource_schema.fields[field_name] EXISTS AS field THEN RETURN TRY (cleanupClassifier__cleanup_field_type(Field{ StructField: COPY field })); END,
+    FieldBearingSchema.InlineStructVariantMultiowned AS inline_variant -> IF inline_variant.fields[symbol(field_name)] EXISTS AS field THEN RETURN TRY (type__new(cleanupClassifier__type_input_to_construction(field))); END
   END
   RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
 END
@@ -1745,7 +1748,7 @@ PUB FN cleanupClassifier__elem_type_needs_cleanup?(et: Type, schema_lookup: FN(S
     RETURN TRY (cleanupClassifier__union_variants_need_cleanup?(cleanupClassifier__schema_union(elem_schema), schema_lookup));
   END
   IF (cleanupClassifier__field_bearing_schema(elem_schema) EXISTS) THEN
-    RETURN TRY (cleanupClassifier__elem_has_cleanup_fields?(elem_schema, schema_lookup));
+    RETURN TRY (cleanupClassifier__elem_has_cleanup_fields?(cleanupClassifier__field_bearing_schema(elem_schema), schema_lookup));
   END
   RETURN FALSE;
 END
@@ -1758,7 +1761,7 @@ PUB FN cleanupClassifier__union_variants_need_cleanup?(schema: ?UnionSchema, sch
 END
 PUB FN cleanupClassifier__variant_type_needs_cleanup?(vt: ?SchemasUnionSchemaVariantValue, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF vt? IS_A InlineStructVariant AS inline_struct_variant THEN
-    RETURN TRY (cleanupClassifier__elem_has_cleanup_fields?(inline_struct_variant, schema_lookup));
+    RETURN TRY (cleanupClassifier__elem_has_cleanup_fields?(FieldBearingSchema{ InlineStructVariantMultiowned: KEEP inline_struct_variant }, schema_lookup));
   END
   IF vt? IS_A Type AS type THEN
     RETURN TRY (cleanupClassifier__elem_type_needs_cleanup?(type, schema_lookup));
