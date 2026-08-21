@@ -1047,7 +1047,7 @@ PRIVATE FN emit__build_spawn_setup(ctx: FsmEmitContext) RETURNS !FsmSpawnSetup -
   ELSE
     profile_site_branch_value = NIL;
   END
-  MUTABLE profile_site: ProfileTaskSite = profile_site_branch_value?;
+  MUTABLE profile_site: ?ProfileTaskSite = COPY profile_site_branch_value;
   RETURN FsmSpawnSetup{ alloc_var: ctx.alloc_var, alloc_expr: alloc_expr, promise_var: ctx.promise_var, promise_zig: COPY ctx.promise_zig, promoted_decls: ctx.promoted_decls, ctx_var: ctx.ctx_var, ctx_type: ctx.ctx_type, ctx_init_fields: ctx_init_fields, spawn_call: spawn_call, rt_name: COPY ctx.rt_name, profile_site_id: ctx.profile_site_id, profile_dispatch_id: emit__profile_dispatch_id(dispatch), profile_site: profile_site };
 END
 PUB FN emit__ctx_field_decl(name: String, type_zig: String, default_value: ?Emittable) RETURNS ContextFieldDecl ->

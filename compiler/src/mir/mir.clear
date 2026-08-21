@@ -4069,19 +4069,19 @@ FN fsmTailCondJump__kind(self: FsmTailCondJump) RETURNS String@symbol ->
   RETURN :cond_jump;
 END
 PUB STRUCT FsmSpawnSetup {
-  alloc_var: Any@multiowned,
-  alloc_expr: Any@multiowned,
-  promise_var: Any@multiowned,
+  alloc_var: String,
+  alloc_expr: Emittable,
+  promise_var: String,
   promise_zig: String,
-  promoted_decls: Any@multiowned,
-  ctx_var: Any@multiowned,
-  ctx_type: Any@multiowned,
-  ctx_init_fields: Any@multiowned,
-  spawn_call: Any@multiowned,
+  promoted_decls: []Emittable,
+  ctx_var: String,
+  ctx_type: String,
+  ctx_init_fields: []StructInitField,
+  spawn_call: Emittable,
   rt_name: String,
-  profile_site_id: Any@multiowned,
-  profile_dispatch_id: Any@multiowned,
-  profile_site: Any@multiowned
+  profile_site_id: ?Int64,
+  profile_dispatch_id: ?Int64,
+  profile_site: ?ProfileTaskSite
 }
 PUB STRUCT CapabilityLockTarget {
   source: Emittable,

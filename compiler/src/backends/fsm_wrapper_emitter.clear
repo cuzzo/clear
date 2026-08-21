@@ -291,25 +291,24 @@ PRIVATE FN fsmWrapperEmitter__render_member_fn(fn_value: FsmMemberFn, MUTABLE mi
   rtoc_lambda_result_6 = TRY (fsmWrapperEmitter__render_stmt_array(COPY fn_value.extra_prologue_stmts, fn_value.bg_rt));
   rtoc_lambda_result_6
   }));
-  RETURN (["        fn ${fn_value.fn_name}(__ctx_${fn_value.ctx_id}: *@This()) anyerror!void {", "            const ${fn_value.bg_rt} = __ctx_${fn_value.ctx_id}.rt;", (IF fn_value.suppress_runtime_ref THEN
-    "            _ = &${fn_value.bg_rt};"
-  ELSE
-    NIL
-  END), (IF !(extra_prologue.empty?()) THEN
-    fsmWrapperEmitter__indent_block(extra_prologue, 12)
-  ELSE
-    NIL
-  END), (IF !(body.empty?()) THEN
-    body
-  ELSE
-    NIL
-  END), "        }"]).join("\n");
+  MUTABLE lines: []String = ["        fn ${fn_value.fn_name}(__ctx_${fn_value.ctx_id.toString()}: *@This()) anyerror!void {", "            const ${fn_value.bg_rt} = __ctx_${fn_value.ctx_id.toString()}.rt;"];
+  IF (fn_value.suppress_runtime_ref OR_ELSE FALSE) THEN
+    &lines.append("            _ = &${fn_value.bg_rt};");
+  END
+  IF !(extra_prologue.empty?()) THEN
+    &lines.append(fsmWrapperEmitter__indent_block(extra_prologue, 12));
+  END
+  IF !(body_text.empty?()) THEN
+    &lines.append(COPY body_text);
+  END
+  &lines.append("        }");
+  RETURN lines.join("\n");
 END
 PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: String) RETURNS !String ->
   MUTABLE mir_emitter = mIREmitter__new();
   MUTABLE parts = List[];
-  IF (TRUE AND s.profile_site) THEN
-    &parts.append("    ${mIREmitter__emit_profile_task_site(mir_emitter, s.profile_site)}");
+  IF s.profile_site EXISTS THEN
+    &parts.append("    ${mIREmitter__emit_profile_task_site(mir_emitter, COPY UNWRAP (s.profile_site))}");
   END
   MUTABLE alloc_expr: ?String = TRY (mIREmitter__emit(&mir_emitter, s.alloc_expr));
   &parts.append("    const ${s.alloc_var} = ${alloc_expr};");
@@ -324,9 +323,9 @@ PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: St
   &parts.append("    errdefer CheatHeader.freeFsmCtx(${s.ctx_type}, ${s.ctx_var}_task, ${s.ctx_var});");
   &parts.append("    ${s.ctx_var}_task.ctx = ${s.ctx_var};");
   &parts.append("    ${s.ctx_var}_task.destroy_fn = &${s.ctx_type}.destroyTask;");
-  IF (TRUE AND s.profile_site_id) THEN
-    &parts.append("    ${s.ctx_var}_task.profile_site_id = ${s.profile_site_id};");
-    &parts.append("    ${s.ctx_var}_task.profile_dispatch = ${s.profile_dispatch_id};");
+  IF s.profile_site_id EXISTS THEN
+    &parts.append("    ${s.ctx_var}_task.profile_site_id = ${UNWRAP (s.profile_site_id).toString()};");
+    &parts.append("    ${s.ctx_var}_task.profile_dispatch = ${UNWRAP (s.profile_dispatch_id).toString()};");
   END
   &parts.append("    ${s.ctx_var}.* = .{");
   &parts.append(fsmWrapperEmitter__indent_block(fsmWrapperEmitter__render_struct_init_fields(s.ctx_init_fields, mir_emitter), 8));
