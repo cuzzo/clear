@@ -4077,7 +4077,7 @@ PUB STRUCT FsmSpawnSetup {
   ctx_var: String,
   ctx_type: String,
   ctx_init_fields: []StructInitField,
-  spawn_call: Emittable,
+  spawn_call: FsmSpawnCall,
   rt_name: String,
   profile_site_id: ?Int64,
   profile_dispatch_id: ?Int64,
