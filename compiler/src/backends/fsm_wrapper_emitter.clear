@@ -310,10 +310,19 @@ PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: St
   IF s.profile_site EXISTS THEN
     &parts.append("    ${mIREmitter__emit_profile_task_site(mir_emitter, COPY UNWRAP (s.profile_site))}");
   END
-  MUTABLE alloc_expr: ?String = TRY (mIREmitter__emit(&mir_emitter, s.alloc_expr));
+  MUTABLE alloc_expr_node: Emittable = COPY s.alloc_expr;
+  MUTABLE alloc_expr: String = TRY (mIREmitter__emit(&mir_emitter, &alloc_expr_node));
   &parts.append("    const ${s.alloc_var} = ${alloc_expr};");
   &parts.append("    const ${s.promise_var} = try ${s.promise_zig}.spawn(${s.alloc_var}, ${s.rt_name}.getSched());");
-  MUTABLE promoted_decls = (((COPY s.promoted_field_decls)) |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE out: ?String = TRY (mIREmitter__emit(&mir_emitter, _)); (IF ((out == NIL) OR (UNWRAP (out).trim().length() == 0)) THEN NIL ELSE out END) } |> WHERE _ != NIL).join("\n");
+  MUTABLE promoted_lines: []String = List[];
+  FOR promoted_stmt IN s.promoted_decls DO
+    MUTABLE promoted_node: Emittable = COPY promoted_stmt;
+    MUTABLE out: String = TRY (mIREmitter__emit(&mir_emitter, &promoted_node));
+    IF !((out.trim().length() == 0)) THEN
+      &promoted_lines.append(COPY out);
+    END
+  END
+  MUTABLE promoted_decls: String = promoted_lines.join("\n");
   IF !(fsmWrapperEmitter__empty?(promoted_decls)) THEN
     &parts.append(fsmWrapperEmitter__indent_block(promoted_decls, 4));
   END
