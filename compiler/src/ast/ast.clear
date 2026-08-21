@@ -498,7 +498,7 @@ PUB STRUCT Assignment {
   container_borrow: ?Bool,
   error_kind: ?String@symbol,
   error_type: ?String@symbol,
-  field_lifecycle_plan: ?LifecyclePlan@multiowned,
+  field_lifecycle_plan: ?LifecyclePlan,
   field_pre_cleanup: ?String@symbol,
   implicit_layout_cost: ?Bool,
   kept_edge_plan: ?CallEdgeOwnershipPlan,

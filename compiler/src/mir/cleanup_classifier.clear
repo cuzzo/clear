@@ -401,8 +401,8 @@ PRIVATE FN cleanupClassifier__stamp_field_pre_cleanup_mut(MUTABLE assignment: As
   MUTABLE field_ti: Type = COPY UNWRAP (field_ti_opt);
   MUTABLE lifecycle: ?LifecyclePlan@multiowned = NIL;
   IF lifecycle_registry EXISTS AS registry THEN
-    lifecycle = KEEP TRY (lifecycleRegistry__fetch(registry, field_ti));
-    assignment.field_lifecycle_plan = KEEP lifecycle;
+    lifecycle = COPY TRY (lifecycleRegistry__fetch(registry, field_ti));
+    assignment.field_lifecycle_plan = COPY lifecycle;
   END
   IF ((assignment.auto_lock EXISTS) AND TRY (cleanupClassifier__cleanup_owned_string_type?(field_ti))) THEN
     assignment.field_pre_cleanup = :heap;
@@ -686,7 +686,7 @@ PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup:
   FOR param IN fn_node.params DO
     IF ((param.takes OR_ELSE FALSE) AND (param.carrier_contract == :monomorphic)) THEN
       IF !(bindings.contains?(COPY param.name)) THEN
-        MUTABLE base = cleanupClassifier__rc_entry(:heap);
+        MUTABLE base: CleanupEntry@multiowned = cleanupClassifier__rc_entry(:heap);
         cleanupEntry__mark_moved_guard_mut(&base);
         cleanupEntry__set_alloc_mut(&base, :heap);
         IF !(cleanupEntry__source_kind(base) EXISTS) THEN
@@ -707,7 +707,7 @@ PUB FN cleanupClassifier__walk_takes_params(fn_node: FunctionDef, schema_lookup:
     IF !((param.takes OR_ELSE FALSE)) THEN
       IF param.symbol EXISTS AS symbol THEN
         IF symbolEntry__kept_identity(symbol) THEN
-          MUTABLE base = cleanupClassifier__rc_entry(:heap);
+          MUTABLE base: CleanupEntry@multiowned = cleanupClassifier__rc_entry(:heap);
           cleanupEntry__mark_moved_guard_mut(&base);
           cleanupEntry__set_alloc_mut(&base, :heap);
           IF !(cleanupEntry__source_kind(base) EXISTS) THEN
@@ -759,7 +759,7 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
     # for a local of the same type: the payload is already on the heap, so a
     # consuming site must not rebase the recipe onto its own placement.
     IF TRY (cleanupClassifier__union_variants_need_cleanup?(cleanupClassifier__schema_union(schema), schema_lookup)) THEN
-      MUTABLE union_entry = cleanupEntry__build(:takes_union, :heap, TRUE);
+      MUTABLE union_entry: CleanupEntry@multiowned = cleanupEntry__build(:takes_union, :heap, TRUE);
       cleanupEntry__set_fixed_alloc_mut(&union_entry, TRUE);
       RETURN KEEP union_entry;
     END
@@ -790,7 +790,7 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
   IF lifecycle_registry EXISTS AS registry THEN
     MUTABLE plan: LifecyclePlan = TRY (lifecycleRegistry__fetch(registry, ti));
     IF lifecyclePlan__needs_drop?(plan) THEN
-      MUTABLE fallback = cleanupClassifier__entry(:uniform, :heap, TRUE);
+      MUTABLE fallback: CleanupEntry@multiowned = cleanupClassifier__entry(:uniform, :heap, TRUE);
       cleanupEntry__set_lifecycle_plan_mut(&fallback, plan);
       RETURN KEEP fallback;
     END
@@ -1179,7 +1179,7 @@ PUB FN cleanupClassifier__classify_structural_product(ti: Type, schema_lookup: F
   IF (fields.length() == 0) THEN
     RETURN NIL;
   END
-  MUTABLE tuple_entry = cleanupEntry__build(:tuple, :heap, TRUE);
+  MUTABLE tuple_entry: CleanupEntry@multiowned = cleanupEntry__build(:tuple, :heap, TRUE);
   cleanupEntry__set_tuple_cleanup_fields_mut(&tuple_entry, fields);
   RETURN KEEP tuple_entry;
 END
@@ -1245,23 +1245,23 @@ PUB FN cleanupClassifier__entry(kind: String@symbol, alloc: String@symbol = :hea
   RETURN cleanupEntry__build(kind, alloc, has_moved_guard);
 END
 PRIVATE FN cleanupClassifier__rc_entry(rc_alloc: String@symbol) RETURNS CleanupEntry@multiowned ->
-  MUTABLE built = cleanupEntry__build(:rc, :heap, TRUE);
+  MUTABLE built: CleanupEntry@multiowned = cleanupEntry__build(:rc, :heap, TRUE);
   cleanupEntry__set_rc_alloc_mut(&built, rc_alloc);
   RETURN KEEP built;
 END
 PRIVATE FN cleanupClassifier__resource_entry(close_plan: ResourceClosePlan) RETURNS CleanupEntry@multiowned ->
-  MUTABLE built = cleanupEntry__build(:resource, :heap, TRUE);
+  MUTABLE built: CleanupEntry@multiowned = cleanupEntry__build(:resource, :heap, TRUE);
   cleanupEntry__set_resource_close_plan_mut(&built, close_plan);
   RETURN KEEP built;
 END
 PRIVATE FN cleanupClassifier__uniform_elem_entry(elem_zig: String, match_as: Bool = FALSE) RETURNS CleanupEntry@multiowned ->
-  MUTABLE built = cleanupEntry__build(:uniform, :heap, TRUE);
+  MUTABLE built: CleanupEntry@multiowned = cleanupEntry__build(:uniform, :heap, TRUE);
   cleanupEntry__set_elem_zig_type_mut(&built, elem_zig);
   cleanupEntry__set_match_as_mut(&built, match_as);
   RETURN KEEP built;
 END
 PRIVATE FN cleanupClassifier__match_as_entry() RETURNS CleanupEntry@multiowned ->
-  MUTABLE built = cleanupEntry__build(:uniform, :heap, TRUE);
+  MUTABLE built: CleanupEntry@multiowned = cleanupEntry__build(:uniform, :heap, TRUE);
   cleanupEntry__set_match_as_mut(&built, TRUE);
   RETURN KEEP built;
 END
@@ -1290,7 +1290,7 @@ PUB FN cleanupClassifier__classify_mutable_owning_slot(ti: Type, node: Locatable
     :uniform
   END;
   MUTABLE alloc = TRY (type__cleanup_allocator(ti, schema_lookup));
-  MUTABLE e = cleanupClassifier__entry(kind, alloc, TRUE);
+  MUTABLE e: CleanupEntry@multiowned = cleanupClassifier__entry(kind, alloc, TRUE);
   RETURN e;
 END
 PUB FN cleanupClassifier__classify_owned_return_call(ti: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
@@ -1315,7 +1315,7 @@ PUB FN cleanupClassifier__classify_owned_return_call(ti: Type, node: Locatable, 
   IF TRY (type__string?(ret)) THEN
     kind = :heap_string;
   END
-  MUTABLE e = cleanupClassifier__entry(kind, :heap, TRUE);
+  MUTABLE e: CleanupEntry@multiowned = cleanupClassifier__entry(kind, :heap, TRUE);
   cleanupEntry__set_fixed_alloc_mut(&e, TRUE);
   RETURN KEEP e;
 END
@@ -1342,7 +1342,7 @@ PUB FN cleanupClassifier__classify_collection(ti: Type, schema_lookup: FN(String
   END
   IF ((type__list_collection?(ti) AND !(type__sharded?(ti))) AND !(is_heap)) THEN
     MUTABLE has_heap_elems = TRY (cleanupClassifier__elem_needs_cleanup?(ti, schema_lookup));
-    MUTABLE frame_entry = cleanupEntry__build(:uniform, :frame, TRUE);
+    MUTABLE frame_entry: CleanupEntry@multiowned = cleanupEntry__build(:uniform, :frame, TRUE);
     cleanupEntry__set_elem_needs_cleanup_mut(&frame_entry, has_heap_elems);
     RETURN KEEP frame_entry;
   END
@@ -1436,7 +1436,7 @@ PUB FN cleanupClassifier__classify_optional(ti: Type, schema_lookup: FN(String@s
     ELSE
       :frame
     END;
-    MUTABLE e = cleanupClassifier__entry(:uniform, alloc);
+    MUTABLE e: CleanupEntry@multiowned = cleanupClassifier__entry(:uniform, alloc);
     IF value? IS_A NextExpr THEN
       cleanupEntry__set_alloc_mut(&e, :heap);
       cleanupEntry__set_fixed_alloc_mut(&e, TRUE);
@@ -1493,7 +1493,7 @@ PUB FN cleanupClassifier__classify_owned_string(ti: Type, node: Locatable, schem
   IF !(owns_heap) THEN
     RETURN NIL;
   END
-  MUTABLE e = cleanupClassifier__entry(:heap_string, :heap, TRUE);
+  MUTABLE e: CleanupEntry@multiowned = cleanupClassifier__entry(:heap_string, :heap, TRUE);
   IF fixed_heap THEN
     cleanupEntry__set_fixed_alloc_mut(&e, TRUE);
   END
@@ -1720,7 +1720,7 @@ PUB FN cleanupClassifier__classify_non_copy_union(ti: Type, schema_lookup: FN(St
   ELSE
     ((type__provenance_alloc(ti) OR_ELSE :frame))
   END;
-  MUTABLE e = cleanupClassifier__entry(:uniform, alloc);
+  MUTABLE e: CleanupEntry@multiowned = cleanupClassifier__entry(:uniform, alloc);
   IF has_heap_variants THEN
     cleanupEntry__set_fixed_alloc_mut(&e, TRUE);
   END
@@ -1823,7 +1823,8 @@ PUB FN cleanupClassifier__cleanup_field_type(field: Field) RETURNS !Type ->
 END
 PUB FN cleanupClassifier__borrowed_field_names(schema: FieldBearingSchema) RETURNS ![Set]String ->
   IF schema IS_A StructSchema AS struct_schema THEN
-    RETURN TRY (structSchema__borrowed_fields(struct_schema));
+    MUTABLE local_schema: StructSchema = COPY struct_schema;
+    RETURN TRY (structSchema__borrowed_fields(local_schema));
   END
   MUTABLE empty: [Set]String = Set[];
   RETURN empty;
