@@ -655,7 +655,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
       END
       IF !((mir_prefix.length() == 0)) THEN
-        if_bind_mutable.then_branch = (mir_prefix + ((if_bind_mutable.then_branch OR List[])));
+        if_bind_mutable.then_branch = (mir_prefix + ((if_bind_mutable.then_branch OR_ELSE List[])));
       END
     ELSE
       RETURN;

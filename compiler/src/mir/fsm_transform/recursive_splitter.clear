@@ -271,7 +271,7 @@ PRIVATE FN recursiveSplitter__contains_unsupported?(body: ?Body) RETURNS !Bool E
     AST.WhileBindLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch())),
     AST.ForRange -> TRY (recursiveSplitter__contains_unsupported?(_.body())),
     AST.ForEach -> TRY (recursiveSplitter__contains_unsupported?(_.body())),
-    AST.IfStatement -> (TRY (recursiveSplitter__contains_unsupported?(_.then_branch())) OR TRY (recursiveSplitter__contains_unsupported?((_.else_branch() OR List[])))),
+    AST.IfStatement -> (TRY (recursiveSplitter__contains_unsupported?(_.then_branch())) OR TRY (recursiveSplitter__contains_unsupported?((_.else_branch() OR_ELSE List[])))),
     DEFAULT -> TRY (recursiveSplitter__stmt_unsupported_suspend?(_))
   END;
 END

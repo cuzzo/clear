@@ -282,13 +282,13 @@ PRIVATE FN fsmWrapperEmitter__render_tail(t: FsmTail, ctx_id: Int64) RETURNS !St
 END
 PRIVATE FN fsmWrapperEmitter__render_member_fn(fn_value: FsmMemberFn, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
   MUTABLE rendered: []String = TRY (fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value, mir_emitter) -> {
-  rtoc_lambda_result_5 = TRY (fsmWrapperEmitter__render_body_items((fn_value.body_stmts OR List[]), mir_emitter));
+  rtoc_lambda_result_5 = TRY (fsmWrapperEmitter__render_body_items((fn_value.body_stmts OR_ELSE List[]), mir_emitter));
   rtoc_lambda_result_5
   }));
   MUTABLE body: []String = rendered |> SELECT fsmWrapperEmitter__indent_block(_, 12);
   MUTABLE body_text: String = body.join("\n");
   MUTABLE extra_prologue = fsmWrapperEmitter__with_rt_name(&mir_emitter, fn_value.bg_rt, %() USE(fn_value) -> {
-  rtoc_lambda_result_6 = TRY (fsmWrapperEmitter__render_stmt_array((fn_value.extra_prologue_stmts OR List[]), fn_value.bg_rt));
+  rtoc_lambda_result_6 = TRY (fsmWrapperEmitter__render_stmt_array((fn_value.extra_prologue_stmts OR_ELSE List[]), fn_value.bg_rt));
   rtoc_lambda_result_6
   });
   RETURN (["        fn ${fn_value.fn_name}(__ctx_${fn_value.ctx_id}: *@This()) anyerror!void {", "            const ${fn_value.bg_rt} = __ctx_${fn_value.ctx_id}.rt;", (IF fn_value.suppress_runtime_ref THEN

@@ -3997,7 +3997,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE protocols = program.statements.grep(AST.ProtocolDef).to_h(%(protocol) -> [protocol.name(), protocol]);
     MUTABLE conformances = program.statements.grep(AST.ConformanceDef).group_by(%(declaration) USE(rtoc_self_view) -> mIRLowering__protocol_base_name_for_lowering(rtoc_self_view, declaration.protocol_type()));
     RETURN (TRY (inlineAllocMetadata__values(protocols))) |> SELECT {
-    MUTABLE cases = (((conformances[_.name()] OR List[]))) |> SELECT mIRLowering__lower_protocol_conformance_case(rtoc_self_view, _, _);
+    MUTABLE cases = (((conformances[_.name()] OR_ELSE List[]))) |> SELECT mIRLowering__lower_protocol_conformance_case(rtoc_self_view, _, _);
     MUTABLE requirements = _.requirements() |> SELECT ProtocolRequirementAdapter{ name: COPY _.name(), argument_count: scopeBindings__length(_.params()), return_type: COPY TRY (mIRLowering__protocol_requirement_return_type(rtoc_self_view, _, _)) };
     ProtocolAdapterDef{ protocol: COPY _.name(), associated_types: COPY _.associated_types() |> SELECT _.name(), requirements: COPY requirements, conformances: COPY cases }
     };
@@ -6611,11 +6611,11 @@ PRIVATE FN mIRLowering__lower_test_block(MUTABLE self: MIRLowering, node: TestBl
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ctx = testBlockCtx__new(node, rtoc_self_view);
     MUTABLE tests = List[];
-    TRY (testBlockCtx__emit_all_hooks(ctx, (node.before_all OR List[]), "__before_all", "", &tests));
-    FOR _ IN ((node.whens OR List[])) DO
+    TRY (testBlockCtx__emit_all_hooks(ctx, (node.before_all OR_ELSE List[]), "__before_all", "", &tests));
+    FOR _ IN ((node.whens OR_ELSE List[])) DO
     TRY (mIRLowering__lower_when_block(&rtoc_self_view, _, ctx, &tests));
     END
-    TRY (testBlockCtx__emit_all_hooks(ctx, (node.after_all OR List[]), "__after_all", "", &tests));
+    TRY (testBlockCtx__emit_all_hooks(ctx, (node.after_all OR_ELSE List[]), "__after_all", "", &tests));
     RETURN tests;
 }
 END
@@ -6641,21 +6641,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       rtoc_ternary_value_224? })
     }) |> WHERE _ != NIL;
-    MUTABLE when_before_each_mir = (((when_block.before_each OR List[]))) |> SELECT TRY (mIRLowering__lower_body(&rtoc_self_view, _));
-    MUTABLE when_after_each_mir = (((when_block.after_each OR List[]))) |> SELECT TRY (mIRLowering__lower_body(&rtoc_self_view, _));
-    MUTABLE let_ast_map = TRY (mIRLowering__build_let_ast_map(rtoc_self_view, (when_block.lets OR List[]), mIRLowering__build_let_ast_map(rtoc_self_view, (ctx.test_block.lets OR List[]))));
-    TRY (testBlockCtx__emit_all_hooks(ctx, (when_block.before_all OR List[]), "__before_all", "${when_desc}: ", &tests));
-    MUTABLE tag_suffix = mIRLowering__format_tag_suffix(rtoc_self_view, (when_block.tags OR List[]));
+    MUTABLE when_before_each_mir = (((when_block.before_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&rtoc_self_view, _));
+    MUTABLE when_after_each_mir = (((when_block.after_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&rtoc_self_view, _));
+    MUTABLE let_ast_map = TRY (mIRLowering__build_let_ast_map(rtoc_self_view, (when_block.lets OR_ELSE List[]), mIRLowering__build_let_ast_map(rtoc_self_view, (ctx.test_block.lets OR_ELSE List[]))));
+    TRY (testBlockCtx__emit_all_hooks(ctx, (when_block.before_all OR_ELSE List[]), "__before_all", "${when_desc}: ", &tests));
+    MUTABLE tag_suffix = mIRLowering__format_tag_suffix(rtoc_self_view, (when_block.tags OR_ELSE List[]));
     MUTABLE env = TestThatEnv{ ctx: COPY ctx, when_block: COPY when_block, when_desc: when_desc, tag_suffix: tag_suffix, stub_mir: stub_mir, when_setup_mir: when_setup_mir, when_before_each_mir: when_before_each_mir, when_after_each_mir: when_after_each_mir, let_ast_map: let_ast_map };
-    FOR _ IN ((when_block.tests OR List[])) DO
+    FOR _ IN ((when_block.tests OR_ELSE List[])) DO
     &tests.append(mIRLowering__lower_test_that(&rtoc_self_view, _, env));
     END
-    FOR _ IN ((when_block.benchmarks OR List[])) DO
+    FOR _ IN ((when_block.benchmarks OR_ELSE List[])) DO
     MUTABLE name = "${ctx.test_name}: ${when_desc}: benchmark${tag_suffix}";
     MUTABLE body = (((([testBlockCtx__fresh_preamble(ctx)] + stub_mir) + ctx.setup_mir) + when_setup_mir) + [TRY (mIRLowering__lower(&rtoc_self_view, _))]);
     &tests.append(TestDef{ name: COPY name, body: COPY body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL });
     END
-    RETURN TRY (testBlockCtx__emit_all_hooks(ctx, (when_block.after_all OR List[]), "__after_all", "${when_desc}: ", &tests));
+    RETURN TRY (testBlockCtx__emit_all_hooks(ctx, (when_block.after_all OR_ELSE List[]), "__after_all", "${when_desc}: ", &tests));
 }
 END
 PRIVATE FN mIRLowering__lower_test_that(MUTABLE self: MIRLowering, test_that: TestThat, env: TestThatEnv) RETURNS !TestDef
@@ -9226,7 +9226,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner_contract = callableContract__new(inner_sig, TRY (ownershipContract__new(( { MUTABLE rtoc_empty_list_324: []OwnershipOperandFact = List[]; rtoc_empty_list_324 } ), ( { MUTABLE rtoc_empty_list_325: []String = List[]; rtoc_empty_list_325 } ), ( { MUTABLE rtoc_empty_list_326: []String = List[]; rtoc_empty_list_326 } ), TRUE)), node.params.length());
     MUTABLE inner_call_mir = Call{ callee: COPY inner_name, args: COPY arg_idents, try_wrap: is_error_union, owned_return: mIRLowering__call_owned_return?(rtoc_self_view, Node{ FunctionDef: COPY node }), callable_contract: COPY inner_contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
     inner_call_mir.result_type = TRY (type__new((payload_type OR_ELSE :Void)));
-    MUTABLE check_stmts = (((node.post_clauses OR List[]))) |> SELECT {
+    MUTABLE check_stmts = (((node.post_clauses OR_ELSE List[]))) |> SELECT {
     MUTABLE expr = _[:expr];
     MUTABLE source = _[:source];
     MUTABLE cond_mir = TRY (mIRLowering__lower(&rtoc_self_view, expr));
@@ -9895,7 +9895,7 @@ PRIVATE FN mIRLowering__kept_edge_temp_stack(MUTABLE self: MIRLowering) RETURNS 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.kept_edge_temp_stack = (rtoc_self_view.kept_edge_temp_stack OR List[]);
+    rtoc_self_view.kept_edge_temp_stack = (rtoc_self_view.kept_edge_temp_stack OR_ELSE List[]);
     RETURN rtoc_self_view.kept_edge_temp_stack;
 }
 END
@@ -12249,7 +12249,7 @@ PRIVATE FN mIRLowering__lower_pre_clauses(MUTABLE self: MIRLowering, node: Funct
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE pre_clauses: []Any = List[];
     IF TRUE THEN
-      pre_clauses = ((node.pre_clauses OR List[]));
+      pre_clauses = ((node.pre_clauses OR_ELSE List[]));
     ELSE
       pre_clauses = ( { MUTABLE rtoc_empty_list_475: []Any = List[]; rtoc_empty_list_475 } );
     END
@@ -13546,7 +13546,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       rtoc_ternary_value_523 = {};
     END
-    rtoc_ternary_value_523? }, run_body: COPY (stream_run_body OR List[]), fsm_structure: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
+    rtoc_ternary_value_523? }, run_body: COPY (stream_run_body OR_ELSE List[]), fsm_structure: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
     bg.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY tense_t }));
     bg.boundary_fact = TRY (mIRLowering__execution_boundary_fact(rtoc_self_view, :bg_stream, :local, analysis));
     RETURN MIRLoweringReturnValue{ MIRBgBlock: COPY bg };

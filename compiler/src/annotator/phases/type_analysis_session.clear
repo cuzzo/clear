@@ -3486,7 +3486,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         MUTABLE type_params = TRY (functionSignature__type_params(signature));
         IF type_params |> ANY _ THEN
-          comptime_type_args = (comptime_type_args OR List[]);
+          comptime_type_args = (comptime_type_args OR_ELSE List[]);
           IF (functionSignature__extern(signature) AND (comptime_type_args |> ANY _)) THEN
             subst = {};
             MUTABLE rtoc_idx = 0;
@@ -9536,7 +9536,7 @@ PRIVATE FN typeAnalysisSession__visit_pre_clauses_mut(MUTABLE self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE pre_clauses = (fn_node.pre_clauses OR List[]);
+    MUTABLE pre_clauses = (fn_node.pre_clauses OR_ELSE List[]);
     IF pre_clauses.empty?() THEN
       RETURN;
     END
@@ -9569,7 +9569,7 @@ PRIVATE FN typeAnalysisSession__visit_post_clauses_mut(MUTABLE self: TypeAnalysi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE post_clauses: []Any = List[];
     IF TRUE THEN
-      post_clauses = ((fn_node.post_clauses OR List[]));
+      post_clauses = ((fn_node.post_clauses OR_ELSE List[]));
     ELSE
       post_clauses = ( { MUTABLE rtoc_empty_list_210: []Any = List[]; rtoc_empty_list_210 } );
     END
@@ -11105,7 +11105,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(TRUE) THEN
       RETURN;
     END
-    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.lets, TestContainerNode.WhenBlock AS item -> item.lets END) OR List[])) DO
+    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.lets, TestContainerNode.WhenBlock AS item -> item.lets END) OR_ELSE List[])) DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _.expr()));
     MUTABLE let_type = _.expr().full_type_mut({:context: "TEST LET expression"});
     MUTABLE rtoc_mutable_receiver_253 = typeAnalysisSession__current_scope(rtoc_self_view);
@@ -11121,22 +11121,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(TRUE) THEN
       RETURN;
     END
-    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.before_each, TestContainerNode.WhenBlock AS item -> item.before_each END) OR List[])) DO
+    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.before_each, TestContainerNode.WhenBlock AS item -> item.before_each END) OR_ELSE List[])) DO
     FOR _ IN _ DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
     END
-    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.after_each, TestContainerNode.WhenBlock AS item -> item.after_each END) OR List[])) DO
+    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.after_each, TestContainerNode.WhenBlock AS item -> item.after_each END) OR_ELSE List[])) DO
     FOR _ IN _ DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
     END
-    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.before_all, TestContainerNode.WhenBlock AS item -> item.before_all END) OR List[])) DO
+    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.before_all, TestContainerNode.WhenBlock AS item -> item.before_all END) OR_ELSE List[])) DO
     FOR _ IN _ DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
     END
-    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.after_all, TestContainerNode.WhenBlock AS item -> item.after_all END) OR List[])) DO
+    FOR _ IN (((MATCH node START TestContainerNode.TestBlock AS item -> item.after_all, TestContainerNode.WhenBlock AS item -> item.after_all END) OR_ELSE List[])) DO
     FOR _ IN _ DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
@@ -17607,7 +17607,7 @@ PRIVATE FN typeAnalysisSession__validate_sync_policy_body_mut(self: TypeAnalysis
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen = List[];
-    FOR _ IN ((decl.handlers OR List[])) DO
+    FOR _ IN ((decl.handlers OR_ELSE List[])) DO
     MUTABLE rtoc_each_items_429 = _.selectors();
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_429.length() DO
@@ -17705,7 +17705,7 @@ PRIVATE FN typeAnalysisSession__visit_SyncPolicyDecl(MUTABLE self: TypeAnalysisS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN ((node.handlers OR List[])) DO
+    FOR _ IN ((node.handlers OR_ELSE List[])) DO
     IF (_.action() IS_A Exit) THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, _.message()));
     ELSE_IF (_.action() == ErrorActionKind.Block) THEN
@@ -18868,7 +18868,7 @@ PRIVATE FN typeAnalysisSession__promote_to_expr_match_mut(self: TypeAnalysisSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE case_types = (match_node.case_result_types OR List[]);
+    MUTABLE case_types = (match_node.case_result_types OR_ELSE List[]);
     MUTABLE default_type: ?Type = COPY match_node.default_result_type;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < case_types.length() DO

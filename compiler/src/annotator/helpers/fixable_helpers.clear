@@ -705,7 +705,7 @@ FN emit_with_guard_mutable_mutated_mut(node: WithBlock, names_input: []String, v
   MUTABLE edits = List[];
   IF ((src AND TRUE) AND node.token) THEN
     MUTABLE with_line = node.token.line;
-    MUTABLE window_lines = (src.split("\n").substr(((with_line - 1)), ((((with_line + 8)) - ((with_line - 1))) + 1)) OR List[]);
+    MUTABLE window_lines = (src.split("\n").substr(((with_line - 1)), ((((with_line + 8)) - ((with_line - 1))) + 1)) OR_ELSE List[]);
     FOR _ IN names DO
   MUTABLE pat = "\\bMUTABLE\\s+${escapeRegex(_)}\\b";
   MUTABLE off = 0;

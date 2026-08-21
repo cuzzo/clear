@@ -1475,12 +1475,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE old_flow_alias: ?String = COPY rtoc_self_view.flow_alias_name;
     rtoc_self_view.flow_alias_name = node.alias_name;
     MUTABLE cell_zig = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.cell)));
-    MUTABLE captures = TRY (mIREmitter__polymorphic_read_captures(rtoc_self_view, ((node.body) + ((node.guard_fail_body OR List[]))), [node.alias_name, "__flow"]));
+    MUTABLE captures = TRY (mIREmitter__polymorphic_read_captures(rtoc_self_view, ((node.body) + ((node.guard_fail_body OR_ELSE List[]))), [node.alias_name, "__flow"]));
     IF !(captures.contains?(CAST(node.rt AS String))) THEN
       &captures.unshift(CAST(node.rt AS String));
     END
     MUTABLE overrides = TRY (mIREmitter__polymorphic_capture_overrides(rtoc_self_view, captures));
-    MUTABLE all_bodies = ((node.body) + ((node.guard_fail_body OR List[])));
+    MUTABLE all_bodies = ((node.body) + ((node.guard_fail_body OR_ELSE List[])));
     MUTABLE guard_captures = TRY (mIREmitter__polymorphic_move_guard_captures(rtoc_self_view, all_bodies, [node.alias_name, "__flow"]));
     MUTABLE guard_overrides = TRY (mIREmitter__polymorphic_move_guard_overrides(rtoc_self_view, guard_captures, captures.length()));
     MUTABLE body_zig = mIREmitter__with_move_guard_overrides(&rtoc_self_view, guard_overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
@@ -1517,14 +1517,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE fail_zig = mIREmitter__with_move_guard_overrides(&rtoc_self_view, guard_overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_21 = mIREmitter__with_ident_overrides(&rtoc_self_view, overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_20 = mIREmitter__with_runtime_name(&rtoc_self_view, UNWRAP (overrides[CAST(node.rt AS String)]), %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_19 = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (node.guard_fail_body OR List[]), :ret_no_commit));
+    rtoc_lambda_result_19 = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (node.guard_fail_body OR_ELSE List[]), :ret_no_commit));
     rtoc_lambda_result_19
       });
     rtoc_lambda_result_20
       });
     rtoc_lambda_result_21
       });
-      IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR List[]))) THEN
+      IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR_ELSE List[]))) THEN
         fail_zig = (fail_zig + "\n__flow.* = .{ .kind = .skip_no_commit };\nreturn;");
       END
       guard_block = "if (!(${mIREmitter__with_ident_overrides(&rtoc_self_view, overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
@@ -1715,8 +1715,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN "{\n${mIREmitter__indent_block(rtoc_self_view, inner, 4)}\n}";
     ELSE_IF stmt IS_A IfStmt AS if_stmt THEN
       MUTABLE if_stmt_mutable = COPY if_stmt;
-      MUTABLE then_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (if_stmt_mutable.then_body OR List[]), return_kind));
-      MUTABLE else_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (if_stmt_mutable.else_body OR List[]), return_kind));
+      MUTABLE then_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (if_stmt_mutable.then_body OR_ELSE List[]), return_kind));
+      MUTABLE else_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (if_stmt_mutable.else_body OR_ELSE List[]), return_kind));
       MUTABLE else_body = if_stmt_mutable.else_body;
       IF (else_body AND !(else_body.empty?())) THEN
         RETURN "if (${TRY (mIREmitter__emit(&rtoc_self_view, if_stmt_mutable.cond))}) {\n${mIREmitter__indent_block(rtoc_self_view, then_zig, 4)}\n} else {\n${mIREmitter__indent_block(rtoc_self_view, else_zig, 4)}\n}";
@@ -1759,7 +1759,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF last IS_A ScopeBlock AS scope_block THEN
       RETURN mIREmitter__flow_body_terminates?(rtoc_self_view, scopeBlock__body(scope_block));
     ELSE_IF last IS_A IfStmt AS if_stmt THEN
-      IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, (if_stmt.then_body OR List[]))) THEN
+      IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, (if_stmt.then_body OR_ELSE List[]))) THEN
         RETURN FALSE;
       END
       MUTABLE else_body = if_stmt.else_body;
@@ -1780,7 +1780,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(node.guard_cond) THEN
       RETURN body_exits;
     END
-    RETURN (body_exits AND mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR List[])));
+    RETURN (body_exits AND mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR_ELSE List[])));
 }
 END
 PRIVATE FN mIREmitter__indent_block(self: MIREmitter, code: String, spaces: Int64) RETURNS String
@@ -2006,7 +2006,7 @@ PRIVATE FN mIREmitter__emit_fallible_lock_acquire_expr(MUTABLE self: MIREmitter,
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE handler = TRY (mIREmitter__emit_fallible_lock_error_handler(&rtoc_self_view, castEmittableToFailureAction(node.action), node.retries, (node.matched_types OR List[]), (node.bubble_types OR List[]), node.rt_name, CAST(node.source_line AS String)));
+    MUTABLE handler = TRY (mIREmitter__emit_fallible_lock_error_handler(&rtoc_self_view, castEmittableToFailureAction(node.action), node.retries, (node.matched_types OR_ELSE List[]), (node.bubble_types OR_ELSE List[]), node.rt_name, CAST(node.source_line AS String)));
     MUTABLE acquire_call = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.acquire_call)));
     IF node.retries THEN
       RETURN regexReplaceAll("${node.acquire_block}: {\n  var __retry: usize = 0;\n  while (true) : (__retry += 1) {\n    if (${acquire_call}) |__g| {\n      break :${node.acquire_block} __g;\n    } else |__err| {\n      ${handler}\n    }\n  }\n}\n", "\\s+\\z", "");
@@ -2085,7 +2085,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     regexReplaceAll("${_.indexOf()} => {\n                                if (${lock_expr}.${_.method_name()}()) |__g| {\n                                    ${_.guard_var()} = __g;\n                                    ${_.held_var()} = true;\n                                } else |__err_inner| {\n                                    __err_caught = __err_inner;\n                                    __success = false;\n                                }\n                            },\n", "\\s+\\z", "")
     }).join("\n                                ");
     MUTABLE release_arms = (entries |> SELECT "${_.indexOf()} => if (${_.held_var()}) { ${_.guard_var()}.release(); ${_.held_var()} = false; },").join("\n                            ");
-    MUTABLE handler_switch = TRY (mIREmitter__emit_sorted_lock_handler_switch(&rtoc_self_view, action, (node.matched_types OR List[]), (node.bubble_types OR List[]), node.rt_name, CAST(node.source_line AS String)));
+    MUTABLE handler_switch = TRY (mIREmitter__emit_sorted_lock_handler_switch(&rtoc_self_view, action, (node.matched_types OR_ELSE List[]), (node.bubble_types OR_ELSE List[]), node.rt_name, CAST(node.source_line AS String)));
     MUTABLE retry_branch: String = "";
     IF node.retries THEN
       retry_branch = "if (__retry + 1 < ${node.retries}) continue;";
@@ -2171,7 +2171,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       vis = "";
     END
-    MUTABLE comptime = ((node.comptime_params OR List[])).join(", ");
+    MUTABLE comptime = ((node.comptime_params OR_ELSE List[])).join(", ");
     MUTABLE params = (node.params |> SELECT "${_.name}: ${_.zig_type}").join(", ");
     MUTABLE all_params = ([comptime, params]) |> WHERE !(_.empty?()).join(", ");
     MUTABLE ret: String = "";
@@ -2212,7 +2212,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       vis = "";
     END
-    MUTABLE fields = ((((node.fields OR List[]))) |> SELECT {
+    MUTABLE fields = ((((node.fields OR_ELSE List[]))) |> SELECT {
     MUTABLE default: String = "";
       IF _.default() THEN
         default = " = ${TRY (mIREmitter__emit(&rtoc_self_view, _.default()))}";
@@ -2221,7 +2221,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     "${mIREmitter__zig_field_name(rtoc_self_view, _.name())}: ${TRY (type__zig_type(_))}${default},"
     }).join("\n    ");
-    MUTABLE methods = (((node.methods OR List[]))) |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _)).join("\n\n    ");
+    MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _)).join("\n\n    ");
     MUTABLE parts = ([fields, methods]) |> WHERE !(_.empty?()).join("\n\n    ");
     IF node.name THEN
       RETURN "${vis}const ${node.name} = struct {\n    ${parts}\n};";
@@ -2256,7 +2256,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       vis = "";
     END
     MUTABLE fields = (node.variants |> SELECT "${_[:name]}: ${_[:zig_type]},").join("\n    ");
-    MUTABLE methods = (((node.methods OR List[]))) |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _)).join("\n\n    ");
+    MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _)).join("\n\n    ");
     MUTABLE parts = ([fields, methods]) |> WHERE !(_.empty?()).join("\n\n    ");
     IF node.name THEN
       RETURN "${vis}const ${castNamedEmittableReturnValueToString(node.name)} = union(enum) {\n    ${parts}\n};";

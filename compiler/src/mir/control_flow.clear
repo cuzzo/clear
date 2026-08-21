@@ -131,7 +131,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE join_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, then_block);
       basicBlock__add_successor(&current_block, (else_block OR_ELSE join_block));
-      MUTABLE then_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.then_branch() OR List[]), then_block, exit_target, cfg, break_target, continue_target));
+      MUTABLE then_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.then_branch() OR_ELSE List[]), then_block, exit_target, cfg, break_target, continue_target));
       IF then_exit EXISTS AS then_exit_value THEN
         MUTABLE then_exit_value_mutable = COPY then_exit_value;
         basicBlock__add_successor(&then_exit_value_mutable, join_block);
@@ -150,7 +150,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE after_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, body_block);
       basicBlock__add_successor(&current_block, after_block);
-      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.do_branch() OR List[]), body_block, exit_target, cfg, after_block, current_block));
+      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.do_branch() OR_ELSE List[]), body_block, exit_target, cfg, after_block, current_block));
       IF body_exit != NIL THEN
             basicBlock__add_successor(&body_exit, current_block);
       END
@@ -1368,7 +1368,7 @@ PRIVATE FN ownershipDataflow__collect_bg_capture_places_in_args(self: OwnershipD
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE consumed: []PlaceId = ( { MUTABLE rtoc_empty_list_17: []PlaceId = List[]; rtoc_empty_list_17 } );
-    MUTABLE args = (stmt.args() OR List[]);
+    MUTABLE args = (stmt.args() OR_ELSE List[]);
     FOR _ IN args DO
     TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, _, %(expr: Locatable) USE(MUTABLE consumed, state, rtoc_self_view) -> {
     IF !((expr IS_A BgBlock OR expr IS_A BgStreamBlock)) THEN
@@ -1400,7 +1400,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       (bg_node.capture_analysis()).move_mark_names()
     ELSE
       NIL
-    END))) OR List[]);
+    END))) OR_ELSE List[]);
 }
 END
 PRIVATE FN ownershipDataflow__copy_type?(self: OwnershipDataflow, MUTABLE ident: Identifier) RETURNS !Bool
