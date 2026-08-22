@@ -202,7 +202,7 @@ FN param__owned_effect_for_alloc(self: MIRParam, alloc: ?String@symbol, cleanup_
 END
 PUB STRUCT MIRStructDef {
   name: String,
-  fields: Any@multiowned,
+  fields: String,
   methods: Any@multiowned,
   visibility: String@symbol,
   lowered_node_id: ?LoweredNodeId,
@@ -214,8 +214,8 @@ PUB STRUCT MIRStructDef {
 PUB FN mIRStructDef__name(self: MIRStructDef) RETURNS String ->
   COPY self.name;
 END
-PUB FN mIRStructDef__fields(self: MIRStructDef) RETURNS Any@multiowned ->
-  KEEP self.fields;
+PUB FN mIRStructDef__fields(self: MIRStructDef) RETURNS String ->
+  COPY self.fields;
 END
 PUB FN mIRStructDef__methods(self: MIRStructDef) RETURNS Any@multiowned ->
   KEEP self.methods;
@@ -669,7 +669,7 @@ FN typeAlias__stmt?(self: TypeAlias) RETURNS Bool ->
 END
 PUB STRUCT CExternFnDecl {
   name: String,
-  params: Any@multiowned,
+  params: String,
   return_type: String,
   library: ?String,
   callconv: Any@multiowned,
@@ -741,7 +741,7 @@ FN cExternFnDecl__stmt?(self: CExternFnDecl) RETURNS Bool ->
 END
 PUB STRUCT CExternStructDef {
   name: String,
-  fields: Any@multiowned,
+  fields: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -1323,7 +1323,7 @@ FN reassignWithCleanup__stmt?(self: ReassignWithCleanup) RETURNS Bool ->
 END
 PUB STRUCT ResourceClose {
   target: Emittable,
-  close_plan: Any@multiowned,
+  close_plan: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -10339,7 +10339,7 @@ FN comptime__expr?(self: Comptime) RETURNS Bool ->
 END
 PUB STRUCT UnionVariantGet {
   object: Emittable,
-  variant: Any@multiowned,
+  variant: String,
   zig_type: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10660,7 +10660,7 @@ FN deref__expr?(self: Deref) RETURNS Bool ->
 END
 PUB STRUCT PointerCast {
   expr: Emittable,
-  target_type: Any@multiowned,
+  target_type: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -11306,7 +11306,7 @@ END
 PUB STRUCT MIRRangeLit {
   start: Emittable,
   end_val: Emittable,
-  elem_type: Any@multiowned,
+  elem_type: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   result_type: ?Type
@@ -11318,7 +11318,7 @@ END
 PUB FN mIRRangeLit__end_val(self: MIRRangeLit) RETURNS Emittable ->
   self.end_val;
 END
-PUB FN mIRRangeLit__elem_type(self: MIRRangeLit) RETURNS Any@multiowned ->
+PUB FN mIRRangeLit__elem_type(self: MIRRangeLit) RETURNS String ->
   COPY self.elem_type;
 END
 PUB FN mIRRangeLit__lowered_node_id(self: MIRRangeLit) RETURNS ?LoweredNodeId ->
@@ -11395,7 +11395,7 @@ FN rangeLit__expr?(self: MIRRangeLit) RETURNS Bool ->
 END
 PUB STRUCT HasField {
   expr: Emittable,
-  field: Any@multiowned,
+  field: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
