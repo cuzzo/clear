@@ -10436,7 +10436,7 @@ PRIVATE FN typeAnalysisSession__narrow_collection_type_mut(self: TypeAnalysisSes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((((TRY (functionSignature__intrinsic_contract(&matched_def))).behavior).narrows_collection AND (args.length() >= 2))) THEN
+    IF !((((TRY (functionSignature__intrinsic_contract(matched_def))).behavior).narrows_collection AND (args.length() >= 2))) THEN
       RETURN;
     END
     MUTABLE list_arg: ?Locatable = COPY args[0];
@@ -12752,7 +12752,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE definitions: []FunctionSignature@multiowned = TRY (intrinsicRegistry__overloads(:std_lib, node.name));
     IF (definitions.length() > 0) THEN
       MUTABLE method_overloads: []FunctionSignature@multiowned = definitions |> WHERE { MUTABLE rtoc_mutable_block_param_307 = COPY _;
-      ((TRY (functionSignature__intrinsic_contract(&rtoc_mutable_block_param_307))).behavior).is_method };
+      ((TRY (functionSignature__intrinsic_contract(rtoc_mutable_block_param_307))).behavior).is_method };
       IF (method_overloads.length() == 0) THEN
         RETURN FALSE;
       END

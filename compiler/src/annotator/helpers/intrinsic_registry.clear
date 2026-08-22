@@ -66,7 +66,7 @@ PUB FN intrinsicRegistry__collection_element_evidence_method?(name: Name, arity:
     MUTABLE found: ?FunctionSignature@multiowned = TRY (intrinsicRegistry__lookup_single(registries[i], method_name));
     IF found EXISTS AS found_value THEN
       MUTABLE found_mutable = COPY found_value;
-      IF (TRY (functionSignature__intrinsic_contract(&found_mutable))).behavior.is_method THEN
+      IF (TRY (functionSignature__intrinsic_contract(found_mutable))).behavior.is_method THEN
         IF TRY (functionSignature__intrinsic_collection_narrowing?(&found_mutable)) THEN
           RETURN TRUE;
         END
@@ -84,7 +84,7 @@ PUB FN intrinsicRegistry__map_pair_evidence_method?(name: Name, arity: Int64) RE
   MUTABLE found: ?FunctionSignature@multiowned = TRY (intrinsicRegistry__lookup_single(:map_methods, intrinsicRegistry__name_string(name)));
   IF found EXISTS AS found_value THEN
     MUTABLE found_mutable = COPY found_value;
-    IF !((TRY (functionSignature__intrinsic_contract(&found_mutable))).behavior.is_method) THEN
+    IF !((TRY (functionSignature__intrinsic_contract(found_mutable))).behavior.is_method) THEN
       RETURN FALSE;
     END
     RETURN (TRY (functionSignature__mutates_receiver?(&found_mutable)) AND TRY (functionSignature__takes_ownership?(&found_mutable)));
@@ -107,7 +107,7 @@ PUB FN intrinsicRegistry__collection_value_store_method?(name: Name, arity: Int6
       END
       MUTABLE method_arity = (declared_arity OR_ELSE param_arity);
       IF (method_arity == arity) THEN
-        IF (TRY (functionSignature__intrinsic_contract(&found_mutable))).behavior.is_method THEN
+        IF (TRY (functionSignature__intrinsic_contract(found_mutable))).behavior.is_method THEN
           IF (TRY (functionSignature__mutates_receiver?(&found_mutable)) AND TRY (functionSignature__takes_ownership?(&found_mutable))) THEN
             RETURN TRUE;
           END

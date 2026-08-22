@@ -308,20 +308,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.facts.emit;
 }
 END
-PUB FN functionSignature__intrinsic_contract(MUTABLE self: FunctionSignature) RETURNS !IntrinsicContract
+PUB FN functionSignature__intrinsic_contract(self: FunctionSignature) RETURNS !IntrinsicContract
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF rtoc_self_view.intrinsic_contract == NIL THEN
-        MUTABLE emit: ?IntrinsicEmit = COPY rtoc_self_view.facts.emit;
-      rtoc_self_view.intrinsic_contract = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_1: ?IntrinsicContract = NIL;
-        IF emit != NIL THEN
-          rtoc_ternary_value_1 = TRY (intrinsicContract__from_emit(emit, rtoc_self_view.contract.params));
-        ELSE
-          rtoc_ternary_value_1 = intrinsicContract__empty();
-        END
-        rtoc_ternary_value_1? };  END
-    RETURN UNWRAP (rtoc_self_view.intrinsic_contract);
+WITH POLYMORPHIC self AS rtoc_self_view {
+    # The contract is derived, not stored: memoizing it would force every
+    # reader to hold a mutable signature.
+    IF rtoc_self_view.intrinsic_contract EXISTS AS cached THEN
+      RETURN COPY cached;
+    END
+    IF rtoc_self_view.facts.emit EXISTS AS emit THEN
+      RETURN TRY (intrinsicContract__from_emit(emit, rtoc_self_view.contract.params));
+    END
+    RETURN intrinsicContract__empty();
 }
 END
 PUB FN functionSignature__requires(self: FunctionSignature) RETURNS !{String}[Set]String@symbol
@@ -442,7 +441,7 @@ PUB FN functionSignature__emits_allocating?(MUTABLE self: FunctionSignature) RET
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).allocation).allocates;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).allocation).allocates;
 }
 END
 PUB FN functionSignature__recoverable_result?(self: FunctionSignature) RETURNS Bool
@@ -460,14 +459,14 @@ PUB FN functionSignature__mutates_receiver?(MUTABLE self: FunctionSignature) RET
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership).mutates_receiver;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership).mutates_receiver;
 }
 END
 PUB FN functionSignature__takes_ownership?(MUTABLE self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN intrinsicOwnershipContract__takes_any?(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership));
+    RETURN intrinsicOwnershipContract__takes_any?(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership));
 }
 END
 PUB FN functionSignature__return_alloc(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
@@ -475,35 +474,35 @@ PUB FN functionSignature__return_alloc(MUTABLE self: FunctionSignature) RETURNS 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).allocation).return_alloc;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).allocation).return_alloc;
 }
 END
 PUB FN functionSignature__intrinsic_takes_value?(MUTABLE self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership).takes_value;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership).takes_value;
 }
 END
 PUB FN functionSignature__intrinsic_argument_takes_indices(MUTABLE self: FunctionSignature) RETURNS ![Set]Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN COPY ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership).argument_takes_indices;
+    RETURN COPY ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership).argument_takes_indices;
 }
 END
 PUB FN functionSignature__intrinsic_pattern(MUTABLE self: FunctionSignature) RETURNS !?FunctionSignatureReturnValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN COPY castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).template).zig);
+    RETURN COPY castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).template).zig);
 }
 END
 PUB FN functionSignature__intrinsic_template(self: FunctionSignature, kind: IntrinsicTemplateKind) RETURNS !?FunctionSignatureReturnValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(intrinsicTemplateContract__pattern_for(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).template), kind));
+    RETURN castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(intrinsicTemplateContract__pattern_for(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).template), kind));
 }
 END
 PUB FN functionSignature__required_intrinsic_template(self: FunctionSignature, kind: IntrinsicTemplateKind) RETURNS !String
@@ -537,84 +536,84 @@ PUB FN functionSignature__intrinsic_bc_op_or(MUTABLE self: FunctionSignature, de
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN intrinsicTemplateContract__bc_op_or(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).template), default_name);
+    RETURN intrinsicTemplateContract__bc_op_or(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).template), default_name);
 }
 END
 PUB FN functionSignature__intrinsic_bc?(MUTABLE self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).template).bc;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).template).bc;
 }
 END
 PUB FN functionSignature__intrinsic_alloc(MUTABLE self: FunctionSignature, kind: IntrinsicAllocationKind) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN intrinsicAllocationContract__placeholder(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).allocation), kind);
+    RETURN intrinsicAllocationContract__placeholder(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).allocation), kind);
 }
 END
 PUB FN functionSignature__intrinsic_suspends?(MUTABLE self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).suspends;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).suspends;
 }
 END
 PUB FN functionSignature__intrinsic_container_borrow?(MUTABLE self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).ownership).container_borrow;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership).container_borrow;
 }
 END
 PUB FN functionSignature__intrinsic_collection_narrowing?(MUTABLE self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN intrinsicBehaviorContract__narrows_collection_type?(((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior));
+    RETURN intrinsicBehaviorContract__narrows_collection_type?(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior));
 }
 END
 PUB FN functionSignature__intrinsic_receiver_collection_narrowing?(MUTABLE self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).narrows_receiver_collection;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).narrows_receiver_collection;
 }
 END
 PUB FN functionSignature__intrinsic_reject_when(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).reject_when;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).reject_when;
 }
 END
 PUB FN functionSignature__intrinsic_reject_error(MUTABLE self: FunctionSignature) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN COPY ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).reject_error;
+    RETURN COPY ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).reject_error;
 }
 END
 PUB FN functionSignature__intrinsic_error_kind(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).error_kind;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).error_kind;
 }
 END
 PUB FN functionSignature__intrinsic_error_type(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).error_type;
+    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).error_type;
 }
 END
 PUB FN functionSignature__intrinsic_lifetime(MUTABLE self: FunctionSignature) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN COPY ((TRY (functionSignature__intrinsic_contract(&rtoc_self_view))).behavior).lifetime;
+    RETURN COPY ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).lifetime;
 }
 END
 PUB FN functionSignature__with_intrinsic_override(self: FunctionSignature, pattern: IntrinsicEmitStrOrSym, alloc: ?String@symbol = NIL) RETURNS !FunctionSignature@multiowned
