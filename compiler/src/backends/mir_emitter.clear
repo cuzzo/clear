@@ -3794,7 +3794,7 @@ PRIVATE FN mIREmitter__emit_array_init(MUTABLE self: MIREmitter, node: ArrayInit
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE items = (node.items |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ");
-    RETURN "[${node.count()}]${node.elem_type}{ ${items} }";
+    RETURN "[${node.count}]${node.elem_type}{ ${items} }";
 }
 END
 PRIVATE FN mIREmitter__emit_array_default_init(MUTABLE self: MIREmitter, node: ArrayDefaultInit) RETURNS !String
@@ -3802,7 +3802,7 @@ PRIVATE FN mIREmitter__emit_array_default_init(MUTABLE self: MIREmitter, node: A
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN "[_]${node.elem_type}{ ${TRY (mIREmitter__emit(&rtoc_self_view, node.default_value))} } ** ${node.count()}";
+    RETURN "[_]${node.elem_type}{ ${TRY (mIREmitter__emit(&rtoc_self_view, node.default_value))} } ** ${node.count}";
 }
 END
 PRIVATE FN mIREmitter__emit_slice_expr(MUTABLE self: MIREmitter, node: SliceExpr) RETURNS !String

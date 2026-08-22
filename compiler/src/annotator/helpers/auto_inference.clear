@@ -6065,7 +6065,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeLimitOp(v: LimitOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  IF v.count() EXISTS AS rtoc_opt_count THEN
+  IF v.count EXISTS AS rtoc_opt_count THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_count)] });
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
@@ -8571,7 +8571,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSkipOp(v: SkipOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  IF v.count() EXISTS AS rtoc_opt_count THEN
+  IF v.count EXISTS AS rtoc_opt_count THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_count)] });
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN

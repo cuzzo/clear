@@ -6649,8 +6649,8 @@ PRIVATE FN aST__walk_children_OrderByOp_mut(MUTABLE item: OrderByOp, MUTABLE des
   END
 END
 PRIVATE FN aST__walk_children_LimitOp_mut(MUTABLE item: LimitOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  IF item.count() EXISTS THEN
-    MUTABLE count_child: Locatable = COPY UNWRAP (item.count());
+  IF item.count EXISTS THEN
+    MUTABLE count_child: Locatable = COPY UNWRAP (item.count);
     aST__each_locatable_mut(&count_child, &descend_functions, visitor);
     item.count = COPY count_child;
   END
@@ -6680,8 +6680,8 @@ PRIVATE FN aST__walk_children_TapOp_mut(MUTABLE item: TapOp, MUTABLE descend_fun
   item.body = COPY body_items;
 END
 PRIVATE FN aST__walk_children_SkipOp_mut(MUTABLE item: SkipOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  IF item.count() EXISTS THEN
-    MUTABLE count_child: Locatable = COPY UNWRAP (item.count());
+  IF item.count EXISTS THEN
+    MUTABLE count_child: Locatable = COPY UNWRAP (item.count);
     aST__each_locatable_mut(&count_child, &descend_functions, visitor);
     item.count = COPY count_child;
   END
