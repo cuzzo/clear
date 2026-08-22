@@ -8334,9 +8334,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF kind IS_A FutureTypeExpression AS rtoc_future_type_expression THEN
       RETURN TypeExpression{ rtoc_future_type_expression: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_future_type_expression.inner, subst)  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A LinearTypeExpression AS rtoc_linear_type_expression THEN
-      RETURN TypeExpression{ rtoc_linear_type_expression: TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ rtoc_linear_type_expression: COPY rtoc_linear_type_expression.kind(), dimensions: COPY rtoc_linear_type_expression.dimensions, item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_linear_type_expression.item, subst), allocation_hint: rtoc_linear_type_expression.allocation_hint()  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ rtoc_linear_type_expression: TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ rtoc_linear_type_expression: COPY rtoc_linear_type_expression.kind, dimensions: COPY rtoc_linear_type_expression.dimensions, item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_linear_type_expression.item, subst), allocation_hint: rtoc_linear_type_expression.allocation_hint  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A MapTypeExpression AS rtoc_map_type_expression THEN
-      RETURN TypeExpression{ rtoc_map_type_expression: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_map_type_expression.key, subst), value: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_map_type_expression.value(), subst), key_implicit: rtoc_map_type_expression.key_implicit, legacy_separator: COPY rtoc_map_type_expression.legacy_separator  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ rtoc_map_type_expression: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_map_type_expression.key, subst), value: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_map_type_expression.value, subst), key_implicit: rtoc_map_type_expression.key_implicit, legacy_separator: COPY rtoc_map_type_expression.legacy_separator  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A StreamTypeExpression AS rtoc_stream_type_expression THEN
       RETURN TypeExpression{ rtoc_stream_type_expression: TypeExpressionKind{ StreamTypeExpression: COPY StreamTypeExpression{ cardinality: COPY rtoc_stream_type_expression.cardinality, item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_stream_type_expression.item, subst)  } }, capabilities: COPY cap };
     ELSE
@@ -13467,7 +13467,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF pattern IS_A GetField AS get_field THEN
       RETURN get_field.field;
     ELSE_IF pattern IS_A MethodCall AS rtoc_method_call THEN
-      RETURN rtoc_method_call.name();
+      RETURN rtoc_method_call.name;
     ELSE
       RETURN NIL;
     END
@@ -20154,7 +20154,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF init_value IS_A KeepNode AS keep_node THEN
         RETURN TRUE;
       ELSE_IF init_value IS_A Cast AS rtoc_cast THEN
-        RETURN typeAnalysisSession__init_value_contents_heap?(rtoc_self_view, rtoc_cast.value());
+        RETURN typeAnalysisSession__init_value_contents_heap?(rtoc_self_view, rtoc_cast.value);
       ELSE_IF init_value IS_A IfStatement AS if_statement THEN
         MUTABLE then_tail: ?Locatable = COPY (if_statement.then_branch).last();
         MUTABLE else_tail: ?Locatable = COPY ((if_statement.else_branch OR_ELSE List[])).last();
