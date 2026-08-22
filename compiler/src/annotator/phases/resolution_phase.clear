@@ -51,7 +51,7 @@ PUB STRUCT ResolutionSession {
 }
 
 builtin_type_parameter_names = [:Number, :Bool, :Byte, :Int8, :Int16, :Int32, :Int64, :UInt8, :UInt16, :UInt32, :UInt64, :Float32, :Float64, :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong, :TargetULongLong, :String, :Any, :Void, :Range, :Map];
-PUB FN resolutionSession__initialize(MUTABLE self: ResolutionSession, MUTABLE importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS !Void
+PUB FN resolutionSession__initialize(MUTABLE self: ResolutionSession, importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -68,7 +68,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN resolutionSession__resolve_mut(MUTABLE self: ResolutionSession, MUTABLE program: Program) RETURNS !ResolutionFacts@multiowned
+PUB FN resolutionSession__resolve_mut(MUTABLE self: ResolutionSession, program: Program) RETURNS !ResolutionFacts@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -100,7 +100,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.protocols[protocol.name] = COPY protocol;
 }
 END
-PUB FN resolutionSession__register_local_declaration_mut(self: ResolutionSession, MUTABLE node: Node) RETURNS !Void
+PUB FN resolutionSession__register_local_declaration_mut(self: ResolutionSession, node: Node) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -164,14 +164,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     functionRegistry__clear_synthetic_definitions_mut(rtoc_self_view.function_registry);
 }
 END
-PUB FN resolutionSession__queue_synthetic_function_mut(MUTABLE self: ResolutionSession, MUTABLE node: FunctionDef) RETURNS FunctionDef
+PUB FN resolutionSession__queue_synthetic_function_mut(MUTABLE self: ResolutionSession, node: FunctionDef) RETURNS FunctionDef
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN CAST(functionRegistry__add_synthetic_definition_mut(rtoc_self_view.function_registry, node) AS FunctionDef);
 }
 END
-PUB FN resolutionSession__validate_type_param_list_mut(self: ResolutionSession, MUTABLE node: Node, type_params: []String, kind: String) RETURNS !Void
+PUB FN resolutionSession__validate_type_param_list_mut(self: ResolutionSession, node: Node, type_params: []String, kind: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -192,7 +192,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN resolutionSession__generic_param_token(self: ResolutionSession, MUTABLE node: Node, name: String) RETURNS ResolutionSessionReturnValue
+PUB FN resolutionSession__generic_param_token(self: ResolutionSession, node: Node, name: String) RETURNS ResolutionSessionReturnValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -204,7 +204,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END) OR_ELSE node);
 }
 END
-PUB FN resolutionSession__get_lifetime_path(self: ResolutionSession, MUTABLE node: FunctionDef) RETURNS !?String
+PUB FN resolutionSession__get_lifetime_path(self: ResolutionSession, node: FunctionDef) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -241,7 +241,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN resolutionSession__validate_union_methods_mut(MUTABLE self: ResolutionSession, MUTABLE node: UnionDef) RETURNS !Void
+PUB FN resolutionSession__validate_union_methods_mut(MUTABLE self: ResolutionSession, node: UnionDef) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -272,7 +272,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     });
 }
 END
-PRIVATE FN resolutionSession__validate_union_method_mut(MUTABLE self: ResolutionSession, MUTABLE node: UnionDef, requirement: UnionMethodRequirement) RETURNS !Void
+PRIVATE FN resolutionSession__validate_union_method_mut(MUTABLE self: ResolutionSession, node: UnionDef, requirement: UnionMethodRequirement) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -329,7 +329,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__validate_union_method_visibility_mut(self: ResolutionSession, MUTABLE node: UnionDef, requirement: UnionMethodRequirement, signature: FunctionSignature) RETURNS !Void
+PRIVATE FN resolutionSession__validate_union_method_visibility_mut(self: ResolutionSession, node: UnionDef, requirement: UnionMethodRequirement, signature: FunctionSignature) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -437,7 +437,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN resolutionSession__fixable_mut(self: ResolutionSession, node_or_token: Any, category: String@symbol, MUTABLE fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
+PRIVATE FN resolutionSession__fixable_mut(self: ResolutionSession, node_or_token: Any, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -664,7 +664,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "__conformance_${parts.join("_")}";
 }
 END
-PRIVATE FN resolutionSession__resolve_conformance_declarations_mut(self: ResolutionSession, MUTABLE declarations: DeclarationIndex) RETURNS ![]ConformanceResolution
+PRIVATE FN resolutionSession__resolve_conformance_declarations_mut(self: ResolutionSession, declarations: DeclarationIndex) RETURNS ![]ConformanceResolution
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -709,7 +709,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     } };
 }
 END
-PRIVATE FN resolutionSession__prepare_conformance_members_mut(self: ResolutionSession, MUTABLE declarations: DeclarationIndex, resolutions: []ConformanceResolution, MUTABLE program: Program) RETURNS !Void
+PRIVATE FN resolutionSession__prepare_conformance_members_mut(self: ResolutionSession, declarations: DeclarationIndex, resolutions: []ConformanceResolution, program: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -753,7 +753,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__conformance_base_name(self: ResolutionSession, MUTABLE type: Type) RETURNS String
+PRIVATE FN resolutionSession__conformance_base_name(self: ResolutionSession, type: Type) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1096,7 +1096,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (inlineStructVariant__new(fields, COPY variant.deinit_entries));
 }
 END
-PRIVATE FN resolutionSession__resolve_implementation_declarations_mut(self: ResolutionSession, MUTABLE declarations: DeclarationIndex) RETURNS ![]ImplementationResolution
+PRIVATE FN resolutionSession__resolve_implementation_declarations_mut(self: ResolutionSession, declarations: DeclarationIndex) RETURNS ![]ImplementationResolution
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1129,7 +1129,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN resolutionSession__prepare_implementation_members_mut(self: ResolutionSession, MUTABLE declarations: DeclarationIndex, resolutions: []ImplementationResolution, MUTABLE program: Program) RETURNS !Void
+PRIVATE FN resolutionSession__prepare_implementation_members_mut(self: ResolutionSession, declarations: DeclarationIndex, resolutions: []ImplementationResolution, program: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1195,7 +1195,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__unbound_type_parameter_names(self: ResolutionSession, MUTABLE type: Type, seen_input: [Set]String = Set[]) RETURNS ![Set]String@symbol
+PRIVATE FN resolutionSession__unbound_type_parameter_names(self: ResolutionSession, type: Type, seen_input: [Set]String = Set[]) RETURNS ![Set]String@symbol
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1309,7 +1309,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN resolutionSession__register_program_signatures(MUTABLE self: ResolutionSession, MUTABLE declarations: DeclarationIndex) RETURNS !Void
+PRIVATE FN resolutionSession__register_program_signatures(MUTABLE self: ResolutionSession, declarations: DeclarationIndex) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1329,7 +1329,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__register_function_signature(self: ResolutionSession, MUTABLE node: FunctionDef) RETURNS !SymbolEntry@multiowned
+PRIVATE FN resolutionSession__register_function_signature(self: ResolutionSession, node: FunctionDef) RETURNS !SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1350,7 +1350,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN entry;
 }
 END
-PRIVATE FN resolutionSession__register_implementation_member_signature_mut(self: ResolutionSession, MUTABLE node: FunctionDef, signature: FunctionSignature) RETURNS Void
+PRIVATE FN resolutionSession__register_implementation_member_signature_mut(self: ResolutionSession, node: FunctionDef, signature: FunctionSignature) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1392,7 +1392,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ExternFnDecl: COPY node }, :Void));
 }
 END
-PRIVATE FN resolutionSession__validate_extern_return_lifetime_mut(self: ResolutionSession, MUTABLE node: ExternFnDecl, signature: FunctionSignature) RETURNS !Void
+PRIVATE FN resolutionSession__validate_extern_return_lifetime_mut(self: ResolutionSession, node: ExternFnDecl, signature: FunctionSignature) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1416,7 +1416,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__validate_c_extern_signature_mut(self: ResolutionSession, MUTABLE node: ExternFnDecl) RETURNS !Void
+PRIVATE FN resolutionSession__validate_c_extern_signature_mut(self: ResolutionSession, node: ExternFnDecl) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1429,7 +1429,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__validate_c_boundary_type_mut(self: ResolutionSession, MUTABLE node: ExternFnDecl, MUTABLE type: Type, position: String, return_position: Bool) RETURNS !Void
+PRIVATE FN resolutionSession__validate_c_boundary_type_mut(self: ResolutionSession, node: ExternFnDecl, type: Type, position: String, return_position: Bool) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1441,7 +1441,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__c_boundary_rejection(self: ResolutionSession, MUTABLE type: Type, return_position: Bool) RETURNS !?String
+PRIVATE FN resolutionSession__c_boundary_rejection(self: ResolutionSession, type: Type, return_position: Bool) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1483,7 +1483,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN resolutionSession__reject_duplicate_program_signatures_mut(self: ResolutionSession, MUTABLE declarations: DeclarationIndex) RETURNS !Void
+PRIVATE FN resolutionSession__reject_duplicate_program_signatures_mut(self: ResolutionSession, declarations: DeclarationIndex) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1502,7 +1502,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__reject_duplicate_seen_signature_mut(self: ResolutionSession, MUTABLE node: Node, MUTABLE seen: {String}Locatable, label: String) RETURNS !Void
+PRIVATE FN resolutionSession__reject_duplicate_seen_signature_mut(self: ResolutionSession, node: Node, MUTABLE seen: {String}Locatable, label: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1518,7 +1518,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     seen[key] = castNodeToLocatable(COPY node);
 }
 END
-PRIVATE FN resolutionSession__reject_duplicate_function_binding_mut(self: ResolutionSession, MUTABLE node: FunctionDef) RETURNS !Void
+PRIVATE FN resolutionSession__reject_duplicate_function_binding_mut(self: ResolutionSession, node: FunctionDef) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1529,7 +1529,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_FUNCTION_DECLARATION }, [], {:name: node.name}));
 }
 END
-PRIVATE FN resolutionSession__reject_duplicate_extern_function_mut(self: ResolutionSession, MUTABLE node: ExternFnDecl) RETURNS !Void
+PRIVATE FN resolutionSession__reject_duplicate_extern_function_mut(self: ResolutionSession, node: ExternFnDecl) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1555,7 +1555,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__reject_duplicate_extern_method_mut(self: ResolutionSession, MUTABLE node: ExternFnDecl, type_schema: ScopeScopeTypeSchema) RETURNS !Void
+PRIVATE FN resolutionSession__reject_duplicate_extern_method_mut(self: ResolutionSession, node: ExternFnDecl, type_schema: ScopeScopeTypeSchema) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1567,7 +1567,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_EXTERN_METHOD_DECLARATION }, [], {:owner: owner, :name: node.name}));
 }
 END
-PRIVATE FN resolutionSession__emit_protocol_projection_issue_mut(self: ResolutionSession, MUTABLE node: Node, issue: ProtocolProjectionIssue) RETURNS !Void
+PRIVATE FN resolutionSession__emit_protocol_projection_issue_mut(self: ResolutionSession, node: Node, issue: ProtocolProjectionIssue) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1585,7 +1585,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__register_type_declarations(MUTABLE self: ResolutionSession, MUTABLE declarations: DeclarationIndex) RETURNS !Void
+PRIVATE FN resolutionSession__register_type_declarations(MUTABLE self: ResolutionSession, declarations: DeclarationIndex) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1677,7 +1677,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__recursive_layout_fixes(self: ResolutionSession, MUTABLE edges: []RecursiveFieldEdge) RETURNS ![]Fix
+PRIVATE FN resolutionSession__recursive_layout_fixes(self: ResolutionSession, edges: []RecursiveFieldEdge) RETURNS ![]Fix
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1720,7 +1720,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN span__new(NIL, line, col, 0);
 }
 END
-PRIVATE FN resolutionSession__inline_recursive_target(self: ResolutionSession, MUTABLE type: Type, MUTABLE names: [Set]String@symbol) RETURNS !?String@symbol
+PRIVATE FN resolutionSession__inline_recursive_target(self: ResolutionSession, type: Type, names: [Set]String@symbol) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1745,7 +1745,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__visit_recursive_component(self: ResolutionSession, MUTABLE node: String@symbol, adjacency: {String@symbol}[]String@symbol, index_value: Int64, MUTABLE indices: {String@symbol}Int64, MUTABLE low: {String@symbol}Int64, MUTABLE stack: []String@symbol, MUTABLE on_stack: [Set]String@symbol, MUTABLE result: [][Set]String@symbol) RETURNS Int64
+PRIVATE FN resolutionSession__visit_recursive_component(self: ResolutionSession, node: String@symbol, adjacency: {String@symbol}[]String@symbol, index_value: Int64, MUTABLE indices: {String@symbol}Int64, MUTABLE low: {String@symbol}Int64, MUTABLE stack: []String@symbol, MUTABLE on_stack: [Set]String@symbol, MUTABLE result: [][Set]String@symbol) RETURNS Int64
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1784,7 +1784,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN next_index;
 }
 END
-PRIVATE FN resolutionSession__recursive_components(self: ResolutionSession, MUTABLE names: [Set]String@symbol, MUTABLE edges: []RecursiveFieldEdge) RETURNS ![][Set]String@symbol
+PRIVATE FN resolutionSession__recursive_components(self: ResolutionSession, names: [Set]String@symbol, edges: []RecursiveFieldEdge) RETURNS ![][Set]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1815,7 +1815,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN result;
 }
 END
-PRIVATE FN resolutionSession__register_type_declaration(self: ResolutionSession, MUTABLE node: TypeDeclaration) RETURNS !Void
+PRIVATE FN resolutionSession__register_type_declaration(self: ResolutionSession, node: TypeDeclaration) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1908,7 +1908,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__resolve_declaration_projections_mut(self: ResolutionSession, MUTABLE node: Locatable, MUTABLE type: Type, parameters: []GenericParamDecl) RETURNS !Void
+PRIVATE FN resolutionSession__resolve_declaration_projections_mut(self: ResolutionSession, node: Locatable, MUTABLE type: Type, parameters: []GenericParamDecl) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1958,7 +1958,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__register_inline_struct_variants_mut(self: ResolutionSession, MUTABLE node: UnionDef) RETURNS !Void
+PRIVATE FN resolutionSession__register_inline_struct_variants_mut(self: ResolutionSession, node: UnionDef) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1976,7 +1976,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN resolutionSession__declare_type_schema_mut(self: ResolutionSession, MUTABLE node: TypeDeclaration, name: String@symbol, schema: ScopeScopeTypeSchema) RETURNS !Void
+PRIVATE FN resolutionSession__declare_type_schema_mut(self: ResolutionSession, node: TypeDeclaration, name: String@symbol, schema: ScopeScopeTypeSchema) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2037,7 +2037,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN resolutionSession__inline_struct_deinit_entries(self: ResolutionSession, MUTABLE variant_data: InlineStructVariant) RETURNS ![]InlineStructDeinitEntry
+PRIVATE FN resolutionSession__inline_struct_deinit_entries(self: ResolutionSession, variant_data: InlineStructVariant) RETURNS ![]InlineStructDeinitEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2070,7 +2070,7 @@ PUB FN resolutionSession__new(importer: ?ModuleImporter, source_dir: String, sou
   TRY (resolutionSession__initialize(&self, importer, source_dir, source_code, root_scope, function_registry, install_builtins));
   RETURN self @multiowned;
 END
-PUB FN resolutionPhase__run(program: Program, MUTABLE importer: ?ModuleImporter, source_dir: String, source_code: ?String) RETURNS !ResolutionFacts@multiowned ->
+PUB FN resolutionPhase__run(program: Program, importer: ?ModuleImporter, source_dir: String, source_code: ?String) RETURNS !ResolutionFacts@multiowned ->
   RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_63 = TRY (resolutionSession__new(importer, source_dir, source_code));
   TRY (resolutionSession__resolve_mut(&rtoc_mutable_receiver_63, program)) };
 END

@@ -93,7 +93,7 @@ END
 PUB FN tenseEnvelope__payload_type(self: TenseEnvelope) RETURNS !Type ->
   RETURN TRY (type__from_child_expression(self.payload_expression));
 END
-PUB FN tenseEnvelope__wrap(self: TenseEnvelope, MUTABLE payload: TypeExpression) RETURNS !TypeExpression EFFECTS REENTRANT ->
+PUB FN tenseEnvelope__wrap(self: TenseEnvelope, payload: TypeExpression) RETURNS !TypeExpression EFFECTS REENTRANT ->
   MUTABLE inner = COPY payload;
   MUTABLE index = self.layers.length();
   WHILE (index > 0) DO
@@ -447,7 +447,7 @@ PUB FN tenseOperationPlanner__join_async_results(types: []Type) RETURNS !TenseJo
   TRY (type__merge_capabilities_from_mut(&joined, payload, TRUE, TRUE));
   RETURN TenseJoinPlan{ result_type: COPY joined, reason: NIL };
 END
-PRIVATE FN tenseOperationPlanner__operation_plan(operation: TenseOperationKind, input: Type, MUTABLE result: Type, backend: TenseBackendForm, consumed: []TenseLayer, preserved: []TenseLayer, navigation: []TenseLayer, propagation: TensePropagation = TensePropagation.None, recovery: TenseRecovery = TenseRecovery.None, handle_use: TenseHandleUse = TenseHandleUse.None, suspends: Bool = FALSE, may_terminate: Bool = FALSE, refinement: ?Type = NIL) RETURNS TenseOperationPlan ->
+PRIVATE FN tenseOperationPlanner__operation_plan(operation: TenseOperationKind, input: Type, result: Type, backend: TenseBackendForm, consumed: []TenseLayer, preserved: []TenseLayer, navigation: []TenseLayer, propagation: TensePropagation = TensePropagation.None, recovery: TenseRecovery = TenseRecovery.None, handle_use: TenseHandleUse = TenseHandleUse.None, suspends: Bool = FALSE, may_terminate: Bool = FALSE, refinement: ?Type = NIL) RETURNS TenseOperationPlan ->
   RETURN TenseOperationPlan{ operation: COPY operation, input_type: COPY input, result_type: COPY result, backend_form: COPY backend, consumed_layers: COPY consumed, preserved_layers: COPY preserved, navigation_layers: COPY navigation, propagation: COPY propagation, recovery: COPY recovery, handle_use: COPY handle_use, suspends: suspends, may_terminate_current_flow: may_terminate, refinement_type: COPY refinement };
 END
 PRIVATE FN tenseOperationPlanner__normalize_navigation_layers(layers: []TenseLayer) RETURNS ![]TenseLayer ->

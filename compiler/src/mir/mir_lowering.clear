@@ -15516,7 +15516,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE shard_direct = ((shard != NIL) AND (plan.target_name == shard[:map]));
         MUTABLE template_kind =       IF shard_direct THEN
           IntrinsicTemplateKind.ShardDirectZig
-        ELSE_IF (((type__sharded?(map_ft) OR type__striped?(map_ft))) AND (TRY (functionSignature__intrinsic_template(&op_value_mutable, IntrinsicTemplateKind.ShardedZig)) != NIL)) THEN
+        ELSE_IF (((type__sharded?(map_ft) OR type__striped?(map_ft))) AND (TRY (functionSignature__intrinsic_template(op_value_mutable, IntrinsicTemplateKind.ShardedZig)) != NIL)) THEN
           IntrinsicTemplateKind.ShardedZig
         ELSE
           IntrinsicTemplateKind.Zig
@@ -19202,10 +19202,10 @@ PRIVATE FN mIRLowering__indexed_assignment_dispatch(self: MIRLowering, kind: Str
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE target_var: ?String = mIRLowering__indexed_assignment_target_var(rtoc_self_view, target_node);
     MUTABLE shard: ?{String@symbol}String = TRY (mIRLowering__shard_context(rtoc_self_view));
-    MUTABLE shard_direct = !(!(((((shard != NIL) AND (target_var == shard[:map])) AND (TRY (functionSignature__intrinsic_template(&op, IntrinsicTemplateKind.ShardDirectZig)) != NIL)))));
+    MUTABLE shard_direct = !(!(((((shard != NIL) AND (target_var == shard[:map])) AND (TRY (functionSignature__intrinsic_template(op, IntrinsicTemplateKind.ShardDirectZig)) != NIL)))));
     MUTABLE template_kind =   IF shard_direct THEN
       IntrinsicTemplateKind.ShardDirectZig
-    ELSE_IF (((type__sharded?(receiver_type) OR type__striped?(receiver_type))) AND (TRY (functionSignature__intrinsic_template(&op, IntrinsicTemplateKind.ShardedZig)) != NIL)) THEN
+    ELSE_IF (((type__sharded?(receiver_type) OR type__striped?(receiver_type))) AND (TRY (functionSignature__intrinsic_template(op, IntrinsicTemplateKind.ShardedZig)) != NIL)) THEN
       IntrinsicTemplateKind.ShardedZig
     ELSE
       IntrinsicTemplateKind.Zig

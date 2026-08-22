@@ -39,7 +39,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.predecessors = List[];
 }
 END
-PUB FN basicBlock__add_successor(MUTABLE self: BasicBlock, MUTABLE block: BasicBlock) RETURNS Void
+PUB FN basicBlock__add_successor(MUTABLE self: BasicBlock, block: BasicBlock) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -110,7 +110,7 @@ PUB FN functionCFG__build(fn_node: FunctionDef, can_fail_fns: ?[Set]String = NIL
   END
   RETURN cfg;
 END
-PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: BasicBlock, exit_target: BasicBlock, MUTABLE cfg: FunctionCFG, break_target: ?BasicBlock = NIL, continue_target: ?BasicBlock = NIL) RETURNS !?BasicBlock@multiowned EFFECTS REENTRANT ->
+PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: BasicBlock, exit_target: BasicBlock, cfg: FunctionCFG, break_target: ?BasicBlock = NIL, continue_target: ?BasicBlock = NIL) RETURNS !?BasicBlock@multiowned EFFECTS REENTRANT ->
   MUTABLE current_block = COPY current_block_input;
   MUTABLE stmts = COPY stmts_input;
   MUTABLE rtoc_idx = 0;
@@ -345,7 +345,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN ownershipSnapshot__each_entry(self: OwnershipSnapshot, MUTABLE block: FN(PlaceId, OwnerEntry) -> Void) RETURNS Void
+PUB FN ownershipSnapshot__each_entry(self: OwnershipSnapshot, block: FN(PlaceId, OwnerEntry) -> Void) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -393,7 +393,7 @@ PUB FN ownershipDataflow__state_from_names(state: {String}OwnerEntry) RETURNS !{
   };
   RETURN entries;
 END
-PUB FN ownershipDataflow__place_for_binding_node(name: String, MUTABLE node: Node) RETURNS PlaceId ->
+PUB FN ownershipDataflow__place_for_binding_node(name: String, node: Node) RETURNS PlaceId ->
   MUTABLE sym = aST__node__symbol(node);
   MUTABLE symbol = IF sym IS_A SymbolEntry THEN
     sym
@@ -416,7 +416,7 @@ END
 PUB FN ownershipDataflow__lookup_state_entry(state: {PlaceId}OwnerEntry, place: Place) RETURNS ?OwnerEntry ->
   RETURN COPY state[ownershipDataflow__resolve_state_place(state, place)];
 END
-PUB FN ownershipDataflow__initialize(MUTABLE self: OwnershipDataflow, MUTABLE cfg: FunctionCFG, fn_node: FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS Void
+PUB FN ownershipDataflow__initialize(MUTABLE self: OwnershipDataflow, cfg: FunctionCFG, fn_node: FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -510,7 +510,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PUB FN ownershipDataflow__insert_ordered_worklist_mut(self: OwnershipDataflow, MUTABLE worklist: []BasicBlock@multiowned, MUTABLE block: BasicBlock, order_index: {Int64}Int64) RETURNS Void
+PUB FN ownershipDataflow__insert_ordered_worklist_mut(self: OwnershipDataflow, MUTABLE worklist: []BasicBlock@multiowned, block: BasicBlock, order_index: {Int64}Int64) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -712,14 +712,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (localBindingAnalysis__binding_decl_name(stmt) == var);
 }
 END
-PUB FN ownershipDataflow__binding_move_places(self: OwnershipDataflow, MUTABLE node: ?Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
+PUB FN ownershipDataflow__binding_move_places(self: OwnershipDataflow, node: ?Locatable, state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (ownershipDataflow__collect_binding_move_places(rtoc_self_view, node, state));
 }
 END
-PUB FN ownershipDataflow__explicit_move_places(self: OwnershipDataflow, MUTABLE node: ?Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
+PUB FN ownershipDataflow__explicit_move_places(self: OwnershipDataflow, node: ?Locatable, state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -769,14 +769,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     }; END rtoc_transform_values_result_13 } );
 }
 END
-PUB FN ownershipDataflow__replay_state_for_block(self: OwnershipDataflow, MUTABLE block: BasicBlock) RETURNS !{PlaceId}OwnerEntry
+PUB FN ownershipDataflow__replay_state_for_block(self: OwnershipDataflow, block: BasicBlock) RETURNS !{PlaceId}OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (ownershipDataflow__dup_state(rtoc_self_view, (rtoc_self_view.block_in[block.id] OR_ELSE TRY (ownershipDataflow__empty_ownership_state(rtoc_self_view)))));
 }
 END
-PUB FN ownershipDataflow__replay_transfer_stmt_mut(self: OwnershipDataflow, stmt: Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !Void
+PUB FN ownershipDataflow__replay_transfer_stmt_mut(self: OwnershipDataflow, stmt: Locatable, state: {PlaceId}OwnerEntry) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -791,7 +791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN {};
 }
 END
-PRIVATE FN ownershipDataflow__state_to_names(self: OwnershipDataflow, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !{String}OwnerEntry
+PRIVATE FN ownershipDataflow__state_to_names(self: OwnershipDataflow, state: {PlaceId}OwnerEntry) RETURNS !{String}OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -803,14 +803,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     });
 }
 END
-PRIVATE FN ownershipDataflow__state_entry(self: OwnershipDataflow, MUTABLE state: {PlaceId}OwnerEntry, place: Place) RETURNS ?OwnerEntry
+PRIVATE FN ownershipDataflow__state_entry(self: OwnershipDataflow, state: {PlaceId}OwnerEntry, place: Place) RETURNS ?OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ownershipDataflow__lookup_state_entry(state, place);
 }
 END
-PRIVATE FN ownershipDataflow__set_state_entry_mut(self: OwnershipDataflow, MUTABLE state: {PlaceId}OwnerEntry, place: Place, MUTABLE entry: OwnerEntry) RETURNS Void
+PRIVATE FN ownershipDataflow__set_state_entry_mut(self: OwnershipDataflow, MUTABLE state: {PlaceId}OwnerEntry, place: Place, entry: OwnerEntry) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -902,7 +902,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN state;
 }
 END
-PRIVATE FN ownershipDataflow__join_predecessors(self: OwnershipDataflow, MUTABLE block: BasicBlock) RETURNS !{PlaceId}OwnerEntry
+PRIVATE FN ownershipDataflow__join_predecessors(self: OwnershipDataflow, block: BasicBlock) RETURNS !{PlaceId}OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -962,7 +962,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN :maybe_moved;
 }
 END
-PRIVATE FN ownershipDataflow__apply_transfer(self: OwnershipDataflow, MUTABLE block: BasicBlock, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
+PRIVATE FN ownershipDataflow__apply_transfer(self: OwnershipDataflow, block: BasicBlock, state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1036,7 +1036,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN !((((((type__primitive?(ti) OR TRY (type__string?(ti))) OR type__any?(ti)) OR type__void?(ti)) OR ((TRY (type__any_rc?(ti)) AND !(is_atomic_ptr))))));
 }
 END
-PUB FN ownershipDataflow__resource_captures(self: OwnershipDataflow, MUTABLE node: Locatable) RETURNS ![]String
+PUB FN ownershipDataflow__resource_captures(self: OwnershipDataflow, node: Locatable) RETURNS ![]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1045,7 +1045,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (analysis.resource_captures() OR_ELSE List[]);
 }
 END
-PRIVATE FN ownershipDataflow__transfer_stmt(self: OwnershipDataflow, stmt: Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
+PRIVATE FN ownershipDataflow__transfer_stmt(self: OwnershipDataflow, stmt: Locatable, state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1171,7 +1171,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN ownershipDataflow__collect_binding_move_places(self: OwnershipDataflow, MUTABLE node: ?Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
+PRIVATE FN ownershipDataflow__collect_binding_move_places(self: OwnershipDataflow, node: ?Locatable, state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1184,7 +1184,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN ownershipDataflow__collect_ownership_transfers(self: OwnershipDataflow, MUTABLE node: ?Locatable, MUTABLE step: DataflowStep) RETURNS !Void
+PRIVATE FN ownershipDataflow__collect_ownership_transfers(self: OwnershipDataflow, MUTABLE node: ?Locatable, step: DataflowStep) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1260,7 +1260,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN ownershipDataflow__collect_explicit_in(self: OwnershipDataflow, MUTABLE node: ?Locatable, MUTABLE step: DataflowStep) RETURNS !Void
+PRIVATE FN ownershipDataflow__collect_explicit_in(self: OwnershipDataflow, node: ?Locatable, step: DataflowStep) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1282,7 +1282,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (ownershipDataflow__collect_share_transfers_in(rtoc_self_view, node, step));
 }
 END
-PRIVATE FN ownershipDataflow__collect_field_owner_transfer(self: OwnershipDataflow, MUTABLE node: GetField, MUTABLE step: DataflowStep) RETURNS !Void
+PRIVATE FN ownershipDataflow__collect_field_owner_transfer(self: OwnershipDataflow, MUTABLE node: GetField, step: DataflowStep) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1303,7 +1303,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN ownershipDataflow__collect_explicit_move_places(self: OwnershipDataflow, MUTABLE node: ?Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
+PRIVATE FN ownershipDataflow__collect_explicit_move_places(self: OwnershipDataflow, node: ?Locatable, state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1316,7 +1316,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN ownershipDataflow__collect_share_transfers_in(self: OwnershipDataflow, MUTABLE node: ?Locatable, MUTABLE step: DataflowStep) RETURNS !Void
+PRIVATE FN ownershipDataflow__collect_share_transfers_in(self: OwnershipDataflow, node: ?Locatable, step: DataflowStep) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1329,7 +1329,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     }));
 }
 END
-PRIVATE FN ownershipDataflow__collect_share_transfer(self: OwnershipDataflow, MUTABLE node: ShareNode, MUTABLE step: DataflowStep) RETURNS !Void
+PRIVATE FN ownershipDataflow__collect_share_transfer(self: OwnershipDataflow, node: ShareNode, step: DataflowStep) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1352,7 +1352,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, source, step));
 }
 END
-PRIVATE FN ownershipDataflow__collect_bg_capture_places_in_args(self: OwnershipDataflow, stmt: Stmt, MUTABLE state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
+PRIVATE FN ownershipDataflow__collect_bg_capture_places_in_args(self: OwnershipDataflow, stmt: Stmt, state: {PlaceId}OwnerEntry) RETURNS ![]PlaceId
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1423,14 +1423,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
-PRIVATE FN ownershipDataflow__dup_state(self: OwnershipDataflow, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
+PRIVATE FN ownershipDataflow__dup_state(self: OwnershipDataflow, state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY state;
 }
 END
-PRIVATE FN ownershipDataflow__walk_expr_node(self: OwnershipDataflow, MUTABLE node: ?Locatable, skip_copy: Bool = FALSE, MUTABLE block: FN(Locatable) -> Void) RETURNS !Void
+PRIVATE FN ownershipDataflow__walk_expr_node(self: OwnershipDataflow, node: ?Locatable, skip_copy: Bool = FALSE, block: FN(Locatable) -> Void) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1487,7 +1487,7 @@ PUB FN useAfterMoveChecker__check(fn_node: FunctionDef, can_fail_fns: ?[Set]Stri
   TRY (useAfterMoveChecker__check_mut(&checker));
   RETURN COPY checker.errors;
 END
-PRIVATE FN useAfterMoveChecker__check_stmt_reads(MUTABLE self: UseAfterMoveChecker, stmt: Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !Void
+PRIVATE FN useAfterMoveChecker__check_stmt_reads(MUTABLE self: UseAfterMoveChecker, stmt: Locatable, state: {PlaceId}OwnerEntry) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1554,7 +1554,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN useAfterMoveChecker__check_call_reads(MUTABLE self: UseAfterMoveChecker, call_node: CallNode, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !Void
+PRIVATE FN useAfterMoveChecker__check_call_reads(MUTABLE self: UseAfterMoveChecker, call_node: CallNode, state: {PlaceId}OwnerEntry) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1580,7 +1580,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN useAfterMoveChecker__check_reads_in_expr(MUTABLE self: UseAfterMoveChecker, MUTABLE node: ?Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !Void
+PRIVATE FN useAfterMoveChecker__check_reads_in_expr(MUTABLE self: UseAfterMoveChecker, node: ?Locatable, state: {PlaceId}OwnerEntry) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1667,7 +1667,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN useAfterMoveChecker__check_share_reads(MUTABLE self: UseAfterMoveChecker, MUTABLE node: ShareNode, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !Void
+PRIVATE FN useAfterMoveChecker__check_share_reads(MUTABLE self: UseAfterMoveChecker, node: ShareNode, state: {PlaceId}OwnerEntry) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1685,7 +1685,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN useAfterMoveChecker__check_identifier_node_read(MUTABLE self: UseAfterMoveChecker, MUTABLE node: Identifier, MUTABLE state: {PlaceId}OwnerEntry) RETURNS Void
+PRIVATE FN useAfterMoveChecker__check_identifier_node_read(MUTABLE self: UseAfterMoveChecker, node: Identifier, state: {PlaceId}OwnerEntry) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1693,7 +1693,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     useAfterMoveChecker__check_identifier_read(&rtoc_self_view, node.name, state, node.token, place);
 }
 END
-PRIVATE FN useAfterMoveChecker__check_identifier_read(MUTABLE self: UseAfterMoveChecker, name: String, MUTABLE state: {PlaceId}OwnerEntry, token: Token, place: ?PlaceId = NIL) RETURNS Void
+PRIVATE FN useAfterMoveChecker__check_identifier_read(MUTABLE self: UseAfterMoveChecker, name: String, state: {PlaceId}OwnerEntry, token: Token, place: ?PlaceId = NIL) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1709,7 +1709,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN useAfterMoveChecker__walk_expr_node(self: UseAfterMoveChecker, MUTABLE node: ?Locatable, skip_copy: Bool = FALSE, MUTABLE block: FN(Locatable) -> Void) RETURNS !Void
+PRIVATE FN useAfterMoveChecker__walk_expr_node(self: UseAfterMoveChecker, node: ?Locatable, skip_copy: Bool = FALSE, block: FN(Locatable) -> Void) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1807,7 +1807,7 @@ PUB FN loopFrameAnalysis__direct_loop_expression_frame_alloc?(body: []Locatable,
   }));
   RETURN found;
 END
-PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names: [Set]String, MUTABLE block: FN(Locatable) -> Void) RETURNS !Void ->
+PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names: [Set]String, block: FN(Locatable) -> Void) RETURNS !Void ->
   MUTABLE stack: []Locatable = [root];
   MUTABLE seen: [Set]Int64 = Set[];
   WHILE !((stack.length() == 0)) DO
@@ -1966,7 +1966,7 @@ PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema
     RETURN FALSE;
   END
 END
-PUB FN loopFrameAnalysis__walk_all_nodes(nodes: ?ControlFlowNodeInput, MUTABLE visited: [Set]Int64 = Set[], MUTABLE block: FN(Locatable) -> Void) RETURNS Void ->
+PUB FN loopFrameAnalysis__walk_all_nodes(nodes: ?ControlFlowNodeInput, visited: [Set]Int64 = Set[], block: FN(Locatable) -> Void) RETURNS Void ->
   aST__each_locatable(nodes, TRUE, %(node: Locatable) USE(visited) -> {
   IF !(visited.add?(aST__node_identity(node))) THEN
       RETURN;
@@ -2120,7 +2120,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN borrowChecker__check_stmts(MUTABLE self: BorrowChecker, stmts: []Locatable, MUTABLE state: BorrowState) RETURNS !Void
+PRIVATE FN borrowChecker__check_stmts(MUTABLE self: BorrowChecker, stmts: []Locatable, state: BorrowState) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -2130,7 +2130,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN borrowChecker__check_stmt(MUTABLE self: BorrowChecker, stmt: Locatable, MUTABLE state: BorrowState) RETURNS !Void
+PRIVATE FN borrowChecker__check_stmt(MUTABLE self: BorrowChecker, stmt: Locatable, state: BorrowState) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -2203,7 +2203,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN borrowChecker__handle_with_block(MUTABLE self: BorrowChecker, stmt: WithBlock, MUTABLE state: BorrowState) RETURNS !Void
+PRIVATE FN borrowChecker__handle_with_block(MUTABLE self: BorrowChecker, stmt: WithBlock, state: BorrowState) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -2241,7 +2241,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (borrowChecker__check_stmts(&rtoc_self_view, stmt.body, body_state));
 }
 END
-PRIVATE FN borrowChecker__check_binding_moves(MUTABLE self: BorrowChecker, expr: ?Locatable, token: Token, MUTABLE state: BorrowState) RETURNS !Void
+PRIVATE FN borrowChecker__check_binding_moves(MUTABLE self: BorrowChecker, expr: ?Locatable, token: Token, state: BorrowState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2255,7 +2255,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN borrowChecker__check_explicit_moves(MUTABLE self: BorrowChecker, stmt: Locatable, token: Token, MUTABLE state: BorrowState) RETURNS !Void
+PRIVATE FN borrowChecker__check_explicit_moves(MUTABLE self: BorrowChecker, stmt: Locatable, token: Token, state: BorrowState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2266,7 +2266,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN borrowChecker__check_borrowed_move(MUTABLE self: BorrowChecker, name: String, token: Token, MUTABLE state: BorrowState) RETURNS Void
+PRIVATE FN borrowChecker__check_borrowed_move(MUTABLE self: BorrowChecker, name: String, token: Token, state: BorrowState) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2277,7 +2277,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &rtoc_self_view.errors.append("[MOVE_WHILE_BORROWED] ${rtoc_self_view.fn_name}::${name} -- cannot move while ${borrow_kind} borrow is active${borrowChecker__line_info(rtoc_self_view, token)}");
 }
 END
-PRIVATE FN borrowChecker__collect_moved_names(MUTABLE self: BorrowChecker, MUTABLE node: Locatable) RETURNS ![Set]String
+PRIVATE FN borrowChecker__collect_moved_names(MUTABLE self: BorrowChecker, node: Locatable) RETURNS ![Set]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2301,7 +2301,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN {};
 }
 END
-PRIVATE FN borrowChecker__walk_expr_node(self: BorrowChecker, MUTABLE node: ?Locatable, skip_copy: Bool = FALSE, MUTABLE block: FN(Locatable) -> Void) RETURNS !Void
+PRIVATE FN borrowChecker__walk_expr_node(self: BorrowChecker, node: ?Locatable, skip_copy: Bool = FALSE, block: FN(Locatable) -> Void) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

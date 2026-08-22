@@ -608,7 +608,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "const ${plan.ctx_type} = struct {\n    wg: *CheatHeader.WaitGroup,\n    ${capture_fields}\n    fn run(${plan.raw_rt_name}: *anyopaque, ${plan.raw_args_name}: ?*anyopaque) anyerror!void {\n        const __rt = @as(*Runtime, @ptrCast(@alignCast(${plan.raw_rt_name})));\n        ${rt_suppress}\n        const ctx = @as(*@This(), @ptrCast(@alignCast(${plan.raw_args_name}.?)));\n        defer ctx.wg.done();\n        ${body_code}\n    }\n};\n${capture_pre_decls}\nvar ${plan.ctx_var} = ${plan.ctx_type}{ ${capture_inits} };\n${spawn_call}\n${plan.wg_var}.add(1);\n".trim();
 }
 END
-FN mIREmitter__emit_context_field_decls(MUTABLE self: MIREmitter, MUTABLE fields: []ContextFieldDecl) RETURNS !String
+FN mIREmitter__emit_context_field_decls(MUTABLE self: MIREmitter, fields: []ContextFieldDecl) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -624,7 +624,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     }).join("\n");
 }
 END
-FN mIREmitter__emit_struct_init_fields(MUTABLE self: MIREmitter, MUTABLE fields: []StructInitField) RETURNS !String
+FN mIREmitter__emit_struct_init_fields(MUTABLE self: MIREmitter, fields: []StructInitField) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -705,7 +705,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       panic("emit_inline_bc_as_zig: node has no stdlib_def (:{})");
     END
     MUTABLE pattern = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_3 = CAST(entry AS FunctionSignature);
-    TRY (functionSignature__required_intrinsic_template(&rtoc_mutable_receiver_3, IntrinsicTemplateKind.Zig)) };
+    TRY (functionSignature__required_intrinsic_template(rtoc_mutable_receiver_3, IntrinsicTemplateKind.Zig)) };
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
     pattern = pattern.split("{${rtoc_idx.toString()}}").join(TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?)));
@@ -850,7 +850,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE op: ?FunctionSignature@multiowned = KEEP mIREmitter__sharded_map_stdlib_def(node);
     MUTABLE kind = mIREmitter__sharded_map_template_kind(node);
     MUTABLE op_value: FunctionSignature = COPY UNWRAP (op);
-    IF (TRY (functionSignature__intrinsic_template(&op_value, kind))) EXISTS AS template THEN
+    IF (TRY (functionSignature__intrinsic_template(op_value, kind))) EXISTS AS template THEN
       PARTIAL MATCH template START
         FunctionSignatureReturnValue.StringValue AS text -> RETURN COPY text;,
         FunctionSignatureReturnValue.SymbolValue AS sym -> RETURN CAST(sym AS String);
@@ -918,14 +918,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN code.replace("&{target}", "&${target}").replace("{target}", target).replace("{index}", index).replace("{value}", value);
 }
 END
-PRIVATE FN mIREmitter__registry_template(self: MIREmitter, MUTABLE entry: FunctionSignature, template_kind: IntrinsicTemplateKind) RETURNS !String
+PRIVATE FN mIREmitter__registry_template(self: MIREmitter, entry: FunctionSignature, template_kind: IntrinsicTemplateKind) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (functionSignature__required_intrinsic_template(&entry, template_kind));
+    RETURN TRY (functionSignature__required_intrinsic_template(entry, template_kind));
 }
 END
-PRIVATE FN mIREmitter__substitute_registry_common(self: MIREmitter, code: String, MUTABLE entry: FunctionSignature, allocs: ?InlineAllocMetadata, key_type: ?Type, value_type: ?Type) RETURNS !String
+PRIVATE FN mIREmitter__substitute_registry_common(self: MIREmitter, code: String, entry: FunctionSignature, allocs: ?InlineAllocMetadata, key_type: ?Type, value_type: ?Type) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3105,7 +3105,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (inits |> SELECT ".${_.field_name} = ${TRY (mIREmitter__emit(&rtoc_self_view, _.value))}").join(", ");
 }
 END
-PRIVATE FN mIREmitter__emit_thunk_frame_field_decls(self: MIREmitter, MUTABLE fields: []ThunkFrameField, indent: String) RETURNS !String
+PRIVATE FN mIREmitter__emit_thunk_frame_field_decls(self: MIREmitter, fields: []ThunkFrameField, indent: String) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3267,7 +3267,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIREmitter__emit_body(&rtoc_self_view, stmts));
 }
 END
-PUB FN mIREmitter__emit_direct_cleanup(self: MIREmitter, name: String, MUTABLE entry: CleanupEntry, alloc_override: ?String = NIL) RETURNS !String
+PUB FN mIREmitter__emit_direct_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, alloc_override: ?String = NIL) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3313,7 +3313,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__emit_cleanup(self: MIREmitter, name: String, MUTABLE entry: CleanupEntry, errdefer: Bool = FALSE) RETURNS !String
+PRIVATE FN mIREmitter__emit_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, errdefer: Bool = FALSE) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4152,7 +4152,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (((stmt.expr?() AND !(stripped.endsWith?(";"))) AND !(stripped.endsWith?("}"))) AND !(stripped.endsWith?("{")));
 }
 END
-PRIVATE FN mIREmitter__alloc_from_entry(self: MIREmitter, MUTABLE entry: CleanupEntry) RETURNS !String
+PRIVATE FN mIREmitter__alloc_from_entry(self: MIREmitter, entry: CleanupEntry) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4267,7 +4267,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__render_tuple_cleanup(self: MIREmitter, MUTABLE entry: CleanupEntry, root_name: String, alloc: String) RETURNS !String
+PRIVATE FN mIREmitter__render_tuple_cleanup(self: MIREmitter, entry: CleanupEntry, root_name: String, alloc: String) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

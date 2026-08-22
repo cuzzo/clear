@@ -940,7 +940,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   &ctx.destroy_actions.append(FsmDestroyAction{ FsmDestroyLockRelease: COPY FsmDestroyLockRelease{ name: COPY CAST(meta[:lock_field_ref] AS String), ctx_id: id, guard_index: UNWRAP (cap_idx), lock_ref: Emittable{ Ident: COPY Ident{ name: COPY CAST(meta[:lock_field_ref] AS String), lowered_node_id: NIL, ownership_consumption: NIL } }, unlock_method: COPY CAST(meta[:unlock_method] AS String) } });
   RETURN ExpandedLockSegment{ lock_try_spec: COPY lock_try_spec, appended_specs: [woken_spec, retry_spec, fail_spec, held_set_spec], extra_fields: COPY extra_fields };
 END
-PRIVATE FN emit__build_segment_descriptor(seg: Segment, MUTABLE ctx: FsmEmitContext, lowering: MIRLowering, capture_map: {String}String, sp_idx: ?Int64 = NIL) RETURNS !?SuspendDescriptor ->
+PRIVATE FN emit__build_segment_descriptor(seg: Segment, ctx: FsmEmitContext, lowering: MIRLowering, capture_map: {String}String, sp_idx: ?Int64 = NIL) RETURNS !?SuspendDescriptor ->
   MUTABLE lowering_api = COPY lowering;
   MUTABLE tail = seg.tail;
   IF !(Segments.suspend_tail?(tail)) THEN

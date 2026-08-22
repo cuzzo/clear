@@ -898,7 +898,7 @@ PUB FN type__tense_of(value_type: TypeTypeInput) RETURNS !Type ->
   type__copy_placement_from_mut(&t, value, FALSE);
   RETURN t;
 END
-PUB FN type__generic_instance_of(base: String@symbol, MUTABLE args: []TypeTypeInput) RETURNS !Type ->
+PUB FN type__generic_instance_of(base: String@symbol, args: []TypeTypeInput) RETURNS !Type ->
   MUTABLE arguments: []TypeExpression = ( { MUTABLE rtoc_empty_list_3: []TypeExpression = List[]; rtoc_empty_list_3 } );
   MUTABLE index: Int64 = 0;
   WHILE (index < args.length()) DO

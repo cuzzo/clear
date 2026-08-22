@@ -56,16 +56,16 @@ PUB FN pipelineListLowerer__lower(self: PipelineListLowerer, site: PipelineSite,
     RETURN NIL;
   END
 END
-PUB FN pipelineListLowerer__lower_where_expr(self: PipelineListLowerer, site: PipelineSite, MUTABLE expr_node: Locatable) RETURNS !MIRBlockExpr ->
+PUB FN pipelineListLowerer__lower_where_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   RETURN TRY (pipelineListLowerer__lower_where(self, site, COPY expr_node));
 END
-PUB FN pipelineListLowerer__lower_select_expr(self: PipelineListLowerer, site: PipelineSite, MUTABLE expr_node: Locatable) RETURNS !MIRBlockExpr ->
+PUB FN pipelineListLowerer__lower_select_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   RETURN TRY (pipelineListLowerer__lower_select(self, site, COPY expr_node));
 END
-PUB FN pipelineListLowerer__lower_take_while_expr(self: PipelineListLowerer, site: PipelineSite, MUTABLE expr_node: Locatable) RETURNS !MIRBlockExpr ->
+PUB FN pipelineListLowerer__lower_take_while_expr(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   RETURN TRY (pipelineListLowerer__lower_take_while(self, site, expr_node));
 END
-PRIVATE FN pipelineListLowerer__lower_where(self: PipelineListLowerer, site: PipelineSite, MUTABLE expr_node: Locatable) RETURNS !MIRBlockExpr ->
+PRIVATE FN pipelineListLowerer__lower_where(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(list_node)))))) AS String);
@@ -158,7 +158,7 @@ PRIVATE FN pipelineListLowerer__lower_limit(self: PipelineListLowerer, site: Pip
   rtoc_lambda_result_6
   });
 END
-PRIVATE FN pipelineListLowerer__lower_take_while(self: PipelineListLowerer, site: PipelineSite, MUTABLE expr_node: Locatable) RETURNS !MIRBlockExpr ->
+PRIVATE FN pipelineListLowerer__lower_take_while(self: PipelineListLowerer, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   MUTABLE list_node = COPY site.list;
   MUTABLE smooth_node = COPY site.options;
   MUTABLE elem_type = COPY CAST(type__resolved(UNWRAP (TRY (type__element_type(TRY (aST__full_type_mut(list_node)))))) AS String);
@@ -288,7 +288,7 @@ PRIVATE FN pipelineListLowerer__lower_tap(self: PipelineListLowerer, site: Pipel
   MUTABLE body_mir = TRY (pipelineListLowerer__visit_body_call(self, tap_op.body, "__tap_item"));
   RETURN MIRBlockExpr{ label: COPY label, body: COPY [Emittable{ Let: COPY Let{ name: COPY "__tap_src", init: COPY source_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Let: COPY Let{ name: COPY "__tap_items", init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY Ident{ name: "__tap_src", lowered_node_id: NIL, ownership_consumption: NIL } }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ForStmt: COPY ForStmt{ iter: Emittable{ Ident: COPY Ident{ name: "__tap_items", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__tap_item", body: COPY body_mir, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "__tap_src", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 END
-PRIVATE FN pipelineListLowerer__visit_pipeline_expr_mir(self: PipelineListLowerer, list_node: Locatable, MUTABLE expr_node: Locatable, placeholder: String = "it") RETURNS Emittable ->
+PRIVATE FN pipelineListLowerer__visit_pipeline_expr_mir(self: PipelineListLowerer, list_node: Locatable, expr_node: Locatable, placeholder: String = "it") RETURNS Emittable ->
   RETURN pipelineListLowerer__visit_expr_call(self, list_node, expr_node, placeholder);
 END
 PRIVATE FN pipelineListLowerer__join_predicate_mir(self: PipelineListLowerer, list_node: Locatable, join_node: JoinOp) RETURNS !Emittable ->
