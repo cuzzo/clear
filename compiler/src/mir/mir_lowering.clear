@@ -9484,7 +9484,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             &takes_indices.insert(COPY rtoc_idx);
             FOR _ IN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, mir_args[rtoc_idx]) DO
         &consumed.append(COPY _);
-        &operands.append(ownershipOperandFact__owned_binding(_, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "kept call argument ${rtoc_idx}", :heap));
+        &operands.append(ownershipOperandFact__owned_binding(_, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "kept call argument ${rtoc_idx.toString()}", :heap));
             END
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -9502,13 +9502,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_ternary_value_335? } }));
       &takes_indices.insert(COPY rtoc_idx);
       IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, arg_type)) THEN
-            &operands.append(ownershipOperandFact__non_owning(arg_type, "call argument ${rtoc_idx}"));
+            &operands.append(ownershipOperandFact__non_owning(arg_type, "call argument ${rtoc_idx.toString()}"));
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE sink_alloc = TRY (mIRLowering__allocator_for_takes_param_mut(rtoc_self_view, param));
       IF mIRLowering__borrowed_ownership_operand?(rtoc_self_view, ast_args[rtoc_idx]?) THEN
-            &operands.append(ownershipOperandFact__borrowed_access(mIRLowering__moved_arg_root(rtoc_self_view, ast_args[rtoc_idx]?), arg_type, "call argument ${rtoc_idx}", sink_alloc));
+            &operands.append(ownershipOperandFact__borrowed_access(mIRLowering__moved_arg_root(rtoc_self_view, ast_args[rtoc_idx]?), arg_type, "call argument ${rtoc_idx.toString()}", sink_alloc));
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -9516,7 +9516,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &consumed.append(COPY _);
       END
       FOR _ IN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, mir_args[rtoc_idx]) DO
-      &operands.append(ownershipOperandFact__owned_binding(_, arg_type, "call argument ${rtoc_idx}", sink_alloc));
+      &operands.append(ownershipOperandFact__owned_binding(_, arg_type, "call argument ${rtoc_idx.toString()}", sink_alloc));
       END
     rtoc_idx = rtoc_idx + 1;
       END
@@ -9601,13 +9601,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_ternary_value_340? } }));
       &takes_indices.insert(COPY rtoc_idx);
       IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, arg_type)) THEN
-          &operands.append(ownershipOperandFact__non_owning(arg_type, "call argument ${rtoc_idx}"));
+          &operands.append(ownershipOperandFact__non_owning(arg_type, "call argument ${rtoc_idx.toString()}"));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE sink_alloc = TRY (mIRLowering__allocator_for_takes_param_mut(rtoc_self_view, callee_param));
       IF mIRLowering__borrowed_ownership_operand?(rtoc_self_view, ast_args[rtoc_idx]?) THEN
-          &operands.append(ownershipOperandFact__borrowed_access(mIRLowering__moved_arg_root(rtoc_self_view, ast_args[rtoc_idx]?), arg_type, "call argument ${rtoc_idx}", sink_alloc));
+          &operands.append(ownershipOperandFact__borrowed_access(mIRLowering__moved_arg_root(rtoc_self_view, ast_args[rtoc_idx]?), arg_type, "call argument ${rtoc_idx.toString()}", sink_alloc));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -9622,7 +9622,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       &consumed.append(mIRLowering__transfer_binding_name(rtoc_self_view, UNWRAP (root)));
-      &operands.append(ownershipOperandFact__owned_binding(mIRLowering__transfer_binding_name(rtoc_self_view, UNWRAP (root)), arg_type, "call argument ${rtoc_idx}", sink_alloc));
+      &operands.append(ownershipOperandFact__owned_binding(mIRLowering__transfer_binding_name(rtoc_self_view, UNWRAP (root)), arg_type, "call argument ${rtoc_idx.toString()}", sink_alloc));
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN CallOwnershipFacts{ takes_indices: COPY takes_indices, consumed_names: COPY dedupeStrings(consumed), consumed_operands: COPY operands };
@@ -10844,7 +10844,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE operands = TRY (mIRLowering__ownership_operands_for_lowered_takes_arg(rtoc_self_view, materialized_args[rtoc_idx]?, stdlibCallFacts__ast_arg(stdlib_facts, rtoc_idx), "stdlib argument ${rtoc_idx}", sink_alloc, stdlib_facts.args[rtoc_idx]?.sink_type));
+      MUTABLE operands = TRY (mIRLowering__ownership_operands_for_lowered_takes_arg(rtoc_self_view, materialized_args[rtoc_idx]?, stdlibCallFacts__ast_arg(stdlib_facts, rtoc_idx), "stdlib argument ${rtoc_idx.toString()}", sink_alloc, stdlib_facts.args[rtoc_idx]?.sink_type));
       &consumed_operands.concat(operands);
       FOR _ IN operands DO
       IF ((_.kind == :owned_binding) AND (_.name != NIL)) THEN

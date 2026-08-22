@@ -708,7 +708,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (functionSignature__required_intrinsic_template(&rtoc_mutable_receiver_3, IntrinsicTemplateKind.Zig)) };
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
-    pattern = pattern.split("{${rtoc_idx}}").join(TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?)));
+    pattern = pattern.split("{${rtoc_idx.toString()}}").join(TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?)));
     rtoc_idx = rtoc_idx + 1;
     END
     IF node.suppress_try THEN
@@ -885,8 +885,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
       MUTABLE rendered = TRY (mIREmitter__coerce_registry_arg(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?.expr)), node.args[rtoc_idx]?.coerce_type));
-      code = code.replace("&{${rtoc_idx}}", "&${rendered}");
-      code = code.replace("{${rtoc_idx}}", rendered);
+      code = code.replace("&{${rtoc_idx.toString()}}", "&${rendered}");
+      code = code.replace("{${rtoc_idx.toString()}}", rendered);
     rtoc_idx = rtoc_idx + 1;
     END
     IF node.suppress_try THEN
@@ -1009,7 +1009,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           NIL
         END) END);
-      &fields.append("a${rtoc_idx}: ${(field_type OR_ELSE "@TypeOf(${args_tuple_name}[${rtoc_idx}])")}");
+      &fields.append("a${rtoc_idx.toString()}: ${(field_type OR_ELSE "@TypeOf(${args_tuple_name}[${rtoc_idx.toString()}])")}");
     rtoc_idx = rtoc_idx + 1;
     END
     IF can_fail THEN
