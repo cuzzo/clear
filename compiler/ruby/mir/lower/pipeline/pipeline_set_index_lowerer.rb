@@ -57,7 +57,9 @@ class PipelineSetIndexLowerer < T::Struct
     end
 
     elem_type = T.must(smooth_node.full_type!.element_type)
-    elem_zig = self.transpile_type.call(elem_type.resolved.to_s)
+    # `resolved` drops the element's capabilities, so a set of String@symbol
+    # rendered as Set([]const u8) while its items were Symbol.
+    elem_zig = self.transpile_type.call(elem_type)
     set_zig = "CheatLib.Set(#{elem_zig})"
     # Placement decides the set's allocator (escape-analysis stamp), the same
     # source every other pipeline op reads — a hardcoded :heap here diverges
@@ -93,7 +95,9 @@ class PipelineSetIndexLowerer < T::Struct
     end
 
     elem_type = T.must(list_node.full_type!.element_type)
-    elem_zig = self.transpile_type.call(elem_type.resolved.to_s)
+    # `resolved` drops the element's capabilities, so a set of String@symbol
+    # rendered as Set([]const u8) while its items were Symbol.
+    elem_zig = self.transpile_type.call(elem_type)
     expr_mir = self.visit_mir_with_placeholder.call(expr_node, "it")
     map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig}))"
 

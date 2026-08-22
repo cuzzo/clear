@@ -29,6 +29,18 @@ test "makeListCapacity honors a minimum above the initial item count" {
     try std.testing.expect(list.capacity >= 16);
 }
 
+test "join renders a list of symbols by their bytes" {
+    const allocator = std.testing.allocator;
+    var symbols = try CheatLib.makeList(CheatLib.Symbol, allocator, &[_]CheatLib.Symbol{
+        .{ .bytes = "yield" }, .{ .bytes = "io" },
+    });
+    defer symbols.deinit(allocator);
+
+    const joined = try CheatLib.join(allocator, symbols, ", ");
+    defer allocator.free(joined);
+    try std.testing.expectEqualStrings("yield, io", joined);
+}
+
 test "optionalOf normalizes a bare value and passes an optional through" {
     const bare: u32 = 7;
     const opt: ?u32 = 9;

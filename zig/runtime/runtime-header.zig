@@ -2792,6 +2792,14 @@ pub const CheatLib = struct {
         Runtime.profileAlloc(0); // size unknown until join completes
         const c = if (@typeInfo(@TypeOf(list)) == .pointer and @typeInfo(@TypeOf(list)).pointer.size == .one) list.* else list;
         const items = if (@hasField(@TypeOf(c), "items")) c.items else c;
+        const Item = @typeInfo(@TypeOf(items)).pointer.child;
+        if (Item == Symbol) {
+            // A symbol is a named byte slice; joining reads those bytes.
+            const bytes = try allocator.alloc([]const u8, items.len);
+            defer allocator.free(bytes);
+            for (items, 0..) |item, index| bytes[index] = item.bytes;
+            return std.mem.join(allocator, delimiter, bytes);
+        }
         return std.mem.join(allocator, delimiter, items);
     }
 

@@ -1,0 +1,13 @@
+# Test: DISTINCT over symbol elements builds a set of Symbol, and a list
+# literal feeding the pipeline stays a list. The set was typed from the
+# widened String while its items were Symbol, and the literal took the
+# pipeline's set type as its own, leaving the pipeline slicing a set.
+
+FN main() RETURNS Void ->
+    MUTABLE kinds = (([symbol("yield"), symbol("io"), symbol("yield")]) |> DISTINCT _);
+    ASSERT kinds.contains?(symbol("io"));
+    ASSERT !kinds.contains?(symbol("fail"));
+
+    MUTABLE names = (["a", "b", "a"] |> DISTINCT _);
+    ASSERT names.contains?("a");
+END

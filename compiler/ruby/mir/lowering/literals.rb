@@ -203,8 +203,11 @@ module MIRLoweringLiterals
     end
 
     # Non-empty SET literal (`Set[a, b]`): the items belong to a set, not to
-    # an ArrayList, so they go through makeSet rather than makeList.
-    if ti.set_collection?
+    # an ArrayList, so they go through makeSet rather than makeList. The
+    # literal's OWN type decides: a list literal feeding a DISTINCT pipeline
+    # carries the pipeline's set type as its coerced destination, and building
+    # a set there would leave the pipeline slicing a set.
+    if ti.set_collection? && Type.new(node.full_type!(context: "set literal source")).set_collection?
       inner = T.cast(
         with_ownership_consumption(
           MIR::MakeSet.new(elem_zig, items_mir, list_alloc),
