@@ -857,7 +857,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE kind = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.template_kind, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.template_kind END);
     MUTABLE op_value: FunctionSignature = COPY UNWRAP (op);
     IF (TRY (functionSignature__intrinsic_template(&op_value, kind))) EXISTS AS template THEN
-      RETURN COPY template;
+      PARTIAL MATCH template START
+        FunctionSignatureReturnValue.StringValue AS text -> RETURN COPY text;,
+        FunctionSignatureReturnValue.SymbolValue AS sym -> RETURN CAST(sym AS String);
+      END
     END
     panic("ShardedMap: op has no :{} template (contract={})");
 }
