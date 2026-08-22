@@ -21,7 +21,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.effects = eff;
 }
 END
-FN effectSet__include?(self: EffectSet, effect: String@symbol) RETURNS Bool
+PUB FN effectSet__include?(self: EffectSet, effect: String@symbol) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -29,7 +29,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN rtoc_self_view.effects.contains?(effect);
 }
 END
-FN effectSet__empty?(self: EffectSet) RETURNS Bool
+PUB FN effectSet__empty?(self: EffectSet) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -37,14 +37,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN rtoc_self_view.effects.empty?();
 }
 END
-FN effectSet__union(self: EffectSet, other: EffectSet) RETURNS !EffectSet@multiowned
+PUB FN effectSet__union(self: EffectSet, other: EffectSet) RETURNS !EffectSet@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (effectSet__new(ruby_set_union_String_symbol_set(rtoc_self_view.effects, other.effects)));
 }
 END
-FN effectSet__equals?(self: EffectSet, other: EffectSet) RETURNS Bool
+PUB FN effectSet__equals?(self: EffectSet, other: EffectSet) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -55,7 +55,7 @@ END
 FN effectSet__eql?(self: EffectSet, other: EffectSet) RETURNS Bool ->
   effectSet__equals?(self, other);
 END
-FN effectSet__hash(self: EffectSet) RETURNS Int64
+PUB FN effectSet__hash(self: EffectSet) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -106,14 +106,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ordered;
 }
 END
-FN effectSet__to_s(self: EffectSet) RETURNS !String
+PUB FN effectSet__to_s(self: EffectSet) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "EffectSet(${(TRY (effectSet__to_a(rtoc_self_view))).join(", ")})";
 }
 END
-FN effectSet__inspect(self: EffectSet) RETURNS !String
+PUB FN effectSet__inspect(self: EffectSet) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

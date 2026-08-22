@@ -21,6 +21,7 @@
 require 'json'
 require 'fileutils'
 require 'optparse'
+require 'set'
 require 'open3'
 
 saved_program_name = $PROGRAM_NAME
@@ -33,7 +34,7 @@ module FnCompat
 
   SCHEMA = 'clear.fn.compat.v1'
 
-  Target = Struct.new(:name, :ruby_require, :ruby_call, :clear_unit, :clear_call, :arg_types, :result_type, keyword_init: true)
+  Target = Struct.new(:name, :ruby_require, :ruby_call, :clear_unit, :clear_call, :arg_types, :result_type, :prelude, keyword_init: true)
 
   TARGETS = [
     Target.new(
@@ -70,6 +71,26 @@ module FnCompat
       clear_unit: 'backends/zig_type.clear',
       clear_call: 'zigType__integer_identifier?',
       arg_types: %i[zig_name],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'effect_set.to_s',
+      ruby_require: 'compiler/ruby/semantic/effect_set',
+      ruby_call: ->(args) { EffectSet.new(Set.new(args.first)).to_s },
+      clear_unit: 'semantic/effect_set.clear',
+      clear_call: 'TRY (effectSet__to_s(fnCompatEffects))',
+      prelude: '  MUTABLE fnCompatEffects: EffectSet@multiowned = TRY (effectSet__new(%s));',
+      arg_types: %i[effect_set],
+      result_type: :string
+    ),
+    Target.new(
+      name: 'effect_set.empty?',
+      ruby_require: 'compiler/ruby/semantic/effect_set',
+      ruby_call: ->(args) { EffectSet.new(Set.new(args.first)).empty? },
+      clear_unit: 'semantic/effect_set.clear',
+      clear_call: 'effectSet__empty?(fnCompatEffects)',
+      prelude: '  MUTABLE fnCompatEffects: EffectSet@multiowned = TRY (effectSet__new(%s));',
+      arg_types: %i[effect_set],
       result_type: :bool
     ),
     Target.new(
@@ -135,6 +156,7 @@ module FnCompat
     opt_symbol: [nil, :heap, :frame, :stack, :rodata, :borrow, :none],
     symbol: %i[heap frame],
     carrier: %i[plain multiowned shared],
+    effect_set: [[], [:yield], [:io, :yield], [:alloc_heap, :fail, :io, :yield], [:fail]],
     zig_name: ['u8', 'i64', 'f32', 'f0', 'u', 'i', 'f', 'usize', 'fn', 'var', 'const', 'anytype',
                'x64', 'u8x', 'i128', 'f64', 'bool', 'struct', 'Type', ''],
     bool: [true, false]
@@ -152,7 +174,7 @@ module FnCompat
       parser.on('-h', '--help') { puts parser; exit 0 }
     end.parse!(argv)
 
-    targets = TARGETS.reject { |t| t.clear_unit == 'mir/placement.clear' }
+    targets = TARGETS.reject { |t| ['mir/placement.clear', 'semantic/effect_set.clear'].include?(t.clear_unit) }
     targets = TARGETS.select { |t| t.name == options[:only] } if options[:only]
     abort 'fn_compat: no targets selected' if targets.empty?
     FileUtils.mkdir_p(options[:out_dir])
@@ -236,6 +258,7 @@ module FnCompat
 
   def encode_scalar(value)
     case value
+    when Array        then "[#{value.map { |v| encode_scalar(v) }.join(',')}]"
     when nil          then 'nil'
     when true, false  then value.to_s
     when Symbol       then ":#{value}"
@@ -246,6 +269,13 @@ module FnCompat
   end
 
   def clear_literal(encoded)
+    if encoded.start_with?('[')
+      inner = encoded[1..-2].to_s
+      members = inner.empty? ? [] : inner.split(',')
+      return 'fnCompatEmptySet()' if members.empty?
+
+      return "Set[#{members.map { |m| clear_literal(m) }.join(', ')}]"
+    end
     return 'NIL' if encoded == 'nil'
     return encoded.upcase if %w[true false].include?(encoded)
     return "symbol(\"#{encoded[1..]}\")" if encoded.start_with?(':')
@@ -268,13 +298,27 @@ module FnCompat
     body = targets.flat_map do |target|
       by_name.fetch(target.name, []).each_with_index.map do |call, index|
         args = call['args'].map { |a| clear_literal(a) }.join(', ')
-        value = clear_render("#{target.clear_call}(#{args})", target.result_type)
-        "  print(\"#{target.name}|#{index}|\" $+ #{value});"
+        binding_name = "fnCompatArg#{index}"
+        expr = if target.prelude
+                 target.clear_call.gsub('fnCompatEffects', binding_name)
+               elsif target.clear_call.include?('%s')
+                 format(target.clear_call, args)
+               else
+                 "#{target.clear_call}(#{args})"
+               end
+        value = clear_render(expr, target.result_type)
+        [target.prelude ? format(target.prelude, args).gsub('fnCompatEffects', binding_name) : nil,
+         "  print(\"#{target.name}|#{index}|\" $+ #{value});"].compact.join("\n")
       end
     end.join("\n")
 
     <<~CLEAR
       #{requires}
+
+      PRIVATE FN fnCompatEmptySet() RETURNS [Set]String@symbol ->
+        MUTABLE empty: [Set]String@symbol = Set[];
+        RETURN empty;
+      END
 
       FN main() RETURNS !Void ->
       #{body}
