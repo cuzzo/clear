@@ -1231,9 +1231,13 @@ module MIRHoistLowering
         next
       end
       if mir_produces_owned_result?(child)
+        # `result_children` are the sources of THIS expression's owned result.
+        # When the parent hands its result on (a break/return value), the child
+        # hands the same buffer on with it, so a plain cleanup on the child
+        # frees what the parent's receiver also frees.
         owned_prefix, owned_normalized = normalize_allocating_used_expr(
           child,
-          transfer_on_success: consumes_owned_children?(expr),
+          transfer_on_success: transfer_on_success || consumes_owned_children?(expr),
         )
         replace_mir_expr_child!(expr, child, owned_normalized)
         prefix.concat(owned_prefix)
@@ -1263,6 +1267,25 @@ module MIRHoistLowering
     prefix
   end
 
+  # The hoisted temps whose buffers left with a parent's owned result. Their
+  # allocator comes from the AllocMark the same hoist emitted, so the checker
+  # can prove where ownership went.
+  sig { params(prefix: T::Array[MIR::Node], sources: T::Array[MIR::Ident]).returns(T::Array[MIR::Node]) }
+  def transferred_result_source_marks(prefix, sources)
+    return [] if sources.empty?
+
+    allocs = prefix.each_with_object({}) do |stmt, out|
+      out[stmt.name.to_s] = stmt.alloc if stmt.is_a?(MIR::AllocMark)
+    end
+    sources.flat_map do |source|
+      name = source.name.to_s
+      alloc = allocs[name]
+      next [] unless alloc
+
+      MIR.ownership_transfer_marks(name, :owned_sink, target_alloc: alloc, move_guarded: true)
+    end
+  end
+
   sig { params(expr: MIR::Node, transfer_on_success: T::Boolean).returns([T::Array[MIR::Node], MIR::Node]) }
   def normalize_allocating_used_expr(expr, transfer_on_success: false)
     prefix = T.let([], T::Array[MIR::Node])
@@ -1287,6 +1310,7 @@ module MIRHoistLowering
       nested = normalize_allocating_result_expr!(expr, transfer_on_success: transfer_on_success)
       prefix.concat(nested)
       return [prefix, expr] if normalized_alloc_wrapper_alias?(expr)
+      result_sources = transfer_on_success ? expr.ownership_source_exprs.grep(MIR::Ident) : []
       hoisted, ident = hoist_normalized_alloc_expr(
         expr,
         transfer_on_success: transfer_on_success,
@@ -1294,6 +1318,9 @@ module MIRHoistLowering
         cleanup_entry: cleanup_entry,
       )
       prefix.concat(hoisted)
+      # The mark has to follow the parent's hoist: that hoist is the read of
+      # the child, and a transfer recorded before it reads a moved binding.
+      prefix.concat(transferred_result_source_marks(prefix, result_sources))
       return [prefix, ident]
     end
 
