@@ -847,7 +847,7 @@ FN mIREmitter__sharded_map_template(self: MIREmitter, node: MIREmitterShardedMap
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE op: FunctionSignature = NIL;
+    MUTABLE op: ?FunctionSignature@multiowned = NIL;
     MATCH node START
       MIREmitterShardedMapNode.ShardedMapPut AS item ->
         op = COPY item.stdlib_def;,
@@ -855,11 +855,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         op = COPY item.stdlib_def;,
     END
     MUTABLE kind = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.template_kind, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.template_kind END);
-    IF TRY (functionSignature__intrinsic_template(&op, kind)) != NIL THEN
-    RETURN TRY (functionSignature__intrinsic_template(&op, kind));
-    ELSE
-    panic("ShardedMap: op has no :{} template (contract={})");
+    MUTABLE op_value: FunctionSignature = COPY UNWRAP (op);
+    IF (TRY (functionSignature__intrinsic_template(&op_value, kind))) EXISTS AS template THEN
+      RETURN COPY template;
     END
+    panic("ShardedMap: op has no :{} template (contract={})");
 }
 END
 FN mIREmitter__sharded_map_substitute_common(MUTABLE self: MIREmitter, pattern_input: String, node: MIREmitterShardedMapNode) RETURNS !String
