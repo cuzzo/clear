@@ -1058,7 +1058,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE alloc_expr = TRY (mIREmitter__alloc_zig(rtoc_self_view, alloc_kind_value));
       &init_fields.append(".alloc = ${alloc_expr}");
     END
-    MUTABLE f_needed = !(!((((((((IF receiver_code != NIL THEN receiver_code ELSE node.alloc_kind END) OR (runtime_arg_codes |> ANY _))) OR !(returns_void))) OR can_fail))));
+    MUTABLE f_needed = ((((receiver_code EXISTS) OR (node.alloc_kind EXISTS)) OR (runtime_arg_codes.length() > 0)) OR (!(returns_void) OR can_fail));
     MUTABLE f_binding: String = "";
     IF f_needed THEN
       f_binding = "const f: *@This() = @ptrCast(@alignCast(ptr));";
