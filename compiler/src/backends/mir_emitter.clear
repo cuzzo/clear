@@ -847,14 +847,8 @@ FN mIREmitter__sharded_map_template(self: MIREmitter, node: MIREmitterShardedMap
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE op: ?FunctionSignature@multiowned = NIL;
-    MATCH node START
-      MIREmitterShardedMapNode.ShardedMapPut AS item ->
-        op = COPY item.stdlib_def;,
-      MIREmitterShardedMapNode.ShardedMapGet AS item ->
-        op = COPY item.stdlib_def;,
-    END
-    MUTABLE kind = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.template_kind, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.template_kind END);
+    MUTABLE op: ?FunctionSignature@multiowned = KEEP mIREmitter__sharded_map_stdlib_def(node);
+    MUTABLE kind = mIREmitter__sharded_map_template_kind(node);
     MUTABLE op_value: FunctionSignature = COPY UNWRAP (op);
     IF (TRY (functionSignature__intrinsic_template(&op_value, kind))) EXISTS AS template THEN
       PARTIAL MATCH template START
@@ -874,15 +868,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END) THEN
       pattern = (pattern.replace("{shard_idx}", TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END))))).replace("{shard_key}", TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_key, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_key END))));
     END
-    MUTABLE key_type: ?Type = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> COPY item.key_type, MIREmitterShardedMapNode.ShardedMapGet AS item -> COPY item.key_type END);
+    MUTABLE key_type: ?Type = mIREmitter__sharded_map_key_type(node);
     IF key_type EXISTS AS key_type_value THEN
       pattern = pattern.replace("{key_zig}", TRY (type__zig_type(key_type_value)));
     END
-    MUTABLE value_type: ?Type = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> COPY item.value_type, MIREmitterShardedMapNode.ShardedMapGet AS item -> COPY item.value_type END);
+    MUTABLE value_type: ?Type = mIREmitter__sharded_map_value_type(node);
     IF value_type EXISTS AS value_type_value THEN
       pattern = pattern.replace("{val_zig}", TRY (type__zig_type(value_type_value)));
     END
-    MUTABLE rtoc_local_receiver_7 = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.resolved_allocs, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.resolved_allocs END);
+    MUTABLE rtoc_local_receiver_7 = mIREmitter__sharded_map_resolved_allocs(node);
     inlineAllocMetadata__each(rtoc_local_receiver_7, %(alloc_key: String@symbol, sym: String@symbol) USE(MUTABLE pattern, rtoc_self_view) -> {
     pattern = pattern.replace("{${alloc_key}}", TRY (mIREmitter__alloc_zig(rtoc_self_view, sym)));
     rubyToClearVoid()
@@ -1386,6 +1380,41 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     RETURN parts.join("\n");
 }
+END
+PRIVATE FN mIREmitter__sharded_map_key_type(node: MIREmitterShardedMapNode) RETURNS ?Type ->
+  PARTIAL MATCH node START
+    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN COPY item.key_type;,
+    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN COPY item.key_type;
+  END
+  RETURN NIL;
+END
+PRIVATE FN mIREmitter__sharded_map_value_type(node: MIREmitterShardedMapNode) RETURNS ?Type ->
+  PARTIAL MATCH node START
+    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN COPY item.value_type;,
+    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN COPY item.value_type;
+  END
+  RETURN NIL;
+END
+PRIVATE FN mIREmitter__sharded_map_resolved_allocs(node: MIREmitterShardedMapNode) RETURNS InlineAllocMetadata ->
+  PARTIAL MATCH node START
+    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN COPY item.resolved_allocs;,
+    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN COPY item.resolved_allocs;
+  END
+  panic("unreachable sharded map node");
+END
+PRIVATE FN mIREmitter__sharded_map_template_kind(node: MIREmitterShardedMapNode) RETURNS IntrinsicTemplateKind ->
+  PARTIAL MATCH node START
+    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN COPY item.template_kind;,
+    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN COPY item.template_kind;
+  END
+  panic("unreachable sharded map node");
+END
+PRIVATE FN mIREmitter__sharded_map_stdlib_def(node: MIREmitterShardedMapNode) RETURNS ?FunctionSignature@multiowned ->
+  PARTIAL MATCH node START
+    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN KEEP item.stdlib_def;,
+    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN KEEP item.stdlib_def;
+  END
+  RETURN NIL;
 END
 PRIVATE FN mIREmitter__emit_capability_unwrap(MUTABLE self: MIREmitter, node: CapabilityUnwrap) RETURNS !String
   REQUIRES self: LOCAL
