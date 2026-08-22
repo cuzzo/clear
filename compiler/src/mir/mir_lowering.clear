@@ -11387,11 +11387,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         decl_branch_value = NIL;
       END
       MUTABLE decl: ?SymbolEntryRegInput = decl_branch_value;
-      MUTABLE mapped: ?String = IF decl != NIL THEN
-        (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[decl.object_id()]
-      ELSE
-        NIL
-      END;
+      MUTABLE mapped: ?String = NIL;
+      IF decl EXISTS THEN
+        mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[decl.object_id()];
+      END
       RETURN (((IF mIRLowering__capture_state(rtoc_self_view).do_capture_map != NIL THEN
         (mIRLowering__capture_state(rtoc_self_view).do_capture_map)[var_name]
       ELSE
@@ -12649,11 +12648,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF sym != NIL THEN
           decl = COPY UNWRAP (sym).reg;
         END
-    MUTABLE mapped: ?String = IF decl != NIL THEN
-          (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[decl.object_id()]
-        ELSE
-          NIL
-        END;
+    MUTABLE mapped: ?String = NIL;
+        IF decl EXISTS THEN
+          mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[decl.object_id()];
+        END
     IF mapped EXISTS AS mapped_value THEN
           out[rtoc_key] = (out[rtoc_key] OR_ELSE mapped_value);
     END

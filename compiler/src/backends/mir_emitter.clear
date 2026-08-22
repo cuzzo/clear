@@ -638,11 +638,10 @@ FN mIREmitter__emit_capture_cleanup_actions(MUTABLE self: MIREmitter, actions: [
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (actions |> SELECT {
-    MUTABLE allocator: ?String = IF _.allocator != NIL THEN
-        TRY (mIREmitter__emit(&rtoc_self_view, (_.allocator)?))
-      ELSE
-        NIL
-      END;
+    MUTABLE allocator: ?String = NIL;
+      IF _.allocator EXISTS THEN
+        allocator = TRY (mIREmitter__emit(&rtoc_self_view, (_.allocator)?));
+      END
     "defer ${TRY (mIREmitter__emit_direct_cleanup(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, _.target)), KEEP _.cleanup_entry, allocator))}"
     }).join("\n");
 }
@@ -993,11 +992,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       arg_tuple = ".{ ${runtime_arg_codes.join(", ")} }";
     END
-    MUTABLE receiver_code: ?String = IF node.receiver != NIL THEN
-      TRY (mIREmitter__emit(&rtoc_self_view, (node.receiver)?))
-    ELSE
-      NIL
-    END;
+    MUTABLE receiver_code: ?String = NIL;
+    IF node.receiver EXISTS THEN
+      receiver_code = TRY (mIREmitter__emit(&rtoc_self_view, (node.receiver)?));
+    END
     MUTABLE fields: []String = ( { MUTABLE rtoc_empty_list_8: []String = List[]; rtoc_empty_list_8 } );
     IF receiver_code EXISTS AS receiver_code_value THEN
       &fields.append("self_val: @TypeOf(${receiver_code_value})");
@@ -2181,11 +2179,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ret = node.ret_type;
     END
     MUTABLE runtime_param: ?MIRParam = node.params |> FIND (_.zig_type == "*Runtime");
-    MUTABLE cache_name: ?String = IF runtime_param != NIL THEN
-      mIREmitter__unique_heap_allocator_cache_name(rtoc_self_view)
-    ELSE
-      NIL
-    END;
+    MUTABLE cache_name: ?String = NIL;
+    IF runtime_param EXISTS THEN
+      cache_name = mIREmitter__unique_heap_allocator_cache_name(rtoc_self_view);
+    END
     MUTABLE body = mIREmitter__with_heap_allocator_cache(&rtoc_self_view, cache_name, runtime_param?.name, %() USE(node, runtime_param, MUTABLE rtoc_self_view) -> {
     IF runtime_param THEN
       RETURN TRY (mIREmitter__emit_body_with_runtime(&rtoc_self_view, node.body, runtime_param.name));
@@ -3341,11 +3338,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF src.startsWith?("@panic(") THEN
       RETURN src;
     END
-    MUTABLE alloc: ?String = IF node.alloc != NIL THEN
-      TRY (mIREmitter__alloc_expr(&rtoc_self_view, Alloc{ SymbolValue: COPY symbol(UNWRAP ((node.alloc)?)) }))
-    ELSE
-      NIL
-    END;
+    MUTABLE alloc: ?String = NIL;
+    IF node.alloc EXISTS THEN
+      alloc = TRY (mIREmitter__alloc_expr(&rtoc_self_view, Alloc{ SymbolValue: COPY symbol(UNWRAP ((node.alloc)?)) }));
+    END
     rtoc_self_view.deep_copy_counter = (rtoc_self_view.deep_copy_counter + 1);
     MUTABLE bc = "blk_copy_${rtoc_self_view.deep_copy_counter.toString()}";
     IF (node.strategy == :passthrough) THEN

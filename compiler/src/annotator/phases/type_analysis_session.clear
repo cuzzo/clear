@@ -1824,11 +1824,10 @@ PRIVATE FN typeAnalysisSession__emit_use_of_moved_in_loop_error_mut(self: TypeAn
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE loop_move_line: ?Int64 = og_node?.move_line;
-    MUTABLE consumer: ?String = IF loop_move_line != NIL THEN
-      typeAnalysisSession__consumer_source_text(rtoc_self_view, loop_move_line)
-    ELSE
-      NIL
-    END;
+    MUTABLE consumer: ?String = NIL;
+    IF loop_move_line EXISTS THEN
+      consumer = typeAnalysisSession__consumer_source_text(rtoc_self_view, loop_move_line);
+    END
     MUTABLE consumer_clause: String = "";
     IF consumer EXISTS AS consumer_value THEN
       consumer_clause = "`${consumer_value}` already TOOK it. ";
