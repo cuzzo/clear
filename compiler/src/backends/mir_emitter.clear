@@ -784,22 +784,31 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE facts_body = ((facts_cases + ["@compileError(\"No ${node.protocol} conformance for \" ++ @typeName(T));"])).join("\n    ");
     MUTABLE facts = "fn ${facts_name}(comptime T: type) type {\n    ${facts_body}\n}";
-    MUTABLE operations = node.requirements |> SELECT {
-    MUTABLE params = (1 ..< _.argument_count) |> SELECT "arg${_.toString()}: anytype";
-    MUTABLE all_params = (["comptime T: type", "rt: *Runtime", "self: anytype"] + params);
-    MUTABLE branches = node.conformances |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE target: ?String = COPY _.operations[_.name]; (IF !(target) THEN NIL ELSE mIREmitter__protocol_conformance_branch(rtoc_self_view, _, %(bindings: String) USE(target, _) -> {
-      MUTABLE type_args = COPY _.type_params;
-      MUTABLE call_args = ((type_args + ["rt", "self"]) + ((1 ..< _.argument_count) |> SELECT "arg${_}"));
-      "${bindings}return ${target}(${call_args.join(", ")});"
-    }) END) } |> WHERE _ != NIL;
-    MUTABLE suppressions =   IF (branches.length() == 0) THEN
-        ((["rt", "self"] + ((1 ..< _.argument_count) |> SELECT "arg${_}"))) |> SELECT "_ = ${_};"
-      ELSE
-        List[]
-      END;
-    MUTABLE body = (((suppressions + branches) + ["@compileError(\"No ${node.protocol}.${_.name} conformance for \" ++ @typeName(T));"])).join("\n    ");
-    "fn __clearProtocol_${node.protocol}_${mIREmitter__protocol_zig_name(rtoc_self_view, _.name)}(${all_params.join(", ")}) ${_.return_type} {\n    ${body}\n}"
-    };
+    MUTABLE operations: []String = List[];
+    FOR requirement IN node.requirements DO
+      MUTABLE params: []String = List[];
+      MUTABLE arg_names: []String = List[];
+      MUTABLE arg_index = 1;
+      WHILE arg_index < requirement.argument_count DO
+        &params.append("arg${arg_index.toString()}: anytype");
+        &arg_names.append("arg${arg_index.toString()}");
+        arg_index = arg_index + 1;
+      END
+      MUTABLE all_params: []String = (["comptime T: type", "rt: *Runtime", "self: anytype"] + params);
+      MUTABLE branches: []String = List[];
+      FOR conformance IN node.conformances DO
+        IF conformance.operations[requirement.name] EXISTS AS target THEN
+          MUTABLE call_args: []String = ((COPY conformance.type_params + ["rt", "self"]) + arg_names);
+          &branches.append(mIREmitter__protocol_conformance_branch(rtoc_self_view, conformance, %(bindings: String) USE(target, call_args) -> "${bindings}return ${target}(${call_args.join(", ")});"));
+        END
+      END
+      MUTABLE suppressions: []String = List[];
+      IF (branches.length() == 0) THEN
+        suppressions = (["rt", "self"] + arg_names) |> SELECT "_ = ${_};";
+      END
+      MUTABLE body: String = (((suppressions + branches) + ["@compileError(\"No ${node.protocol}.${requirement.name} conformance for \" ++ @typeName(T));"])).join("\n    ");
+      &operations.append("fn __clearProtocol_${node.protocol}_${mIREmitter__protocol_zig_name(rtoc_self_view, requirement.name)}(${all_params.join(", ")}) ${requirement.return_type} {\n    ${body}\n}");
+    END
     RETURN (([facts] + operations)).join("\n\n");
 }
 END
