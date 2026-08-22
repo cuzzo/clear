@@ -67,7 +67,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN marker;
 }
 END
-PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, ast: Program) RETURNS !Void
+PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, MUTABLE ast: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -285,7 +285,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN frozenCleanupFacts__without_names(facts, captures.keys() |> SELECT _.toString());
 }
 END
-PRIVATE FN mIRPass__mark_consumed_cleanup_guards_mut(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !?[Set]String
+PRIVATE FN mIRPass__mark_consumed_cleanup_guards_mut(self: MIRPass, MUTABLE stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !?[Set]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -295,7 +295,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIRPass__collect_consumed_names(rtoc_self_view, stmt, facts));
 }
 END
-PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS ![Set]String
+PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, MUTABLE stmt: Locatable, facts: FrozenCleanupFacts) RETURNS ![Set]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -540,7 +540,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRPass__new();
 }
 END
-PRIVATE FN mIRPass__stamp_match_as_cleanup_mut(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !Void
+PRIVATE FN mIRPass__stamp_match_as_cleanup_mut(self: MIRPass, MUTABLE stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -704,7 +704,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRPass__insert_return_mut(self: MIRPass, result: []Locatable, ret_node: ReturnNode, facts: FrozenCleanupFacts, fn_node: ?FunctionDef = NIL) RETURNS Void
+PRIVATE FN mIRPass__insert_return_mut(self: MIRPass, MUTABLE result: []Locatable, ret_node: ReturnNode, facts: FrozenCleanupFacts, fn_node: ?FunctionDef = NIL) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

@@ -554,7 +554,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Result{ resolved: COPY resolved, ambiguous: COPY ambiguous, unresolved: COPY unresolved };
 }
 END
-PRIVATE FN autoUnifier__collect_observed_types(self: AutoUnifier, slot: Slot) RETURNS ![]AutoConstraintCollectorObservedType
+PRIVATE FN autoUnifier__collect_observed_types(self: AutoUnifier, MUTABLE slot: Slot) RETURNS ![]AutoConstraintCollectorObservedType
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

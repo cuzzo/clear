@@ -279,7 +279,7 @@ PUB FN typeExpressionTree__linear_item_envelope(expression: TypeExpression) RETU
     RETURN NIL;
   END
 END
-PUB FN typeExpressionTree__with_nominal_arguments(expression: TypeExpression, name: String@symbol, arguments: []TypeExpression) RETURNS TypeExpression EFFECTS REENTRANT ->
+PUB FN typeExpressionTree__with_nominal_arguments(expression: TypeExpression, name: String@symbol, MUTABLE arguments: []TypeExpression) RETURNS TypeExpression EFFECTS REENTRANT ->
   MUTABLE kind = COPY expression.kind;
   MUTABLE cap = COPY expression.capabilities;
   IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN

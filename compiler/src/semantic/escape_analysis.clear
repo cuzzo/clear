@@ -542,7 +542,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN keptEdgeLiveness__index_node(MUTABLE self: KeptEdgeLiveness, node: Locatable, loop_depth: Int64) RETURNS Void
+PRIVATE FN keptEdgeLiveness__index_node(MUTABLE self: KeptEdgeLiveness, MUTABLE node: Locatable, loop_depth: Int64) RETURNS Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -573,12 +573,12 @@ PUB FN keptEdgeLiveness__new(body: []Locatable) RETURNS KeptEdgeLiveness@multiow
   keptEdgeLiveness__initialize(&self, body);
   RETURN self @multiowned;
 END
-PUB FN escapeAnalysis__restamp_promoted_uses_mut(body: []Locatable, name: String, entry: SymbolEntry) RETURNS !Void ->
+PUB FN escapeAnalysis__restamp_promoted_uses_mut(body: []Locatable, name: String, MUTABLE entry: SymbolEntry) RETURNS !Void ->
   FOR _ IN body DO
   TRY (escapeAnalysis__restamp_promoted_uses_in_node_mut(_, name, entry));
   END
 END
-PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: String, entry: SymbolEntry) RETURNS !Void EFFECTS REENTRANT ->
+PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: String, MUTABLE entry: SymbolEntry) RETURNS !Void EFFECTS REENTRANT ->
   IF node IS_A FunctionDef AS function_def THEN
     RETURN;
   END
@@ -624,7 +624,7 @@ PUB FN escapeAnalysis__param_accepts_caller_sync?(fn_node: FunctionDef, param: P
   MUTABLE families = (TRUE AND requires[param.name]);
   RETURN (families.contains?(:ATOMIC) OR families.contains?(:SNAPSHOTTED));
 END
-PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, bg_heap: [Set]String, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
+PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, MUTABLE bg_heap: [Set]String, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE context = EscapeContext{ fn: facts.fn, facts: COPY facts, fn_nodes: COPY fn_nodes, facts_by_name: COPY facts_by_name, bg_heap: COPY bg_heap, schema_lookup: schema_lookup };
   FOR _ IN facts.escape_nodes DO
   FOR _ IN escape_sinks DO
@@ -634,7 +634,7 @@ PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {St
   END
   END
 END
-PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, context: EscapeContext) RETURNS !Void ->
+PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, MUTABLE node: Locatable, context: EscapeContext) RETURNS !Void ->
   IF (sink.handler == symbol("apply_return_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_return_escape_sink_mut(castLocatableToReturnNode(node), context));
   ELSE_IF (sink.handler == symbol("apply_assignment_escape_sink!")) THEN
@@ -1731,7 +1731,7 @@ PUB FN escapeAnalysis__owning_return_type(fn_value: FunctionDef, MUTABLE expr: L
   MUTABLE declared = functionDef__declared_return_type(fn_value);
   RETURN (declared OR (TRY (aST__full_type_mut(expr))));
 END
-PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatable) RETURNS !Void ->
+PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, MUTABLE expr: Locatable) RETURNS !Void ->
   MUTABLE fn = COPY facts.fn;
   IF !(fn.return_lifetime.empty?()) THEN
     RETURN;
@@ -1772,7 +1772,7 @@ PUB FN escapeAnalysis__returned_call_result?(expr: Locatable) RETURNS Bool ->
   END
   RETURN !(!(((node IS_A Locatable AND aST__call?(node)))));
 END
-PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, names: [Set]String) RETURNS Void ->
+PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, MUTABLE names: [Set]String) RETURNS Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < names.length() DO
     MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[names[rtoc_idx]];

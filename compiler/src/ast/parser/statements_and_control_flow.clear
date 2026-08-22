@@ -98,7 +98,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN DeferStmt{ token: COPY token, body: body, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-PRIVATE FN clearParser__reject_defer_control_flow_mut(self: ClearParser, token: Token, body: []Locatable) RETURNS !Void
+PRIVATE FN clearParser__reject_defer_control_flow_mut(self: ClearParser, token: Token, MUTABLE body: []Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -789,7 +789,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ParsedMatchArm{ kind: :eq, value: COPY first_pattern, extra_values: COPY extra_patterns, binding: COPY binding, destructure: COPY destructure };
 }
 END
-PRIVATE FN clearParser__build_match_case(self: ClearParser, arm: ParsedMatchArm, body: []Locatable) RETURNS MatchCase
+PRIVATE FN clearParser__build_match_case(self: ClearParser, arm: ParsedMatchArm, MUTABLE body: []Locatable) RETURNS MatchCase
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

@@ -119,7 +119,7 @@ PRIVATE FN liveness__tail_targets(seg: Segment) RETURNS ![]Int64 ->
     END
   END
 END
-PRIVATE FN liveness__collect_tail_uses(seg: Segment, uses_by_seg: {Int64}[Set]String) RETURNS Void ->
+PRIVATE FN liveness__collect_tail_uses(seg: Segment, MUTABLE uses_by_seg: {Int64}[Set]String) RETURNS Void ->
   MUTABLE tail = seg.tail;
   IF (tail IS_A IoSuspend) THEN
     MUTABLE next_idx = (seg.index + 1);

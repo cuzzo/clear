@@ -9,11 +9,11 @@ REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172"
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
-EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, MUTABLE replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 FN lifecyclePlanRegexMatch?(subject: String, pattern: String) RETURNS Bool ->
   RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
 END
-FN regexReplaceFirst(subject: String, pattern: String, replacement: String) RETURNS String ->
+FN regexReplaceFirst(subject: String, pattern: String, MUTABLE replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceFirst(subject, compilerRegexCompile(pattern), replacement);
 END
 
@@ -471,7 +471,7 @@ FN lifecycleRegistry__add_monomorphic_carrier_plans_mut(MUTABLE plans: {String}L
   rubyToClearVoid()
   });
 END
-FN lifecycleRegistry__initialize(MUTABLE self: LifecycleRegistry, plans: {String}LifecyclePlan, binding_plans: {Int64}LifecyclePlan) RETURNS Void
+FN lifecycleRegistry__initialize(MUTABLE self: LifecycleRegistry, MUTABLE plans: {String}LifecyclePlan, binding_plans: {Int64}LifecyclePlan) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -619,7 +619,7 @@ PRIVATE FN lifecycleRegistry__add_declaration_types_mut(MUTABLE types: {String}T
   rubyToClearVoid()
   });
 END
-PRIVATE FN lifecycleRegistry__expand_schema_fields_mut(MUTABLE types: {String}Type, pending: []Type, owner: Type, fields: {String}StructField, type_params: []String@symbol) RETURNS ![]Type EFFECTS REENTRANT ->
+PRIVATE FN lifecycleRegistry__expand_schema_fields_mut(MUTABLE types: {String}Type, MUTABLE pending: []Type, owner: Type, fields: {String}StructField, type_params: []String@symbol) RETURNS ![]Type EFFECTS REENTRANT ->
   MUTABLE grown: []Type = COPY pending;
   FOR field IN fields.values() DO
     MUTABLE concrete = TRY (lifecycleRegistry__concrete_schema_type(owner, TypeTypeInput{ Type: COPY field.type }, type_params));

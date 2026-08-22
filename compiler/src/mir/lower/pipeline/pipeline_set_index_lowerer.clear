@@ -38,7 +38,7 @@ PUB STRUCT PipelineSetIndexLowerer {
   index_temp_name: FN() -> String
 }
 
-PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, list_node: Locatable, MUTABLE smooth_node: BinaryOp, distinct_node: DistinctOp) RETURNS !MIRBlockExpr ->
+PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, MUTABLE list_node: Locatable, MUTABLE smooth_node: BinaryOp, distinct_node: DistinctOp) RETURNS !MIRBlockExpr ->
   IF smooth_node.observable_dest THEN
     MUTABLE observable: ?MIRBlockExpr = pipelineSetIndexLowerer__lower_observable_distinct(self, list_node, smooth_node, distinct_node);
     IF observable EXISTS AS observable_value THEN
@@ -61,7 +61,7 @@ PUB FN pipelineSetIndexLowerer__lower_distinct(self: PipelineSetIndexLowerer, li
   rtoc_lambda_result_1
   });
 END
-PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTABLE list_node: Locatable, smooth_node: BinaryOp, expr_node: Locatable) RETURNS !MIRBlockExpr ->
+PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTABLE list_node: Locatable, MUTABLE smooth_node: BinaryOp, expr_node: Locatable) RETURNS !MIRBlockExpr ->
   MUTABLE elem_zig: String = "";
   MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE alloc = pipelineSetIndexLowerer__pipeline_alloc_call(self, smooth_node);
@@ -82,7 +82,7 @@ PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTAB
   rtoc_lambda_result_2
   });
 END
-PRIVATE FN pipelineSetIndexLowerer__lower_observable_distinct(self: PipelineSetIndexLowerer, list_node: Locatable, smooth_node: BinaryOp, distinct_node: DistinctOp) RETURNS ?MIRBlockExpr ->
+PRIVATE FN pipelineSetIndexLowerer__lower_observable_distinct(self: PipelineSetIndexLowerer, MUTABLE list_node: Locatable, MUTABLE smooth_node: BinaryOp, distinct_node: DistinctOp) RETURNS ?MIRBlockExpr ->
   MUTABLE range_chain: ?PipelineRangeChain = pipelineSetIndexLowerer__range_chain_call(self, list_node);
   IF range_chain EXISTS AS range_chain_value THEN
     MUTABLE prefix = pipelineSetIndexLowerer__lazy_range_prefix_call(self, range_chain_value.source, range_chain_value.stages, NIL, TRUE);

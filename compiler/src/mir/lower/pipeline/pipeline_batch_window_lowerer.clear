@@ -55,7 +55,7 @@ PRIVATE FN pipelineBatchWindowLowerer__lower_source_plan(self: PipelineBatchWind
     panic("batch window: unsupported source kind");
   END
 END
-PRIVATE FN pipelineBatchWindowLowerer__source_kind_for(self: PipelineBatchWindowLowerer, list_node: Locatable, lhs_type: Type) RETURNS !PipelineBatchWindowSourceKind ->
+PRIVATE FN pipelineBatchWindowLowerer__source_kind_for(self: PipelineBatchWindowLowerer, MUTABLE list_node: Locatable, lhs_type: Type) RETURNS !PipelineBatchWindowSourceKind ->
   IF pipelineBatchWindowLowerer__bc_target_call(self) THEN
     IF (IF list_node IS_A Identifier AS identifier THEN TRY (type__inf_stream?(lhs_type)) ELSE FALSE END) THEN
       RETURN PipelineBatchWindowSourceKind.BcInfiniteStream;

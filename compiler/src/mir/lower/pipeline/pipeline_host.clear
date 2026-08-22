@@ -402,7 +402,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN block;
 }
 END
-PUB FN pipelineHost__visit(self: PipelineHost, node: Locatable) RETURNS !PipelineHostReturnValue
+PUB FN pipelineHost__visit(self: PipelineHost, MUTABLE node: Locatable) RETURNS !PipelineHostReturnValue
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -435,7 +435,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PipelineHostReturnValue{ StringValue: COPY UNWRAP (pipelineLoweringBridge__emit_mir(rtoc_self_view.lowering_bridge, mir_node)) };
 }
 END
-PUB FN pipelineHost__visit_mir(self: PipelineHost, node: Locatable) RETURNS !Emittable
+PUB FN pipelineHost__visit_mir(self: PipelineHost, MUTABLE node: Locatable) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -443,7 +443,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelineLoweringBridge__lower_node(rtoc_self_view.lowering_bridge, substituted);
 }
 END
-PUB FN pipelineHost__visit_mir_head(self: PipelineHost, node: Locatable) RETURNS !PipelineElementHead
+PUB FN pipelineHost__visit_mir_head(self: PipelineHost, MUTABLE node: Locatable) RETURNS !PipelineElementHead
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -478,7 +478,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelinePlaceholderUsage__node_uses_placeholder?(node);
 }
 END
-PRIVATE FN pipelineHost__substitute_placeholders(self: PipelineHost, node: Locatable) RETURNS !Locatable
+PRIVATE FN pipelineHost__substitute_placeholders(self: PipelineHost, MUTABLE node: Locatable) RETURNS !Locatable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -619,7 +619,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN pipelineHost__lower_stream_select(MUTABLE self: PipelineHost, site: PipelineSite, op: SelectOp) RETURNS !MIRBgBlock
+PRIVATE FN pipelineHost__lower_stream_select(MUTABLE self: PipelineHost, MUTABLE site: PipelineSite, op: SelectOp) RETURNS !MIRBgBlock
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -845,7 +845,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineMaterializer__concurrent_source_setup(&rtoc_self_view.materializer, &lhs));
 }
 END
-PRIVATE FN pipelineHost__visit_pipeline_expr_mir(MUTABLE self: PipelineHost, list_node: Locatable, expr_node: Locatable, placeholder: String = "it") RETURNS !Emittable
+PRIVATE FN pipelineHost__visit_pipeline_expr_mir(MUTABLE self: PipelineHost, MUTABLE list_node: Locatable, expr_node: Locatable, placeholder: String = "it") RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -859,7 +859,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelinePlaceholderUsage__node_uses_bare_placeholder?(node);
 }
 END
-PRIVATE FN pipelineHost__lower_soa_scalar_fold(MUTABLE self: PipelineHost, site: PipelineSite, fold_node: PipelineMaterializedScalarOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_soa_scalar_fold(MUTABLE self: PipelineHost, MUTABLE site: PipelineSite, fold_node: PipelineMaterializedScalarOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -879,7 +879,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (pipelineHost__build_soa_scalar_fold_block(rtoc_self_view, site, fold_node, label, source_mir, UNWRAP (expr_mir), fields, needs_whole_item));
 }
 END
-PRIVATE FN pipelineHost__build_soa_scalar_fold_block(self: PipelineHost, site: PipelineSite, fold_node: PipelineMaterializedScalarOp, label: String, source_mir: Emittable, expr_mir: Emittable, fields: []String, needs_whole_item: Bool) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__build_soa_scalar_fold_block(self: PipelineHost, MUTABLE site: PipelineSite, fold_node: PipelineMaterializedScalarOp, label: String, source_mir: Emittable, expr_mir: Emittable, fields: []String, needs_whole_item: Bool) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -950,63 +950,63 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN MIRBlockExpr{ label: COPY label, body: COPY (pre_loop + init_stmts + [Emittable{ ForStmt: COPY ForStmt{ iter: Emittable{ IterRange: COPY iter_expr }, capture: "__soa_i", body: COPY (loop_prefix + loop_body), index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY final_expr, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 }
 END
-PRIVATE FN pipelineHost__lower_count(self: PipelineHost, site: PipelineSite, count_node: CountOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_count(self: PipelineHost, MUTABLE site: PipelineSite, count_node: CountOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, site, PipelineMaterializedScalarOp{ CountOpMultiowned: COPY count_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_sum(self: PipelineHost, site: PipelineSite, sum_node: SumOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_sum(self: PipelineHost, MUTABLE site: PipelineSite, sum_node: SumOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, site, PipelineMaterializedScalarOp{ SumOpMultiowned: COPY sum_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_average(self: PipelineHost, site: PipelineSite, avg_node: AverageOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_average(self: PipelineHost, MUTABLE site: PipelineSite, avg_node: AverageOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, site, PipelineMaterializedScalarOp{ AverageOpMultiowned: COPY avg_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_min(self: PipelineHost, site: PipelineSite, min_node: MinOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_min(self: PipelineHost, MUTABLE site: PipelineSite, min_node: MinOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, site, PipelineMaterializedScalarOp{ MinOpMultiowned: COPY min_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_max(self: PipelineHost, site: PipelineSite, max_node: MaxOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_max(self: PipelineHost, MUTABLE site: PipelineSite, max_node: MaxOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, site, PipelineMaterializedScalarOp{ MaxOpMultiowned: COPY max_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_any(self: PipelineHost, site: PipelineSite, any_node: AnyOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_any(self: PipelineHost, MUTABLE site: PipelineSite, any_node: AnyOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, site, PipelineMaterializedScalarOp{ AnyOpMultiowned: COPY any_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_all(self: PipelineHost, site: PipelineSite, all_node: AllOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_all(self: PipelineHost, MUTABLE site: PipelineSite, all_node: AllOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, site, PipelineMaterializedScalarOp{ AllOpMultiowned: COPY all_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_find(self: PipelineHost, site: PipelineSite, find_node: FindOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_find(self: PipelineHost, MUTABLE site: PipelineSite, find_node: FindOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, site, PipelineMaterializedScalarOp{ FindOpMultiowned: COPY find_node }));
 }
 END
-PRIVATE FN pipelineHost__pipeline_alloc(self: PipelineHost, smooth_node: BinaryOp) RETURNS String@symbol
+PRIVATE FN pipelineHost__pipeline_alloc(self: PipelineHost, MUTABLE smooth_node: BinaryOp) RETURNS String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1016,42 +1016,42 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelineHost__pipeline_result_alloc(rtoc_self_view);
 }
 END
-PRIVATE FN pipelineHost__lower_where(self: PipelineHost, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_where(self: PipelineHost, MUTABLE site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower_where_expr(rtoc_self_view.list_lowerer, site, expr_node));
 }
 END
-PRIVATE FN pipelineHost__lower_select(self: PipelineHost, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_select(self: PipelineHost, MUTABLE site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower_select_expr(rtoc_self_view.list_lowerer, site, expr_node));
 }
 END
-PRIVATE FN pipelineHost__lower_limit(self: PipelineHost, site: PipelineSite, limit_node: LimitOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_limit(self: PipelineHost, MUTABLE site: PipelineSite, limit_node: LimitOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, site, PipelineListTerminalOp{ LimitOp: COPY limit_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_take_while(self: PipelineHost, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_take_while(self: PipelineHost, MUTABLE site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower_take_while_expr(rtoc_self_view.list_lowerer, site, expr_node));
 }
 END
-PRIVATE FN pipelineHost__lower_skip(self: PipelineHost, site: PipelineSite, skip_node: SkipOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_skip(self: PipelineHost, MUTABLE site: PipelineSite, skip_node: SkipOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, site, PipelineListTerminalOp{ SkipOp: COPY skip_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_distinct(self: PipelineHost, site: PipelineSite, distinct_node: DistinctOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_distinct(self: PipelineHost, MUTABLE site: PipelineSite, distinct_node: DistinctOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1059,42 +1059,42 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineSetIndexLowerer__lower_distinct(rtoc_self_view.set_index_lowerer, site.list, &site.options, distinct_node));
 }
 END
-PRIVATE FN pipelineHost__lower_unnest(self: PipelineHost, site: PipelineSite, unnest_node: UnnestOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_unnest(self: PipelineHost, MUTABLE site: PipelineSite, unnest_node: UnnestOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, site, PipelineListTerminalOp{ UnnestOpMultiowned: COPY unnest_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_reduce(self: PipelineHost, site: PipelineSite, reduce_node: ReduceOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_reduce(self: PipelineHost, MUTABLE site: PipelineSite, reduce_node: ReduceOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, site, PipelineListTerminalOp{ ReduceOpMultiowned: COPY reduce_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_window(self: PipelineHost, site: PipelineSite, window_node: WindowOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_window(self: PipelineHost, MUTABLE site: PipelineSite, window_node: WindowOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, site, PipelineListTerminalOp{ WindowOpMultiowned: COPY window_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_batch_window(self: PipelineHost, site: PipelineSite, bw_node: BatchWindowOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_batch_window(self: PipelineHost, MUTABLE site: PipelineSite, bw_node: BatchWindowOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineBatchWindowLowerer__lower(rtoc_self_view.batch_window_lowerer, site.list, site.options, bw_node));
 }
 END
-PRIVATE FN pipelineHost__lower_order_by(self: PipelineHost, site: PipelineSite, order_node: OrderByOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_order_by(self: PipelineHost, MUTABLE site: PipelineSite, order_node: OrderByOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, site, PipelineListTerminalOp{ OrderByOpMultiowned: COPY order_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_index(self: PipelineHost, site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_index(self: PipelineHost, MUTABLE site: PipelineSite, expr_node: Locatable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1102,21 +1102,21 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineSetIndexLowerer__lower_index(rtoc_self_view.set_index_lowerer, &site.list, site.options, expr_node));
 }
 END
-PRIVATE FN pipelineHost__lower_join(self: PipelineHost, site: PipelineSite, join_node: JoinOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_join(self: PipelineHost, MUTABLE site: PipelineSite, join_node: JoinOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, site, PipelineListTerminalOp{ JoinOp: COPY join_node }));
 }
 END
-PRIVATE FN pipelineHost__lower_tap(self: PipelineHost, site: PipelineSite, tap_op: TapOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_tap(self: PipelineHost, MUTABLE site: PipelineSite, tap_op: TapOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, site, PipelineListTerminalOp{ TapOp: COPY tap_op }));
 }
 END
-PRIVATE FN pipelineHost__lower_each(self: PipelineHost, site: PipelineSite, each_op: EachOp) RETURNS !?PipelineEachResult
+PRIVATE FN pipelineHost__lower_each(self: PipelineHost, MUTABLE site: PipelineSite, MUTABLE each_op: EachOp) RETURNS !?PipelineEachResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1139,7 +1139,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelineRangeLowerer__finite_stream_source_node?(rtoc_self_view.range_lowerer, &node);
 }
 END
-PRIVATE FN pipelineHost__unwrap_range_chain(self: PipelineHost, node: Locatable) RETURNS ?PipelineRangeChain
+PRIVATE FN pipelineHost__unwrap_range_chain(self: PipelineHost, MUTABLE node: Locatable) RETURNS ?PipelineRangeChain
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1147,14 +1147,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelineRangeLowerer__unwrap_range_chain(rtoc_self_view.range_lowerer, node);
 }
 END
-PRIVATE FN pipelineHost__unwrap_binding_unnest_chain(self: PipelineHost, node: BinaryOp) RETURNS !?PipelineBindingUnnestChain
+PRIVATE FN pipelineHost__unwrap_binding_unnest_chain(self: PipelineHost, MUTABLE node: BinaryOp) RETURNS !?PipelineBindingUnnestChain
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineBindingChainLowerer__unwrap_chain(rtoc_self_view.binding_chain_lowerer, node));
 }
 END
-PRIVATE FN pipelineHost__lower_binding_chain(self: PipelineHost, chain: PipelineBindingUnnestChain, smooth_node: BinaryOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_binding_chain(self: PipelineHost, chain: PipelineBindingUnnestChain, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1177,7 +1177,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__build_lazy_range_prefix(rtoc_self_view.range_lowerer, &source_node, stages, on_skip, source_alloc, NIL, track_owned_items));
 }
 END
-PRIVATE FN pipelineHost__lower_each_range(self: PipelineHost, MUTABLE range_lit: Locatable, stages: []Locatable, each_op: EachOp) RETURNS !ScopeBlock
+PRIVATE FN pipelineHost__lower_each_range(self: PipelineHost, MUTABLE range_lit: Locatable, stages: []Locatable, MUTABLE each_op: EachOp) RETURNS !ScopeBlock
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1185,7 +1185,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__lower_each_range(rtoc_self_view.range_lowerer, &range_lit, stages, each_op));
 }
 END
-PRIVATE FN pipelineHost__bc_for_iter_range(self: PipelineHost, range_lit: RangeLit, capture_name: ?String) RETURNS Tuple<IterRange, ?String>
+PRIVATE FN pipelineHost__bc_for_iter_range(self: PipelineHost, MUTABLE range_lit: RangeLit, capture_name: ?String) RETURNS Tuple<IterRange, ?String>
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1201,14 +1201,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelineLoweringBridge__bc_target?(rtoc_self_view.lowering_bridge);
 }
 END
-PRIVATE FN pipelineHost__pipeline_source_shape(self: PipelineHost, source_node: Locatable) RETURNS !PipelineSourceShape
+PRIVATE FN pipelineHost__pipeline_source_shape(self: PipelineHost, MUTABLE source_node: Locatable) RETURNS !PipelineSourceShape
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PipelineSourceShape{ type: COPY TRY (type__from_node_mut(source_node, "pipeline source shape")), bc_target: pipelineHost__bc_target?(rtoc_self_view), named_source: source_node IS_A Identifier };
 }
 END
-PRIVATE FN pipelineHost__lower_range_fold_observable(self: PipelineHost, p: PipelineLazyRangePrefix, smooth_node: BinaryOp, label: String, source_node: Locatable, acc_alloc_expr: Emittable, publish_stmts: []Emittable) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_range_fold_observable(self: PipelineHost, p: PipelineLazyRangePrefix, MUTABLE smooth_node: BinaryOp, label: String, MUTABLE source_node: Locatable, acc_alloc_expr: Emittable, publish_stmts: []Emittable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1216,7 +1216,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable(rtoc_self_view.range_lowerer, p, smooth_node, label, source_node, acc_alloc_expr, publish_stmts));
 }
 END
-PRIVATE FN pipelineHost__lower_range_fold_observable_default(self: PipelineHost, p: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp, label: String, source_node: Locatable, terminal: String@symbol, observable_id: ?Int64 = NIL) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_range_fold_observable_default(self: PipelineHost, p: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp, label: String, MUTABLE source_node: Locatable, terminal: String@symbol, observable_id: ?Int64 = NIL) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1240,7 +1240,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__owned_stream_item_stmts(rtoc_self_view.range_lowerer, item_var, elem_t));
 }
 END
-PRIVATE FN pipelineHost__lower_range_reduce_observable(self: PipelineHost, p: PipelineLazyRangePrefix, reduce_op: ReduceOp, MUTABLE smooth_node: BinaryOp, label: String, source_node: Locatable) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_range_reduce_observable(self: PipelineHost, p: PipelineLazyRangePrefix, MUTABLE reduce_op: ReduceOp, MUTABLE smooth_node: BinaryOp, label: String, MUTABLE source_node: Locatable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1248,7 +1248,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__lower_range_reduce_observable(rtoc_self_view.range_lowerer, p, reduce_op, &smooth_node, label, source_node));
 }
 END
-PRIVATE FN pipelineHost__lower_range_fold_observable_distinct(self: PipelineHost, p: PipelineLazyRangePrefix, distinct_op: DistinctOp, MUTABLE smooth_node: BinaryOp, label: String, source_node: Locatable) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_range_fold_observable_distinct(self: PipelineHost, p: PipelineLazyRangePrefix, distinct_op: DistinctOp, MUTABLE smooth_node: BinaryOp, label: String, MUTABLE source_node: Locatable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1280,7 +1280,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__observable_alloc_expr(rtoc_self_view.range_lowerer, target, method_value, args));
 }
 END
-PRIVATE FN pipelineHost__lower_range_fold(self: PipelineHost, range_lit: Locatable, stages: []Locatable, fold_op: PipelineDefaultObservableFoldOp, smooth_node: BinaryOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_range_fold(self: PipelineHost, MUTABLE range_lit: Locatable, stages: []Locatable, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1288,7 +1288,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__lower_range_fold(rtoc_self_view.range_lowerer, range_lit, stages, fold_op, smooth_node));
 }
 END
-PRIVATE FN pipelineHost__lower_range_reduce(self: PipelineHost, range_lit: Locatable, stages: []Locatable, MUTABLE reduce_op: ReduceOp, smooth_node: ?BinaryOp = NIL) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_range_reduce(self: PipelineHost, MUTABLE range_lit: Locatable, stages: []Locatable, MUTABLE reduce_op: ReduceOp, MUTABLE smooth_node: ?BinaryOp = NIL) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1296,7 +1296,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__lower_range_reduce(rtoc_self_view.range_lowerer, range_lit, stages, &reduce_op, smooth_node));
 }
 END
-PRIVATE FN pipelineHost__lower_concurrent(self: PipelineHost, site: PipelineSite, conc_op: ConcurrentOp) RETURNS !PipelineConcurrentResult
+PRIVATE FN pipelineHost__lower_concurrent(self: PipelineHost, MUTABLE site: PipelineSite, conc_op: ConcurrentOp) RETURNS !PipelineConcurrentResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
