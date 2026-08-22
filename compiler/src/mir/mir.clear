@@ -1120,10 +1120,10 @@ PUB FN mIRDestructureTarget__name(self: MIRDestructureTarget) RETURNS String ->
   COPY self.name;
 END
 PUB FN mIRDestructureTarget__declaration_kind(self: MIRDestructureTarget) RETURNS Any@multiowned ->
-  KEEP self.declaration_kind;
+  COPY self.declaration_kind;
 END
 PUB FN mIRDestructureTarget__annotation(self: MIRDestructureTarget) RETURNS Any@multiowned ->
-  KEEP self.annotation;
+  COPY self.annotation;
 END
 PUB FN mIRDestructureTarget__lowered_node_id(self: MIRDestructureTarget) RETURNS ?LoweredNodeId ->
   COPY self.lowered_node_id;
@@ -9867,7 +9867,7 @@ PUB FN mIRCast__target_type(self: MIRCast) RETURNS Any@multiowned ->
   COPY self.target_type;
 END
 PUB FN mIRCast__method(self: MIRCast) RETURNS Any@multiowned ->
-  KEEP self.method;
+  COPY self.method;
 END
 PUB FN mIRCast__lowered_node_id(self: MIRCast) RETURNS ?LoweredNodeId ->
   COPY self.lowered_node_id;
