@@ -435,7 +435,7 @@ PRIVATE FN fsmWrapperEmitter__render_destroy_cleanup_action(action: FsmDestroyCl
   IF action.allocator EXISTS AS allocator_node THEN
     allocator = TRY (mIREmitter__emit(&mir_emitter, allocator_node));
   END
-  MUTABLE cleanup = TRY (mIREmitter__emit_direct_cleanup(mir_emitter, UNWRAP (TRY (mIREmitter__emit(&mir_emitter, action.target))), KEEP action.cleanup_entry, allocator));
+  MUTABLE cleanup = TRY (mIREmitter__emit_direct_cleanup(mir_emitter, TRY (mIREmitter__emit(&mir_emitter, action.target)), KEEP action.cleanup_entry, allocator));
   MUTABLE guard: ?String = NIL;
   IF action.guard EXISTS AS guard_node THEN
     guard = TRY (mIREmitter__emit(&mir_emitter, guard_node));
@@ -455,7 +455,7 @@ PRIVATE FN fsmWrapperEmitter__render_destroy_cleanup_action(action: FsmDestroyCl
   END
 END
 PRIVATE FN fsmWrapperEmitter__render_destroy_stmt_action(action: FsmDestroyStmt, MUTABLE mir_emitter: MIREmitter) RETURNS !String ->
-  MUTABLE stmt = (UNWRAP (TRY (mIREmitter__emit(&mir_emitter, action.stmt)))).trim();
+  MUTABLE stmt = (TRY (mIREmitter__emit(&mir_emitter, action.stmt))).trim();
   IF (stmt.endsWith?(";") OR stmt.endsWith?("}")) THEN
     RETURN stmt;
   ELSE

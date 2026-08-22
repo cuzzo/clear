@@ -176,7 +176,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A DirectTenseMap) THEN
       RETURN TRY (mIREmitter__emit_direct_tense_map(&rtoc_self_view, node));
     ELSE_IF (node IS_A AsyncPayloadTake) THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.source()))))}.value";
+      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.source())))}.value";
     ELSE_IF (node IS_A ShardConcurrentEach) THEN
       RETURN TRY (mIREmitter__emit_shard_concurrent_each(&rtoc_self_view, node));
     ELSE_IF (node IS_A MIRDoBlock) THEN
@@ -352,11 +352,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A Comptime) THEN
       RETURN "comptime ${TRY (mIREmitter__emit(&rtoc_self_view, node.expr()))}";
     ELSE_IF (node IS_A UnionVariantGet) THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.object()))))}.${node.variant()}";
+      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.object())))}.${node.variant()}";
     ELSE_IF (node IS_A ListItems) THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.list()))))}.items";
+      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.list())))}.items";
     ELSE_IF (node IS_A ListLength) THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.expr()))))}.len";
+      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.expr())))}.len";
     ELSE_IF (node IS_A AddressOf) THEN
       RETURN "&${TRY (mIREmitter__emit(&rtoc_self_view, node.expr()))}";
     ELSE_IF (node IS_A Deref) THEN
@@ -370,7 +370,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A NextPromiseList) THEN
       RETURN TRY (mIREmitter__emit_next_promise_list(&rtoc_self_view, node));
     ELSE_IF (node IS_A MIROptionalUnwrap) OR (node IS_A ForeignOwnedUnwrap) THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.expr()))))}.?";
+      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.expr())))}.?";
     ELSE_IF (node IS_A CFunctionAdapter) THEN
       RETURN TRY (mIREmitter__emit_c_function_adapter(&rtoc_self_view, node));
     ELSE_IF (node IS_A ForeignSliceView) THEN
@@ -454,7 +454,7 @@ FN mIREmitter__emit_direct_tense_map(MUTABLE self: MIREmitter, plan: DirectTense
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIREmitter__emit_direct_tense_layers(rtoc_self_view, plan.layers, plan.bindings, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, plan.source))), UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, plan.mapped))), plan.label));
+    RETURN TRY (mIREmitter__emit_direct_tense_layers(rtoc_self_view, plan.layers, plan.bindings, TRY (mIREmitter__emit(&rtoc_self_view, plan.source)), TRY (mIREmitter__emit(&rtoc_self_view, plan.mapped)), plan.label));
 }
 END
 FN mIREmitter__emit_direct_tense_layers(self: MIREmitter, layers: []String, bindings: []String, source: String, mapped: String, label: String) RETURNS !String
@@ -482,7 +482,7 @@ FN mIREmitter__emit_future_map_plan(MUTABLE self: MIREmitter, plan: FutureMapPla
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE source = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, plan.source)));
+    MUTABLE source = TRY (mIREmitter__emit(&rtoc_self_view, plan.source));
     MUTABLE source_init: String = "";
     IF plan.source_shared THEN
       source_init = "(${source}).retain()";
@@ -515,7 +515,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE capture_frees = capture_frees_raw.replace("\n", "\n                  ");
     MUTABLE arena_init = COPY arena_init_raw;
     MUTABLE spawn_call = (TRY (mIREmitter__emit_fiber_spawn_call(rtoc_self_view, plan.spawn_call))).replace("\n", "\n          ");
-    MUTABLE alloc_expr = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, plan.alloc_expr)));
+    MUTABLE alloc_expr = TRY (mIREmitter__emit(&rtoc_self_view, plan.alloc_expr));
     MUTABLE profile_comment = mIREmitter__emit_profile_task_site(rtoc_self_view, plan.profile_site);
     MUTABLE suppress_line = mIREmitter__bg_stackful_runtime_suppress_line(rtoc_self_view, plan, run_body_raw, capture_frees_raw, arena_init_raw);
     RETURN ("${plan.blk_label}: {\n    ${profile_comment}\n    const ${plan.ctx_type} = struct {\n        inner: *${plan.promise_zig}.Inner,\n        alloc: std.mem.Allocator,\n        ${capture_fields}\n        fn run(__raw_rt_${plan.id.toString()}: *anyopaque, __raw_args_${plan.id.toString()}: ?*anyopaque) anyerror!void {\n            const ${plan.bg_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_${plan.id.toString()})));\n            ${suppress_line}\n            ${arena_init}\n            const __ctx_${plan.id.toString()} = @as(*@This(), @ptrCast(@alignCast(__raw_args_${plan.id.toString()}.?)));\n            defer __ctx_${plan.id.toString()}.alloc.destroy(__ctx_${plan.id.toString()});\n            defer __ctx_${plan.id.toString()}.inner.wg.done();\n            errdefer |fiber_err| __ctx_${plan.id.toString()}.inner.result = fiber_err;\n            ${capture_frees}\n            ${run_body_code}\n            ${IF plan.is_void THEN
@@ -643,7 +643,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         NIL
       END;
-    "defer ${TRY (mIREmitter__emit_direct_cleanup(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, _.target))), KEEP _.cleanup_entry, allocator))}"
+    "defer ${TRY (mIREmitter__emit_direct_cleanup(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, _.target)), KEEP _.cleanup_entry, allocator))}"
     }).join("\n");
 }
 END
@@ -710,7 +710,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (functionSignature__required_intrinsic_template(&rtoc_mutable_receiver_3, IntrinsicTemplateKind.Zig)) };
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
-    pattern = pattern.split("{${rtoc_idx}}").join(UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?))));
+    pattern = pattern.split("{${rtoc_idx}}").join(TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?)));
     rtoc_idx = rtoc_idx + 1;
     END
     IF node.suppress_try THEN
@@ -861,7 +861,7 @@ FN mIREmitter__sharded_map_substitute_common(MUTABLE self: MIREmitter, pattern_i
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE pattern = COPY pattern_input;
     IF (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END) THEN
-      pattern = (pattern.replace("{shard_idx}", UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END)))))).replace("{shard_key}", UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_key, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_key END)))));
+      pattern = (pattern.replace("{shard_idx}", TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END))))).replace("{shard_key}", TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_key, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_key END))));
     END
     IF (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.key_type, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.key_type END) THEN
       pattern = pattern.replace("{key_zig}", (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> TRY (type__zig_type(item.key_type)), MIREmitterShardedMapNode.ShardedMapGet AS item -> TRY (type__zig_type(item.key_type)) END));
@@ -886,7 +886,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     code = TRY (mIREmitter__substitute_registry_common(rtoc_self_view, code, KEEP node.entry, KEEP node.allocs, node.key_type, node.value_type));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
-      MUTABLE rendered = TRY (mIREmitter__coerce_registry_arg(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?.expr))), node.args[rtoc_idx]?.coerce_type));
+      MUTABLE rendered = TRY (mIREmitter__coerce_registry_arg(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?.expr)), node.args[rtoc_idx]?.coerce_type));
       code = code.replace("&{${rtoc_idx}}", "&${rendered}");
       code = code.replace("{${rtoc_idx}}", rendered);
     rtoc_idx = rtoc_idx + 1;
@@ -905,9 +905,9 @@ PRIVATE FN mIREmitter__emit_indexed_store(MUTABLE self: MIREmitter, node: Indexe
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE code = TRY (mIREmitter__registry_template(rtoc_self_view, KEEP node.entry, node.template_kind));
     code = TRY (mIREmitter__substitute_registry_common(rtoc_self_view, code, KEEP node.entry, KEEP node.allocs, node.key_type, node.value_type));
-    MUTABLE target = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.target)));
-    MUTABLE index = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.index)));
-    MUTABLE value = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.value)));
+    MUTABLE target = TRY (mIREmitter__emit(&rtoc_self_view, node.target));
+    MUTABLE index = TRY (mIREmitter__emit(&rtoc_self_view, node.index));
+    MUTABLE value = TRY (mIREmitter__emit(&rtoc_self_view, node.value));
     RETURN code.replace("&{target}", "&${target}").replace("{target}", target).replace("{index}", index).replace("{value}", value);
 }
 END
@@ -985,8 +985,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       frame_name = "__ext${node.id.toString()}_frame";
     END
-    MUTABLE runtime_arg_codes = node.runtime_args |> SELECT UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, _.expr)));
-    MUTABLE comptime_codes = node.comptime_args |> SELECT UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, _)));
+    MUTABLE runtime_arg_codes = node.runtime_args |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _.expr));
+    MUTABLE comptime_codes = node.comptime_args |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _));
     MUTABLE arg_tuple: String = "";
     IF (runtime_arg_codes.length() == 0) THEN
       arg_tuple = ".{}";
@@ -1102,7 +1102,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_indexed_output_12
     };
     MUTABLE args = node.signature.params.each_index() |> SELECT "a${_}";
-    MUTABLE clear_function = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.clear_function))).deletePrefix("&");
+    MUTABLE clear_function = TRY (mIREmitter__emit(&rtoc_self_view, node.clear_function)).deletePrefix("&");
     MUTABLE clear_call = "${clear_function}(__clear_c_callback_rt orelse @panic(\"C callback escaped its synchronous CLEAR call\")${IF (args.length() == 0) THEN
       ""
     ELSE
@@ -1311,7 +1311,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE prior_rt_name: String = COPY rtoc_self_view.rt_name;
   DEFER rtoc_self_view.rt_name = prior_rt_name;
   rtoc_self_view.rt_name = COPY runtime_name;
-  RETURN UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node)));
+  RETURN TRY (mIREmitter__emit(&rtoc_self_view, node));
 }
 END
 PRIVATE FN mIREmitter__emit_capture_cleanup_actions_with_runtime(MUTABLE self: MIREmitter, actions: []CaptureCleanupAction, runtime_name: String) RETURNS !String
@@ -1367,7 +1367,7 @@ PRIVATE FN mIREmitter__emit_snapshot_read(MUTABLE self: MIREmitter, node: Snapsh
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
-    MUTABLE cell_unwrap = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.cell_unwrap)));
+    MUTABLE cell_unwrap = TRY (mIREmitter__emit(&rtoc_self_view, node.cell_unwrap));
     MUTABLE parts = ["var ${node.guard_var} = ${cell_unwrap}.*.read(${node.rt});", "defer ${node.guard_var}.release();", "const ${node.alias_name} = ${node.guard_var}.get();", "_ = &${node.alias_name};"];
     IF !((body.length() == 0)) THEN
       &parts.append(body);
@@ -1380,7 +1380,7 @@ PRIVATE FN mIREmitter__emit_capability_unwrap(MUTABLE self: MIREmitter, node: Ca
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE source = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.source)));
+    MUTABLE source = TRY (mIREmitter__emit(&rtoc_self_view, node.source));
     MUTABLE is_ptr = "@typeInfo(@TypeOf(${source})) == .pointer";
     MUTABLE inner_t = "@typeInfo(@TypeOf(${source})).pointer.child";
     RETURN "(if (comptime ${is_ptr}) (if (comptime @typeInfo(${inner_t}) == .@\"struct\") (if (comptime @hasDecl(${inner_t}, \"__clear_ref_carrier\")) ${source}.ctrl.data else ${source}) else (if (comptime @typeInfo(${inner_t}) == .pointer) (if (comptime @typeInfo(@typeInfo(${inner_t}).pointer.child) == .@\"struct\") (if (comptime @hasDecl(@typeInfo(${inner_t}).pointer.child, \"__clear_ref_carrier\")) ${source}.*.ctrl.data else ${source}.*) else ${source}.*) else ${source})) else (if (comptime @typeInfo(@TypeOf(${source})) == .@\"struct\") (if (comptime @hasDecl(@TypeOf(${source}), \"__clear_ref_carrier\")) ${source}.ctrl.data else &${source}) else &${source}))";
@@ -1391,7 +1391,7 @@ PRIVATE FN mIREmitter__emit_capability_lock_target(MUTABLE self: MIREmitter, nod
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE source = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.source)));
+    MUTABLE source = TRY (mIREmitter__emit(&rtoc_self_view, node.source));
     IF node.comptime_arc_unwrap THEN
       RETURN mIREmitter__comptime_arc_unwrap_expr(rtoc_self_view, source);
     END
@@ -1406,7 +1406,7 @@ PRIVATE FN mIREmitter__emit_capability_lock_address(MUTABLE self: MIREmitter, no
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE source = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.source)));
+    MUTABLE source = TRY (mIREmitter__emit(&rtoc_self_view, node.source));
     IF node.arc_wrapped THEN
       RETURN "${source}.ctrl.data";
     ELSE
@@ -1444,7 +1444,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     rtoc_lambda_result_15
     });
-    MUTABLE cell_zig = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.cell)));
+    MUTABLE cell_zig = TRY (mIREmitter__emit(&rtoc_self_view, node.cell));
     MUTABLE capture_param: String = "";
     IF (captures.length() == 0) THEN
       capture_param = "";
@@ -1474,7 +1474,7 @@ PRIVATE FN mIREmitter__emit_polymorphic_mutate_flow(MUTABLE self: MIREmitter, no
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE old_flow_alias: ?String = COPY rtoc_self_view.flow_alias_name;
     rtoc_self_view.flow_alias_name = node.alias_name;
-    MUTABLE cell_zig = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.cell)));
+    MUTABLE cell_zig = TRY (mIREmitter__emit(&rtoc_self_view, node.cell));
     MUTABLE captures = TRY (mIREmitter__polymorphic_read_captures(rtoc_self_view, ((node.body) + ((node.guard_fail_body OR_ELSE List[]))), [node.alias_name, "__flow"]));
     IF !(captures.contains?(CAST(node.rt AS String))) THEN
       &captures.unshift(CAST(node.rt AS String));
@@ -1801,7 +1801,7 @@ PRIVATE FN mIREmitter__emit_snapshot_transaction(MUTABLE self: MIREmitter, node:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_zig = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
-    MUTABLE cell_unwrap = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.cell_unwrap)));
+    MUTABLE cell_unwrap = TRY (mIREmitter__emit(&rtoc_self_view, node.cell_unwrap));
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
     MUTABLE core = regexReplaceAll("${cell_unwrap}.*.update(${node.rt}, ${alloc}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}) void {\n        _ = &${node.alias_name};\n        ${body_zig}\n    }\n}.run, .{})\n", "\\s+\\z", "");
     MUTABLE zig_error_name: String = "";
@@ -1819,7 +1819,7 @@ PRIVATE FN mIREmitter__emit_snapshot_multi_txn(MUTABLE self: MIREmitter, node: S
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_zig = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
-    MUTABLE cells_tuple = ".{ ${(node.cells) |> SELECT UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ")} }";
+    MUTABLE cells_tuple = ".{ ${(node.cells) |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _)).join(", ")} }";
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
     MUTABLE alias_decls = unsupportedRuby("CallNode at 1585:18: each_with_index requires a statically typed collection").join("\n            ");
     MUTABLE core = regexReplaceAll("CheatLib.versionedUpdateMulti(${cells_tuple}, ${node.rt}, ${alloc}, struct {\n    fn run(views: anytype) anyerror!void {\n        ${alias_decls}\n        ${body_zig}\n    }\n}.run, .{})\n", "\\s+\\z", "");
@@ -1831,7 +1831,7 @@ PRIVATE FN mIREmitter__emit_with_match_dispatch(MUTABLE self: MIREmitter, node: 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE cell_zig = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.cell)));
+    MUTABLE cell_zig = TRY (mIREmitter__emit(&rtoc_self_view, node.cell));
     MUTABLE arms = node.arms;
     MUTABLE arm_strs = unsupportedRuby("CallNode at 1607:15: each_with_index requires a statically typed collection");
     MUTABLE chain = (arm_strs.join(" ") + " else { unreachable; }");
@@ -1926,7 +1926,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (kind == FailureActionKind.Exit) THEN
       MUTABLE message: String = "";
       IF action.message EXISTS AS message_value THEN
-        message = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, message_value)));
+        message = TRY (mIREmitter__emit(&rtoc_self_view, message_value));
       ELSE
         message = mIREmitter__zig_string_literal(rtoc_self_view, action.default_message);
       END
@@ -1934,7 +1934,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (kind == FailureActionKind.Pass) THEN
       RETURN "break :${TRY (mIREmitter__required_failure_label(rtoc_self_view, action))};";
     ELSE_IF (kind IS_A Return) THEN
-      RETURN "return ${UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, UNWRAP (action.return_value))))};";
+      RETURN "return ${TRY (mIREmitter__emit(&rtoc_self_view, UNWRAP (action.return_value)))};";
     ELSE_IF (kind == FailureActionKind.Block) THEN
       RETURN "${TRY (mIREmitter__emit_body(&rtoc_self_view, action.body))}\nbreak :${TRY (mIREmitter__required_failure_label(rtoc_self_view, action))};";
     ELSE
@@ -2007,7 +2007,7 @@ PRIVATE FN mIREmitter__emit_fallible_lock_acquire_expr(MUTABLE self: MIREmitter,
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE handler = TRY (mIREmitter__emit_fallible_lock_error_handler(&rtoc_self_view, castEmittableToFailureAction(node.action), node.retries, (node.matched_types OR_ELSE List[]), (node.bubble_types OR_ELSE List[]), node.rt_name, CAST(node.source_line AS String)));
-    MUTABLE acquire_call = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.acquire_call)));
+    MUTABLE acquire_call = TRY (mIREmitter__emit(&rtoc_self_view, node.acquire_call));
     IF node.retries THEN
       RETURN regexReplaceAll("${node.acquire_block}: {\n  var __retry: usize = 0;\n  while (true) : (__retry += 1) {\n    if (${acquire_call}) |__g| {\n      break :${node.acquire_block} __g;\n    } else |__err| {\n      ${handler}\n    }\n  }\n}\n", "\\s+\\z", "");
     ELSE
@@ -2423,7 +2423,7 @@ PRIVATE FN mIREmitter__emit_destructure_set(MUTABLE self: MIREmitter, node: Dest
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE targets = (node.targets |> SELECT UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, _)))).join(", ");
+    MUTABLE targets = (node.targets |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ");
     MUTABLE suppressions = (node.targets |> SELECT:? (IF !((_ IS_A MIRDestructureTarget AND (_.declaration_kind() == :var))) THEN NIL ELSE (IF (CAST(_.name() AS String) == "_") THEN NIL ELSE " _ = &${_.name()};" END) END) |> WHERE _ != NIL).join("");
     RETURN "${targets} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.value))};${suppressions}";
 }
@@ -2480,7 +2480,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (inner IS_A Lit AND (CAST(inner.value() AS String) == "null")) THEN
       RETURN "null";
     END
-    RETURN UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, value)));
+    RETURN TRY (mIREmitter__emit(&rtoc_self_view, value));
 }
 END
 PRIVATE FN mIREmitter__zig_field_name(self: MIREmitter, name: Name) RETURNS String
@@ -2655,7 +2655,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE upd: String = "";
     IF node.update THEN
-      MUTABLE update_code = (UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.update)))).chomp(";");
+      MUTABLE update_code = (TRY (mIREmitter__emit(&rtoc_self_view, node.update))).chomp(";");
       upd = " : (${update_code})";
     ELSE
       upd = "";
@@ -2732,7 +2732,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF pattern IS_A EnumSwitchPattern AS enum_switch_pattern THEN
       RETURN ".${enum_switch_pattern.variant}";
     ELSE
-      RETURN UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, pattern)));
+      RETURN TRY (mIREmitter__emit(&rtoc_self_view, pattern));
     END
 }
 END
@@ -2741,7 +2741,7 @@ PRIVATE FN mIREmitter__emit_catch_wrapper(MUTABLE self: MIREmitter, node: CatchW
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE inner_call = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.inner_call)));
+    MUTABLE inner_call = TRY (mIREmitter__emit(&rtoc_self_view, node.inner_call));
     IF node.clauses.empty?() THEN
       RETURN "return ${inner_call} catch {\n${mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_catch_default_body(&rtoc_self_view, node)), 4)}\n};";
     END
@@ -2836,7 +2836,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &filter_checks.append("${rt_name}.__error.matchesName(@intFromEnum(ErrorName.${_}))");
     END
     FOR _ IN meta.filter_messages DO
-    &filter_checks.append("${rt_name}.__error.matchesMessage(${UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, _)))})");
+    &filter_checks.append("${rt_name}.__error.matchesMessage(${TRY (mIREmitter__emit(&rtoc_self_view, _))})");
     END
     IF (filter_checks.length() == 0) THEN
       RETURN item_cond;
@@ -2941,7 +2941,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &parts.append(":${node.label}");
     END
     IF node.value THEN
-      &parts.append(UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.value))));
+      &parts.append(TRY (mIREmitter__emit(&rtoc_self_view, node.value)));
     END
     RETURN "${parts.join(" ")};";
 }
@@ -2956,7 +2956,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &parts.append(":${node.label}");
     END
     IF node.value THEN
-      &parts.append(UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.value))));
+      &parts.append(TRY (mIREmitter__emit(&rtoc_self_view, node.value)));
     END
     RETURN parts.join(" ");
 }
@@ -3136,7 +3136,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF body IS_A []Emittable AS array THEN
       RETURN "{\n${mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_body(&rtoc_self_view, array)), 4)}\n}";
     ELSE
-      RETURN UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, body)));
+      RETURN TRY (mIREmitter__emit(&rtoc_self_view, body));
     END
 }
 END
@@ -3216,7 +3216,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF alloc IS_A String@symbol AS string_symbol THEN
       RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, string_symbol));
     ELSE
-      RETURN UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, alloc)));
+      RETURN TRY (mIREmitter__emit(&rtoc_self_view, alloc));
     END
 }
 END
@@ -3339,7 +3339,7 @@ PRIVATE FN mIREmitter__emit_deep_copy(MUTABLE self: MIREmitter, node: DeepCopy) 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE src = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.source)));
+    MUTABLE src = TRY (mIREmitter__emit(&rtoc_self_view, node.source));
     IF src.startsWith?("@panic(") THEN
       RETURN src;
     END
@@ -3452,7 +3452,7 @@ PRIVATE FN mIREmitter__emit_comptime_carrier_payload(MUTABLE self: MIREmitter, n
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE src = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.source)));
+    MUTABLE src = TRY (mIREmitter__emit(&rtoc_self_view, node.source));
     RETURN "(if (comptime @hasDecl(@TypeOf(${src}), \"__clear_ref_carrier\")) ${src}.ctrl.data.* else ${src})";
 }
 END
@@ -3461,7 +3461,7 @@ PRIVATE FN mIREmitter__emit_monomorphic_keep(MUTABLE self: MIREmitter, node: Mon
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE src = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.source)));
+    MUTABLE src = TRY (mIREmitter__emit(&rtoc_self_view, node.source));
     MUTABLE alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, (node.alloc OR :heap)));
     RETURN "try CheatLib.dupeValue(@TypeOf(${src}), ${src}, ${alloc})";
 }
@@ -3579,7 +3579,7 @@ PRIVATE FN mIREmitter__emit_method_call(MUTABLE self: MIREmitter, node: MIRMetho
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE recv = mIREmitter__paren_if_try(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.receiver))));
+    MUTABLE recv = mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.receiver)));
     IF (((node.method == "heapAlloc") AND (node.args.length() == 0)) AND (recv == rtoc_self_view.rt_name)) THEN
       RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap));
     END
@@ -3597,7 +3597,7 @@ PRIVATE FN mIREmitter__emit_call_argument(MUTABLE self: MIREmitter, argument: Em
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE rendered = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, argument)));
+    MUTABLE rendered = TRY (mIREmitter__emit(&rtoc_self_view, argument));
     IF argument IS_A MIRBlockExpr AS mir_block_expr THEN
       RETURN "(${rendered})";
     ELSE
@@ -3610,7 +3610,7 @@ PRIVATE FN mIREmitter__emit_field_get(MUTABLE self: MIREmitter, node: FieldGet) 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE object = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.object)));
+    MUTABLE object = TRY (mIREmitter__emit(&rtoc_self_view, node.object));
     IF (node.object IS_A StructInit OR node.object IS_A TupleLiteral) THEN
       object = "(${object})";
     END
@@ -3622,7 +3622,7 @@ PRIVATE FN mIREmitter__emit_union_payload_get(MUTABLE self: MIREmitter, node: Un
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE subject = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.subject)));
+    MUTABLE subject = TRY (mIREmitter__emit(&rtoc_self_view, node.subject));
     MUTABLE variant = COPY node.variant;
     RETURN "(switch (${subject}) { .${variant} => |__union_payload| __union_payload, else => unreachable })";
 }
@@ -3722,7 +3722,7 @@ PRIVATE FN mIREmitter__emit_next_promise_list(MUTABLE self: MIREmitter, node: Ne
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE list_expr = mIREmitter__paren_if_try(rtoc_self_view, UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.list_expr))));
+    MUTABLE list_expr = mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.list_expr)));
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
     MUTABLE resolved_value: String = "";
     IF asyncResultShape__boxes_fallible_payload?(node.async_shape) THEN
@@ -3759,7 +3759,7 @@ PRIVATE FN mIREmitter__emit_lock_acquire(MUTABLE self: MIREmitter, node: LockAcq
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE lock_expr = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.lock_expr)));
+    MUTABLE lock_expr = TRY (mIREmitter__emit(&rtoc_self_view, node.lock_expr));
     IF (node.lock_sync == :write_locked) THEN
       RETURN "${lock_expr}.${IF node.fallible THEN
         "writeOrErr"
@@ -3855,7 +3855,7 @@ PRIVATE FN mIREmitter__emit_cast(MUTABLE self: MIREmitter, node: MIRCast) RETURN
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE inner = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.expr)));
+    MUTABLE inner = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
     MUTABLE target_t: ?String = COPY node.target_type;
     IF target_t THEN
       target_t = zigType__cast_target_type(zigType__new(target_t));
@@ -3897,7 +3897,7 @@ PRIVATE FN mIREmitter__emit_orelse(MUTABLE self: MIREmitter, node: Orelse) RETUR
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fallback = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.fallback)));
+    MUTABLE fallback = TRY (mIREmitter__emit(&rtoc_self_view, node.fallback));
     MUTABLE result_type: ?Type = COPY node.result_type;
     IF ((result_type != NIL) AND !(fallback.startsWith?("@panic("))) THEN
       fallback = "@as(${TRY (type__zig_type(result_type))}, ${fallback})";
@@ -4251,7 +4251,7 @@ PRIVATE FN mIREmitter__emit_resource_close(MUTABLE self: MIREmitter, node: Resou
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE target = UNWRAP (TRY (mIREmitter__emit(&rtoc_self_view, node.target)));
+    MUTABLE target = TRY (mIREmitter__emit(&rtoc_self_view, node.target));
     RETURN "${TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, UNWRAP (node.close_plan), target))};";
 }
 END
