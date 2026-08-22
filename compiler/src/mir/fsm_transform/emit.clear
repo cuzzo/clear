@@ -226,7 +226,7 @@ PUB FN emit__unique_fsm_ownership_facts(facts: []FsmOwnershipFact) RETURNS ![]Fs
   RETURN facts |> DISTINCT CAST(Tuple{_.name, _.target, _.target_alloc, _.move_guarded} AS Tuple<String, String@symbol, ?String@symbol, Bool>);
 END
 PRIVATE FN emit__collect_required_move_guards(nodes: []Emittable, id: Int64, cleanup_names: []String) RETURNS ![]String ->
-  RETURN CAST((((nodes |> SELECT:? (IF !(_ IS_A TransferMark) THEN NIL ELSE (IF !(((_.target() == :owned_sink) OR (_.target() == :return))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = emit__normalized_ctx_field_name(CAST(_.name() AS String), id); (IF cleanup_names.contains?(name) THEN
+  RETURN CAST((((nodes |> SELECT:? (IF !(_ IS_A TransferMark) THEN NIL ELSE (IF !(((_.target == :owned_sink) OR (_.target == :return))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = emit__normalized_ctx_field_name(CAST(_.name() AS String), id); (IF cleanup_names.contains?(name) THEN
     name
   ELSE
     NIL
@@ -237,7 +237,7 @@ PRIVATE FN emit__collect_move_guard_writes(nodes: []Emittable, id: Int64) RETURN
     MUTABLE name = COPY CAST(move_mark.name AS String);
     MUTABLE normalized = emit__normalized_ctx_field_name(name, id);
     CONTINUE;
-  END (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__true_literal?(_.value())) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE field: ?String = emit__ctx_field_name(_.target(), id); (IF !((IF field != NIL THEN
+  END (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__true_literal?(_.value())) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE field: ?String = emit__ctx_field_name(_.target, id); (IF !((IF field != NIL THEN
     field.endsWith?("_moved")
   ELSE
     NIL
@@ -247,7 +247,7 @@ PUB FN emit__normalized_ctx_field_name(name: String, id: Int64) RETURNS String -
   RETURN name.deletePrefix("__ctx_${id.toString()}.");
 END
 PRIVATE FN emit__collect_result_names(nodes: []Emittable, id: Int64) RETURNS ![]String ->
-  RETURN CAST(((nodes |> SELECT:? (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__ctx_inner_result_target?(_.target(), id)) THEN NIL ELSE emit__result_source_name(_.value(), id) END) END) |> WHERE _ != NIL) |> DISTINCT _) AS []String);
+  RETURN CAST(((nodes |> SELECT:? (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__ctx_inner_result_target?(_.target, id)) THEN NIL ELSE emit__result_source_name(_.value(), id) END) END) |> WHERE _ != NIL) |> DISTINCT _) AS []String);
 END
 PRIVATE FN emit__fsm_fact_guard_name(name: String) RETURNS String ->
   IF emit__fsm_ctx_name?(name) THEN
@@ -376,9 +376,9 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
       MUTABLE target_step = explicit_next;
       MUTABLE desc_tail = desc_value.tail;
       IF desc_tail IS_A FsmTailYield AS rtoc_fsm_tail_yield THEN
-        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: rtoc_fsm_tail_yield.yield_reason() } };
+        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: rtoc_fsm_tail_yield.yield_reason } };
       ELSE_IF desc_tail IS_A FsmTailRegisterYield AS rtoc_fsm_tail_register_yield THEN
-        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: rtoc_fsm_tail_register_yield.register_expr(), yield_reason: rtoc_fsm_tail_register_yield.yield_reason() } };
+        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: rtoc_fsm_tail_register_yield.register_expr, yield_reason: rtoc_fsm_tail_register_yield.yield_reason } };
       ELSE
         panic("Unsupported descriptor tail {} in segment {}");
       END
@@ -391,9 +391,9 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
       MUTABLE target_step = explicit_next;
       MUTABLE desc_tail = desc_value.tail;
       IF desc_tail IS_A FsmTailYield AS rtoc_fsm_tail_yield THEN
-        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: rtoc_fsm_tail_yield.yield_reason() } };
+        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: rtoc_fsm_tail_yield.yield_reason } };
       ELSE_IF desc_tail IS_A FsmTailRegisterYield AS rtoc_fsm_tail_register_yield THEN
-        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: rtoc_fsm_tail_register_yield.register_expr(), yield_reason: rtoc_fsm_tail_register_yield.yield_reason() } };
+        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: rtoc_fsm_tail_register_yield.register_expr, yield_reason: rtoc_fsm_tail_register_yield.yield_reason } };
       ELSE
         panic("Unsupported descriptor tail {} in segment {}");
       END
@@ -435,7 +435,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     IF rtoc_indexed_items_11[rtoc_indexed_i_12].stmts.empty?() THEN
         CONTINUE;
     END
-    IF (rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Done OR ((rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Goto AND (rtoc_indexed_items_11[rtoc_indexed_i_12].tail.target_index() == done_idx)))) THEN
+    IF (rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Done OR ((rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Goto AND (rtoc_indexed_items_11[rtoc_indexed_i_12].tail.target_index == done_idx)))) THEN
         &rtoc_indexed_acc_13.append(rtoc_indexed_items_11[rtoc_indexed_i_12].indexOf());
     END
     rtoc_indexed_i_12 = rtoc_indexed_i_12 + 1;
@@ -612,7 +612,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE suspend_result_vars = segment_nodes |> SELECT:? {
   MUTABLE tail = _.tail;
   (IF (tail IS_A IoSuspend OR tail IS_A NextSuspend) THEN
-      tail.result_var()
+      tail.result_var
     ELSE
       NIL
     END)
@@ -622,7 +622,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   acc
   };
   MUTABLE promoted_value_decls = ((liveness.cross_segment_vars |> WHERE !((suspend_result_vars.contains?(_._0) OR conservative_names.contains?(_._0))))) |> SELECT {
-  MUTABLE type_info = _._1.type_info();
+  MUTABLE type_info = _._1.type_info;
   emit__ctx_field_decl(CAST(_._0 AS String), IF type_info THEN
       TRY (type__zig_type(type_info))
     ELSE
@@ -652,7 +652,7 @@ PRIVATE FN emit__build_recursive_capture_map(ctx: FsmEmitContext, segments: []Se
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE rv = tail.result_var();
+    MUTABLE rv = tail.result_var;
     IF (rv AND (rv != "_")) THEN
         capture_map[rv] = (capture_map[rv] OR_ELSE "__ctx_${id.toString()}.${rv}");
     END
@@ -706,7 +706,7 @@ PRIVATE FN emit__rewrite_promoted_fsm_node(MUTABLE node: PromotableFsmValue, pro
     RETURN PromotableFsmValue{ ArrayValue: COPY array_mutable |> SELECT castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(PromotableFsmValue{ Emittable: COPY _ }, promoted_names, id)) };
   ELSE_IF (node IS_A Let) THEN
     MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(node.name() AS String), promoted_names);
-    MUTABLE rewritten_init: Emittable = castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(node.init(), promoted_names, id));
+    MUTABLE rewritten_init: Emittable = castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(node.init, promoted_names, id));
     IF promoted_name EXISTS AS promoted_name_value THEN
       RETURN PromotableFsmValue{ Emittable: COPY CAST(Set{ target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, promoted_name_value) }, value: COPY rewritten_init, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
     END
@@ -728,7 +728,7 @@ PRIVATE FN emit__rewrite_promoted_fsm_struct_fields_mut(MUTABLE node: Emittable,
   IF !(node IS_A Struct) THEN
     RETURN;
   END
-  MUTABLE rtoc_each_items_35 = node.members();
+  MUTABLE rtoc_each_items_35 = node.members;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_35.length() DO
     MUTABLE value = node[rtoc_each_items_35[rtoc_idx]];
@@ -805,7 +805,7 @@ PRIVATE FN emit__fsm_owned_result_guards(segments: []Segment, lowering: MIRLower
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE result_var = tail.result_var();
+    MUTABLE result_var = tail.result_var;
     IF !((result_var AND (result_var != "_"))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -914,9 +914,9 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   END
   rtoc_indexed_output_40
   }).reverse().flatten();
-  MUTABLE fail_body_stmts = (prior_release_stmts + err.body_stmts());
+  MUTABLE fail_body_stmts = (prior_release_stmts + err.body_stmts);
   MUTABLE fail_tail = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?Done = NIL;
-  IF (err.exit_kind() == :done) THEN
+  IF (err.exit_kind == :done) THEN
     rtoc_ternary_value_42 = Done{ _: NIL };
   ELSE
     rtoc_ternary_value_42 = Goto{ target_index: after_idx };
@@ -979,17 +979,17 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
         counter = (counter + 1);
       END
       IF (seg_value.tail IS_A Goto) OR (seg_value.tail IS_A LoopBack) THEN
-        &stack.push(seg_value.tail.target_index());
+        &stack.push(seg_value.tail.target_index);
       ELSE_IF (seg_value.tail IS_A CondBranch) THEN
-        &stack.push(seg_value.tail.then_index());
-        &stack.push(seg_value.tail.else_index());
+        &stack.push(seg_value.tail.then_index);
+        &stack.push(seg_value.tail.else_index);
       ELSE_IF (seg_value.tail IS_A LockSuspend) THEN
-        IF seg_value.tail.next_index() THEN
-          &stack.push(seg_value.tail.next_index());
+        IF seg_value.tail.next_index THEN
+          &stack.push(seg_value.tail.next_index);
         END
       ELSE
-        IF (Segments.suspend_tail?(seg_value.tail) AND seg_value.tail.next_index()) THEN
-          &stack.push(seg_value.tail.next_index());
+        IF (Segments.suspend_tail?(seg_value.tail) AND seg_value.tail.next_index) THEN
+          &stack.push(seg_value.tail.next_index);
         END
       END
     ELSE

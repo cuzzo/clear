@@ -15,7 +15,7 @@ PUB FN capabilityAuditPhase__run(typed_program: TypedProgramFacts, request: Capa
   END
   MUTABLE summaries = COPY typed_program.body_summaries;
   MUTABLE derived_program = TRY (derivedProgramFacts__capture(typed_program.resolution.function_registry.nodes));
-  RETURN capabilityAuditReport__new(typed_program, derived_program, summaries.keys(), summaries.values() |> SUM scopeBindings__length(_.call_site_facts()), summaries.values() |> SUM scopeBindings__length(_.with_blocks()), 0);
+  RETURN capabilityAuditReport__new(typed_program, derived_program, summaries.keys(), summaries.values() |> SUM scopeBindings__length(_.call_site_facts), summaries.values() |> SUM scopeBindings__length(_.with_blocks), 0);
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator

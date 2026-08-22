@@ -61,7 +61,7 @@ PUB FN builder__stamp_overrides(MUTABLE self: Builder, idx: Int64) RETURNS Void
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF rtoc_self_view.current_alias_overrides EXISTS AS current_alias_overrides_value THEN
-      IF (current_alias_overrides_value.count() == 0) THEN
+      IF (current_alias_overrides_value.count == 0) THEN
         RETURN;
       ELSE
         rtoc_self_view.alias_overrides_for[idx] = UNWRAP (COPY current_alias_overrides_value);
@@ -267,11 +267,11 @@ PRIVATE FN recursiveSplitter__contains_unsupported?(body: ?Body) RETURNS !Bool E
   RETURN body |> ANY PARTIAL MATCH _ START
     AST.WithBlock -> TRY (recursiveSplitter__with_unsupported?(_)),
     AST.CatchBlock -> TRUE,
-    AST.WhileLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch())),
-    AST.WhileBindLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch())),
+    AST.WhileLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch)),
+    AST.WhileBindLoop -> TRY (recursiveSplitter__contains_unsupported?(_.do_branch)),
     AST.ForRange -> TRY (recursiveSplitter__contains_unsupported?(_.body())),
     AST.ForEach -> TRY (recursiveSplitter__contains_unsupported?(_.body())),
-    AST.IfStatement -> (TRY (recursiveSplitter__contains_unsupported?(_.then_branch())) OR TRY (recursiveSplitter__contains_unsupported?((_.else_branch() OR_ELSE List[])))),
+    AST.IfStatement -> (TRY (recursiveSplitter__contains_unsupported?(_.then_branch)) OR TRY (recursiveSplitter__contains_unsupported?((_.else_branch OR_ELSE List[])))),
     DEFAULT -> TRY (recursiveSplitter__stmt_unsupported_suspend?(_))
   END;
 END
@@ -293,7 +293,7 @@ PRIVATE FN recursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) RETU
   IF !(sus IS_A NextSuspend) THEN
     RETURN FALSE;
   END
-  MUTABLE pt = TRY (type__from_node_mut(sus.promise_ast(), "FSM suspend promise"));
+  MUTABLE pt = TRY (type__from_node_mut(sus.promise_ast, "FSM suspend promise"));
   IF !(type__future?(pt)) THEN
     RETURN TRUE;
   END

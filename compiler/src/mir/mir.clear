@@ -12737,7 +12737,7 @@ PUB FN inlineAllocMetadata__empty?(self: InlineAllocMetadata) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.slots.count() == 0);
+    RETURN (rtoc_self_view.slots.count == 0);
 }
 END
 PUB FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS Void

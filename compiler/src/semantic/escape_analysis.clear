@@ -226,7 +226,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
   rtoc_idx = rtoc_idx + 1;
   END
   END
-  fn_nodes.count().times(%() USE(callsites, fn_nodes) -> {
+  fn_nodes.count.times(%() USE(callsites, fn_nodes) -> {
   MUTABLE changed: Bool = FALSE;
   FOR rtoc_key IN fn_nodes.keys() DO
     MUTABLE callee_fn: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
@@ -302,7 +302,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
       by_index[rtoc_idx] = UNWRAP (contract);
     rtoc_idx = rtoc_idx + 1;
   END
-  IF !((by_index.count() == 0)) THEN
+  IF !((by_index.count == 0)) THEN
       kept_contracts[rtoc_key] = by_index;
   END
   END
@@ -331,14 +331,14 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
-        IF raw_arg.kept_edge_plan() THEN
+        IF raw_arg.kept_edge_plan THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
         MUTABLE stamp_plan: FN(CallEdgeOwnershipPlan) -> Void = %(plan) USE(raw_arg, rtoc_idx, rtoc_key) -> {
           raw_arg.kept_edge_plan = plan;
           MUTABLE call_node = COPY _.call_site_facts[rtoc_idx].node;
-          call_node.kept_edge_plans = TRY (ownershipGraph__merge(((call_node.kept_edge_plans() OR_ELSE {})), {rtoc_key: plan}));
+          call_node.kept_edge_plans = TRY (ownershipGraph__merge(((call_node.kept_edge_plans OR_ELSE {})), {rtoc_key: plan}));
           NIL
         };
         MUTABLE given = raw_arg IS_A MoveNode;
@@ -388,7 +388,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
-        MUTABLE entry: ?SymbolEntry@multiowned = arg.symbol();
+        MUTABLE entry: ?SymbolEntry@multiowned = arg.symbol;
         IF !((entry != NIL)) THEN
             entry = local_entries[arg.name()];
         END
@@ -491,7 +491,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND _.symbol().equal?(entry));
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND _.symbol.equal?(entry));
   IF decl EXISTS AS decl_value THEN
     MUTABLE decl_value_mutable = COPY decl_value;
     MUTABLE stamped = (decl_value_mutable.full_type() OR_ELSE NIL);
@@ -583,7 +583,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
     RETURN;
   END
   IF (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == name) ELSE FALSE END) THEN
-    MUTABLE sym = node.symbol();
+    MUTABLE sym = node.symbol;
     IF (!(sym IS_A SymbolEntry@multiowned) OR sym.equal?(entry)) THEN
       MUTABLE stamp = (node.full_type() OR_ELSE NIL);
       IF ((stamp IS_A Type AND !(stamp.equal?(symbolEntry__type(entry)))) AND !(TRY (type__any_rc?(stamp)))) THEN
@@ -597,7 +597,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   });
 END
 PUB FN escapeAnalysis__unify_caller_attr(sites: []CallSiteFact, idx: Int64, project: FN(SymbolEntry) -> ?String@symbol) RETURNS ?String@symbol ->
-  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND (aST__node__symbol(arg) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol = arg.symbol(); (IF !(symbol IS_A SymbolEntry@multiowned) THEN NIL ELSE project(symbol) END) } END) };
+  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND (aST__node__symbol(arg) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol = arg.symbol; (IF !(symbol IS_A SymbolEntry@multiowned) THEN NIL ELSE project(symbol) END) } END) };
   IF (observed.length() == 0) THEN
     RETURN NIL;
   END
@@ -684,9 +684,9 @@ PUB FN escapeAnalysis__apply_assignment_escape_sink_mut(node: Assignment, contex
 END
 PUB FN escapeAnalysis__apply_binding_escape_sink_mut(node: Node, context: EscapeContext) RETURNS !Void ->
   IF escapeAnalysis__borrow_return_expr?(node.value()) THEN
-    escapeAnalysis__mark_symbol_borrow_mut(node.symbol());
+    escapeAnalysis__mark_symbol_borrow_mut(node.symbol);
   ELSE_IF TRY (escapeAnalysis__call_result_is_heap?(node.value(), context.fn_nodes, COPY context.schema_lookup, context.facts_by_name)) THEN
-    escapeAnalysis__mark_symbol_heap_mut(node.symbol());
+    escapeAnalysis__mark_symbol_heap_mut(node.symbol);
   END
 END
 PUB FN escapeAnalysis__apply_destructuring_escape_sink_mut(node: DestructuringAssignment, context: EscapeContext) RETURNS !Void ->
@@ -714,8 +714,8 @@ PUB FN escapeAnalysis__propagate_value_block_placements_mut(facts: FunctionFacts
   IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
       RETURN NIL;
   END
-  IF !((IF node.symbol() != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (node.symbol());
+  IF !((IF node.symbol != NIL THEN
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (node.symbol);
   symbolEntry__heap_storage?(rtoc_local_receiver_8) }
     ELSE
       NIL
@@ -734,7 +734,7 @@ PUB FN escapeAnalysis__mark_value_position_heap_mut(expr: ?Locatable) RETURNS Vo
     IF (node IS_A Cast) THEN
       node = node.value();
     ELSE_IF (node IS_A BlockExpr) THEN
-      node = node.result();
+      node = node.result;
     ELSE_IF node IS_A Identifier AS identifier THEN
       escapeAnalysis__mark_node_symbol_heap_mut(identifier);
       RETURN;
@@ -764,7 +764,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
     IF (nodes[rtoc_idx]? IS_A MethodCall) THEN
         MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
         IF respondsTo?(nodes[rtoc_idx]?, "matched_signature") THEN
-          sig_branch_value = functionSignature__unwrap(nodes[rtoc_idx]?.matched_signature());
+          sig_branch_value = functionSignature__unwrap(nodes[rtoc_idx]?.matched_signature);
         ELSE
           sig_branch_value = NIL;
         END
@@ -775,7 +775,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
             rtoc_idx = rtoc_idx + 1;
   CONTINUE;
           END
-          MUTABLE root: ?Identifier = aST__root_identifier(nodes[rtoc_idx]?.object());
+          MUTABLE root: ?Identifier = aST__root_identifier(nodes[rtoc_idx]?.object);
         ELSE
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -905,13 +905,13 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
   MUTABLE declared_names = TRY (escapeAnalysis__loop_body_declared_names(body));
   TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(declared_names) -> {
   IF (node IS_A MethodCall) THEN
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature());
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature);
       IF sig EXISTS AS sig_value THEN
         MUTABLE sig_value_mutable = COPY sig_value;
         IF !((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(&sig_value_mutable)))) THEN
           RETURN NIL;
         END
-        MUTABLE root: ?Identifier = aST__root_identifier(node.object());
+        MUTABLE root: ?Identifier = aST__root_identifier(node.object);
         MUTABLE value_params = (TRY (functionSignature__params(sig_value_mutable))) |> SKIP 1;
       ELSE
         RETURN NIL;
@@ -999,8 +999,8 @@ PUB FN escapeAnalysis__mark_expr_identifiers_heap_mut(expr: ?Locatable) RETURNS 
       CONTINUE;
     END
     IF ((node != NIL) AND (node IS_A BlockExpr)) THEN
-      IF node.result() THEN
-        &stack.append(node.result());
+      IF node.result THEN
+        &stack.append(node.result);
       END
       CONTINUE;
     END
@@ -1036,7 +1036,7 @@ PUB FN escapeAnalysis__push_locatable_children_mut(node: Locatable, MUTABLE stac
   FOR _ IN (TRY (aST__wrapped_children(node))) DO
   &stack.append(_);
   END
-  FOR _ IN node.class().members() DO
+  FOR _ IN node.class().members DO
   MUTABLE value = COPY node.substr(_, 1);
   END
 END
@@ -1056,7 +1056,7 @@ PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup
     RETURN;
   END
   escapeAnalysis__walk_body(node.body, %(child) USE(schema_lookup) -> {
-  IF !((child IS_A VarDecl OR ((child IS_A BindExpr AND (child.mode() == :decl))))) THEN
+  IF !((child IS_A VarDecl OR ((child IS_A BindExpr AND (child.mode == :decl))))) THEN
       RETURN NIL;
   END
   MUTABLE ti = TRY (type__success_type((TRY (aST__full_type_mut(child)))));
@@ -1071,7 +1071,7 @@ PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup
     END))) THEN
       RETURN NIL;
   END
-  escapeAnalysis__mark_symbol_heap_mut(child.symbol())
+  escapeAnalysis__mark_symbol_heap_mut(child.symbol)
   });
 END
 PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Param, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
@@ -1153,7 +1153,7 @@ PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Lo
   IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
     RETURN FALSE;
   END
-  IF ((aST__node__symbol(node) EXISTS) AND ((node.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_13 = ((node.symbol())?);
+  IF ((aST__node__symbol(node) EXISTS) AND ((node.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_13 = ((node.symbol)?);
   symbolEntry__heap_storage?(rtoc_local_receiver_13) })) THEN
     RETURN FALSE;
   END
@@ -1388,7 +1388,7 @@ PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_al
   IF (TRUE AND symbolEntry__heap_storage?(value)) THEN
     RETURN TRUE;
   END
-  IF ((aST__node__symbol(value) EXISTS) AND ((value.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = ((value.symbol())?);
+  IF ((aST__node__symbol(value) EXISTS) AND ((value.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = ((value.symbol)?);
   symbolEntry__heap_storage?(rtoc_local_receiver_19) })) THEN
     RETURN TRUE;
   END
@@ -1423,7 +1423,7 @@ PUB FN escapeAnalysis__borrow_return_expr?(expr: ?Locatable) RETURNS !Bool ->
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF (aST__node__matched_signature(call) EXISTS) THEN
-    sig_branch_value = functionSignature__unwrap(call.matched_signature());
+    sig_branch_value = functionSignature__unwrap(call.matched_signature);
   ELSE
     sig_branch_value = NIL;
   END
@@ -1435,7 +1435,7 @@ PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool 
   aST__each_locatable(expr, %(raw: Locatable) -> {
   MUTABLE node = escapeAnalysis__unwrap_value(raw);
   IF node IS_A Identifier THEN
-      IF escapeAnalysis__symbol_heap?(node.symbol()) THEN
+      IF escapeAnalysis__symbol_heap?(node.symbol) THEN
         found = TRUE;
       END
   END
@@ -1520,21 +1520,21 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
   IF (node IS_A VarDecl) THEN
       escapeAnalysis__record_binding_fact_mut(node, symbols, binding_values);
   ELSE_IF (node IS_A BindExpr) THEN
-      IF (node.mode() == :assign) THEN
+      IF (node.mode == :assign) THEN
         &assignment_nodes.append(COPY node);
       ELSE
         escapeAnalysis__record_binding_fact_mut(node, symbols, binding_values);
       END
   ELSE_IF (node IS_A DestructuringAssignment) THEN
-      MUTABLE rtoc_each_items_23 = node.targets();
+      MUTABLE rtoc_each_items_23 = node.targets;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_23.length() DO
       IF (rtoc_each_items_23[rtoc_idx].name() == "_") THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (IF rtoc_each_items_23[rtoc_idx].symbol() != NIL THEN
-            (rtoc_each_items_23[rtoc_idx].symbol()).reg()
+      IF (IF rtoc_each_items_23[rtoc_idx].symbol != NIL THEN
+            (rtoc_each_items_23[rtoc_idx].symbol).reg
           ELSE
             NIL
           END).equal?(rtoc_each_items_23[rtoc_idx]) THEN
@@ -1594,7 +1594,7 @@ PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    escapeAnalysis__mark_symbol_heap_mut(identifiers[rtoc_idx].symbol(), &bg_heap, CAST(identifiers[rtoc_idx].name() AS String));
+    escapeAnalysis__mark_symbol_heap_mut(identifiers[rtoc_idx].symbol, &bg_heap, CAST(identifiers[rtoc_idx].name() AS String));
   rtoc_idx = rtoc_idx + 1;
   END
 END
@@ -1808,8 +1808,8 @@ PUB FN escapeAnalysis__collect_identifier_names_mut(expr: Locatable, MUTABLE nam
       CONTINUE;
     END
     IF node IS_A BlockExpr THEN
-      IF node.result() THEN
-        &stack.append(node.result());
+      IF node.result THEN
+        &stack.append(node.result);
       END
       CONTINUE;
     END
@@ -1863,7 +1863,7 @@ PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF (aST__node__matched_signature(call) EXISTS) THEN
-    sig_branch_value = functionSignature__unwrap(call.matched_signature());
+    sig_branch_value = functionSignature__unwrap(call.matched_signature);
   ELSE
     sig_branch_value = NIL;
   END
@@ -1969,14 +1969,14 @@ PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
   IF (TRUE AND symbolEntry__heap_storage?(node)) THEN
     RETURN TRUE;
   END
-  IF ((aST__node__symbol(node) EXISTS) AND ((node.symbol() != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_34 = ((node.symbol())?);
+  IF ((aST__node__symbol(node) EXISTS) AND ((node.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_34 = ((node.symbol)?);
   symbolEntry__heap_storage?(rtoc_local_receiver_34) })) THEN
     RETURN TRUE;
   END
   IF node IS_A StringConcat THEN
     RETURN TRUE;
   END
-  IF (node IS_A BinaryOp AND node.string_concat()) THEN
+  IF (node IS_A BinaryOp AND node.string_concat) THEN
     RETURN TRUE;
   END
   IF !(node IS_A Locatable) THEN
@@ -2003,7 +2003,7 @@ PUB FN escapeAnalysis__function_facts_have_heap_return_binding?(facts: FunctionF
   RETURN facts.return_values |> ANY escapeAnalysis__expr_has_heap_identifier?(_);
 END
 PUB FN escapeAnalysis__symbol_for_binding_node(node: BindingNode) RETURNS ?SymbolEntry@multiowned ->
-  MUTABLE rtoc_owned_return_36: ?SymbolEntry@multiowned = node.symbol();
+  MUTABLE rtoc_owned_return_36: ?SymbolEntry@multiowned = node.symbol;
   RETURN rtoc_owned_return_36;
 END
 PUB FN escapeAnalysis__mark_symbol_heap_mut(sym: ?SymbolEntry, MUTABLE names: ?[Set]String = NIL, name: ?String = NIL) RETURNS Bool ->
@@ -2023,8 +2023,8 @@ END
 PUB FN escapeAnalysis__mark_node_symbol_heap_mut(node: Any) RETURNS Bool ->
   MUTABLE changed = escapeAnalysis__mark_symbol_heap_mut(aST__node__symbol(node));
   MUTABLE decl = IF (aST__node__symbol(node) EXISTS) THEN
-    (IF node.symbol() != NIL THEN
-    (node.symbol()).reg()
+    (IF node.symbol != NIL THEN
+    (node.symbol).reg
   ELSE
     NIL
   END)
@@ -2067,7 +2067,7 @@ PUB FN escapeAnalysis__canonical_symbol(sym: ?SymbolEntry) RETURNS ?SymbolEntry@
       decl_branch_value = NIL;
     END
     MUTABLE decl: ?SymbolEntryRegInput = decl_branch_value;
-    RETURN (((((decl != NIL) AND (aST__node__symbol(decl) EXISTS)) AND decl.symbol())) OR sym_value);
+    RETURN (((((decl != NIL) AND (aST__node__symbol(decl) EXISTS)) AND decl.symbol)) OR sym_value);
   ELSE
     RETURN NIL;
   END

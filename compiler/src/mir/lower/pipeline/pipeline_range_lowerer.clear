@@ -325,7 +325,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           item_counter = (item_counter + 1);
           MUTABLE next_item = "__each_item_${item_counter.toString()}";
           MUTABLE head = runtimeHost__range_lower_head_with_context(rtoc_self_view.host, selectOp__expression(select_op), item_var);
-          stage_stmts = ruby_array_concat_Emittable(stage_stmts, CAST(head.pending() AS []Emittable));
+          stage_stmts = ruby_array_concat_Emittable(stage_stmts, CAST(head.pending AS []Emittable));
           &stage_stmts.append(Emittable{ Let: COPY Let{ name: COPY next_item, init: COPY head.value(), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           item_var = COPY next_item;
           current_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (selectOp__expression(select_op)))) }));
@@ -535,7 +535,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE terminal: ?String@symbol = COPY (TRY (type__observable_terminals())).each_with_object({}, %(tuple_param_0, h) -> {
     MUTABLE sym = tuple_param_0._0;
     MUTABLE entry = tuple_param_0._1;
-    MUTABLE tag = entry.ast_class();
+    MUTABLE tag = entry.ast_class;
     IF !((tag == NIL)) THEN
           MUTABLE klass: ?Any@multiowned = (CAST({:sum: AST.SumOp, :count: AST.CountOp, :avg: AST.AverageOp, :max: AST.MaxOp, :min: AST.MinOp, :any: AST.AnyOp, :all: AST.AllOp, :find: AST.FindOp} AS {String@symbol}Any@multiowned))[tag];
           IF !((klass == NIL)) THEN
@@ -738,8 +738,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE spec = COPY (TRY (type__observable_terminals())).each_with_object({}, %(tuple_param_0, h) -> {
     MUTABLE sym = tuple_param_0._0;
     MUTABLE entry = tuple_param_0._1;
-    IF entry.publish() THEN
-      h[sym] = pipelinePublishSpec__from(entry.publish());
+    IF entry.publish THEN
+      h[sym] = pipelinePublishSpec__from(entry.publish);
       RETURN NIL;
     END
     NIL

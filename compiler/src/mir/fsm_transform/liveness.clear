@@ -30,9 +30,9 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
     liveness__collect_uses(_, &uses_by_seg[_.index]);
   END
   liveness__collect_tail_uses(_, uses_by_seg);
-  IF ((((_.tail IS_A NextSuspend OR _.tail IS_A IoSuspend)) AND _.tail.result_var()) AND (_.tail.kind() != :io)) THEN
+  IF ((((_.tail IS_A NextSuspend OR _.tail IS_A IoSuspend)) AND _.tail.result_var) AND (_.tail.kind() != :io)) THEN
       MUTABLE rtoc_index_receiver_1 = UNWRAP (defs_by_seg[_.index]);
-      rtoc_index_receiver_1[_.tail.result_var()] = NIL;
+      rtoc_index_receiver_1[_.tail.result_var] = NIL;
   END
   END
   MUTABLE first_def: {String}Int64 = {};
@@ -106,9 +106,9 @@ PRIVATE FN liveness__tail_targets(seg: Segment) RETURNS ![]Int64 ->
   IF (seg.tail IS_A Done) THEN
     RETURN CAST(( { MUTABLE rtoc_empty_list_2: []Int64 = List[]; rtoc_empty_list_2 } ) AS []Int64);
   ELSE_IF (seg.tail IS_A Goto) OR (seg.tail IS_A LoopBack) THEN
-    RETURN CAST([seg.tail.target_index()] AS []Int64);
+    RETURN CAST([seg.tail.target_index] AS []Int64);
   ELSE_IF (seg.tail IS_A CondBranch) THEN
-    RETURN CAST([seg.tail.then_index(), seg.tail.else_index()] AS []Int64);
+    RETURN CAST([seg.tail.then_index, seg.tail.else_index] AS []Int64);
   ELSE_IF (seg.tail IS_A LockSuspend) THEN
     RETURN CAST([(seg.index + 1)] AS []Int64);
   ELSE
@@ -125,9 +125,9 @@ PRIVATE FN liveness__collect_tail_uses(seg: Segment, uses_by_seg: {Int64}[Set]St
     MUTABLE next_idx = (seg.index + 1);
     uses_by_seg[next_idx] = (uses_by_seg[next_idx] OR_ELSE Set[]);
     MUTABLE bucket: ?[Set]String = COPY uses_by_seg[next_idx];
-    MUTABLE call_node = tail.call_node();
+    MUTABLE call_node = tail.call_node;
     IF call_node IS_A MethodCall THEN
-      liveness__walk_idents(call_node.object(), %(name: String) USE(bucket) -> {
+      liveness__walk_idents(call_node.object, %(name: String) USE(bucket) -> {
   UNWRAP (bucket).insert(COPY name);
   rubyToClearVoid()
       });
@@ -144,7 +144,7 @@ PRIVATE FN liveness__collect_defs(MUTABLE stmt: Stmt, into: Any) RETURNS !Void -
   IF stmt IS_A VarDecl AS var_decl THEN
     MUTABLE var_decl_mutable = COPY var_decl;
     IF TRUE THEN
-      IF ((var_decl_mutable IS_A BindExpr AND FALSE) AND (var_decl_mutable.mode() != :decl)) THEN
+      IF ((var_decl_mutable IS_A BindExpr AND FALSE) AND (var_decl_mutable.mode != :decl)) THEN
         RETURN;
       END
       MUTABLE t: ?Type@multiowned = TRY (liveness__stmt_decl_type(BindingStmt{ VarDecl: COPY var_decl_mutable }));

@@ -119,7 +119,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       &current_block.stmts.append(COPY stmts[rtoc_idx]?);
       MUTABLE then_block = functionCFG__new_block(&cfg);
       MUTABLE else_block_branch_value: ?BasicBlock = NIL;
-      IF stmts[rtoc_idx]?.else_branch() THEN
+      IF stmts[rtoc_idx]?.else_branch THEN
         else_block_branch_value = functionCFG__new_block(&cfg);
       ELSE
         else_block_branch_value = NIL;
@@ -128,13 +128,13 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE join_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, then_block);
       basicBlock__add_successor(&current_block, (else_block OR_ELSE join_block));
-      MUTABLE then_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.then_branch() OR_ELSE List[]), then_block, exit_target, cfg, break_target, continue_target));
+      MUTABLE then_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.then_branch OR_ELSE List[]), then_block, exit_target, cfg, break_target, continue_target));
       IF then_exit EXISTS AS then_exit_value THEN
         MUTABLE then_exit_value_mutable = COPY then_exit_value;
         basicBlock__add_successor(&then_exit_value_mutable, join_block);
       END
-      IF stmts[rtoc_idx]?.else_branch() THEN
-        MUTABLE else_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.else_branch(), else_block?, exit_target, cfg, break_target, continue_target));
+      IF stmts[rtoc_idx]?.else_branch THEN
+        MUTABLE else_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.else_branch, else_block?, exit_target, cfg, break_target, continue_target));
         IF else_exit EXISTS AS else_exit_value THEN
           MUTABLE else_exit_value_mutable = COPY else_exit_value;
           basicBlock__add_successor(&else_exit_value_mutable, join_block);
@@ -147,7 +147,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE after_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, body_block);
       basicBlock__add_successor(&current_block, after_block);
-      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.do_branch() OR_ELSE List[]), body_block, exit_target, cfg, after_block, current_block));
+      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.do_branch OR_ELSE List[]), body_block, exit_target, cfg, after_block, current_block));
       IF body_exit != NIL THEN
             basicBlock__add_successor(&body_exit, current_block);
       END
@@ -166,7 +166,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
   ELSE_IF (stmts[rtoc_idx]? IS_A MatchStatement) THEN
       &current_block.stmts.append(COPY stmts[rtoc_idx]?);
       MUTABLE join_block = functionCFG__new_block(&cfg);
-      FOR _ IN (stmts[rtoc_idx]?.cases()) DO
+      FOR _ IN (stmts[rtoc_idx]?.cases) DO
     MUTABLE case_block = functionCFG__new_block(&cfg);
     basicBlock__add_successor(&current_block, case_block);
     MUTABLE case_exit: ?BasicBlock = TRY (functionCFG__build_body(_.body(), case_block, exit_target, cfg, break_target, continue_target));
@@ -175,10 +175,10 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
           basicBlock__add_successor(&case_exit_value_mutable, join_block);
     END
       END
-      IF stmts[rtoc_idx]?.default_case() THEN
+      IF stmts[rtoc_idx]?.default_case THEN
         MUTABLE default_block = functionCFG__new_block(&cfg);
         basicBlock__add_successor(&current_block, default_block);
-        MUTABLE default_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.default_case(), default_block, exit_target, cfg, break_target, continue_target));
+        MUTABLE default_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.default_case, default_block, exit_target, cfg, break_target, continue_target));
         IF default_exit EXISTS AS default_exit_value THEN
           MUTABLE default_exit_value_mutable = COPY default_exit_value;
           basicBlock__add_successor(&default_exit_value_mutable, join_block);
@@ -200,7 +200,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
   ELSE_IF (stmts[rtoc_idx]? IS_A DoBlock) THEN
       &current_block.stmts.append(COPY stmts[rtoc_idx]?);
       MUTABLE join_block = functionCFG__new_block(&cfg);
-      FOR _ IN (stmts[rtoc_idx]?.branches()) DO
+      FOR _ IN (stmts[rtoc_idx]?.branches) DO
     MUTABLE branch_block = functionCFG__new_block(&cfg);
     basicBlock__add_successor(&current_block, branch_block);
     MUTABLE branch_exit: ?BasicBlock = TRY (functionCFG__build_body(_.body(), branch_block, exit_target, cfg, break_target, continue_target));
@@ -341,7 +341,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF rtoc_self_view.entries[place] != NIL THEN
     RETURN COPY (rtoc_self_view.entries[place])?;
     ELSE
-    RETURN COPY ( { MUTABLE rtoc_transform_keys_result_3: {Any}OwnerEntry = {}; FOR rtoc_key IN rtoc_self_view.entries.keys() DO rtoc_transform_keys_result_3[rtoc_key.path] = (rtoc_self_view.entries[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS OwnerEntry)); END rtoc_transform_keys_result_3 } )[place.path()];
+    RETURN COPY ( { MUTABLE rtoc_transform_keys_result_3: {Any}OwnerEntry = {}; FOR rtoc_key IN rtoc_self_view.entries.keys() DO rtoc_transform_keys_result_3[rtoc_key.path] = (rtoc_self_view.entries[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS OwnerEntry)); END rtoc_transform_keys_result_3 } )[place.path];
     END
 }
 END
@@ -407,8 +407,8 @@ PUB FN ownershipDataflow__resolve_state_place(state: {PlaceId}OwnerEntry, place:
   IF state[candidate] THEN
     RETURN candidate;
   END
-  IF state.keys() |> FIND (_.path == candidate.path()) != NIL THEN
-  RETURN (state.keys() |> FIND (_.path == candidate.path()))?;
+  IF state.keys() |> FIND (_.path == candidate.path) != NIL THEN
+  RETURN (state.keys() |> FIND (_.path == candidate.path))?;
   ELSE
   RETURN candidate;
   END
@@ -483,11 +483,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE order: []BasicBlock@multiowned = ( { MUTABLE rtoc_empty_list_5: []BasicBlock@multiowned = List[]; rtoc_empty_list_5 } );
     MUTABLE visit: ?Any@multiowned = NIL;
     visit = %(block) USE(MUTABLE order, visit, MUTABLE visited) -> {
-    IF visited.contains?(block.id()) THEN
+    IF visited.contains?(block.id) THEN
         RETURN NIL;
     END
-    &visited.insert(block.id());
-    FOR _ IN block.successors() DO
+    &visited.insert(block.id);
+    FOR _ IN block.successors DO
     runtimeCallSpec__call(CAST(UNWRAP (visit) AS RuntimeCallSpec), _);
     END
     &order.append(COPY block)
@@ -640,7 +640,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((node IS_A VarDecl OR ((IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :assign) ELSE FALSE END)))) THEN
         RETURN;
     END
-    MUTABLE entry = node.mir_binding_entry();
+    MUTABLE entry = node.mir_binding_entry;
     IF !(entry) THEN
         RETURN;
     END
@@ -798,7 +798,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN state.each_with_object({}, %(tuple_param_0, out: Tuple<PlaceId,OwnerEntry>) -> {
     MUTABLE place = tuple_param_0._0;
     MUTABLE entry = tuple_param_0._1;
-    out[place.path()] = entry;
+    out[place.path] = entry;
     NIL
     });
 }
@@ -916,7 +916,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE result = TRY (ownershipDataflow__dup_state(rtoc_self_view, first_out));
     FOR _ IN (preds |> SKIP 1) DO
-    MUTABLE pred_out = COPY UNWRAP (rtoc_self_view.block_out[_.id()]);
+    MUTABLE pred_out = COPY UNWRAP (rtoc_self_view.block_out[_.id]);
     pred_out.keys() |> EACH {
       MUTABLE b: OwnerEntry = (pred_out[_] OR_ELSE CAST(panic("missing hash key") AS OwnerEntry));
     result[_] = ownershipDataflow__join_entry(rtoc_self_view, result[_], b);
@@ -1051,7 +1051,7 @@ PRIVATE FN ownershipDataflow__transfer_stmt(self: OwnershipDataflow, stmt: Locat
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF stmt IS_A VarDecl AS var_decl THEN
       MUTABLE plan = var_decl.ownership_transport_plan;
-      IF !((plan IS_A OwnershipTransportPlan AND (plan.action() != :move))) THEN
+      IF !((plan IS_A OwnershipTransportPlan AND (plan.action != :move))) THEN
         FOR _ IN (TRY (ownershipDataflow__collect_binding_move_places(rtoc_self_view, var_decl.value, state))) DO
         ownershipDataflow__mark_moved_mut(rtoc_self_view, state, _);
         END
@@ -1059,7 +1059,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, CAST(var_decl.name AS String), Locatable{ VarDecl: COPY var_decl }));
     ELSE_IF stmt IS_A BindExpr AS bind_expr THEN
       MUTABLE plan = bind_expr.ownership_transport_plan;
-      IF !((plan IS_A OwnershipTransportPlan AND (plan.action() != :move))) THEN
+      IF !((plan IS_A OwnershipTransportPlan AND (plan.action != :move))) THEN
         FOR _ IN (TRY (ownershipDataflow__collect_binding_move_places(rtoc_self_view, bind_expr.value, state))) DO
         ownershipDataflow__mark_moved_mut(rtoc_self_view, state, _);
         END
@@ -1208,7 +1208,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
                 END
         END
       ELSE_IF (node_value_mutable IS_A MethodCall) THEN
-        IF (node_value_mutable.object() IS_A Identifier AND ((node_value_mutable.object().token() != NIL) AND (((node_value_mutable.object().token())?).type() == :TYPE_ID))) THEN
+        IF (node_value_mutable.object IS_A Identifier AND ((node_value_mutable.object.token() != NIL) AND (((node_value_mutable.object.token())?).type() == :TYPE_ID))) THEN
           FOR _ IN node_value_mutable.args() DO
           TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, _, step));
           END
@@ -1386,7 +1386,7 @@ PRIVATE FN ownershipDataflow__collect_bg_body_gives(self: OwnershipDataflow, bg_
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (TRY (effectSet__to_a((IF bg_node.capture_analysis() != NIL THEN
-      (bg_node.capture_analysis()).move_mark_names()
+      (bg_node.capture_analysis()).move_mark_names
     ELSE
       NIL
     END))) OR_ELSE List[]);
@@ -1519,7 +1519,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE func_call_mutable = COPY func_call;
       TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, CallNode{ FuncCall: COPY func_call_mutable }, state));
     ELSE_IF (stmt IS_A MethodCall) THEN
-      TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, stmt.object(), state));
+      TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, stmt.object, state));
       TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, castLocatableToCallNode(stmt), state));
     ELSE_IF stmt IS_A IfStatement AS if_statement THEN
       MUTABLE if_statement_mutable = COPY if_statement;
@@ -1562,7 +1562,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_21 = ((MATCH call_node START CallNode.FuncCall AS item -> item.args, CallNode.MethodCall AS item -> item.args END));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_21.length() DO
-    IF (rtoc_each_items_21[rtoc_idx] IS_A Identifier AND rtoc_each_items_21[rtoc_idx].was_moved()) THEN
+    IF (rtoc_each_items_21[rtoc_idx] IS_A Identifier AND rtoc_each_items_21[rtoc_idx].was_moved) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
     ELSE_IF rtoc_each_items_21[rtoc_idx] IS_A MoveNode THEN
@@ -1617,7 +1617,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE func_call_mutable = COPY func_call;
         TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, CallNode{ FuncCall: COPY func_call_mutable }, state));
       ELSE_IF (node_value_mutable IS_A MethodCall) THEN
-        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, node_value_mutable.object(), state));
+        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, node_value_mutable.object, state));
         TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, castLocatableToCallNode(node_value_mutable), state));
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
         MUTABLE get_field_mutable = COPY get_field;
@@ -1833,7 +1833,7 @@ PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names
 END
 PUB FN loopFrameAnalysis__loop_local_children(node: Locatable) RETURNS ![]Locatable ->
   MUTABLE children: []Locatable = ( { MUTABLE rtoc_empty_list_27: []Locatable = List[]; rtoc_empty_list_27 } );
-  FOR _ IN node.class().members() DO
+  FOR _ IN node.class().members DO
   MUTABLE value = COPY node.substr(_, 1);
   IF (value == Array) THEN
       FOR _ IN value DO
@@ -1908,13 +1908,13 @@ PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_n
       RETURN FALSE;
     END
     MUTABLE receiver =     IF node IS_A MethodCall THEN
-      node.object()
+      node.object
     ELSE
       node.args().first()
     END;
     MUTABLE root = (aST__root_identifier(receiver) OR_ELSE NIL);
     IF !((IF root != NIL THEN
-      root.symbol()
+      root.symbol
     ELSE
       NIL
     END)) THEN
@@ -1938,7 +1938,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !((TRY (functionSignature__emits_allocating?(&sig)) AND TRY (functionSignature__mutates_receiver?(&sig)))) THEN
       RETURN;
   END
-  MUTABLE root: ?Identifier = aST__root_identifier(node.object());
+  MUTABLE root: ?Identifier = aST__root_identifier(node.object);
   IF !(root?.symbol) THEN
       RETURN;
   END
@@ -2052,7 +2052,7 @@ PUB FN borrowState__empty() RETURNS BorrowState ->
   RETURN BorrowState{ borrows: {} };
 END
 PUB FN borrowState__empty?(self: BorrowState) RETURNS Bool EFFECTS REENTRANT ->
-  RETURN (self.borrows.count() == 0);
+  RETURN (self.borrows.count == 0);
 END
 PUB FN borrowState__kind_for(self: BorrowState, name: String) RETURNS ?String@symbol ->
   IF self.borrows[name] != NIL THEN

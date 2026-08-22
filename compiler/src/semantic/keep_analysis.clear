@@ -46,12 +46,12 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
   NIL
   };
   refresh_kept();
-  fn_nodes.count().times(%() USE(body_summaries, caller_params, fn_nodes, kept_param_indexes, refresh_kept) -> {
+  fn_nodes.count.times(%() USE(body_summaries, caller_params, fn_nodes, kept_param_indexes, refresh_kept) -> {
   MUTABLE changed: Bool = FALSE;
   FOR rtoc_key IN body_summaries.keys() DO
     MUTABLE summary: FunctionBodySummary = COPY UNWRAP (body_summaries[rtoc_key]);
     MUTABLE params: ?{String}SymbolEntry@multiowned = COPY caller_params[rtoc_key];
-    IF ((params == NIL) OR (UNWRAP (params).count() == 0)) THEN
+    IF ((params == NIL) OR (UNWRAP (params).count == 0)) THEN
         RETURN;
     END
     MUTABLE rtoc_idx = 0;
@@ -77,12 +77,12 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
             MUTABLE callee_param = ((fn_nodes[summary.call_site_facts[rtoc_idx]?.callee_name])?.params[kept[rtoc_idx]] OR_ELSE NIL);
             MUTABLE inherited: ?KeptIdentityContract = NIL;
             IF (IF callee_param != NIL THEN
-                callee_param.symbol()
+                callee_param.symbol
               ELSE
                 NIL
               END) != NIL THEN
                 inherited = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = (((IF callee_param != NIL THEN
-                callee_param.symbol()
+                callee_param.symbol
               ELSE
                 NIL
               END))?);

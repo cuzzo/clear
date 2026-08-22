@@ -42,7 +42,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (rtoc_self_view.violations.length() == 0) THEN
       RETURN;
     END
-    MUTABLE sample = (rtoc_self_view.violations.first(20) |> SELECT "  - ${_.class_name()} @ ${_.location()}: ${_.type_name()}").join("\n");
+    MUTABLE sample = (rtoc_self_view.violations.first(20) |> SELECT "  - ${_.class_name()} @ ${_.location()}: ${_.type_name}").join("\n");
     MUTABLE more: String = "";
     IF (rtoc_self_view.violations.length() > 20) THEN
       more = "\n  ... (+${(rtoc_self_view.violations.length() - 20)} more)";
@@ -110,7 +110,7 @@ PRIVATE FN annotationTypeInventory__location(node: Locatable) RETURNS String ->
   IF !(token) THEN
     RETURN "?";
   END
-  RETURN "${token.line()}:${token.column()}";
+  RETURN "${token.line}:${token.column}";
 END
 PUB FN annotationTypeInventory__new(typed_node_count: Int64, violations: []Violation) RETURNS AnnotationTypeInventory@multiowned ->
   MUTABLE self = AnnotationTypeInventory{ typed_node_count: typed_node_count, violations: List[] };

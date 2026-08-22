@@ -132,8 +132,8 @@ FN emit_registry_mismatch_mut(token: Token, name: NameCandidate, candidates: []N
   fixable_mut(token, {:code: :REGISTRY_MISMATCH_REJECTED, :detail: message, :category: :registry, :level: :error, :fixes: fixes});
 END
 PUB FN emit_typo_suggestion_mut(token: ?TypoToken, name: String, candidates: []String, message: String, fix_label: String, category: String@symbol = :registry, cascade: Bool = TRUE) RETURNS !Void ->
-  MUTABLE token_line: Int64 = CAST(token.line() AS Int64);
-  MUTABLE token_column: Int64 = CAST(token.column() AS Int64);
+  MUTABLE token_line: Int64 = CAST(token.line AS Int64);
+  MUTABLE token_column: Int64 = CAST(token.column AS Int64);
   MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch?(name, "\\A[A-Z]")) THEN
     NIL
   ELSE
@@ -156,13 +156,13 @@ FN variant_anchor_from_getfield(getfield_node: GetField) RETURNS ?AnchorToken ->
   IF !(tgt.token()) THEN
     RETURN NIL;
   END
-  RETURN anchor_at(tgt.token().line(), ((tgt.token().column() + (CAST(tgt.name() AS String)).codepointCount()) + 1));
+  RETURN anchor_at(tgt.token().line, ((tgt.token().column + (CAST(tgt.name() AS String)).codepointCount()) + 1));
 END
 FN variant_anchor_from_unionlit(node: Node, variant_name: String) RETURNS ?AnchorToken ->
   IF !(node.token()) THEN
     RETURN NIL;
   END
-  RETURN anchor_at(node.token().line(), (node.token().column() - variant_name.codepointCount()));
+  RETURN anchor_at(node.token().line, (node.token().column - variant_name.codepointCount()));
 END
 FN emit_variant_typo_mut(anchor: AnchorToken, name: String, candidates: []NameCandidate, message: String, fix_label: String, cascade: Bool = FALSE) RETURNS !Void ->
   MUTABLE best = TRY (closest_name(name, candidates));
@@ -257,9 +257,9 @@ FN emit_use_of_moved_error_mut(use_node: Identifier, og_node: OwnershipNode) RET
       END)?.reg;
       src = source_code();
       IF ((decl AND aST__node__token(decl)) AND src) THEN
-        MUTABLE dline = aST__node__token(decl).line();
+        MUTABLE dline = aST__node__token(decl).line;
         MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");
-        MUTABLE semi_idx = line_text.indexOf(";", (aST__node__token(decl).column() - 1));
+        MUTABLE semi_idx = line_text.indexOf(";", (aST__node__token(decl).column - 1));
         IF semi_idx THEN
           MUTABLE insert_col = (semi_idx + 1);
           FOR _ IN candidate_caps DO
@@ -506,7 +506,7 @@ FN emit_missing_mutable_marker_error_mut(facts: CallArgumentFacts, scope: Scope)
     MUTABLE edits: []Edit = [edit__new(span__new(NIL, root_value.token.line, root_value.token.column, 0), "&")];
     MUTABLE mutable_fix = TRY (build_declare_mutable_fix(root_value.name, scope));
     IF (scope__is_immutable?(scope, root_value.name) AND mutable_fix) THEN
-      edits = ruby_array_concat_Edit(edits, CAST(mutable_fix.edits() AS []Edit));
+      edits = ruby_array_concat_Edit(edits, CAST(mutable_fix.edits AS []Edit));
     END
     MUTABLE fix = TRY (fix__new(fix_description(:INSERT_MUTABLE_ARGUMENT_MARKER, {:name: root_value.name, :param: facts.param.name}), edits, :auto));
     fixable_mut(root_value, {:code: :MUTABLE_ARGUMENT_REQUIRES_MARKER, :index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name, :category: :mutability, :level: :error, :fixes: [fix]});
@@ -589,7 +589,7 @@ FN emit_return_borrowed_no_copy_error_mut(MUTABLE node: Locatable) RETURNS !Void
   MUTABLE fix = NIL;
   IF node.token() THEN
     MUTABLE tok = node.token();
-    fix = TRY (fix__new(fix_description(:WRAP_RETURN_WITH_COPY), [edit__new(span__new(NIL, tok.line(), tok.column(), 0), "COPY ")], :auto));
+    fix = TRY (fix__new(fix_description(:WRAP_RETURN_WITH_COPY), [edit__new(span__new(NIL, tok.line, tok.column, 0), "COPY ")], :auto));
   END
   MUTABLE kw = {:type: TRY (aST__full_type_mut(node))};
   IF !(fix) THEN
@@ -626,7 +626,7 @@ FN emit_foreign_with_view_needs_unsafe_mut(node: WithBlock, fact: CapabilityTran
   IF !((view_token AND as_token)) THEN
     RETURN error_mut(node, :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, {:name: name});
   END
-  MUTABLE fix = TRY (fix__new(fix_description(:CONVERT_FOREIGN_VIEW_TO_UNSAFE, {:name: name}), [edit__new(span__new(NIL, view_token.line(), view_token.column(), "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token.line(), as_token.column(), 0), "LENGTH 0 ")], :interactive));
+  MUTABLE fix = TRY (fix__new(fix_description(:CONVERT_FOREIGN_VIEW_TO_UNSAFE, {:name: name}), [edit__new(span__new(NIL, view_token.line, view_token.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token.line, as_token.column, 0), "LENGTH 0 ")], :interactive));
   fixable_mut(node, {:code: :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, :name: name, :category: :capability, :level: :error, :fixes: [fix], :raise_in_collector: TRUE});
 END
 FN emit_foreign_index_needs_unsafe_view_mut(node: GetIndex, name: String) RETURNS !Void ->
@@ -661,7 +661,7 @@ FN emit_direct_view_access_finding_mut(node: Locatable, name: String, permission
   MUTABLE src = source_code();
   MUTABLE fixes = List[];
   IF src THEN
-    MUTABLE line_num = token__start_line(node.source_range());
+    MUTABLE line_num = token__start_line(node.source_range);
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
     MUTABLE body = line_text.trim();
     MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
@@ -689,7 +689,7 @@ FN emit_with_guard_all_bindings_need_as_mut(node: WithBlock, missing_caps: []Cap
     END
     MUTABLE tok = vn.token();
     MUTABLE name = COPY CAST(vn.name() AS String);
-    &edits.append(edit__new(span__new(NIL, tok.line(), (tok.column() + name.codepointCount()), 0), " AS ${name}_v"));
+    &edits.append(edit__new(span__new(NIL, tok.line, (tok.column + name.codepointCount()), 0), " AS ${name}_v"));
   rtoc_idx = rtoc_idx + 1;
   END
   IF (edits.length() == 0) THEN
@@ -770,9 +770,9 @@ FN emit_with_materialized_needs_tense_mut(node: WithBlock, name: String, got: Ty
   IF (decl AND src) THEN
     MUTABLE token = aST__node__token(decl);
     IF token THEN
-      MUTABLE dline = token.line();
+      MUTABLE dline = token.line;
       MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");
-      MUTABLE search_offset = (token.column() - 1);
+      MUTABLE search_offset = (token.column - 1);
       MUTABLE ann_match = (IF line_text.substr(search_offset, (line_text.length() - search_offset)) != NIL THEN
         ((line_text.substr(search_offset, (line_text.length() - search_offset)))?).match(":\\s*([A-Za-z_][\\w]*)")
       ELSE
@@ -802,12 +802,12 @@ END
 FN emit_can_smash_unsupported_error_mut(node: AsyncValidationNode) RETURNS !Void ->
   MUTABLE fix = NIL;
   MUTABLE tok = IF respondsTo?(node, "can_smash_token") THEN
-    node.can_smash_token()
+    node.can_smash_token
   ELSE
     NIL
   END;
   IF tok THEN
-    fix = TRY (fix__new(fix_description(:REPLACE_CAN_SMASH_WITH_SERVICE), [edit__new(span__new(NIL, tok.line(), tok.column(), (CAST(tok.value() AS String)).codepointCount()), "@service")], :auto));
+    fix = TRY (fix__new(fix_description(:REPLACE_CAN_SMASH_WITH_SERVICE), [edit__new(span__new(NIL, tok.line, tok.column, (CAST(tok.value() AS String)).codepointCount()), "@service")], :auto));
   END
   IF !(fix) THEN
     RETURN error_mut(node, :CAN_SMASH_NOT_SUPPORTED);
@@ -887,7 +887,7 @@ FN build_cast_wrap_fix(value: ?Locatable, target_type: TypeTypeInput) RETURNS !?
     IF !(text_length) THEN
       RETURN NIL;
     END
-    RETURN TRY (fix__new(fix_description(:WRAP_VALUE_WITH_CAST, {:type: target_name}), [edit__new(span__new(NIL, tok.line(), tok.column(), 0), "CAST("), edit__new(span__new(NIL, tok.line(), (tok.column() + text_length), 0), " AS ${castTypeTypeInputToString(target_name)})")], :interactive));
+    RETURN TRY (fix__new(fix_description(:WRAP_VALUE_WITH_CAST, {:type: target_name}), [edit__new(span__new(NIL, tok.line, tok.column, 0), "CAST("), edit__new(span__new(NIL, tok.line, (tok.column + text_length), 0), " AS ${castTypeTypeInputToString(target_name)})")], :interactive));
   ELSE
     RETURN NIL;
   END
@@ -907,9 +907,9 @@ FN build_decl_cap_insert_fix(name: String, sigil: String, description_code: Stri
   IF !(src) THEN
     RETURN NIL;
   END
-  MUTABLE dline = aST__node__token(decl).line();
+  MUTABLE dline = aST__node__token(decl).line;
   MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");
-  MUTABLE semi_idx = line_text.indexOf(";", (aST__node__token(decl).column() - 1));
+  MUTABLE semi_idx = line_text.indexOf(";", (aST__node__token(decl).column - 1));
   IF !(semi_idx) THEN
     RETURN NIL;
   END
@@ -935,7 +935,7 @@ FN build_decl_cap_replace_fix(name: String, old_sigil: String, new_sigil: String
   IF !(src) THEN
     RETURN NIL;
   END
-  MUTABLE dline = aST__node__token(decl).line();
+  MUTABLE dline = aST__node__token(decl).line;
   MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");
   MUTABLE idx = line_text.indexOf(old_sigil);
   IF !(idx) THEN
@@ -975,7 +975,7 @@ FN build_declare_mutable_fix(name: String, scope: Scope) RETURNS !?Fix ->
     IF (tok.value() == "MUTABLE") THEN
       RETURN NIL;
     END
-    RETURN TRY (fix__new(fix_description(:DECLARE_MUTABLE_BINDING, {:name: name, :line: tok.line()}), [edit__new(span__new(NIL, tok.line(), tok.column(), 0), "MUTABLE ")], :auto));
+    RETURN TRY (fix__new(fix_description(:DECLARE_MUTABLE_BINDING, {:name: name, :line: tok.line}), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
   ELSE
     RETURN NIL;
   END
@@ -997,12 +997,12 @@ FN build_atomic_escape_migration_fix(source_sym: SymbolEntry, source_name: Strin
   MUTABLE reg: ?SymbolEntryRegInput = reg_branch_value;
   IF reg EXISTS AS reg_value THEN
     IF reg_value.token() THEN
-      MUTABLE line_num = reg_value.token().line();
+      MUTABLE line_num = reg_value.token().line;
       IF !(line_num) THEN
         RETURN NIL;
       END
       MUTABLE src_line = (src.split("\n")[(line_num - 1)] OR "");
-      MUTABLE search_offset = (reg_value.token().column() - 1);
+      MUTABLE search_offset = (reg_value.token().column - 1);
       MUTABLE match = (IF src_line.substr(search_offset, (src_line.length() - search_offset)) != NIL THEN
         ((src_line.substr(search_offset, (src_line.length() - search_offset)))?).match("@(?:shared:atomic|atomic:shared)")
       ELSE
@@ -1052,7 +1052,7 @@ FN auto_rank_candidates(ops: [Set]String@symbol) RETURNS ![]AutoCandidate ->
     END
   rtoc_idx = rtoc_idx + 1;
   END
-  MUTABLE n_ops = ops.size();
+  MUTABLE n_ops = ops.size;
   MUTABLE intersection = agg |> WHERE (_._1[:count] == n_ops);
   RETURN (intersection |> ORDER_BY _._1[:rank_sum]).keys() |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY (CAST(((CAST(((intersection |> ORDER_BY _._1[:rank_sum])[_] OR_ELSE panic("missing hash key"))[:notes] AS []String)) |> DISTINCT _) AS []String)).first() };
 END
@@ -1066,7 +1066,7 @@ FN build_auto_candidate_fix(slot: Slot, type_sym: String@symbol, note: ?String, 
     " ${note}"
   ELSE
     ""
-  END}), [edit__new(span__new(NIL, auto_tok.line(), auto_tok.column(), "Auto".codepointCount()), type_str)], :interactive));
+  END}), [edit__new(span__new(NIL, auto_tok.line, auto_tok.column, "Auto".codepointCount()), type_str)], :interactive));
 END
 FN build_auto_op_evidence_block(ops: [Set]String@symbol, candidates: []AutoCandidate) RETURNS String ->
   IF (candidates.length() == 0) THEN
@@ -1151,7 +1151,7 @@ FN emit_auto_ambiguity_finding_mut(ambiguity: Ambiguity, op_evidence: {AutoSlotI
   MUTABLE fixes = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < candidates.length() DO
-    MUTABLE fix = TRY (build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym(), candidates[rtoc_idx].note(), (rtoc_idx + 1)));
+    MUTABLE fix = TRY (build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym, candidates[rtoc_idx].note, (rtoc_idx + 1)));
     IF fix THEN
         &fixes.append(fix);
     END
@@ -1180,7 +1180,7 @@ FN emit_auto_unresolved_finding_mut(slot: Slot, op_evidence: {AutoSlotId}[Set]St
   MUTABLE fixes = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < candidates.length() DO
-    MUTABLE fix = TRY (build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym(), candidates[rtoc_idx].note(), (rtoc_idx + 1)));
+    MUTABLE fix = TRY (build_auto_candidate_fix(slot, candidates[rtoc_idx].type_sym, candidates[rtoc_idx].note, (rtoc_idx + 1)));
     IF fix THEN
         &fixes.append(fix);
     END

@@ -196,7 +196,7 @@ PUB FN resolutionSession__generic_param_token(self: ResolutionSession, node: Nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE param = node.generic_params() |> FIND (_.name() == name);
+    MUTABLE param = node.generic_params |> FIND (_.name() == name);
     RETURN ((IF param != NIL THEN
       param.token()
     ELSE
@@ -519,7 +519,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((token != NIL)) THEN
       RETURN NIL;
     END
-    RETURN Token{ type: :ANCHOR, value: NIL, line: token.line(), column: token.column(), file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
+    RETURN Token{ type: :ANCHOR, value: NIL, line: token.line, column: token.column, file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
 }
 END
 PRIVATE FN resolutionSession__diagnostic_output(self: ResolutionSession, message: String) RETURNS Void
@@ -791,7 +791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (binders.length() == 0) THEN
       MUTABLE names = ((TRY (type__generic_args(declaration.protocol_type))) |> SELECT:? {
     MUTABLE kind = COPY _.shape.expression.kind;
-    (    IF ((kind IS_A NamedTypeExpression AND kind.arguments().empty?()) AND !(builtin_type_parameter_names.contains?(kind.name()))) THEN
+    (    IF ((kind IS_A NamedTypeExpression AND kind.arguments.empty?()) AND !(builtin_type_parameter_names.contains?(kind.name()))) THEN
           CAST(kind.name() AS String)
         ELSE
           NIL
@@ -924,9 +924,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_mutable_receiver_22 = resolutionSession__current_scope(rtoc_self_view);
     TRY (scope__declare(&rtoc_mutable_receiver_22, rtoc_each_1, NIL, imported_sig, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :static));
         END
-    mod_value.global_scope.types().keys() |> EACH {
-    MUTABLE type_entry: Any = (mod_value.global_scope.types()[_] OR_ELSE panic("missing hash key"));
-    MUTABLE schema = type_entry.schema();
+    mod_value.global_scope.types.keys() |> EACH {
+    MUTABLE type_entry: Any = (mod_value.global_scope.types[_] OR_ELSE panic("missing hash key"));
+    MUTABLE schema = type_entry.schema;
     MUTABLE vis = (functionSignature__visibility(schema) OR :package);
     IF (vis == :private) THEN
         CONTINUE;
@@ -1370,7 +1370,7 @@ PRIVATE FN resolutionSession__register_extern_function_signature(self: Resolutio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (node.extern_source.abi() == :c) THEN
+    IF (node.extern_source.abi == :c) THEN
       TRY (resolutionSession__validate_c_extern_signature_mut(rtoc_self_view, node));
     END
     MUTABLE signature = TRY (signatureRegistry__extern_function_signature(node));
@@ -1837,7 +1837,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE schema =   IF ((node.close_method != NIL) AND (node.from_module != NIL)) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
-      IF (node.extern_source.abi() == :c) THEN
+      IF (node.extern_source.abi == :c) THEN
       close_plan = resourceClosePlan__c_function(UNWRAP (node.close_method));
     ELSE
       close_plan = resourceClosePlan__method(UNWRAP (node.close_method));
@@ -1997,10 +1997,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((resolutionSession__extern_type_schema?(rtoc_self_view, existing) AND resolutionSession__extern_type_schema?(rtoc_self_view, incoming))) THEN
       RETURN FALSE;
     END
-    IF !((existing.extern_module() == incoming.extern_module())) THEN
+    IF !((existing.extern_module == incoming.extern_module)) THEN
       RETURN FALSE;
     END
-    IF !((existing.as_type() == incoming.as_type())) THEN
+    IF !((existing.as_type == incoming.as_type)) THEN
       RETURN FALSE;
     END
     IF !((existing.type_params() == incoming.type_params())) THEN
@@ -2021,7 +2021,7 @@ PRIVATE FN resolutionSession__extern_type_schema?(self: ResolutionSession, schem
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((schema IS_A StructSchema OR schema IS_A ResourceSchema)) AND !((schema.extern_module() == NIL)));
+    RETURN (((schema IS_A StructSchema OR schema IS_A ResourceSchema)) AND !((schema.extern_module == NIL)));
 }
 END
 PRIVATE FN resolutionSession__equivalent_struct_fields?(self: ResolutionSession, left: {String}StructField, right: {String}StructField) RETURNS Bool

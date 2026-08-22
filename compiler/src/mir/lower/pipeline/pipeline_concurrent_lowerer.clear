@@ -658,8 +658,8 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_select(self: Pipelin
 END
 PRIVATE FN pipelineConcurrentLowerer__concurrent_select_result_type(self: PipelineConcurrentLowerer, inner: SelectOp) RETURNS !Type ->
   MUTABLE expression = COPY inner.expression;
-  IF (((((inner.effect_mode == :fallible) OR (inner.effect_mode == :fallible_optional))) AND (aST__node_error_union_type(expression) EXISTS)) AND expression.error_union_type()) THEN
-    RETURN TRY (type__new(expression.error_union_type()));
+  IF (((((inner.effect_mode == :fallible) OR (inner.effect_mode == :fallible_optional))) AND (aST__node_error_union_type(expression) EXISTS)) AND expression.error_union_type) THEN
+    RETURN TRY (type__new(expression.error_union_type));
   END
   RETURN TRY (aST__full_type_mut(expression));
 END
@@ -918,7 +918,7 @@ PRIVATE FN pipelineConcurrentLowerer__assignment_targets_placeholder?(self: Pipe
     RETURN pipelineConcurrentLowerer__target_rooted_at_placeholder?(self, castAssignmentNameToLocatable(assignment.name));
   END
   IF node IS_A Struct AS struct THEN
-    RETURN struct.members() |> ANY (IF ([:token, :location]).contains?(_) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE value = COPY struct[_]; (    IF value IS_A []@multiowned Any THEN
+    RETURN struct.members |> ANY (IF ([:token, :location]).contains?(_) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE value = COPY struct[_]; (    IF value IS_A []@multiowned Any THEN
       value |> ANY (_ IS_A Struct AND pipelineConcurrentLowerer__assignment_targets_placeholder?(self, _))
     ELSE_IF value IS_A Struct THEN
       pipelineConcurrentLowerer__assignment_targets_placeholder?(self, value)
