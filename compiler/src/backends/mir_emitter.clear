@@ -487,7 +487,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF plan.source_shared THEN
       source_init = "(${source}).retain()";
     ELSE
-      source_init = source;
+      source_init = COPY source;
     END
     MUTABLE run_body = (TRY (mIREmitter__emit_body_with_runtime(&rtoc_self_view, plan.run_body, plan.raw_rt))).replace("\n", "\n                  ");
     MUTABLE spawn_call = (TRY (mIREmitter__emit_fiber_spawn_call(rtoc_self_view, plan.spawn_call))).replace("\n", "\n          ");
