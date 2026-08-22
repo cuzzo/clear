@@ -1048,7 +1048,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF receiver_code EXISTS AS receiver_code_value THEN
       &init_fields.append(".self_val = ${receiver_code_value}");
     END
-    runtime_arg_codes.each_index(%(index_value: String) USE(args_tuple_name, MUTABLE init_fields) -> &init_fields.append(".a${index_value} = ${args_tuple_name}[${index_value}]"));
+    MUTABLE arg_index = 0;
+    WHILE arg_index < runtime_arg_codes.length() DO
+      &init_fields.append(".a${arg_index.toString()} = ${args_tuple_name}[${arg_index.toString()}]");
+      arg_index = arg_index + 1;
+    END
     MUTABLE alloc_kind: ?String@symbol = COPY node.alloc_kind;
     IF alloc_kind EXISTS AS alloc_kind_value THEN
       MUTABLE alloc_expr = TRY (mIREmitter__alloc_zig(rtoc_self_view, alloc_kind_value));
@@ -1109,7 +1113,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     rtoc_indexed_output_12
     };
-    MUTABLE args = node.signature.params.each_index() |> SELECT "a${_}";
+    MUTABLE args: []String = List[];
+    MUTABLE param_index = 0;
+    WHILE param_index < node.signature.params.length() DO
+      &args.append("a${param_index.toString()}");
+      param_index = param_index + 1;
+    END
     MUTABLE clear_function = TRY (mIREmitter__emit(&rtoc_self_view, node.clear_function)).deletePrefix("&");
     MUTABLE clear_call = "${clear_function}(__clear_c_callback_rt orelse @panic(\"C callback escaped its synchronous CLEAR call\")${IF (args.length() == 0) THEN
       ""

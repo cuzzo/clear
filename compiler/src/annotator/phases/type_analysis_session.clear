@@ -10634,8 +10634,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(KEEP node.matched_stdlib_def));
     signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY node.matched_signature)));
     IF signature EXISTS AS signature_value THEN
-      MUTABLE takes_indices = (TRY (functionSignature__params(signature_value))).each_index() |> WHERE (UNWRAP ((TRY (functionSignature__params(signature_value)))[_])).takes;
-      IF !((scopeBindings__length(takes_indices) == 1)) THEN
+      MUTABLE signature_params: []Param = TRY (functionSignature__params(signature_value));
+      MUTABLE takes_count = 0;
+      FOR signature_param IN signature_params DO
+        IF (signature_param.takes OR_ELSE FALSE) THEN
+          takes_count = takes_count + 1;
+        END
+      END
+      IF !((takes_count == 1)) THEN
         RETURN;
       END
       MUTABLE value_index = (takes_indices.first() - 1);
