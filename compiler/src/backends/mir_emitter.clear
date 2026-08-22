@@ -367,8 +367,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (mIREmitter__emit_default_stream_capacity(&rtoc_self_view, rtoc_default_stream_capacity));
     ELSE_IF node IS_A NextPromiseList AS rtoc_next_promise_list THEN
       RETURN TRY (mIREmitter__emit_next_promise_list(&rtoc_self_view, rtoc_next_promise_list));
-    ELSE_IF (node IS_A MIROptionalUnwrap) OR (node IS_A ForeignOwnedUnwrap) THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.expr())))}.?";
+    ELSE_IF node IS_A MIROptionalUnwrap AS rtoc_optional_unwrap_node THEN
+      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_optional_unwrap_node.expr)))}.?";
+    ELSE_IF node IS_A ForeignOwnedUnwrap AS rtoc_foreign_owned_unwrap THEN
+      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_foreign_owned_unwrap.expr)))}.?";
     ELSE_IF node IS_A CFunctionAdapter AS rtoc_c_function_adapter THEN
       RETURN TRY (mIREmitter__emit_c_function_adapter(&rtoc_self_view, rtoc_c_function_adapter));
     ELSE_IF node IS_A ForeignSliceView AS rtoc_foreign_slice_view THEN
@@ -3097,8 +3099,8 @@ PRIVATE FN mIREmitter__emit_batch_window_emit(MUTABLE self: MIREmitter, node: No
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE slice = "${node.batch_var}_slice";
     MUTABLE val = "${node.batch_var}_val";
-    MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc()));
-    RETURN "if (${source}) |${slice}| {\n    defer ${node.window}.freeBatch(${slice});\n    var ${node.batch_var} = std.ArrayListUnmanaged(${node.elem_zig()}){ .items = ${slice}, .capacity = ${slice}.len };\n    _ = &${node.batch_var};\n    const ${val} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr))};\n    try ${node.result_var}.append(${alloc}, ${val});\n}\n".trim();
+    MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
+    RETURN "if (${source}) |${slice}| {\n    defer ${node.window}.freeBatch(${slice});\n    var ${node.batch_var} = std.ArrayListUnmanaged(${node.elem_zig}){ .items = ${slice}, .capacity = ${slice}.len };\n    _ = &${node.batch_var};\n    const ${val} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr))};\n    try ${node.result_var}.append(${alloc}, ${val});\n}\n".trim();
 }
 END
 PRIVATE FN mIREmitter__emit_scope_block(MUTABLE self: MIREmitter, node: ScopeBlock) RETURNS !String
