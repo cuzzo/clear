@@ -671,7 +671,7 @@ PUB STRUCT CExternFnDecl {
   name: String,
   params: Any@multiowned,
   return_type: String,
-  library: String,
+  library: ?String,
   callconv: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -1111,7 +1111,7 @@ END
 PUB STRUCT MIRDestructureTarget {
   name: String,
   declaration_kind: String@symbol,
-  annotation: String,
+  annotation: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -2415,7 +2415,7 @@ PUB STRUCT AssertRaisesCheck {
   expr: Emittable,
   rt_name: String,
   kind: String@symbol,
-  error_name: String,
+  error_name: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -6868,7 +6868,7 @@ PUB STRUCT PolymorphicMutateFlow {
   rt: String,
   alias_name: String,
   bare_type: String,
-  return_type: String,
+  return_type: ?String,
   body: []Emittable,
   guard_cond: Emittable,
   guard_fail_body: Any@multiowned,
@@ -7315,7 +7315,7 @@ FN ownedDestroy__owned_effect_for_alloc(self: OwnedDestroy, alloc: ?String@symbo
 END
 PUB STRUCT OwnedTransfer {
   name: String,
-  target: String,
+  target: ?String,
   source: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -9612,7 +9612,7 @@ PUB STRUCT SliceExpr {
   target: Emittable,
   start: Emittable,
   end_expr: ?Emittable,
-  elem_type: String,
+  elem_type: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
