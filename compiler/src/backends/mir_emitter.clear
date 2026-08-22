@@ -328,10 +328,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (mIREmitter__emit_concat(&rtoc_self_view, rtoc_concat_str));
     ELSE_IF node IS_A MIRCast AS rtoc_m_i_r_cast THEN
       RETURN TRY (mIREmitter__emit_cast(&rtoc_self_view, rtoc_m_i_r_cast));
-    ELSE_IF (node IS_A TryExpr) THEN
-      MUTABLE try_expr = node.expr();
-      IF try_expr IS_A MIROptionalUnwrap THEN
-        RETURN "(try ${TRY (mIREmitter__emit(&rtoc_self_view, try_expr.expr()))}).?";
+    ELSE_IF node IS_A TryExpr AS rtoc_try_expr THEN
+      MUTABLE try_expr: Emittable = COPY rtoc_try_expr.expr;
+      IF try_expr IS_A MIROptionalUnwrap AS rtoc_optional_unwrap THEN
+        RETURN "(try ${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_optional_unwrap.expr))}).?";
       ELSE
         RETURN "try ${TRY (mIREmitter__emit(&rtoc_self_view, try_expr))}";
       END
