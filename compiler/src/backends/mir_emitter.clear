@@ -820,17 +820,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN "if (T == ${owner_type_value}) { ${block("")} }";
     END
     MUTABLE marker = COPY UNWRAP (conformance.owner_marker);
-    MUTABLE bindings = ({
-    MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE rtoc_indexed_items_4: []String = conformance.type_params;
-    MUTABLE rtoc_indexed_output_6 = [];
-    MUTABLE rtoc_indexed_i_5 = 0;
-    WHILE rtoc_indexed_i_5 < rtoc_indexed_items_4.length() DO
-      &rtoc_indexed_output_6.append("const ${rtoc_indexed_items_4[rtoc_indexed_i_5]} = T.__clear_type_args[${rtoc_indexed_i_5}]; ");
-      rtoc_indexed_i_5 = rtoc_indexed_i_5 + 1;
+    MUTABLE binding_parts: []String = List[];
+    MUTABLE type_param_names: []String = COPY conformance.type_params;
+    MUTABLE binding_index = 0;
+    WHILE binding_index < type_param_names.length() DO
+      MUTABLE type_param: String = COPY UNWRAP (type_param_names[binding_index]);
+      &binding_parts.append("const ${type_param} = T.__clear_type_args[${binding_index.toString()}]; ");
+      binding_index = binding_index + 1;
     END
-    rtoc_indexed_output_6
-    }).join("");
+    MUTABLE bindings: String = binding_parts.join("");
     RETURN "if (comptime @typeInfo(T) == .@\"struct\" and @hasDecl(T, \"${marker}\")) { ${block(bindings)} }";
 }
 END
