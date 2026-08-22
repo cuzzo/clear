@@ -1013,11 +1013,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.runtime_args.length() DO
-      MUTABLE field_type: ?String = (IF node.runtime_args[rtoc_idx]?.field_zig_type != NIL THEN node.runtime_args[rtoc_idx]?.field_zig_type ELSE (IF node.runtime_args[rtoc_idx]?.field_type != NIL THEN
-          TRY (type__zig_type((node.runtime_args[rtoc_idx]?.field_type), TRUE))
-        ELSE
-          NIL
-        END) END);
+      MUTABLE runtime_arg = COPY UNWRAP (node.runtime_args[rtoc_idx]);
+      MUTABLE field_type: ?String = COPY runtime_arg.field_zig_type;
+      IF !(field_type EXISTS) THEN
+        IF runtime_arg.field_type EXISTS AS arg_field_type THEN
+          field_type = TRY (type__zig_type(arg_field_type, TRUE));
+        END
+      END
       &fields.append("a${rtoc_idx.toString()}: ${(field_type OR_ELSE "@TypeOf(${args_tuple_name}[${rtoc_idx.toString()}])")}");
     rtoc_idx = rtoc_idx + 1;
     END
