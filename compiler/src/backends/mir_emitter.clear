@@ -1691,7 +1691,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (stmts |> SELECT:? TRY (mIREmitter__emit_flow_stmt(&rtoc_self_view, _, return_kind)) |> WHERE _ != NIL).join("\n");
 }
 END
-PRIVATE FN mIREmitter__emit_flow_stmt(MUTABLE self: MIREmitter, stmt: Emittable, return_kind: String@symbol) RETURNS !?String
+PRIVATE FN mIREmitter__emit_flow_stmt(MUTABLE self: MIREmitter, stmt: Emittable, return_kind: String@symbol) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -2317,7 +2317,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "const ${node.name} = struct {\n${mIREmitter__indent_block(rtoc_self_view, body, 4)}\n};";
 }
 END
-PRIVATE FN mIREmitter__emit_container_item(MUTABLE self: MIREmitter, node: Emittable) RETURNS !?String
+PRIVATE FN mIREmitter__emit_container_item(MUTABLE self: MIREmitter, node: Emittable) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -3330,7 +3330,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "${guard} = true;";
 }
 END
-PRIVATE FN mIREmitter__emit_deep_copy(MUTABLE self: MIREmitter, node: DeepCopy) RETURNS !?String
+PRIVATE FN mIREmitter__emit_deep_copy(MUTABLE self: MIREmitter, node: DeepCopy) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -3403,7 +3403,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__emit_cap_wrap(MUTABLE self: MIREmitter, node: CapWrap) RETURNS !?String
+PRIVATE FN mIREmitter__emit_cap_wrap(MUTABLE self: MIREmitter, node: CapWrap) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
