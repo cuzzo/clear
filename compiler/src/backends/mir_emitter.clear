@@ -79,8 +79,6 @@ PUB FN mIREmitter__emit(MUTABLE self: MIREmitter, node: ?Emittable) RETURNS !Str
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node == NIL) THEN
       RETURN "";
-    ELSE_IF (node == String) THEN
-      panic("MIREmitter cannot emit raw Zig strings; use a structural MIR node");
     ELSE_IF (node IS_A MIRProgram) THEN
       RETURN TRY (mIREmitter__emit_program(&rtoc_self_view, node));
     ELSE_IF (node IS_A FnDef) THEN

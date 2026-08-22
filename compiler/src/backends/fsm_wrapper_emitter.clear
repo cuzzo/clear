@@ -488,7 +488,7 @@ PRIVATE FN fsmWrapperEmitter__indent_block(text: String, n: Int64) RETURNS Strin
   (IF stripped.trim().empty?() THEN
       ""
     ELSE
-      (pad + stripped)
+      (pad $+ stripped)
     END)
   }).join("\n");
 END
