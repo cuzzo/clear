@@ -36,7 +36,7 @@ PUB STRUCT HoistResult {
 }
 
 PUB FN result__empty?(self: HoistResult) RETURNS Bool EFFECTS REENTRANT ->
-  RETURN (self.bindings_by_function.count == 0);
+  RETURN (self.bindings_by_function.count() == 0);
 END
 PUB FN hoist__apply_mut(ast: Program, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !HoistResult ->
   MUTABLE hoist_pass_state = mIRPassState__for_mut(PassStateProgram{ Program: COPY ast });
@@ -373,10 +373,10 @@ PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []Va
   ELSE_IF node IS_A ListLit AS list_lit THEN
     MUTABLE list_lit_mutable = COPY list_lit;
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < list_lit_mutable.items.length() DO
-      MUTABLE v = COPY UNWRAP (list_lit_mutable.items[rtoc_idx]);
+    WHILE rtoc_idx < list_lit_mutable.items().length() DO
+      MUTABLE v = COPY UNWRAP (list_lit_mutable.items()[rtoc_idx]);
       IF hoist__concat?(v) THEN
-        list_lit_mutable.items[rtoc_idx] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
+        list_lit_mutable.items()[rtoc_idx] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
       ELSE
         TRY (hoist__hoist_concats_within_mut(v, &hoists, &counter));
       END
@@ -398,7 +398,7 @@ PRIVATE FN hoist__composite_element_store?(call: MethodCall) RETURNS !Bool ->
   RETURN !(!(((((et != NIL) AND !(type__primitive?(et))) AND !(TRY (type__string?(et)))))));
 END
 PRIVATE FN hoist__empty_list_literal?(node: ?Locatable) RETURNS Bool ->
-  RETURN (IF node? IS_A ListLit AS list_lit THEN list_lit.items.empty?() ELSE FALSE END);
+  RETURN (IF node? IS_A ListLit AS list_lit THEN list_lit.items().empty?() ELSE FALSE END);
 END
 PRIVATE FN hoist__callee_param_type(call: Locatable, idx: Int64) RETURNS !?Type ->
   IF aST__node__matched_signature(call) EXISTS AS signature THEN

@@ -818,7 +818,7 @@ PUB STRUCT ModuleNamespace {
 }
 
 FN moduleNamespace__child_exprs(self: ModuleNamespace) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN moduleNamespace__compact_child_exprs(self, self.items);
+  RETURN moduleNamespace__compact_child_exprs(self, self.items());
 END
 FN moduleNamespace__mir?(self: ModuleNamespace) RETURNS Bool ->
   RETURN TRUE;
@@ -6301,7 +6301,7 @@ FN makeList__initialize(MUTABLE self: MakeList, elem_type: String, items: []Emit
 
 END
 FN makeList__child_exprs(self: MakeList) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN makeList__compact_child_exprs(self, [CAST(self.items AS Any)]);
+  RETURN makeList__compact_child_exprs(self, [CAST(self.items() AS Any)]);
 END
 FN makeList__ownership_source_exprs(self: MakeList) RETURNS ![]Emittable ->
   RETURN makeList__child_exprs(self);
@@ -9092,7 +9092,7 @@ PUB STRUCT TupleLiteral {
 
 FN tupleLiteral__child_exprs(self: TupleLiteral) RETURNS ![]Emittable EFFECTS REENTRANT ->
   MUTABLE values: []Emittable = [];
-  FOR item IN self.items DO
+  FOR item IN self.items() DO
     &values.append(COPY item);
   END
   RETURN tupleLiteral__compact_child_exprs(self, values);
@@ -9483,7 +9483,7 @@ PUB STRUCT ArrayInit {
 }
 
 FN arrayInit__child_exprs(self: ArrayInit) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN arrayInit__compact_child_exprs(self, [CAST(self.items AS Any)]);
+  RETURN arrayInit__compact_child_exprs(self, [CAST(self.items() AS Any)]);
 END
 FN arrayInit__ownership_source_exprs(self: ArrayInit) RETURNS ![]Emittable ->
   RETURN arrayInit__child_exprs(self);
@@ -11248,7 +11248,7 @@ PUB STRUCT ForeignSliceView {
 }
 
 FN foreignSliceView__child_exprs(self: ForeignSliceView) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN foreignSliceView__compact_child_exprs(self, [CAST(self.pointer AS Any), CAST(self.count AS Any)]);
+  RETURN foreignSliceView__compact_child_exprs(self, [CAST(self.pointer AS Any), CAST(self.count() AS Any)]);
 END
 FN foreignSliceView__mir?(self: ForeignSliceView) RETURNS Bool ->
   RETURN TRUE;
@@ -12737,7 +12737,7 @@ PUB FN inlineAllocMetadata__empty?(self: InlineAllocMetadata) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.slots.count == 0);
+    RETURN (rtoc_self_view.slots.count() == 0);
 }
 END
 PUB FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS Void

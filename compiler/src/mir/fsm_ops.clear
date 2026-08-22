@@ -265,7 +265,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF expr IS_A CallExpr AS call_expr THEN
       RETURN Emittable{ Call: COPY Call{ callee: COPY lowerer__resolve_fn(rtoc_self_view, call_expr.fn), args: COPY call_expr.args |> SELECT TRY (lowerer__lower_expr(rtoc_self_view, _)), try_wrap: call_expr.is_try, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     ELSE_IF expr IS_A AllocExpr AS alloc_expr THEN
-      RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY lowerer__ctx_ident(rtoc_self_view) }, field: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "alloc", args: [CAST(Ident{ name: COPY alloc_expr.elem_type, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(TRY (lowerer__lower_expr(rtoc_self_view, Expr{ LocalRef: COPY alloc_expr.count })) AS Any)], try_wrap: TRUE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
+      RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY lowerer__ctx_ident(rtoc_self_view) }, field: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "alloc", args: [CAST(Ident{ name: COPY alloc_expr.elem_type, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(TRY (lowerer__lower_expr(rtoc_self_view, Expr{ LocalRef: COPY alloc_expr.count() })) AS Any)], try_wrap: TRUE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
     ELSE_IF expr IS_A SliceUntilIntCast AS slice_until_int_cast THEN
       RETURN Emittable{ SliceExpr: COPY SliceExpr{ target: COPY TRY (lowerer__lower_expr(rtoc_self_view, Expr{ StateField: COPY slice_until_int_cast.base })), start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_expr: COPY TRY (lowerer__lower_expr(rtoc_self_view, Expr{ IntCast: COPY IntCast{ zig_type: "usize", expr: Expr{ SubField: COPY slice_until_int_cast.end_expr } } })), elem_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE_IF expr IS_A FsmOpsBinOp AS fsm_ops_bin_op THEN
@@ -393,7 +393,7 @@ FN fsmOps__walk(node: ?WalkValue, block: FN(?WalkValue) -> Void) RETURNS Void EF
     ELSE_IF node_value IS_A IntCast AS int_cast THEN
       fsmOps__walk(castExprToOptionalWalkValue(intCast__expr(int_cast)), block);
     ELSE_IF node_value IS_A AllocExpr AS alloc_expr THEN
-      fsmOps__walk(WalkValue{ LocalRef: COPY alloc_expr.count }, block);
+      fsmOps__walk(WalkValue{ LocalRef: COPY alloc_expr.count() }, block);
     ELSE_IF node_value IS_A SliceUntilIntCast AS slice_until_int_cast THEN
       fsmOps__walk(WalkValue{ StateField: COPY slice_until_int_cast.base }, block);
       fsmOps__walk(WalkValue{ SubField: COPY slice_until_int_cast.end_expr }, block);

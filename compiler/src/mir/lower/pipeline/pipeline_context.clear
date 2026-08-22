@@ -44,7 +44,7 @@ PUB FN pipelineContextState__active?(self: PipelineContextState) RETURNS Bool ->
   IF self.soa_rewrite_active THEN
     RETURN TRUE;
   END
-  RETURN !((self.named_bindings.count == 0));
+  RETURN !((self.named_bindings.count() == 0));
 END
 PUB FN pipelineContextState__replacement_for_identifier(self: PipelineContextState, name: String) RETURNS ?String ->
   IF ((name == "_") AND (self.placeholder_name != NIL)) THEN
@@ -565,7 +565,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_list_lit(MUTABLE self: Pipeli
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
+    MUTABLE new_items = node.items() |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
     IF FALSE THEN
       RETURN COPY Locatable{ ListLit: COPY node };
     END
@@ -579,7 +579,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_tuple_lit(MUTABLE self: Pipel
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE new_items = node.items |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
+    MUTABLE new_items = node.items() |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY _));
     IF FALSE THEN
       RETURN COPY Locatable{ TupleLit: COPY node };
     END

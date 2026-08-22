@@ -6465,12 +6465,12 @@ PRIVATE FN aST__walk_children_CallSiteOverride_mut(MUTABLE item: CallSiteOverrid
   item.inner = COPY inner_child;
 END
 PRIVATE FN aST__walk_children_ListLit_mut(MUTABLE item: ListLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  MUTABLE items_items: []Locatable = COPY item.items;
+  MUTABLE items_items: []Locatable = COPY item.items();
   aST__each_locatable_list_mut(&items_items, &descend_functions, visitor);
   item.items = COPY items_items;
 END
 PRIVATE FN aST__walk_children_TupleLit_mut(MUTABLE item: TupleLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  MUTABLE items_items: []Locatable = COPY item.items;
+  MUTABLE items_items: []Locatable = COPY item.items();
   aST__each_locatable_list_mut(&items_items, &descend_functions, visitor);
   item.items = COPY items_items;
 END
@@ -6649,8 +6649,8 @@ PRIVATE FN aST__walk_children_OrderByOp_mut(MUTABLE item: OrderByOp, MUTABLE des
   END
 END
 PRIVATE FN aST__walk_children_LimitOp_mut(MUTABLE item: LimitOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  IF item.count EXISTS THEN
-    MUTABLE count_child: Locatable = COPY UNWRAP (item.count);
+  IF item.count() EXISTS THEN
+    MUTABLE count_child: Locatable = COPY UNWRAP (item.count());
     aST__each_locatable_mut(&count_child, &descend_functions, visitor);
     item.count = COPY count_child;
   END
@@ -6680,8 +6680,8 @@ PRIVATE FN aST__walk_children_TapOp_mut(MUTABLE item: TapOp, MUTABLE descend_fun
   item.body = COPY body_items;
 END
 PRIVATE FN aST__walk_children_SkipOp_mut(MUTABLE item: SkipOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  IF item.count EXISTS THEN
-    MUTABLE count_child: Locatable = COPY UNWRAP (item.count);
+  IF item.count() EXISTS THEN
+    MUTABLE count_child: Locatable = COPY UNWRAP (item.count());
     aST__each_locatable_mut(&count_child, &descend_functions, visitor);
     item.count = COPY count_child;
   END
@@ -6694,8 +6694,8 @@ PRIVATE FN aST__walk_children_TakeWhileOp_mut(MUTABLE item: TakeWhileOp, MUTABLE
   END
 END
 PRIVATE FN aST__walk_children_WindowOp_mut(MUTABLE item: WindowOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  IF item.size EXISTS THEN
-    MUTABLE size_child: Locatable = COPY UNWRAP (item.size);
+  IF item.size() EXISTS THEN
+    MUTABLE size_child: Locatable = COPY UNWRAP (item.size());
     aST__each_locatable_mut(&size_child, &descend_functions, visitor);
     item.size = COPY size_child;
   END
@@ -7132,7 +7132,7 @@ PUB FN aST__wrapped_children(expr: Locatable) RETURNS []Locatable ->
   ELSE_IF expr IS_A UnionVariantLit AS union_variant_lit THEN
     children = children + union_variant_lit.fields.values();
   ELSE_IF expr IS_A ListLit AS list_lit THEN
-    children = children + list_lit.items;
+    children = children + list_lit.items();
   ELSE_IF expr IS_A Cast AS cast_node THEN
     &children.append(COPY cast_node.value);
   ELSE_IF expr IS_A MoveNode AS move_node THEN
@@ -7210,7 +7210,7 @@ PUB FN aST__expression_children(node: Locatable) RETURNS []Locatable ->
   ELSE_IF node IS_A UnionVariantLit AS union_variant_lit THEN
     children = children + union_variant_lit.fields.values();
   ELSE_IF node IS_A ListLit AS list_lit THEN
-    children = children + list_lit.items;
+    children = children + list_lit.items();
   ELSE_IF node IS_A Assert AS assert_node THEN
     &children.append(COPY assert_node.condition);
   END
@@ -7877,7 +7877,7 @@ FN rtocChildrenOfLocatableLetBinding(v: LetBinding) RETURNS []Locatable ->
 END
 FN rtocChildrenOfLocatableListLit(v: ListLit) RETURNS []Locatable ->
   MUTABLE out: []Locatable = [];
-  FOR rtoc_arr_child IN v.items DO
+  FOR rtoc_arr_child IN v.items() DO
     &out.append(COPY rtoc_arr_child);
   END
   RETURN out;
@@ -9362,8 +9362,8 @@ PUB FN aST__node_body(node: Locatable) RETURNS ?[]Locatable ->
 END
 PUB FN aST__node_items(node: Locatable) RETURNS ?[]Locatable ->
   PARTIAL MATCH node START
-    Locatable.ListLit AS item -> RETURN COPY item.items;,
-    Locatable.TupleLit AS item -> RETURN COPY item.items;
+    Locatable.ListLit AS item -> RETURN COPY item.items();,
+    Locatable.TupleLit AS item -> RETURN COPY item.items();
   END
   RETURN NIL;
 END

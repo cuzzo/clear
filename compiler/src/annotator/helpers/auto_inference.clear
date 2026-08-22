@@ -382,7 +382,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE slot = COPY UNWRAP (rtoc_self_view.slots[castAutoConstraintCollectorLocalDeclEntryToAutoSlotIdMultiowned(entry)]);
       IF (slot.shape == :list_element) THEN
         IF rhs_value IS_A ListLit AS list_lit THEN
-          FOR rtoc_item IN list_lit.items DO
+          FOR rtoc_item IN list_lit.items() DO
           &slot.sources.append(COPY rtoc_item);
           END
         END
@@ -400,7 +400,7 @@ PRIVATE FN autoConstraintCollector__empty_list_lit?(self: AutoConstraintCollecto
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node EXISTS AS node_value THEN
       IF node_value IS_A ListLit AS list_lit THEN
-        RETURN (list_lit.items.empty?() AND (list_lit.constructor_options == NIL));
+        RETURN (list_lit.items().empty?() AND (list_lit.constructor_options == NIL));
       END
     END
     RETURN FALSE;
@@ -747,7 +747,7 @@ PRIVATE FN shapeEvidenceCollector__collect_in_function(self: ShapeEvidenceCollec
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name_map = TRY (shapeEvidenceCollector__build_name_map(rtoc_self_view, fn_value));
-    IF (name_map.count == 0) THEN
+    IF (name_map.count() == 0) THEN
       RETURN;
     END
     TRY (shapeEvidenceCollector__walk(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode(_) }, name_map));
@@ -6065,7 +6065,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeLimitOp(v: LimitOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  IF v.count EXISTS AS rtoc_opt_count THEN
+  IF v.count() EXISTS AS rtoc_opt_count THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_count)] });
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
@@ -6193,7 +6193,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeListLit(v: ListLit) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  FOR rtoc_arr_child IN v.items DO
+  FOR rtoc_arr_child IN v.items() DO
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
@@ -8571,7 +8571,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeSkipOp(v: SkipOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  IF v.count EXISTS AS rtoc_opt_count THEN
+  IF v.count() EXISTS AS rtoc_opt_count THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_count)] });
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
@@ -10661,7 +10661,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeWindowOp(v: WindowOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  IF v.size EXISTS AS rtoc_opt_size THEN
+  IF v.size() EXISTS AS rtoc_opt_size THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_size)] });
   END
   MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;
@@ -10730,7 +10730,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeWindowOpMultiowned(v: WindowOp) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  IF v.size EXISTS AS rtoc_opt_size THEN
+  IF v.size() EXISTS AS rtoc_opt_size THEN
     &out.append(AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode(COPY rtoc_opt_size)] });
   END
   MUTABLE rtoc_expr_opt: ?Locatable = COPY v.expression;

@@ -21,7 +21,7 @@ PUB FN mIRLoweringCounters__initialize(MUTABLE self: MIRLoweringCounters) RETURN
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.values = {};
     FOR _ IN counter_kinds DO
-    rtoc_self_view.values[mIRLoweringCounters__counter_key(rtoc_self_view, _)] = 0;
+    rtoc_self_view.values()[mIRLoweringCounters__counter_key(rtoc_self_view, _)] = 0;
     END
 }
 END
@@ -106,14 +106,14 @@ PUB FN mIRLoweringCounters__snapshot(self: MIRLoweringCounters) RETURNS MIRLower
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN MIRLoweringCounterSnapshot{ values: COPY rtoc_self_view.values };
+    RETURN MIRLoweringCounterSnapshot{ values: COPY rtoc_self_view.values() };
 }
 END
 PUB FN mIRLoweringCounters__restore_mut(MUTABLE self: MIRLoweringCounters, snapshot_value: MIRLoweringCounterSnapshot) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.values = COPY snapshot_value.values;
+    rtoc_self_view.values = COPY snapshot_value.values();
 }
 END
 PRIVATE FN mIRLoweringCounters__next_one_based(MUTABLE self: MIRLoweringCounters, kind: MIRLoweringCounterKind) RETURNS MIRLoweringGeneratedId
@@ -135,8 +135,8 @@ PRIVATE FN mIRLoweringCounters__next_id(MUTABLE self: MIRLoweringCounters, kind:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE key = mIRLoweringCounters__counter_key(rtoc_self_view, kind);
-    MUTABLE value = rtoc_self_view.values[key]?;
-    rtoc_self_view.values[key] = (value + 1);
+    MUTABLE value = rtoc_self_view.values()[key]?;
+    rtoc_self_view.values()[key] = (value + 1);
     RETURN MIRLoweringGeneratedId{ kind: COPY kind, value: (value + offset) };
 }
 END

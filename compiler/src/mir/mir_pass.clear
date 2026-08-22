@@ -360,7 +360,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
         MUTABLE list_lit_mutable = COPY list_lit;
-        FOR _ IN list_lit_mutable.items DO
+        FOR _ IN list_lit_mutable.items() DO
         TRY (mIRPass__walk_consumed(rtoc_self_view, _, &names, facts));
         END
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
@@ -669,7 +669,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       info[rtoc_key] = TRUE;
     END
     END
-    IF !((info.count == 0)) THEN
+    IF !((info.count() == 0)) THEN
       fn_value.moved_guard_info = info;
     END
 }

@@ -1216,7 +1216,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           TRY (ownershipDataflow__collect_explicit_in(rtoc_self_view, node_value_mutable, step));
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
-        FOR _ IN list_lit.items DO
+        FOR _ IN list_lit.items() DO
         TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, _, step));
         END
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
@@ -1635,7 +1635,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
         MUTABLE list_lit_mutable = COPY list_lit;
-        FOR _ IN list_lit_mutable.items DO
+        FOR _ IN list_lit_mutable.items() DO
         TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, _, state));
         END
       ELSE_IF node_value_mutable IS_A HashLit AS hash_lit THEN
@@ -2052,7 +2052,7 @@ PUB FN borrowState__empty() RETURNS BorrowState ->
   RETURN BorrowState{ borrows: {} };
 END
 PUB FN borrowState__empty?(self: BorrowState) RETURNS Bool EFFECTS REENTRANT ->
-  RETURN (self.borrows.count == 0);
+  RETURN (self.borrows.count() == 0);
 END
 PUB FN borrowState__kind_for(self: BorrowState, name: String) RETURNS ?String@symbol ->
   IF self.borrows[name] != NIL THEN

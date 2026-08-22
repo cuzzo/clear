@@ -61,7 +61,7 @@ PUB FN builder__stamp_overrides(MUTABLE self: Builder, idx: Int64) RETURNS Void
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF rtoc_self_view.current_alias_overrides EXISTS AS current_alias_overrides_value THEN
-      IF (current_alias_overrides_value.count == 0) THEN
+      IF (current_alias_overrides_value.count() == 0) THEN
         RETURN;
       ELSE
         rtoc_self_view.alias_overrides_for[idx] = UNWRAP (COPY current_alias_overrides_value);
