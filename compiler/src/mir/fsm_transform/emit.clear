@@ -375,10 +375,10 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
       MUTABLE explicit_next = io_suspend.next_index;
       MUTABLE target_step = explicit_next;
       MUTABLE desc_tail = desc_value.tail;
-      IF (desc_tail IS_A FsmTailYield) THEN
-        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: desc_tail.yield_reason() } };
-      ELSE_IF (desc_tail IS_A FsmTailRegisterYield) THEN
-        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: desc_tail.register_expr(), yield_reason: desc_tail.yield_reason() } };
+      IF desc_tail IS_A FsmTailYield AS rtoc_fsm_tail_yield THEN
+        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: rtoc_fsm_tail_yield.yield_reason() } };
+      ELSE_IF desc_tail IS_A FsmTailRegisterYield AS rtoc_fsm_tail_register_yield THEN
+        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: rtoc_fsm_tail_register_yield.register_expr(), yield_reason: rtoc_fsm_tail_register_yield.yield_reason() } };
       ELSE
         panic("Unsupported descriptor tail {} in segment {}");
       END
@@ -390,10 +390,10 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
       MUTABLE explicit_next = next_suspend.next_index;
       MUTABLE target_step = explicit_next;
       MUTABLE desc_tail = desc_value.tail;
-      IF (desc_tail IS_A FsmTailYield) THEN
-        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: desc_tail.yield_reason() } };
-      ELSE_IF (desc_tail IS_A FsmTailRegisterYield) THEN
-        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: desc_tail.register_expr(), yield_reason: desc_tail.yield_reason() } };
+      IF desc_tail IS_A FsmTailYield AS rtoc_fsm_tail_yield THEN
+        RETURN FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: target_step, yield_reason: rtoc_fsm_tail_yield.yield_reason() } };
+      ELSE_IF desc_tail IS_A FsmTailRegisterYield AS rtoc_fsm_tail_register_yield THEN
+        RETURN FsmTail{ FsmTailRegisterYield: COPY FsmTailRegisterYield{ next_step: target_step, register_expr: rtoc_fsm_tail_register_yield.register_expr(), yield_reason: rtoc_fsm_tail_register_yield.yield_reason() } };
       ELSE
         panic("Unsupported descriptor tail {} in segment {}");
       END

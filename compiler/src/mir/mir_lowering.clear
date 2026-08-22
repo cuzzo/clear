@@ -7363,8 +7363,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       NIL
     END);
-    IF (value IS_A StructInit) THEN
-      RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY CAST((TRY (type__zig_type(value))) AS String) }));
+    IF value IS_A StructInit AS rtoc_struct_init THEN
+      RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY CAST((TRY (type__zig_type(rtoc_struct_init))) AS String) }));
     ELSE_IF (value IS_A Ident) THEN
       MUTABLE let = body.grep(MIR.Let) |> FIND (CAST(_.name() AS String) == CAST(value.name() AS String));
       MUTABLE init = (IF let != NIL THEN
