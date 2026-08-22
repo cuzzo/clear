@@ -747,15 +747,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       panic("unsupported protocol call {}.{}");
     END
     MUTABLE receiver: String = TRY (mIREmitter__emit(&rtoc_self_view, node.receiver));
-    MUTABLE arguments: []?String = node.args |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _));
+    MUTABLE arguments: []String = node.args |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _));
     IF (node.operation == :get) THEN
-      RETURN "CheatLib.mapProtocolGet(${receiver}, ${arguments[0]})";
+      RETURN "CheatLib.mapProtocolGet(${receiver}, ${UNWRAP (arguments[0])})";
     ELSE_IF (node.operation == :put) THEN
-      RETURN "try CheatLib.mapProtocolPut(${receiver}, ${arguments[2]}, ${arguments[3]}, ${arguments[0]}, ${arguments[1]})";
+      RETURN "try CheatLib.mapProtocolPut(${receiver}, ${UNWRAP (arguments[2])}, ${UNWRAP (arguments[3])}, ${UNWRAP (arguments[0])}, ${UNWRAP (arguments[1])})";
     ELSE_IF (node.operation == :delete) THEN
-      RETURN "CheatLib.mapProtocolDelete(${receiver}, ${arguments[1]}, ${arguments[0]})";
+      RETURN "CheatLib.mapProtocolDelete(${receiver}, ${UNWRAP (arguments[1])}, ${UNWRAP (arguments[0])})";
     ELSE_IF (node.operation == :contains) THEN
-      RETURN "CheatLib.mapProtocolContains(${receiver}, ${arguments[0]})";
+      RETURN "CheatLib.mapProtocolContains(${receiver}, ${UNWRAP (arguments[0])})";
     ELSE_IF (node.operation == :count) THEN
       RETURN "CheatLib.mapProtocolCount(${receiver})";
     ELSE_IF (node.operation == :empty) THEN
