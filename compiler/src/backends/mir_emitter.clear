@@ -1073,10 +1073,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       code = "${label}: { ";
     END
     IF node.runtime_args |> ANY _.expr IS_A CFunctionAdapter THEN
-      code = (code + "const __previous_c_callback_rt = __clear_c_callback_rt; __clear_c_callback_rt = ${rtoc_self_view.rt_name}; defer __clear_c_callback_rt = __previous_c_callback_rt; ");
+      code = (code $+ "const __previous_c_callback_rt = __clear_c_callback_rt; __clear_c_callback_rt = ${rtoc_self_view.rt_name}; defer __clear_c_callback_rt = __previous_c_callback_rt; ");
     END
     IF runtime_arg_codes |> ANY _ THEN
-      code = (code + "const ${args_tuple_name} = ${arg_tuple}; ");
+      code = (code $+ "const ${args_tuple_name} = ${arg_tuple}; ");
     END
     MUTABLE field_decls: String = "";
     IF (fields.length() == 0) THEN
@@ -1084,14 +1084,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       field_decls = "${fields.join(", ")}, ";
     END
-    code = (code + "const ${prefix}${node.id.toString()} = struct { ${field_decls}fn run(ptr: ?*anyopaque) callconv(.c) void { ${f_binding} ${call_stmt} } }; ");
-    code = (code + "var ${frame_name} = ${prefix}${node.id.toString()}{ ${init_fields.join(", ")} }; ");
-    code = (code + "${rtoc_self_view.rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &${prefix}${node.id.toString()}.run), @ptrCast(&${frame_name})); ");
+    code = (code $+ "const ${prefix}${node.id.toString()} = struct { ${field_decls}fn run(ptr: ?*anyopaque) callconv(.c) void { ${f_binding} ${call_stmt} } }; ");
+    code = (code $+ "var ${frame_name} = ${prefix}${node.id.toString()}{ ${init_fields.join(", ")} }; ");
+    code = (code $+ "${rtoc_self_view.rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &${prefix}${node.id.toString()}.run), @ptrCast(&${frame_name})); ");
     IF can_fail THEN
-      code = (code + "if (${frame_name}.err) |e| return e; ");
+      code = (code $+ "if (${frame_name}.err) |e| return e; ");
     END
     IF !(returns_void) THEN
-      code = (code + "break :${label} ${frame_name}.ret; ");
+      code = (code $+ "break :${label} ${frame_name}.ret; ");
     END
     RETURN (code $+ "}");
 }
@@ -1577,7 +1577,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_lambda_result_21
       });
       IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR_ELSE List[]))) THEN
-        fail_zig = (fail_zig + "\n__flow.* = .{ .kind = .skip_no_commit };\nreturn;");
+        fail_zig = (fail_zig $+ "\n__flow.* = .{ .kind = .skip_no_commit };\nreturn;");
       END
       guard_block = "if (!(${mIREmitter__with_ident_overrides(&rtoc_self_view, overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_23 = mIREmitter__with_runtime_name(&rtoc_self_view, UNWRAP (overrides[CAST(node.rt AS String)]), %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -2965,7 +2965,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE default_body = node.default_body;
     IF ((default_body) AND !(default_body.empty?())) THEN
       MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, default_body));
-      result = (result + " else {\n${body}\n}");
+      result = (result $+ " else {\n${body}\n}");
     END
     RETURN result;
 }
