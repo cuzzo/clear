@@ -772,13 +772,16 @@ FN mIREmitter__emit_protocol_adapter_def(self: MIREmitter, node: ProtocolAdapter
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE facts_name = "__clearProtocolFacts_${node.protocol}";
-    MUTABLE facts_cases = node.conformances |> SELECT mIREmitter__protocol_conformance_branch(rtoc_self_view, _, %(bindings: String) USE(node, _) -> {
-    MUTABLE fields = (node.associated_types |> SELECT {
-      MUTABLE value = COPY _.associated_types[_]?;
-      "pub const ${_} = ${value};"
-    }).join(" ");
-    "${bindings}return struct { ${fields} };"
-    });
+    MUTABLE facts_cases: []String = List[];
+    FOR conformance IN node.conformances DO
+      MUTABLE field_decls: []String = List[];
+      FOR assoc_name IN node.associated_types DO
+        MUTABLE value: String = COPY UNWRAP (conformance.associated_types[assoc_name]);
+        &field_decls.append("pub const ${assoc_name} = ${value};");
+      END
+      MUTABLE fields: String = field_decls.join(" ");
+      &facts_cases.append(mIREmitter__protocol_conformance_branch(rtoc_self_view, conformance, %(bindings: String) USE(fields) -> "${bindings}return struct { ${fields} };"));
+    END
     MUTABLE facts_body = ((facts_cases + ["@compileError(\"No ${node.protocol} conformance for \" ++ @typeName(T));"])).join("\n    ");
     MUTABLE facts = "fn ${facts_name}(comptime T: type) type {\n    ${facts_body}\n}";
     MUTABLE operations = node.requirements |> SELECT {
