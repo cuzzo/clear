@@ -967,7 +967,7 @@ FN rtocChildrenOfCollectValueLetBinding(v: LetBinding) RETURNS []CollectValue ->
 END
 FN rtocChildrenOfCollectValueListLit(v: ListLit) RETURNS []CollectValue ->
   MUTABLE out: []CollectValue = [];
-  FOR rtoc_arr_child IN v.items() DO
+  FOR rtoc_arr_child IN v.items DO
     &out.append(castLocatableToCollectValue(COPY rtoc_arr_child));
   END
   RETURN out;

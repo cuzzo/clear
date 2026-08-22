@@ -17000,13 +17000,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_writer_receiver_623.current_decl_alloc = COPY mIRLowering__function_state(rtoc_self_view).current_decl_alloc;
     MUTABLE tuple_type = TRY (type__new(TypeConstructionInput{ Type: COPY (node.coerced_type_info() OR_ELSE TRY (aST__full_type_mut(Locatable{ ListLit: COPY node }))) }));
     IF type__tuple?(tuple_type) THEN
-      RETURN Emittable{ TupleLiteral: COPY mIRLowering__lower_tuple_items(&rtoc_self_view, node.items(), tuple_type) };
+      RETURN Emittable{ TupleLiteral: COPY mIRLowering__lower_tuple_items(&rtoc_self_view, node.items, tuple_type) };
     END
     MUTABLE plan = TRY (mIRLowering__list_literal_plan(rtoc_self_view, &node));
     MUTABLE ti = COPY plan.type_info;
     IF listLiteralPlan__bounded_stream?(plan) THEN
       IF mIRLowering__bc_target?(rtoc_self_view) THEN
-        MUTABLE items_mir_bc = node.items() |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(_)));
+        MUTABLE items_mir_bc = node.items |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(_)));
         RETURN Emittable{ MakeList: COPY MakeList{ elem_type: "__bc_stream__", items: COPY items_mir_bc, alloc: :frame, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
       MUTABLE s_id = mIRLowering__next_stream_literal_id(rtoc_self_view);
@@ -17018,7 +17018,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE body: []@multiowned Any = ( { MUTABLE rtoc_empty_list_624: []Any = List[]; rtoc_empty_list_624 } );
       MUTABLE item_idents = {
     MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE rtoc_indexed_items_625: []Locatable = node.items();
+    MUTABLE rtoc_indexed_items_625: []Locatable = node.items;
     MUTABLE rtoc_indexed_output_628 = [];
     MUTABLE rtoc_indexed_i_626 = 0;
     WHILE rtoc_indexed_i_626 < rtoc_indexed_items_625.length() DO
@@ -17046,7 +17046,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE list_alloc = COPY plan.alloc;
     MUTABLE elem_type: ?Type = COPY plan.element_type;
     elem_zig = COPY plan.element_zig;
-    MUTABLE items_mir = node.items() |> SELECT mIRLowering__with_decl_alloc(rtoc_self_view, list_alloc, %() USE(elem_type, elem_zig, list_alloc, node, plan, _, MUTABLE rtoc_self_view) -> {
+    MUTABLE items_mir = node.items |> SELECT mIRLowering__with_decl_alloc(rtoc_self_view, list_alloc, %() USE(elem_type, elem_zig, list_alloc, node, plan, _, MUTABLE rtoc_self_view) -> {
     IF ((listLiteralPlan__fixed_stack_or_frame?(plan, node) AND _ IS_A Literal) AND ([:STRING, :SYMBOL]).contains?(_.type())) THEN
         RETURN TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(_)));
     END
@@ -17083,9 +17083,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL
     });
     IF listLiteralPlan__fixed_stack_or_frame?(plan, node) THEN
-      RETURN Emittable{ ArrayInit: COPY castEmittableToArrayInit(TRY (mIRLowering__with_ownership_consumption(rtoc_self_view, Emittable{ ArrayInit: COPY ArrayInit{ elem_type: COPY elem_zig, count: COPY CAST(node.items().length() AS String), items: COPY items_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, items_mir |> UNNEST mIRLowering__mir_ident_names(rtoc_self_view, _), "MIR::ArrayInit", :owned_sink, list_alloc))) };
+      RETURN Emittable{ ArrayInit: COPY castEmittableToArrayInit(TRY (mIRLowering__with_ownership_consumption(rtoc_self_view, Emittable{ ArrayInit: COPY ArrayInit{ elem_type: COPY elem_zig, count: COPY CAST(node.items.length() AS String), items: COPY items_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, items_mir |> UNNEST mIRLowering__mir_ident_names(rtoc_self_view, _), "MIR::ArrayInit", :owned_sink, list_alloc))) };
     END
-    IF node.items().empty?() THEN
+    IF node.items.empty?() THEN
       IF listLiteralPlan__list_collection?(plan) THEN
         MUTABLE inner_ti_branch_value: ?Type = NIL;
         IF mIRLowering__list_literal_capability_wrap_needed?(rtoc_self_view, ti) THEN
@@ -17119,7 +17119,7 @@ PRIVATE FN mIRLowering__lower_tuple_lit(MUTABLE self: MIRLowering, MUTABLE node:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE tuple_type = TRY (type__new(TypeConstructionInput{ Type: COPY (node.coerced_type_info() OR_ELSE TRY (aST__full_type_mut(Locatable{ TupleLit: COPY node }))) }));
-    RETURN mIRLowering__lower_tuple_items(&rtoc_self_view, node.items(), tuple_type);
+    RETURN mIRLowering__lower_tuple_items(&rtoc_self_view, node.items, tuple_type);
 }
 END
 PRIVATE FN mIRLowering__lower_tuple_items(MUTABLE self: MIRLowering, items: []Locatable, tuple_type: Type) RETURNS !TupleLiteral

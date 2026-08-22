@@ -373,10 +373,10 @@ PRIVATE FN hoist__hoist_concats_within_mut(node: Locatable, MUTABLE hoists: []Va
   ELSE_IF node IS_A ListLit AS list_lit THEN
     MUTABLE list_lit_mutable = COPY list_lit;
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < list_lit_mutable.items().length() DO
-      MUTABLE v = COPY UNWRAP (list_lit_mutable.items()[rtoc_idx]);
+    WHILE rtoc_idx < list_lit_mutable.items.length() DO
+      MUTABLE v = COPY UNWRAP (list_lit_mutable.items[rtoc_idx]);
       IF hoist__concat?(v) THEN
-        list_lit_mutable.items()[rtoc_idx] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
+        list_lit_mutable.items[rtoc_idx] = TRY (hoist__make_temp_mut(v, &hoists, hoistCounter__next_name(&counter)));
       ELSE
         TRY (hoist__hoist_concats_within_mut(v, &hoists, &counter));
       END

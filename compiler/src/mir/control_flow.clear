@@ -1635,7 +1635,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
         MUTABLE list_lit_mutable = COPY list_lit;
-        FOR _ IN list_lit_mutable.items() DO
+        FOR _ IN list_lit_mutable.items DO
         TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, _, state));
         END
       ELSE_IF node_value_mutable IS_A HashLit AS hash_lit THEN

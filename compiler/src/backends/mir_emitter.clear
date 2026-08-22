@@ -2120,7 +2120,7 @@ PRIVATE FN mIREmitter__emit_program(MUTABLE self: MIREmitter, node: MIRProgram) 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE parts = node.items() |> SELECT:? TRY (mIREmitter__emit_container_item(&rtoc_self_view, _)) |> WHERE _ != NIL;
+    MUTABLE parts = node.items |> SELECT:? TRY (mIREmitter__emit_container_item(&rtoc_self_view, _)) |> WHERE _ != NIL;
     MUTABLE symbol_pool = mIREmitter__symbol_pool_declarations(rtoc_self_view);
     IF !((symbol_pool.length() == 0)) THEN
       &parts.unshift(symbol_pool);
@@ -2314,7 +2314,7 @@ PRIVATE FN mIREmitter__emit_module_namespace(MUTABLE self: MIREmitter, node: Mod
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE body = ((node.items()) |> SELECT:? TRY (mIREmitter__emit_container_item(&rtoc_self_view, _)) |> WHERE _ != NIL).join("\n");
+    MUTABLE body = ((node.items) |> SELECT:? TRY (mIREmitter__emit_container_item(&rtoc_self_view, _)) |> WHERE _ != NIL).join("\n");
     RETURN "const ${node.name} = struct {\n${mIREmitter__indent_block(rtoc_self_view, body, 4)}\n};";
 }
 END
@@ -3502,9 +3502,9 @@ PRIVATE FN mIREmitter__emit_make_list(MUTABLE self: MIREmitter, node: MakeList) 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE items = (node.items() |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ");
+    MUTABLE items = (node.items |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ");
     MUTABLE items_expr: String = "";
-    IF (node.items().length() == 0) THEN
+    IF (node.items.length() == 0) THEN
       items_expr = "&.{}";
     ELSE
       items_expr = "&.{ ${items} }";
@@ -3750,7 +3750,7 @@ PRIVATE FN mIREmitter__emit_tuple_literal(MUTABLE self: MIREmitter, node: TupleL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN ".{${(node.items() |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ")}}";
+    RETURN ".{${(node.items |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ")}}";
 }
 END
 PRIVATE FN mIREmitter__emit_lock_acquire(MUTABLE self: MIREmitter, node: LockAcquire) RETURNS !String
@@ -3793,7 +3793,7 @@ PRIVATE FN mIREmitter__emit_array_init(MUTABLE self: MIREmitter, node: ArrayInit
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE items = (node.items() |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ");
+    MUTABLE items = (node.items |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ");
     RETURN "[${node.count()}]${node.elem_type}{ ${items} }";
 }
 END

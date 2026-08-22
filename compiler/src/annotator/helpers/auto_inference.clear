@@ -6193,7 +6193,7 @@ END
 FN rtocChildrenOfAutoInferenceWalkNodeListLit(v: ListLit) RETURNS []AutoInferenceWalkNode ->
   MUTABLE out: []AutoInferenceWalkNode = [];
   &out.append(AutoInferenceWalkNode{ TokenMultiowned: COPY v.token });
-  FOR rtoc_arr_child IN v.items() DO
+  FOR rtoc_arr_child IN v.items DO
     &out.append(castLocatableToAutoInferenceWalkNode(COPY rtoc_arr_child));
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN

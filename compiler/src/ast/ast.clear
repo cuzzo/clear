@@ -6465,12 +6465,12 @@ PRIVATE FN aST__walk_children_CallSiteOverride_mut(MUTABLE item: CallSiteOverrid
   item.inner = COPY inner_child;
 END
 PRIVATE FN aST__walk_children_ListLit_mut(MUTABLE item: ListLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  MUTABLE items_items: []Locatable = COPY item.items();
+  MUTABLE items_items: []Locatable = COPY item.items;
   aST__each_locatable_list_mut(&items_items, &descend_functions, visitor);
   item.items = COPY items_items;
 END
 PRIVATE FN aST__walk_children_TupleLit_mut(MUTABLE item: TupleLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  MUTABLE items_items: []Locatable = COPY item.items();
+  MUTABLE items_items: []Locatable = COPY item.items;
   aST__each_locatable_list_mut(&items_items, &descend_functions, visitor);
   item.items = COPY items_items;
 END
@@ -7877,7 +7877,7 @@ FN rtocChildrenOfLocatableLetBinding(v: LetBinding) RETURNS []Locatable ->
 END
 FN rtocChildrenOfLocatableListLit(v: ListLit) RETURNS []Locatable ->
   MUTABLE out: []Locatable = [];
-  FOR rtoc_arr_child IN v.items() DO
+  FOR rtoc_arr_child IN v.items DO
     &out.append(COPY rtoc_arr_child);
   END
   RETURN out;
@@ -9362,8 +9362,8 @@ PUB FN aST__node_body(node: Locatable) RETURNS ?[]Locatable ->
 END
 PUB FN aST__node_items(node: Locatable) RETURNS ?[]Locatable ->
   PARTIAL MATCH node START
-    Locatable.ListLit AS item -> RETURN COPY item.items();,
-    Locatable.TupleLit AS item -> RETURN COPY item.items();
+    Locatable.ListLit AS item -> RETURN COPY item.items;,
+    Locatable.TupleLit AS item -> RETURN COPY item.items;
   END
   RETURN NIL;
 END

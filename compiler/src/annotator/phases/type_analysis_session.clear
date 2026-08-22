@@ -8319,7 +8319,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE signature = TRY (type__function_type_for_expression(kind));
       RETURN TypeExpression{ kind: COPY type__function_type_expression_for(FunctionType{ params: COPY signature.params |> SELECT FunctionTypeParam{ type: CAST(COPY typeAnalysisSession__apply_type_subst(rtoc_self_view, castTypeToTypeTypeInput(_.type), subst) AS Type), mutable: FALSE }, return_type: CAST(COPY typeAnalysisSession__apply_type_subst(rtoc_self_view, castTypeToTypeTypeInput(signature.return_type), subst) AS Type), reentrant: signature.reentrant, source_signature: COPY signature.source_signature, abi: COPY signature.abi }), capabilities: COPY cap };
     ELSE_IF kind IS_A TupleTypeExpression AS rtoc_tuple_type_expression THEN
-      RETURN TypeExpression{ rtoc_tuple_type_expression: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY rtoc_tuple_type_expression.items() |> SELECT typeAnalysisSession__apply_expression_subst(rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ rtoc_tuple_type_expression: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY rtoc_tuple_type_expression.items |> SELECT typeAnalysisSession__apply_expression_subst(rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A OptionalTypeExpression AS rtoc_optional_type_expression THEN
       RETURN TypeExpression{ rtoc_optional_type_expression: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_optional_type_expression.inner, subst)  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A FallibleTypeExpression) THEN
@@ -14715,7 +14715,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A ListLit, DeclarationNode.BindExpr AS item -> item.value IS_A ListLit END)) THEN
       RETURN;
     END
-    MUTABLE item_count = scopeBindings__length((MATCH node START DeclarationNode.VarDecl AS item -> item.value.items(), DeclarationNode.BindExpr AS item -> item.value.items() END));
+    MUTABLE item_count = scopeBindings__length((MATCH node START DeclarationNode.VarDecl AS item -> item.value.items, DeclarationNode.BindExpr AS item -> item.value.items END));
     IF (TRY (type__fixed_rank?(declared_type)) AND (item_count != UNWRAP (type__capacity(declared_type)))) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_LITERAL_SIZE }, [], {:expected: UNWRAP (type__capacity(declared_type)), :got: item_count}));
     END
@@ -15801,8 +15801,8 @@ PRIVATE FN typeAnalysisSession__destructure_value_type_at(self: TypeAnalysisSess
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE value = node.value;
-    IF (value IS_A ListLit AND value.items()[index_value]) THEN
-      RETURN value.items()[index_value].full_type_mut({:context: "destructuring literal element"});
+    IF (value IS_A ListLit AND value.items[index_value]) THEN
+      RETURN value.items[index_value].full_type_mut({:context: "destructuring literal element"});
     END
     IF type__tuple?((TRY (aST__full_type_mut(node.value)))) THEN
       RETURN COPY (TRY (type__generic_args((TRY (aST__full_type_mut(node.value))))))[index_value];
@@ -16426,7 +16426,7 @@ PRIVATE FN typeAnalysisSession__visit_ListLit(MUTABLE self: TypeAnalysisSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN node.items() DO
+    FOR _ IN node.items DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
     MUTABLE expected_tuple: ?Type@multiowned = node.coerced_type_info();
@@ -16436,43 +16436,43 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END) THEN
       MUTABLE tuple_types = TRY (type__generic_args(expected_tuple));
-      IF (tuple_types.length() != node.items().length()) THEN
-        TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], {:type: :Tuple, :expected: tuple_types.length(), :got: node.items().length()}));
+      IF (tuple_types.length() != node.items.length()) THEN
+        TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], {:type: :Tuple, :expected: tuple_types.length(), :got: node.items.length()}));
       END
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < node.items().length() DO
+      WHILE rtoc_idx < node.items.length() DO
       MUTABLE expected_item = COPY UNWRAP (tuple_types[rtoc_idx]);
-      MUTABLE actual_item = &node.items()[rtoc_idx].full_type_mut({:context: "tuple literal element"});
+      MUTABLE actual_item = &node.items[rtoc_idx].full_type_mut({:context: "tuple literal element"});
       IF TRY (type__accepts?(expected_item, actual_item)) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE union_schema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved((TRY (type__value_payload_type(expected_item))))));
       IF TRY (unionPayloadCompatibility__unique_variant(expected_item, actual_item, union_schema)) THEN
-            node.items()[rtoc_idx].coerced_type = COPY expected_item;
+            node.items[rtoc_idx].coerced_type = COPY expected_item;
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       IF !(typeAnalysisSession__is_safe_autocast?(rtoc_self_view, actual_item, castTypeToTypeTypeInput(expected_item))) THEN
             TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_ASSIGN }, [], {:got: actual_item.resolved(), :expected: expected_item}));
       END
-      node.items()[rtoc_idx].coerced_type = COPY expected_item;
+      node.items[rtoc_idx].coerced_type = COPY expected_item;
     rtoc_idx = rtoc_idx + 1;
       END
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ ListLit: COPY node }, expected_tuple));
       node.storage = :stack;
       RETURN;
     END
-    IF (!(node.items().empty?()) AND (node.items() |> ALL type__future?((TRY (type__new(_.resolved_type)))))) THEN
-      MUTABLE inner_types = CAST(((node.items() |> SELECT type__to_sym((TRY (type__tense_type((TRY (type__new(_.resolved_type)))))))) |> DISTINCT _) AS []String@symbol);
+    IF (!(node.items.empty?()) AND (node.items |> ALL type__future?((TRY (type__new(_.resolved_type)))))) THEN
+      MUTABLE inner_types = CAST(((node.items |> SELECT type__to_sym((TRY (type__tense_type((TRY (type__new(_.resolved_type)))))))) |> DISTINCT _) AS []String@symbol);
       IF (inner_types.size() > 1) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :BOUNDED_STREAM_MIXED_TYPES }, [], {:types: inner_types.join(", ")}));
       END
-      TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ ListLit: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${inner_types.first()}[${node.items().size()}]") }))));
+      TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ ListLit: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${inner_types.first()}[${node.items.size()}]") }))));
       node.storage = :stack;
       RETURN;
     END
-    IF node.items().empty?() THEN
+    IF node.items.empty?() THEN
       MUTABLE coll = listLit__constructor_collection(node);
       IF coll THEN
         MUTABLE t = TRY (type__new(TypeConstructionInput{ SymbolValue: symbol("Any[]") }, NIL, NIL, NIL, NIL, coll));
@@ -16496,7 +16496,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN;
     END
-    MUTABLE string_item_types = node.items() |> SELECT { MUTABLE rtoc_mutable_block_param_409 = COPY _;
+    MUTABLE string_item_types = node.items |> SELECT { MUTABLE rtoc_mutable_block_param_409 = COPY _;
     TRY (aST__full_type_mut(rtoc_mutable_block_param_409)) };
     MUTABLE all_strings = string_item_types |> ALL _.string?();
     MUTABLE string_element_sync =   IF all_strings THEN
@@ -16515,21 +16515,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF all_strings THEN
       MUTABLE base_type = :String;
     ELSE
-      MUTABLE base_type = (UNWRAP (node.items().first())).resolved_type;
+      MUTABLE base_type = (UNWRAP (node.items.first())).resolved_type;
       MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < node.items().length() DO
+      WHILE rtoc_idx < node.items.length() DO
       IF (rtoc_idx == 0) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (node.items()[rtoc_idx].resolved_type != base_type) THEN
-            TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :LIST_LITERAL_MIXED_TYPES }, [], {:base: base_type, :index: (rtoc_idx + 1), :got: node.items()[rtoc_idx].resolved_type}));
+      IF (node.items[rtoc_idx].resolved_type != base_type) THEN
+            TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :LIST_LITERAL_MIXED_TYPES }, [], {:base: base_type, :index: (rtoc_idx + 1), :got: node.items[rtoc_idx].resolved_type}));
       END
     rtoc_idx = rtoc_idx + 1;
       END
     END
     IF (node.storage == :stack) THEN
-      MUTABLE inferred = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${base_type}[${node.items().size()}]") }));
+      MUTABLE inferred = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${base_type}[${node.items.size()}]") }));
       IF string_element_sync THEN
         TRY (type__set_elem_sync(&inferred, string_element_sync));
       END
@@ -16548,10 +16548,10 @@ PRIVATE FN typeAnalysisSession__visit_TupleLit(MUTABLE self: TypeAnalysisSession
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN node.items() DO
+    FOR _ IN node.items DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
-    MUTABLE item_types = node.items() |> SELECT { MUTABLE rtoc_mutable_block_param_410 = COPY _;
+    MUTABLE item_types = node.items |> SELECT { MUTABLE rtoc_mutable_block_param_410 = COPY _;
     TRY (aST__full_type_mut(rtoc_mutable_block_param_410)) };
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ TupleLit: COPY node }, TRY (type__generic_instance_of(:Tuple, item_types))));
     node.storage = :stack;
