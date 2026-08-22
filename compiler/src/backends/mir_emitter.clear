@@ -259,7 +259,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A FallibleLockBinding AS rtoc_fallible_lock_binding THEN
       RETURN TRY (mIREmitter__emit_fallible_lock_binding(&rtoc_self_view, rtoc_fallible_lock_binding));
     ELSE_IF (node IS_A Noop) OR (node IS_A AllocMark) OR (node IS_A ReturnMark) OR (node IS_A TransferMark) OR (node IS_A ReassignMark) OR (node IS_A FieldCleanupMark) OR (node IS_A OwnedCreate) OR (node IS_A OwnedDestroy) OR (node IS_A OwnedTransfer) OR (node IS_A OwnedBorrow) OR (node IS_A OwnedStore) OR (node IS_A OwnedReturn) THEN
-      RETURN NIL;
+      RETURN "";
     ELSE_IF node IS_A Call AS rtoc_call THEN
       RETURN TRY (mIREmitter__emit_call(&rtoc_self_view, rtoc_call));
     ELSE_IF node IS_A RuntimeCall AS rtoc_runtime_call THEN
