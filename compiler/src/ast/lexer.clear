@@ -553,7 +553,7 @@ PRIVATE FN lexer__current_offset(self: Lexer) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.base_offset + rtoc_self_view.s.pos);
+    RETURN (rtoc_self_view.base_offset + rtoc_self_view.s.pos());
 }
 END
 PRIVATE FN lexer__source_token(self: Lexer, type: String@symbol, value: ?TokenValue, line: Int64, column: Int64, start_offset: Int64, end_line: Int64, end_column: Int64, end_offset: Int64) RETURNS Token
