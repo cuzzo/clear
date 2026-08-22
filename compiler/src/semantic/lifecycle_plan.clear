@@ -623,9 +623,9 @@ PRIVATE FN lifecycleRegistry__expand_schema_fields_mut(MUTABLE types: {String}Ty
   MUTABLE grown: []Type = COPY pending;
   FOR field IN fields.values() DO
     MUTABLE concrete = TRY (lifecycleRegistry__concrete_schema_type(owner, TypeTypeInput{ Type: COPY field.type }, type_params));
-    MUTABLE before = types.count;
+    MUTABLE before = types.count();
     TRY (lifecycleRegistry__add_type_mut(&types, concrete));
-    IF (types.count > before) THEN
+    IF (types.count() > before) THEN
       MUTABLE all_types = COPY types.values();
       MUTABLE grow_idx: Int64 = before;
       WHILE (grow_idx < all_types.length()) DO
