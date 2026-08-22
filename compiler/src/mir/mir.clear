@@ -3271,7 +3271,7 @@ FN exprStmt__stmt?(self: ExprStmt) RETURNS Bool ->
 END
 PUB STRUCT DiscardOwned {
   expr: Emittable,
-  cleanup_entry: Any@multiowned,
+  cleanup_entry: CleanupEntry@multiowned,
   zig_type: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -5289,7 +5289,7 @@ FN destroyPtr__expr?(self: DestroyPtr) RETURNS Bool ->
 END
 PUB STRUCT Cleanup {
   name: String,
-  cleanup_entry: Any@multiowned,
+  cleanup_entry: CleanupEntry@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -5355,7 +5355,7 @@ FN cleanup__stmt?(self: Cleanup) RETURNS Bool ->
 END
 PUB STRUCT ErrCleanup {
   name: String,
-  cleanup_entry: Any@multiowned,
+  cleanup_entry: CleanupEntry@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,

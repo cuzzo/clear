@@ -209,9 +209,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A DestroyPtr AS rtoc_destroy_ptr THEN
       RETURN TRY (mIREmitter__emit_destroy_ptr(&rtoc_self_view, rtoc_destroy_ptr));
     ELSE_IF node IS_A Cleanup AS rtoc_cleanup THEN
-      RETURN TRY (mIREmitter__emit_cleanup(rtoc_self_view, rtoc_cleanup));
+      RETURN TRY (mIREmitter__emit_cleanup(rtoc_self_view, COPY rtoc_cleanup.name, KEEP rtoc_cleanup.cleanup_entry));
     ELSE_IF node IS_A ErrCleanup AS rtoc_err_cleanup THEN
-      RETURN TRY (mIREmitter__emit_cleanup(rtoc_self_view, rtoc_err_cleanup, TRUE));
+      RETURN TRY (mIREmitter__emit_cleanup(rtoc_self_view, COPY rtoc_err_cleanup.name, KEEP rtoc_err_cleanup.cleanup_entry, TRUE));
     ELSE_IF node IS_A MoveMark AS rtoc_move_mark THEN
       RETURN mIREmitter__emit_move_mark(rtoc_self_view, rtoc_move_mark);
     ELSE_IF node IS_A DeepCopy AS rtoc_deep_copy THEN
@@ -3271,13 +3271,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__emit_cleanup(self: MIREmitter, node: Node, errdefer: Bool = FALSE) RETURNS !String
+PRIVATE FN mIREmitter__emit_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, errdefer: Bool = FALSE) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE entry = node.cleanup_entry;
     MUTABLE alloc = TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry));
-    MUTABLE name = node.name;
     MUTABLE g = cleanupEntry__has_moved_guard?(entry);
     MUTABLE vp = cleanupEntry__via_pointer?(entry);
     IF (entry.kind() == :resource) THEN
