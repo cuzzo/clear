@@ -874,11 +874,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END) THEN
       pattern = (pattern.replace("{shard_idx}", TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END))))).replace("{shard_key}", TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_key, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_key END))));
     END
-    IF (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.key_type, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.key_type END) THEN
-      pattern = pattern.replace("{key_zig}", (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> TRY (type__zig_type(item.key_type)), MIREmitterShardedMapNode.ShardedMapGet AS item -> TRY (type__zig_type(item.key_type)) END));
+    MUTABLE key_type: ?Type = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> COPY item.key_type, MIREmitterShardedMapNode.ShardedMapGet AS item -> COPY item.key_type END);
+    IF key_type EXISTS AS key_type_value THEN
+      pattern = pattern.replace("{key_zig}", TRY (type__zig_type(key_type_value)));
     END
-    IF (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.value_type, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.value_type END) THEN
-      pattern = pattern.replace("{val_zig}", (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> TRY (type__zig_type(item.value_type)), MIREmitterShardedMapNode.ShardedMapGet AS item -> TRY (type__zig_type(item.value_type)) END));
+    MUTABLE value_type: ?Type = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> COPY item.value_type, MIREmitterShardedMapNode.ShardedMapGet AS item -> COPY item.value_type END);
+    IF value_type EXISTS AS value_type_value THEN
+      pattern = pattern.replace("{val_zig}", TRY (type__zig_type(value_type_value)));
     END
     MUTABLE rtoc_local_receiver_7 = (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.resolved_allocs, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.resolved_allocs END);
     inlineAllocMetadata__each(rtoc_local_receiver_7, %(alloc_key: String@symbol, sym: String@symbol) USE(MUTABLE pattern, rtoc_self_view) -> {
