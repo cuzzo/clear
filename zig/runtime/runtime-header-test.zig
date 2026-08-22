@@ -29,6 +29,18 @@ test "makeListCapacity honors a minimum above the initial item count" {
     try std.testing.expect(list.capacity >= 16);
 }
 
+test "makeSet builds a populated set that owns its elements" {
+    const allocator = std.testing.allocator;
+    var set = try CheatLib.makeSet([]const u8, allocator, &[_][]const u8{
+        try allocator.dupe(u8, "a"), try allocator.dupe(u8, "b"), try allocator.dupe(u8, "a"),
+    });
+    // Set.deinit frees the keys it owns, so the test must not free them too.
+    defer set.deinit(allocator);
+    try std.testing.expectEqual(@as(i64, 2), set.count());
+    try std.testing.expect(set.contains("a"));
+    try std.testing.expect(!set.contains("c"));
+}
+
 test "listConcat joins a list, a slice, and an array literal into one owned list" {
     const allocator = std.testing.allocator;
     var left = try CheatLib.makeList(u64, allocator, &[_]u64{ 1, 2 });

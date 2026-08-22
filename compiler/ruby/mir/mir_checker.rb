@@ -148,7 +148,7 @@ class MIRChecker
     MIR::IfBindStmt, MIR::IfChain, MIR::IfOptional, MIR::IfStmt, MIR::Import,
     MIR::IndexGet, MIR::IndexInsert, MIR::InlineBc, MIR::ItemsAccess, MIR::IterRange,
     MIR::LambdaExpr, MIR::Let, MIR::ListItems, MIR::ListLength, MIR::Lit,
-    MIR::LockAcquire, MIR::MakeList, MIR::MethodCall, MIR::ModuleNamespace,
+    MIR::LockAcquire, MIR::MakeList, MIR::MakeSet, MIR::MethodCall, MIR::ModuleNamespace,
     MIR::MoveMark, MIR::Noop, MIR::OptionalUnwrap,
     MIR::OrElseExitBcRewrite, MIR::Orelse, MIR::OwnedBorrow, MIR::OwnedCreate,
     MIR::OwnedDestroy, MIR::OwnedReturn, MIR::OwnedSlice, MIR::OwnedStore,
@@ -2962,7 +2962,7 @@ class MIRChecker
 
     case expr
     when MIR::DupeSlice, MIR::ConcatStr, MIR::ConcatList, MIR::HeapCreate, MIR::AllocSlice,
-         MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap
+         MIR::ContainerInit, MIR::MakeList, MIR::MakeSet, MIR::DeepCopy, MIR::CapWrap
       MIR::Placement.frame?(expr.alloc)
     else
       false

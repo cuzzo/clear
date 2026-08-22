@@ -202,6 +202,21 @@ module MIRLoweringLiterals
       return wrap_list_literal_capability(MIR::MakeList.new(elem_zig, [], list_alloc), ti, list_alloc)
     end
 
+    # Non-empty SET literal (`Set[a, b]`): the items belong to a set, not to
+    # an ArrayList, so they go through makeSet rather than makeList.
+    if ti.set_collection?
+      inner = T.cast(
+        with_ownership_consumption(
+          MIR::MakeSet.new(elem_zig, items_mir, list_alloc),
+          items_mir.flat_map { |item| mir_ident_names(item) },
+          "MIR::MakeSet",
+          target_alloc: list_alloc,
+        ),
+        MIR::MakeSet,
+      )
+      return wrap_list_literal_capability(inner, ti, list_alloc)
+    end
+
     # Non-empty list literal -> makeList
     inner = T.cast(
       with_ownership_consumption(

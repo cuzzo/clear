@@ -1,0 +1,20 @@
+# Test: `Set[a, b]` builds a populated set. A non-empty set constructor used to
+# type as a fixed array, and the declaration lowering ignored the items and
+# emitted an empty set, so a set could only be built one insert at a time.
+
+FN main() RETURNS Void ->
+    MUTABLE names: [Set]String = Set["a", "b", "a"];
+    ASSERT names.length() == 2;
+    ASSERT names.contains?("a");
+    ASSERT !names.contains?("c");
+
+    MUTABLE effects: [Set]String@symbol = Set[symbol("yield"), symbol("io")];
+    ASSERT effects.length() == 2;
+    ASSERT effects.contains?(symbol("io"));
+
+    MUTABLE empty: [Set]String = Set[];
+    ASSERT empty.length() == 0;
+
+    &names.insert("c");
+    ASSERT names.length() == 3;
+END

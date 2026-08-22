@@ -686,6 +686,28 @@ module Annotator
           end
         end
 
+        # A constructor literal keeps its collection when it has items, exactly
+        # as the empty form does above. Without this `Set[:a, :b]` typed as a
+        # fixed array, so a `[Set]T` binding could only ever be built by
+        # declaring `Set[]` and inserting one element at a time.
+        if (coll = node.constructor_collection)
+          t = case coll
+              when :set  then Type.set_of(base_type)
+              else Type.new(:"#{base_type}[]", collection: coll)
+              end
+          t.elem_sync = string_element_sync if string_element_sync
+          t.apply_constructor_collection!(
+            collection: nil,
+            soa: node.constructor_soa?,
+            shard_count: node.constructor_shard_count
+          )
+          t.mark_heap_allocated! if coll == :pool || coll == :set
+          stamp_type!(node, t)
+          node.storage = (coll == :pool || coll == :set) ? :heap : node.storage
+          record_effect(EffectTracker::HEAP)
+          return
+        end
+
         if node.storage == :stack
           inferred = Type.new(:"#{base_type}[#{node.items.size}]")
           inferred.elem_sync = string_element_sync if string_element_sync

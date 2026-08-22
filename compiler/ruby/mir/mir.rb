@@ -3458,6 +3458,28 @@ module MIR
     end
   end
 
+  # Set literal with items (`Set[a, b]`).
+  # Zig: try CheatLib.makeSet(T, alloc, &.{ items })
+  MakeSet = Struct.new(:elem_type, :items, :alloc) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Boolean) }
+    def materializes_value? = true
+    sig { params(elem_type: String, items: T::Array[Emittable], alloc: Symbol).void }
+    def initialize(elem_type, items, alloc)
+      super(elem_type, items, alloc)
+    end
+
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = compact_child_exprs([items])
+    sig { returns(T::Array[Emittable]) }
+    def ownership_source_exprs = child_exprs
+    sig { returns(OwnershipEffect) }
+    def ownership_effect
+      owned_effect_for_alloc(alloc)
+    end
+  end
+
   # List concatenation (`a + b`).
   # Zig: try CheatLib.listConcat(T, alloc, a, b)
   ConcatList = Struct.new(:elem_type, :left, :right, :alloc) do
@@ -5552,7 +5574,7 @@ module MIR
     HeapCreate, DupeSlice, AllocSlice, FreeSlice, DestroyPtr,
     DeepCopy, ContainerInit, CapWrap, SharePromote, RcRetain, RcRelease,
     ComptimeCarrierPayload, MonomorphicKeep,
-    RcDowngrade, WeakUpgrade, MakeList, ArrayDefaultInit, ConcatStr, ConcatList, OwnedSlice,
+    RcDowngrade, WeakUpgrade, MakeList, MakeSet, ArrayDefaultInit, ConcatStr, ConcatList, OwnedSlice,
     NextPromiseList,
     IndexInsert, BatchWindowPush, BatchWindowFlush,
     SnapshotTransaction, SnapshotMultiTxn,

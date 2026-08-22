@@ -527,7 +527,7 @@ module MIRHoistLowering
   # Nodes whose ownership must be verifier-visible when nested, regardless of
   # whether placement selected heap or frame.
   ALLOC_MIR_CLASSES = [
-    MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::CapWrap,
+    MIR::DupeSlice, MIR::AllocSlice, MIR::MakeList, MIR::MakeSet, MIR::CapWrap,
     MIR::SharePromote, MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade,
     MIR::DeepCopy, MIR::ConcatStr, MIR::ConcatList, MIR::ContainerInit, MIR::MonomorphicKeep,
   ].freeze
@@ -840,6 +840,8 @@ module MIRHoistLowering
       Type.new(:Slice, location: alloc)
     when MIR::MakeList, MIR::ConcatList
       Type.new("#{mir.elem_type}[]", collection: :list, location: alloc)
+    when MIR::MakeSet
+      Type.set_of(mir.elem_type.to_s)
     when MIR::HeapCreate
       Type.new(mir.zig_type.to_s.delete_prefix("*").to_sym, layout: :indirect)
     when MIR::ContainerInit
@@ -1608,6 +1610,8 @@ module MIRHoistLowering
       e
     when MIR::MakeList, MIR::ConcatList
       uniform_cleanup_entry("std.ArrayListUnmanaged(#{mir.elem_type})", alloc: alloc)
+    when MIR::MakeSet
+      uniform_cleanup_entry("CheatLib.Set(#{mir.elem_type})", alloc: alloc)
     when MIR::OwnedSlice
       uniform_cleanup_entry("[]", alloc: alloc)
     when MIR::HeapCreate, MIR::ContainerInit

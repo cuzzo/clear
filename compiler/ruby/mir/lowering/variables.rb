@@ -739,6 +739,10 @@ module MIRLoweringVariables
     if ft.set_collection?
       return lower(node.value) if rhs.is_a?(AST::BinaryOp) && rhs.smooth?
       return lower(node.value) if rhs_unwrapped.is_a?(AST::MoveNode) || AST.call?(rhs_unwrapped) || !rhs_unwrapped.is_a?(AST::ListLit)
+      # `Set[a, b]` declares a populated set; only the empty form is a bare
+      # container init. Ignoring the items built an empty set and dropped them.
+      return lower(node.value) unless rhs_unwrapped.items.empty?
+
       hint = ft.allocation_hint
       inner = MIR::ContainerInit.new(bare_zig, hint ? :set_capacity : :set_empty, decl_alloc, hint)
       return has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner

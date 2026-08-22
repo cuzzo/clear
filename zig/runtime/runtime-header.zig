@@ -816,6 +816,16 @@ pub const CheatLib = struct {
         for (items) |item| list.appendAssumeCapacity(try dupeValue(T, item, allocator));
     }
 
+    pub fn makeSet(comptime T: type, allocator: std.mem.Allocator, items: []const T) !DataStructures.Set(T) {
+        var set = DataStructures.Set(T){};
+        errdefer set.deinit(allocator);
+        // The caller's items are already owned values (the same contract
+        // makeList has); insert() takes that ownership and frees whichever
+        // duplicate loses.
+        for (items) |item| try set.insert(allocator, item);
+        return set;
+    }
+
     pub fn makeListCapacity(comptime T: type, allocator: std.mem.Allocator, items: []const T, minimum_capacity: usize) !std.ArrayListUnmanaged(T) {
         var list = try std.ArrayListUnmanaged(T).initCapacity(allocator, @max(items.len, minimum_capacity));
         list.appendSliceAssumeCapacity(items);

@@ -231,6 +231,7 @@ class MIREmitter
     when MIR::ArrayDefaultInit then emit_array_default_init(node)
     when MIR::SliceExpr        then emit_slice_expr(node)
     when MIR::BlockExpr        then emit_block_expr(node)
+    when MIR::MakeSet          then emit_make_set(node)
     when MIR::ConcatStr        then emit_concat(node)
     when MIR::ConcatList       then emit_concat_list(node)
     when MIR::Cast             then emit_cast(node)
@@ -3127,6 +3128,13 @@ class MIREmitter
     else
       "try CheatLib.makeList(#{node.elem_type}, #{alloc_zig(node.alloc)}, #{items_expr})"
     end
+  end
+
+  sig { params(node: MIR::MakeSet).returns(String) }
+  def emit_make_set(node)
+    items = node.items.map { |i| emit(i) }.join(", ")
+    items_expr = node.items.empty? ? "&.{}" : "&.{ #{items} }"
+    "try CheatLib.makeSet(#{node.elem_type}, #{alloc_zig(node.alloc)}, #{items_expr})"
   end
 
   sig { params(node: MIR::FrameSave).returns(String) }
