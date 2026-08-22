@@ -17270,7 +17270,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         NIL
       END);
       IF stream_at EXISTS AS stream_at_value THEN
-        MUTABLE insert_col = ((stream_at_value $+ "STREAM".codepointCount()) + 1);
+        MUTABLE insert_col = ((stream_at_value + "STREAM".codepointCount()) + 1);
         fix = TRY (fix__new(typeAnalysisSession__fix_description(rtoc_self_view, :ADD_STREAM_YIELDS_CONTRACT, {:type: DiagnosticKwValue{ StringValue: COPY contract_name }}), [edit__new(span__new(NIL, token.line, insert_col, 0), " YIELDS ${contract_name}")], :auto));
       END
     END
