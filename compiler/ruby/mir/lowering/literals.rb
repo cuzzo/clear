@@ -508,7 +508,11 @@ module MIRLoweringLiterals
       node.coerced_type_info || node.full_type!
     end
     type_info = Type.new(ti)
-    elem_type = type_info.element_type
+    # A literal coerced into an optional destination (`?[Set]T`) keeps that
+    # optional wrapper here; its element type lives one level in, and reading
+    # through the wrapper yielded no element at all (rendering as `u8`).
+    element_source = type_info.optional? ? (type_info.wrapped_type || type_info) : type_info
+    elem_type = element_source.element_type
     elem_ti = elem_type ? Type.new(elem_type) : nil
     requested_alloc = function_state.current_decl_alloc || alloc_for_node(node)
     ListLiteralPlan.new(

@@ -691,8 +691,15 @@ module Annotator
         # fixed array, so a `[Set]T` binding could only ever be built by
         # declaring `Set[]` and inserting one element at a time.
         if (coll = node.constructor_collection)
+          # A set of symbols is a set of Symbol, not of the widened String the
+          # array path infers: the element type has to keep its capabilities.
+          element = if string_element_sync
+                      Type.new(base_type).tap { |el| el.sync = string_element_sync }
+                    else
+                      T.must(T.must(node.items.first).full_type!(context: "set literal element"))
+                    end
           t = case coll
-              when :set  then Type.set_of(base_type)
+              when :set  then Type.set_of(element)
               else Type.new(:"#{base_type}[]", collection: coll)
               end
           t.elem_sync = string_element_sync if string_element_sync
