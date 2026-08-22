@@ -67,7 +67,7 @@ FN diagnosticRegistry__template_from_entry(entry: {String@symbol}?DiagnosticEntr
   panic("Internal Compiler Error: diagnostic entry has no template");
 END
 PUB FN diagnosticRegistry__format_template(template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String ->
-  IF (!((kwargs.count == 0)) OR template.contains?("%{")) THEN
+  IF (!((kwargs.count() == 0)) OR template.contains?("%{")) THEN
     IF (!(template.contains?("%{")) OR diagnosticRegistry__named_template_args_complete?(template, kwargs)) THEN
       RETURN compilerFormatTemplate(template);
     END
