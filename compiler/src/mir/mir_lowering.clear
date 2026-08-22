@@ -213,7 +213,7 @@ STRUCT LoweredModuleItems {
 
 FN loweredModuleItems__get_index(self: LoweredModuleItems, key: String@symbol) RETURNS ![]Emittable ->
   IF (key == :items) THEN
-    RETURN COPY self.items();
+    RETURN COPY self.items;
   ELSE_IF (key == :type_items) THEN
     RETURN COPY self.type_items;
   ELSE
@@ -6328,14 +6328,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             END
       END
     ELSE_IF node IS_A ListLit AS list_lit THEN
-      IF list_lit.items() != NIL THEN
+      IF list_lit.items != NIL THEN
             MUTABLE rtoc_idx = 0;
-            WHILE rtoc_idx < list_lit.items().length() DO
-            IF list_lit.items()[rtoc_idx] IS_A CopyNode THEN
+            WHILE rtoc_idx < list_lit.items.length() DO
+            IF list_lit.items[rtoc_idx] IS_A CopyNode THEN
               rtoc_idx = rtoc_idx + 1;
           CONTINUE;
             END
-            ruby_array_concat_String(names, mIRLowering__fsm_ast_result_consumed_roots(rtoc_self_view, list_lit.items()[rtoc_idx]));
+            ruby_array_concat_String(names, mIRLowering__fsm_ast_result_consumed_roots(rtoc_self_view, list_lit.items[rtoc_idx]));
           rtoc_idx = rtoc_idx + 1;
             END
       END
@@ -21016,7 +21016,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         TRY (mIRLowering__collect_returned_binding_names(rtoc_self_view, _, &names));
         END
       ELSE_IF expr_value IS_A ListLit AS list_lit THEN
-        FOR _ IN list_lit.items() DO
+        FOR _ IN list_lit.items DO
         TRY (mIRLowering__collect_returned_binding_names(rtoc_self_view, _, &names));
         END
       ELSE_IF expr_value IS_A BinaryOp AS binary_op THEN

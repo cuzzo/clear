@@ -398,7 +398,7 @@ PRIVATE FN hoist__composite_element_store?(call: MethodCall) RETURNS !Bool ->
   RETURN !(!(((((et != NIL) AND !(type__primitive?(et))) AND !(TRY (type__string?(et)))))));
 END
 PRIVATE FN hoist__empty_list_literal?(node: ?Locatable) RETURNS Bool ->
-  RETURN (IF node? IS_A ListLit AS list_lit THEN list_lit.items().empty?() ELSE FALSE END);
+  RETURN (IF node? IS_A ListLit AS list_lit THEN list_lit.items.empty?() ELSE FALSE END);
 END
 PRIVATE FN hoist__callee_param_type(call: Locatable, idx: Int64) RETURNS !?Type ->
   IF aST__node__matched_signature(call) EXISTS AS signature THEN

@@ -340,7 +340,7 @@ PUB FN typeExpressionTree__transform(expression: TypeExpression, visitor: FN(Typ
     MUTABLE signature = function_type_expression.signature;
     rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ FunctionTypeExpression: COPY FunctionTypeExpression{ signature: COPY FunctionSignatureExpression{ params: COPY signature.params |> SELECT FunctionParamExpression{ expression: COPY typeExpressionTree__transform(_.expression, visitor) }, return_expression: COPY typeExpressionTree__transform(signature.return_expression, visitor), reentrant: signature.reentrant, abi: COPY signature.abi, semantic_payload: NIL } } }, capabilities: COPY cap };,
     TypeExpressionKind.TupleTypeExpression AS tuple_type_expression ->
-    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY tuple_type_expression.items() |> SELECT typeExpressionTree__transform(_, visitor) } }, capabilities: COPY cap };,
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY tuple_type_expression.items |> SELECT typeExpressionTree__transform(_, visitor) } }, capabilities: COPY cap };,
     TypeExpressionKind.OptionalTypeExpression AS optional_type_expression ->
     rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeExpressionTree__transform(optional_type_expression.inner, visitor) } }, capabilities: COPY cap };,
     TypeExpressionKind.FallibleTypeExpression AS fallible_type_expression ->
@@ -425,7 +425,7 @@ PRIVATE FN typeExpressionTree__children(expression: TypeExpression) RETURNS ![]T
     &children.append(typeExpressionTree__unbox(function_type_expression.signature.return_expression));
     RETURN children;
   ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
-    RETURN COPY tuple_type_expression.items();
+    RETURN COPY tuple_type_expression.items;
   ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
     MUTABLE children_of: []TypeExpression = List[];
     &children_of.append(typeExpressionTree__unbox(optional_type_expression.inner));
@@ -831,7 +831,7 @@ PUB FN typeExpressionPrinter__semantic(expression: TypeExpression) RETURNS !Stri
     MUTABLE params = (function_type_expression.signature.params |> SELECT TRY (typeExpressionPrinter__semantic(_.expression))).join(",");
     RETURN "FN(${params}) -> ${TRY (typeExpressionPrinter__semantic(function_type_expression.signature.return_expression))}";
   ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
-    RETURN "Tuple<${(tuple_type_expression.items() |> SELECT TRY (typeExpressionPrinter__semantic(_))).join(",")}>";
+    RETURN "Tuple<${(tuple_type_expression.items |> SELECT TRY (typeExpressionPrinter__semantic(_))).join(",")}>";
   ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
     MUTABLE inner = TRY (typeExpressionPrinter__semantic(optional_type_expression.inner));
     MUTABLE inner_kind = optional_type_expression.inner.kind;
@@ -877,7 +877,7 @@ PUB FN typeExpressionPrinter__legacy(expression: TypeExpression) RETURNS !String
   ELSE_IF kind IS_A FunctionTypeExpression AS function_type_expression THEN
     RETURN "FN(${(function_type_expression.signature.params |> SELECT TRY (typeExpressionPrinter__legacy(_.expression))).join(",")}) -> ${TRY (typeExpressionPrinter__legacy(function_type_expression.signature.return_expression))}${typeExpressionPrinter__capability_suffix(cap)}";
   ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
-    RETURN "Tuple<${(tuple_type_expression.items() |> SELECT TRY (typeExpressionPrinter__legacy(_))).join(",")}>${typeExpressionPrinter__capability_suffix(cap)}";
+    RETURN "Tuple<${(tuple_type_expression.items |> SELECT TRY (typeExpressionPrinter__legacy(_))).join(",")}>${typeExpressionPrinter__capability_suffix(cap)}";
   ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
     MUTABLE inner = TRY (typeExpressionPrinter__legacy(optional_type_expression.inner));
     MUTABLE inner_kind = optional_type_expression.inner.kind;
@@ -934,7 +934,7 @@ PUB FN typeExpressionPrinter__inline(expression: TypeExpression) RETURNS !String
   ELSE_IF kind IS_A FunctionTypeExpression AS function_type_expression THEN
     RETURN "FN(${(function_type_expression.signature.params |> SELECT TRY (typeExpressionPrinter__inline(_.expression))).join(", ")}) -> ${TRY (typeExpressionPrinter__inline(function_type_expression.signature.return_expression))}${typeExpressionPrinter__capability_suffix(cap)}";
   ELSE_IF kind IS_A TupleTypeExpression AS tuple_type_expression THEN
-    RETURN "Tuple<${(tuple_type_expression.items() |> SELECT TRY (typeExpressionPrinter__inline(_))).join(", ")}>${typeExpressionPrinter__capability_suffix(cap)}";
+    RETURN "Tuple<${(tuple_type_expression.items |> SELECT TRY (typeExpressionPrinter__inline(_))).join(", ")}>${typeExpressionPrinter__capability_suffix(cap)}";
   ELSE_IF kind IS_A OptionalTypeExpression AS optional_type_expression THEN
     RETURN "?${TRY (typeExpressionPrinter__inline(optional_type_expression.inner))}${typeExpressionPrinter__capability_suffix(cap)}";
   ELSE_IF kind IS_A FallibleTypeExpression AS fallible_type_expression THEN

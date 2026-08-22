@@ -1216,7 +1216,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           TRY (ownershipDataflow__collect_explicit_in(rtoc_self_view, node_value_mutable, step));
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
-        FOR _ IN list_lit.items() DO
+        FOR _ IN list_lit.items DO
         TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, _, step));
         END
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN

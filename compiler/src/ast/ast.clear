@@ -7132,7 +7132,7 @@ PUB FN aST__wrapped_children(expr: Locatable) RETURNS []Locatable ->
   ELSE_IF expr IS_A UnionVariantLit AS union_variant_lit THEN
     children = children + union_variant_lit.fields.values();
   ELSE_IF expr IS_A ListLit AS list_lit THEN
-    children = children + list_lit.items();
+    children = children + list_lit.items;
   ELSE_IF expr IS_A Cast AS cast_node THEN
     &children.append(COPY cast_node.value);
   ELSE_IF expr IS_A MoveNode AS move_node THEN
@@ -7210,7 +7210,7 @@ PUB FN aST__expression_children(node: Locatable) RETURNS []Locatable ->
   ELSE_IF node IS_A UnionVariantLit AS union_variant_lit THEN
     children = children + union_variant_lit.fields.values();
   ELSE_IF node IS_A ListLit AS list_lit THEN
-    children = children + list_lit.items();
+    children = children + list_lit.items;
   ELSE_IF node IS_A Assert AS assert_node THEN
     &children.append(COPY assert_node.condition);
   END

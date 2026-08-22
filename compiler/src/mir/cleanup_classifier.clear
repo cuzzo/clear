@@ -1379,10 +1379,10 @@ END
 PUB FN cleanupClassifier__literal_only_list?(node: Locatable) RETURNS Bool ->
   IF cleanupClassifier__binding_value(node) EXISTS AS val THEN
     IF val IS_A ListLit AS list_lit THEN
-      IF (list_lit.items().length() == 0) THEN
+      IF (list_lit.items.length() == 0) THEN
         RETURN FALSE;
       END
-      RETURN list_lit.items() |> ALL _ IS_A Literal;
+      RETURN list_lit.items |> ALL _ IS_A Literal;
     END
   END
   RETURN FALSE;

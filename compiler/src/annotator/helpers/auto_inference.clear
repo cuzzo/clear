@@ -382,7 +382,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE slot = COPY UNWRAP (rtoc_self_view.slots[castAutoConstraintCollectorLocalDeclEntryToAutoSlotIdMultiowned(entry)]);
       IF (slot.shape == :list_element) THEN
         IF rhs_value IS_A ListLit AS list_lit THEN
-          FOR rtoc_item IN list_lit.items() DO
+          FOR rtoc_item IN list_lit.items DO
           &slot.sources.append(COPY rtoc_item);
           END
         END
@@ -400,7 +400,7 @@ PRIVATE FN autoConstraintCollector__empty_list_lit?(self: AutoConstraintCollecto
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node EXISTS AS node_value THEN
       IF node_value IS_A ListLit AS list_lit THEN
-        RETURN (list_lit.items().empty?() AND (list_lit.constructor_options == NIL));
+        RETURN (list_lit.items.empty?() AND (list_lit.constructor_options == NIL));
       END
     END
     RETURN FALSE;
