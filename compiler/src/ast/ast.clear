@@ -6694,8 +6694,8 @@ PRIVATE FN aST__walk_children_TakeWhileOp_mut(MUTABLE item: TakeWhileOp, MUTABLE
   END
 END
 PRIVATE FN aST__walk_children_WindowOp_mut(MUTABLE item: WindowOp, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  IF item.size() EXISTS THEN
-    MUTABLE size_child: Locatable = COPY UNWRAP (item.size());
+  IF item.size EXISTS THEN
+    MUTABLE size_child: Locatable = COPY UNWRAP (item.size);
     aST__each_locatable_mut(&size_child, &descend_functions, visitor);
     item.size = COPY size_child;
   END
