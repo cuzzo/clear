@@ -189,12 +189,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A PubConst AS rtoc_pub_const THEN
       RETURN "pub const ${rtoc_pub_const.name} = ${rtoc_pub_const.value};";
     ELSE_IF node IS_A ModuleVar AS rtoc_module_var THEN
-      RETURN "${IF ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = CAST(rtoc_module_var AS FunctionSignature);
-      functionSignature__visibility(rtoc_local_receiver_2) } == :pub) THEN
+      RETURN "${IF (rtoc_module_var.visibility == :pub) THEN
         "pub "
       ELSE
         ""
-      END}var ${node.name()}: ${TRY (type__zig_type(CAST(node AS Type)))} = undefined;";
+      END}var ${rtoc_module_var.name}: ${rtoc_module_var.zig_type} = undefined;";
     ELSE_IF node IS_A ModuleConstFree AS rtoc_module_const_free THEN
       RETURN "defer CheatLib.cleanup(@TypeOf(${rtoc_module_const_free.name}), ${rtoc_self_view.rt_name}.heapAlloc(), &${rtoc_module_const_free.name});";
     ELSE_IF node IS_A ProtocolAdapterDef AS rtoc_protocol_adapter_def THEN
@@ -3276,9 +3275,9 @@ PRIVATE FN mIREmitter__emit_cleanup(self: MIREmitter, node: Node, errdefer: Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE entry = node.cleanup_entry();
+    MUTABLE entry = node.cleanup_entry;
     MUTABLE alloc = TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry));
-    MUTABLE name = node.name();
+    MUTABLE name = node.name;
     MUTABLE g = cleanupEntry__has_moved_guard?(entry);
     MUTABLE vp = cleanupEntry__via_pointer?(entry);
     IF (entry.kind() == :resource) THEN
