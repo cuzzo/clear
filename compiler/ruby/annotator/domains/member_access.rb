@@ -693,8 +693,11 @@ module Annotator
         if (coll = node.constructor_collection)
           # A set of symbols is a set of Symbol, not of the widened String the
           # array path infers: the element type has to keep its capabilities.
-          element = if string_element_sync
-                      Type.new(base_type).tap { |el| el.sync = string_element_sync }
+          element = if all_strings
+                      # Mixed string lengths widen to String exactly as the
+                      # array path does; only the sync capability carries over,
+                      # which is what makes a symbol set a set of Symbol.
+                      Type.new(base_type).tap { |el| el.sync = string_element_sync if string_element_sync }
                     else
                       T.must(T.must(node.items.first).full_type!(context: "set literal element"))
                     end
