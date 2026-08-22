@@ -29,6 +29,17 @@ test "makeListCapacity honors a minimum above the initial item count" {
     try std.testing.expect(list.capacity >= 16);
 }
 
+test "optionalOf normalizes a bare value and passes an optional through" {
+    const bare: u32 = 7;
+    const opt: ?u32 = 9;
+    const none: ?u32 = null;
+    try std.testing.expectEqual(@as(?u32, 7), CheatLib.optionalOf(bare));
+    try std.testing.expectEqual(@as(?u32, 9), CheatLib.optionalOf(opt));
+    try std.testing.expectEqual(@as(?u32, null), CheatLib.optionalOf(none));
+    try std.testing.expectEqual(?u32, CheatLib.Optionalized(u32));
+    try std.testing.expectEqual(?u32, CheatLib.Optionalized(?u32));
+}
+
 test "makeSet builds a populated set that owns its elements" {
     const allocator = std.testing.allocator;
     var set = try CheatLib.makeSet([]const u8, allocator, &[_][]const u8{

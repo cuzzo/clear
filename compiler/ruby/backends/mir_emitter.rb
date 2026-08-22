@@ -2358,7 +2358,11 @@ class MIREmitter
         result += " else |_| {}" unless else_body
       else
         capture = b[:pointer_capture] ? "*#{b[:capture]}" : b[:capture]
-        result = "if (#{expr}) |#{capture}| {\n#{suppress}#{then_body}\n}"
+        # An `anytype` parameter declared `?T` can arrive as a bare `T`, which
+        # `if (x) |y|` rejects. Only a bare binding can have that shape; a call
+        # result carries its own optionality.
+        subject = b[:expr].is_a?(MIR::Ident) ? "CheatLib.optionalOf(#{expr})" : expr
+        result = "if (#{subject}) |#{capture}| {\n#{suppress}#{then_body}\n}"
         result += " else {\n#{else_body}\n}" if else_body
       end
       result

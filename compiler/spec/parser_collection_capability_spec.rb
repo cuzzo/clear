@@ -123,7 +123,7 @@ RSpec.describe "ClearParser collection capability chains" do
     CLEAR
 
     zig = ZigTranspiler.new.transpile(source)
-    branch = zig.index("if (maybe) |value|")
+    branch = zig.index("|value|")
     copy = zig.index("const __tmp_", branch || 0)
     expect(branch).not_to be_nil
     expect(copy).not_to be_nil

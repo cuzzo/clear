@@ -816,6 +816,21 @@ pub const CheatLib = struct {
         for (items) |item| list.appendAssumeCapacity(try dupeValue(T, item, allocator));
     }
 
+    // A `?T` parameter that is emitted `anytype` (collections, generic
+    // payloads) receives a bare `T` from a caller that had a concrete value.
+    // Unwrapping that with `if (x) |y|` is a compile error, so normalize the
+    // subject to an optional first; for an already-optional value this is the
+    // identity.
+    pub fn Optionalized(comptime T: type) type {
+        // `null` on its own is @TypeOf(null), which cannot be made optional.
+        if (T == @TypeOf(null)) return ?u0;
+        return if (@typeInfo(T) == .optional) T else ?T;
+    }
+
+    pub inline fn optionalOf(value: anytype) Optionalized(@TypeOf(value)) {
+        return value;
+    }
+
     pub fn makeSet(comptime T: type, allocator: std.mem.Allocator, items: []const T) !DataStructures.Set(T) {
         var set = DataStructures.Set(T){};
         errdefer set.deinit(allocator);

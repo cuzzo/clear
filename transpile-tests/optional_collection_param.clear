@@ -1,0 +1,25 @@
+# Test: a `?[Set]T` parameter is emitted `anytype`, so a caller with a concrete
+# set passes a bare set. Unwrapping that with the plain optional bind was a Zig
+# compile error, so an optional collection parameter could not be called with a
+# real collection at all.
+
+FN countNames(values: ?[Set]String@symbol = NIL) RETURNS Int64 ->
+    IF values EXISTS AS present THEN
+        RETURN present.length();
+    END
+    RETURN 0;
+END
+
+FN countItems(values: ?[]Int64 = NIL) RETURNS Int64 ->
+    IF values EXISTS AS present THEN
+        RETURN present.length();
+    END
+    RETURN -1;
+END
+
+FN main() RETURNS Void ->
+    ASSERT countNames(Set[symbol("a"), symbol("b")]) == 2;
+    ASSERT countNames() == 0;
+    ASSERT countItems([1, 2, 3]) == 3;
+    ASSERT countItems() == -1;
+END
