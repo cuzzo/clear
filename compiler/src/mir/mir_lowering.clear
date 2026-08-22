@@ -3949,9 +3949,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < nodes.length() DO
       IF (rtoc_idx.zero?() AND (target.line != NIL)) THEN
-            &target.items().append(Emittable{ Comment: COPY Comment{ text: "CLR:${(target.line)?.toString()}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+            &target.items.append(Emittable{ Comment: COPY Comment{ text: "CLR:${(target.line)?.toString()}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
       END
-      &target.items().append(COPY nodes[rtoc_idx]);
+      &target.items.append(COPY nodes[rtoc_idx]);
     rtoc_idx = rtoc_idx + 1;
       END
       NIL;
@@ -6694,7 +6694,7 @@ PRIVATE FN mIRLowering__compute_used_let_names(self: MIRLowering, let_ast_map: {
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (let_ast_map.count() == 0) THEN
+    IF (let_ast_map.count == 0) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_230: []String = List[]; rtoc_empty_list_230 } ) AS []String);
     END
     MUTABLE referenced = Set[];
@@ -6713,9 +6713,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE rhs = COPY let_binding.expr;
-      MUTABLE before = referenced.size();
+      MUTABLE before = referenced.size;
       mIRLowering__collect_identifier_refs(rtoc_self_view, castLocatableToOptionalAstIdentifierSearchNode(rhs), let_ast_map, &referenced);
-      IF (referenced.size() > before) THEN
+      IF (referenced.size > before) THEN
             changed = TRUE;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -6818,7 +6818,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE values: ?StubValue@boxed = COPY node.value;
       MUTABLE items_mir: []Any = List[];
       IF (aST__node_items(values) EXISTS) THEN
-        items_mir = values.items() |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, _));
+        items_mir = values.items |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, _));
       ELSE
         items_mir = [CAST(TRY (mIRLowering__lower(&rtoc_self_view, values)) AS Any)];
       END
@@ -8474,7 +8474,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fields: []FieldDef = List[];
     MUTABLE source: ?ExternSource = COPY node.extern_source;
     IF ((source != NIL) AND (source.abi == :c)) THEN
-      IF (node.field_decls.count() == 0) THEN
+      IF (node.field_decls.count == 0) THEN
         MUTABLE opaque_name = "${node.name}__opaque";
         RETURN MIRLoweringReturnValue{ ArrayValue: [TypeAlias{ name: COPY opaque_name, target: "opaque {}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, TypeAlias{ name: COPY node.name, target: "*${opaque_name}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] |> SELECT Emittable{ TypeAlias: COPY _ } };
       END
@@ -8520,7 +8520,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN MIRLoweringReturnValue{ ArrayValue: COPY items };
       END
     ELSE
-    IF (node.field_decls.count() == 0) THEN
+    IF (node.field_decls.count == 0) THEN
         RETURN MIRLoweringReturnValue{ Emittable: COPY CAST(Noop{ reason: "empty_local_extern_struct", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
     ELSE
         fields = node.field_decls.keys() |> SELECT {
@@ -9222,7 +9222,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       snap_types = Set[];
     END
     MUTABLE snapshot_type_branch_value: ?Type = NIL;
-    IF (snap_types.size() == 1) THEN
+    IF (snap_types.size == 1) THEN
       snapshot_type_branch_value = TRY (type__new(snap_types.first()));
     ELSE
       snapshot_type_branch_value = NIL;
@@ -13335,7 +13335,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       strategies = {};
     END
     MUTABLE refused = strategies |> WHERE _._1 IS_A Refuse;
-    IF (refused.count() == 0) THEN
+    IF (refused.count == 0) THEN
       RETURN;
     END
     MUTABLE lines = refused.keys() |> SELECT {
@@ -14672,7 +14672,7 @@ PRIVATE FN mIRLowering__smooth_snapshot_stmts(self: MIRLowering, node: BinaryOp,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((mIRLowering__current_function_has_catch?(rtoc_self_view) AND ((TRY (mIRLowering__current_function_snapshot_types(rtoc_self_view))).size() == 1))) THEN
+    IF !((mIRLowering__current_function_has_catch?(rtoc_self_view) AND ((TRY (mIRLowering__current_function_snapshot_types(rtoc_self_view))).size == 1))) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_554: []Stmt = List[]; rtoc_empty_list_554 } ) AS []Stmt);
     END
     MUTABLE t = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.left)) }));
@@ -15462,7 +15462,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF type__rank?(target_type) THEN
       MUTABLE index_nodes: []Locatable = List[];
       IF node.index IS_A TupleLit THEN
-        index_nodes = node.index.items();
+        index_nodes = node.index.items;
       ELSE
         index_nodes = [node.index];
       END
@@ -15718,7 +15718,7 @@ PRIVATE FN mIRLowering__substitute_mir_type(self: MIRLowering, raw_type: ?Struct
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (subst.count() == 0) THEN
+    IF (subst.count == 0) THEN
       RETURN COPY raw_type;
     END
     IF raw_type EXISTS AS raw_type_value THEN
@@ -18151,7 +18151,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       });
       RETURN TRY (mIRLowering__place_value_for_destination(rtoc_self_view, placed, rhs, decl_alloc, TypeTypeInput{ Type: COPY ft }));
     END
-    IF ((TRY (type__dynamic_rank?(ft)) AND rhs_unwrapped IS_A ListLit) AND rhs_unwrapped.items().empty?()) THEN
+    IF ((TRY (type__dynamic_rank?(ft)) AND rhs_unwrapped IS_A ListLit) AND rhs_unwrapped.items.empty?()) THEN
       MUTABLE inner = ContainerInit{ zig_type: COPY bare_zig, strategy: :grid_empty, alloc: COPY decl_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
       IF has_caps THEN
         RETURN mIRLowering__compose_capability_wrap(rtoc_self_view, Emittable{ ContainerInit: COPY inner }, bare_zig, ft, decl_alloc);
@@ -18208,7 +18208,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(rhs_unwrapped IS_A ListLit) THEN
         RETURN TRY (mIRLowering__lower(&rtoc_self_view, node.value));
       END
-      IF !(rhs_unwrapped.items().empty?()) THEN
+      IF !(rhs_unwrapped.items.empty?()) THEN
         RETURN mIRLowering__with_expected_type(rtoc_self_view, ft, %() USE(node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_672 = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
     rtoc_lambda_result_672
@@ -19039,7 +19039,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE target = AddressOf{ expr: COPY CAST(TRY (mIRLowering__lower(&rtoc_self_view, target_node)) AS Emittable), lowered_node_id: NIL, ownership_consumption: NIL };
       MUTABLE index_nodes: []?Int64 = List[];
       IF FALSE THEN
-        index_nodes = node.name.indexOf().items();
+        index_nodes = node.name.indexOf().items;
       ELSE
         index_nodes = [node.name.indexOf()];
       END

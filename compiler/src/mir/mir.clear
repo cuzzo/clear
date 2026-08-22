@@ -11248,7 +11248,7 @@ PUB STRUCT ForeignSliceView {
 }
 
 FN foreignSliceView__child_exprs(self: ForeignSliceView) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN foreignSliceView__compact_child_exprs(self, [CAST(self.pointer AS Any), CAST(self.count() AS Any)]);
+  RETURN foreignSliceView__compact_child_exprs(self, [CAST(self.pointer AS Any), CAST(self.count AS Any)]);
 END
 FN foreignSliceView__mir?(self: ForeignSliceView) RETURNS Bool ->
   RETURN TRUE;
@@ -12737,7 +12737,7 @@ PUB FN inlineAllocMetadata__empty?(self: InlineAllocMetadata) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.slots.count() == 0);
+    RETURN (rtoc_self_view.slots.count == 0);
 }
 END
 PUB FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS Void

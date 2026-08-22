@@ -44,7 +44,7 @@ PUB FN pipelineContextState__active?(self: PipelineContextState) RETURNS Bool ->
   IF self.soa_rewrite_active THEN
     RETURN TRUE;
   END
-  RETURN !((self.named_bindings.count() == 0));
+  RETURN !((self.named_bindings.count == 0));
 END
 PUB FN pipelineContextState__replacement_for_identifier(self: PipelineContextState, name: String) RETURNS ?String ->
   IF ((name == "_") AND (self.placeholder_name != NIL)) THEN

@@ -29,7 +29,7 @@ PUB FN span__end_line(self: Span) RETURNS Int64 ->
   RETURN self.line;
 END
 PUB FN span__end_col(self: Span) RETURNS Int64 ->
-  RETURN (self.col + self.length());
+  RETURN (self.col + self.length);
 END
 # Ruby's Span#to_h returns a mixed-value Hash; a record is the honest CLEAR
 # spelling (an `Any` map has no representation -- `Any` resolves to f64).
@@ -42,7 +42,7 @@ PUB STRUCT SpanHash {
   end_col: Int64
 }
 PUB FN span__to_h(self: Span) RETURNS SpanHash ->
-  RETURN SpanHash{ file: COPY self.file, line: self.line, col: self.col, length: self.length(), end_line: span__end_line(self), end_col: span__end_col(self) };
+  RETURN SpanHash{ file: COPY self.file, line: self.line, col: self.col, length: self.length, end_line: span__end_line(self), end_col: span__end_col(self) };
 END
 PUB FN span__new(file: ?String, line: Int64, col: Int64, length: Int64) RETURNS Span ->
   MUTABLE self = Span{ col: col, file: COPY file, length: length, line: line };

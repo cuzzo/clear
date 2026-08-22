@@ -226,7 +226,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
   rtoc_idx = rtoc_idx + 1;
   END
   END
-  fn_nodes.count().times(%() USE(callsites, fn_nodes) -> {
+  fn_nodes.count.times(%() USE(callsites, fn_nodes) -> {
   MUTABLE changed: Bool = FALSE;
   FOR rtoc_key IN fn_nodes.keys() DO
     MUTABLE callee_fn: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
@@ -302,7 +302,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
       by_index[rtoc_idx] = UNWRAP (contract);
     rtoc_idx = rtoc_idx + 1;
   END
-  IF !((by_index.count() == 0)) THEN
+  IF !((by_index.count == 0)) THEN
       kept_contracts[rtoc_key] = by_index;
   END
   END

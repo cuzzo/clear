@@ -2409,7 +2409,7 @@ PUB FN type__fsm_foreach_descriptor(self: Type) RETURNS !?TypeFsmForEachDescript
   ELSE_IF type__set_collection?(self) THEN
     RETURN TypeFsmForEachDescriptor{ kind: :iterator, init_method: "keyIterator", advance_method: "next", deref: TRUE, var_zig_type: COPY TRY (type__element_zig_type_or_anyopaque(self)), slice_suffix: "" };
   ELSE_IF (type__list_collection?(self) OR ((type__array?(self) AND type__dynamic?(self)))) THEN
-    RETURN TypeFsmForEachDescriptor{ kind: :indexed_slice, slice_suffix: ".items()", var_zig_type: COPY TRY (type__element_zig_type_or_anyopaque(self)), init_method: NIL, advance_method: NIL, deref: FALSE };
+    RETURN TypeFsmForEachDescriptor{ kind: :indexed_slice, slice_suffix: ".items", var_zig_type: COPY TRY (type__element_zig_type_or_anyopaque(self)), init_method: NIL, advance_method: NIL, deref: FALSE };
   ELSE_IF (type__array?(self) AND !(type__dynamic?(self))) THEN
     RETURN TypeFsmForEachDescriptor{ kind: :indexed_slice, slice_suffix: "", var_zig_type: COPY TRY (type__element_zig_type_or_anyopaque(self)), init_method: NIL, advance_method: NIL, deref: FALSE };
   ELSE

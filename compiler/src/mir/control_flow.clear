@@ -2052,7 +2052,7 @@ PUB FN borrowState__empty() RETURNS BorrowState ->
   RETURN BorrowState{ borrows: {} };
 END
 PUB FN borrowState__empty?(self: BorrowState) RETURNS Bool EFFECTS REENTRANT ->
-  RETURN (self.borrows.count() == 0);
+  RETURN (self.borrows.count == 0);
 END
 PUB FN borrowState__kind_for(self: BorrowState, name: String) RETURNS ?String@symbol ->
   IF self.borrows[name] != NIL THEN

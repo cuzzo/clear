@@ -69,7 +69,7 @@ PUB FN scopeBindings__length(self: ScopeBindings) RETURNS Int64
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.entries.count();
+    RETURN rtoc_self_view.entries.count;
 }
 END
 FN scopeBindings__pairs(self: ScopeBindings) RETURNS ![]Tuple<String, SymbolEntry@multiowned>
