@@ -748,7 +748,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((node.protocol == :Map)) THEN
       panic("unsupported protocol call {}.{}");
     END
-    MUTABLE receiver: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.receiver));
+    MUTABLE receiver: String = TRY (mIREmitter__emit(&rtoc_self_view, node.receiver));
     MUTABLE arguments: []?String = node.args |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _));
     IF (node.operation == :get) THEN
       RETURN "CheatLib.mapProtocolGet(${receiver}, ${arguments[0]})";
@@ -2081,7 +2081,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ptr_init = (entries |> SELECT "@intFromPtr(${TRY (mIREmitter__emit(&rtoc_self_view, _.address_expr()))})").join(", ");
     MUTABLE order_init = (0 ..< n).to_a().join(", ");
     MUTABLE acquire_arms = (entries |> SELECT {
-    MUTABLE lock_expr: ?String = TRY (mIREmitter__emit(&rtoc_self_view, _.lock_expr()));
+    MUTABLE lock_expr: String = TRY (mIREmitter__emit(&rtoc_self_view, _.lock_expr()));
     regexReplaceAll("${_.indexOf()} => {\n                                if (${lock_expr}.${_.method_name()}()) |__g| {\n                                    ${_.guard_var()} = __g;\n                                    ${_.held_var()} = true;\n                                } else |__err_inner| {\n                                    __err_caught = __err_inner;\n                                    __success = false;\n                                }\n                            },\n", "\\s+\\z", "")
     }).join("\n                                ");
     MUTABLE release_arms = (entries |> SELECT "${_.indexOf()} => if (${_.held_var()}) { ${_.guard_var()}.release(); ${_.held_var()} = false; },").join("\n                            ");
@@ -2550,7 +2550,7 @@ PRIVATE FN mIREmitter__emit_if_stmt(MUTABLE self: MIREmitter, node: IfStmt) RETU
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE cond: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.cond));
+    MUTABLE cond: String = TRY (mIREmitter__emit(&rtoc_self_view, node.cond));
     IF (node.comptime OR_ELSE FALSE) THEN
       cond = "comptime ${cond}";
     END
@@ -2579,7 +2579,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END;
     IF (node.bindings.length() == 1) THEN
       MUTABLE b = node.bindings[0];
-      MUTABLE expr: ?String = TRY (mIREmitter__emit(&rtoc_self_view, b[:expr]));
+      MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, b[:expr]));
       MUTABLE suppress: String = "";
       IF (CAST(b[:capture] AS String) == "_") THEN
         suppress = "";
@@ -2646,7 +2646,7 @@ PRIVATE FN mIREmitter__emit_while(MUTABLE self: MIREmitter, node: WhileStmt) RET
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE cond: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.cond));
+    MUTABLE cond: String = TRY (mIREmitter__emit(&rtoc_self_view, node.cond));
     MUTABLE cap: String = "";
     IF node.capture THEN
       cap = " |${node.capture}|";
@@ -2675,7 +2675,7 @@ PRIVATE FN mIREmitter__emit_for(MUTABLE self: MIREmitter, node: ForStmt) RETURNS
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE iter: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.iter));
+    MUTABLE iter: String = TRY (mIREmitter__emit(&rtoc_self_view, node.iter));
     MUTABLE captures = ([node.capture, node.index_capture]).join(", ");
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
     IF mIREmitter__i64_range_capture_cast_required?(rtoc_self_view, node) THEN
@@ -2698,7 +2698,7 @@ PRIVATE FN mIREmitter__emit_switch(MUTABLE self: MIREmitter, node: SwitchStmt) R
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE subject: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.subject));
+    MUTABLE subject: String = TRY (mIREmitter__emit(&rtoc_self_view, node.subject));
     MUTABLE arms = node.arms |> SELECT {
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body()));
     "${TRY (mIREmitter__emit_switch_patterns(&rtoc_self_view, _.patterns()))} => {\n${body}\n}"
@@ -2863,7 +2863,7 @@ PRIVATE FN mIREmitter__emit_union_match(MUTABLE self: MIREmitter, node: UnionMat
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE subject: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.subject));
+    MUTABLE subject: String = TRY (mIREmitter__emit(&rtoc_self_view, node.subject));
     MUTABLE arms = node.arms |> SELECT {
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body()));
     MUTABLE payload = _.payload();
@@ -2906,7 +2906,7 @@ PRIVATE FN mIREmitter__emit_if_chain(MUTABLE self: MIREmitter, node: IfChain) RE
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE parts = node.branches |> SELECT {
-    MUTABLE cond: ?String = TRY (mIREmitter__emit(&rtoc_self_view, _.cond()));
+    MUTABLE cond: String = TRY (mIREmitter__emit(&rtoc_self_view, _.cond()));
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body()));
     "if (${cond}) {\n${body}\n}"
     };
@@ -2966,9 +2966,9 @@ PRIVATE FN mIREmitter__emit_index_insert(MUTABLE self: MIREmitter, node: IndexIn
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE map: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.map));
-    MUTABLE key: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.key_expr));
-    MUTABLE val: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr));
+    MUTABLE map: String = TRY (mIREmitter__emit(&rtoc_self_view, node.map));
+    MUTABLE key: String = TRY (mIREmitter__emit(&rtoc_self_view, node.key_expr));
+    MUTABLE val: String = TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr));
     MUTABLE key_t = (node.key_zig_type OR "u8");
     MUTABLE elem_t = node.elem_zig_type;
     MUTABLE alloc_str = PARTIAL MATCH node.alloc START
@@ -2986,7 +2986,7 @@ PRIVATE FN mIREmitter__emit_sort(MUTABLE self: MIREmitter, node: Sort) RETURNS !
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE et = node.elem_type;
-    MUTABLE items: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.items_expr));
+    MUTABLE items: String = TRY (mIREmitter__emit(&rtoc_self_view, node.items_expr));
     MUTABLE cmp: String = "";
     IF node.string_keys THEN
       cmp = "std.mem.order(u8, ${TRY (mIREmitter__emit(&rtoc_self_view, node.key_a))}, ${TRY (mIREmitter__emit(&rtoc_self_view, node.key_b))}) == .lt";
@@ -3157,7 +3157,7 @@ PRIVATE FN mIREmitter__emit_expr_stmt(MUTABLE self: MIREmitter, node: ExprStmt) 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE code: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
+    MUTABLE code: String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
     IF (node.discard OR_ELSE FALSE) THEN
       RETURN "_ = ${code};";
     ELSE
@@ -3171,7 +3171,7 @@ PRIVATE FN mIREmitter__emit_heap_create(MUTABLE self: MIREmitter, node: HeapCrea
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE label = (node.label OR_ELSE "__hc");
-    MUTABLE init: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.init));
+    MUTABLE init: String = TRY (mIREmitter__emit(&rtoc_self_view, node.init));
     MUTABLE alloc = TRY (mIREmitter__alloc_expr(&rtoc_self_view, Alloc{ SymbolValue: COPY node.alloc }));
     RETURN "${label}: {\n    const __p = try ${alloc}.create(${node.zig_type});\n    errdefer ${alloc}.destroy(__p);\n    __p.* = ${init};\n    break :${label} __p;\n}";
 }
@@ -3412,7 +3412,7 @@ PRIVATE FN mIREmitter__emit_cap_wrap(MUTABLE self: MIREmitter, node: CapWrap) RE
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE inner: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.inner));
+    MUTABLE inner: String = TRY (mIREmitter__emit(&rtoc_self_view, node.inner));
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
     IF (node.strategy == :local) THEN
       RETURN "try CheatLib.localCreate(${node.zig_base}, ${alloc}, ${inner})";
@@ -3434,7 +3434,7 @@ PRIVATE FN mIREmitter__emit_share_promote(MUTABLE self: MIREmitter, node: ShareP
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE source: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.source));
+    MUTABLE source: String = TRY (mIREmitter__emit(&rtoc_self_view, node.source));
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
     RETURN "blk_share: {\n    const __share_src = ${source};\n    errdefer CheatLib.rcRelease(${node.zig_base}, ${alloc}, __share_src);\n    var __share_val = try CheatLib.dupeValue(${node.zig_base}, __share_src.ctrl.data.*, ${alloc});\n    errdefer CheatLib.cleanup(${node.zig_base}, ${alloc}, &__share_val);\n    const __share_arc = try CheatLib.arcCreate(${node.zig_base}, ${alloc}, __share_val);\n    CheatLib.rcRelease(${node.zig_base}, ${alloc}, __share_src);\n    break :blk_share __share_arc;\n}\n".trim();
 }
@@ -3713,7 +3713,7 @@ PRIVATE FN mIREmitter__emit_default_stream_capacity(MUTABLE self: MIREmitter, no
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE workers: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.worker_count));
+    MUTABLE workers: String = TRY (mIREmitter__emit(&rtoc_self_view, node.worker_count));
     RETURN "blk: { var c: usize = 4; while (c < ${workers} * 4) : (c <<= 1) {} break :blk @min(c, 64); }";
 }
 END
@@ -3811,8 +3811,8 @@ PRIVATE FN mIREmitter__emit_slice_expr(MUTABLE self: MIREmitter, node: SliceExpr
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE target: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.target));
-    MUTABLE s: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.start));
+    MUTABLE target: String = TRY (mIREmitter__emit(&rtoc_self_view, node.target));
+    MUTABLE s: String = TRY (mIREmitter__emit(&rtoc_self_view, node.start));
     MUTABLE range: String = "";
     IF node.end_expr THEN
       range = "${s}..${TRY (mIREmitter__emit(&rtoc_self_view, node.end_expr))}";
@@ -3902,7 +3902,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((result_type != NIL) AND !(fallback.startsWith?("@panic("))) THEN
       fallback = "@as(${TRY (type__zig_type(result_type))}, ${fallback})";
     END
-    MUTABLE expr: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
+    MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
     IF ((result_type != NIL) AND (expr == "null")) THEN
       expr = "@as(?${TRY (type__zig_type(result_type))}, null)";
     END
@@ -3914,8 +3914,8 @@ PRIVATE FN mIREmitter__emit_try_catch(MUTABLE self: MIREmitter, node: TryCatch) 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE expr: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
-    MUTABLE catch_body: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.catch_body));
+    MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
+    MUTABLE catch_body: String = TRY (mIREmitter__emit(&rtoc_self_view, node.catch_body));
     MUTABLE cap: String = "";
     IF node.capture THEN
       cap = " |${node.capture}|";
@@ -3936,7 +3936,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF mIREmitter__discard_success_only?(rtoc_self_view, discard_expr) THEN
       MUTABLE success_expr: TryCatch = castEmittableToTryCatch(discard_expr);
       MUTABLE opt = "${name}_opt";
-      MUTABLE expr: ?String = TRY (mIREmitter__emit(&rtoc_self_view, success_expr.expr));
+      MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, success_expr.expr));
       MUTABLE body = (["{", "const ${opt}: ?${node.zig_type} = (${expr} catch null);", "if (${opt}) |${name}_val| {", "var ${name} = ${name}_val;", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, Node{ Cleanup: COPY Cleanup{ name: COPY name, cleanup_entry: node.cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, FALSE)), 4), "}", "}"]).join("\n");
       RETURN body;
     END
@@ -3972,7 +3972,7 @@ PRIVATE FN mIREmitter__emit_if_optional(MUTABLE self: MIREmitter, node: IfOption
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE then_expr: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.then_expr));
+    MUTABLE then_expr: String = TRY (mIREmitter__emit(&rtoc_self_view, node.then_expr));
     IF (IF node.result_type != NIL THEN
       type__optional?(node.result_type)
     ELSE
@@ -4042,8 +4042,8 @@ PRIVATE FN mIREmitter__emit_range_lit(MUTABLE self: MIREmitter, node: MIRRangeLi
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE s: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.start));
-    MUTABLE e: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.end_val));
+    MUTABLE s: String = TRY (mIREmitter__emit(&rtoc_self_view, node.start));
+    MUTABLE e: String = TRY (mIREmitter__emit(&rtoc_self_view, node.end_val));
     IF (node.elem_type == :Int64) THEN
       RETURN "CheatLib.IntRange{ .start = ${s}, .end = ${e} }";
     ELSE
@@ -4074,7 +4074,7 @@ PRIVATE FN mIREmitter__emit_items_access(MUTABLE self: MIREmitter, node: ItemsAc
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE inner: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
+    MUTABLE inner: String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
     IF node.safe THEN
       rtoc_self_view.items_block_counter = (rtoc_self_view.items_block_counter + 1);
       MUTABLE label = "blk_items_${rtoc_self_view.items_block_counter.toString()}";
@@ -4089,7 +4089,7 @@ PRIVATE FN mIREmitter__emit_owned_slice(MUTABLE self: MIREmitter, node: OwnedSli
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE inner: ?String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
+    MUTABLE inner: String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
     rtoc_self_view.owned_slice_counter = (rtoc_self_view.owned_slice_counter + 1);
     MUTABLE label = "blk_owned_slice_${rtoc_self_view.owned_slice_counter.toString()}";
     MUTABLE alloc = TRY (mIREmitter__alloc_expr(&rtoc_self_view, Alloc{ SymbolValue: COPY node.alloc }));
@@ -4101,7 +4101,7 @@ PRIVATE FN mIREmitter__emit_body(MUTABLE self: MIREmitter, stmts: []Emittable) R
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN (stmts |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE code: ?String = TRY (mIREmitter__emit(&rtoc_self_view, _)); (IF !(code) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE stripped = code.trim(); (  IF mIREmitter__semicolon_required?(rtoc_self_view, _, stripped) THEN
+    RETURN (stmts |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE code: String = TRY (mIREmitter__emit(&rtoc_self_view, _)); (IF !(code) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE stripped = code.trim(); (  IF mIREmitter__semicolon_required?(rtoc_self_view, _, stripped) THEN
       "${code};"
     ELSE
       code

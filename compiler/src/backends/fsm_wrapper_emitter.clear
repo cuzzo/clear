@@ -397,7 +397,7 @@ PUB FN fsmWrapperEmitter__render_context_field_decls(fields: []ContextFieldDecl,
 END
 PRIVATE FN fsmWrapperEmitter__render_fsm_state_field_decls(fields: []StateFieldDecl, mir_emitter: MIREmitter) RETURNS !String ->
   RETURN (fields |> SELECT {
-  MUTABLE default: ?String = TRY (mIREmitter__emit(&mir_emitter, _.default_value));
+  MUTABLE default: String = TRY (mIREmitter__emit(&mir_emitter, _.default_value));
   "${_.name}: ${_.zig_type} = ${default},"
   }).join("\n");
 END
@@ -418,11 +418,17 @@ PRIVATE FN fsmWrapperEmitter__render_destroy_actions(ctx_id: Int64, destroy_acti
   IF (destroy_actions.length() == 0) THEN
     RETURN "";
   END
-  RETURN CAST(fsmWrapperEmitter__with_rt_name(&mir_emitter, "__ctx_${ctx_id.toString()}.rt", %() USE(ctx_id, destroy_actions, MUTABLE mir_emitter) -> ((destroy_actions |> SELECT PARTIAL MATCH _ START
-    FsmDestroyAction.FsmDestroyCleanup AS fsm_destroy_cleanup -> fsmWrapperEmitter__render_destroy_cleanup_action(fsm_destroy_cleanup, mir_emitter),
-    FsmDestroyAction.FsmDestroyStmt AS fsm_destroy_stmt -> fsmWrapperEmitter__render_destroy_stmt_action(fsm_destroy_stmt, mir_emitter),
-    FsmDestroyAction.FsmDestroyLockRelease AS fsm_destroy_lock_release -> fsmWrapperEmitter__render_destroy_lock_action(ctx_id, fsm_destroy_lock_release, mir_emitter),
-  END) |> WHERE _ != NIL).join("\n")) AS String);
+  RETURN TRY (fsmWrapperEmitter__with_rt_name_text(&mir_emitter, "__ctx_${ctx_id.toString()}.rt", %() USE(ctx_id, destroy_actions, MUTABLE mir_emitter) -> {
+  MUTABLE rendered: []String = List[];
+  FOR action IN destroy_actions DO
+    PARTIAL MATCH action START
+      FsmDestroyAction.FsmDestroyCleanup AS fsm_destroy_cleanup -> &rendered.append(TRY (fsmWrapperEmitter__render_destroy_cleanup_action(fsm_destroy_cleanup, mir_emitter)));,
+      FsmDestroyAction.FsmDestroyStmt AS fsm_destroy_stmt -> &rendered.append(TRY (fsmWrapperEmitter__render_destroy_stmt_action(fsm_destroy_stmt, mir_emitter)));,
+      FsmDestroyAction.FsmDestroyLockRelease AS fsm_destroy_lock_release -> &rendered.append(TRY (fsmWrapperEmitter__render_destroy_lock_action(ctx_id, fsm_destroy_lock_release, mir_emitter)));
+    END
+  END
+  rendered.join("\n")
+  }));
 END
 PRIVATE FN fsmWrapperEmitter__render_destroy_cleanup_action(action: FsmDestroyCleanup, mir_emitter: MIREmitter) RETURNS !String ->
   MUTABLE allocator: ?String = IF action.allocator != NIL THEN
