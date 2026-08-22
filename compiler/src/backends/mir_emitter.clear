@@ -785,7 +785,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE facts_body = ((facts_cases + ["@compileError(\"No ${node.protocol} conformance for \" ++ @typeName(T));"])).join("\n    ");
     MUTABLE facts = "fn ${facts_name}(comptime T: type) type {\n    ${facts_body}\n}";
     MUTABLE operations = node.requirements |> SELECT {
-    MUTABLE params = (1 ..< _.argument_count) |> SELECT "arg${_}: anytype";
+    MUTABLE params = (1 ..< _.argument_count) |> SELECT "arg${_.toString()}: anytype";
     MUTABLE all_params = (["comptime T: type", "rt: *Runtime", "self: anytype"] + params);
     MUTABLE branches = node.conformances |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE target: ?String = COPY _.operations[_.name]; (IF !(target) THEN NIL ELSE mIREmitter__protocol_conformance_branch(rtoc_self_view, _, %(bindings: String) USE(target, _) -> {
       MUTABLE type_args = COPY _.type_params;
