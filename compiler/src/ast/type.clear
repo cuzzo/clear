@@ -320,7 +320,7 @@ FN typeShape__generic_args_raw(self: TypeShape) RETURNS ![]String@symbol ->
   MUTABLE structural = COPY typeShape__structural_expression(self).kind;
   MUTABLE items: []TypeExpression = ( { MUTABLE rtoc_empty_list_2: []TypeExpression = List[]; rtoc_empty_list_2 } );
   IF structural IS_A TupleTypeExpression THEN
-    FOR _ IN ((UNWRAP (typeExpressionKind__tuple(structural))).items()) DO
+    FOR _ IN ((UNWRAP (typeExpressionKind__tuple(structural))).items) DO
     &items.append(COPY _);
     END
   ELSE_IF structural IS_A NamedTypeExpression THEN
@@ -2654,7 +2654,7 @@ PUB FN type__generic_args(self: Type) RETURNS ![]Type ->
   MUTABLE kind = type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind));
   MUTABLE items: []TypeExpression = ( { MUTABLE rtoc_empty_list_6: []TypeExpression = List[]; rtoc_empty_list_6 } );
   IF kind IS_A TupleTypeExpression THEN
-    FOR _ IN ((UNWRAP (typeExpressionKind__tuple(kind))).items()) DO
+    FOR _ IN ((UNWRAP (typeExpressionKind__tuple(kind))).items) DO
     &items.append(COPY _);
     END
   ELSE_IF kind IS_A NamedTypeExpression THEN
