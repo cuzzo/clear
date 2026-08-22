@@ -671,21 +671,20 @@ FN mIREmitter__emit_fiber_spawn_call(self: MIREmitter, call: FiberSpawnCall) RET
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE callee = PARTIAL MATCH call.target START
-      :runtime_submit -> {
-        MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE runtime_name = (call.runtime_name OR_ELSE CAST(panic("FiberSpawnCall runtime_name required") AS String));
-        "try ${runtime_name}.getSched().submitSpawn"
-      },
-      :pinned -> "try CheatHeader.spawnPinned",
-      :best -> "try CheatHeader.spawnBest",
-      :wait_group_submit -> {
-        MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE wait_group_name = (call.wait_group_name OR_ELSE CAST(panic("FiberSpawnCall wait_group_name required") AS String));
-        "try ${wait_group_name}.sched.submitSpawn"
-      },
-      DEFAULT -> panic("unknown FiberSpawnCall target {}")
-    END;
+    MUTABLE callee: String = "";
+    IF (call.target == :runtime_submit) THEN
+      MUTABLE runtime_name = (call.runtime_name OR_ELSE CAST(panic("FiberSpawnCall runtime_name required") AS String));
+      callee = "try ${runtime_name}.getSched().submitSpawn";
+    ELSE_IF (call.target == :pinned) THEN
+      callee = "try CheatHeader.spawnPinned";
+    ELSE_IF (call.target == :best) THEN
+      callee = "try CheatHeader.spawnBest";
+    ELSE_IF (call.target == :wait_group_submit) THEN
+      MUTABLE wait_group_name = (call.wait_group_name OR_ELSE CAST(panic("FiberSpawnCall wait_group_name required") AS String));
+      callee = "try ${wait_group_name}.sched.submitSpawn";
+    ELSE
+      panic("unknown FiberSpawnCall target {}");
+    END
     MUTABLE task_cfg = mIREmitter__emit_task_config_plan(rtoc_self_view, call.task_config);
     MUTABLE ctx_arg: String = "";
     IF call.pass_ctx_by_address THEN
