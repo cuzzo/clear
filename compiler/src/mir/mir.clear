@@ -1119,10 +1119,10 @@ PUB STRUCT MIRDestructureTarget {
 PUB FN mIRDestructureTarget__name(self: MIRDestructureTarget) RETURNS String ->
   COPY self.name;
 END
-PUB FN mIRDestructureTarget__declaration_kind(self: MIRDestructureTarget) RETURNS Any@multiowned ->
+PUB FN mIRDestructureTarget__declaration_kind(self: MIRDestructureTarget) RETURNS String@symbol ->
   COPY self.declaration_kind;
 END
-PUB FN mIRDestructureTarget__annotation(self: MIRDestructureTarget) RETURNS Any@multiowned ->
+PUB FN mIRDestructureTarget__annotation(self: MIRDestructureTarget) RETURNS ?String ->
   COPY self.annotation;
 END
 PUB FN mIRDestructureTarget__lowered_node_id(self: MIRDestructureTarget) RETURNS ?LoweredNodeId ->
@@ -9683,7 +9683,7 @@ PUB STRUCT MIRBlockExpr {
   result_type: ?Type
 }
 
-PUB FN mIRBlockExpr__label(self: MIRBlockExpr) RETURNS Any@multiowned ->
+PUB FN mIRBlockExpr__label(self: MIRBlockExpr) RETURNS ?String ->
   COPY self.label;
 END
 PUB FN mIRBlockExpr__body(self: MIRBlockExpr) RETURNS []Emittable ->
@@ -9863,10 +9863,10 @@ PUB STRUCT MIRCast {
 PUB FN mIRCast__expr(self: MIRCast) RETURNS Emittable ->
   self.expr;
 END
-PUB FN mIRCast__target_type(self: MIRCast) RETURNS Any@multiowned ->
+PUB FN mIRCast__target_type(self: MIRCast) RETURNS ?String ->
   COPY self.target_type;
 END
-PUB FN mIRCast__method(self: MIRCast) RETURNS Any@multiowned ->
+PUB FN mIRCast__method(self: MIRCast) RETURNS String@symbol ->
   COPY self.method;
 END
 PUB FN mIRCast__lowered_node_id(self: MIRCast) RETURNS ?LoweredNodeId ->
