@@ -534,7 +534,7 @@ END
 PUB STRUCT Import {
   alias_name: String,
   module_path: String,
-  member: Any@multiowned,
+  member: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -670,8 +670,8 @@ END
 PUB STRUCT CExternFnDecl {
   name: String,
   params: Any@multiowned,
-  return_type: Any@multiowned,
-  library: Any@multiowned,
+  return_type: String,
+  library: String,
   callconv: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -1110,8 +1110,8 @@ FN set__stmt?(self: Set) RETURNS Bool ->
 END
 PUB STRUCT MIRDestructureTarget {
   name: String,
-  declaration_kind: Any@multiowned,
-  annotation: Any@multiowned,
+  declaration_kind: String@symbol,
+  annotation: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -2414,8 +2414,8 @@ END
 PUB STRUCT AssertRaisesCheck {
   expr: Emittable,
   rt_name: String,
-  kind: Any@multiowned,
-  error_name: Any@multiowned,
+  kind: String@symbol,
+  error_name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -2686,7 +2686,7 @@ FN sort__stmt?(self: Sort) RETURNS Bool ->
 END
 PUB STRUCT SoaFieldAccess {
   soa_expr: Emittable,
-  field_name: Any@multiowned,
+  field_name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -2887,8 +2887,8 @@ END
 PUB STRUCT BatchWindowPush {
   window: String,
   item_expr: Emittable,
-  batch_var: Any@multiowned,
-  elem_zig: Any@multiowned,
+  batch_var: String,
+  elem_zig: String,
   result_var: ?String,
   value_expr: Emittable,
   alloc: String@symbol,
@@ -2955,8 +2955,8 @@ FN batchWindowPush__stmt?(self: BatchWindowPush) RETURNS Bool ->
 END
 PUB STRUCT BatchWindowFlush {
   window: String,
-  batch_var: Any@multiowned,
-  elem_zig: Any@multiowned,
+  batch_var: String,
+  elem_zig: String,
   result_var: ?String,
   value_expr: Emittable,
   alloc: String@symbol,
@@ -4207,7 +4207,7 @@ PUB STRUCT SortedLockAcquire {
   source_line: ?Int64,
   loop_label: String,
   rt_name: String,
-  fallible: Any@multiowned,
+  fallible: Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64
@@ -4279,7 +4279,7 @@ FN sortedLockAcquire__owned_effect_for_alloc(self: SortedLockAcquire, alloc: ?St
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT FallibleLockBinding {
-  guard_var: Any@multiowned,
+  guard_var: String,
   alias_name: String,
   acquire_call: Emittable,
   action: Emittable,
@@ -5964,7 +5964,7 @@ END
 PUB STRUCT RcRelease {
   source: Emittable,
   zig_base: String,
-  func: Any@multiowned,
+  func: String,
   alloc: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -6029,7 +6029,7 @@ END
 PUB STRUCT RcDowngrade {
   source: String,
   zig_base: String,
-  func: Any@multiowned,
+  func: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -6094,7 +6094,7 @@ END
 PUB STRUCT WeakUpgrade {
   source: String,
   zig_base: String,
-  func: Any@multiowned,
+  func: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -6356,7 +6356,7 @@ FN makeList__expr?(self: MakeList) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT FrameSave {
-  rt_expr: Any@multiowned,
+  rt_expr: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -6421,7 +6421,7 @@ FN frameSave__stmt?(self: FrameSave) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT FrameRestore {
-  rt_expr: Any@multiowned,
+  rt_expr: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -6551,7 +6551,7 @@ PUB STRUCT SnapshotRead {
   cell_unwrap: Emittable,
   rt: String,
   alias_name: String,
-  guard_var: Any@multiowned,
+  guard_var: String,
   body: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -6625,7 +6625,7 @@ PUB STRUCT SnapshotTransaction {
   rt: String,
   alloc: String@symbol,
   alias_name: String,
-  bare_type: Any@multiowned,
+  bare_type: String,
   body: []Emittable,
   conflict_action: Emittable,
   retries: ?Int64,
@@ -6794,7 +6794,7 @@ PUB STRUCT PolymorphicMutate {
   cell: Emittable,
   rt: String,
   alias_name: String,
-  bare_type: Any@multiowned,
+  bare_type: String,
   body: []Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -6867,8 +6867,8 @@ PUB STRUCT PolymorphicMutateFlow {
   cell: Emittable,
   rt: String,
   alias_name: String,
-  bare_type: Any@multiowned,
-  return_type: Any@multiowned,
+  bare_type: String,
+  return_type: String,
   body: []Emittable,
   guard_cond: Emittable,
   guard_fail_body: Any@multiowned,
@@ -6947,7 +6947,7 @@ FN polymorphicMutateFlow__owned_effect_for_alloc(self: PolymorphicMutateFlow, al
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT PolymorphicFlowSignal {
-  kind: Any@multiowned,
+  kind: String@symbol,
   ret: ?Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -7315,7 +7315,7 @@ FN ownedDestroy__owned_effect_for_alloc(self: OwnedDestroy, alloc: ?String@symbo
 END
 PUB STRUCT OwnedTransfer {
   name: String,
-  target: Any@multiowned,
+  target: String,
   source: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -8302,7 +8302,7 @@ FN fieldGet__expr?(self: FieldGet) RETURNS Bool ->
 END
 PUB STRUCT UnionPayloadGet {
   subject: Emittable,
-  variant: Any@multiowned,
+  variant: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -8427,7 +8427,7 @@ FN indexGet__expr?(self: IndexGet) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT ProtocolCall {
-  protocol: Any@multiowned,
+  protocol: String,
   operation: Any@multiowned,
   receiver: Emittable,
   args: []Emittable,
@@ -8835,7 +8835,7 @@ FN lit__expr?(self: Lit) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT SymbolLit {
-  value: Any@multiowned,
+  value: String@symbol,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -9216,7 +9216,7 @@ END
 PUB STRUCT LockAcquire {
   lock_expr: Emittable,
   lock_sync: Any@multiowned,
-  fallible: Any@multiowned,
+  fallible: Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -9612,7 +9612,7 @@ PUB STRUCT SliceExpr {
   target: Emittable,
   start: Emittable,
   end_expr: ?Emittable,
-  elem_type: Any@multiowned,
+  elem_type: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -9855,7 +9855,7 @@ END
 PUB STRUCT MIRCast {
   expr: Emittable,
   target_type: ?String,
-  method: Any@multiowned,
+  method: String@symbol,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
