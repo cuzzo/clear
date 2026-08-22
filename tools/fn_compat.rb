@@ -152,8 +152,8 @@ module FnCompat
       parser.on('-h', '--help') { puts parser; exit 0 }
     end.parse!(argv)
 
-    targets = TARGETS
-    targets = targets.select { |t| t.name == options[:only] } if options[:only]
+    targets = TARGETS.reject { |t| t.clear_unit == 'mir/placement.clear' }
+    targets = TARGETS.select { |t| t.name == options[:only] } if options[:only]
     abort 'fn_compat: no targets selected' if targets.empty?
     FileUtils.mkdir_p(options[:out_dir])
 
