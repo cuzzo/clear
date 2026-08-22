@@ -747,7 +747,7 @@ PRIVATE FN shapeEvidenceCollector__collect_in_function(self: ShapeEvidenceCollec
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name_map = TRY (shapeEvidenceCollector__build_name_map(rtoc_self_view, fn_value));
-    IF (name_map.count == 0) THEN
+    IF (name_map.count() == 0) THEN
       RETURN;
     END
     TRY (shapeEvidenceCollector__walk(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode(_) }, name_map));

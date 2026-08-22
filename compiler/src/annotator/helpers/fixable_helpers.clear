@@ -1052,7 +1052,7 @@ FN auto_rank_candidates(ops: [Set]String@symbol) RETURNS ![]AutoCandidate ->
     END
   rtoc_idx = rtoc_idx + 1;
   END
-  MUTABLE n_ops = ops.size;
+  MUTABLE n_ops = ops.size();
   MUTABLE intersection = agg |> WHERE (_._1[:count] == n_ops);
   RETURN (intersection |> ORDER_BY _._1[:rank_sum]).keys() |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY (CAST(((CAST(((intersection |> ORDER_BY _._1[:rank_sum])[_] OR_ELSE panic("missing hash key"))[:notes] AS []String)) |> DISTINCT _) AS []String)).first() };
 END

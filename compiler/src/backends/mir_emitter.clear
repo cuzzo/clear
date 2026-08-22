@@ -2010,7 +2010,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF existing EXISTS AS existing_value THEN
       RETURN COPY existing_value;
     END
-    MUTABLE name = "__clear_symbol_${rtoc_self_view.symbol_literals.count}";
+    MUTABLE name = "__clear_symbol_${rtoc_self_view.symbol_literals.count()}";
     rtoc_self_view.symbol_literals[value] = name;
     RETURN name;
 }
@@ -2191,7 +2191,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &lines.append("// Runtime bridge for synchronous C callbacks.");
       &lines.append("threadlocal var __clear_c_callback_rt: ?*Runtime = null;");
     END
-    IF !((rtoc_self_view.symbol_literals.count == 0)) THEN
+    IF !((rtoc_self_view.symbol_literals.count() == 0)) THEN
       &lines.append("// Static String@symbol literal pool.");
     END
     FOR rtoc_key IN rtoc_self_view.symbol_literals.keys() DO

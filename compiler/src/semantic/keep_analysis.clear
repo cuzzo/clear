@@ -46,7 +46,7 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
   NIL
   };
   refresh_kept();
-  fn_nodes.count.times(%() USE(body_summaries, caller_params, fn_nodes, kept_param_indexes, refresh_kept) -> {
+  fn_nodes.count().times(%() USE(body_summaries, caller_params, fn_nodes, kept_param_indexes, refresh_kept) -> {
   MUTABLE changed: Bool = FALSE;
   FOR rtoc_key IN body_summaries.keys() DO
     MUTABLE summary: FunctionBodySummary = COPY UNWRAP (body_summaries[rtoc_key]);

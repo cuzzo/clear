@@ -6694,7 +6694,7 @@ PRIVATE FN mIRLowering__compute_used_let_names(self: MIRLowering, let_ast_map: {
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (let_ast_map.count == 0) THEN
+    IF (let_ast_map.count() == 0) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_230: []String = List[]; rtoc_empty_list_230 } ) AS []String);
     END
     MUTABLE referenced = Set[];
@@ -9222,7 +9222,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       snap_types = Set[];
     END
     MUTABLE snapshot_type_branch_value: ?Type = NIL;
-    IF (snap_types.size == 1) THEN
+    IF (snap_types.size() == 1) THEN
       snapshot_type_branch_value = TRY (type__new(snap_types.first()));
     ELSE
       snapshot_type_branch_value = NIL;
@@ -15716,7 +15716,7 @@ PRIVATE FN mIRLowering__substitute_mir_type(self: MIRLowering, raw_type: ?Struct
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (subst.count == 0) THEN
+    IF (subst.count() == 0) THEN
       RETURN COPY raw_type;
     END
     IF raw_type EXISTS AS raw_type_value THEN

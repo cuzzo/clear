@@ -2789,7 +2789,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
     END
-    MUTABLE n_ops = ops.size;
+    MUTABLE n_ops = ops.size();
     MUTABLE intersection = agg |> WHERE (_._1[:count] == n_ops);
     RETURN (intersection |> ORDER_BY _._1[:rank_sum]).keys() |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY (CAST(((CAST(((intersection |> ORDER_BY _._1[:rank_sum])[_] OR_ELSE panic("missing hash key"))[:notes] AS []String)) |> DISTINCT _) AS []String)).first() };
 }
@@ -4504,7 +4504,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       requires_map = {};
     END
-    IF (requires_map.count == 0) THEN
+    IF (requires_map.count() == 0) THEN
       RETURN;
     END
     MUTABLE rtoc_idx = 0;
@@ -5549,10 +5549,10 @@ PRIVATE FN typeAnalysisSession__analyze_window_op(MUTABLE self: TypeAnalysisSess
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "WINDOW"));
     MUTABLE item_type = (TRY (aST__full_type_mut(node.left))).element_type().resolved();
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.size));
-    MUTABLE size_type = node.right.size.resolved_type;
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.size()));
+    MUTABLE size_type = node.right.size().resolved_type;
     IF !(([:Int64, :Float64]).contains?(size_type)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.size, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], {:got: size_type}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.size(), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], {:got: size_type}));
     END
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_118 = typeAnalysisSession__current_scope(rtoc_self_view);
@@ -5691,7 +5691,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE key_expr = node.right.key_expr;
     IF key_expr IS_A LambdaLit THEN
       MUTABLE params = key_expr.params();
-      IF !((params.size == 2)) THEN
+      IF !((params.size() == 2)) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, key_expr, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_LAMBDA_ARITY }));
       END
       MUTABLE left_name = params[0].name();
@@ -5810,10 +5810,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "LIMIT", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.count));
-    MUTABLE count_type = node.right.count.resolved_type;
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.count()));
+    MUTABLE count_type = node.right.count().resolved_type;
     IF !(([:Int64, :Float64]).contains?(count_type)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.count, TypeAnalysisCodeOrMessage{ SymbolValue: :LIMIT_COUNT_NEEDS_NUMBER }, [], {:got: count_type}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.count(), TypeAnalysisCodeOrMessage{ SymbolValue: :LIMIT_COUNT_NEEDS_NUMBER }, [], {:got: count_type}));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${castTypeToString(item_type)}[]") }))));
     node.storage = :frame;
@@ -6049,10 +6049,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "SKIP", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.count));
-    MUTABLE count_type = node.right.count.resolved_type;
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.count()));
+    MUTABLE count_type = node.right.count().resolved_type;
     IF !(([:Int64, :Float64]).contains?(count_type)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.count, TypeAnalysisCodeOrMessage{ SymbolValue: :SKIP_COUNT_NEEDS_NUMBER }, [], {:got: count_type}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.count(), TypeAnalysisCodeOrMessage{ SymbolValue: :SKIP_COUNT_NEEDS_NUMBER }, [], {:got: count_type}));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF pipelineSourceFact__inf_stream?(source) THEN
       symbol("~${castTypeToString(item_type)}[INF]")
