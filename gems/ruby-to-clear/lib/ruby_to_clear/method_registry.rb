@@ -675,6 +675,30 @@ module RubyToClear
       "FOR _ IN #{source} DO\n#{body}\nEND"
     end
 
+    # `n.times { |i| }` is a COUNTED loop, not a method CLEAR has: Int64 owns
+    # no `times`. Lower it to the range FOR it means, so the body stays a plain
+    # loop body instead of a lambda with USE captures.
+    def self.integer_range_effect_loop(node, transpiler, method_label, bounds)
+      counter = transpiler.next_generated_local("counter")
+      lowering = lower_literal_block(
+        node,
+        node.block,
+        transpiler,
+        method_label,
+        min_params: 0,
+        max_params: 1,
+        rename: ->(param_names) { param_names.first ? { param_names.first => counter } : {} },
+        allow_next: true,
+        allow_break: true,
+        allow_return: true,
+        local_types: ->(param_names) { param_names.first ? { param_names.first => "Int64" } : {} }
+      )
+      return lowering if unsupported_result?(lowering)
+
+      body = materialize_mutable_block_parameter(lowering.effect_code, counter, transpiler)
+      "FOR #{counter} IN (#{bounds}) DO\n#{body}\nEND"
+    end
+
     def self.for_each_effect_loop(source, node, transpiler, method_label, element_type: nil)
       item_name = transpiler.next_generated_local("each_item")
       lowering = lower_literal_block(
@@ -1041,13 +1065,57 @@ module RubyToClear
       "#{pipeline_source(source)}.keys() |> WHERE #{lowering.value_code}"
     end
 
+    # A `next` in the Ruby block becomes CONTINUE, and this loop's index has
+    # to advance before it or the WHILE spins. Only THIS loop's CONTINUEs may
+    # advance it: one inside a nested loop in the body belongs to that loop and
+    # already carries its own advance.
+    def self.advance_own_continues(code, index_name)
+      open_blocks = []
+      code.lines.map do |line|
+        rendered = line
+        if open_blocks.none?(:loop) && line.strip == "CONTINUE;"
+          rendered = line.sub("CONTINUE;", "#{index_name} = #{index_name} + 1;\nCONTINUE;")
+        end
+        block_tokens(line).each do |token|
+          if token == :end
+            open_blocks.pop
+          else
+            open_blocks << token
+          end
+        end
+        rendered
+      end.join
+    end
+
+    # Block structure of one emitted line, in order: an opener per IF/FOR/
+    # WHILE/MATCH and a closer per END. String literals are dropped first --
+    # emitted Zig text is full of the word END.
+    def self.block_tokens(line)
+      bare = line.gsub(/"(?:[^"\\]|\\.)*"/, '""')
+      bare.scan(/\b(?:ELSE_IF|IF|FOR|WHILE|MATCH|END)\b/).filter_map do |word|
+        case word
+        when "ELSE_IF" then nil
+        when "END" then :end
+        when "FOR", "WHILE" then :loop
+        else :block
+        end
+      end
+    end
+
     def self.each_with_index_effect_loop(receiver, node, transpiler, receiver_type: nil, element_type: nil, max_params: 2)
       block_node = node.block
       unless block_node
         return unsupported(transpiler, node, "each_with_index without a block is not supported")
       end
 
-      index_name = "rtoc_idx"
+      transpiler.with_while_index_name do |index_name|
+        each_with_index_effect_loop_body(receiver, node, transpiler, block_node, index_name,
+          receiver_type: receiver_type, element_type: element_type, max_params: max_params)
+      end
+    end
+
+    def self.each_with_index_effect_loop_body(receiver, node, transpiler, block_node, index_name,
+                                              receiver_type:, element_type:, max_params:)
       receiver_type ||= transpiler.clear_type_for_receiver_node(node.receiver)
       collection_type = receiver_type.to_s.delete_prefix("?")
       fixed_array = collection_type.match(/\A\[\d+\](.+)\z/)
@@ -1106,10 +1174,7 @@ module RubyToClear
       )
       return lowering if unsupported_result?(lowering)
 
-      effect_code = lowering.effect_code.gsub(
-        "CONTINUE;",
-        "#{index_name} = #{index_name} + 1;\nCONTINUE;"
-      )
+      effect_code = advance_own_continues(lowering.effect_code, index_name)
       body = indent_block_line(effect_code)
       [
         items_decl,
@@ -2208,6 +2273,23 @@ module RubyToClear
       else
         nil
       end
+    end
+
+    register("times") do |context|
+      node = context.node
+      next nil unless node.block.is_a?(Prism::BlockNode)
+
+      integer_range_effect_loop(node, context.transpiler, "times",
+        "0_i64 ..< #{context.receiver_code}")
+    end
+
+    register("upto") do |context|
+      node = context.node
+      limit = node.arguments&.arguments
+      next nil unless node.block.is_a?(Prism::BlockNode) && limit&.length == 1
+
+      integer_range_effect_loop(node, context.transpiler, "upto",
+        "#{context.receiver_code} ..= #{context.transpiler.expression_argument_code(limit.first)}")
     end
 
     register("one?", receiver: "array") do |context|

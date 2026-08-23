@@ -1848,6 +1848,18 @@ module RubyToClear
     end
     public :next_generated_local
 
+    # A while-desugared loop names its index by NESTING DEPTH, not by a global
+    # counter: an inner loop must not shadow the outer one, and a sibling loop
+    # at the same depth can safely reuse the name.
+    def with_while_index_name
+      @while_index_depth = (@while_index_depth || 0) + 1
+      name = @while_index_depth == 1 ? "rtoc_idx" : "rtoc_idx_#{@while_index_depth}"
+      yield name
+    ensure
+      @while_index_depth -= 1
+    end
+    public :with_while_index_name
+
     def static_respond_to_result(receiver_code, method_name, receiver_node = nil)
       receiver_type = clear_type_for_receiver_node(receiver_node)
       receiver_type ||= if receiver_code.nil? || receiver_code == "self"
