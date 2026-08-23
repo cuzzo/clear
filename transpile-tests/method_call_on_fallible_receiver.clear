@@ -1,0 +1,24 @@
+# Test: a method call on a fallible receiver is rejected. The annotator typed
+# the call by the success payload and dropped the error channel, and the
+# emitted Zig then sliced an error union. TRY binds to the whole postfix chain
+# by design, so the receiver must be parenthesized.
+
+FN emit(n: Int64) RETURNS !String ->
+  IF n < 0 THEN
+    RAISE "negative";
+  END
+  RETURN "&x${n.toString()}";
+END
+
+FN render(n: Int64) RETURNS !String ->
+  RETURN (TRY (emit(n))).deletePrefix("&");
+END
+
+FN main() RETURNS !Void ->
+  ASSERT TRY (render(7)) == "x7";
+
+  MUTABLE failed = FALSE;
+  MUTABLE recovered = render(-1) OR_ELSE { failed = TRUE; "fallback" };
+  ASSERT failed;
+  ASSERT recovered == "fallback";
+END

@@ -1129,6 +1129,13 @@ module DiagnosticRegistry
       summary:  "String concatenation must use the dedicated `$+` operator.",
       fix_hint: "Replace `+` with `$+`; `clear fix` applies this when operand types prove the expression is string concatenation.",
     },
+    FALLIBLE_METHOD_RECEIVER: {
+      severity: :error, category: :type,
+      template: "Type Error: Cannot call '%{method}' on fallible '%{type}'; the error must be handled first.",
+      summary:  "A method call on a `!T` receiver has to say what happens when the receiver failed.",
+      cause: "`!T` is a value OR an error. Reaching through it as if the value were already there would silently discard the failure.",
+      fix_hint: "Wrap the receiver: `(TRY (expr)).%{method}(...)` to propagate, or use tense navigation `expr!.%{method}(...)` to map over the success value.",
+    },
     IS_OK_REQUIRES_FALLIBLE: {
       severity: :error, category: :type,
       template: "`IS_OK` requires a fallible value, got '%{got}'.",

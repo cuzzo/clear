@@ -87,6 +87,7 @@ module Annotator
 
         reject_legacy_foreign_slice_view!(node)
         reject_direct_observable_method_access!(node)
+        reject_fallible_method_receiver!(node)
 
         if resolve_protocol_method_call!(node)
           finalize_tense_navigation_method!(node)
@@ -369,6 +370,22 @@ module Annotator
         error!(node, :FOREIGN_VIEW_REQUIRES_WITH)
       end
       private :reject_legacy_foreign_slice_view!
+
+      # `!T` is a value OR an error. Reaching through it with a plain `.`
+      # dropped the failure silently: the annotator typed the call by the
+      # success payload and the emitted Zig then sliced an error union.
+      sig { params(node: AST::MethodCall).void }
+      def reject_fallible_method_receiver!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        return if node.object.is_a?(AST::TenseNavigation)
+
+        receiver_type = recoverable_result_type(node.object, context: "fallible method receiver")
+        return unless receiver_type
+
+        error!(node, :FALLIBLE_METHOD_RECEIVER,
+               method: node.name, type: Type.surface_name(receiver_type))
+      end
+      private :reject_fallible_method_receiver!
 
       sig { params(node: AST::MethodCall).void }
       def reject_direct_observable_method_access!(node)

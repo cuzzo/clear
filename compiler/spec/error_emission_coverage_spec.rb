@@ -2637,6 +2637,32 @@ RSpec.describe "error emission coverage" do
   # past the "minimum reproducible example" sweet spot.
   # ============================================================
 
+  # @example_for: FALLIBLE_METHOD_RECEIVER
+  # @fix: `!T` is a value OR an error, so a plain `.` through it
+  # @fix: would drop the failure. TRY binds to the whole postfix
+  # @fix: chain, so parenthesize the receiver: `(TRY (expr)).m()`.
+  describe ":FALLIBLE_METHOD_RECEIVER — calling a method on a `!T` receiver" do
+    it "raises when a method is called through an unhandled fallible call" do
+      expect {
+        run(<<~CLEAR)
+          FN emit() RETURNS !String -> RETURN "&x"; END
+          FN main() RETURNS !Void ->
+              print(emit().deletePrefix("&"));
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot call 'deletePrefix' on fallible '!String'/)
+    end
+
+    it "compiles when the receiver's error is propagated first" do
+      run(<<~CLEAR)
+        FN emit() RETURNS !String -> RETURN "&x"; END
+        FN main() RETURNS !Void ->
+            print((TRY (emit())).deletePrefix("&"));
+        END
+      CLEAR
+    end
+  end
+
   # @example_for: UNWRAP_NON_OPTIONAL
   # @fix: The `?` postfix unwraps an optional (`?T`) type. On a
   # @fix: plain `T` there's nothing to unwrap. Either change the
