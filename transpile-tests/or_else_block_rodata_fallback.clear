@@ -1,0 +1,23 @@
+# Test: an OR_ELSE block whose value is a string LITERAL must not free it.
+# The block's ownership fell back to what a String could hold, which claimed
+# the .rodata literal as owned; the emitted cleanup then aborted with
+# "incorrect alignment".
+
+FN emit(n: Int64) RETURNS !String ->
+  IF n < 0 THEN
+    RAISE "negative";
+  END
+  RETURN "x${n.toString()}";
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE failed = FALSE;
+  MUTABLE recovered = emit(-1) OR_ELSE { failed = TRUE; "fallback" };
+  ASSERT failed;
+  ASSERT recovered == "fallback";
+
+  MUTABLE ok = FALSE;
+  MUTABLE kept = emit(7) OR_ELSE { ok = TRUE; "fallback" };
+  ASSERT !ok;
+  ASSERT kept == "x7";
+END

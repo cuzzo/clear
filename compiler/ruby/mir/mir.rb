@@ -663,6 +663,10 @@ module MIR
     sig { params(result_type: T.nilable(Type)).returns(T::Boolean) }
     private_class_method def self.cleanup_result_type?(result_type)
       return false unless result_type
+      # `recursive_cleanup_shape?` asks what a String COULD hold. A block that
+      # breaks on a static literal holds .rodata, and freeing that aborts --
+      # provenance is the stamp that settles it, so read it before the shape.
+      return false if result_type.rodata?
 
       result_type.needs_cleanup?(nil) ||
         result_type.recursive_cleanup_shape?(nil) ||
