@@ -269,6 +269,13 @@ class MIRPass
       val.body = transform_body(val.body, ctx.with(cleanup_facts: bg_inner_facts(val, ctx.cleanup_facts)))
     elsif val.is_a?(AST::BlockExpr)
       val.body = transform_body(val.body, ctx)
+    elsif val.is_a?(AST::LambdaLit)
+      # A lambda body is a nested function body. Its reassignments need the
+      # same cleanup stamp, or the overwritten value is never freed.
+      AST.lambda_body_nodes(val.body).each { |body_node| recurse_expr_body!(body_node, ctx) }
+    elsif val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall)
+      # A body-bearing expression is usually an ARGUMENT, not the whole value.
+      val.args.each { |arg| recurse_expr_body!(arg, ctx) }
     end
   end
 

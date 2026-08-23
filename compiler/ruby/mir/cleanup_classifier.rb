@@ -471,17 +471,37 @@ module CleanupClassifier
         next
       end
 
+      # A lambda body is a nested function body: its locals are real bindings
+      # and need the same classification, or lowering finds no cleanup entry
+      # for them and emits a transfer with no allocator.
+      if child.is_a?(AST::LambdaLit)
+        AST.lambda_body_nodes(child.body).each do |body_node|
+          classify_value_block_binding_body(body_node, schema_lookup, lifecycle_registry, bindings, entries_by_place)
+        end
+        next
+      end
+
       # A value BlockExpr (`{ stmts...; result }`, e.g. a desugared pipeline
       # fold) carries real bindings in its body that need cleanup classification
       # like any other statement sequence.
       if child.is_a?(AST::BlockExpr)
-        classify_cleanup_binding_body(child.body, schema_lookup, lifecycle_registry, bindings, entries_by_place) if child.body
-        classify_inline_bg_binding_body(child.result, schema_lookup, lifecycle_registry, bindings, entries_by_place) if child.result
+        classify_value_block_binding_body(child, schema_lookup, lifecycle_registry, bindings, entries_by_place)
         next
       end
 
       classify_inline_bg_binding_body(child, schema_lookup, lifecycle_registry, bindings, entries_by_place)
     end
+  end
+
+  sig { params(node: AstBodyNode, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }
+  private_class_method def self.classify_value_block_binding_body(node, schema_lookup, lifecycle_registry, bindings, entries_by_place)
+    unless node.is_a?(AST::BlockExpr)
+      classify_cleanup_binding_body([node], schema_lookup, lifecycle_registry, bindings, entries_by_place)
+      return
+    end
+
+    classify_cleanup_binding_body(node.body, schema_lookup, lifecycle_registry, bindings, entries_by_place) if node.body
+    classify_inline_bg_binding_body(node.result, schema_lookup, lifecycle_registry, bindings, entries_by_place) if node.result
   end
 
   sig { params(node: BindingNode, schema_lookup: Proc, lifecycle_registry: T.nilable(Semantic::LifecycleRegistry), bindings: T::Hash[String, CleanupEntry], entries_by_place: T::Hash[PlaceId, CleanupEntry]).void }

@@ -1,0 +1,32 @@
+# Test: a lambda body's locals are classified for cleanup. The classifier
+# never descended into a lambda, so a reassignment inside one found no entry
+# and lowering emitted an ownership transfer with no allocator.
+
+PUB STRUCT Proj { owner: String@symbol, member: String@symbol }
+PUB UNION Kind { Proj: Proj, Named: Proj }
+PUB STRUCT Expr { kind: Kind@boxed, caps: String }
+
+FN transform(e: Expr, f: FN(Expr) -> Expr) RETURNS Expr ->
+  RETURN f(e);
+END
+
+FN resolve(e: Expr) RETURNS Expr ->
+  RETURN transform(e, %(candidate: Expr) -> {
+    MUTABLE result_expression: Expr = candidate;
+    IF candidate.caps == "c" THEN
+      MUTABLE projection_kind = Proj{ owner: COPY :a, member: COPY :b };
+      result_expression = Expr{ kind: COPY Kind{ Proj: COPY projection_kind }, caps: COPY "rebuilt" };
+    END
+    result_expression
+  });
+END
+
+FN main() RETURNS Void ->
+  MUTABLE e = Expr{ kind: Kind{ Proj: Proj{ owner: COPY :o, member: COPY :m } }, caps: COPY "c" };
+  MUTABLE r = resolve(e);
+  ASSERT r.caps == "rebuilt";
+
+  MUTABLE untouched = Expr{ kind: Kind{ Proj: Proj{ owner: COPY :o, member: COPY :m } }, caps: COPY "z" };
+  ASSERT resolve(untouched).caps == "z";
+
+END
