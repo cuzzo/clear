@@ -2845,6 +2845,29 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     node.smooth? == true
   end
 
+  sig { params(node: AST::LambdaLit).returns(T::Set[String]) }
+  def captured_names(node)
+    (node.captures || []).map { |c| c.respond_to?(:name) ? c.name.to_s : c.to_s }.to_set
+  end
+
+  sig { params(body: T::Array[MIR::Node], captures: T::Set[String]).returns(T::Array[MIR::Node]) }
+  def drop_unguarded_move_marks(body, captures)
+    guarded = T.let(Set.new(captures), T::Set[String])
+    allocated = T.let(Set.new(captures), T::Set[String])
+    body.each do |stmt|
+      case stmt
+      when MIR::Cleanup, MIR::ErrCleanup
+        guarded.add(stmt.name.to_s) if stmt.cleanup_entry.has_moved_guard?
+      when MIR::AllocMark
+        allocated.add(stmt.name.to_s)
+      end
+    end
+    body.reject do |stmt|
+      (stmt.is_a?(MIR::MoveMark) && !guarded.include?(stmt.name.to_s)) ||
+        (stmt.is_a?(MIR::TransferMark) && !allocated.include?(stmt.name.to_s))
+    end
+  end
+
   sig { params(node: AST::LambdaLit).returns(MIR::LambdaExpr) }
   def lower_lambda(node)
     T.bind(self, MIRLowering) rescue nil
@@ -2914,6 +2937,13 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     unless hoisted_returns.length == body_mir.length
       body_mir = append_ownership_transfers_for_mir_body(hoisted_returns)
     end
+
+    # A MoveMark exists to suppress a cleanup. The move-guard decision reads the
+    # ENCLOSING function's guarded-cleanup registry, so a temp hoisted inside
+    # this lambda could be marked moved while its guarded cleanup lives in
+    # another frame -- the lambda then emits `name_moved = true` for a `_moved`
+    # variable it never declares.
+    body_mir = drop_unguarded_move_marks(body_mir, captured_names(node))
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
     # A WITH alias (`WITH POLYMORPHIC self AS rtoc_self_view`) lowers to the
