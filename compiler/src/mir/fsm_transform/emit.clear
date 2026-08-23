@@ -157,7 +157,7 @@ PRIVATE FN emit__ordered_fsm_destroy_actions(ctx: FsmEmitContext) RETURNS ![]Fsm
   MUTABLE rtoc_indexed_output_5 = [];
   MUTABLE rtoc_indexed_i_4 = 0;
   WHILE rtoc_indexed_i_4 < rtoc_indexed_items_3.length() DO
-    &rtoc_indexed_output_5.append(Tuple{COPY rtoc_indexed_items_3[rtoc_indexed_i_4], [rtoc_indexed_items_3[rtoc_indexed_i_4].destroy_order_bucket(), rtoc_indexed_items_3[rtoc_indexed_i_4].destroy_order_index(rtoc_indexed_i_4)]});
+    &rtoc_indexed_output_5.append(Tuple{COPY UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), [UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]).destroy_order_bucket(), UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]).destroy_order_index(rtoc_indexed_i_4)]});
     rtoc_indexed_i_4 = rtoc_indexed_i_4 + 1;
   END
   rtoc_indexed_output_5 |> ORDER_BY _._1 |> SELECT _._0
@@ -432,11 +432,11 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE rtoc_indexed_acc_13 = Set[];
   MUTABLE rtoc_indexed_i_12 = 0;
   WHILE rtoc_indexed_i_12 < rtoc_indexed_items_11.length() DO
-    IF rtoc_indexed_items_11[rtoc_indexed_i_12].stmts.empty?() THEN
+    IF UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).stmts.empty?() THEN
         CONTINUE;
     END
-    IF (rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Done OR ((rtoc_indexed_items_11[rtoc_indexed_i_12].tail IS_A Goto AND (rtoc_indexed_items_11[rtoc_indexed_i_12].tail.target_index == done_idx)))) THEN
-        &rtoc_indexed_acc_13.append(rtoc_indexed_items_11[rtoc_indexed_i_12].indexOf());
+    IF (UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).tail IS_A Done OR ((UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).tail IS_A Goto AND (UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).tail.target_index == done_idx)))) THEN
+        &rtoc_indexed_acc_13.append(UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).indexOf());
     END
     rtoc_indexed_i_12 = rtoc_indexed_i_12 + 1;
   END
@@ -454,7 +454,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     &rtoc_indexed_output_20.append({
   MUTABLE mir_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_18: []Emittable = List[]; rtoc_empty_list_18 } );
   MUTABLE ast_stmts: []Locatable = ( { MUTABLE rtoc_empty_list_19: []Locatable = List[]; rtoc_empty_list_19 } );
-  FOR _ IN rtoc_indexed_items_16[rtoc_indexed_i_17].stmts DO
+  FOR _ IN UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).stmts DO
   IF _ IS_A Emittable THEN
       &mir_stmts.append(_);
   ELSE
@@ -470,13 +470,13 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     ELSE
       {
     MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE want_result = (!(is_void) AND result_seg_indices.contains?(rtoc_indexed_items_16[rtoc_indexed_i_17].indexOf()));
+    MUTABLE want_result = (!(is_void) AND result_seg_indices.contains?(UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).indexOf()));
     MUTABLE inherited_capture_names: [Set]String = ((TRY (emit__fsm_destroy_actions(ctx))) |> SELECT:? _.ctx_cleanup_target_name() |> WHERE _ != NIL) |> DISTINCT _;
     FOR _ IN captured.keys() DO
   &inherited_capture_names.insert("__ctx_${id.toString()}.${_}");
   END
     MUTABLE lowering_api = COPY lowering;
-    MUTABLE seg_overrides: ?{String}String = TRY (segmentList__alias_overrides_for(segment_list, rtoc_indexed_items_16[rtoc_indexed_i_17].indexOf()));
+    MUTABLE seg_overrides: ?{String}String = TRY (segmentList__alias_overrides_for(segment_list, UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).indexOf()));
     MUTABLE eff_capture_map: {String}String = {};
     IF seg_overrides EXISTS AS seg_overrides_value THEN
       eff_capture_map = seg_overrides_value.keys() |> REDUCE(COPY capture_map) { acc[_] = COPY (seg_overrides_value[_] OR_ELSE CAST(panic("missing hash key") AS String)); acc };
@@ -492,7 +492,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     NIL
   }));
     MUTABLE facts: []FsmResultTransferFact = CAST(mIRLowering__last_fsm_result_transfer_facts(lowering_api) AS []FsmResultTransferFact);
-    seg_result_facts[rtoc_indexed_items_16[rtoc_indexed_i_17].indexOf()] = facts;
+    seg_result_facts[UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).indexOf()] = facts;
     IF (lowered_mir == NIL) THEN
       RETURN NIL;
   END
@@ -532,10 +532,10 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE rtoc_indexed_i_23 = 0;
   WHILE rtoc_indexed_i_23 < rtoc_indexed_items_22.length() DO
     &rtoc_indexed_output_31.append({
-  MUTABLE tail = rtoc_indexed_items_22[rtoc_indexed_i_23].tail;
+  MUTABLE tail = UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail;
   MUTABLE descriptor_branch_value: ?SuspendDescriptor = NIL;
     IF (tail IS_A IoSuspend OR tail IS_A NextSuspend) THEN
-      descriptor_branch_value = emit__build_segment_descriptor(rtoc_indexed_items_22[rtoc_indexed_i_23], ctx, lowering, capture_map, sp_indices[rtoc_indexed_items_22[rtoc_indexed_i_23].indexOf()]);
+      descriptor_branch_value = emit__build_segment_descriptor(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]), ctx, lowering, capture_map, sp_indices[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()]);
     ELSE
       descriptor_branch_value = NIL;
     END
@@ -563,7 +563,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     END;
   MUTABLE body_stmts = seg_codes[rtoc_indexed_i_23];
   IF void_assign_stmt THEN
-  IF rtoc_indexed_items_22[rtoc_indexed_i_23].tail IS_A Done THEN
+  IF UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail IS_A Done THEN
       body_stmts = (body_stmts + [emit__fsm_body_mir_item(Emittable{ Set: COPY void_assign_stmt })]);
   END
   END
@@ -574,7 +574,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   ruby_array_concat_Emittable(rt_roots, CAST((descriptor?.setup_stmts OR_ELSE List[]) AS []Emittable));
   MUTABLE rt_used = TRY (emit__mir_nodes_reference_ident?(rt_roots, bg_rt));
   MUTABLE suppress_runtime_ref = !(rt_used);
-  FsmSegmentSpec{ index: rtoc_indexed_items_22[rtoc_indexed_i_23].indexOf(), prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY rtoc_indexed_items_22[rtoc_indexed_i_23].tail, descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[rtoc_indexed_items_22[rtoc_indexed_i_23].indexOf()] OR_ELSE List[]), fn_name: "runSeg${rtoc_indexed_items_22[rtoc_indexed_i_23].indexOf()}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }
+  FsmSegmentSpec{ index: UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf(), prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail, descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()] OR_ELSE List[]), fn_name: "runSeg${UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }
   });
     rtoc_indexed_i_23 = rtoc_indexed_i_23 + 1;
   END
@@ -909,7 +909,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   MUTABLE rtoc_indexed_output_40 = [];
   MUTABLE rtoc_indexed_i_39 = 0;
   WHILE rtoc_indexed_i_39 < rtoc_indexed_items_38.length() DO
-    &rtoc_indexed_output_40.append(TRY (emit__prior_lock_release_stmts(id, CAST(tail.prior_lock_indices[rtoc_indexed_i_39] AS Int64), CAST(rtoc_indexed_items_38[rtoc_indexed_i_39][:lock_field_ref] AS String), CAST(rtoc_indexed_items_38[rtoc_indexed_i_39][:unlock_method] AS String))));
+    &rtoc_indexed_output_40.append(TRY (emit__prior_lock_release_stmts(id, CAST(tail.prior_lock_indices[rtoc_indexed_i_39] AS Int64), CAST(UNWRAP (rtoc_indexed_items_38[rtoc_indexed_i_39])[:lock_field_ref] AS String), CAST(UNWRAP (rtoc_indexed_items_38[rtoc_indexed_i_39])[:unlock_method] AS String))));
     rtoc_indexed_i_39 = rtoc_indexed_i_39 + 1;
   END
   rtoc_indexed_output_40

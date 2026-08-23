@@ -3986,7 +3986,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_indexed_i_104 < rtoc_indexed_items_103.length() DO
       MUTABLE rtoc_indexed_pair_106 = {
     MUTABLE binding = COPY UNWRAP ((TRY (type__generic_args(declaration.protocol_type)))[rtoc_indexed_i_104]);
-    [rtoc_indexed_items_103[rtoc_indexed_i_104].name, mIRLowering__transpile_type(rtoc_self_view, ZigTypeMapperType{ Type: COPY binding })]
+    [UNWRAP (rtoc_indexed_items_103[rtoc_indexed_i_104]).name, mIRLowering__transpile_type(rtoc_self_view, ZigTypeMapperType{ Type: COPY binding })]
     };
       rtoc_indexed_output_105[rtoc_indexed_pair_106._0] = rtoc_indexed_pair_106._1;
       rtoc_indexed_i_104 = rtoc_indexed_i_104 + 1;
@@ -10033,7 +10033,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_indexed_output_361 = [];
     MUTABLE rtoc_indexed_i_360 = 0;
     WHILE rtoc_indexed_i_360 < rtoc_indexed_items_359.length() DO
-      &rtoc_indexed_output_361.append(mIRLowering__lower_call_arg_from_facts(&rtoc_self_view, mIRLowering__call_arg_facts(rtoc_self_view, rtoc_indexed_items_359[rtoc_indexed_i_360], callee_sig, rtoc_indexed_i_360, call_plans[rtoc_indexed_i_360])));
+      &rtoc_indexed_output_361.append(mIRLowering__lower_call_arg_from_facts(&rtoc_self_view, mIRLowering__call_arg_facts(rtoc_self_view, UNWRAP (rtoc_indexed_items_359[rtoc_indexed_i_360]), callee_sig, rtoc_indexed_i_360, call_plans[rtoc_indexed_i_360])));
       rtoc_indexed_i_360 = rtoc_indexed_i_360 + 1;
     END
     rtoc_indexed_output_361
@@ -10131,7 +10131,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_indexed_output_367 = [];
       MUTABLE rtoc_indexed_i_366 = 0;
       WHILE rtoc_indexed_i_366 < rtoc_indexed_items_365.length() DO
-        &rtoc_indexed_output_367.append(mIRLowering__lower_call_arg_from_facts(&rtoc_self_view, mIRLowering__call_arg_facts(rtoc_self_view, rtoc_indexed_items_365[rtoc_indexed_i_366], callee_sig, (rtoc_indexed_i_366 + 1))));
+        &rtoc_indexed_output_367.append(mIRLowering__lower_call_arg_from_facts(&rtoc_self_view, mIRLowering__call_arg_facts(rtoc_self_view, UNWRAP (rtoc_indexed_items_365[rtoc_indexed_i_366]), callee_sig, (rtoc_indexed_i_366 + 1))));
         rtoc_indexed_i_366 = rtoc_indexed_i_366 + 1;
       END
       rtoc_indexed_output_367
@@ -10212,7 +10212,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_indexed_output_373 = [];
     MUTABLE rtoc_indexed_i_372 = 0;
     WHILE rtoc_indexed_i_372 < rtoc_indexed_items_371.length() DO
-      &rtoc_indexed_output_373.append(mIRLowering__lower_call_arg_from_facts(&rtoc_self_view, mIRLowering__call_arg_facts(rtoc_self_view, rtoc_indexed_items_371[rtoc_indexed_i_372], signature, rtoc_indexed_i_372)));
+      &rtoc_indexed_output_373.append(mIRLowering__lower_call_arg_from_facts(&rtoc_self_view, mIRLowering__call_arg_facts(rtoc_self_view, UNWRAP (rtoc_indexed_items_371[rtoc_indexed_i_372]), signature, rtoc_indexed_i_372)));
       rtoc_indexed_i_372 = rtoc_indexed_i_372 + 1;
     END
     rtoc_indexed_output_373
@@ -10250,7 +10250,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_376 = [];
     MUTABLE rtoc_indexed_i_375 = 0;
     WHILE rtoc_indexed_i_375 < rtoc_indexed_items_374.length() DO
-      MUTABLE rtoc_indexed_value_377 = { MUTABLE rtoc_value_block_marker = 0; MUTABLE param: ?Param = COPY (TRY (functionSignature__params(signature_value)))[rtoc_indexed_i_375]; (IF !(((param != NIL) AND mIRLowering__protocol_map_signature_param?(rtoc_self_view, signature_value, param))) THEN [rtoc_indexed_items_374[rtoc_indexed_i_375]] ELSE [rtoc_indexed_items_374[rtoc_indexed_i_375], mIRLowering__protocol_map_allocator_for(rtoc_self_view, UNWRAP (ast_args[rtoc_indexed_i_375]))] END) };
+      MUTABLE rtoc_indexed_value_377 = { MUTABLE rtoc_value_block_marker = 0; MUTABLE param: ?Param = COPY (TRY (functionSignature__params(signature_value)))[rtoc_indexed_i_375]; (IF !(((param != NIL) AND mIRLowering__protocol_map_signature_param?(rtoc_self_view, signature_value, param))) THEN [UNWRAP (rtoc_indexed_items_374[rtoc_indexed_i_375])] ELSE [UNWRAP (rtoc_indexed_items_374[rtoc_indexed_i_375]), mIRLowering__protocol_map_allocator_for(rtoc_self_view, UNWRAP (ast_args[rtoc_indexed_i_375]))] END) };
       FOR rtoc_indexed_flattened_378 IN rtoc_indexed_value_377 DO
         &rtoc_indexed_output_376.append(COPY rtoc_indexed_flattened_378);
       END
@@ -10690,12 +10690,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_indexed_i_388 < rtoc_indexed_items_387.length() DO
       &rtoc_indexed_output_389.append({
     MUTABLE ast_arg: ?Locatable = mIRLowering__intrinsic_ast_arg(rtoc_self_view, node, stdlib_facts, rtoc_indexed_i_388);
-    (    IF mIRLowering__node_store_create_call?(rtoc_self_view, rtoc_indexed_items_387[rtoc_indexed_i_388]) THEN
-          mIRLowering__hoist_evaluation_barrier(rtoc_self_view, rtoc_indexed_items_387[rtoc_indexed_i_388])
-        ELSE_IF mIRLowering__mir_allocates?(rtoc_self_view, rtoc_indexed_items_387[rtoc_indexed_i_388]) THEN
-          mIRLowering__hoist_alloc(rtoc_self_view, rtoc_indexed_items_387[rtoc_indexed_i_388], ast_arg, callOwnershipFacts__takes?(ownership_facts, rtoc_indexed_i_388))
+    (    IF mIRLowering__node_store_create_call?(rtoc_self_view, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388])) THEN
+          mIRLowering__hoist_evaluation_barrier(rtoc_self_view, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388]))
+        ELSE_IF mIRLowering__mir_allocates?(rtoc_self_view, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388])) THEN
+          mIRLowering__hoist_alloc(rtoc_self_view, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388]), ast_arg, callOwnershipFacts__takes?(ownership_facts, rtoc_indexed_i_388))
         ELSE
-          rtoc_indexed_items_387[rtoc_indexed_i_388]
+          UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388])
         END)
       });
       rtoc_indexed_i_388 = rtoc_indexed_i_388 + 1;
@@ -10757,7 +10757,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_indexed_i_392 < rtoc_indexed_items_391.length() DO
       &rtoc_indexed_output_393.append({
     MUTABLE arg_fact = facts_by_index[rtoc_indexed_i_392];
-    RegistryCallArg{ expr: COPY rtoc_indexed_items_391[rtoc_indexed_i_392], coerce_type: COPY (IF arg_fact != NIL THEN
+    RegistryCallArg{ expr: COPY UNWRAP (rtoc_indexed_items_391[rtoc_indexed_i_392]), coerce_type: COPY (IF arg_fact != NIL THEN
         arg_fact.coerce_type
       ELSE
         NIL
@@ -10813,7 +10813,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_396 = [];
     MUTABLE rtoc_indexed_i_395 = 0;
     WHILE rtoc_indexed_i_395 < rtoc_indexed_items_394.length() DO
-      &rtoc_indexed_output_396.append(mIRLowering__hoist_alloc(rtoc_self_view, rtoc_indexed_items_394[rtoc_indexed_i_395], stdlibCallFacts__ast_arg(stdlib_facts, rtoc_indexed_i_395), callOwnershipFacts__takes?(ownership_facts, rtoc_indexed_i_395), FALSE, TRUE, IF callOwnershipFacts__takes?(ownership_facts, rtoc_indexed_i_395) THEN
+      &rtoc_indexed_output_396.append(mIRLowering__hoist_alloc(rtoc_self_view, UNWRAP (rtoc_indexed_items_394[rtoc_indexed_i_395]), stdlibCallFacts__ast_arg(stdlib_facts, rtoc_indexed_i_395), callOwnershipFacts__takes?(ownership_facts, rtoc_indexed_i_395), FALSE, TRUE, IF callOwnershipFacts__takes?(ownership_facts, rtoc_indexed_i_395) THEN
         sink_alloc
       ELSE
         NIL
@@ -10968,7 +10968,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         NIL
       END)[rtoc_indexed_i_403];
-    MUTABLE lowered = TRY (mIRLowering__lower_c_abi_callback_arg(&rtoc_self_view, rtoc_indexed_items_402[rtoc_indexed_i_403], param, source));
+    MUTABLE lowered = TRY (mIRLowering__lower_c_abi_callback_arg(&rtoc_self_view, UNWRAP (rtoc_indexed_items_402[rtoc_indexed_i_403]), param, source));
     ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_405: ?AddressOf = NIL;
       IF (((source != NIL) AND (source.abi == :c)) AND mIRLowering__c_abi_param_uses_address?(rtoc_self_view, param)) THEN
         rtoc_ternary_value_405 = AddressOf{ expr: COPY lowered, lowered_node_id: NIL, ownership_consumption: NIL };
@@ -11111,7 +11111,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           field_type = COPY NIL;
         END
     END
-    ExternTrampolineArg{ expr: COPY rtoc_indexed_items_413[rtoc_indexed_i_414], field_type: COPY field_type, field_zig_type: COPY field_zig_type }
+    ExternTrampolineArg{ expr: COPY UNWRAP (rtoc_indexed_items_413[rtoc_indexed_i_414]), field_type: COPY field_type, field_zig_type: COPY field_zig_type }
     });
       rtoc_indexed_i_414 = rtoc_indexed_i_414 + 1;
     END
@@ -12445,12 +12445,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_i_480 = 0;
     WHILE rtoc_indexed_i_480 < rtoc_indexed_items_479.length() DO
       &rtoc_indexed_output_481.append({
-    MUTABLE var_node: CapabilityVarNode = castLocatableToCapabilityVarNode(rtoc_indexed_items_479[rtoc_indexed_i_480].var_node);
-    MUTABLE var_name = rtoc_indexed_items_479[rtoc_indexed_i_480].target_label;
-    MUTABLE alias_name = rtoc_indexed_items_479[rtoc_indexed_i_480].alias_name;
-    MUTABLE resolved = rtoc_indexed_items_479[rtoc_indexed_i_480].resolved_type;
+    MUTABLE var_node: CapabilityVarNode = castLocatableToCapabilityVarNode(UNWRAP (rtoc_indexed_items_479[rtoc_indexed_i_480]).var_node);
+    MUTABLE var_name = UNWRAP (rtoc_indexed_items_479[rtoc_indexed_i_480]).target_label;
+    MUTABLE alias_name = UNWRAP (rtoc_indexed_items_479[rtoc_indexed_i_480]).alias_name;
+    MUTABLE resolved = UNWRAP (rtoc_indexed_items_479[rtoc_indexed_i_480]).resolved_type;
     MUTABLE source_mir = TRY (mIRLowering__with_capability_source_mir(rtoc_self_view, var_node));
-    MUTABLE var_storage = rtoc_indexed_items_479[rtoc_indexed_i_480].storage;
+    MUTABLE var_storage = UNWRAP (rtoc_indexed_items_479[rtoc_indexed_i_480]).storage;
     MUTABLE is_arc = (symbolEntry__rc_storage?(var_storage) OR (IF resolved != NIL THEN
         TRY (type__any_rc?(resolved))
       ELSE
@@ -12458,10 +12458,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END));
     MUTABLE lock_expr = CapabilityLockTarget{ source: COPY source_mir, arc_wrapped: is_arc, comptime_arc_unwrap: FALSE, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE addr_expr = CapabilityLockAddress{ source: COPY source_mir, arc_wrapped: is_arc, lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE var_sync: ?String@symbol = rtoc_indexed_items_479[rtoc_indexed_i_480].sync;
+    MUTABLE var_sync: ?String@symbol = UNWRAP (rtoc_indexed_items_479[rtoc_indexed_i_480]).sync;
     MUTABLE panic_method: String = "read";
     MUTABLE err_method: String = "readOrErr";
-    IF (rtoc_indexed_items_479[rtoc_indexed_i_480].capability == symbol("EXCLUSIVE")) THEN
+    IF (UNWRAP (rtoc_indexed_items_479[rtoc_indexed_i_480]).capability == symbol("EXCLUSIVE")) THEN
         IF (var_sync == :write_locked) THEN
           panic_method = "write";
           err_method = "writeOrErr";
@@ -17027,7 +17027,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_indexed_i_626 < rtoc_indexed_items_625.length() DO
       &rtoc_indexed_output_628.append({
     MUTABLE item_mir, pending = mIRLowering__lower_head(rtoc_self_view, %() USE(rtoc_indexed_items_625, rtoc_indexed_i_626, MUTABLE rtoc_self_view) -> {
-      rtoc_lambda_result_627 = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(rtoc_indexed_items_625[rtoc_indexed_i_626])));
+      rtoc_lambda_result_627 = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(UNWRAP (rtoc_indexed_items_625[rtoc_indexed_i_626]))));
       rtoc_lambda_result_627
     });
     &body.concat(pending);
@@ -17140,12 +17140,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE expected_item = COPY UNWRAP ((TRY (type__generic_args(tuple_type)))[rtoc_indexed_i_634]);
     mIRLowering__with_decl_alloc(rtoc_self_view, alloc, %() USE(alloc, expected_item, rtoc_indexed_items_633, rtoc_indexed_i_634, MUTABLE rtoc_self_view) -> {
       MUTABLE value = mIRLowering__with_expected_type(rtoc_self_view, expected_item, %() USE(rtoc_indexed_items_633, rtoc_indexed_i_634, MUTABLE rtoc_self_view) -> {
-        rtoc_lambda_result_635 = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(rtoc_indexed_items_633[rtoc_indexed_i_634])));
+        rtoc_lambda_result_635 = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]))));
         rtoc_lambda_result_635
       });
-      MUTABLE placed = TRY (mIRLowering__place_value_for_destination(rtoc_self_view, value, rtoc_indexed_items_633[rtoc_indexed_i_634], alloc, TypeTypeInput{ Type: COPY expected_item }));
-      MUTABLE owned = TRY (mIRLowering__materialize_owned_sink_value(rtoc_self_view, placed, rtoc_indexed_items_633[rtoc_indexed_i_634], alloc, TypeTypeInput{ Type: COPY expected_item }));
-      mIRLowering__hoist_alloc(rtoc_self_view, owned, rtoc_indexed_items_633[rtoc_indexed_i_634], TRUE)
+      MUTABLE placed = TRY (mIRLowering__place_value_for_destination(rtoc_self_view, value, UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]), alloc, TypeTypeInput{ Type: COPY expected_item }));
+      MUTABLE owned = TRY (mIRLowering__materialize_owned_sink_value(rtoc_self_view, placed, UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]), alloc, TypeTypeInput{ Type: COPY expected_item }));
+      mIRLowering__hoist_alloc(rtoc_self_view, owned, UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]), TRUE)
     })
     });
       rtoc_indexed_i_634 = rtoc_indexed_i_634 + 1;

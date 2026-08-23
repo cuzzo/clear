@@ -1783,7 +1783,9 @@ module RubyToClear
 
       items_name = next_generated_local("indexed_items")
       index_name = next_generated_local("indexed_i")
-      element_expr = "#{items_name}[#{index_name}]"
+      # CLEAR's list index yields an OPTIONAL; the loop guard already proves the
+      # index is in range, so the element reaches the block body definite.
+      element_expr = "UNWRAP (#{items_name}[#{index_name}])"
       lowering = if node.name.to_s == "to_a"
         nil
       else
@@ -1908,7 +1910,7 @@ module RubyToClear
       index_name = next_generated_local("indexed_i")
       accumulator_name = next_generated_local("indexed_acc")
       aliases = {
-        pair_names[0] => "#{items_name}[#{index_name}]",
+        pair_names[0] => "UNWRAP (#{items_name}[#{index_name}])",
         pair_names[1] => index_name,
         accumulator_param.name.to_s => accumulator_name,
       }

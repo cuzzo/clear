@@ -4964,7 +4964,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE rtoc_indexed_output_105 = true;
         MUTABLE rtoc_indexed_i_104 = 0;
         WHILE rtoc_indexed_i_104 < rtoc_indexed_items_103.length() AND rtoc_indexed_output_105 DO
-          rtoc_indexed_output_105 = TRY (typeAnalysisSession__intrinsic_arg_matches?(rtoc_self_view, UNWRAP (specs[rtoc_indexed_i_104]), &rtoc_indexed_items_103[rtoc_indexed_i_104]));
+          rtoc_indexed_output_105 = TRY (typeAnalysisSession__intrinsic_arg_matches?(rtoc_self_view, UNWRAP (specs[rtoc_indexed_i_104]), &UNWRAP (rtoc_indexed_items_103[rtoc_indexed_i_104])));
           rtoc_indexed_i_104 = rtoc_indexed_i_104 + 1;
         END
         rtoc_indexed_output_105
@@ -4981,7 +4981,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         WHILE rtoc_indexed_i_107 < rtoc_indexed_items_106.length() DO
           IF {
         MUTABLE spec = COPY UNWRAP (specs[rtoc_indexed_i_107]);
-        (!(intrinsicArgSpec__unconstrained_any?(spec)) AND (rtoc_indexed_items_106[rtoc_indexed_i_107].resolved_type == spec.type))
+        (!(intrinsicArgSpec__unconstrained_any?(spec)) AND (UNWRAP (rtoc_indexed_items_106[rtoc_indexed_i_107]).resolved_type == spec.type))
       } THEN
             rtoc_indexed_output_108 = rtoc_indexed_output_108 + 1;
           END
@@ -17618,7 +17618,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_433 = {};
     MUTABLE rtoc_indexed_i_432 = 0;
     WHILE rtoc_indexed_i_432 < rtoc_indexed_items_431.length() DO
-      MUTABLE rtoc_indexed_pair_434 = [rtoc_indexed_items_431[rtoc_indexed_i_432].name, rtoc_indexed_i_432];
+      MUTABLE rtoc_indexed_pair_434 = [UNWRAP (rtoc_indexed_items_431[rtoc_indexed_i_432]).name, rtoc_indexed_i_432];
       rtoc_indexed_output_433[rtoc_indexed_pair_434._0] = rtoc_indexed_pair_434._1;
       rtoc_indexed_i_432 = rtoc_indexed_i_432 + 1;
     END

@@ -179,7 +179,7 @@ PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan,
   WHILE rtoc_indexed_i_5 < rtoc_indexed_items_4.length() DO
     &rtoc_indexed_output_6.append({
   MUTABLE target_param = COPY UNWRAP (target_params[rtoc_indexed_i_5]);
-  emit__frame_init(target_param.name, TRY (emit__lower_frame_expr(rtoc_indexed_items_4[rtoc_indexed_i_5], lowering, context)))
+  emit__frame_init(target_param.name, TRY (emit__lower_frame_expr(UNWRAP (rtoc_indexed_items_4[rtoc_indexed_i_5]), lowering, context)))
   });
     rtoc_indexed_i_5 = rtoc_indexed_i_5 + 1;
   END

@@ -862,7 +862,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_19 = {};
     MUTABLE rtoc_indexed_i_18 = 0;
     WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
-      MUTABLE rtoc_indexed_pair_20 = CAST(Tuple{symbol(rtoc_indexed_items_17[rtoc_indexed_i_18].name), UNWRAP ((TRY (type__generic_args(declaration.protocol_type)))[rtoc_indexed_i_18])} AS Tuple<String@symbol, Type>);
+      MUTABLE rtoc_indexed_pair_20 = CAST(Tuple{symbol(UNWRAP (rtoc_indexed_items_17[rtoc_indexed_i_18]).name), UNWRAP ((TRY (type__generic_args(declaration.protocol_type)))[rtoc_indexed_i_18])} AS Tuple<String@symbol, Type>);
       rtoc_indexed_output_19[rtoc_indexed_pair_20._0] = rtoc_indexed_pair_20._1;
       rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
     END
@@ -1302,7 +1302,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_35 = [];
     MUTABLE rtoc_indexed_i_34 = 0;
     WHILE rtoc_indexed_i_34 < rtoc_indexed_items_33.length() DO
-      &rtoc_indexed_output_35.append(OwnerGenericBinding{ position: rtoc_indexed_i_34, local_param: COPY rtoc_indexed_items_33[rtoc_indexed_i_34], owner_param: COPY UNWRAP (owner_params[rtoc_indexed_i_34]) });
+      &rtoc_indexed_output_35.append(OwnerGenericBinding{ position: rtoc_indexed_i_34, local_param: COPY UNWRAP (rtoc_indexed_items_33[rtoc_indexed_i_34]), owner_param: COPY UNWRAP (owner_params[rtoc_indexed_i_34]) });
       rtoc_indexed_i_34 = rtoc_indexed_i_34 + 1;
     END
     rtoc_indexed_output_35

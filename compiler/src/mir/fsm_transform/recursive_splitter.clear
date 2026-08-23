@@ -127,8 +127,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_3 = [];
     MUTABLE rtoc_indexed_i_2 = 0;
     WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length() DO
-      IF ruby_union_scalar_equal_SegmentSlot_String_symbol(rtoc_indexed_items_1[rtoc_indexed_i_2], :placeholder) THEN
-        &rtoc_indexed_output_3.append(COPY rtoc_indexed_items_1[rtoc_indexed_i_2]);
+      IF ruby_union_scalar_equal_SegmentSlot_String_symbol(UNWRAP (rtoc_indexed_items_1[rtoc_indexed_i_2]), :placeholder) THEN
+        &rtoc_indexed_output_3.append(COPY UNWRAP (rtoc_indexed_items_1[rtoc_indexed_i_2]));
       END
       rtoc_indexed_i_2 = rtoc_indexed_i_2 + 1;
     END
@@ -411,7 +411,7 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
   MUTABLE rtoc_indexed_output_19 = [];
   MUTABLE rtoc_indexed_i_18 = 0;
   WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
-    &rtoc_indexed_output_19.append(Tuple{COPY rtoc_indexed_items_17[rtoc_indexed_i_18], rtoc_indexed_i_18});
+    &rtoc_indexed_output_19.append(Tuple{COPY UNWRAP (rtoc_indexed_items_17[rtoc_indexed_i_18]), rtoc_indexed_i_18});
     rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
   END
   rtoc_indexed_output_19
@@ -422,7 +422,7 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
     MUTABLE rtoc_indexed_output_19 = [];
     MUTABLE rtoc_indexed_i_18 = 0;
     WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
-      &rtoc_indexed_output_19.append(Tuple{COPY rtoc_indexed_items_17[rtoc_indexed_i_18], rtoc_indexed_i_18});
+      &rtoc_indexed_output_19.append(Tuple{COPY UNWRAP (rtoc_indexed_items_17[rtoc_indexed_i_18]), rtoc_indexed_i_18});
       rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
     END
     rtoc_indexed_output_19

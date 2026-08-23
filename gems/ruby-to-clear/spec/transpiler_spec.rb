@@ -7711,7 +7711,7 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
       clear = RubyToClear.transpile(source)
       expect(clear).to include("MUTABLE rtoc_indexed_output_3 = 0;")
-      expect(clear).to include("IF (rtoc_indexed_items_1[rtoc_indexed_i_2] == rtoc_indexed_i_2) THEN\n        rtoc_indexed_output_3 = rtoc_indexed_output_3 + 1;\n      END")
+      expect(clear).to include("IF (UNWRAP (rtoc_indexed_items_1[rtoc_indexed_i_2]) == rtoc_indexed_i_2) THEN\n        rtoc_indexed_output_3 = rtoc_indexed_output_3 + 1;\n      END")
       expect(clear).to include("rtoc_indexed_output_3\n    };")
     end
 
