@@ -1,0 +1,33 @@
+# Test: CAST(union AS PayloadType) reads the variant's payload. It lowered to
+# a plain @as, handing Zig a union where the payload was expected -- accepted
+# by the annotator, rejected by the backend.
+
+PUB STRUCT Ident { name: String }
+PUB UNION Lifetime { SymbolValue: String@symbol, ArrayValue: []Ident }
+
+FN names(lt: Lifetime) RETURNS []String ->
+  MUTABLE out: []String = List[];
+  MUTABLE items = (CAST(lt AS []Ident));
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    &out.append(COPY UNWRAP (items[i]).name);
+    i = i + 1;
+  END
+  RETURN out;
+END
+
+FN tag(lt: Lifetime) RETURNS String@symbol ->
+  RETURN CAST(lt AS String@symbol);
+END
+
+FN main() RETURNS Void ->
+  MUTABLE ids: []Ident = List[];
+  &ids.append(Ident{ name: COPY "a" });
+  &ids.append(Ident{ name: COPY "b" });
+
+  MUTABLE listed = names(Lifetime{ ArrayValue: GIVE ids });
+  ASSERT listed.length() == 2;
+  ASSERT UNWRAP (listed[1]) == "b";
+
+  ASSERT tag(Lifetime{ SymbolValue: COPY :wildcard }) == :wildcard;
+END

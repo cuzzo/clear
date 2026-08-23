@@ -749,7 +749,7 @@ module EscapeAnalysis
 
   sig { params(node: T.any(AST::VarDecl, AST::BindExpr), context: EscapeContext).void }
   private_class_method def self.apply_binding_escape_sink!(node, context)
-    if borrow_return_expr?(node.value)
+    if borrow_return_expr?(node.value) || union_payload_narrowing?(node.value, context.schema_lookup)
       mark_symbol_borrow!(node.symbol)
     elsif call_result_is_heap?(node.value, context.fn_nodes, context.schema_lookup, facts_by_name: context.facts_by_name)
       mark_symbol_heap!(node.symbol)
@@ -870,6 +870,9 @@ module EscapeAnalysis
       # aggregate owner before lowering so every owned field has one coherent
       # allocator.  This is deliberately source-driven: a plain value struct
       # remains frame-backed unless one of its fields refers to a heap owner.
+      # A view of a union's payload owns nothing; promoting it to heap would
+      # give it a cleanup for memory the union still holds.
+      next if values.any? { |value| union_payload_narrowing?(value, schema_lookup) }
       next unless aggregate_owner_requires_heap?(ti, schema_lookup) ||
                   values.any? { |value| aggregate_contains_heap_owned_value?(value) } ||
                   values.any? { |value| copies_heap_owner?(value, ti, schema_lookup) }
@@ -1360,6 +1363,32 @@ module EscapeAnalysis
     return false unless call.is_a?(AST::FuncCall) || call.is_a?(AST::MethodCall)
     sig = call.respond_to?(:matched_signature) ? FunctionSignature.unwrap(call.matched_signature) : nil
     !!sig && !sig.return_lifetime.empty?
+  end
+
+  # `CAST(union AS PayloadType)` names a variant by its payload type and reads
+  # it in place. The binding VIEWS the union's payload; it owns nothing, and
+  # cleaning it up would free memory the union still holds.
+  sig { params(expr: NodeValue, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.union_payload_narrowing?(expr, schema_lookup)
+    return false unless schema_lookup
+
+    cast = unwrap_value(expr)
+    return false unless cast.is_a?(AST::Cast)
+
+    source = Type.new(cast.value.full_type!(context: "union payload narrowing source")).value_payload_type
+    return false unless source
+    schema = schema_lookup.call(source.resolved)
+    return false unless schema.respond_to?(:variants)
+
+    target = Type.new(cast.target)
+    return false if target.resolved == source.resolved
+
+    matches = schema.variants.count do |_name, payload|
+      payload.is_a?(Type) && Type.coercion_surface_name(payload) == Type.coercion_surface_name(target)
+    end
+    matches == 1
+  rescue StandardError
+    false
   end
 
   sig { params(expr: NodeValue).returns(T::Boolean) }

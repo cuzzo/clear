@@ -1151,7 +1151,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE mod_prefix: String = "";
     IF node.module_alias EXISTS AS module_alias_value THEN
-      mod_prefix = "${(UNWRAP (module_alias_value)).replace(".", "_")}.";
+      mod_prefix = "${module_alias_value.replace(".", "_")}.";
     ELSE
       mod_prefix = "";
     END

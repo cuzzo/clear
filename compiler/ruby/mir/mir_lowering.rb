@@ -1637,6 +1637,27 @@ class MIRLowering
     union_payload_coercion_value(mir, node, target_type, variant_name, payload_type)
   end
 
+  # `CAST(union AS PayloadType)` is the NARROWING direction of the coercion
+  # above: it names a variant by its payload type. Emitted as a plain `@as`
+  # it handed Zig a union where the payload was expected -- a cast the
+  # annotator accepts and the backend cannot honour.
+  sig { params(mir: MIR::Node, node: AST::Cast).returns(T.nilable(MIR::Node)) }
+  def lower_union_payload_narrowing(mir, node)
+    return nil unless mir.is_a?(MIR::Emittable)
+
+    source_type = Type.from_node!(node.value, context: "union payload narrowing source").value_payload_type
+    schema = union_schemas[source_type.resolved]
+    return nil unless schema.is_a?(Schemas::UnionSchema)
+
+    target_type = Type.new(node.target)
+    return nil if target_type.resolved == source_type.resolved
+
+    variant_name, _payload_type = unique_mir_union_payload_variant(schema, target_type)
+    return nil unless variant_name
+
+    MIR::UnionPayloadGet.new(mir, variant_name)
+  end
+
   sig { params(schema: Schemas::UnionSchema, actual_type: Type).returns([T.nilable(String), T.nilable(Type)]) }
   def unique_mir_union_payload_variant(schema, actual_type)
     matches = schema.variants.filter_map do |variant_name, payload|
@@ -4421,6 +4442,9 @@ class MIRLowering
     # unreachable code at the use site. `CAST(panic("...") AS T)` is how the
     # translation spells an unreachable fallback.
     return inner if Hoist.noreturn_value?(node.value)
+
+    narrowed = lower_union_payload_narrowing(inner, node)
+    return narrowed if narrowed
 
     target_type = transpile_type(node.target)
 
