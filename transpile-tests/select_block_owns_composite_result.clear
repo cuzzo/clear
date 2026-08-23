@@ -1,0 +1,45 @@
+# Test: a SELECT whose body is a BLOCK yielding a freshly built struct owns
+# that struct. The block's ownership fell back to the result type's cleanup
+# shape, which was resolved without a schema lookup, so a user struct looked
+# cleanup-free -- the element was appended as a borrow and leaked.
+
+PUB STRUCT Alias {
+  source_name: String,
+  ordinal: Int64
+}
+
+PUB STRUCT Decision {
+  alias_fact: Alias,
+  label: String
+}
+
+PUB STRUCT Facts {
+  aliases: []Alias
+}
+
+PUB FN facts__decisions(self: Facts) RETURNS ![]Decision
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+  RETURN rtoc_self_view.aliases |> SELECT {
+    MUTABLE label = "borrow";
+    IF (_.ordinal > 3) THEN
+      label = "move";
+    END
+    Decision{ alias_fact: COPY _, label: COPY label }
+  };
+}
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE aliases: []Alias = List[];
+  &aliases.append(Alias{ source_name: COPY "src", ordinal: 1 });
+  &aliases.append(Alias{ source_name: COPY "dst", ordinal: 9 });
+  MUTABLE facts = Facts{ aliases: GIVE aliases };
+
+  MUTABLE decisions = TRY (facts__decisions(facts));
+  ASSERT decisions.length() == 2;
+  ASSERT UNWRAP (decisions[0]).label == "borrow";
+  ASSERT UNWRAP (decisions[1]).label == "move";
+  ASSERT UNWRAP (decisions[1]).alias_fact.source_name == "dst";
+END

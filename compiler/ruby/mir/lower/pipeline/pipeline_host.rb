@@ -644,8 +644,34 @@ class PipelineHost
     # owned call), so the value's effect alone under-reports ownership. An owned
     # allocation among the hoists means the element constructed something owned.
     owned = MIR::OwnershipEffect.of(head.value).produces_owned ||
-      head.pending.any? { |stmt| stmt.is_a?(MIR::AllocMark) }
+      head.pending.any? { |stmt| stmt.is_a?(MIR::AllocMark) } ||
+      fresh_composite_block_result?(head.value)
     PipelineElementHead.new(value: head.value, pending: head.pending, owned: owned)
+  end
+
+  # A block-bodied element (`SELECT { stmts...; Decision{...} }`) reports no
+  # ownership from its own MIR facts: OwnershipEffect.from_block_body falls
+  # back to the result type's cleanup shape, and that fallback runs WITHOUT a
+  # schema lookup, so a user struct resolves as cleanup-free. The pipeline has
+  # the schema, so decide the shape here -- otherwise the freshly built struct
+  # is appended as a BORROW and nothing ever frees it.
+  sig { params(value: T.nilable(MIR::Emittable)).returns(T::Boolean) }
+  def fresh_composite_block_result?(value)
+    block = [value].grep(MIR::BlockExpr).first
+    return false unless block
+
+    break_value = block.body.reverse.grep(MIR::BreakStmt).first&.value
+    return false unless fresh_composite_node?(break_value)
+
+    result_type = block.result_type
+    !result_type.nil? && result_type.recursive_cleanup_shape?(T.unsafe(pipeline_schema_lookup))
+  end
+
+  # Owned BY CONSTRUCTION: the fields of a composite literal took ownership of
+  # their values (a GIVE-moved item, a COPY dupe), so the composite must move.
+  sig { params(node: T.nilable(MIR::Emittable)).returns(T::Boolean) }
+  def fresh_composite_node?(node)
+    node.is_a?(MIR::StructInit) || node.is_a?(MIR::TupleLiteral) || node.is_a?(MIR::ArrayInit)
   end
 
   # Lower an array of AST body statements to MIR nodes, with pipeline
@@ -930,8 +956,7 @@ class PipelineHost
     # owned BY CONSTRUCTION even though nothing in it allocates: its fields
     # took ownership of their values (a GIVE-moved item, a COPY dupe). Deep-
     # copying it would strand the moved-in originals (leak); it must move.
-    fresh_composite = (selector.is_a?(MIR::StructInit) ||
-        selector.is_a?(MIR::TupleLiteral) || selector.is_a?(MIR::ArrayInit)) &&
+    fresh_composite = fresh_composite_node?(selector) &&
       item_type.recursive_cleanup_shape?(T.unsafe(pipeline_schema_lookup))
     selector_owned = MIR::OwnershipEffect.of(selector).produces_owned ||
       selector_prefix.any? { |stmt| stmt.is_a?(MIR::AllocMark) } ||
