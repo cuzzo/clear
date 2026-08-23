@@ -1,0 +1,29 @@
+# Test: a value block inside a COPIED aggregate literal, stored into a heap
+# container, is placed on the heap. Escape analysis skipped a COPY outright --
+# right for `COPY binding`, wrong for `COPY Struct{...}`, which is BUILT here
+# and whose field values still flow into the destination.
+
+PUB STRUCT Loc { name: String }
+PUB STRUCT Slot { kind: String@symbol, sources: []Loc }
+PUB STRUCT Coll { slots: {String}Slot@multiowned }
+
+FN coll__fill(MUTABLE self: Coll) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+  view.slots["a"] = COPY Slot{ kind: COPY :param, sources: ( { MUTABLE fresh: []Loc = List[]; fresh } ) } @multiowned;
+
+  MUTABLE seeded: []Loc = List[];
+  &seeded.append(Loc{ name: COPY "here" });
+  view.slots["b"] = COPY Slot{ kind: COPY :return, sources: GIVE seeded } @multiowned;
+}
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE c = Coll{ slots: {} };
+  TRY (coll__fill(&c));
+  ASSERT c.slots.count() == 2;
+  ASSERT UNWRAP (c.slots["a"]).sources.length() == 0;
+  ASSERT UNWRAP (c.slots["b"]).sources.length() == 1;
+  ASSERT UNWRAP (UNWRAP (c.slots["b"]).sources[0]).name == "here";
+END

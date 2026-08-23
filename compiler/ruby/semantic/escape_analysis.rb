@@ -989,6 +989,7 @@ module EscapeAnalysis
     stack = T.let([expr], NodeStack)
     until stack.empty?
       node = stack.pop
+      node = fresh_aggregate_copy_payload(node)
       next if node.is_a?(AST::CopyNode) || node.is_a?(AST::KeepNode)
       node = unwrap_value(node)
       next unless node.is_a?(AST::Locatable)
@@ -1014,6 +1015,25 @@ module EscapeAnalysis
       push_locatable_children!(node, stack)
     end
     changed
+  end
+
+  # `dest = COPY src` duplicates an existing binding, so src's placement is
+  # its own business -- that is what the COPY skip above is for. `dest = COPY
+  # Struct{ field: expr }` is not that: the aggregate is BUILT here and its
+  # field values flow into the destination, so they have to reach it with the
+  # destination's allocator.
+  sig { params(node: DynamicValue).returns(DynamicValue) }
+  private_class_method def self.fresh_aggregate_copy_payload(node)
+    return node unless node.is_a?(AST::CopyNode) || node.is_a?(AST::KeepNode)
+
+    payload = unwrap_value(T.cast(node, T.any(AST::CopyNode, AST::KeepNode)).value)
+    aggregate_literal?(payload) ? payload : node
+  end
+
+  sig { params(node: DynamicValue).returns(T::Boolean) }
+  private_class_method def self.aggregate_literal?(node)
+    node.is_a?(AST::StructLit) || node.is_a?(AST::UnionVariantLit) ||
+      node.is_a?(AST::ListLit) || node.is_a?(AST::HashLit) || node.is_a?(AST::TupleLit)
   end
 
   sig { params(node: DynamicValue).returns(DynamicValue) }
