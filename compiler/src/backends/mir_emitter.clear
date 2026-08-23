@@ -1108,7 +1108,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_indexed_output_12 = [];
     MUTABLE rtoc_indexed_i_11 = 0;
     WHILE rtoc_indexed_i_11 < rtoc_indexed_items_10.length() DO
-      &rtoc_indexed_output_12.append("a${rtoc_indexed_i_11}: ${TRY (type__zig_type(rtoc_indexed_items_10[rtoc_indexed_i_11].type, TRUE))}");
+      &rtoc_indexed_output_12.append("a${rtoc_indexed_i_11.toString()}: ${TRY (type__zig_type(rtoc_indexed_items_10[rtoc_indexed_i_11].type, TRUE))}");
       rtoc_indexed_i_11 = rtoc_indexed_i_11 + 1;
     END
     rtoc_indexed_output_12
@@ -1633,7 +1633,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_27 = {};
     MUTABLE rtoc_indexed_i_26 = 0;
     WHILE rtoc_indexed_i_26 < rtoc_indexed_items_25.length() DO
-      MUTABLE rtoc_indexed_pair_28 = [rtoc_indexed_items_25[rtoc_indexed_i_26], "__captures[${rtoc_indexed_i_26}]"];
+      MUTABLE rtoc_indexed_pair_28 = [rtoc_indexed_items_25[rtoc_indexed_i_26], "__captures[${rtoc_indexed_i_26.toString()}]"];
       rtoc_indexed_output_27[rtoc_indexed_pair_28._0] = rtoc_indexed_pair_28._1;
       rtoc_indexed_i_26 = rtoc_indexed_i_26 + 1;
     END

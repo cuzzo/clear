@@ -309,8 +309,21 @@ module RubyToClear
           [raw_name, requested_aliases.fetch(clear_name, clear_name)]
         end
       end
+      # `local_types` is keyed by the CLEAR parameter names, but the block body
+      # still reads the RUBY names -- and the two differ whenever a name
+      # collides with a CLEAR keyword (`index` -> `index_value`). Key the scope
+      # by both so the type survives the rename.
+      block_local_types = local_types ? local_types.call(param_names) : {}
+      unless block_local_types.empty?
+        aliases.each_key.with_index do |raw_name, position|
+          clear_name = param_names[position]
+          next unless clear_name && block_local_types.key?(clear_name)
+
+          block_local_types[raw_name] ||= block_local_types[clear_name]
+        end
+      end
       transpiler.with_block_local_scope do
-        transpiler.with_local_types(local_types ? local_types.call(param_names) : {}) do
+        transpiler.with_local_types(block_local_types) do
           transpiler.with_renames(aliases) do
             if (unsafe = unsafe_value_block_node(block_node, allow_next: allow_next, allow_yield: allow_yield, allow_break: allow_break, allow_return: allow_return))
               next unsupported(transpiler, node, "#{method_label} block contains unsupported #{unsafe}")
