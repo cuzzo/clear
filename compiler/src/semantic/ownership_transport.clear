@@ -132,10 +132,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source: Locatable = castNodeToLocatable(COPY node);
     MUTABLE symbol: ?SymbolEntry@multiowned = NIL;
     IF node IS_A VarDecl AS var_decl THEN
-      source = CAST(var_decl.value AS Locatable);
+      source = COPY CAST(var_decl.value AS Locatable);
       symbol = var_decl.symbol;
     ELSE_IF node IS_A BindExpr AS bind_expr THEN
-      source = CAST(bind_expr.value AS Locatable);
+      source = COPY CAST(bind_expr.value AS Locatable);
       symbol = bind_expr.symbol;
     END
     IF !(ownershipTransportFacts__source?(source)) THEN
@@ -152,7 +152,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF source_id EXISTS AS source_id_value THEN
         MUTABLE source_id_value_mutable = COPY source_id_value;
         MUTABLE source_name = ownershipTransportFacts__source_display(source);
-        MUTABLE fallback_root: Tuple<Int64,String> = CAST(Tuple{source_id_value_mutable, source_name} AS Tuple<Int64,String>);
+        MUTABLE fallback_root: Tuple<Int64,String> = CAST(Tuple{source_id_value_mutable, COPY source_name} AS Tuple<Int64,String>);
         MUTABLE root_id, root_name = (rtoc_self_view.alias_roots[source_id_value_mutable] OR_ELSE fallback_root);
         MUTABLE destination_name: String = "";
         IF node IS_A VarDecl AS var_decl THEN

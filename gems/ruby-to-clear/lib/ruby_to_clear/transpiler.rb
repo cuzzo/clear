@@ -4908,8 +4908,6 @@ end
         semantic_type = inferred_clear_type(node) if semantic_value.type.unresolved?
         return true if copyable_storage_type?(semantic_type)
       end
-      return false if semantic_value&.access == :owned
-
       value_node = node
       type_annotation = explicit_type_annotation
       if (typed_value = sorbet_typed_value(value_node))
@@ -4936,6 +4934,13 @@ end
           return copyable_storage_type?(type)
         end
       end
+
+      # `access` is a CFG FACT only for the shapes record_value recognises; a
+      # bare reader call defaults to :owned. Checking it after the field
+      # lookups above keeps the guess from overriding the fact that the
+      # receiver's type declares this name as a field -- reading a field is a
+      # borrow, and assigning that borrow into an owning local needs a COPY.
+      return false if semantic_value&.access == :owned
 
       return false unless value_node.is_a?(Prism::LocalVariableReadNode)
 

@@ -5907,7 +5907,7 @@ RSpec.describe RubyToClear::Transpiler do
 
     it "transpiles predicate collection blocks" do
       expect_transpile("nums = []; nums.reject { |x| x < 2 }", "MUTABLE nums = List[];\nnums |> WHERE !((_ < 2));")
-      expect_transpile("nums = []; nums.any?", "MUTABLE nums = List[];\nnums |> ANY _;")
+      expect_transpile("nums = []; nums.any?", "MUTABLE nums = List[];\n(nums.length() > 0);")
       expect_transpile("nums = []; nums.any? { |x| x > 5 }", "MUTABLE nums = List[];\nnums |> ANY (_ > 5);")
       expect_transpile("nums = []; nums.all?", "MUTABLE nums = List[];\nnums |> ALL _;")
       expect_transpile("nums = []; nums.all? { |x| x > 0 }", "MUTABLE nums = List[];\nnums |> ALL (_ > 0);")
@@ -9078,7 +9078,7 @@ RSpec.describe RubyToClear::Transpiler do
       RUBY
 
       clear = RubyToClear.transpile(ruby_code)
-      expect(clear).to include("MUTABLE target: Locatable = CAST(get_field.target AS Locatable);")
+      expect(clear).to include("MUTABLE target: Locatable = COPY CAST(get_field.target AS Locatable);")
       expect(clear).not_to include("UNION Node")
       expect(clear).not_to include("castNodeToLocatable")
     end
