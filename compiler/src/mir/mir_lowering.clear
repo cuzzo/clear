@@ -6171,25 +6171,23 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < body.length() DO
-          IF !((body[rtoc_idx]? IS_A Cleanup OR body[rtoc_idx]? IS_A ErrCleanup)) THEN
-            rtoc_idx = rtoc_idx + 1;
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
+      MUTABLE rtoc_idx_n1 = 0;
+      WHILE rtoc_idx_n1 < body.length() DO
+          IF !((body[rtoc_idx_n1]? IS_A Cleanup OR body[rtoc_idx_n1]? IS_A ErrCleanup)) THEN
+            rtoc_idx_n1 = rtoc_idx_n1 + 1;
+        CONTINUE;
           END
-          MUTABLE node_name = COPY CAST((body[rtoc_idx]?.name()) AS String);
+          MUTABLE node_name = COPY CAST((body[rtoc_idx_n1]?.name()) AS String);
           MUTABLE rendered_name = COPY (rename_map[node_name] OR_ELSE node_name);
           IF !(((node_name == facts[rtoc_idx]?.name) OR (rendered_name == facts[rtoc_idx]?.name))) THEN
-              rtoc_idx = rtoc_idx + 1;
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
+              rtoc_idx_n1 = rtoc_idx_n1 + 1;
+        CONTINUE;
           END
-          MUTABLE rtoc_mutable_receiver_197 = (body[rtoc_idx]?.cleanup_entry());
+          MUTABLE rtoc_mutable_receiver_197 = (body[rtoc_idx_n1]?.cleanup_entry());
           cleanupEntry__mark_moved_guard_mut(&rtoc_mutable_receiver_197);
           MUTABLE rtoc_key_1: String = COPY UNWRAP (facts[rtoc_idx]).name;
           guarded_cleanup_names[rtoc_key_1] = TRUE;
-        rtoc_idx = rtoc_idx + 1;
+        rtoc_idx_n1 = rtoc_idx_n1 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -15170,10 +15168,9 @@ PRIVATE FN mIRLowering__tense_map_bindings(self: MIRLowering, id: Int64, segment
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE bindings: []String = ( { MUTABLE rtoc_empty_list_565: []String = List[]; rtoc_empty_list_565 } );
-    count_value.times(%(index_value: Int64) USE(MUTABLE bindings, id, segment) -> {
-    &bindings.append("__tense_${segment}${id.toString()}_${index_value.toString()}");
-    rubyToClearVoid()
-    });
+    FOR rtoc_counter_t IN (0_i64 ..< count_value) DO
+      &bindings.append("__tense_${segment}${id.toString()}_${rtoc_counter_t.toString()}");
+    END
     RETURN bindings;
 }
 END

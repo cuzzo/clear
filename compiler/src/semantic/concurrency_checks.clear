@@ -128,13 +128,13 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
           RETURN;
       END
       MUTABLE rtoc_each_items_1 = (TRY (functionSignature__params(sig)));
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < rtoc_each_items_1.length() DO
-          MUTABLE pname = COPY CAST((rtoc_each_items_1[rtoc_idx]?.name) AS String);
+      MUTABLE rtoc_idx_n1 = 0;
+      WHILE rtoc_idx_n1 < rtoc_each_items_1.length() DO
+          MUTABLE pname = COPY CAST((rtoc_each_items_1[rtoc_idx_n1]?.name) AS String);
           IF !((TRY (functionSignature__requires(sig))).contains?(pname)) THEN
               RETURN;
           END
-          MUTABLE arg = (scope[rtoc_idx]?.args())[rtoc_idx];
+          MUTABLE arg = (scope[rtoc_idx]?.args())[rtoc_idx_n1];
           IF !(arg) THEN
               RETURN;
           END
@@ -142,12 +142,12 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
           IF !((TRUE AND held_params.contains?(arg_name))) THEN
               RETURN;
           END
-          error_handler(scope[rtoc_idx]?, "Reentrant lock acquisition: '${scope[rtoc_idx]?.name()}' has REQUIRES '${pname}: ${(((TRY (functionSignature__requires(sig)))[pname]) |> SELECT COPY _).join(" | ")}' and is called with '${arg_name}', which is already held by the WITH at line ${(IF with_block.token != NIL THEN
+          error_handler(scope[rtoc_idx_n1]?, "Reentrant lock acquisition: '${scope[rtoc_idx_n1]?.name()}' has REQUIRES '${pname}: ${(((TRY (functionSignature__requires(sig)))[pname]) |> SELECT COPY _).join(" | ")}' and is called with '${arg_name}', which is already held by the WITH at line ${(IF with_block.token != NIL THEN
               with_block.token.line
             ELSE
               NIL
             END)}. Pass the unwrapped inner alias instead of the wrapped binding.");
-        rtoc_idx = rtoc_idx + 1;
+        rtoc_idx_n1 = rtoc_idx_n1 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
   END

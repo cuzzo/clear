@@ -101,15 +101,15 @@ FN levenshtein(a: String, b: String) RETURNS !Int64 ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < a.length() DO
     MUTABLE curr = [(rtoc_idx + 1)];
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < b.length() DO
-        MUTABLE cost = IF (a.substr(rtoc_idx, 1) == b.substr(rtoc_idx, 1)) THEN
+    MUTABLE rtoc_idx_n1 = 0;
+    WHILE rtoc_idx_n1 < b.length() DO
+        MUTABLE cost = IF (a.substr(rtoc_idx, 1) == b.substr(rtoc_idx_n1, 1)) THEN
             0
           ELSE
             1
           END;
-        &curr.append(([(UNWRAP (curr[rtoc_idx]) + 1), (prev[(rtoc_idx + 1)] + 1), (prev[rtoc_idx] + cost)]).min());
-      rtoc_idx = rtoc_idx + 1;
+        &curr.append(([(UNWRAP (curr[rtoc_idx_n1]) + 1), (prev[(rtoc_idx_n1 + 1)] + 1), (prev[rtoc_idx_n1] + cost)]).min());
+      rtoc_idx_n1 = rtoc_idx_n1 + 1;
     END
     prev = curr;
   rtoc_idx = rtoc_idx + 1;
@@ -1036,19 +1036,19 @@ FN auto_rank_candidates(ops: [Set]String@symbol) RETURNS ![]AutoCandidate ->
     MUTABLE alts: []String@symbol = CAST((entry[:alts] OR_ELSE List[]) AS []String@symbol);
     MUTABLE notes: {String@symbol}String = CAST((entry[:notes] OR_ELSE {}) AS {String@symbol}String);
     MUTABLE ranked = ([default] + alts);
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < ranked.length() DO
-        MUTABLE stat: ?Any = COPY agg[ranked[rtoc_idx]];
+    MUTABLE rtoc_idx_n2 = 0;
+    WHILE rtoc_idx_n2 < ranked.length() DO
+        MUTABLE stat: ?Any = COPY agg[ranked[rtoc_idx_n2]];
         IF !(stat) THEN
             stat = {:count: 0, :rank_sum: 0, :notes: List[]};
-            agg[ranked[rtoc_idx]] = UNWRAP (stat);
+            agg[ranked[rtoc_idx_n2]] = UNWRAP (stat);
         END
         stat[:count] = (CAST(stat[:count] AS Int64) + 1);
-        stat[:rank_sum] = (CAST(stat[:rank_sum] AS Int64) + rtoc_idx);
-        IF notes[ranked[rtoc_idx]] THEN
-            (CAST(stat[:notes] AS []String)).append(UNWRAP (notes[ranked[rtoc_idx]]));
+        stat[:rank_sum] = (CAST(stat[:rank_sum] AS Int64) + rtoc_idx_n2);
+        IF notes[ranked[rtoc_idx_n2]] THEN
+            (CAST(stat[:notes] AS []String)).append(UNWRAP (notes[ranked[rtoc_idx_n2]]));
         END
-      rtoc_idx = rtoc_idx + 1;
+      rtoc_idx_n2 = rtoc_idx_n2 + 1;
     END
   rtoc_idx = rtoc_idx + 1;
   END

@@ -1144,10 +1144,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF node.alloc_kind EXISTS AS alloc_kind_value THEN
         &args.append("f.alloc");
       END
-      runtime_arg_count.times(%(index_value: Int64) USE(MUTABLE args) -> {
-    &args.append("f.a${index_value.toString()}");
-    rubyToClearVoid()
-      });
+      FOR rtoc_counter_a IN (0_i64 ..< runtime_arg_count) DO
+        &args.append("f.a${rtoc_counter_a.toString()}");
+      END
       RETURN "f.self_val.${method_name_value}(${args.join(", ")})";
     END
     MUTABLE mod_prefix: String = "";
@@ -1160,10 +1159,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node.alloc_kind EXISTS AS alloc_kind_value THEN
       &parts.append("f.alloc");
     END
-    runtime_arg_count.times(%(index_value: Int64) USE(MUTABLE parts) -> {
-    &parts.append("f.a${index_value.toString()}");
-    rubyToClearVoid()
-    });
+    FOR rtoc_counter_p IN (0_i64 ..< runtime_arg_count) DO
+      &parts.append("f.a${rtoc_counter_p.toString()}");
+    END
     RETURN "${mod_prefix}${node.callee_name}(${parts.join(", ")})";
 }
 END
@@ -4262,10 +4260,9 @@ PRIVATE FN mIREmitter__render_resource_close_action(self: MIREmitter, action: Re
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE target = (([root_name] + action.field_path)).join(".");
     MUTABLE runtime_args: []String = ( { MUTABLE rtoc_empty_list_40: []String = List[]; rtoc_empty_list_40 } );
-    action.runtime_heap_alloc_args.times(%() USE(MUTABLE runtime_args, rtoc_self_view) -> {
-    &runtime_args.append(TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap)));
-    rubyToClearVoid()
-    });
+    FOR rtoc_counter_h IN (0_i64 ..< action.runtime_heap_alloc_args) DO
+      &runtime_args.append(TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap)));
+    END
     IF (action.call_kind == ResourceCloseCallKind.Method) THEN
       RETURN "${target}.${action.name}(${runtime_args.join(", ")})";
     ELSE_IF (action.call_kind == ResourceCloseCallKind.Function) THEN

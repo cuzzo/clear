@@ -502,15 +502,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < left.length() DO
       MUTABLE current = [(rtoc_idx + 1)];
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < right.length() DO
-          MUTABLE cost = IF (left.substr(rtoc_idx, 1) == right.substr(rtoc_idx, 1)) THEN
+      MUTABLE rtoc_idx_n1 = 0;
+      WHILE rtoc_idx_n1 < right.length() DO
+          MUTABLE cost = IF (left.substr(rtoc_idx, 1) == right.substr(rtoc_idx_n1, 1)) THEN
               0
             ELSE
               1
             END;
-          &current.append(([(UNWRAP (current[rtoc_idx]) + 1), (previous[(rtoc_idx + 1)] + 1), (previous[rtoc_idx] + cost)]).min());
-        rtoc_idx = rtoc_idx + 1;
+          &current.append(([(UNWRAP (current[rtoc_idx_n1]) + 1), (previous[(rtoc_idx_n1 + 1)] + 1), (previous[rtoc_idx_n1] + cost)]).min());
+        rtoc_idx_n1 = rtoc_idx_n1 + 1;
       END
       previous = current;
     rtoc_idx = rtoc_idx + 1;
@@ -590,15 +590,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < a.length() DO
       MUTABLE curr = [(rtoc_idx + 1)];
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < b.length() DO
-          MUTABLE cost = IF (a.substr(rtoc_idx, 1) == b.substr(rtoc_idx, 1)) THEN
+      MUTABLE rtoc_idx_n2 = 0;
+      WHILE rtoc_idx_n2 < b.length() DO
+          MUTABLE cost = IF (a.substr(rtoc_idx, 1) == b.substr(rtoc_idx_n2, 1)) THEN
               0
             ELSE
               1
             END;
-          &curr.append(([(UNWRAP (curr[rtoc_idx]) + 1), (prev[(rtoc_idx + 1)] + 1), (prev[rtoc_idx] + cost)]).min());
-        rtoc_idx = rtoc_idx + 1;
+          &curr.append(([(UNWRAP (curr[rtoc_idx_n2]) + 1), (prev[(rtoc_idx_n2 + 1)] + 1), (prev[rtoc_idx_n2] + cost)]).min());
+        rtoc_idx_n2 = rtoc_idx_n2 + 1;
       END
       prev = curr;
     rtoc_idx = rtoc_idx + 1;
@@ -1781,19 +1781,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE alts: []String@symbol = CAST((entry[:alts] OR_ELSE List[]) AS []String@symbol);
       MUTABLE notes: {String@symbol}String = CAST((entry[:notes] OR_ELSE {}) AS {String@symbol}String);
       MUTABLE ranked = ([default] + alts);
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < ranked.length() DO
-          MUTABLE stat: ?Any = COPY agg[ranked[rtoc_idx]];
+      MUTABLE rtoc_idx_n3 = 0;
+      WHILE rtoc_idx_n3 < ranked.length() DO
+          MUTABLE stat: ?Any = COPY agg[ranked[rtoc_idx_n3]];
           IF !(stat) THEN
               stat = {:count: 0, :rank_sum: 0, :notes: List[]};
-              agg[ranked[rtoc_idx]] = UNWRAP (stat);
+              agg[ranked[rtoc_idx_n3]] = UNWRAP (stat);
           END
           stat[:count] = (CAST(stat[:count] AS Int64) + 1);
-          stat[:rank_sum] = (CAST(stat[:rank_sum] AS Int64) + rtoc_idx);
-          IF notes[ranked[rtoc_idx]] THEN
-              (CAST(stat[:notes] AS []String)).append(UNWRAP (notes[ranked[rtoc_idx]]));
+          stat[:rank_sum] = (CAST(stat[:rank_sum] AS Int64) + rtoc_idx_n3);
+          IF notes[ranked[rtoc_idx_n3]] THEN
+              (CAST(stat[:notes] AS []String)).append(UNWRAP (notes[ranked[rtoc_idx_n3]]));
           END
-        rtoc_idx = rtoc_idx + 1;
+        rtoc_idx_n3 = rtoc_idx_n3 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -3816,17 +3816,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE rtoc_each_items_27 = (transitive[callees[rtoc_idx]]);
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < rtoc_each_items_27.length() DO
+      MUTABLE rtoc_idx_n4 = 0;
+      WHILE rtoc_idx_n4 < rtoc_each_items_27.length() DO
           MUTABLE fn_set = transitive[rtoc_each_21];
-          IF fn_set.contains?(rtoc_each_items_27[rtoc_idx]) THEN
-                rtoc_idx = rtoc_idx + 1;
-        rtoc_idx = rtoc_idx + 1;
+          IF fn_set.contains?(rtoc_each_items_27[rtoc_idx_n4]) THEN
+                rtoc_idx_n4 = rtoc_idx_n4 + 1;
     CONTINUE;
           END
-          &fn_set.append(COPY rtoc_each_items_27[rtoc_idx]);
+          &fn_set.append(COPY rtoc_each_items_27[rtoc_idx_n4]);
           changed = TRUE;
-        rtoc_idx = rtoc_idx + 1;
+        rtoc_idx_n4 = rtoc_idx_n4 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
       END

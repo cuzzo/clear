@@ -226,7 +226,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
   rtoc_idx = rtoc_idx + 1;
   END
   END
-  fn_nodes.count().times(%() USE(callsites, fn_nodes) -> {
+  FOR rtoc_counter_sync IN (0_i64 ..< fn_nodes.count()) DO
   MUTABLE changed: Bool = FALSE;
   FOR rtoc_key IN fn_nodes.keys() DO
     MUTABLE callee_fn: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
@@ -235,12 +235,13 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
     WHILE rtoc_idx < callee_fn.params.length() DO
         MUTABLE entry: ?SymbolEntry = callee_fn.params[rtoc_idx]?.symbol;
         IF !(entry) THEN
-            RETURN;
+            rtoc_idx = rtoc_idx + 1;
+      CONTINUE;
         END
         IF !(escapeAnalysis__param_sync_was_declared?(callee_fn.params[rtoc_idx]?)) THEN
             MUTABLE unified = escapeAnalysis__unify_caller_attr(sites, rtoc_idx, %(s) -> {
           IF s.sync() THEN
-                RETURN;
+                RETURN s.sync();
           END
           MUTABLE t = s.type();
           t.sync()
@@ -252,14 +253,14 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
         END
         MUTABLE unified_storage = escapeAnalysis__unify_caller_attr(sites, rtoc_idx, %(s) -> {
           IF symbolEntry__rc_stored?(s) THEN
-              RETURN;
+              RETURN s.storage();
           END
           MUTABLE t = s.type();
           IF type__shared?(t) THEN
-              RETURN;
+              RETURN :shared;
           END
           IF t.multiowned?() THEN
-              RETURN;
+              RETURN :multiowned;
           END
           NIL
         });
@@ -273,8 +274,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
   IF !(changed) THEN
       BREAK;
   END
-  rubyToClearVoid()
-  });
+  END
 END
 PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}FunctionDef, body_summaries: {String}FunctionBodySummary, on_mutable_violation: ?FN(SymbolEntry, Identifier, String) -> Void = NIL, on_family_violation: ?FN(Locatable, String@symbol, String@symbol, String) -> Void = NIL, imported_params: {String}[]Param) RETURNS !Void ->
   MUTABLE kept_contracts: {String}{Int64}KeptIdentityContract = {};

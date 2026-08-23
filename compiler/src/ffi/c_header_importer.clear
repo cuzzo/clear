@@ -255,15 +255,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE raw_param_parts = TRY (translator__split_top_level(rtoc_self_view, raw_params));
       MUTABLE params: []CHeaderImporterParam = ( { MUTABLE rtoc_empty_list_16: []CHeaderImporterParam = List[]; rtoc_empty_list_16 } );
       MUTABLE valid_params: Bool = TRUE;
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < raw_param_parts.length() DO
-        IF (raw_param_parts[rtoc_idx]?.trim() == "...") THEN
+      MUTABLE rtoc_idx_n1 = 0;
+      WHILE rtoc_idx_n1 < raw_param_parts.length() DO
+        IF (raw_param_parts[rtoc_idx_n1]?.trim() == "...") THEN
             valid_params = FALSE;
             BREAK;
         ELSE
-            MUTABLE param_match: ?CompilerRegexScanner = compilerRegexMatchData(raw_param_parts[rtoc_idx]?, compilerRegexCompile("^([A-Za-z_]\\w*):\\s*(.+)$"));
-            MUTABLE param_name: String = "arg${rtoc_idx.toString()}";
-            MUTABLE raw_type: String = COPY raw_param_parts[rtoc_idx]?;
+            MUTABLE param_match: ?CompilerRegexScanner = compilerRegexMatchData(raw_param_parts[rtoc_idx_n1]?, compilerRegexCompile("^([A-Za-z_]\\w*):\\s*(.+)$"));
+            MUTABLE param_name: String = "arg${rtoc_idx_n1.toString()}";
+            MUTABLE raw_type: String = COPY raw_param_parts[rtoc_idx_n1]?;
             IF param_match EXISTS AS param_match_value THEN
               param_name = COPY compilerRegexCapture(param_match_value, 1);
               raw_type = COPY compilerRegexCapture(param_match_value, 2);
@@ -276,7 +276,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               BREAK;
             END
         END
-        rtoc_idx = rtoc_idx + 1;
+        rtoc_idx_n1 = rtoc_idx_n1 + 1;
       END
       IF !(valid_params) THEN
           rtoc_idx = rtoc_idx + 1;
