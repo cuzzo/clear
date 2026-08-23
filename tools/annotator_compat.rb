@@ -49,6 +49,124 @@ module AnnotatorCompat
     mutates_receiver can_fail error_kind error_type module_alias
   ].freeze
 
+
+  # The annotator's corpus is its OWN, not the parser's: a parse-only case is
+  # allowed to reference an undeclared type or carry an effect the checker
+  # rejects, and neither can be annotated. Every case here is a complete
+  # program, chosen so that between them they exercise each stamp in
+  # STAMPED_ATTRIBUTES.
+  CASES = [
+    { 'name' => 'assignment', 'source' => "answer = 42;\n" },
+    { 'name' => 'literals', 'source' => "name = \"clear\"; enabled = TRUE; missing = NIL; ratio = 3.5;\n" },
+    { 'name' => 'collections', 'source' => "items = [1, 2, 3]; pairs = {\"a\": 1, \"b\": 2};\n" },
+    {
+      'name' => 'function',
+      'source' => <<~CLEAR
+        FN add(left: Int64, right: Int64 = 1) RETURNS Int64 ->
+          total = left + right;
+          RETURN total;
+        END
+      CLEAR
+    },
+    {
+      'name' => 'struct_and_types',
+      'source' => <<~CLEAR
+        STRUCT Point { x: Int64, y: ?Float64 }
+        FN main() RETURNS Void ->
+          MUTABLE values: Int64[3];
+          values[0] = 1;
+          RETURN;
+        END
+      CLEAR
+    },
+    {
+      'name' => 'control_flow',
+      'source' => <<~CLEAR
+        FN classify(value: Int64) RETURNS String ->
+          IF value > 0 THEN
+            RETURN "positive";
+          ELSE
+            RETURN "other";
+          END
+        END
+      CLEAR
+    },
+    {
+      'name' => 'pipeline',
+      'source' => <<~CLEAR
+        STRUCT Item { name: String, enabled: Bool }
+        FN names(items: []Item) RETURNS []String ->
+          RETURN items |> WHERE _.enabled |> SELECT COPY _.name;
+        END
+      CLEAR
+    },
+    {
+      'name' => 'recursive_effect',
+      'source' => <<~CLEAR
+        FN walk(n: Int64) RETURNS Int64 EFFECTS REENTRANT:TAIL_CALL ->
+          IF n <= 0 THEN
+            RETURN 0;
+          END
+          RETURN walk(n - 1);
+        END
+      CLEAR
+    },
+    {
+      'name' => 'ownership_transfer',
+      'source' => <<~CLEAR
+        FN consume(TAKES text: String) RETURNS Int64 ->
+          RETURN text.length();
+        END
+        FN main() RETURNS Void ->
+          MUTABLE greeting = "hello";
+          used = consume(GIVE greeting);
+          RETURN;
+        END
+      CLEAR
+    },
+    {
+      'name' => 'error_tense',
+      'source' => <<~CLEAR
+        FN parse(text: String) RETURNS !Int64 ->
+          IF text.length() == 0 THEN
+            RAISE "empty";
+          END
+          RETURN text.length();
+        END
+        FN main() RETURNS !Void ->
+          count = TRY (parse("abc"));
+          RETURN;
+        END
+      CLEAR
+    },
+    {
+      'name' => 'optional_tense',
+      'source' => <<~CLEAR
+        FN first(items: []Int64) RETURNS ?Int64 ->
+          RETURN items[0];
+        END
+        FN main() RETURNS Void ->
+          value = first([1, 2]) OR_ELSE 0;
+          RETURN;
+        END
+      CLEAR
+    },
+    {
+      'name' => 'struct_methods',
+      'source' => <<~CLEAR
+        STRUCT Counter { total: Int64 }
+        FN counter__bump(MUTABLE self: Counter, by: Int64) RETURNS Void ->
+          self.total = self.total + by;
+        END
+        FN main() RETURNS Void ->
+          MUTABLE c = Counter{ total: 0 };
+          counter__bump(&c, 2);
+          RETURN;
+        END
+      CLEAR
+    }
+  ].freeze
+
   def main(argv)
     options = { out_dir: File.expand_path('tmp/annotator-compat'), ruby_only: false, limit: nil }
     OptionParser.new do |parser|
@@ -60,7 +178,7 @@ module AnnotatorCompat
     end.parse!(argv)
 
     FileUtils.mkdir_p(options[:out_dir])
-    cases = ParserCompat.corpus('smoke')
+    cases = CASES
     cases = cases.first(options[:limit]) if options[:limit]
 
     ruby_payload = payload('ruby', cases)
@@ -123,8 +241,12 @@ module AnnotatorCompat
     stamps
   end
 
+  # AST nodes are Structs: their children live in Struct MEMBERS, not in
+  # instance variables (the ivars hold the annotator's own stamps). Walking
+  # ivars alone reached the Program node and stopped.
   def children(node)
     return node.compact if node.is_a?(Array)
+    return node.members.map { |member| node[member] }.compact if node.is_a?(Struct)
     return [] unless node.respond_to?(:instance_variables)
 
     node.instance_variables.flat_map do |ivar|
