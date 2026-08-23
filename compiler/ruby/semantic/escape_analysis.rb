@@ -871,9 +871,30 @@ module EscapeAnalysis
       # allocator.  This is deliberately source-driven: a plain value struct
       # remains frame-backed unless one of its fields refers to a heap owner.
       next unless aggregate_owner_requires_heap?(ti, schema_lookup) ||
-                  values.any? { |value| aggregate_contains_heap_owned_value?(value) }
+                  values.any? { |value| aggregate_contains_heap_owned_value?(value) } ||
+                  values.any? { |value| copies_heap_owner?(value, ti, schema_lookup) }
       mark_symbol_heap!(sym)
     end
+  end
+
+  # Copying a heap-owning aggregate (a union payload, a nested collection)
+  # duplicates its heap children, so the new owner has to be heap too -- a
+  # frame owner would later free a heap child with the wrong allocator. The
+  # literal scan above cannot see this: the value is a COPY of a BINDING, not
+  # a literal built here.
+  sig { params(node: T.nilable(AST::Node), ti: T.nilable(Type), schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
+  private_class_method def self.copies_heap_owner?(node, ti, schema_lookup)
+    return false unless node
+    return false unless ti&.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+
+    source = T.let(unwrap_value(node), DynamicValue)
+    while source.is_a?(AST::OptionalUnwrap) || source.is_a?(AST::Cast)
+      source = unwrap_value(source.is_a?(AST::OptionalUnwrap) ? source.target : source.value)
+    end
+    return false unless source.is_a?(AST::Locatable)
+
+    root = AST.root_identifier(source)
+    !!(root && symbol_heap?(root.symbol))
   end
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
