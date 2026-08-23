@@ -1222,7 +1222,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF string_key THEN
       key_store_expr = "try rt.heapAlloc().dupe(u8, ${key_var})";
     ELSE
-      key_store_expr = key_var;
+      key_store_expr = COPY key_var;
     END
     MUTABLE key_free_work = mIREmitter__shard_key_free_work(rtoc_self_view, id, string_key);
     MUTABLE key_free_success: String = "";
