@@ -12372,7 +12372,7 @@ FN ownershipEffect__hoistable_owned_result?(node: ?Emittable) RETURNS !Bool ->
   RETURN (effect.produces_owned AND effect.requires_hoist);
 END
 PUB FN ownershipEffect__alloc_of(node: ?Emittable) RETURNS !?String@symbol EFFECTS REENTRANT ->
-  RETURN TRY (ownershipEffect__of(node)).alloc;
+  RETURN (TRY (ownershipEffect__of(node))).alloc;
 END
 FN ownershipEffect__from_effects(effects_value: []OwnershipEffect) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE owned: []OwnershipEffect = [];

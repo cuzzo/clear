@@ -5652,7 +5652,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) THEN
-      item_type_branch_value = TRY (type__element_type(left_ti)).resolved();
+      item_type_branch_value = (TRY (type__element_type(left_ti))).resolved();
     ELSE
       item_type_branch_value = typeAnalysisSession__error_mut(rtoc_self_view, node.left, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_COLLECTION_INPUT });
     END
@@ -5687,7 +5687,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END))) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.right_source, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_RIGHT_NEEDS_LIST }, [], {:got: node.right.right_source.resolved_type}));
     END
-    MUTABLE right_type: ?Type = TRY (type__element_type(rhs_type_info)).resolved();
+    MUTABLE right_type: ?Type = (TRY (type__element_type(rhs_type_info))).resolved();
     MUTABLE key_expr = node.right.key_expr;
     IF key_expr IS_A LambdaLit THEN
       MUTABLE params = key_expr.params();
@@ -11523,7 +11523,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE frame = bodyFactFrame__for_identity(identity);
     typeAnalysisSession__body_fact_frames(rtoc_self_view).append(frame);
     DEFER {
-    MUTABLE popped: ?BodyFactFrame = TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view)).pop();
+    MUTABLE popped: ?BodyFactFrame = (TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view))).pop();
     IF !(popped.equal?(frame)) THEN
       panic("BUG: body fact frame mismatch");
     END

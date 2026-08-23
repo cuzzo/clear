@@ -1326,7 +1326,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF blockExpr__body(mir_block_expr_mutable) |> ANY (_ IS_A TransferMark AND (_.target == :block_result)) THEN
         RETURN TRUE;
       END
-      MUTABLE break_index = TRY (blockExpr__body(mir_block_expr_mutable)).rindex(%(stmt) -> stmt IS_A BreakStmt);
+      MUTABLE break_index = (TRY (blockExpr__body(mir_block_expr_mutable))).rindex(%(stmt) -> stmt IS_A BreakStmt);
       IF !(break_index) THEN
         RETURN FALSE;
       END
@@ -1354,7 +1354,7 @@ FN mIRLowering__owned_branch_source_owns?(self: MIRLowering, mir: Emittable) RET
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE result = COPY mir;
     IF mir IS_A MIRBlockExpr AS mir_block_expr THEN
-      MUTABLE tail: ?Emittable = TRY (blockExpr__body(mir_block_expr)).reverse() |> FIND _ IS_A BreakStmt;
+      MUTABLE tail: ?Emittable = (TRY (blockExpr__body(mir_block_expr))).reverse() |> FIND _ IS_A BreakStmt;
       IF tail EXISTS AS tail_value THEN
         IF tail_value IS_A BreakStmt AS break_stmt THEN
           result = COPY break_stmt.value;
@@ -8351,7 +8351,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF mir IS_A MIRBlockExpr AS mir_block_expr THEN
       MUTABLE transferred: ?String = COPY effect.target_var;
       IF transferred EXISTS AS transferred_value THEN
-        MUTABLE let = TRY (blockExpr__body(mir_block_expr)).grep(MIR.Let) |> FIND (CAST(_.name() AS String) == transferred_value);
+        MUTABLE let = (TRY (blockExpr__body(mir_block_expr))).grep(MIR.Let) |> FIND (CAST(_.name() AS String) == transferred_value);
         IF let THEN
           RETURN mIRLowering__hoist_cleanup_entry(rtoc_self_view, let.init, NIL);
         END
@@ -8393,7 +8393,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A Ident AS ident THEN
       RETURN CAST([CAST(ident.name AS String)] AS []String);
     ELSE_IF node IS_A MIRBlockExpr AS mir_block_expr THEN
-      MUTABLE local_names = TRY (blockExpr__body(mir_block_expr)).each_with_object(Set[], %(stmt, names: [Set]Any) -> {
+      MUTABLE local_names = (TRY (blockExpr__body(mir_block_expr))).each_with_object(Set[], %(stmt, names: [Set]Any) -> {
     IF stmt IS_A AllocMark THEN
           &names.insert(COPY CAST(stmt.name() AS String));
     END
@@ -8402,13 +8402,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     NIL
       });
-      MUTABLE transferred_names = TRY (blockExpr__body(mir_block_expr)).each_with_object(Set[], %(stmt, names: [Set]Any) -> {
+      MUTABLE transferred_names = (TRY (blockExpr__body(mir_block_expr))).each_with_object(Set[], %(stmt, names: [Set]Any) -> {
     IF (stmt IS_A TransferMark AND (stmt.target == :block_result)) THEN
       RETURN &names.insert(COPY CAST(stmt.name() AS String));
     END
     NIL
       });
-      MUTABLE last = TRY (blockExpr__body(mir_block_expr)).reverse().grep(MIR.BreakStmt).first();
+      MUTABLE last = (TRY (blockExpr__body(mir_block_expr))).reverse().grep(MIR.BreakStmt).first();
       IF last THEN
         RETURN (mIRLowering__mir_ident_names(rtoc_self_view, last.value())) |> WHERE !((local_names.contains?(_) OR transferred_names.contains?(_)));
       ELSE

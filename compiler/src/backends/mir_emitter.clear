@@ -1119,7 +1119,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &args.append("a${param_index.toString()}");
       param_index = param_index + 1;
     END
-    MUTABLE clear_function = TRY (mIREmitter__emit(&rtoc_self_view, node.clear_function)).deletePrefix("&");
+    MUTABLE clear_function = (TRY (mIREmitter__emit(&rtoc_self_view, node.clear_function))).deletePrefix("&");
     MUTABLE clear_call = "${clear_function}(__clear_c_callback_rt orelse @panic(\"C callback escaped its synchronous CLEAR call\")${IF (args.length() == 0) THEN
       ""
     ELSE
@@ -1871,7 +1871,7 @@ PRIVATE FN mIREmitter__emit_snapshot_multi_txn(MUTABLE self: MIREmitter, node: S
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_zig = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
-    MUTABLE cells_tuple = ".{ ${(node.cells) |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _)).join(", ")} }";
+    MUTABLE cells_tuple = ".{ ${(node.cells) |> SELECT (TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ")} }";
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
     MUTABLE alias_decls = unsupportedRuby("CallNode at 1585:18: each_with_index requires a statically typed collection").join("\n            ");
     MUTABLE core = regexReplaceAll("CheatLib.versionedUpdateMulti(${cells_tuple}, ${node.rt}, ${alloc}, struct {\n    fn run(views: anytype) anyerror!void {\n        ${alias_decls}\n        ${body_zig}\n    }\n}.run, .{})\n", "\\s+\\z", "");
@@ -2272,7 +2272,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     "${mIREmitter__zig_field_name(rtoc_self_view, _.name())}: ${TRY (type__zig_type(_))}${default},"
     }).join("\n    ");
-    MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _)).join("\n\n    ");
+    MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT (TRY (mIREmitter__emit(&rtoc_self_view, _))).join("\n\n    ");
     MUTABLE parts = ([fields, methods]) |> WHERE !(_.empty?()).join("\n\n    ");
     IF node.name THEN
       RETURN "${vis}const ${node.name} = struct {\n    ${parts}\n};";
@@ -2307,7 +2307,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       vis = "";
     END
     MUTABLE fields = (node.variants |> SELECT "${_[:name]}: ${_[:zig_type]},").join("\n    ");
-    MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _)).join("\n\n    ");
+    MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT (TRY (mIREmitter__emit(&rtoc_self_view, _))).join("\n\n    ");
     MUTABLE parts = ([fields, methods]) |> WHERE !(_.empty?()).join("\n\n    ");
     IF node.name THEN
       RETURN "${vis}const ${castNamedEmittableReturnValueToString(node.name)} = union(enum) {\n    ${parts}\n};";
