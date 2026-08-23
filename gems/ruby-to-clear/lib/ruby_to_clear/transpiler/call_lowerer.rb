@@ -1620,6 +1620,14 @@ module RubyToClear
           types[parameter.name.to_s] = function_type_param_type(parameter_type)
         end
       end
+      # `n.times { |i| }` / `a.upto(b) { |i| }` yield an integer, and there is
+      # no declared block-parameter type to read it from. Without the stamp the
+      # lambda parameter renders untyped and every use of it types as Any.
+      if %w[times upto downto].include?(node.name.to_s)
+        counter = requireds.first
+        types[counter.name.to_s] ||= "Int64" if counter.respond_to?(:name)
+      end
+
       return types unless node.name.to_s == "each_with_object"
 
       element_param, accumulator_param = requireds

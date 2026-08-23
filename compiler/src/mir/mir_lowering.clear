@@ -15170,8 +15170,8 @@ PRIVATE FN mIRLowering__tense_map_bindings(self: MIRLowering, id: Int64, segment
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE bindings: []String = ( { MUTABLE rtoc_empty_list_565: []String = List[]; rtoc_empty_list_565 } );
-    count_value.times(%(index_value) USE(MUTABLE bindings, id, segment) -> {
-    &bindings.append("__tense_${segment}${id.toString()}_${index_value}");
+    count_value.times(%(index_value: Int64) USE(MUTABLE bindings, id, segment) -> {
+    &bindings.append("__tense_${segment}${id.toString()}_${index_value.toString()}");
     rubyToClearVoid()
     });
     RETURN bindings;

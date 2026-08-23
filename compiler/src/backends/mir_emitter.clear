@@ -1144,8 +1144,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF node.alloc_kind EXISTS AS alloc_kind_value THEN
         &args.append("f.alloc");
       END
-      runtime_arg_count.times(%(index_value) USE(MUTABLE args) -> {
-    &args.append("f.a${index_value}");
+      runtime_arg_count.times(%(index_value: Int64) USE(MUTABLE args) -> {
+    &args.append("f.a${index_value.toString()}");
     rubyToClearVoid()
       });
       RETURN "f.self_val.${method_name_value}(${args.join(", ")})";
@@ -1160,8 +1160,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node.alloc_kind EXISTS AS alloc_kind_value THEN
       &parts.append("f.alloc");
     END
-    runtime_arg_count.times(%(index_value) USE(MUTABLE parts) -> {
-    &parts.append("f.a${index_value}");
+    runtime_arg_count.times(%(index_value: Int64) USE(MUTABLE parts) -> {
+    &parts.append("f.a${index_value.toString()}");
     rubyToClearVoid()
     });
     RETURN "${mod_prefix}${node.callee_name}(${parts.join(", ")})";
