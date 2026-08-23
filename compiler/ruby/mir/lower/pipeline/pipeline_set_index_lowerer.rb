@@ -198,6 +198,15 @@ class PipelineSetIndexLowerer < T::Struct
     key_owned = !self.pipeline_owned_cleanup_entry.call(expr_mir, expr_node).nil?
     owned_value = if key_owned
       MIR::Ident.new("dist_key")
+    elsif elem_type.any_rc?
+      # An Rc/Arc handle is retained, never structurally duplicated: a
+      # DeepCopy of the handle bits would give the set a second owner of the
+      # same payload with one refcount between them.
+      MIR::RcRetain.new(
+        MIR::Ident.new("dist_key"),
+        ::FiberCtxBuilder.rc_payload_zig_type(Type.new(elem_type)),
+        elem_type.shared? ? "arcRetain" : "rcRetain"
+      )
     else
       MIR::DeepCopy.new(MIR::Ident.new("dist_key"), elem_zig, nil, :full_value, alloc)
     end

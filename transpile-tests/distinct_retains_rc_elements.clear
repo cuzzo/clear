@@ -1,0 +1,22 @@
+# Test: DISTINCT over @multiowned elements retains each handle instead of
+# deep-copying it. A structural copy of the handle bits hands the set a second
+# owner of the same payload sharing one refcount, so dropping the set frees a
+# payload the originals still point at.
+
+STRUCT Node { name: String }
+
+FN main() RETURNS Void ->
+    a: Node@multiowned = Node{ name: COPY "a" };
+    b: Node@multiowned = Node{ name: COPY "b" };
+    MUTABLE items: []Node@multiowned = List[];
+    &items.append(KEEP a);
+    &items.append(KEEP b);
+    &items.append(KEEP a);
+
+    uniq = (items |> DISTINCT _);
+    ASSERT uniq.length() == 2, "the repeated handle collapses to one entry";
+
+    # The originals outlive the set: their payloads must still be intact.
+    ASSERT a.name == "a", "the first payload survives the set";
+    ASSERT b.name == "b", "the second payload survives the set";
+END

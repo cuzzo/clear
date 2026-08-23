@@ -784,7 +784,26 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN symbolEntry__tied_lifetime(sources: []SymbolEntry@multiowned) RETURNS ![]SymbolEntry@multiowned ->
-  RETURN CAST((sources |> DISTINCT _) AS []SymbolEntry@multiowned);
+  RETURN TRY (symbolEntry__unique_sources(sources));
+END
+# Ruby's `sources.uniq` keeps an Array; DISTINCT yields a set, and a set of
+# retained handles compares by payload rather than by identity.
+PRIVATE FN symbolEntry__unique_sources(sources: []SymbolEntry@multiowned) RETURNS ![]SymbolEntry@multiowned ->
+  MUTABLE seen: [Set]Int64 = Set[];
+  MUTABLE unique: []SymbolEntry@multiowned = List[];
+  FOR source IN sources DO
+    MUTABLE local_source: SymbolEntry = COPY source;
+    MUTABLE place: ?Int64 = symbolEntry__semantic_place_id(local_source);
+    IF place EXISTS AS place_id THEN
+      IF !(seen.contains?(place_id)) THEN
+        &seen.insert(place_id);
+        &unique.append(KEEP source);
+      END
+    ELSE
+      &unique.append(KEEP source);
+    END
+  END
+  RETURN unique;
 END
 PUB FN symbolEntry__reg_symbol(self: SymbolEntry) RETURNS ?SymbolEntry@multiowned ->
   IF self.reg EXISTS AS reg THEN
@@ -1016,7 +1035,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     &normalized.append(castSymbolEntryLifetimeSourceInputToSymbolEntryMultiowned(COPY _));
     END
-    RETURN CAST((normalized |> DISTINCT _) AS []SymbolEntry@multiowned);
+    RETURN TRY (symbolEntry__unique_sources(normalized));
 }
 END
 PUB FN symbolEntry__new(reg: ?SymbolEntryRegInput, type: ?SymbolEntryTypeInput, mutable: Bool, storage: String@symbol, sync: ?String@symbol = NIL, layout: ?String@symbol = NIL, rebindable: Bool = FALSE, size: Int64 = 0, capabilities: [Set]String@symbol = Set[], valid: Bool = TRUE, invalid_reason: ?String = NIL, resource: ?Bool = NIL, close_plan: ?ResourceClosePlan = NIL) RETURNS !SymbolEntry@multiowned ->

@@ -8688,7 +8688,7 @@ PUB FN aST__node_capture_analysis(node: Locatable) RETURNS ?PassStateValue ->
   END
   RETURN NIL;
 END
-PUB FN aST__node_expr(node: Locatable) RETURNS ?Locatable@boxed ->
+PUB FN aST__node_expr(node: Locatable) RETURNS ?Locatable ->
   PARTIAL MATCH node START
     Locatable.YieldExpr AS item -> RETURN COPY item.expr;,
     Locatable.NextExpr AS item -> RETURN COPY item.expr;,
