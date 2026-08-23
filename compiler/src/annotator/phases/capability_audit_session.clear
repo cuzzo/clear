@@ -3190,7 +3190,7 @@ PRIVATE FN capabilityAuditSession__with_block_suspends?(self: CapabilityAuditSes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(node)))))) |> ANY _;
+    RETURN ((TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(node)))))).length() > 0);
 }
 END
 PRIVATE FN capabilityAuditSession__func_call_suspends?(self: CapabilityAuditSession, node: CallLikeNode) RETURNS !Bool
@@ -4040,7 +4040,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END]; rtoc_pipe_src |> DISTINCT _ } );
     ELSE
       possible = Set[];
-      IF site.cap_types |> ANY _ THEN
+      IF (site.cap_types.length() > 0) THEN
         &possible.insert(:LockTimeout);
       END
       FOR _ IN site.cap_types DO

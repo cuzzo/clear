@@ -2179,7 +2179,9 @@ module RubyToClear
         context.transpiler.closed_static_type_any_predicate(context.node) ||
           pipeline_value_stage(context.receiver_code, "ANY", context.node, context.transpiler, "any?")
       elsif context.receiver_shape == "array"
-        "#{pipeline_source(context.receiver_code)} |> ANY _"
+        # Blockless `any?` is Ruby's non-empty test; `|> ANY _` would demand a
+        # Bool element.
+        "(#{context.receiver_code}.length() > 0)"
       else
         nil
       end

@@ -1075,7 +1075,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.runtime_args |> ANY _.expr IS_A CFunctionAdapter THEN
       code = (code $+ "const __previous_c_callback_rt = __clear_c_callback_rt; __clear_c_callback_rt = ${rtoc_self_view.rt_name}; defer __clear_c_callback_rt = __previous_c_callback_rt; ");
     END
-    IF runtime_arg_codes |> ANY _ THEN
+    IF (runtime_arg_codes.length() > 0) THEN
       code = (code $+ "const ${args_tuple_name} = ${arg_tuple}; ");
     END
     MUTABLE field_decls: String = "";

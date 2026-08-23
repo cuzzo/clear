@@ -261,7 +261,7 @@ PRIVATE FN recursiveSplitter__contains_suspend_anywhere?(stmts: ?Stmts) RETURNS 
   RETURN FALSE;
 END
 PRIVATE FN recursiveSplitter__with_lock_suspend?(with_node: WithBlock) RETURNS !Bool ->
-  RETURN (TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_node)))))) |> ANY _;
+  RETURN ((TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_node)))))).length() > 0);
 END
 PRIVATE FN recursiveSplitter__contains_unsupported?(body: ?Body) RETURNS !Bool EFFECTS REENTRANT ->
   RETURN body |> ANY PARTIAL MATCH _ START

@@ -1861,7 +1861,7 @@ PRIVATE FN resolutionSession__register_struct_declaration(self: ResolutionSessio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF node.type_params |> ANY _ THEN
+    IF (node.type_params.length() > 0) THEN
       TRY (resolutionSession__validate_type_param_list_mut(rtoc_self_view, Node{ StructDef: COPY node }, node.type_params, "struct"));
     END
     TRY (resolutionSession__validate_generic_bounds_mut(rtoc_self_view, node.generic_params));
@@ -1970,7 +1970,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE synthetic_name = symbol("${node.name}_${_}");
     TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, ScopeScopeTypeSchema{ StructSchemaMultiowned: COPY TRY (structSchema__new(variant_data.fields().transform_values(%(type) -> StructField{ type: type, default: NIL, borrowed: FALSE }), ( { MUTABLE rtoc_empty_list_60: []String@symbol = List[]; rtoc_empty_list_60 } ), ( { MUTABLE rtoc_empty_list_61: []GenericParamDecl = List[]; rtoc_empty_list_61 } ), {}, {})) }));
     MUTABLE entries = TRY (resolutionSession__inline_struct_deinit_entries(rtoc_self_view, variant_data));
-    IF entries |> ANY _ THEN
+    IF (entries.length() > 0) THEN
         TRY (inlineStructVariant__set_deinit_entries(&variant_data, entries));
     END
     };

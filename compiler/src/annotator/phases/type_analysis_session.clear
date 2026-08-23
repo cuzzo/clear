@@ -3154,7 +3154,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_ternary_value_40? }));
     MUTABLE return_type =   IF body IS_A []Node THEN
       ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?Type = NIL;
-    IF found_returns |> ANY _ THEN
+    IF (found_returns.length() > 0) THEN
       rtoc_ternary_value_42 = (UNWRAP (found_returns.first())).type;
     ELSE
       rtoc_ternary_value_42 = :Any;
@@ -3163,7 +3163,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       body.resolved_type
     END;
-    IF (((is_implicit OR ruby_union_scalar_equal_optional_TypeTypeInput_String_symbol(declared_return, :Any))) AND (found_returns |> ANY _)) THEN
+    IF (((is_implicit OR ruby_union_scalar_equal_optional_TypeTypeInput_String_symbol(declared_return, :Any))) AND ((found_returns.length() > 0))) THEN
       MUTABLE inferred = (UNWRAP (found_returns.first())).type;
       IF (is_implicit OR (found_returns.length() == 1)) THEN
         return_type = inferred;
@@ -3466,7 +3466,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
           END
-          IF comptime_type_args |> ANY _ THEN
+          IF (comptime_type_args.length() > 0) THEN
             MATCH node START
               FunctionCallNode.FuncCall AS item ->
                 MUTABLE item_mutable = COPY item;
@@ -3480,9 +3480,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE type_params = TRY (functionSignature__type_params(signature));
-        IF type_params |> ANY _ THEN
+        IF (type_params.length() > 0) THEN
           comptime_type_args = (comptime_type_args OR_ELSE List[]);
-          IF (functionSignature__extern(signature) AND (comptime_type_args |> ANY _)) THEN
+          IF (functionSignature__extern(signature) AND ((comptime_type_args.length() > 0))) THEN
             subst = {};
             MUTABLE rtoc_idx = 0;
             WHILE rtoc_idx < type_params.length() DO
@@ -8908,7 +8908,7 @@ PRIVATE FN typeAnalysisSession__with_block_suspends?(self: TypeAnalysisSession, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(node)))))) |> ANY _;
+    RETURN ((TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(node)))))).length() > 0);
 }
 END
 PRIVATE FN typeAnalysisSession__func_call_suspends?(self: TypeAnalysisSession, node: CallLikeNode) RETURNS !Bool
@@ -14479,7 +14479,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (TRUE AND (CAST(cap_tok.value() AS String) == "@versioned")) THEN
         &fixes.append(TRY (fix__new(typeAnalysisSession__fix_description(rtoc_self_view, :UPGRADE_VERSIONED_TO_SHARED), [edit__new(span__new(NIL, cap_tok.line, cap_tok.column, "@versioned".codepointCount()), "@shared:versioned")], :auto)));
       END
-      IF fixes |> ANY _ THEN
+      IF (fixes.length() > 0) THEN
         TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, node, :lint, fixes, NIL, :BARE_VERSIONED_UNSHARED, :warning, FALSE, {:name: (MATCH node START DeclarationNode.VarDecl AS item -> item.name, DeclarationNode.BindExpr AS item -> item.name END)}));
       ELSE
         typeAnalysisSession__note_mut(rtoc_self_view, castDeclarationNodeToLocatable(node), typeAnalysisSession__diagnostic_message(rtoc_self_view, :BARE_VERSIONED_UNSHARED, [], {:name: (MATCH node START DeclarationNode.VarDecl AS item -> item.name, DeclarationNode.BindExpr AS item -> item.name END)}));
@@ -17097,7 +17097,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       possible.merge(snapshot_possible_types);
     END
     MUTABLE capability_plan = TRY (capabilityPlan__require_for(node));
-    IF (TRY (withCapabilityPlan__locks(capability_plan))) |> ANY _ THEN
+    IF ((TRY (withCapabilityPlan__locks(capability_plan))).length() > 0) THEN
       possible.merge(lock_possible_types);
     END
     IF !(((TRY (withCapabilityPlan__guarded(capability_plan))).length() == 0)) THEN
