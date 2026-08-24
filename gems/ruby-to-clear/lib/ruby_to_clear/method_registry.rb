@@ -2292,6 +2292,16 @@ module RubyToClear
         "#{context.receiver_code} ..= #{context.transpiler.expression_argument_code(limit.first)}")
     end
 
+    # CLEAR's String IS bytes, so a byte slice is the ordinary substring.
+    register("byteslice") do |context|
+      args = context.node.arguments&.arguments
+      next nil unless args&.length == 2
+
+      offset = context.transpiler.expression_argument_code(args[0])
+      length = context.transpiler.expression_argument_code(args[1])
+      "#{context.receiver_code}.substr(#{offset}, #{length})"
+    end
+
     register("one?", receiver: "array") do |context|
       next nil if context.node.block
 

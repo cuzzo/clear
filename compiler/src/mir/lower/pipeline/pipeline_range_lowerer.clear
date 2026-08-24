@@ -959,11 +959,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE needle_len = needle.bytes();
     MUTABLE result = "";
     WHILE (idx < source.bytes()) DO
-      IF (((source.byteslice(idx, needle_len) == needle) AND pipelineRangeLowerer__zig_identifier_boundary?(rtoc_self_view, source, (idx - 1))) AND pipelineRangeLowerer__zig_identifier_boundary?(rtoc_self_view, source, (idx + needle_len))) THEN
+      IF (((source.substr(idx, needle_len) == needle) AND pipelineRangeLowerer__zig_identifier_boundary?(rtoc_self_view, source, (idx - 1))) AND pipelineRangeLowerer__zig_identifier_boundary?(rtoc_self_view, source, (idx + needle_len))) THEN
         &result.append(COPY replacement);
         idx = (idx + needle_len);
       ELSE
-        &result.append(source.byteslice(idx, 1));
+        &result.append(source.substr(idx, 1));
         idx = (idx + 1);
       END
     END
