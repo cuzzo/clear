@@ -1369,10 +1369,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((index_value < 0) OR (index_value >= source.bytes())) THEN
       RETURN TRUE;
     END
-    MUTABLE byte = source.getbyte(index_value);
-    IF !(byte) THEN
-      RETURN TRUE;
-    END
+    MUTABLE byte = byteAt(source, index_value);
     RETURN !((((((((byte >= 48) AND (byte <= 57))) OR (((byte >= 65) AND (byte <= 90)))) OR (((byte >= 97) AND (byte <= 122)))) OR (byte == 95))));
 }
 END

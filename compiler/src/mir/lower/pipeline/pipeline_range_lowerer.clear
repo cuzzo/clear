@@ -977,7 +977,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((idx < 0) OR (idx >= source.bytes())) THEN
       RETURN TRUE;
     END
-    MUTABLE byte = source.getbyte(idx);
+    MUTABLE byte = byteAt(source, idx);
     RETURN !(pipelineRangeLowerer__zig_identifier_byte?(rtoc_self_view, byte));
 }
 END

@@ -2292,6 +2292,16 @@ module RubyToClear
         "#{context.receiver_code} ..= #{context.transpiler.expression_argument_code(limit.first)}")
     end
 
+    # `byteAt` is a free FN, not a METHOD, and returns 0 out of range where
+    # Ruby returns nil -- a caller that checks for nil needs its guard rewritten
+    # to a bounds check.
+    register("getbyte") do |context|
+      args = context.node.arguments&.arguments
+      next nil unless args&.length == 1
+
+      "byteAt(#{context.receiver_code}, #{context.transpiler.expression_argument_code(args.first)})"
+    end
+
     # CLEAR's String IS bytes, so a byte slice is the ordinary substring.
     register("byteslice") do |context|
       args = context.node.arguments&.arguments
