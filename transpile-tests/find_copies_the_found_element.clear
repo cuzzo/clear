@@ -1,0 +1,27 @@
+# Test: FIND's result is copied out of the loop variable's borrow. The fused
+# loop assigned the borrow straight into the result slot, so an owning element
+# left an ownership transfer with no allocation behind it.
+
+PUB STRUCT Note { text: String }
+PUB STRUCT Layer { kind: Int64, note: ?Note }
+
+FN first_of(layers: []Layer, kind: Int64) RETURNS ![]Layer ->
+  MUTABLE found: ?Layer = layers |> FIND (_.kind == kind);
+  MUTABLE result: []Layer = List[];
+  IF found EXISTS AS found_value THEN
+    &result.append(COPY found_value);
+  END
+  RETURN result;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE ls: []Layer = List[];
+  &ls.append(Layer{ kind: 1, note: Note{ text: COPY "one" } });
+  &ls.append(Layer{ kind: 2, note: NIL });
+
+  MUTABLE hit = TRY (first_of(ls, 1));
+  ASSERT hit.length() == 1;
+  ASSERT UNWRAP (UNWRAP (hit[0]).note).text == "one";
+
+  ASSERT (TRY (first_of(ls, 9))).length() == 0;
+END

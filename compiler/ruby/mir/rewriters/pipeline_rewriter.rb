@@ -559,10 +559,21 @@ class PipelineRewriter
       AST.stamp_synthetic_type!(val, Type.new(:NIL), context: "synthetic AST type")
       decl = AST::VarDecl.new(token, res_var, nil, val, true)
       AST.stamp_synthetic_type!(decl, smooth_node.full_type!, context: "synthetic AST type")
-      decl.storage   = :stack
-      decl.slot_size = Type.new(decl.full_type!).slot_size(T.unsafe(schema_lookup))
+      found_ty = Type.new(decl.full_type!)
+      # The found element is COPIED out of the loop variable's borrow, so an
+      # owning element makes this a heap binding whose reassignment frees the
+      # prior candidate -- the accumulator rule above, for one slot.
+      owned_found = found_ty.needs_cleanup?(T.unsafe(schema_lookup)) ||
+        found_ty.recursive_cleanup_shape?(T.unsafe(schema_lookup))
+      decl.storage   = owned_found ? :heap : :stack
+      decl.slot_size = found_ty.slot_size(T.unsafe(schema_lookup))
       decl.var_used = true
       decl.var_mutated = true
+      if owned_found
+        sym = SymbolEntry.new(reg: decl, type: found_ty, mutable: true, storage: :heap)
+        decl.symbol = sym
+        @reduce_acc_symbols[res_var] = sym
+      end
       [decl]
     when AST::MinOp, AST::MaxOp
       # Found-flag pattern: first element always sets result, subsequent compare
@@ -782,8 +793,20 @@ class PipelineRewriter
       [assign]
     when AST::FindOp
       expr = replace_placeholder(terminal.expression, current_val)
-      assign = AST::Assignment.new(token, res_ident, current_val.dup)
-      AST.stamp_synthetic_type!(assign, Type.new(:Void), context: "synthetic AST type")
+      # The loop variable BORROWS the element; the FIND result outlives the
+      # loop, so an owning element has to be copied out -- the same rule the
+      # list terminal below applies to a selected value.
+      acc_symbol = @reduce_acc_symbols[res_var]
+      found = T.let(current_val.dup, AST::Node)
+      if acc_symbol
+        found = AST::CopyNode.new(token, found)
+        AST.stamp_synthetic_type!(found, current_val.full_type!(context: "pipeline found value"),
+          context: "synthetic AST type")
+      end
+      assign = AST::BindExpr.new(token, res_var, nil, found, nil)
+      assign.mode = :assign
+      assign.symbol = acc_symbol
+      AST.stamp_synthetic_type!(assign, res_type || Type.new(:Void), context: "synthetic AST type")
       if_stmt = AST::IfStatement.new(token, expr, [assign, AST::BreakNode.new(token)], [])
       AST.stamp_synthetic_type!(if_stmt, Type.new(:Void), context: "synthetic AST type")
       [if_stmt]

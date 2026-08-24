@@ -258,12 +258,12 @@ PUB FN tenseOperationPlanner__try_value(type: Type) RETURNS !TenseOperationPlan 
   MUTABLE first: ?TenseLayer = COPY envelope.layers.first();
   IF (first?.kind == TenseLayerKind.Fallible) THEN
     MUTABLE result = TRY (tenseEnvelope__without_layer(envelope, 0));
-    TRY (tenseOperationPlanner__preserve_value_metadata_mut(CAST(result AS Type), type));
+    TRY (tenseOperationPlanner__preserve_value_metadata_mut(&result, type));
     RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Try, type, CAST(result AS Type), TenseBackendForm.ZigTry, [first?], envelope.layers |> SKIP 1, ( { MUTABLE rtoc_empty_list_4: []TenseLayer = List[]; rtoc_empty_list_4 } ), TensePropagation.Failure, TenseRecovery.None, TenseHandleUse.None, FALSE, TRUE);
   END
   IF (first?.kind == TenseLayerKind.Optional) THEN
     MUTABLE result = TRY (tenseEnvelope__without_layer(envelope, 0));
-    TRY (tenseOperationPlanner__preserve_value_metadata_mut(CAST(result AS Type), type));
+    TRY (tenseOperationPlanner__preserve_value_metadata_mut(&result, type));
     RETURN tenseOperationPlanner__operation_plan(TenseOperationKind.Try, type, CAST(result AS Type), TenseBackendForm.OptionalTry, [first?], envelope.layers |> SKIP 1, ( { MUTABLE rtoc_empty_list_5: []TenseLayer = List[]; rtoc_empty_list_5 } ), TensePropagation.AbsenceAsFailure, TenseRecovery.None, TenseHandleUse.None, FALSE, TRUE);
   END
   panic("TRY requires an outer fallible or optional layer, got {}");
@@ -386,7 +386,7 @@ PUB FN tenseOperationPlanner__or_else(type: Type, fallback_type: Type, operation
   END
   MUTABLE handled: []TenseLayer = List[];
   IF (recovery == TenseRecovery.Fallback) THEN
-    handled = available;
+    handled = COPY available;
   ELSE
     handled = available |> WHERE (_.kind == TenseLayerKind.Fallible);
   END
@@ -474,10 +474,10 @@ PRIVATE FN tenseOperationPlanner__normalize_immediate_navigation_segment(layers:
   MUTABLE optional: ?TenseLayer = layers |> FIND (_.kind == TenseLayerKind.Optional);
   MUTABLE result: []TenseLayer = ( { MUTABLE rtoc_empty_list_20: []TenseLayer = List[]; rtoc_empty_list_20 } );
   IF fallible EXISTS AS fallible_value THEN
-    &result.append(fallible_value);
+    &result.append(COPY fallible_value);
   END
   IF optional EXISTS AS optional_value THEN
-    &result.append(optional_value);
+    &result.append(COPY optional_value);
   END
   RETURN result;
 END
