@@ -5912,9 +5912,19 @@ PRIVATE FN typeAnalysisSession__analyze_pipe_to_func_call(MUTABLE self: TypeAnal
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    node.right.args().unshift(node.left);
+    # UFC: inject the LHS as the call's first argument so the ordinary
+    # FuncCall validation runs, then take it back out. CLEAR holds the args by
+    # value, so each edit is a write-back into node.right, not an in-place
+    # mutation of a returned list.
+    IF node.right IS_A FuncCall AS MUTABLE injected_call THEN
+      injected_call.args = ([node.left] + injected_call.args);
+      node.right = Locatable{ FuncCall: COPY injected_call };
+    END
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
-    node.right.args().shift();
+    IF node.right IS_A FuncCall AS MUTABLE visited_call THEN
+      visited_call.args = visited_call.args |> SKIP 1;
+      node.right = Locatable{ FuncCall: COPY visited_call };
+    END
     MUTABLE result_type = TRY (aST__full_type_mut(node.right));
     IF (typeAnalysisSession__has_catch_blocks?(rtoc_self_view) AND TRUE) THEN
       MUTABLE t = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY result_type }));
@@ -19895,17 +19905,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE curr: Any = COPY node;
     WHILE ((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap) DO
       IF curr IS_A GetField THEN
-        &path.unshift(type__to_sym(curr.field));
+        path = ([type__to_sym(curr.field)] + path);
       END
       IF curr IS_A GetIndex THEN
-        &path.unshift(symbol("*"));
+        path = ([symbol("*")] + path);
       END
       curr = curr.target;
     END
     IF !(curr IS_A Identifier) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_504: []String@symbol = List[]; rtoc_empty_list_504 } ) AS []String@symbol);
     END
-    &path.unshift(type__to_sym(curr.name()));
+    path = ([type__to_sym(curr.name())] + path);
     RETURN path;
 }
 END

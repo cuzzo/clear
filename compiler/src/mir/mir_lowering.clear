@@ -3882,15 +3882,22 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       :private
     END, can_fail: TRUE, comptime_params: List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
-    MUTABLE main_fn: ?Emittable = items |> FIND (IF _ IS_A FnDef AS fn_def THEN (((CAST(fn_def.name AS String) == zig_name) OR (CAST(fn_def.name AS String) == name))) ELSE FALSE END);
-    IF main_fn? IS_A FnDef AS fn_def THEN
-      MUTABLE rtoc_reverse_items_99: []ConstInitEntry = entries;
-      MUTABLE rtoc_reverse_i_100 = rtoc_reverse_items_99.length() - 1;
-      WHILE rtoc_reverse_i_100 >= 0 DO
-    fnDef__body(fn_def).unshift(ModuleConstFree{ name: COPY ((rtoc_reverse_items_99[rtoc_reverse_i_100])?).name, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
-    rtoc_reverse_i_100 = rtoc_reverse_i_100 - 1;
+    # `items` owns the FnDef by value, so the prologue has to be written BACK
+    # into the slot: mutating a FIND result would update a copy.
+    MUTABLE main_idx = 0;
+    WHILE main_idx < items.length() DO
+      IF (items[main_idx])? IS_A FnDef AS MUTABLE fn_def THEN
+        IF ((CAST(fn_def.name AS String) == zig_name) OR (CAST(fn_def.name AS String) == name)) THEN
+          MUTABLE prologue: []Emittable = [Emittable{ Call: COPY Call{ callee: COPY "__clear_init_consts", args: [Emittable{ Ident: COPY Ident{ name: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: TRUE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }];
+          FOR _ IN entries DO
+            &prologue.append(Emittable{ ModuleConstFree: COPY ModuleConstFree{ name: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+          END
+          fn_def.body = (prologue + fn_def.body);
+          items[main_idx] = Emittable{ FnDef: COPY fn_def };
+          BREAK;
+        END
       END
-      fnDef__body(fn_def).unshift(Call{ callee: COPY "__clear_init_consts", args: [Emittable{ Ident: COPY Ident{ name: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: TRUE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL });
+      main_idx = main_idx + 1;
     END
 }
 END
@@ -4640,14 +4647,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     END
     MUTABLE methods: []FnDef = ( { MUTABLE rtoc_empty_list_134: []FnDef = List[]; rtoc_empty_list_134 } );
-    &drop_statements.unshift(Suppress{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+    drop_statements = ([Suppress{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + drop_statements);
     IF (drop_statements.length() == 1) THEN
-      &drop_statements.unshift(Suppress{ name: "self", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+      drop_statements = ([Suppress{ name: "self", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + drop_statements);
     END
     &methods.append(FnDef{ name: "__clear_drop", params: [MIRParam{ name: "self", zig_type: "*@This()", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }, MIRParam{ name: "alloc", zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }], ret_type: "void", body: drop_statements |> SELECT castStmtToLocatable(_), visibility: :pub, can_fail: FALSE, comptime_params: List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
     IF !(copy_forbidden) THEN
       clone_statements[0] = Let{ name: COPY "result", init: Emittable{ Ident: COPY self_ref }, mutable: clone_fields |> ANY _, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
-      &clone_statements.unshift(Suppress{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+      clone_statements = ([Suppress{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + clone_statements);
       &clone_statements.append(Stmt{ Emittable: COPY CAST(ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: "result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) });
       &methods.append(FnDef{ name: "__clear_clone", params: [MIRParam{ name: "self", zig_type: "@This()", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }, MIRParam{ name: "alloc", zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }], ret_type: "@This()", body: clone_statements |> SELECT castStmtToLocatable(_), visibility: :pub, can_fail: TRUE, comptime_params: List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
     END
@@ -8568,7 +8575,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     params
     };
     IF fn_needs_rt THEN
-      &params_mir.unshift(MIRParam{ name: "rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL });
+      params_mir = ([MIRParam{ name: "rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }] + params_mir);
     END
     MUTABLE comptime_params = node.type_params |> SELECT "comptime ${_}: type";
     MUTABLE tied_shared_return: ?String = mIRLowering__tied_shared_family_return_param(rtoc_self_view, UNWRAP (node), context.mutable_scalar_params);
@@ -17579,7 +17586,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     END
     IF (TRY (type__node_reference?(facts.ft)) AND (!(nodes |> ANY _ IS_A AllocMark))) THEN
-      &nodes.unshift(AllocMark{ name: COPY safe_name, alloc: :heap, type_info: COPY facts.ft, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+      nodes = ([AllocMark{ name: COPY safe_name, alloc: :heap, type_info: COPY facts.ft, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + nodes);
       &nodes.append(Stmt{ Emittable: COPY CAST(Cleanup{ name: COPY safe_name, cleanup_entry: cleanupEntry__build(:uniform, :heap, FALSE), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) });
     END
     MUTABLE owner_marks = TRY (mIRLowering__field_owner_move_marks(rtoc_self_view, node));

@@ -1476,7 +1476,7 @@ PRIVATE FN mIREmitter__emit_polymorphic_mutate(MUTABLE self: MIREmitter, node: P
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE captures = TRY (mIREmitter__polymorphic_read_captures(rtoc_self_view, node.body, [node.alias_name]));
     IF !(captures.contains?(CAST(node.rt AS String))) THEN
-      &captures.unshift(CAST(node.rt AS String));
+      captures = ([CAST(node.rt AS String)] + captures);
     END
     MUTABLE overrides = TRY (mIREmitter__polymorphic_capture_overrides(rtoc_self_view, captures));
     MUTABLE guard_captures = TRY (mIREmitter__polymorphic_move_guard_captures(rtoc_self_view, node.body, [node.alias_name]));
@@ -1524,7 +1524,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cell_zig = TRY (mIREmitter__emit(&rtoc_self_view, node.cell));
     MUTABLE captures = TRY (mIREmitter__polymorphic_read_captures(rtoc_self_view, ((node.body) + ((node.guard_fail_body OR_ELSE List[]))), [node.alias_name, "__flow"]));
     IF !(captures.contains?(CAST(node.rt AS String))) THEN
-      &captures.unshift(CAST(node.rt AS String));
+      captures = ([CAST(node.rt AS String)] + captures);
     END
     MUTABLE overrides = TRY (mIREmitter__polymorphic_capture_overrides(rtoc_self_view, captures));
     MUTABLE all_bodies = ((node.body) + ((node.guard_fail_body OR_ELSE List[])));
@@ -2171,7 +2171,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE parts = node.items |> SELECT:? TRY (mIREmitter__emit_container_item(&rtoc_self_view, _)) |> WHERE _ != NIL;
     MUTABLE symbol_pool = mIREmitter__symbol_pool_declarations(rtoc_self_view);
     IF !((symbol_pool.length() == 0)) THEN
-      &parts.unshift(symbol_pool);
+      parts = ([symbol_pool] + parts);
     END
     MUTABLE out = List[];
     MUTABLE rtoc_idx = 0;

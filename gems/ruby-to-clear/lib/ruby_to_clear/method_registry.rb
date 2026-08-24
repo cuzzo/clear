@@ -2292,6 +2292,16 @@ module RubyToClear
         "#{context.receiver_code} ..= #{context.transpiler.expression_argument_code(limit.first)}")
     end
 
+    # CLEAR has no prepend METHOD; concatenation onto a fresh list is the
+    # spelling, and unshift is O(n) either way.
+    register("unshift", receiver: "array") do |context|
+      args = context.node.arguments&.arguments
+      next nil unless args&.length == 1
+      next nil unless context.receiver_code.to_s.match?(/\A[A-Za-z_]\w*\z/)
+
+      "#{context.receiver_code} = ([#{context.transpiler.expression_argument_code(args.first)}] + #{context.receiver_code})"
+    end
+
     # `byteAt` is a free FN, not a METHOD, and returns 0 out of range where
     # Ruby returns nil -- a caller that checks for nil needs its guard rewritten
     # to a bounds check.
