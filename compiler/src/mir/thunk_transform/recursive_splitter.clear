@@ -147,10 +147,9 @@ PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set
   IF node EXISTS AS node_value THEN
     MUTABLE stack: []Locatable = ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } );
     IF node_value IS_A []Node AS array THEN
-      MUTABLE rtoc_reverse_items_2: []Node = array;
-      MUTABLE rtoc_reverse_i_3 = rtoc_reverse_items_2.length() - 1;
+      MUTABLE rtoc_reverse_i_3 = array.length() - 1;
       WHILE rtoc_reverse_i_3 >= 0 DO
-  &stack.append(COPY (rtoc_reverse_items_2[rtoc_reverse_i_3])?);
+  &stack.append(COPY (array[rtoc_reverse_i_3])?);
   rtoc_reverse_i_3 = rtoc_reverse_i_3 - 1;
       END
     ELSE
