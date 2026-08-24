@@ -480,14 +480,23 @@ class PipelineMaterializer
 
   sig { params(elem_zig: String).returns(PipelineMaterializer::BufferSetup) }
   def var_and_defer(elem_zig)
-    var_decl = MIR::Let.new("pipe_mat",
+    var_decl = self_managed_let("pipe_mat",
       MIR::ContainerInit.new("std.ArrayListUnmanaged(#{elem_zig})",
-        :array_list_empty, result_alloc, nil),
-      true, nil, nil)
+        :array_list_empty, result_alloc, nil))
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
         [MIR::AllocatorRef.new(result_alloc)], false, MIR::CallableContract.no_ownership(1)))
     BufferSetup.new(var_decl: var_decl, defer_stmt: defer)
+  end
+
+  # The `deinit` this buffer defers IS its cleanup: it frees the list's own
+  # storage and leaves the borrowed element views alone, which no uniform
+  # MIR::Cleanup can express.
+  sig { params(name: String, init: MIR::Emittable).returns(MIR::Let) }
+  def self_managed_let(name, init)
+    let = MIR::Let.new(name, init, true, nil, nil)
+    let.self_managed_alloc = true
+    let
   end
 
   sig { returns(MIR::Let) }
@@ -635,7 +644,7 @@ class PipelineMaterializer
       [MIR::AllocatorRef.new(:heap)], true, MIR::CallableContract.no_ownership(1))
     [
       MIR::Let.new("pipe_src_list", source_mir, true, nil, "_ = &pipe_src_list;"),
-      MIR::Let.new("pipe_mat", to_list, true, nil, nil),
+      self_managed_let("pipe_mat", to_list),
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
         [MIR::AllocatorRef.new(:heap)], false, MIR::CallableContract.no_ownership(1))),
       MIR::Let.new("pipe_items", MIR::ItemsAccess.new(MIR::Ident.new("pipe_mat"), true), false, nil, nil),

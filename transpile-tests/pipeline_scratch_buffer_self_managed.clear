@@ -1,0 +1,17 @@
+# Test: a pipeline that materializes its source into a scratch buffer verifies.
+# The buffer holds BORROWED views of the source and frees only its own storage,
+# but ownership finalization invented an allocation contract for it that no
+# uniform cleanup could close.
+
+FN sorted_names(names: [Set]String) RETURNS []String ->
+  RETURN names |> ORDER_BY _;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE names: [Set]String = Set["pear", "apple", "fig"];
+  MUTABLE ordered = sorted_names(names);
+  ASSERT ordered.length() == 3;
+  ASSERT UNWRAP (ordered[0]) == "apple";
+  ASSERT UNWRAP (ordered[1]) == "fig";
+  ASSERT UNWRAP (ordered[2]) == "pear";
+END

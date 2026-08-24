@@ -462,7 +462,7 @@ class MIRChecker
         end
       when MIR::Let
         owned_return_lets << node if owned_return_init?(node.init)
-        owned_result_lets << node if expr_owned_result_alloc(node.init)
+        owned_result_lets << node if expr_owned_result_alloc(node.init) && !node.self_managed_alloc
       when MIR::ExprStmt
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
       when MIR::LambdaExpr
@@ -1165,6 +1165,7 @@ class MIRChecker
   def verify_allocating_lets_marked!(nodes, allocs)
     nodes.each do |node|
       next unless node.is_a?(MIR::Let)
+      next if node.self_managed_alloc
       next unless allocating_expr?(node.init)
       next if allocs.key?(node.name)
       @errors << error(:ALLOCATING_LET_WITHOUT_ALLOC, node.name,

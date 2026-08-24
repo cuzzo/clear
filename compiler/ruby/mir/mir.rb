@@ -1200,6 +1200,17 @@ module MIR
     def const_visibility = @const_visibility
     sig { params(value: T.nilable(Symbol)).void }
     def const_visibility=(value); @const_visibility = value; end
+    # The producer emitted this binding's whole lifetime itself. A pipeline's
+    # scratch buffer is the case: it holds BORROWED views of its source and
+    # frees only its own storage, which no uniform cleanup can express -- so
+    # ownership finalization must not invent an allocation contract for it.
+    sig { returns(T::Boolean) }
+    def self_managed_alloc
+      @self_managed_alloc = T.let(nil, T.nilable(T::Boolean)) unless defined?(@self_managed_alloc)
+      @self_managed_alloc == true
+    end
+    sig { params(value: T::Boolean).void }
+    def self_managed_alloc=(value); @self_managed_alloc = T.let(value, T.nilable(T::Boolean)); end
     sig do
       params(
         name: T.any(String, Symbol),

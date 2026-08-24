@@ -1401,10 +1401,10 @@ PRIVATE FN mIREmitter__sharded_map_value_type(node: MIREmitterShardedMapNode) RE
   END
   RETURN NIL;
 END
-PRIVATE FN mIREmitter__sharded_map_resolved_allocs(node: MIREmitterShardedMapNode) RETURNS InlineAllocMetadata ->
+PRIVATE FN mIREmitter__sharded_map_resolved_allocs(node: MIREmitterShardedMapNode) RETURNS InlineAllocMetadata@multiowned ->
   PARTIAL MATCH node START
-    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN COPY item.resolved_allocs;,
-    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN COPY item.resolved_allocs;
+    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN KEEP item.resolved_allocs;,
+    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN KEEP item.resolved_allocs;
   END
   panic("unreachable sharded map node");
 END

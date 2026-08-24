@@ -2694,6 +2694,8 @@ class MIRLowering
   sig { params(node: MIR::Node, state: OwnershipFinalizationContext).returns(T.nilable(AllocatingResultFact)) }
   def implicit_allocating_result_fact(node, state)
     return nil unless node.is_a?(MIR::Let)
+    return nil if node.self_managed_alloc
+
     init = node.init
     return nil unless mir_allocates?(init)
     return nil if mutating_receiver_allocator_op?(init)
