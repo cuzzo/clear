@@ -58,10 +58,7 @@ FN fnDef__has_own_frame?(self: FnDef) RETURNS Bool ->
   RETURN TRUE;
 END
 FN fnDef__body_slots(MUTABLE self: FnDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([fnDef__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([fnDef__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN fnDef__body(self: FnDef) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -110,8 +107,8 @@ FN fnDef__append_child_expr<T>(self: FnDef, MUTABLE children: []Emittable, value
   END
   RETURN NIL;
 END
-FN fnDef__body_slot(self: FnDef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fnDef__body_slot(self: FnDef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fnDef__owned_effect_for_alloc(self: FnDef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -194,8 +191,8 @@ FN param__append_child_expr<T>(self: MIRParam, MUTABLE children: []Emittable, va
   END
   RETURN NIL;
 END
-FN param__body_slot(self: MIRParam, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN param__body_slot(self: MIRParam, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN param__owned_effect_for_alloc(self: MIRParam, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -241,10 +238,7 @@ FN structDef__body_slots(MUTABLE self: MIRStructDef) RETURNS ![]MIRBodySlot EFFE
     MUTABLE empty_body_slots: []MIRBodySlot = [];
     RETURN empty_body_slots;
   END
-  RETURN CAST([structDef__body_slot(self, :methods, self.methods, %(new_methods: []Emittable) USE(MUTABLE self) -> {
-  self.methods = new_methods;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([structDef__body_slot(self, :methods, self.methods)] AS []MIRBodySlot);
 END
 FN structDef__name(self: MIRStructDef) RETURNS StructDefReturnValue ->
 
@@ -293,8 +287,8 @@ FN structDef__append_child_expr<T>(self: MIRStructDef, MUTABLE children: []Emitt
   END
   RETURN NIL;
 END
-FN structDef__body_slot(self: MIRStructDef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN structDef__body_slot(self: MIRStructDef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN structDef__owned_effect_for_alloc(self: MIRStructDef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -362,8 +356,8 @@ FN fieldDef__append_child_expr<T>(self: FieldDef, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN fieldDef__body_slot(self: FieldDef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fieldDef__body_slot(self: FieldDef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fieldDef__owned_effect_for_alloc(self: FieldDef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -451,8 +445,8 @@ FN enumDef__append_child_expr<T>(self: MIREnumDef, MUTABLE children: []Emittable
   END
   RETURN NIL;
 END
-FN enumDef__body_slot(self: MIREnumDef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN enumDef__body_slot(self: MIREnumDef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN enumDef__owned_effect_for_alloc(self: MIREnumDef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -522,8 +516,8 @@ FN unionTypeDef__append_child_expr<T>(self: UnionTypeDef, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN unionTypeDef__body_slot(self: UnionTypeDef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN unionTypeDef__body_slot(self: UnionTypeDef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN unionTypeDef__owned_effect_for_alloc(self: UnionTypeDef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -589,8 +583,8 @@ FN import__append_child_expr<T>(self: Import, MUTABLE children: []Emittable, val
   END
   RETURN NIL;
 END
-FN import__body_slot(self: Import, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN import__body_slot(self: Import, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN import__owned_effect_for_alloc(self: Import, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -658,8 +652,8 @@ FN typeAlias__append_child_expr<T>(self: TypeAlias, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN typeAlias__body_slot(self: TypeAlias, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN typeAlias__body_slot(self: TypeAlias, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN typeAlias__owned_effect_for_alloc(self: TypeAlias, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -730,8 +724,8 @@ FN cExternFnDecl__append_child_expr<T>(self: CExternFnDecl, MUTABLE children: []
   END
   RETURN NIL;
 END
-FN cExternFnDecl__body_slot(self: CExternFnDecl, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN cExternFnDecl__body_slot(self: CExternFnDecl, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN cExternFnDecl__owned_effect_for_alloc(self: CExternFnDecl, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -799,8 +793,8 @@ FN cExternStructDef__append_child_expr<T>(self: CExternStructDef, MUTABLE childr
   END
   RETURN NIL;
 END
-FN cExternStructDef__body_slot(self: CExternStructDef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN cExternStructDef__body_slot(self: CExternStructDef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN cExternStructDef__owned_effect_for_alloc(self: CExternStructDef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -864,8 +858,8 @@ FN moduleNamespace__append_child_expr<T>(self: ModuleNamespace, MUTABLE children
   END
   RETURN NIL;
 END
-FN moduleNamespace__body_slot(self: ModuleNamespace, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN moduleNamespace__body_slot(self: ModuleNamespace, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN moduleNamespace__owned_effect_for_alloc(self: ModuleNamespace, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -890,10 +884,7 @@ FN testDef__set_needs_scheduler(MUTABLE self: TestDef, value: Bool) RETURNS Void
   self.needs_scheduler = COPY value;
 END
 FN testDef__body_slots(MUTABLE self: TestDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([testDef__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([testDef__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN testDef__body(self: TestDef) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -942,8 +933,8 @@ FN testDef__append_child_expr<T>(self: TestDef, MUTABLE children: []Emittable, v
   END
   RETURN NIL;
 END
-FN testDef__body_slot(self: TestDef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN testDef__body_slot(self: TestDef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN testDef__owned_effect_for_alloc(self: TestDef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1033,8 +1024,8 @@ FN let__append_child_expr<T>(self: Let, MUTABLE children: []Emittable, value: T)
   END
   RETURN NIL;
 END
-FN let__body_slot(self: Let, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN let__body_slot(self: Let, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN let__owned_effect_for_alloc(self: Let, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1099,8 +1090,8 @@ FN set__append_child_expr<T>(self: Set, MUTABLE children: []Emittable, value: T)
   END
   RETURN NIL;
 END
-FN set__body_slot(self: Set, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN set__body_slot(self: Set, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN set__owned_effect_for_alloc(self: Set, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1180,8 +1171,8 @@ FN destructureTarget__append_child_expr<T>(self: MIRDestructureTarget, MUTABLE c
   END
   RETURN NIL;
 END
-FN destructureTarget__body_slot(self: MIRDestructureTarget, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN destructureTarget__body_slot(self: MIRDestructureTarget, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN destructureTarget__owned_effect_for_alloc(self: MIRDestructureTarget, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1245,8 +1236,8 @@ FN destructureSet__append_child_expr<T>(self: DestructureSet, MUTABLE children: 
   END
   RETURN NIL;
 END
-FN destructureSet__body_slot(self: DestructureSet, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN destructureSet__body_slot(self: DestructureSet, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN destructureSet__owned_effect_for_alloc(self: DestructureSet, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1312,8 +1303,8 @@ FN reassignWithCleanup__append_child_expr<T>(self: ReassignWithCleanup, MUTABLE 
   END
   RETURN NIL;
 END
-FN reassignWithCleanup__body_slot(self: ReassignWithCleanup, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN reassignWithCleanup__body_slot(self: ReassignWithCleanup, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN reassignWithCleanup__owned_effect_for_alloc(self: ReassignWithCleanup, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1377,8 +1368,8 @@ FN resourceClose__append_child_expr<T>(self: ResourceClose, MUTABLE children: []
   END
   RETURN NIL;
 END
-FN resourceClose__body_slot(self: ResourceClose, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN resourceClose__body_slot(self: ResourceClose, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN resourceClose__owned_effect_for_alloc(self: ResourceClose, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1401,15 +1392,9 @@ FN ifStmt__child_exprs(self: IfStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN ifStmt__compact_child_exprs(self, [CAST(self.cond AS Any)]);
 END
 FN ifStmt__body_slots(MUTABLE self: IfStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = [ifStmt__body_slot(self, :then_body, self.then_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.then_body = new_body;
-  rubyToClearVoid()
-  })];
+  MUTABLE slots: []MIRBodySlot = [ifStmt__body_slot(self, :then_body, self.then_body)];
   IF self.else_body != NIL THEN
-    &slots.append(ifStmt__body_slot(self, :else_body, UNWRAP (self.else_body), %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.else_body = new_body;
-  rubyToClearVoid()
-    }));
+    &slots.append(ifStmt__body_slot(self, :else_body, UNWRAP (self.else_body)));
   END
   RETURN slots;
 END
@@ -1453,8 +1438,8 @@ FN ifStmt__append_child_expr<T>(self: IfStmt, MUTABLE children: []Emittable, val
   END
   RETURN NIL;
 END
-FN ifStmt__body_slot(self: IfStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ifStmt__body_slot(self: IfStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ifStmt__owned_effect_for_alloc(self: IfStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1485,15 +1470,9 @@ FN ifBindStmt__child_exprs(self: IfBindStmt) RETURNS ![]Emittable EFFECTS REENTR
   RETURN ifBindStmt__compact_child_exprs(self, exprs);
 END
 FN ifBindStmt__body_slots(MUTABLE self: IfBindStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = [ifBindStmt__body_slot(self, :then_body, self.then_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.then_body = new_body;
-  rubyToClearVoid()
-  })];
+  MUTABLE slots: []MIRBodySlot = [ifBindStmt__body_slot(self, :then_body, self.then_body)];
   IF self.else_body != NIL THEN
-    &slots.append(ifBindStmt__body_slot(self, :else_body, UNWRAP (self.else_body), %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.else_body = new_body;
-  rubyToClearVoid()
-    }));
+    &slots.append(ifBindStmt__body_slot(self, :else_body, UNWRAP (self.else_body)));
   END
   RETURN slots;
 END
@@ -1537,8 +1516,8 @@ FN ifBindStmt__append_child_expr<T>(self: IfBindStmt, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN ifBindStmt__body_slot(self: IfBindStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ifBindStmt__body_slot(self: IfBindStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ifBindStmt__owned_effect_for_alloc(self: IfBindStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1563,10 +1542,7 @@ FN whileStmt__child_exprs(self: WhileStmt) RETURNS ![]Emittable EFFECTS REENTRAN
   RETURN whileStmt__compact_child_exprs(self, [CAST(self.cond AS Any), CAST(self.update AS Any)]);
 END
 FN whileStmt__body_slots(MUTABLE self: WhileStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([whileStmt__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([whileStmt__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN whileStmt__body(self: WhileStmt) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -1611,8 +1587,8 @@ FN whileStmt__append_child_expr<T>(self: WhileStmt, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN whileStmt__body_slot(self: WhileStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN whileStmt__body_slot(self: WhileStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN whileStmt__owned_effect_for_alloc(self: WhileStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1637,10 +1613,7 @@ FN forStmt__child_exprs(self: ForStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN forStmt__compact_child_exprs(self, [CAST(self.iter AS Any)]);
 END
 FN forStmt__body_slots(MUTABLE self: ForStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([forStmt__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([forStmt__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN forStmt__body(self: ForStmt) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -1685,8 +1658,8 @@ FN forStmt__append_child_expr<T>(self: ForStmt, MUTABLE children: []Emittable, v
   END
   RETURN NIL;
 END
-FN forStmt__body_slot(self: ForStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN forStmt__body_slot(self: ForStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN forStmt__owned_effect_for_alloc(self: ForStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1703,10 +1676,7 @@ PUB STRUCT ScopeBlock {
 }
 
 FN scopeBlock__body_slots(MUTABLE self: ScopeBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([scopeBlock__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([scopeBlock__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN scopeBlock__body(self: ScopeBlock) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -1755,8 +1725,8 @@ FN scopeBlock__append_child_expr<T>(self: ScopeBlock, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN scopeBlock__body_slot(self: ScopeBlock, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN scopeBlock__body_slot(self: ScopeBlock, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN scopeBlock__owned_effect_for_alloc(self: ScopeBlock, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1791,19 +1761,11 @@ FN switchStmt__body_slots(MUTABLE self: SwitchStmt) RETURNS ![]MIRBodySlot EFFEC
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_25: []MIRBodySlot = List[]; rtoc_empty_list_25 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.arms.length() DO
-  &slots.append(switchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (self.arms[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
-    MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
-    rtoc_slot_arm.body = new_body;
-    self.arms[rtoc_idx] = rtoc_slot_arm;
-    rubyToClearVoid()
-  }));
+  &slots.append(switchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (self.arms[rtoc_idx]).body));
   rtoc_idx = rtoc_idx + 1;
   END
   IF self.default_body THEN
-    &slots.append(switchStmt__body_slot(self, :default_body, self.default_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.default_body = new_body;
-  rubyToClearVoid()
-    }));
+    &slots.append(switchStmt__body_slot(self, :default_body, self.default_body));
   END
   RETURN slots;
 END
@@ -1847,8 +1809,8 @@ FN switchStmt__append_child_expr<T>(self: SwitchStmt, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN switchStmt__body_slot(self: SwitchStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN switchStmt__body_slot(self: SwitchStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN switchStmt__owned_effect_for_alloc(self: SwitchStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1875,20 +1837,12 @@ FN unionMatchStmt__body_slots(MUTABLE self: UnionMatchStmt) RETURNS ![]MIRBodySl
       MUTABLE rtoc_each_items_28 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_28.length() DO
-      &slots.append(unionMatchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_28[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
-        MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
-        rtoc_slot_arm.body = new_body;
-        self.arms[rtoc_idx] = rtoc_slot_arm;
-        rubyToClearVoid()
-      }));
+      &slots.append(unionMatchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_28[rtoc_idx]).body));
       rtoc_idx = rtoc_idx + 1;
       END
   END
   IF self.default_body THEN
-    &slots.append(unionMatchStmt__body_slot(self, :default_body, self.default_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.default_body = new_body;
-  rubyToClearVoid()
-    }));
+    &slots.append(unionMatchStmt__body_slot(self, :default_body, self.default_body));
   END
   RETURN slots;
 END
@@ -1932,8 +1886,8 @@ FN unionMatchStmt__append_child_expr<T>(self: UnionMatchStmt, MUTABLE children: 
   END
   RETURN NIL;
 END
-FN unionMatchStmt__body_slot(self: UnionMatchStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN unionMatchStmt__body_slot(self: UnionMatchStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN unionMatchStmt__owned_effect_for_alloc(self: UnionMatchStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -1961,19 +1915,11 @@ FN ifChain__body_slots(MUTABLE self: IfChain) RETURNS ![]MIRBodySlot EFFECTS REE
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_30: []MIRBodySlot = List[]; rtoc_empty_list_30 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.branches.length() DO
-  &slots.append(ifChain__body_slot(self, symbol("branches_${rtoc_idx.toString()}"), UNWRAP (self.branches[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
-    MUTABLE rtoc_slot_arm = COPY UNWRAP (self.branches[rtoc_idx]);
-    rtoc_slot_arm.body = new_body;
-    self.branches[rtoc_idx] = rtoc_slot_arm;
-    rubyToClearVoid()
-  }));
+  &slots.append(ifChain__body_slot(self, symbol("branches_${rtoc_idx.toString()}"), UNWRAP (self.branches[rtoc_idx]).body));
   rtoc_idx = rtoc_idx + 1;
   END
   IF self.default_body THEN
-    &slots.append(ifChain__body_slot(self, :default_body, self.default_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.default_body = new_body;
-  rubyToClearVoid()
-    }));
+    &slots.append(ifChain__body_slot(self, :default_body, self.default_body));
   END
   RETURN slots;
 END
@@ -2017,8 +1963,8 @@ FN ifChain__append_child_expr<T>(self: IfChain, MUTABLE children: []Emittable, v
   END
   RETURN NIL;
 END
-FN ifChain__body_slot(self: IfChain, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ifChain__body_slot(self: IfChain, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ifChain__owned_effect_for_alloc(self: IfChain, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2081,8 +2027,8 @@ FN returnStmt__append_child_expr<T>(self: ReturnStmt, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN returnStmt__body_slot(self: ReturnStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN returnStmt__body_slot(self: ReturnStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN returnStmt__owned_effect_for_alloc(self: ReturnStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2146,8 +2092,8 @@ FN breakStmt__append_child_expr<T>(self: BreakStmt, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN breakStmt__body_slot(self: BreakStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN breakStmt__body_slot(self: BreakStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN breakStmt__owned_effect_for_alloc(self: BreakStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2207,8 +2153,8 @@ FN breakExpr__append_child_expr<T>(self: BreakExpr, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN breakExpr__body_slot(self: BreakExpr, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN breakExpr__body_slot(self: BreakExpr, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN breakExpr__owned_effect_for_alloc(self: BreakExpr, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2272,8 +2218,8 @@ FN continueStmt__append_child_expr<T>(self: ContinueStmt, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN continueStmt__body_slot(self: ContinueStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN continueStmt__body_slot(self: ContinueStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN continueStmt__owned_effect_for_alloc(self: ContinueStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2337,8 +2283,8 @@ FN panic__append_child_expr<T>(self: Panic, MUTABLE children: []Emittable, value
   END
   RETURN NIL;
 END
-FN panic__body_slot(self: Panic, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN panic__body_slot(self: Panic, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN panic__owned_effect_for_alloc(self: Panic, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2402,8 +2348,8 @@ FN assertStmt__append_child_expr<T>(self: AssertStmt, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN assertStmt__body_slot(self: AssertStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN assertStmt__body_slot(self: AssertStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN assertStmt__owned_effect_for_alloc(self: AssertStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2472,8 +2418,8 @@ FN assertRaisesCheck__append_child_expr<T>(self: AssertRaisesCheck, MUTABLE chil
   END
   RETURN NIL;
 END
-FN assertRaisesCheck__body_slot(self: AssertRaisesCheck, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN assertRaisesCheck__body_slot(self: AssertRaisesCheck, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN assertRaisesCheck__owned_effect_for_alloc(self: AssertRaisesCheck, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2537,8 +2483,8 @@ FN testPreamble__append_child_expr<T>(self: TestPreamble, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN testPreamble__body_slot(self: TestPreamble, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN testPreamble__body_slot(self: TestPreamble, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN testPreamble__owned_effect_for_alloc(self: TestPreamble, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2555,10 +2501,7 @@ PUB STRUCT DebugOnly {
 }
 
 FN debugOnly__body_slots(MUTABLE self: DebugOnly) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([debugOnly__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([debugOnly__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN debugOnly__body(self: DebugOnly) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -2607,8 +2550,8 @@ FN debugOnly__append_child_expr<T>(self: DebugOnly, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN debugOnly__body_slot(self: DebugOnly, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN debugOnly__body_slot(self: DebugOnly, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN debugOnly__owned_effect_for_alloc(self: DebugOnly, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2675,8 +2618,8 @@ FN sort__append_child_expr<T>(self: Sort, MUTABLE children: []Emittable, value: 
   END
   RETURN NIL;
 END
-FN sort__body_slot(self: Sort, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN sort__body_slot(self: Sort, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN sort__owned_effect_for_alloc(self: Sort, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2739,8 +2682,8 @@ FN soaFieldAccess__append_child_expr<T>(self: SoaFieldAccess, MUTABLE children: 
   END
   RETURN NIL;
 END
-FN soaFieldAccess__body_slot(self: SoaFieldAccess, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN soaFieldAccess__body_slot(self: SoaFieldAccess, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN soaFieldAccess__owned_effect_for_alloc(self: SoaFieldAccess, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2806,8 +2749,8 @@ FN tryOrPanic__append_child_expr<T>(self: TryOrPanic, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN tryOrPanic__body_slot(self: TryOrPanic, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN tryOrPanic__body_slot(self: TryOrPanic, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN tryOrPanic__owned_effect_for_alloc(self: TryOrPanic, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2875,8 +2818,8 @@ FN indexInsert__append_child_expr<T>(self: IndexInsert, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN indexInsert__body_slot(self: IndexInsert, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN indexInsert__body_slot(self: IndexInsert, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN indexInsert__owned_effect_for_alloc(self: IndexInsert, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -2944,8 +2887,8 @@ FN batchWindowPush__append_child_expr<T>(self: BatchWindowPush, MUTABLE children
   END
   RETURN NIL;
 END
-FN batchWindowPush__body_slot(self: BatchWindowPush, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN batchWindowPush__body_slot(self: BatchWindowPush, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN batchWindowPush__owned_effect_for_alloc(self: BatchWindowPush, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3012,8 +2955,8 @@ FN batchWindowFlush__append_child_expr<T>(self: BatchWindowFlush, MUTABLE childr
   END
   RETURN NIL;
 END
-FN batchWindowFlush__body_slot(self: BatchWindowFlush, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN batchWindowFlush__body_slot(self: BatchWindowFlush, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN batchWindowFlush__owned_effect_for_alloc(self: BatchWindowFlush, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3050,10 +2993,7 @@ FN deferStmt__initialize(MUTABLE self: MIRDeferStmt, body: DeferBodyInput) RETUR
 END
 FN deferStmt__body_slots(MUTABLE self: MIRDeferStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.body IS_A []Emittable THEN
-    RETURN CAST([deferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body), %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-    })] AS []MIRBodySlot);
+    RETURN CAST([deferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body))] AS []MIRBodySlot);
   ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_47: []MIRBodySlot = List[]; rtoc_empty_list_47 } ) AS []MIRBodySlot);
   END
@@ -3108,8 +3048,8 @@ FN deferStmt__append_child_expr<T>(self: MIRDeferStmt, MUTABLE children: []Emitt
   END
   RETURN NIL;
 END
-FN deferStmt__body_slot(self: MIRDeferStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN deferStmt__body_slot(self: MIRDeferStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN deferStmt__owned_effect_for_alloc(self: MIRDeferStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3130,10 +3070,7 @@ FN errDeferStmt__initialize(MUTABLE self: ErrDeferStmt, body: DeferBodyInput) RE
 END
 FN errDeferStmt__body_slots(MUTABLE self: ErrDeferStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.body IS_A []Emittable THEN
-    RETURN CAST([errDeferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body), %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-    })] AS []MIRBodySlot);
+    RETURN CAST([errDeferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body))] AS []MIRBodySlot);
   ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_50: []MIRBodySlot = List[]; rtoc_empty_list_50 } ) AS []MIRBodySlot);
   END
@@ -3188,8 +3125,8 @@ FN errDeferStmt__append_child_expr<T>(self: ErrDeferStmt, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN errDeferStmt__body_slot(self: ErrDeferStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN errDeferStmt__body_slot(self: ErrDeferStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN errDeferStmt__owned_effect_for_alloc(self: ErrDeferStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3260,8 +3197,8 @@ FN exprStmt__append_child_expr<T>(self: ExprStmt, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN exprStmt__body_slot(self: ExprStmt, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN exprStmt__body_slot(self: ExprStmt, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN exprStmt__owned_effect_for_alloc(self: ExprStmt, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3329,8 +3266,8 @@ FN discardOwned__append_child_expr<T>(self: DiscardOwned, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN discardOwned__body_slot(self: DiscardOwned, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN discardOwned__body_slot(self: DiscardOwned, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN discardOwned__owned_effect_for_alloc(self: DiscardOwned, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3406,10 +3343,7 @@ FN bgBlock__expr?(self: MIRBgBlock) RETURNS Bool ->
 END
 FN bgBlock__body_slots(MUTABLE self: MIRBgBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.run_body THEN
-    RETURN CAST([bgBlock__body_slot(self, :run_body, self.run_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.run_body = new_body;
-  rubyToClearVoid()
-    })] AS []MIRBodySlot);
+    RETURN CAST([bgBlock__body_slot(self, :run_body, self.run_body)] AS []MIRBodySlot);
   ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_55: []MIRBodySlot = List[]; rtoc_empty_list_55 } ) AS []MIRBodySlot);
   END
@@ -3455,8 +3389,8 @@ FN bgBlock__append_child_expr<T>(self: MIRBgBlock, MUTABLE children: []Emittable
   END
   RETURN NIL;
 END
-FN bgBlock__body_slot(self: MIRBgBlock, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN bgBlock__body_slot(self: MIRBgBlock, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN bgBlock__owned_effect_for_alloc(self: MIRBgBlock, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3485,10 +3419,7 @@ FN streamSpawn__expr?(self: StreamSpawn) RETURNS Bool ->
   RETURN TRUE;
 END
 FN streamSpawn__body_slots(MUTABLE self: StreamSpawn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([streamSpawn__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([streamSpawn__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN streamSpawn__body(self: StreamSpawn) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -3534,8 +3465,8 @@ FN streamSpawn__append_child_expr<T>(self: StreamSpawn, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN streamSpawn__body_slot(self: StreamSpawn, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN streamSpawn__body_slot(self: StreamSpawn, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN streamSpawn__owned_effect_for_alloc(self: StreamSpawn, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3646,8 +3577,8 @@ FN fsmStructure__append_child_expr<T>(self: FsmStructure, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN fsmStructure__body_slot(self: FsmStructure, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fsmStructure__body_slot(self: FsmStructure, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fsmStructure__owned_effect_for_alloc(self: FsmStructure, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3710,8 +3641,8 @@ FN fsmIoBody__append_child_expr<T>(self: FsmIoBody, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN fsmIoBody__body_slot(self: FsmIoBody, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fsmIoBody__body_slot(self: FsmIoBody, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fsmIoBody__owned_effect_for_alloc(self: FsmIoBody, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3774,8 +3705,8 @@ FN streamYield__append_child_expr<T>(self: StreamYield, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN streamYield__body_slot(self: StreamYield, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN streamYield__body_slot(self: StreamYield, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN streamYield__owned_effect_for_alloc(self: StreamYield, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3841,8 +3772,8 @@ FN fsmB1Body__append_child_expr<T>(self: FsmB1Body, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN fsmB1Body__body_slot(self: FsmB1Body, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fsmB1Body__body_slot(self: FsmB1Body, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fsmB1Body__owned_effect_for_alloc(self: FsmB1Body, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -3914,8 +3845,8 @@ FN fsmGenericBody__append_child_expr<T>(self: FsmGenericBody, MUTABLE children: 
   END
   RETURN NIL;
 END
-FN fsmGenericBody__body_slot(self: FsmGenericBody, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fsmGenericBody__body_slot(self: FsmGenericBody, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fsmGenericBody__owned_effect_for_alloc(self: FsmGenericBody, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4126,8 +4057,8 @@ FN capabilityLockTarget__append_child_expr<T>(self: CapabilityLockTarget, MUTABL
   END
   RETURN NIL;
 END
-FN capabilityLockTarget__body_slot(self: CapabilityLockTarget, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN capabilityLockTarget__body_slot(self: CapabilityLockTarget, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN capabilityLockTarget__owned_effect_for_alloc(self: CapabilityLockTarget, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4189,8 +4120,8 @@ FN capabilityLockAddress__append_child_expr<T>(self: CapabilityLockAddress, MUTA
   END
   RETURN NIL;
 END
-FN capabilityLockAddress__body_slot(self: CapabilityLockAddress, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN capabilityLockAddress__body_slot(self: CapabilityLockAddress, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN capabilityLockAddress__owned_effect_for_alloc(self: CapabilityLockAddress, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4272,8 +4203,8 @@ FN sortedLockAcquire__append_child_expr<T>(self: SortedLockAcquire, MUTABLE chil
   END
   RETURN NIL;
 END
-FN sortedLockAcquire__body_slot(self: SortedLockAcquire, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN sortedLockAcquire__body_slot(self: SortedLockAcquire, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN sortedLockAcquire__owned_effect_for_alloc(self: SortedLockAcquire, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4344,8 +4275,8 @@ FN fallibleLockBinding__append_child_expr<T>(self: FallibleLockBinding, MUTABLE 
   END
   RETURN NIL;
 END
-FN fallibleLockBinding__body_slot(self: FallibleLockBinding, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fallibleLockBinding__body_slot(self: FallibleLockBinding, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fallibleLockBinding__owned_effect_for_alloc(self: FallibleLockBinding, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4390,19 +4321,11 @@ FN catchWrapper__body_slots(MUTABLE self: CatchWrapper) RETURNS ![]MIRBodySlot E
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_68: []MIRBodySlot = List[]; rtoc_empty_list_68 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.clauses.length() DO
-  &slots.append(catchWrapper__body_slot(self, symbol("clauses_${rtoc_idx.toString()}"), UNWRAP (self.clauses[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
-    MUTABLE rtoc_slot_arm = COPY UNWRAP (self.clauses[rtoc_idx]);
-    rtoc_slot_arm.body = new_body;
-    self.clauses[rtoc_idx] = rtoc_slot_arm;
-    rubyToClearVoid()
-  }));
+  &slots.append(catchWrapper__body_slot(self, symbol("clauses_${rtoc_idx.toString()}"), UNWRAP (self.clauses[rtoc_idx]).body));
   rtoc_idx = rtoc_idx + 1;
   END
   IF catchWrapper__has_default(self) THEN
-    &slots.append(catchWrapper__body_slot(self, :default_body, self.default_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.default_body = new_body;
-  rubyToClearVoid()
-    }));
+    &slots.append(catchWrapper__body_slot(self, :default_body, self.default_body));
   END
   RETURN slots;
 END
@@ -4446,8 +4369,8 @@ FN catchWrapper__append_child_expr<T>(self: CatchWrapper, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN catchWrapper__body_slot(self: CatchWrapper, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN catchWrapper__body_slot(self: CatchWrapper, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN catchWrapper__owned_effect_for_alloc(self: CatchWrapper, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4501,10 +4424,7 @@ FN doBlock__body_slots(MUTABLE self: MIRDoBlock) RETURNS ![]MIRBodySlot EFFECTS 
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_70: []MIRBodySlot = List[]; rtoc_empty_list_70 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.branch_bodies.length() DO
-  &slots.append(doBlock__body_slot(self, symbol("branch_bodies_${rtoc_idx.toString()}"), self.branch_bodies[rtoc_idx]?, %(new_body: []Emittable) USE(rtoc_idx, MUTABLE self) -> {
-    self.branch_bodies[rtoc_idx] = COPY new_body;
-    rubyToClearVoid()
-  }));
+  &slots.append(doBlock__body_slot(self, symbol("branch_bodies_${rtoc_idx.toString()}"), self.branch_bodies[rtoc_idx]?));
   rtoc_idx = rtoc_idx + 1;
   END
   RETURN slots;
@@ -4553,8 +4473,8 @@ FN doBlock__append_child_expr<T>(self: MIRDoBlock, MUTABLE children: []Emittable
   END
   RETURN NIL;
 END
-FN doBlock__body_slot(self: MIRDoBlock, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN doBlock__body_slot(self: MIRDoBlock, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN doBlock__owned_effect_for_alloc(self: MIRDoBlock, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4618,8 +4538,8 @@ FN noop__append_child_expr<T>(self: Noop, MUTABLE children: []Emittable, value: 
   END
   RETURN NIL;
 END
-FN noop__body_slot(self: Noop, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN noop__body_slot(self: Noop, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN noop__owned_effect_for_alloc(self: Noop, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4683,8 +4603,8 @@ FN comment__append_child_expr<T>(self: Comment, MUTABLE children: []Emittable, v
   END
   RETURN NIL;
 END
-FN comment__body_slot(self: Comment, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN comment__body_slot(self: Comment, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN comment__owned_effect_for_alloc(self: Comment, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4748,8 +4668,8 @@ FN suppress__append_child_expr<T>(self: Suppress, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN suppress__body_slot(self: Suppress, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN suppress__body_slot(self: Suppress, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN suppress__owned_effect_for_alloc(self: Suppress, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4814,8 +4734,8 @@ FN pubConst__append_child_expr<T>(self: PubConst, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN pubConst__body_slot(self: PubConst, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN pubConst__body_slot(self: PubConst, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN pubConst__owned_effect_for_alloc(self: PubConst, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4881,8 +4801,8 @@ FN moduleVar__append_child_expr<T>(self: ModuleVar, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN moduleVar__body_slot(self: ModuleVar, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN moduleVar__body_slot(self: ModuleVar, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN moduleVar__owned_effect_for_alloc(self: ModuleVar, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -4946,8 +4866,8 @@ FN moduleConstFree__append_child_expr<T>(self: ModuleConstFree, MUTABLE children
   END
   RETURN NIL;
 END
-FN moduleConstFree__body_slot(self: ModuleConstFree, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN moduleConstFree__body_slot(self: ModuleConstFree, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN moduleConstFree__owned_effect_for_alloc(self: ModuleConstFree, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5013,8 +4933,8 @@ FN heapCreate__append_child_expr<T>(self: HeapCreate, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN heapCreate__body_slot(self: HeapCreate, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN heapCreate__body_slot(self: HeapCreate, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN heapCreate__owned_effect_for_alloc(self: HeapCreate, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5079,8 +4999,8 @@ FN dupeSlice__append_child_expr<T>(self: DupeSlice, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN dupeSlice__body_slot(self: DupeSlice, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN dupeSlice__body_slot(self: DupeSlice, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN dupeSlice__owned_effect_for_alloc(self: DupeSlice, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5146,8 +5066,8 @@ FN allocSlice__append_child_expr<T>(self: AllocSlice, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN allocSlice__body_slot(self: AllocSlice, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN allocSlice__body_slot(self: AllocSlice, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN allocSlice__owned_effect_for_alloc(self: AllocSlice, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5212,8 +5132,8 @@ FN freeSlice__append_child_expr<T>(self: FreeSlice, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN freeSlice__body_slot(self: FreeSlice, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN freeSlice__body_slot(self: FreeSlice, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN freeSlice__owned_effect_for_alloc(self: FreeSlice, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5278,8 +5198,8 @@ FN destroyPtr__append_child_expr<T>(self: DestroyPtr, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN destroyPtr__body_slot(self: DestroyPtr, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN destroyPtr__body_slot(self: DestroyPtr, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN destroyPtr__owned_effect_for_alloc(self: DestroyPtr, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5344,8 +5264,8 @@ FN cleanup__append_child_expr<T>(self: Cleanup, MUTABLE children: []Emittable, v
   END
   RETURN NIL;
 END
-FN cleanup__body_slot(self: Cleanup, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN cleanup__body_slot(self: Cleanup, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN cleanup__owned_effect_for_alloc(self: Cleanup, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5410,8 +5330,8 @@ FN errCleanup__append_child_expr<T>(self: ErrCleanup, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN errCleanup__body_slot(self: ErrCleanup, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN errCleanup__body_slot(self: ErrCleanup, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN errCleanup__owned_effect_for_alloc(self: ErrCleanup, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5475,8 +5395,8 @@ FN moveMark__append_child_expr<T>(self: MoveMark, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN moveMark__body_slot(self: MoveMark, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN moveMark__body_slot(self: MoveMark, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN moveMark__owned_effect_for_alloc(self: MoveMark, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5553,8 +5473,8 @@ FN deepCopy__append_child_expr<T>(self: DeepCopy, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN deepCopy__body_slot(self: DeepCopy, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN deepCopy__body_slot(self: DeepCopy, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN deepCopy__owned_effect_for_alloc(self: DeepCopy, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5621,8 +5541,8 @@ FN containerInit__append_child_expr<T>(self: ContainerInit, MUTABLE children: []
   END
   RETURN NIL;
 END
-FN containerInit__body_slot(self: ContainerInit, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN containerInit__body_slot(self: ContainerInit, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN containerInit__owned_effect_for_alloc(self: ContainerInit, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5696,8 +5616,8 @@ FN capWrap__append_child_expr<T>(self: CapWrap, MUTABLE children: []Emittable, v
   END
   RETURN NIL;
 END
-FN capWrap__body_slot(self: CapWrap, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN capWrap__body_slot(self: CapWrap, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN capWrap__owned_effect_for_alloc(self: CapWrap, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5762,8 +5682,8 @@ FN sharePromote__append_child_expr<T>(self: SharePromote, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN sharePromote__body_slot(self: SharePromote, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN sharePromote__body_slot(self: SharePromote, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN sharePromote__owned_effect_for_alloc(self: SharePromote, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5826,8 +5746,8 @@ FN rcRetain__append_child_expr<T>(self: RcRetain, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN rcRetain__body_slot(self: RcRetain, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN rcRetain__body_slot(self: RcRetain, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN rcRetain__owned_effect_for_alloc(self: RcRetain, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5888,8 +5808,8 @@ FN comptimeCarrierPayload__append_child_expr<T>(self: ComptimeCarrierPayload, MU
   END
   RETURN NIL;
 END
-FN comptimeCarrierPayload__body_slot(self: ComptimeCarrierPayload, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN comptimeCarrierPayload__body_slot(self: ComptimeCarrierPayload, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN comptimeCarrierPayload__owned_effect_for_alloc(self: ComptimeCarrierPayload, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -5952,8 +5872,8 @@ FN monomorphicKeep__append_child_expr<T>(self: MonomorphicKeep, MUTABLE children
   END
   RETURN NIL;
 END
-FN monomorphicKeep__body_slot(self: MonomorphicKeep, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN monomorphicKeep__body_slot(self: MonomorphicKeep, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN monomorphicKeep__owned_effect_for_alloc(self: MonomorphicKeep, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6017,8 +5937,8 @@ FN rcRelease__append_child_expr<T>(self: RcRelease, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN rcRelease__body_slot(self: RcRelease, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN rcRelease__body_slot(self: RcRelease, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN rcRelease__owned_effect_for_alloc(self: RcRelease, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6082,8 +6002,8 @@ FN rcDowngrade__append_child_expr<T>(self: RcDowngrade, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN rcDowngrade__body_slot(self: RcDowngrade, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN rcDowngrade__body_slot(self: RcDowngrade, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN rcDowngrade__owned_effect_for_alloc(self: RcDowngrade, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6147,8 +6067,8 @@ FN weakUpgrade__append_child_expr<T>(self: WeakUpgrade, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN weakUpgrade__body_slot(self: WeakUpgrade, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN weakUpgrade__body_slot(self: WeakUpgrade, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN weakUpgrade__owned_effect_for_alloc(self: WeakUpgrade, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6210,8 +6130,8 @@ FN allocatorRef__append_child_expr<T>(self: AllocatorRef, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN allocatorRef__body_slot(self: AllocatorRef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN allocatorRef__body_slot(self: AllocatorRef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN allocatorRef__owned_effect_for_alloc(self: AllocatorRef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6279,8 +6199,8 @@ FN freezeExpr__append_child_expr<T>(self: FreezeExpr, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN freezeExpr__body_slot(self: FreezeExpr, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN freezeExpr__body_slot(self: FreezeExpr, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN freezeExpr__owned_effect_for_alloc(self: FreezeExpr, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6346,8 +6266,8 @@ FN makeList__append_child_expr<T>(self: MakeList, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN makeList__body_slot(self: MakeList, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN makeList__body_slot(self: MakeList, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN makeList__owned_effect_for_alloc(self: MakeList, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6411,8 +6331,8 @@ FN frameSave__append_child_expr<T>(self: FrameSave, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN frameSave__body_slot(self: FrameSave, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN frameSave__body_slot(self: FrameSave, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN frameSave__owned_effect_for_alloc(self: FrameSave, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6476,8 +6396,8 @@ FN frameRestore__append_child_expr<T>(self: FrameRestore, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN frameRestore__body_slot(self: FrameRestore, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN frameRestore__body_slot(self: FrameRestore, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN frameRestore__owned_effect_for_alloc(self: FrameRestore, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6538,8 +6458,8 @@ FN capabilityUnwrap__append_child_expr<T>(self: CapabilityUnwrap, MUTABLE childr
   END
   RETURN NIL;
 END
-FN capabilityUnwrap__body_slot(self: CapabilityUnwrap, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN capabilityUnwrap__body_slot(self: CapabilityUnwrap, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN capabilityUnwrap__owned_effect_for_alloc(self: CapabilityUnwrap, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6566,10 +6486,7 @@ FN snapshotRead__child_exprs(self: SnapshotRead) RETURNS ![]Emittable EFFECTS RE
   RETURN snapshotRead__compact_child_exprs(self, [CAST(self.cell_unwrap AS Any)]);
 END
 FN snapshotRead__body_slots(MUTABLE self: SnapshotRead) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([snapshotRead__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([snapshotRead__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN snapshotRead__body(self: SnapshotRead) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -6614,8 +6531,8 @@ FN snapshotRead__append_child_expr<T>(self: SnapshotRead, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN snapshotRead__body_slot(self: SnapshotRead, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN snapshotRead__body_slot(self: SnapshotRead, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN snapshotRead__owned_effect_for_alloc(self: SnapshotRead, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6648,10 +6565,7 @@ FN snapshotTransaction__child_exprs(self: SnapshotTransaction) RETURNS ![]Emitta
   RETURN snapshotTransaction__compact_child_exprs(self, values);
 END
 FN snapshotTransaction__body_slots(MUTABLE self: SnapshotTransaction) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = [snapshotTransaction__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })];
+  MUTABLE slots: []MIRBodySlot = [snapshotTransaction__body_slot(self, :body, self.body)];
   IF self.conflict_action THEN
     slots = ruby_array_concat_MIRBodySlot(slots, TRY (emittable__body_slots(self.conflict_action)));
   END
@@ -6700,8 +6614,8 @@ FN snapshotTransaction__append_child_expr<T>(self: SnapshotTransaction, MUTABLE 
   END
   RETURN NIL;
 END
-FN snapshotTransaction__body_slot(self: SnapshotTransaction, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN snapshotTransaction__body_slot(self: SnapshotTransaction, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN snapshotTransaction__owned_effect_for_alloc(self: SnapshotTransaction, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6732,10 +6646,7 @@ FN snapshotMultiTxn__child_exprs(self: SnapshotMultiTxn) RETURNS ![]Emittable EF
   RETURN snapshotMultiTxn__compact_child_exprs(self, values);
 END
 FN snapshotMultiTxn__body_slots(MUTABLE self: SnapshotMultiTxn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = [snapshotMultiTxn__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })];
+  MUTABLE slots: []MIRBodySlot = [snapshotMultiTxn__body_slot(self, :body, self.body)];
   IF self.conflict_action THEN
     slots = ruby_array_concat_MIRBodySlot(slots, TRY (emittable__body_slots(self.conflict_action)));
   END
@@ -6784,8 +6695,8 @@ FN snapshotMultiTxn__append_child_expr<T>(self: SnapshotMultiTxn, MUTABLE childr
   END
   RETURN NIL;
 END
-FN snapshotMultiTxn__body_slot(self: SnapshotMultiTxn, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN snapshotMultiTxn__body_slot(self: SnapshotMultiTxn, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN snapshotMultiTxn__owned_effect_for_alloc(self: SnapshotMultiTxn, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6809,10 +6720,7 @@ FN polymorphicMutate__child_exprs(self: PolymorphicMutate) RETURNS ![]Emittable 
   RETURN polymorphicMutate__compact_child_exprs(self, [CAST(self.cell AS Any)]);
 END
 FN polymorphicMutate__body_slots(MUTABLE self: PolymorphicMutate) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([polymorphicMutate__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([polymorphicMutate__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN polymorphicMutate__body(self: PolymorphicMutate) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -6857,8 +6765,8 @@ FN polymorphicMutate__append_child_expr<T>(self: PolymorphicMutate, MUTABLE chil
   END
   RETURN NIL;
 END
-FN polymorphicMutate__body_slot(self: PolymorphicMutate, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN polymorphicMutate__body_slot(self: PolymorphicMutate, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN polymorphicMutate__owned_effect_for_alloc(self: PolymorphicMutate, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -6885,15 +6793,9 @@ FN polymorphicMutateFlow__child_exprs(self: PolymorphicMutateFlow) RETURNS ![]Em
   RETURN polymorphicMutateFlow__compact_child_exprs(self, [CAST(self.cell AS Any), CAST(self.guard_cond AS Any)]);
 END
 FN polymorphicMutateFlow__body_slots(MUTABLE self: PolymorphicMutateFlow) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = [polymorphicMutateFlow__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })];
+  MUTABLE slots: []MIRBodySlot = [polymorphicMutateFlow__body_slot(self, :body, self.body)];
   IF self.guard_fail_body != NIL THEN
-    &slots.append(polymorphicMutateFlow__body_slot(self, :guard_fail_body, UNWRAP (self.guard_fail_body), %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.guard_fail_body = new_body;
-  rubyToClearVoid()
-    }));
+    &slots.append(polymorphicMutateFlow__body_slot(self, :guard_fail_body, UNWRAP (self.guard_fail_body)));
   END
   RETURN slots;
 END
@@ -6940,8 +6842,8 @@ FN polymorphicMutateFlow__append_child_expr<T>(self: PolymorphicMutateFlow, MUTA
   END
   RETURN NIL;
 END
-FN polymorphicMutateFlow__body_slot(self: PolymorphicMutateFlow, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN polymorphicMutateFlow__body_slot(self: PolymorphicMutateFlow, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN polymorphicMutateFlow__owned_effect_for_alloc(self: PolymorphicMutateFlow, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7002,8 +6904,8 @@ FN polymorphicFlowSignal__append_child_expr<T>(self: PolymorphicFlowSignal, MUTA
   END
   RETURN NIL;
 END
-FN polymorphicFlowSignal__body_slot(self: PolymorphicFlowSignal, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN polymorphicFlowSignal__body_slot(self: PolymorphicFlowSignal, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN polymorphicFlowSignal__owned_effect_for_alloc(self: PolymorphicFlowSignal, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7035,12 +6937,7 @@ FN withMatchDispatch__body_slots(self: WithMatchDispatch) RETURNS ![]MIRBodySlot
       MUTABLE rtoc_each_items_109 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_109.length() DO
-      &slots.append(withMatchDispatch__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_109[rtoc_idx]).body, %(new_body: []Emittable) USE(MUTABLE self, rtoc_idx) -> {
-        MUTABLE rtoc_slot_arm = COPY UNWRAP (self.arms[rtoc_idx]);
-        rtoc_slot_arm.body = new_body;
-        self.arms[rtoc_idx] = rtoc_slot_arm;
-        rubyToClearVoid()
-      }));
+      &slots.append(withMatchDispatch__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_109[rtoc_idx]).body));
       rtoc_idx = rtoc_idx + 1;
       END
   END
@@ -7086,8 +6983,8 @@ FN withMatchDispatch__append_child_expr<T>(self: WithMatchDispatch, MUTABLE chil
   END
   RETURN NIL;
 END
-FN withMatchDispatch__body_slot(self: WithMatchDispatch, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN withMatchDispatch__body_slot(self: WithMatchDispatch, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN withMatchDispatch__owned_effect_for_alloc(self: WithMatchDispatch, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7166,8 +7063,8 @@ FN allocMark__append_child_expr<T>(self: AllocMark, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN allocMark__body_slot(self: AllocMark, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN allocMark__body_slot(self: AllocMark, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN allocMark__owned_effect_for_alloc(self: AllocMark, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7237,8 +7134,8 @@ FN ownedCreate__append_child_expr<T>(self: OwnedCreate, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN ownedCreate__body_slot(self: OwnedCreate, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ownedCreate__body_slot(self: OwnedCreate, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ownedCreate__owned_effect_for_alloc(self: OwnedCreate, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7307,8 +7204,8 @@ FN ownedDestroy__append_child_expr<T>(self: OwnedDestroy, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN ownedDestroy__body_slot(self: OwnedDestroy, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ownedDestroy__body_slot(self: OwnedDestroy, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ownedDestroy__owned_effect_for_alloc(self: OwnedDestroy, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7374,8 +7271,8 @@ FN ownedTransfer__append_child_expr<T>(self: OwnedTransfer, MUTABLE children: []
   END
   RETURN NIL;
 END
-FN ownedTransfer__body_slot(self: OwnedTransfer, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ownedTransfer__body_slot(self: OwnedTransfer, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ownedTransfer__owned_effect_for_alloc(self: OwnedTransfer, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7440,8 +7337,8 @@ FN ownedBorrow__append_child_expr<T>(self: OwnedBorrow, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN ownedBorrow__body_slot(self: OwnedBorrow, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ownedBorrow__body_slot(self: OwnedBorrow, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ownedBorrow__owned_effect_for_alloc(self: OwnedBorrow, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7511,8 +7408,8 @@ FN ownedStore__append_child_expr<T>(self: OwnedStore, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN ownedStore__body_slot(self: OwnedStore, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ownedStore__body_slot(self: OwnedStore, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ownedStore__owned_effect_for_alloc(self: OwnedStore, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7577,8 +7474,8 @@ FN ownedReturn__append_child_expr<T>(self: OwnedReturn, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN ownedReturn__body_slot(self: OwnedReturn, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ownedReturn__body_slot(self: OwnedReturn, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ownedReturn__owned_effect_for_alloc(self: OwnedReturn, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7642,8 +7539,8 @@ FN returnMark__append_child_expr<T>(self: ReturnMark, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN returnMark__body_slot(self: ReturnMark, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN returnMark__body_slot(self: ReturnMark, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN returnMark__owned_effect_for_alloc(self: ReturnMark, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7712,8 +7609,8 @@ FN transferMark__append_child_expr<T>(self: TransferMark, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN transferMark__body_slot(self: TransferMark, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN transferMark__body_slot(self: TransferMark, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN transferMark__owned_effect_for_alloc(self: TransferMark, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7781,8 +7678,8 @@ FN reassignMark__append_child_expr<T>(self: ReassignMark, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN reassignMark__body_slot(self: ReassignMark, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN reassignMark__body_slot(self: ReassignMark, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN reassignMark__owned_effect_for_alloc(self: ReassignMark, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7851,8 +7748,8 @@ FN fieldCleanupMark__append_child_expr<T>(self: FieldCleanupMark, MUTABLE childr
   END
   RETURN NIL;
 END
-FN fieldCleanupMark__body_slot(self: FieldCleanupMark, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fieldCleanupMark__body_slot(self: FieldCleanupMark, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fieldCleanupMark__owned_effect_for_alloc(self: FieldCleanupMark, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -7957,8 +7854,8 @@ FN call__append_child_expr<T>(self: Call, MUTABLE children: []Emittable, value: 
   END
   RETURN NIL;
 END
-FN call__body_slot(self: Call, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN call__body_slot(self: Call, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN call__owned_effect_for_alloc(self: Call, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8037,8 +7934,8 @@ FN runtimeCall__append_child_expr<T>(self: RuntimeCall, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN runtimeCall__body_slot(self: RuntimeCall, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN runtimeCall__body_slot(self: RuntimeCall, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN runtimeCall__owned_effect_for_alloc(self: RuntimeCall, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8108,8 +8005,8 @@ FN tailCall__append_child_expr<T>(self: TailCall, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN tailCall__body_slot(self: TailCall, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN tailCall__body_slot(self: TailCall, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN tailCall__owned_effect_for_alloc(self: TailCall, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8228,8 +8125,8 @@ FN methodCall__append_child_expr<T>(self: MIRMethodCall, MUTABLE children: []Emi
   END
   RETURN NIL;
 END
-FN methodCall__body_slot(self: MIRMethodCall, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN methodCall__body_slot(self: MIRMethodCall, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN methodCall__owned_effect_for_alloc(self: MIRMethodCall, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8291,8 +8188,8 @@ FN fieldGet__append_child_expr<T>(self: FieldGet, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN fieldGet__body_slot(self: FieldGet, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fieldGet__body_slot(self: FieldGet, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fieldGet__owned_effect_for_alloc(self: FieldGet, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8354,8 +8251,8 @@ FN unionPayloadGet__append_child_expr<T>(self: UnionPayloadGet, MUTABLE children
   END
   RETURN NIL;
 END
-FN unionPayloadGet__body_slot(self: UnionPayloadGet, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN unionPayloadGet__body_slot(self: UnionPayloadGet, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN unionPayloadGet__owned_effect_for_alloc(self: UnionPayloadGet, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8417,8 +8314,8 @@ FN indexGet__append_child_expr<T>(self: IndexGet, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN indexGet__body_slot(self: IndexGet, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN indexGet__body_slot(self: IndexGet, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN indexGet__owned_effect_for_alloc(self: IndexGet, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8482,8 +8379,8 @@ FN protocolCall__append_child_expr<T>(self: ProtocolCall, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN protocolCall__body_slot(self: ProtocolCall, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN protocolCall__body_slot(self: ProtocolCall, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN protocolCall__owned_effect_for_alloc(self: ProtocolCall, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8562,8 +8459,8 @@ FN binOp__append_child_expr<T>(self: MIRBinOp, MUTABLE children: []Emittable, va
   END
   RETURN NIL;
 END
-FN binOp__body_slot(self: MIRBinOp, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN binOp__body_slot(self: MIRBinOp, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN binOp__owned_effect_for_alloc(self: MIRBinOp, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8638,8 +8535,8 @@ FN unaryOp__append_child_expr<T>(self: MIRUnaryOp, MUTABLE children: []Emittable
   END
   RETURN NIL;
 END
-FN unaryOp__body_slot(self: MIRUnaryOp, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN unaryOp__body_slot(self: MIRUnaryOp, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN unaryOp__owned_effect_for_alloc(self: MIRUnaryOp, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8700,8 +8597,8 @@ FN fallibleOk__append_child_expr<T>(self: FallibleOk, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN fallibleOk__body_slot(self: FallibleOk, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fallibleOk__body_slot(self: FallibleOk, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fallibleOk__owned_effect_for_alloc(self: FallibleOk, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8762,8 +8659,8 @@ FN futureReady__append_child_expr<T>(self: FutureReady, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN futureReady__body_slot(self: FutureReady, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN futureReady__body_slot(self: FutureReady, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN futureReady__owned_effect_for_alloc(self: FutureReady, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8825,8 +8722,8 @@ FN lit__append_child_expr<T>(self: Lit, MUTABLE children: []Emittable, value: T)
   END
   RETURN NIL;
 END
-FN lit__body_slot(self: Lit, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN lit__body_slot(self: Lit, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN lit__owned_effect_for_alloc(self: Lit, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8888,8 +8785,8 @@ FN symbolLit__append_child_expr<T>(self: SymbolLit, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN symbolLit__body_slot(self: SymbolLit, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN symbolLit__body_slot(self: SymbolLit, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN symbolLit__owned_effect_for_alloc(self: SymbolLit, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -8950,8 +8847,8 @@ FN voidLiteral__append_child_expr<T>(self: VoidLiteral, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN voidLiteral__body_slot(self: VoidLiteral, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN voidLiteral__body_slot(self: VoidLiteral, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN voidLiteral__owned_effect_for_alloc(self: VoidLiteral, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9012,8 +8909,8 @@ FN enumOrdinal__append_child_expr<T>(self: EnumOrdinal, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN enumOrdinal__body_slot(self: EnumOrdinal, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN enumOrdinal__body_slot(self: EnumOrdinal, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN enumOrdinal__owned_effect_for_alloc(self: EnumOrdinal, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9075,8 +8972,8 @@ FN ident__append_child_expr<T>(self: Ident, MUTABLE children: []Emittable, value
   END
   RETURN NIL;
 END
-FN ident__body_slot(self: Ident, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ident__body_slot(self: Ident, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ident__owned_effect_for_alloc(self: Ident, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9141,8 +9038,8 @@ FN tupleLiteral__append_child_expr<T>(self: TupleLiteral, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN tupleLiteral__body_slot(self: TupleLiteral, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN tupleLiteral__body_slot(self: TupleLiteral, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN tupleLiteral__owned_effect_for_alloc(self: TupleLiteral, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9204,8 +9101,8 @@ FN fnRef__append_child_expr<T>(self: FnRef, MUTABLE children: []Emittable, value
   END
   RETURN NIL;
 END
-FN fnRef__body_slot(self: FnRef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN fnRef__body_slot(self: FnRef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN fnRef__owned_effect_for_alloc(self: FnRef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9268,8 +9165,8 @@ FN lockAcquire__append_child_expr<T>(self: LockAcquire, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN lockAcquire__body_slot(self: LockAcquire, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN lockAcquire__body_slot(self: LockAcquire, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN lockAcquire__owned_effect_for_alloc(self: LockAcquire, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9333,8 +9230,8 @@ FN typeOf__append_child_expr<T>(self: TypeOf, MUTABLE children: []Emittable, val
   END
   RETURN NIL;
 END
-FN typeOf__body_slot(self: TypeOf, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN typeOf__body_slot(self: TypeOf, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN typeOf__owned_effect_for_alloc(self: TypeOf, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9396,8 +9293,8 @@ FN typeEq__append_child_expr<T>(self: TypeEq, MUTABLE children: []Emittable, val
   END
   RETURN NIL;
 END
-FN typeEq__body_slot(self: TypeEq, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN typeEq__body_slot(self: TypeEq, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN typeEq__owned_effect_for_alloc(self: TypeEq, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9465,8 +9362,8 @@ FN structInit__append_child_expr<T>(self: StructInit, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN structInit__body_slot(self: StructInit, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN structInit__body_slot(self: StructInit, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN structInit__owned_effect_for_alloc(self: StructInit, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9528,8 +9425,8 @@ FN arrayInit__append_child_expr<T>(self: ArrayInit, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN arrayInit__body_slot(self: ArrayInit, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN arrayInit__body_slot(self: ArrayInit, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN arrayInit__owned_effect_for_alloc(self: ArrayInit, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9599,8 +9496,8 @@ FN arrayDefaultInit__append_child_expr<T>(self: ArrayDefaultInit, MUTABLE childr
   END
   RETURN NIL;
 END
-FN arrayDefaultInit__body_slot(self: ArrayDefaultInit, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN arrayDefaultInit__body_slot(self: ArrayDefaultInit, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN arrayDefaultInit__owned_effect_for_alloc(self: ArrayDefaultInit, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9664,8 +9561,8 @@ FN sliceExpr__append_child_expr<T>(self: SliceExpr, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN sliceExpr__body_slot(self: SliceExpr, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN sliceExpr__body_slot(self: SliceExpr, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN sliceExpr__owned_effect_for_alloc(self: SliceExpr, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9724,10 +9621,7 @@ FN blockExpr__set_borrowed_view(MUTABLE self: MIRBlockExpr, value: Bool) RETURNS
   self.borrowed_view = COPY value;
 END
 FN blockExpr__body_slots(MUTABLE self: MIRBlockExpr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([blockExpr__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([blockExpr__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN blockExpr__body(self: MIRBlockExpr) RETURNS ![]Emittable ->
   RETURN COPY self.body;
@@ -9776,8 +9670,8 @@ FN blockExpr__append_child_expr<T>(self: MIRBlockExpr, MUTABLE children: []Emitt
   END
   RETURN NIL;
 END
-FN blockExpr__body_slot(self: MIRBlockExpr, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN blockExpr__body_slot(self: MIRBlockExpr, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN blockExpr__owned_effect_for_alloc(self: MIRBlockExpr, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9843,8 +9737,8 @@ FN concatStr__append_child_expr<T>(self: ConcatStr, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN concatStr__body_slot(self: ConcatStr, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN concatStr__body_slot(self: ConcatStr, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN concatStr__owned_effect_for_alloc(self: ConcatStr, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9924,8 +9818,8 @@ FN cast__append_child_expr<T>(self: MIRCast, MUTABLE children: []Emittable, valu
   END
   RETURN NIL;
 END
-FN cast__body_slot(self: MIRCast, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN cast__body_slot(self: MIRCast, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN cast__owned_effect_for_alloc(self: MIRCast, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -9987,8 +9881,8 @@ FN tryExpr__append_child_expr<T>(self: TryExpr, MUTABLE children: []Emittable, v
   END
   RETURN NIL;
 END
-FN tryExpr__body_slot(self: TryExpr, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN tryExpr__body_slot(self: TryExpr, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN tryExpr__owned_effect_for_alloc(self: TryExpr, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10062,8 +9956,8 @@ PRIVATE FN tryCatch__append_child_expr<T>(self: TryCatch, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-PRIVATE FN tryCatch__body_slot(self: TryCatch, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+PRIVATE FN tryCatch__body_slot(self: TryCatch, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 PRIVATE FN tryCatch__owned_effect_for_alloc(self: TryCatch, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10133,8 +10027,8 @@ FN orelse__append_child_expr<T>(self: Orelse, MUTABLE children: []Emittable, val
   END
   RETURN NIL;
 END
-FN orelse__body_slot(self: Orelse, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN orelse__body_slot(self: Orelse, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN orelse__owned_effect_for_alloc(self: Orelse, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10195,8 +10089,8 @@ FN conditional__append_child_expr<T>(self: Conditional, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN conditional__body_slot(self: Conditional, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN conditional__body_slot(self: Conditional, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN conditional__owned_effect_for_alloc(self: Conditional, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10265,8 +10159,8 @@ FN ifOptional__append_child_expr<T>(self: IfOptional, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN ifOptional__body_slot(self: IfOptional, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ifOptional__body_slot(self: IfOptional, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ifOptional__owned_effect_for_alloc(self: IfOptional, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10328,8 +10222,8 @@ FN comptime__append_child_expr<T>(self: Comptime, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN comptime__body_slot(self: Comptime, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN comptime__body_slot(self: Comptime, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN comptime__owned_effect_for_alloc(self: Comptime, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10392,8 +10286,8 @@ FN unionVariantGet__append_child_expr<T>(self: UnionVariantGet, MUTABLE children
   END
   RETURN NIL;
 END
-FN unionVariantGet__body_slot(self: UnionVariantGet, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN unionVariantGet__body_slot(self: UnionVariantGet, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN unionVariantGet__owned_effect_for_alloc(self: UnionVariantGet, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10454,8 +10348,8 @@ FN listItems__append_child_expr<T>(self: ListItems, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN listItems__body_slot(self: ListItems, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN listItems__body_slot(self: ListItems, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN listItems__owned_effect_for_alloc(self: ListItems, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10519,8 +10413,8 @@ FN listLength__append_child_expr<T>(self: ListLength, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN listLength__body_slot(self: ListLength, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN listLength__body_slot(self: ListLength, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN listLength__owned_effect_for_alloc(self: ListLength, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10584,8 +10478,8 @@ FN addressOf__append_child_expr<T>(self: AddressOf, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN addressOf__body_slot(self: AddressOf, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN addressOf__body_slot(self: AddressOf, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN addressOf__owned_effect_for_alloc(self: AddressOf, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10649,8 +10543,8 @@ FN deref__append_child_expr<T>(self: Deref, MUTABLE children: []Emittable, value
   END
   RETURN NIL;
 END
-FN deref__body_slot(self: Deref, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN deref__body_slot(self: Deref, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN deref__owned_effect_for_alloc(self: Deref, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10715,8 +10609,8 @@ FN pointerCast__append_child_expr<T>(self: PointerCast, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN pointerCast__body_slot(self: PointerCast, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN pointerCast__body_slot(self: PointerCast, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN pointerCast__owned_effect_for_alloc(self: PointerCast, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10780,8 +10674,8 @@ FN constCast__append_child_expr<T>(self: ConstCast, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN constCast__body_slot(self: ConstCast, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN constCast__body_slot(self: ConstCast, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN constCast__owned_effect_for_alloc(self: ConstCast, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10842,8 +10736,8 @@ FN defaultStreamCapacity__append_child_expr<T>(self: DefaultStreamCapacity, MUTA
   END
   RETURN NIL;
 END
-FN defaultStreamCapacity__body_slot(self: DefaultStreamCapacity, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN defaultStreamCapacity__body_slot(self: DefaultStreamCapacity, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN defaultStreamCapacity__owned_effect_for_alloc(self: DefaultStreamCapacity, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10905,8 +10799,8 @@ FN undef__append_child_expr<T>(self: Undef, MUTABLE children: []Emittable, value
   END
   RETURN NIL;
 END
-FN undef__body_slot(self: Undef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN undef__body_slot(self: Undef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN undef__owned_effect_for_alloc(self: Undef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -10969,8 +10863,8 @@ FN typeSentinel__append_child_expr<T>(self: TypeSentinel, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN typeSentinel__body_slot(self: TypeSentinel, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN typeSentinel__body_slot(self: TypeSentinel, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN typeSentinel__owned_effect_for_alloc(self: TypeSentinel, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11034,8 +10928,8 @@ FN iterRange__append_child_expr<T>(self: IterRange, MUTABLE children: []Emittabl
   END
   RETURN NIL;
 END
-FN iterRange__body_slot(self: IterRange, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN iterRange__body_slot(self: IterRange, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN iterRange__owned_effect_for_alloc(self: IterRange, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11107,8 +11001,8 @@ FN optionalUnwrap__append_child_expr<T>(self: MIROptionalUnwrap, MUTABLE childre
   END
   RETURN NIL;
 END
-FN optionalUnwrap__body_slot(self: MIROptionalUnwrap, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN optionalUnwrap__body_slot(self: MIROptionalUnwrap, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN optionalUnwrap__owned_effect_for_alloc(self: MIROptionalUnwrap, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11170,8 +11064,8 @@ FN tryOptional__append_child_expr<T>(self: TryOptional, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN tryOptional__body_slot(self: TryOptional, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN tryOptional__body_slot(self: TryOptional, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN tryOptional__owned_effect_for_alloc(self: TryOptional, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11231,8 +11125,8 @@ FN foreignOwnedUnwrap__append_child_expr<T>(self: ForeignOwnedUnwrap, MUTABLE ch
   END
   RETURN NIL;
 END
-FN foreignOwnedUnwrap__body_slot(self: ForeignOwnedUnwrap, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN foreignOwnedUnwrap__body_slot(self: ForeignOwnedUnwrap, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN foreignOwnedUnwrap__owned_effect_for_alloc(self: ForeignOwnedUnwrap, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11294,8 +11188,8 @@ FN foreignSliceView__append_child_expr<T>(self: ForeignSliceView, MUTABLE childr
   END
   RETURN NIL;
 END
-FN foreignSliceView__body_slot(self: ForeignSliceView, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN foreignSliceView__body_slot(self: ForeignSliceView, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN foreignSliceView__owned_effect_for_alloc(self: ForeignSliceView, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11384,8 +11278,8 @@ FN rangeLit__append_child_expr<T>(self: MIRRangeLit, MUTABLE children: []Emittab
   END
   RETURN NIL;
 END
-FN rangeLit__body_slot(self: MIRRangeLit, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN rangeLit__body_slot(self: MIRRangeLit, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN rangeLit__owned_effect_for_alloc(self: MIRRangeLit, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11450,8 +11344,8 @@ FN hasField__append_child_expr<T>(self: HasField, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN hasField__body_slot(self: HasField, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN hasField__body_slot(self: HasField, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN hasField__owned_effect_for_alloc(self: HasField, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11515,8 +11409,8 @@ FN itemsAccess__append_child_expr<T>(self: ItemsAccess, MUTABLE children: []Emit
   END
   RETURN NIL;
 END
-FN itemsAccess__body_slot(self: ItemsAccess, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN itemsAccess__body_slot(self: ItemsAccess, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN itemsAccess__owned_effect_for_alloc(self: ItemsAccess, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11583,8 +11477,8 @@ FN ownedSlice__append_child_expr<T>(self: OwnedSlice, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN ownedSlice__body_slot(self: OwnedSlice, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN ownedSlice__body_slot(self: OwnedSlice, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN ownedSlice__owned_effect_for_alloc(self: OwnedSlice, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11647,8 +11541,8 @@ FN lambdaExpr__append_child_expr<T>(self: LambdaExpr, MUTABLE children: []Emitta
   END
   RETURN NIL;
 END
-FN lambdaExpr__body_slot(self: LambdaExpr, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN lambdaExpr__body_slot(self: LambdaExpr, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN lambdaExpr__owned_effect_for_alloc(self: LambdaExpr, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11714,8 +11608,8 @@ FN pipeline__append_child_expr<T>(self: Pipeline, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN pipeline__body_slot(self: Pipeline, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN pipeline__body_slot(self: Pipeline, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN pipeline__owned_effect_for_alloc(self: Pipeline, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11800,8 +11694,8 @@ FN inlineBc__append_child_expr<T>(self: InlineBc, MUTABLE children: []Emittable,
   END
   RETURN NIL;
 END
-FN inlineBc__body_slot(self: InlineBc, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN inlineBc__body_slot(self: InlineBc, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN inlineBc__owned_effect_for_alloc(self: InlineBc, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11870,8 +11764,8 @@ FN orElseExitBcRewrite__append_child_expr<T>(self: OrElseExitBcRewrite, MUTABLE 
   END
   RETURN NIL;
 END
-FN orElseExitBcRewrite__body_slot(self: OrElseExitBcRewrite, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN orElseExitBcRewrite__body_slot(self: OrElseExitBcRewrite, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN orElseExitBcRewrite__owned_effect_for_alloc(self: OrElseExitBcRewrite, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -11960,8 +11854,8 @@ FN shardedMapPut__append_child_expr<T>(self: ShardedMapPut, MUTABLE children: []
   END
   RETURN NIL;
 END
-FN shardedMapPut__body_slot(self: ShardedMapPut, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN shardedMapPut__body_slot(self: ShardedMapPut, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN shardedMapPut__owned_effect_for_alloc(self: ShardedMapPut, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -12034,8 +11928,8 @@ FN shardedMapGet__append_child_expr<T>(self: ShardedMapGet, MUTABLE children: []
   END
   RETURN NIL;
 END
-FN shardedMapGet__body_slot(self: ShardedMapGet, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN shardedMapGet__body_slot(self: ShardedMapGet, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN shardedMapGet__owned_effect_for_alloc(self: ShardedMapGet, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -12289,19 +12183,21 @@ FN ownershipConsumptionFact__names(self: OwnershipConsumptionFact) RETURNS ![]St
   END
   RETURN names;
 END
+# A body slot NAMES a body; it does not carry a writer. A writer closure has
+# to capture the owning node mutably, which CLEAR cannot express (the emitted
+# Zig lambda cannot reach an outer local) -- and would have written to a COPY
+# of the owner anyway. `emittable__replace_body` does the write-back by name.
 PUB STRUCT MIRBodySlot {
   body: []Emittable,
-  name: String@symbol,
-  writer: FN(Emittable[]) -> Void
+  name: String@symbol
 }
 
-FN bodySlot__initialize(MUTABLE self: MIRBodySlot, name: String@symbol, body: []Emittable, writer: FN(Emittable[]) -> Void) RETURNS Void
+FN bodySlot__initialize(MUTABLE self: MIRBodySlot, name: String@symbol, body: []Emittable) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.name = COPY name;
     rtoc_self_view.body = COPY body;
-    rtoc_self_view.writer = COPY writer;
 }
 END
 PUB FN bodySlot__replace(MUTABLE self: MIRBodySlot, body: []Emittable) RETURNS Void
@@ -12309,13 +12205,11 @@ PUB FN bodySlot__replace(MUTABLE self: MIRBodySlot, body: []Emittable) RETURNS V
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.body = COPY body;
-    MUTABLE rtoc_writer = COPY rtoc_self_view.writer;
-    rtoc_writer(body);
 }
 END
-FN bodySlot__new(name: String@symbol, body: []Emittable, writer: FN(Emittable[]) -> Void) RETURNS MIRBodySlot@multiowned ->
-  MUTABLE self = MIRBodySlot{ body: COPY body, name: COPY name, writer: COPY writer };
-  bodySlot__initialize(&self, name, body, writer);
+FN bodySlot__new(name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  MUTABLE self = MIRBodySlot{ body: COPY body, name: COPY name };
+  bodySlot__initialize(&self, name, body);
   RETURN self @multiowned;
 END
 PUB STRUCT LoweredNodeId {
@@ -12623,23 +12517,72 @@ END
 PUB FN mIR__each_node_until(root: ?NodeRoot, stop: FN(Emittable) -> Bool, blk: FN(Emittable) -> Void) RETURNS !Void ->
   TRY (mIR__each_node_inner(root, FALSE, stop, blk));
 END
-PUB FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
-  MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_197: []Emittable = List[]; rtoc_empty_list_197 } );
-  TRY (mIR__each_node(UNWRAP (root), %(node: Emittable) USE(MUTABLE out) -> {
-  &out.append(COPY node);
-  rubyToClearVoid()
-  }));
+# Collecting walk. A callback that appends to a caller local would have to
+# capture that local mutably, which CLEAR cannot express -- so the walk
+# RETURNS its nodes instead.
+PUB FN mIR__nodes(root: ?NodeRoot) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  RETURN TRY (mIR__collect_nodes_inner(root, FALSE));
+END
+FN mIR__collect_nodes_inner(root: ?NodeRoot, stop_at_block_expr: Bool) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE out: []Emittable = List[];
+  IF root EXISTS AS root_value THEN
+    IF root_value IS_A []Emittable AS array THEN
+      FOR _ IN array DO
+        out = (out + TRY (mIR__collect_nodes_inner(NodeRoot{ Emittable: COPY _ }, stop_at_block_expr)));
+      END
+      RETURN out;
+    END
+    MUTABLE node: ?Emittable = NIL;
+    IF root_value IS_A Emittable AS root_node THEN
+      node = COPY root_node;
+    END
+    IF node == NIL THEN
+      RETURN out;
+    END
+    MUTABLE node_value = COPY UNWRAP (node);
+    &out.append(COPY node_value);
+    IF stop_at_block_expr THEN
+      IF node_value IS_A MIRBlockExpr THEN
+        RETURN out;
+      END
+    END
+    FOR _ IN TRY (emittable__child_exprs(node_value)) DO
+      out = (out + TRY (mIR__collect_nodes_inner(NodeRoot{ Emittable: COPY _ }, stop_at_block_expr)));
+    END
+    FOR _ IN TRY (emittable__body_slots(node_value)) DO
+      out = (out + TRY (mIR__collect_nodes_inner(NodeRoot{ ArrayValue: COPY _.body }, stop_at_block_expr)));
+    END
+  END
   RETURN out;
 END
 PUB FN mIR__each_surface_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
   TRY (mIR__each_surface_node_inner(UNWRAP (root), blk));
 END
-FN mIR__surface_nodes(root: ?NodeRoot) RETURNS ![]Emittable ->
-  MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_198: []Emittable = List[]; rtoc_empty_list_198 } );
-  TRY (mIR__each_surface_node(UNWRAP (root), %(node: Emittable) USE(MUTABLE out) -> {
-  &out.append(COPY node);
-  rubyToClearVoid()
-  }));
+FN mIR__surface_nodes(root: ?NodeRoot) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE out: []Emittable = List[];
+  IF root EXISTS AS root_value THEN
+    IF root_value IS_A []Emittable AS array THEN
+      FOR _ IN array DO
+        out = (out + TRY (mIR__surface_nodes(NodeRoot{ Emittable: COPY _ })));
+      END
+      RETURN out;
+    END
+    MUTABLE node: ?Emittable = NIL;
+    IF root_value IS_A Emittable AS root_node THEN
+      node = COPY root_node;
+    END
+    IF node == NIL THEN
+      RETURN out;
+    END
+    MUTABLE node_value = COPY UNWRAP (node);
+    &out.append(COPY node_value);
+    IF node_value IS_A MIRBlockExpr THEN
+      RETURN out;
+    END
+    FOR _ IN TRY (emittable__child_exprs(node_value)) DO
+      out = (out + TRY (mIR__surface_nodes(NodeRoot{ Emittable: COPY _ })));
+    END
+  END
   RETURN out;
 END
 FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emittable) -> Bool = NIL, blk: FN(Emittable) -> Void) RETURNS !Void EFFECTS REENTRANT ->
@@ -12996,11 +12939,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-FN program__body_slot(self: MIRProgram, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned
+FN program__body_slot(self: MIRProgram, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN bodySlot__new(name, body, writer);
+    RETURN bodySlot__new(name, body);
 }
 END
 FN program__owned_effect_for_alloc(self: MIRProgram, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect
@@ -13086,8 +13029,8 @@ FN protocolAdapterDef__append_child_expr<T>(self: ProtocolAdapterDef, MUTABLE ch
   END
   RETURN NIL;
 END
-FN protocolAdapterDef__body_slot(self: ProtocolAdapterDef, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN protocolAdapterDef__body_slot(self: ProtocolAdapterDef, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN protocolAdapterDef__owned_effect_for_alloc(self: ProtocolAdapterDef, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -13256,8 +13199,8 @@ FN thunkTrampoline__append_child_expr<T>(self: ThunkTrampoline, MUTABLE children
   END
   RETURN NIL;
 END
-FN thunkTrampoline__body_slot(self: ThunkTrampoline, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN thunkTrampoline__body_slot(self: ThunkTrampoline, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN thunkTrampoline__owned_effect_for_alloc(self: ThunkTrampoline, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -13327,8 +13270,8 @@ FN mutualThunkTrampoline__append_child_expr<T>(self: MutualThunkTrampoline, MUTA
   END
   RETURN NIL;
 END
-FN mutualThunkTrampoline__body_slot(self: MutualThunkTrampoline, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN mutualThunkTrampoline__body_slot(self: MutualThunkTrampoline, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN mutualThunkTrampoline__owned_effect_for_alloc(self: MutualThunkTrampoline, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -13572,8 +13515,8 @@ FN directTenseMap__append_child_expr<T>(self: DirectTenseMap, MUTABLE children: 
   END
   RETURN NIL;
 END
-FN directTenseMap__body_slot(self: DirectTenseMap, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN directTenseMap__body_slot(self: DirectTenseMap, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN directTenseMap__owned_effect_for_alloc(self: DirectTenseMap, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -13634,8 +13577,8 @@ FN asyncPayloadTake__append_child_expr<T>(self: AsyncPayloadTake, MUTABLE childr
   END
   RETURN NIL;
 END
-FN asyncPayloadTake__body_slot(self: AsyncPayloadTake, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN asyncPayloadTake__body_slot(self: AsyncPayloadTake, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN asyncPayloadTake__owned_effect_for_alloc(self: AsyncPayloadTake, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -13747,10 +13690,7 @@ FN failureAction__body_slots(MUTABLE self: FailureAction) RETURNS ![]MIRBodySlot
   IF !((self.kind == FailureActionKind.Block)) THEN
     RETURN CAST(( { MUTABLE rtoc_empty_list_206: []MIRBodySlot = List[]; rtoc_empty_list_206 } ) AS []MIRBodySlot);
   END
-  RETURN CAST([failureAction__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([failureAction__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN failureAction__mir?(self: FailureAction) RETURNS Bool ->
   RETURN TRUE;
@@ -13795,8 +13735,8 @@ FN failureAction__append_child_expr<T>(self: FailureAction, MUTABLE children: []
   END
   RETURN NIL;
 END
-FN failureAction__body_slot(self: FailureAction, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN failureAction__body_slot(self: FailureAction, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN failureAction__owned_effect_for_alloc(self: FailureAction, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -13943,8 +13883,8 @@ FN defaultValue__append_child_expr<T>(self: DefaultValue, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN defaultValue__body_slot(self: DefaultValue, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN defaultValue__body_slot(self: DefaultValue, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN defaultValue__owned_effect_for_alloc(self: DefaultValue, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -14006,8 +13946,8 @@ FN enumTag__append_child_expr<T>(self: EnumTag, MUTABLE children: []Emittable, v
   END
   RETURN NIL;
 END
-FN enumTag__body_slot(self: EnumTag, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN enumTag__body_slot(self: EnumTag, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN enumTag__owned_effect_for_alloc(self: EnumTag, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -14077,8 +14017,8 @@ FN nextPromiseList__append_child_expr<T>(self: NextPromiseList, MUTABLE children
   END
   RETURN NIL;
 END
-FN nextPromiseList__body_slot(self: NextPromiseList, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN nextPromiseList__body_slot(self: NextPromiseList, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN nextPromiseList__owned_effect_for_alloc(self: NextPromiseList, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -14193,8 +14133,8 @@ FN registryCall__append_child_expr<T>(self: RegistryCall, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN registryCall__body_slot(self: RegistryCall, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN registryCall__body_slot(self: RegistryCall, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN registryCall__owned_effect_for_alloc(self: RegistryCall, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -14293,8 +14233,8 @@ FN indexedStore__append_child_expr<T>(self: IndexedStore, MUTABLE children: []Em
   END
   RETURN NIL;
 END
-FN indexedStore__body_slot(self: IndexedStore, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN indexedStore__body_slot(self: IndexedStore, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN indexedStore__owned_effect_for_alloc(self: IndexedStore, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -14361,8 +14301,8 @@ FN cFunctionAdapter__append_child_expr<T>(self: CFunctionAdapter, MUTABLE childr
   END
   RETURN NIL;
 END
-FN cFunctionAdapter__body_slot(self: CFunctionAdapter, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN cFunctionAdapter__body_slot(self: CFunctionAdapter, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN cFunctionAdapter__owned_effect_for_alloc(self: CFunctionAdapter, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -14452,8 +14392,8 @@ FN externTrampoline__append_child_expr<T>(self: ExternTrampoline, MUTABLE childr
   END
   RETURN NIL;
 END
-FN externTrampoline__body_slot(self: ExternTrampoline, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN externTrampoline__body_slot(self: ExternTrampoline, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN externTrampoline__owned_effect_for_alloc(self: ExternTrampoline, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -14479,10 +14419,7 @@ FN observableConsumerSpawn__explicit_ownership_contract(self: ObservableConsumer
   RETURN KEEP self.ownership_contract;
 END
 FN observableConsumerSpawn__body_slots(MUTABLE self: ObservableConsumerSpawn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([observableConsumerSpawn__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([observableConsumerSpawn__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN observableConsumerSpawn__mir?(self: ObservableConsumerSpawn) RETURNS Bool ->
   RETURN TRUE;
@@ -14525,8 +14462,8 @@ FN observableConsumerSpawn__append_child_expr<T>(self: ObservableConsumerSpawn, 
   END
   RETURN NIL;
 END
-FN observableConsumerSpawn__body_slot(self: ObservableConsumerSpawn, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN observableConsumerSpawn__body_slot(self: ObservableConsumerSpawn, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN observableConsumerSpawn__owned_effect_for_alloc(self: ObservableConsumerSpawn, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -14564,16 +14501,7 @@ FN shardConcurrentEach__child_exprs(self: ShardConcurrentEach) RETURNS ![]Emitta
   RETURN shardConcurrentEach__compact_child_exprs(self, [self.map_expr, self.start_expr, self.finish_expr, self.capacity_expr, self.batch_size_expr]);
 END
 FN shardConcurrentEach__body_slots(MUTABLE self: ShardConcurrentEach) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  RETURN CAST([shardConcurrentEach__body_slot(self, :producer_key_body, self.producer_key_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.producer_key_body = new_body;
-  rubyToClearVoid()
-  }), shardConcurrentEach__body_slot(self, :capture_setup, self.capture_setup, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.capture_setup = new_body;
-  rubyToClearVoid()
-  }), shardConcurrentEach__body_slot(self, :body, self.body, %(new_body: []Emittable) USE(MUTABLE self) -> {
-  self.body = new_body;
-  rubyToClearVoid()
-  })] AS []MIRBodySlot);
+  RETURN CAST([shardConcurrentEach__body_slot(self, :producer_key_body, self.producer_key_body), shardConcurrentEach__body_slot(self, :capture_setup, self.capture_setup), shardConcurrentEach__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN shardConcurrentEach__mir?(self: ShardConcurrentEach) RETURNS Bool ->
   RETURN TRUE;
@@ -14615,8 +14543,8 @@ FN shardConcurrentEach__append_child_expr<T>(self: ShardConcurrentEach, MUTABLE 
   END
   RETURN NIL;
 END
-FN shardConcurrentEach__body_slot(self: ShardConcurrentEach, name: String@symbol, body: []Emittable, writer: FN([]Emittable) -> Void) RETURNS MIRBodySlot@multiowned ->
-  RETURN bodySlot__new(name, body, writer);
+FN shardConcurrentEach__body_slot(self: ShardConcurrentEach, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
+  RETURN bodySlot__new(name, body);
 END
 FN shardConcurrentEach__owned_effect_for_alloc(self: ShardConcurrentEach, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
@@ -16739,9 +16667,180 @@ PUB FN emittable__expr?(value: Emittable) RETURNS Bool ->
   END
   RETURN FALSE;
 END
-PUB FN mIRBodySlot__writer_call(self: MIRBodySlot, arg0: Emittable[]) RETURNS Void ->
-  MUTABLE fn_value = self.writer;
-  RETURN fn_value(arg0);
+# Write a transformed body back into the node that owns it. This replaces the
+# writer closures the slots used to carry: a closure would have to capture the
+# owning node mutably, which CLEAR cannot express, and it wrote to a COPY of
+# the owner regardless. The caller re-binds the RESULT.
+PUB FN emittable__replace_body(node: Emittable, slot: String@symbol, new_body: []Emittable) RETURNS Emittable ->
+  PARTIAL MATCH node START
+    Emittable.FnDef AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ FnDef: COPY updated };,
+    Emittable.MIRStructDef AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :methods) THEN
+        updated.methods = COPY new_body;
+      END
+      RETURN Emittable{ MIRStructDef: COPY updated };,
+    Emittable.TestDef AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ TestDef: COPY updated };,
+    Emittable.IfStmt AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :then_body) THEN
+        updated.then_body = COPY new_body;
+      ELSE_IF (slot == :else_body) THEN
+        updated.else_body = COPY new_body;
+      END
+      RETURN Emittable{ IfStmt: COPY updated };,
+    Emittable.IfBindStmt AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :then_body) THEN
+        updated.then_body = COPY new_body;
+      ELSE_IF (slot == :else_body) THEN
+        updated.else_body = COPY new_body;
+      END
+      RETURN Emittable{ IfBindStmt: COPY updated };,
+    Emittable.WhileStmt AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ WhileStmt: COPY updated };,
+    Emittable.ForStmt AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ ForStmt: COPY updated };,
+    Emittable.ScopeBlock AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ ScopeBlock: COPY updated };,
+    Emittable.SwitchStmt AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :default_body) THEN
+        updated.default_body = COPY new_body;
+      END
+      RETURN Emittable{ SwitchStmt: COPY updated };,
+    Emittable.UnionMatchStmt AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :default_body) THEN
+        updated.default_body = COPY new_body;
+      END
+      RETURN Emittable{ UnionMatchStmt: COPY updated };,
+    Emittable.IfChain AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :default_body) THEN
+        updated.default_body = COPY new_body;
+      END
+      RETURN Emittable{ IfChain: COPY updated };,
+    Emittable.DebugOnly AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ DebugOnly: COPY updated };,
+    Emittable.MIRDeferStmt AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ MIRDeferStmt: COPY updated };,
+    Emittable.ErrDeferStmt AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ ErrDeferStmt: COPY updated };,
+    Emittable.MIRBgBlock AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :run_body) THEN
+        updated.run_body = COPY new_body;
+      END
+      RETURN Emittable{ MIRBgBlock: COPY updated };,
+    Emittable.StreamSpawn AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ StreamSpawn: COPY updated };,
+    Emittable.CatchWrapper AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :default_body) THEN
+        updated.default_body = COPY new_body;
+      END
+      RETURN Emittable{ CatchWrapper: COPY updated };,
+    Emittable.SnapshotRead AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ SnapshotRead: COPY updated };,
+    Emittable.SnapshotTransaction AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ SnapshotTransaction: COPY updated };,
+    Emittable.SnapshotMultiTxn AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ SnapshotMultiTxn: COPY updated };,
+    Emittable.PolymorphicMutate AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ PolymorphicMutate: COPY updated };,
+    Emittable.PolymorphicMutateFlow AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      ELSE_IF (slot == :guard_fail_body) THEN
+        updated.guard_fail_body = COPY new_body;
+      END
+      RETURN Emittable{ PolymorphicMutateFlow: COPY updated };,
+    Emittable.MIRBlockExpr AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ MIRBlockExpr: COPY updated };,
+    Emittable.FailureAction AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ FailureAction: COPY updated };,
+    Emittable.ObservableConsumerSpawn AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ ObservableConsumerSpawn: COPY updated };,
+    Emittable.ShardConcurrentEach AS item ->
+      MUTABLE updated = COPY item;
+      IF (slot == :producer_key_body) THEN
+        updated.producer_key_body = COPY new_body;
+      ELSE_IF (slot == :capture_setup) THEN
+        updated.capture_setup = COPY new_body;
+      ELSE_IF (slot == :body) THEN
+        updated.body = COPY new_body;
+      END
+      RETURN Emittable{ ShardConcurrentEach: COPY updated };
+  END
+  RETURN COPY node;
 END
 PUB FN emittable__allocs(node: Emittable) RETURNS ?InlineAllocMetadata@multiowned ->
   PARTIAL MATCH node START

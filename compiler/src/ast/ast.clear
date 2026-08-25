@@ -6211,6 +6211,19 @@ PUB FN aST__copy_pipeline_rewrite_metadata_mut(MUTABLE dst: PipelineRewriteNode,
   RETURN COPY dst;
 END
 # Ruby module AST::StatementVoidType
+# Collecting walk. A visitor that accumulates into a caller local would have to
+# capture that local mutably, which CLEAR cannot express, so the walk RETURNS
+# what it visited and the caller loops over it.
+PUB FN aST__locatables(root: Locatable, MUTABLE descend_functions: Bool) RETURNS []Locatable EFFECTS REENTRANT ->
+  MUTABLE out: []Locatable = [COPY root];
+  IF !(descend_functions) AND (root IS_A FunctionDef) THEN
+    RETURN out;
+  END
+  FOR rtoc_walk_child IN rtocChildrenLocatable(root) DO
+    out = (out + aST__locatables(rtoc_walk_child, &descend_functions));
+  END
+  RETURN out;
+END
 PUB FN aST__each_locatable(root: Locatable, MUTABLE descend_functions: Bool, visitor: FN(Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   visitor(root);
   IF !(descend_functions) AND (root IS_A FunctionDef) THEN

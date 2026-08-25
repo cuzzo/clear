@@ -334,15 +334,14 @@ FN lifecycleRegistry__concrete_schema_type(owner: Type, raw_type: TypeTypeInput,
 END
 PUB FN lifecycleRegistry__type_inventory(program: Program, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !{String}Type ->
   MUTABLE types: {String}Type = {};
-  aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE types) -> {
-  # `typed?` is `!full_type.untyped?` on the Ruby side; there is no such method
-  # on Locatable here, so ask the type directly.
-  IF !(type__untyped?(TRY (aST__full_type_mut(node)))) THEN
+  FOR node IN aST__locatables(CAST(program AS Locatable), TRUE) DO
+    # `typed?` is `!full_type.untyped?` on the Ruby side; there is no such
+    # method on Locatable here, so ask the type directly.
+    IF !(type__untyped?(TRY (aST__full_type_mut(node)))) THEN
       MUTABLE node_type: Type = TRY (aST__full_type_mut(node));
       TRY (lifecycleRegistry__add_type_mut(&types, node_type));
+    END
   END
-  rubyToClearVoid()
-  });
   TRY (lifecycleRegistry__add_declaration_types_mut(&types, program));
   TRY (lifecycleRegistry__add_instantiated_schema_types_mut(&types, schema_lookup));
   RETURN types;
@@ -368,19 +367,18 @@ PUB FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbo
   TRY (lifecycleRegistry__add_monomorphic_carrier_plans_mut(&plans, program));
   MUTABLE binding_plans: {Int64}LifecyclePlan = {};
   MUTABLE inventoried_bindings: []SemanticLifecycleRegistryBindingNode = COPY binding_nodes;
-  aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE inventoried_bindings) -> {
-  IF !(((node IS_A VarDecl OR node IS_A BindExpr) OR node IS_A DestructureTarget)) THEN
-      RETURN;
+  FOR node IN aST__locatables(CAST(program AS Locatable), TRUE) DO
+    IF !(((node IS_A VarDecl OR node IS_A BindExpr) OR node IS_A DestructureTarget)) THEN
+      CONTINUE;
+    END
+    IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
+      CONTINUE;
+    END
+    IF type__untyped?(TRY (aST__full_type_mut(node))) THEN
+      CONTINUE;
+    END
+    &inventoried_bindings.append(castLocatableToSemanticLifecycleRegistryBindingNode(COPY node));
   END
-  IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
-      RETURN;
-  END
-  IF type__untyped?(TRY (aST__full_type_mut(node))) THEN
-      RETURN;
-  END
-  &inventoried_bindings.append(castLocatableToSemanticLifecycleRegistryBindingNode(COPY node));
-  rubyToClearVoid()
-  });
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < inventoried_bindings.length() DO
     MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
@@ -583,7 +581,7 @@ PRIVATE FN lifecycleRegistry__class_binding_place_id(node: Locatable) RETURNS ?I
   END
 END
 PRIVATE FN lifecycleRegistry__add_declaration_types_mut(MUTABLE types: {String}Type, program: Program) RETURNS !Void ->
-  aST__each_locatable(CAST(program AS Locatable), TRUE, %(statement: Locatable) USE(MUTABLE types) -> {
+  FOR statement IN aST__locatables(CAST(program AS Locatable), TRUE) DO
   IF statement IS_A StructDef AS struct_def THEN
       MUTABLE struct_def_mutable = COPY struct_def;
       FOR _ IN struct_def_mutable.field_decls.values() DO
@@ -616,8 +614,7 @@ PRIVATE FN lifecycleRegistry__add_declaration_types_mut(MUTABLE types: {String}T
         TRY (lifecycleRegistry__add_type_mut(&types, TRY (type__new(TypeConstructionInput{ Type: COPY declared_return_type }))));
       END
   END
-  rubyToClearVoid()
-  });
+  END
 END
 PRIVATE FN lifecycleRegistry__expand_schema_fields_mut(MUTABLE types: {String}Type, pending: []Type, owner: Type, fields: {String}StructField, type_params: []String@symbol) RETURNS ![]Type EFFECTS REENTRANT ->
   MUTABLE grown: []Type = COPY pending;
