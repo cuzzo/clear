@@ -1388,8 +1388,8 @@ FN resourceClose__stmt?(self: ResourceClose) RETURNS Bool ->
 END
 PUB STRUCT IfStmt {
   cond: Emittable,
-  then_body: Any@multiowned,
-  else_body: Any@multiowned,
+  then_body: []Emittable,
+  else_body: ?[]Emittable,
   comptime: ?Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -1405,8 +1405,8 @@ FN ifStmt__body_slots(MUTABLE self: IfStmt) RETURNS ![]MIRBodySlot EFFECTS REENT
   self.then_body = new_body;
   rubyToClearVoid()
   })];
-  IF self.else_body THEN
-    &slots.append(ifStmt__body_slot(self, :else_body, self.else_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
+  IF self.else_body != NIL THEN
+    &slots.append(ifStmt__body_slot(self, :else_body, UNWRAP (self.else_body), %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.else_body = new_body;
   rubyToClearVoid()
     }));
@@ -1469,8 +1469,8 @@ PUB STRUCT MIRIfBinding {
 
 PUB STRUCT IfBindStmt {
   bindings: []MIRIfBinding,
-  then_body: Any@multiowned,
-  else_body: Any@multiowned,
+  then_body: []Emittable,
+  else_body: ?[]Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -1489,8 +1489,8 @@ FN ifBindStmt__body_slots(MUTABLE self: IfBindStmt) RETURNS ![]MIRBodySlot EFFEC
   self.then_body = new_body;
   rubyToClearVoid()
   })];
-  IF self.else_body THEN
-    &slots.append(ifBindStmt__body_slot(self, :else_body, self.else_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
+  IF self.else_body != NIL THEN
+    &slots.append(ifBindStmt__body_slot(self, :else_body, UNWRAP (self.else_body), %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.else_body = new_body;
   rubyToClearVoid()
     }));

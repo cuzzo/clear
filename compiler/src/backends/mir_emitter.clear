@@ -1652,12 +1652,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF part IS_A Let AS let THEN
         &declared.insert(COPY CAST(let.name AS String));
     END
-    IF !(part IS_A MoveMark) THEN
-        RETURN;
-    END
-    MUTABLE name = COPY CAST(part.name() AS String);
-    IF !((declared.contains?(name) OR moved.contains?(name))) THEN
-        &moved.append(name);
+    IF part IS_A MoveMark AS move_mark THEN
+      MUTABLE name = COPY CAST(move_mark.name AS String);
+      IF !((declared.contains?(name) OR moved.contains?(name))) THEN
+          &moved.append(name);
+      END
     END
     rubyToClearVoid()
     }));
@@ -1720,7 +1719,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE previous_runtime: ?String = COPY rtoc_self_view.heap_allocator_cache_runtime_name;
   DEFER mIREmitter__restore_heap_allocator_cache(&rtoc_self_view, cache_name, previous_name, previous_runtime);
   IF cache_name EXISTS AS cache_name_value THEN
-      RETURN &rtoc_self_view.heap_allocator_cache_names.append(COPY cache_name_value);
+      &rtoc_self_view.heap_allocator_cache_names.append(COPY cache_name_value);
   END
   rtoc_self_view.heap_allocator_cache_name = COPY cache_name;
   rtoc_self_view.heap_allocator_cache_runtime_name = COPY runtime_name;
@@ -1743,7 +1742,7 @@ PRIVATE FN mIREmitter__emit_body_flow(MUTABLE self: MIREmitter, stmts: []Emittab
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN (stmts |> SELECT:? TRY (mIREmitter__emit_flow_stmt(&rtoc_self_view, _, return_kind)) |> WHERE _ != NIL).join("\n");
+    RETURN (stmts |> SELECT TRY (mIREmitter__emit_flow_stmt(&rtoc_self_view, _, return_kind))).join("\n");
 }
 END
 PRIVATE FN mIREmitter__emit_flow_stmt(MUTABLE self: MIREmitter, stmt: Emittable, return_kind: String@symbol) RETURNS !String
@@ -1753,11 +1752,10 @@ PRIVATE FN mIREmitter__emit_flow_stmt(MUTABLE self: MIREmitter, stmt: Emittable,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF stmt IS_A ReturnStmt AS return_stmt THEN
       MUTABLE return_stmt_mutable = COPY return_stmt;
-      MUTABLE ret = IF return_stmt_mutable.value THEN
-        TRY (mIREmitter__emit(&rtoc_self_view, return_stmt_mutable.value))
-      ELSE
-        "{}"
-      END;
+      MUTABLE ret: String = "{}";
+      IF return_stmt_mutable.value != NIL THEN
+        ret = TRY (mIREmitter__emit(&rtoc_self_view, return_stmt_mutable.value));
+      END
       IF ((rtoc_self_view.flow_alias_name != NIL) AND (ret == (rtoc_self_view.flow_alias_name)?)) THEN
         ret = "${ret}.*";
       END
@@ -1768,10 +1766,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN "{\n${mIREmitter__indent_block(rtoc_self_view, inner, 4)}\n}";
     ELSE_IF stmt IS_A IfStmt AS if_stmt THEN
       MUTABLE if_stmt_mutable = COPY if_stmt;
-      MUTABLE then_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (if_stmt_mutable.then_body OR_ELSE List[]), return_kind));
+      MUTABLE then_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, if_stmt_mutable.then_body, return_kind));
       MUTABLE else_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (if_stmt_mutable.else_body OR_ELSE List[]), return_kind));
-      MUTABLE else_body = if_stmt_mutable.else_body;
-      IF (else_body AND !(else_body.empty?())) THEN
+      MUTABLE else_body: ?[]Emittable = COPY if_stmt_mutable.else_body;
+      IF ((else_body != NIL) AND !((UNWRAP (else_body)).empty?())) THEN
         RETURN "if (${TRY (mIREmitter__emit(&rtoc_self_view, if_stmt_mutable.cond))}) {\n${mIREmitter__indent_block(rtoc_self_view, then_zig, 4)}\n} else {\n${mIREmitter__indent_block(rtoc_self_view, else_zig, 4)}\n}";
       ELSE
         RETURN "if (${TRY (mIREmitter__emit(&rtoc_self_view, if_stmt_mutable.cond))}) {\n${mIREmitter__indent_block(rtoc_self_view, then_zig, 4)}\n}";
@@ -1812,7 +1810,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF last IS_A ScopeBlock AS scope_block THEN
       RETURN mIREmitter__flow_body_terminates?(rtoc_self_view, scopeBlock__body(scope_block));
     ELSE_IF last IS_A IfStmt AS if_stmt THEN
-      IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, (if_stmt.then_body OR_ELSE List[]))) THEN
+      IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, if_stmt.then_body)) THEN
         RETURN FALSE;
       END
       MUTABLE else_body = if_stmt.else_body;
