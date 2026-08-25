@@ -441,9 +441,9 @@ PUB FN lifecycleRegistry__build(program: Program, schema_lookup: FN(String@symbo
   RETURN lifecycleRegistry__new(plans, binding_plans);
 END
 FN lifecycleRegistry__add_monomorphic_carrier_plans_mut(MUTABLE plans: {String}LifecyclePlan, program: Program) RETURNS !Void ->
-  aST__each_locatable(CAST(program AS Locatable), TRUE, %(node: Locatable) USE(MUTABLE plans) -> {
+  FOR node IN aST__locatables(CAST(program AS Locatable), TRUE) DO
   IF !(node IS_A FunctionDef) THEN
-      RETURN;
+      CONTINUE;
   END
   # The Ruby reads `node.params` off the FunctionDef itself, not through a
   # FunctionSignature; narrow to the variant and take its field.
@@ -466,8 +466,7 @@ FN lifecycleRegistry__add_monomorphic_carrier_plans_mut(MUTABLE plans: {String}L
       plans[plan.type_key] = plan;
     rtoc_idx = rtoc_idx + 1;
   END
-  rubyToClearVoid()
-  });
+  END
 END
 FN lifecycleRegistry__initialize(MUTABLE self: LifecycleRegistry, plans: {String}LifecyclePlan, binding_plans: {Int64}LifecyclePlan) RETURNS Void
   REQUIRES self: LOCAL

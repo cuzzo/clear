@@ -263,7 +263,7 @@ END
 PUB FN uniform(field: String, zig_type: String) RETURNS InlineStructDeinitEntry ->
   RETURN InlineStructDeinitEntry{ field: COPY field, kind: :uniform, zig_type: COPY zig_type, elem_zig_type: NIL };
 END
-PUB FN array(field: String, elem_zig_type: String) RETURNS InlineStructDeinitEntry ->
+PUB FN arrayDeinitEntry(field: String, elem_zig_type: String) RETURNS InlineStructDeinitEntry ->
   RETURN InlineStructDeinitEntry{ field: COPY field, kind: :array, zig_type: NIL, elem_zig_type: COPY elem_zig_type };
 END
 PUB STRUCT InlineStructVariant {
