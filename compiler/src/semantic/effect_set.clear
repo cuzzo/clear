@@ -1,4 +1,4 @@
-STRUCT EffectSet {
+PUB STRUCT EffectSet {
   effects: [Set]String@symbol
 }
 

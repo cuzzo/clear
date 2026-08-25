@@ -3915,6 +3915,9 @@ PUB STRUCT FsmStateArm {
   err_cleanups: []Emittable,
   tail: FsmTail
 }
+# The tail of an FSM state. Its variants are declared here; the union has to
+# be too, or every module that names the field type sees an undeclared type.
+PUB UNION FsmTail { FsmTailDone: FsmTailDone, FsmTailJump: FsmTailJump, FsmTailYield: FsmTailYield, FsmTailRegisterYield: FsmTailRegisterYield, FsmTailCondJump: FsmTailCondJump, FsmTailCondSkip: FsmTailCondSkip, FsmTailLockTry: FsmTailLockTry, FsmTailWokenCheck: FsmTailWokenCheck, FsmTailRetryOrError: FsmTailRetryOrError }
 PUB STRUCT FsmTailCondSkip {
   condition: Emittable,
   skip_step: Int64

@@ -4,7 +4,6 @@ REQUIRE "pkg:rtoc_6261636b656e64732f6d69725f656d69747465722e636c656172" AS mir_e
 REQUIRE "pkg:rtoc_6d69722f66736d5f6f70732e636c656172" AS fsm_ops
 EXTERN FN compilerRepeatString(value: String, count: Int64) RETURNS String EFFECTS :safe FROM "compiler_regex";
 # Ruby module FsmWrapperEmitter
-PUB UNION FsmTail { FsmTailDone: FsmTailDone, FsmTailYield: FsmTailYield, FsmTailRegisterYield: FsmTailRegisterYield, FsmTailJump: FsmTailJump, FsmTailCondJump: FsmTailCondJump, FsmTailLockTry: FsmTailLockTry, FsmTailWokenCheck: FsmTailWokenCheck, FsmTailRetryOrError: FsmTailRetryOrError }
 PUB FN fsmWrapperEmitter__render(body: FsmBody) RETURNS !String ->
   IF body IS_A FsmIoBody AS fsm_io_body THEN
     RETURN TRY (fsmWrapperEmitter__render_io_body(fsm_io_body));

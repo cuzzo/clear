@@ -17,7 +17,6 @@ PUB UNION Dispatch { SymbolValue: String@symbol, BoolValue: Bool }
 # Ruby module FsmTransform
 # Ruby module FsmTransform::Emit
 PUB UNION PromotableFsmValue { Emittable: Emittable, ArrayValue: []Emittable }
-PUB UNION FsmTail { FsmTailDone: FsmTailDone, FsmTailJump: FsmTailJump, FsmTailYield: FsmTailYield, FsmTailRegisterYield: FsmTailRegisterYield, FsmTailCondJump: FsmTailCondJump, FsmTailLockTry: FsmTailLockTry, FsmTailWokenCheck: FsmTailWokenCheck, FsmTailRetryOrError: FsmTailRetryOrError }
 PUB STRUCT FsmBodyItem {
   emission: Emittable,
   fact_node_value: ?Emittable
