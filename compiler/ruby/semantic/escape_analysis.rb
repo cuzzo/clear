@@ -1602,6 +1602,10 @@ module EscapeAnalysis
       return true if ti.string? || ti.heap_ptr? || ti.recursive_cleanup_shape?(T.unsafe(schema_lookup))
     end
     expr_t = expr.is_a?(AST::Locatable) ? expr.full_type!(context: "escaping expression") : nil
+    # `RETURN NIL` from an optional-returning function carries nothing. Reading
+    # only the DECLARED payload marked such a function heap-carry-returning, and
+    # its callers then freed the literals its other arms return.
+    return false if expr_t&.resolved == :NIL
     return false if !expr.is_a?(AST::Identifier) && expr_t&.rodata?
     return false if ti.rodata? || ti.borrowed_reference?
     top_heap_ptr || ti.ownership != :affine ||

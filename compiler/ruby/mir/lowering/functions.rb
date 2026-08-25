@@ -2219,6 +2219,10 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     T.bind(self, MIRLowering) rescue nil
     return false unless ti
     ti = ti.success_type || ti
+    # An OPTIONAL return owns exactly what its payload owns. Leaving the `?` on
+    # sent `?String` past the string arm below -- which is the arm that asks the
+    # callee whether it allocates -- and the caller freed a returned literal.
+    ti = ti.wrapped_type || ti if ti.optional?
     if ti.string?
       return false if ti.symbol? || ti.raw?
       return true if sig_obj&.heap_carry_return == true

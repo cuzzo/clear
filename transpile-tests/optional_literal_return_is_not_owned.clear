@@ -1,0 +1,30 @@
+# Test: a function returning ?String built from literals owns nothing, so its
+# caller must not free the result. `RETURN NIL` marked the function heap-carry-
+# returning -- the DECLARED payload needs cleanup, the NIL does not -- and the
+# `?` also hid the string arm that asks the callee whether it allocates. The
+# caller then freed a literal and aborted on "incorrect alignment", so reaching
+# the end of this test at all is the assertion.
+
+FN sync_family_for(value: String@symbol) RETURNS ?String ->
+  IF (value == :locked) THEN
+    RETURN "locked";
+  END
+  IF (value == :atomic) THEN
+    RETURN "atomic";
+  END
+  RETURN NIL;
+END
+
+PRIVATE FN optText(value: ?String) RETURNS String ->
+  IF value EXISTS AS present THEN
+    RETURN "<" $+ present $+ ">";
+  END
+  RETURN "" $+ "none";
+END
+
+FN main() RETURNS Void ->
+  print(optText(sync_family_for(:locked)));
+  print(optText(sync_family_for(:atomic)));
+  print(optText(sync_family_for(:raw)));
+  print(optText(sync_family_for(:locked)));
+END
