@@ -502,7 +502,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_8 = {};
     MUTABLE rtoc_indexed_i_7 = 0;
     WHILE rtoc_indexed_i_7 < rtoc_indexed_items_6.length() DO
-      MUTABLE rtoc_indexed_pair_9 = [UNWRAP (rtoc_indexed_items_6[rtoc_indexed_i_7]).id, rtoc_indexed_i_7];
+      MUTABLE rtoc_indexed_pair_9 = Tuple{UNWRAP (rtoc_indexed_items_6[rtoc_indexed_i_7]).id, rtoc_indexed_i_7};
       rtoc_indexed_output_8[rtoc_indexed_pair_9._0] = rtoc_indexed_pair_9._1;
       rtoc_indexed_i_7 = rtoc_indexed_i_7 + 1;
     END

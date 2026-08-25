@@ -3886,7 +3886,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     # into the slot: mutating a FIND result would update a copy.
     MUTABLE main_idx = 0;
     WHILE main_idx < items.length() DO
-      IF (items[main_idx])? IS_A FnDef AS MUTABLE fn_def THEN
+      PARTIAL MATCH (items[main_idx])? START
+        Emittable.FnDef AS MUTABLE fn_def ->
         IF ((CAST(fn_def.name AS String) == zig_name) OR (CAST(fn_def.name AS String) == name)) THEN
           MUTABLE prologue: []Emittable = [Emittable{ Call: COPY Call{ callee: COPY "__clear_init_consts", args: [Emittable{ Ident: COPY Ident{ name: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: TRUE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }];
           FOR _ IN entries DO
@@ -3896,7 +3897,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           items[main_idx] = Emittable{ FnDef: COPY fn_def };
           BREAK;
         END
-      END
+    END
       main_idx = main_idx + 1;
     END
 }

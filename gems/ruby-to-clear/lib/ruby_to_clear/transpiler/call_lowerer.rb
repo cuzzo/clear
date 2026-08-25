@@ -1828,7 +1828,12 @@ module RubyToClear
         "#{mutable_method_receiver_code(output_name)}.append(Tuple{COPY #{element_expr}, #{index_name}});"
       elsif node.name.to_s == "to_h"
         pair_name = next_generated_local("indexed_pair")
-        "MUTABLE #{pair_name} = #{lowering.value_code};\n    #{output_name}[#{pair_name}._0] = #{pair_name}._1;"
+        # The block yields Ruby's `[key, value]`; the slot read below is by
+        # POSITION, which is a Tuple. A list literal types as a fixed array
+        # and has no `._0`.
+        pair_value = lowering.value_code.to_s.strip
+        pair_value = "Tuple{#{pair_value[1...-1]}}" if pair_value.start_with?("[") && pair_value.end_with?("]")
+        "MUTABLE #{pair_name} = #{pair_value};\n    #{output_name}[#{pair_name}._0] = #{pair_name}._1;"
       elsif node.name.to_s == "select"
         "IF #{lowering.value_code} THEN\n      #{mutable_method_receiver_code(output_name)}.append(COPY #{element_expr});\n    END"
       elsif node.name.to_s == "filter_map"

@@ -6871,7 +6871,7 @@ PUB STRUCT PolymorphicMutateFlow {
   return_type: ?String,
   body: []Emittable,
   guard_cond: Emittable,
-  guard_fail_body: Any@multiowned,
+  guard_fail_body: ?[]Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -6889,8 +6889,8 @@ FN polymorphicMutateFlow__body_slots(MUTABLE self: PolymorphicMutateFlow) RETURN
   self.body = new_body;
   rubyToClearVoid()
   })];
-  IF self.guard_fail_body THEN
-    &slots.append(polymorphicMutateFlow__body_slot(self, :guard_fail_body, self.guard_fail_body, %(new_body: []Emittable) USE(MUTABLE self) -> {
+  IF self.guard_fail_body != NIL THEN
+    &slots.append(polymorphicMutateFlow__body_slot(self, :guard_fail_body, UNWRAP (self.guard_fail_body), %(new_body: []Emittable) USE(MUTABLE self) -> {
   self.guard_fail_body = new_body;
   rubyToClearVoid()
     }));

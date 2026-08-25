@@ -10,6 +10,12 @@ REQUIRE "../annotator/helpers/function_signature.clear"
 REQUIRE "../annotator/helpers/intrinsic_contract.clear"
 REQUIRE "../ast/async_result_shape.clear"
 EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
+  RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
+END
 UNION Plan { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
 STRUCT MIREmitter {
   deep_copy_counter: Int64,
@@ -1628,7 +1634,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_27 = {};
     MUTABLE rtoc_indexed_i_26 = 0;
     WHILE rtoc_indexed_i_26 < rtoc_indexed_items_25.length() DO
-      MUTABLE rtoc_indexed_pair_28 = [UNWRAP (rtoc_indexed_items_25[rtoc_indexed_i_26]), "__captures[${rtoc_indexed_i_26.toString()}]"];
+      MUTABLE rtoc_indexed_pair_28 = Tuple{UNWRAP (rtoc_indexed_items_25[rtoc_indexed_i_26]), "__captures[${rtoc_indexed_i_26.toString()}]"};
       rtoc_indexed_output_27[rtoc_indexed_pair_28._0] = rtoc_indexed_pair_28._1;
       rtoc_indexed_i_26 = rtoc_indexed_i_26 + 1;
     END
@@ -1668,7 +1674,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_32 = {};
     MUTABLE rtoc_indexed_i_31 = 0;
     WHILE rtoc_indexed_i_31 < rtoc_indexed_items_30.length() DO
-      MUTABLE rtoc_indexed_pair_33 = [UNWRAP (rtoc_indexed_items_30[rtoc_indexed_i_31]), "__captures[${(offset + rtoc_indexed_i_31).toString()}].*"];
+      MUTABLE rtoc_indexed_pair_33 = Tuple{UNWRAP (rtoc_indexed_items_30[rtoc_indexed_i_31]), "__captures[${(offset + rtoc_indexed_i_31).toString()}].*"};
       rtoc_indexed_output_32[rtoc_indexed_pair_33._0] = rtoc_indexed_pair_33._1;
       rtoc_indexed_i_31 = rtoc_indexed_i_31 + 1;
     END

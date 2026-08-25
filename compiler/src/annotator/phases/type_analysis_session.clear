@@ -5916,14 +5916,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     # FuncCall validation runs, then take it back out. CLEAR holds the args by
     # value, so each edit is a write-back into node.right, not an in-place
     # mutation of a returned list.
-    IF node.right IS_A FuncCall AS MUTABLE injected_call THEN
-      injected_call.args = ([node.left] + injected_call.args);
-      node.right = Locatable{ FuncCall: COPY injected_call };
+    PARTIAL MATCH node.right START
+      Locatable.FuncCall AS MUTABLE injected_call ->
+        injected_call.args = ([node.left] + injected_call.args);
+        node.right = Locatable{ FuncCall: COPY injected_call };
     END
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
-    IF node.right IS_A FuncCall AS MUTABLE visited_call THEN
-      visited_call.args = visited_call.args |> SKIP 1;
-      node.right = Locatable{ FuncCall: COPY visited_call };
+    PARTIAL MATCH node.right START
+      Locatable.FuncCall AS MUTABLE visited_call ->
+        visited_call.args = visited_call.args |> SKIP 1;
+        node.right = Locatable{ FuncCall: COPY visited_call };
     END
     MUTABLE result_type = TRY (aST__full_type_mut(node.right));
     IF (typeAnalysisSession__has_catch_blocks?(rtoc_self_view) AND TRUE) THEN
@@ -17625,7 +17627,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_output_433 = {};
     MUTABLE rtoc_indexed_i_432 = 0;
     WHILE rtoc_indexed_i_432 < rtoc_indexed_items_431.length() DO
-      MUTABLE rtoc_indexed_pair_434 = [UNWRAP (rtoc_indexed_items_431[rtoc_indexed_i_432]).name, rtoc_indexed_i_432];
+      MUTABLE rtoc_indexed_pair_434 = Tuple{UNWRAP (rtoc_indexed_items_431[rtoc_indexed_i_432]).name, rtoc_indexed_i_432};
       rtoc_indexed_output_433[rtoc_indexed_pair_434._0] = rtoc_indexed_pair_434._1;
       rtoc_indexed_i_432 = rtoc_indexed_i_432 + 1;
     END
