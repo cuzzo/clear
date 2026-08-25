@@ -77,6 +77,119 @@ pub fn compilerRepeatString(value: []const u8, count: i64) []const u8 {
     return out;
 }
 
+// Ruby's `String#dump`, byte for byte. The emitter renders every Zig string
+// literal through it, so the self-hosted compiler's output only matches the
+// Ruby compiler's if the escaping matches exactly -- including Ruby's
+// four-digit `\uXXXX` below U+10000 and braced `\u{...}` above it, its
+// uppercase hex, and its `\#` only before `{`, `$` or `@`.
+pub fn compilerStringDump(value: []const u8) []const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    out.append(allocator, '"') catch @panic("string dump allocation failed");
+    var index: usize = 0;
+    while (index < value.len) {
+        const byte = value[index];
+        switch (byte) {
+            '"' => {
+                out.appendSlice(allocator, "\\\"") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            '\\' => {
+                out.appendSlice(allocator, "\\\\") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            '\n' => {
+                out.appendSlice(allocator, "\\n") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            '\t' => {
+                out.appendSlice(allocator, "\\t") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            '\r' => {
+                out.appendSlice(allocator, "\\r") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            0x0C => {
+                out.appendSlice(allocator, "\\f") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            0x0B => {
+                out.appendSlice(allocator, "\\v") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            0x08 => {
+                out.appendSlice(allocator, "\\b") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            0x07 => {
+                out.appendSlice(allocator, "\\a") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            0x1B => {
+                out.appendSlice(allocator, "\\e") catch @panic("string dump allocation failed");
+                index += 1;
+                continue;
+            },
+            '#' => {
+                // Ruby escapes `#` only where it would start an interpolation.
+                const next: u8 = if (index + 1 < value.len) value[index + 1] else 0;
+                if (next == '{' or next == '$' or next == '@') {
+                    out.appendSlice(allocator, "\\#") catch @panic("string dump allocation failed");
+                } else {
+                    out.append(allocator, '#') catch @panic("string dump allocation failed");
+                }
+                index += 1;
+                continue;
+            },
+            else => {},
+        }
+        if (byte >= 0x20 and byte < 0x7F) {
+            out.append(allocator, byte) catch @panic("string dump allocation failed");
+            index += 1;
+            continue;
+        }
+        if (byte < 0x80) {
+            out.print(allocator, "\\x{X:0>2}", .{byte}) catch @panic("string dump allocation failed");
+            index += 1;
+            continue;
+        }
+        const length = std.unicode.utf8ByteSequenceLength(byte) catch {
+            // Invalid UTF-8 stays a raw byte escape, as Ruby does for a
+            // binary string.
+            out.print(allocator, "\\x{X:0>2}", .{byte}) catch @panic("string dump allocation failed");
+            index += 1;
+            continue;
+        };
+        if (index + length > value.len) {
+            out.print(allocator, "\\x{X:0>2}", .{byte}) catch @panic("string dump allocation failed");
+            index += 1;
+            continue;
+        }
+        const codepoint = std.unicode.utf8Decode(value[index .. index + length]) catch {
+            out.print(allocator, "\\x{X:0>2}", .{byte}) catch @panic("string dump allocation failed");
+            index += 1;
+            continue;
+        };
+        if (codepoint > 0xFFFF) {
+            out.print(allocator, "\\u{{{X}}}", .{codepoint}) catch @panic("string dump allocation failed");
+        } else {
+            out.print(allocator, "\\u{X:0>4}", .{codepoint}) catch @panic("string dump allocation failed");
+        }
+        index += length;
+    }
+    out.append(allocator, '"') catch @panic("string dump allocation failed");
+    return out.toOwnedSlice(allocator) catch @panic("string dump allocation failed");
+}
+
 pub fn compilerZigTranslateC(
     zig: []const u8,
     source_dir: []const u8,
@@ -518,4 +631,40 @@ test "compiler regex match group returns the requested capture or null" {
     try std.testing.expectEqualStrings("INF", compilerRegexMatchGroup("[INF]", re, 1).?);
     try std.testing.expect(compilerRegexMatchGroup("nope", re, 1) == null);
     try std.testing.expect(compilerRegexMatchGroup("[10]", re, 5) == null);
+}
+
+test "compiler string dump matches Ruby String#dump" {
+    try std.testing.expectEqualStrings("\"\"", compilerStringDump(""));
+    try std.testing.expectEqualStrings("\"plain\"", compilerStringDump("plain"));
+    // Ruby: "a\"b\\c\nd\te\r\x00f\x01g\e"
+    try std.testing.expectEqualStrings(
+        "\"a\\\"b\\\\c\\nd\\te\\r\\x00f\\x01g\\e\"",
+        compilerStringDump("a\"b\\c\nd\te\r\x00f\x01g\x1B"),
+    );
+    try std.testing.expectEqualStrings("\"\\a\\b\\v\\f\"", compilerStringDump("\x07\x08\x0B\x0C"));
+    // DEL is a hex escape, not a literal.
+    try std.testing.expectEqualStrings("\"\\x7F\"", compilerStringDump("\x7F"));
+}
+
+test "compiler string dump escapes only interpolating hashes" {
+    // Ruby: "\#{x} \#$y \#@z # ok"
+    try std.testing.expectEqualStrings(
+        "\"\\#{x} \\#$y \\#@z # ok\"",
+        compilerStringDump("#{x} #$y #@z # ok"),
+    );
+    // A trailing `#` has nothing to interpolate.
+    try std.testing.expectEqualStrings("\"#\"", compilerStringDump("#"));
+}
+
+test "compiler string dump uses Ruby's two unicode spellings" {
+    // Ruby pads below U+10000 to four digits and braces above it.
+    try std.testing.expectEqualStrings("\"caf\\u00E9\"", compilerStringDump("caf\u{E9}"));
+    try std.testing.expectEqualStrings("\"\\x7F\\u0080\\u00A0\"", compilerStringDump("\x7F\u{80}\u{A0}"));
+    try std.testing.expectEqualStrings("\"\\u{1F600}\"", compilerStringDump("\u{1F600}"));
+}
+
+test "compiler string dump leaves invalid utf8 as raw byte escapes" {
+    try std.testing.expectEqualStrings("\"\\xFF\"", compilerStringDump("\xFF"));
+    // A truncated sequence must not read past the end.
+    try std.testing.expectEqualStrings("\"\\xC3\"", compilerStringDump("\xC3"));
 }

@@ -9,6 +9,7 @@ REQUIRE "../ast/ast.clear"
 REQUIRE "../annotator/helpers/function_signature.clear"
 REQUIRE "../annotator/helpers/intrinsic_contract.clear"
 REQUIRE "../ast/async_result_shape.clear"
+EXTERN FN compilerStringDump(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
@@ -2043,7 +2044,7 @@ PRIVATE FN mIREmitter__zig_string_literal(self: MIREmitter, text: String) RETURN
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN text.dump();
+    RETURN compilerStringDump(text);
 }
 END
 PRIVATE FN mIREmitter__symbol_literal_name(MUTABLE self: MIREmitter, value: String) RETURNS String
@@ -2054,7 +2055,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF existing EXISTS AS existing_value THEN
       RETURN COPY existing_value;
     END
-    MUTABLE name = "__clear_symbol_${rtoc_self_view.symbol_literals.count()}";
+    MUTABLE name = "__clear_symbol_${rtoc_self_view.symbol_literals.count().toString()}";
     rtoc_self_view.symbol_literals[value] = name;
     RETURN name;
 }
