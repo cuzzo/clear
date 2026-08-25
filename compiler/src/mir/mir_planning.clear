@@ -1,0 +1,39 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f626f64795f616e616c797369732e636c656172" AS body_analysis
+REQUIRE "pkg:rtoc_73656d616e7469632f62675f636170747572655f636c61737369666965722e636c656172" AS bg_capture_classifier
+REQUIRE "pkg:rtoc_73656d616e7469632f6573636170655f616e616c797369732e636c656172" AS escape_analysis
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f636c61737369666965722e636c656172" AS cleanup_classifier
+REQUIRE "pkg:rtoc_6d69722f636f6e74726f6c5f666c6f772e636c656172" AS control_flow
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_73656d616e7469632f6c6966656379636c655f706c616e2e636c656172" AS lifecycle_plan
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+PUB STRUCT MIRPlanningResult {
+  cleanup_plans: {String}CleanupClassificationPlan,
+  escape_placements: EscapePlacementFacts,
+  can_fail_functions: [Set]String
+}
+
+PUB FN mIRPlanningResult__cleanup_plan_for(self: MIRPlanningResult, name: String) RETURNS CleanupClassificationPlan ->
+  RETURN COPY self.cleanup_plans[name]?;
+END
+PUB FN mIRPlanner__plan_all_mut(fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, body_summaries: {String}FunctionBodySummary, hoist_bindings: {String}[]VarDecl) RETURNS !MIRPlanningResult ->
+  MUTABLE escape_result = TRY (escapeAnalysis__apply_with_facts_mut(fn_nodes, schema_lookup, body_summaries, hoist_bindings));
+  TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, schema_lookup));
+  MUTABLE cleanup_plans: {String}CleanupClassificationPlan = {};
+  FOR rtoc_key IN fn_nodes.keys() DO
+  MUTABLE function: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
+  cleanup_plans[rtoc_key] = TRY (cleanupClassifier__classify_plan(function, schema_lookup, lifecycle_registry));
+  END
+  TRY (loopFrameAnalysis__analyze_mut(fn_nodes, schema_lookup));
+  MUTABLE fallible = fn_nodes.each_with_object(Set[], %(tuple_param_0, names: Tuple<String,FunctionDef>) -> {
+  MUTABLE name = tuple_param_0._0;
+  MUTABLE function = tuple_param_0._1;
+  IF functionSignature__can_fail(function) THEN
+    RETURN &names.append(COPY name);
+  END
+  NIL
+  });
+  RETURN MIRPlanningResult{ cleanup_plans: COPY cleanup_plans, escape_placements: COPY escape_result.placements(), can_fail_functions: COPY fallible };
+END

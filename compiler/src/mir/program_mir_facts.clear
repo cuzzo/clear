@@ -1,0 +1,481 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f626f64795f616e616c797369732e636c656172" AS body_analysis
+REQUIRE "pkg:rtoc_636f6d70696c65722f656e747279706f696e742e636c656172" AS entrypoint
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f636c61737369666965722e636c656172" AS cleanup_classifier
+REQUIRE "pkg:rtoc_6d69722f6d69725f706c616e6e696e672e636c656172" AS mir_planning
+REQUIRE "pkg:rtoc_616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotator
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172" AS param
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
+PUB STRUCT FunctionMIRFacts {
+  name: String,
+  needs_runtime: Bool
+}
+
+PUB FN functionMIRFacts__fingerprint(self: FunctionMIRFacts) RETURNS String ->
+  RETURN Digest.SHA256.hexdigest(generateJson(CAST(Tuple{self.name, self.needs_runtime} AS Tuple<String, Bool>)));
+END
+PUB STRUCT ProgramMIRFacts {
+  functions: {String}FunctionMIRFacts
+}
+
+PUB FN programMIRFacts__initialize(MUTABLE self: ProgramMIRFacts, functions: {String}FunctionMIRFacts) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    rtoc_self_view.functions = (functions |> ORDER_BY _).to_h();
+}
+END
+PUB FN programMIRFacts__empty() RETURNS ProgramMIRFacts@multiowned ->
+  RETURN programMIRFacts__new({});
+END
+PUB FN programMIRFacts__new(functions: {String}FunctionMIRFacts) RETURNS ProgramMIRFacts@multiowned ->
+  MUTABLE self = ProgramMIRFacts{ functions: {} };
+  programMIRFacts__initialize(&self, functions);
+  RETURN self @multiowned;
+END
+PUB FN programMIRFinalizer__finalize(fn_nodes: {String}FunctionDef, cleanup_plans: {String}CleanupClassificationPlan, body_summaries: {String}FunctionBodySummary, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !ProgramMIRFacts@multiowned ->
+  MUTABLE needs_runtime = TRY (programMIRFinalizer__local_runtime_requirements(fn_nodes, cleanup_plans, schema_lookup));
+  programMIRFinalizer__propagate_runtime_requirements_mut(&needs_runtime, body_summaries);
+  MUTABLE functions: {String}FunctionMIRFacts = {};
+  FOR _ IN (fn_nodes.keys() |> ORDER_BY _) DO
+  functions[_] = programMIRFinalizer__function_facts(_, (needs_runtime[_] OR_ELSE FALSE));
+  END
+  RETURN programMIRFacts__new(functions);
+END
+PRIVATE FN programMIRFinalizer__local_runtime_requirements(fn_nodes: {String}FunctionDef, cleanup_plans: {String}CleanupClassificationPlan, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !{String}Bool ->
+  MUTABLE result: {String}Bool = {};
+  FOR rtoc_key IN fn_nodes.keys() DO
+  MUTABLE function: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
+  IF !(function.body) THEN
+    CONTINUE;
+  END
+  result[rtoc_key] = TRY (programMIRFinalizer__function_needs_runtime?(function, cleanup_plans[rtoc_key]?.facts, fn_nodes, schema_lookup));
+  END
+  RETURN result;
+END
+PRIVATE FN programMIRFinalizer__function_needs_runtime?(function: FunctionDef, cleanup: ?FrozenCleanupFacts, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  IF programMIRFinalizer__generic_direct_parameter_return?(function) THEN
+    RETURN (programMIRFinalizer__params_need_runtime_cleanup?(function.params) OR programMIRFinalizer__generic_return_needs_runtime?(function, fn_nodes, schema_lookup));
+  END
+  IF programMIRFinalizer__generic_projection_return?(function) THEN
+    RETURN FALSE;
+  END
+  IF programMIRFinalizer__finalized_runtime_input?(function) THEN
+    RETURN TRUE;
+  END
+  IF programMIRFinalizer__params_need_runtime_cleanup?(function.params) THEN
+    RETURN TRUE;
+  END
+  IF ((cleanup != NIL) AND programMIRFinalizer__runtime_cleanup_facts?(cleanup)) THEN
+    RETURN TRUE;
+  END
+  MUTABLE found: Bool = FALSE;
+  aST__each_locatable(function.body, %(node: Locatable) USE(fn_nodes, schema_lookup) -> {
+  IF TRY (programMIRFinalizer__ast_node_needs_runtime?(node, fn_nodes, schema_lookup)) THEN
+      found = TRUE;
+  END
+  rubyToClearVoid()
+  });
+  RETURN (found OR programMIRFinalizer__return_path_needs_allocator?(function, schema_lookup));
+END
+PRIVATE FN programMIRFinalizer__generic_return_needs_runtime?(function: FunctionDef, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  MUTABLE returned: ?String = programMIRFinalizer__generic_returned_parameter_name(function);
+  IF returned EXISTS AS returned_value THEN
+    MUTABLE index = function.params.indexOf();
+    IF !(index) THEN
+      RETURN FALSE;
+    END
+    RETURN fn_nodes.values() |> ANY (IF !(_.body()) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE needs_runtime: Bool = FALSE; { MUTABLE rtoc_value_block_marker = 0; aST__each_locatable(_.body(), %(node: Locatable) USE(function, index, schema_lookup) -> {
+  IF !((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == CAST(function.name AS String)) ELSE FALSE END)) THEN
+        RETURN;
+  END
+  MUTABLE argument = node.args()[index];
+  IF !(argument) THEN
+        RETURN;
+  END
+  MUTABLE type = TRY (type__success_type((&argument.full_type_mut({:context: "generic return instantiation"}))));
+  needs_runtime = (needs_runtime OR ((TRY (type__string?(type)) OR TRY (type__collection_value?(type))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup))));
+  rubyToClearVoid()
+    }); needs_runtime } } END);
+  ELSE
+    RETURN FALSE;
+  END
+END
+PRIVATE FN programMIRFinalizer__generic_direct_parameter_return?(function: FunctionDef) RETURNS Bool ->
+  RETURN !((programMIRFinalizer__generic_returned_parameter_name(function) == NIL));
+END
+PRIVATE FN programMIRFinalizer__generic_projection_return?(function: FunctionDef) RETURNS Bool ->
+  MUTABLE return_type: ?Type = COPY function.return_type;
+  IF !(((return_type != NIL) AND type__generic_type_parameter?(return_type))) THEN
+    RETURN FALSE;
+  END
+  MUTABLE returns: []ReturnNode = ( { MUTABLE rtoc_empty_list_1: []ReturnNode = List[]; rtoc_empty_list_1 } );
+  aST__each_locatable(function.body, %(node: Locatable) USE(MUTABLE returns) -> {
+  IF node IS_A ReturnNode AS return_node THEN
+      &returns.append(return_node);
+  END
+  rubyToClearVoid()
+  });
+  IF !((returns.length() == 1)) THEN
+    RETURN FALSE;
+  END
+  RETURN ((UNWRAP (returns.first())).value) IS_A GetField;
+END
+PRIVATE FN programMIRFinalizer__generic_returned_parameter_name(function: FunctionDef) RETURNS ?String ->
+  MUTABLE return_type: ?Type = COPY function.return_type;
+  IF !(((return_type != NIL) AND type__generic_type_parameter?(return_type))) THEN
+    RETURN NIL;
+  END
+  MUTABLE returns: []ReturnNode = ( { MUTABLE rtoc_empty_list_2: []ReturnNode = List[]; rtoc_empty_list_2 } );
+  aST__each_locatable(function.body, %(node: Locatable) USE(MUTABLE returns) -> {
+  IF node IS_A ReturnNode AS return_node THEN
+      &returns.append(return_node);
+  END
+  rubyToClearVoid()
+  });
+  IF !((returns.length() == 1)) THEN
+    RETURN NIL;
+  END
+  MUTABLE value = (UNWRAP (returns.first())).value;
+  IF !(value IS_A Identifier) THEN
+    RETURN NIL;
+  END
+  IF !(function.params |> ANY (_.name == CAST(value.name() AS String))) THEN
+    RETURN NIL;
+  END
+  RETURN COPY CAST(value.name() AS String);
+END
+PRIVATE FN programMIRFinalizer__finalized_runtime_input?(function: FunctionDef) RETURNS Bool ->
+  RETURN (((((((((CAST(function.name AS String) == name) OR !((function.conformance_protocol == NIL))) OR (function.uses_rt == TRUE)) OR programMIRFinalizer__function_error_context?(function)) OR (function.uses_alloc == TRUE)) OR (function.fn_value_ref == TRUE)) OR !((function.thunk_plan == NIL))) OR !((function.mutual_thunk_plan == NIL))) OR aST__recursion_yield_needed?(function));
+END
+PRIVATE FN programMIRFinalizer__function_error_context?(function: FunctionDef) RETURNS Bool ->
+  IF (IF function.pre_clauses != NIL THEN
+    type__any?(function.pre_clauses)
+  ELSE
+    NIL
+  END) THEN
+    RETURN TRUE;
+  END
+  IF (function.catch_clauses IS_A []Any AND type__any?(function.catch_clauses)) THEN
+    RETURN TRUE;
+  END
+  RETURN (function.default_catch IS_A []Any AND type__any?(function.default_catch));
+END
+PRIVATE FN programMIRFinalizer__params_need_runtime_cleanup?(params: []Param) RETURNS Bool ->
+  RETURN params |> ANY (IF !(_.takes) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE type = COPY _.type; (type__any?(type) OR ((!(type__primitive?(type)) AND !(type__id_handle?(type))))) } END);
+END
+PRIVATE FN programMIRFinalizer__runtime_cleanup_facts?(facts: FrozenCleanupFacts) RETURNS Bool ->
+  MUTABLE found: Bool = FALSE;
+  frozenCleanupFacts__each_entry(facts, %(ignored_place: OwnershipIdentityPlaceId, entry: CleanupEntry) -> {
+  IF (cleanupEntry__heap?(entry) OR cleanupEntry__frame?(entry)) THEN
+      found = TRUE;
+  END
+  rubyToClearVoid()
+  });
+  RETURN found;
+END
+PRIVATE FN programMIRFinalizer__ast_node_needs_runtime?(node: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  RETURN (aST__declaration_with_heap_symbol?(node) OR TRY (programMIRFinalizer__ast_node_lowers_through_runtime?(node, fn_nodes, schema_lookup)));
+END
+PRIVATE FN programMIRFinalizer__ast_node_lowers_through_runtime?(node: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  RETURN PARTIAL MATCH node START
+    Locatable.FuncCall AS func_call -> programMIRFinalizer__ast_call_needs_runtime?(Node{ FuncCall: COPY func_call }, fn_nodes),
+    AST.MethodCall -> programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode(node), fn_nodes),
+    AST.BgBlock -> TRUE,
+    Locatable.BgStreamBlock AS bg_stream_block -> TRUE,
+    Locatable.Assignment AS assignment -> programMIRFinalizer__indexed_assignment_lowers_through_runtime?(assignment),
+    Locatable.CopyNode AS copy_node -> TRY (programMIRFinalizer__copy_node_lowers_through_runtime?(Node{ CopyNode: COPY copy_node }, schema_lookup)),
+    Locatable.KeepNode AS keep_node -> TRY (programMIRFinalizer__copy_node_lowers_through_runtime?(Node{ KeepNode: COPY keep_node }, schema_lookup)),
+    Locatable.BinaryOp AS binary_op -> (IF binaryOp__smooth?(binary_op) THEN
+        {
+      MUTABLE rtoc_value_block_marker = 0;
+      MUTABLE result_ti = TRY (type__from_node_mut(binary_op, "smooth pipeline needs-runtime"));
+      MUTABLE next_needs = !(TRY (type__inf_stream?(result_ti)));
+      (next_needs OR TRY (programMIRFinalizer__owned_or_else_lowers_through_runtime?(binary_op, schema_lookup)))
+    }
+      ELSE
+        TRY (programMIRFinalizer__owned_or_else_lowers_through_runtime?(binary_op, schema_lookup))
+      END),
+    Locatable.WithBlock AS with_block -> programMIRFinalizer__with_block_lowers_through_runtime?(with_block),
+    DEFAULT -> FALSE
+  END;
+END
+PRIVATE FN programMIRFinalizer__owned_or_else_lowers_through_runtime?(node: BinaryOp, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  IF !(((node.op == symbol("OR_ELSE")) OR (node.op == symbol("OR")))) THEN
+    RETURN FALSE;
+  END
+  MUTABLE type = TRY (type__success_type((TRY (type__from_node_mut(node, "owned OR runtime requirement")))));
+  RETURN (((((TRY (type__string?(type)) OR TRY (type__heap_ptr?(type))) OR TRY (type__collection_value?(type))) OR type__collection?(type)) OR TRY (type__needs_cleanup?(type, schema_lookup))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup)));
+END
+PRIVATE FN programMIRFinalizer__ast_call_needs_runtime?(node: Node, fn_nodes: {String}FunctionDef) RETURNS !Bool ->
+  IF fn_nodes.contains?(CAST(node.name() AS String)) THEN
+    RETURN FALSE;
+  END
+  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature());
+  RETURN (((signature != NIL) AND (functionSignature__needs_rt(signature) == TRUE)) OR ((signature != NIL) AND (TRY (functionSignature__emits_allocating?(&signature)) == TRUE)));
+END
+PRIVATE FN programMIRFinalizer__copy_node_lowers_through_runtime?(node: Node, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  MUTABLE type = TRY (type__success_type((TRY (type__from_node_mut(node, "COPY runtime requirement")))));
+  IF ((type__primitive?(type) OR type__symbol?(type)) OR type__id_handle?(type)) THEN
+    RETURN FALSE;
+  END
+  RETURN ((((((TRY (type__string?(type)) OR TRY (type__heap_ptr?(type))) OR TRY (type__collection_value?(type))) OR type__collection?(type)) OR type__any_sync?(type)) OR TRY (type__needs_cleanup?(type, schema_lookup))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup)));
+END
+PRIVATE FN programMIRFinalizer__indexed_assignment_lowers_through_runtime?(node: Assignment) RETURNS !Bool ->
+  IF !(node.name IS_A GetIndex) THEN
+    RETURN FALSE;
+  END
+  MUTABLE target = node.name.target();
+  IF !(target IS_A Locatable) THEN
+    RETURN FALSE;
+  END
+  IF (node.name.protocol_operation() == :map_put) THEN
+    RETURN TRUE;
+  END
+  MUTABLE type = &target.full_type_mut({:context: "indexed assignment target"});
+  IF ((type.fixed?() AND !(TRY (type__string?(type)))) AND !(type__collection?(type))) THEN
+    RETURN FALSE;
+  END
+  MUTABLE key = TRY (type__dispatch_key(type));
+  IF (key AND (IF (CAST({:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}} AS {Any@multiowned}Any@multiowned))[key] != NIL THEN
+  (((CAST({:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}} AS {Any@multiowned}Any@multiowned))[key])?)[:set]
+  ELSE
+  NIL
+  END)) THEN
+    RETURN TRUE;
+  ELSE
+    RETURN FALSE;
+  END
+END
+PRIVATE FN programMIRFinalizer__with_block_lowers_through_runtime?(node: WithBlock) RETURNS Bool ->
+  IF (((node.snapshot_mode == :transaction) OR (node.view_kind == :materialized_view)) OR node.universal_poly) THEN
+    RETURN TRUE;
+  END
+  MUTABLE clause = node.lock_error_clause;
+  IF !(clause) THEN
+    RETURN FALSE;
+  END
+  RETURN (([ErrorActionKind.Raise, ErrorActionKind.Exit]).contains?(clause.action()) OR type__any?(clause.bubble_types()));
+END
+PRIVATE FN programMIRFinalizer__return_path_needs_allocator?(function: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
+  IF !(function.heap_carry_return) THEN
+    RETURN FALSE;
+  END
+  MUTABLE found: Bool = FALSE;
+  aST__each_locatable(function.body, %(node: Locatable) USE(function, schema_lookup) -> {
+  IF !((IF node IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END)) THEN
+      RETURN;
+  END
+  found = (found OR programMIRFinalizer__return_expr_needs_allocator?(function, node.value(), schema_lookup));
+  rubyToClearVoid()
+  });
+  RETURN found;
+END
+PRIVATE FN programMIRFinalizer__return_expr_needs_allocator?(function: FunctionDef, expression: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  MUTABLE node = programMIRFinalizer__unwrap_return_expr(expression);
+  IF node IS_A CopyNode AS copy_node THEN
+    RETURN TRUE;
+  END
+  MUTABLE type = TRY (type__success_type((&node.full_type_mut("return allocator expression"))));
+  IF (type.any_rc?() OR_ELSE type.any_sync?()) THEN
+    RETURN FALSE;
+  END
+  IF node IS_A Identifier AS identifier THEN
+    IF function.params |> ANY ((_.name == identifier__name(identifier)) AND _.takes) THEN
+      RETURN FALSE;
+    END
+    IF type THEN
+      RETURN (type.string?() OR type.recursive_cleanup_shape?(schema_lookup));
+    ELSE
+      RETURN FALSE;
+    END
+  END
+  IF node IS_A StringConcat AS string_concat THEN
+    RETURN TRUE;
+  END
+  IF (IF node IS_A BinaryOp AS binary_op THEN (binary_op.string_concat == TRUE) ELSE FALSE END) THEN
+    RETURN TRUE;
+  END
+  IF type THEN
+    RETURN (!(node IS_A Literal) AND ((((((type.string?() OR type.heap_ptr?()) OR type.collection_value?()) OR type.collection?()) OR type.needs_cleanup?(schema_lookup)) OR type.recursive_cleanup_shape?(schema_lookup))));
+  ELSE
+    RETURN FALSE;
+  END
+END
+PRIVATE FN programMIRFinalizer__unwrap_return_expr(expression: Locatable) RETURNS Locatable EFFECTS REENTRANT ->
+  IF (expression IS_A MoveNode) OR (expression IS_A Cast) OR (expression IS_A FreezeNode) THEN
+    RETURN programMIRFinalizer__unwrap_return_expr(expression.value());
+  ELSE_IF expression IS_A BinaryOp AS binary_op THEN
+    IF (binary_op.op == symbol("OR_ELSE")) THEN
+      RETURN programMIRFinalizer__unwrap_return_expr(binary_op.left);
+    ELSE
+      RETURN COPY Locatable{ BinaryOp: COPY binary_op };
+    END
+  ELSE
+    RETURN COPY expression;
+  END
+END
+PRIVATE FN programMIRFinalizer__propagate_runtime_requirements_mut(MUTABLE needs_runtime: {String}Bool, body_summaries: {String}FunctionBodySummary) RETURNS Void ->
+  MUTABLE changed: Bool = TRUE;
+  WHILE changed DO
+    changed = FALSE;
+    FOR _ IN needs_runtime.keys() DO
+  IF needs_runtime[_]? THEN
+    CONTINUE;
+  END
+  MUTABLE callees: [Set]Any = Set[];
+  IF body_summaries[_] != NIL THEN
+        callees = COPY ((body_summaries[_])?).callees;
+      END
+  IF !(callees |> ANY (needs_runtime[_] OR_ELSE FALSE)) THEN
+        CONTINUE;
+  END
+  needs_runtime[_] = TRUE;
+  changed = TRUE;
+    END
+  END
+END
+PRIVATE FN programMIRFinalizer__function_facts(name: String, needs_runtime: Bool) RETURNS FunctionMIRFacts ->
+  RETURN FunctionMIRFacts{ name: COPY name, needs_runtime: COPY needs_runtime };
+END
+FN castLocatableToNode(value: Locatable) RETURNS Node ->
+  PARTIAL MATCH value START
+    Locatable.MIRProgram AS cast_payload -> RETURN Node{ MIRProgram: COPY cast_payload };,
+    Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN Node{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN Node{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN Node{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN Node{ ConformanceDef: COPY cast_payload };,
+    Locatable.MIRStructDef AS cast_payload -> RETURN Node{ MIRStructDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN Node{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN Node{ Assignment: COPY cast_payload };,
+    Locatable.MIRDestructureTarget AS cast_payload -> RETURN Node{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN Node{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN Node{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN Node{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN Node{ IsA: COPY cast_payload };,
+    Locatable.MIRUnaryOp AS cast_payload -> RETURN Node{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN Node{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN Node{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN Node{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN Node{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN Node{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN Node{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN Node{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN Node{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN Node{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN Node{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN Node{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN Node{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN Node{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN Node{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN Node{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN Node{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN Node{ FuncCall: COPY cast_payload };,
+    Locatable.MIRMethodCall AS cast_payload -> RETURN Node{ MIRMethodCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN Node{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN Node{ GetIndex: COPY cast_payload };,
+    Locatable.MIRCast AS cast_payload -> RETURN Node{ MIRCast: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN Node{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN Node{ Assert: COPY cast_payload };,
+    Locatable.TenseRecoveryRaise AS cast_payload -> RETURN Node{ TenseRecoveryRaise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN Node{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN Node{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN Node{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN Node{ Require: COPY cast_payload };,
+    Locatable.MIRDeferStmt AS cast_payload -> RETURN Node{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN Node{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN Node{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN Node{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN Node{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN Node{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN Node{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN Node{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN Node{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN Node{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN Node{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN Node{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN Node{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN Node{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN Node{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN Node{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN Node{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN Node{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN Node{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN Node{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN Node{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN Node{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN Node{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN Node{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN Node{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN Node{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN Node{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN Node{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN Node{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN Node{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN Node{ Copy: COPY cast_payload };,
+    Locatable.MIROptionalUnwrap AS cast_payload -> RETURN Node{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN Node{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN Node{ MutableBorrow: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseRaise AS cast_payload -> RETURN Node{ TenseOperationKindOrElseRaise: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseExit AS cast_payload -> RETURN Node{ TenseOperationKindOrElseExit: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePass AS cast_payload -> RETURN Node{ TenseOperationKindOrElsePass: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElsePrune AS cast_payload -> RETURN Node{ TenseOperationKindOrElsePrune: COPY cast_payload };,
+    Locatable.TenseOperationKindOrElseBreak AS cast_payload -> RETURN Node{ TenseOperationKindOrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN Node{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN Node{ RecoverOp: COPY cast_payload };,
+    Locatable.MIRBlockExpr AS cast_payload -> RETURN Node{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN Node{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN Node{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN Node{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN Node{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN Node{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN Node{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN Node{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN Node{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN Node{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN Node{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN Node{ StructPattern: COPY cast_payload };,
+    Locatable.MIRRangeLit AS cast_payload -> RETURN Node{ MIRRangeLit: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN Node{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN Node{ ExternStructDecl: COPY cast_payload };,
+    Locatable.MIREnumDef AS cast_payload -> RETURN Node{ MIREnumDef: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN Node{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN Node{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN Node{ StaticCall: COPY cast_payload };,
+    Locatable.MIRDoBlock AS cast_payload -> RETURN Node{ MIRDoBlock: COPY cast_payload };,
+    Locatable.MIRBgBlock AS cast_payload -> RETURN Node{ MIRBgBlock: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN Node{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN Node{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN Node{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN Node{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN Node{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN Node{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN Node{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN Node{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN Node{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN Node{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN Node{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN Node{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN Node{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN Node{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN Node{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN Node{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN Node{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN Node{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN Node{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN Node{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN Node{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN Node{ FieldCleanup: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Node");
+  END
+  panic("Invalid cast to Node");
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

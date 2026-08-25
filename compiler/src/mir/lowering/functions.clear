@@ -1,0 +1,203 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6261636b656e64732f7a69675f747970652e636c656172" AS zig_type
+REQUIRE "pkg:rtoc_6d69722f7468756e6b5f7472616e73666f726d2f656d69742e636c656172" AS emit
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f72656769737472792e636c656172" AS intrinsic_registry
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_73656d616e7469632f6573636170655f616e616c797369732e636c656172" AS escape_analysis
+REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172" AS param
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_73656d616e7469632f74656e73655f6f7065726174696f6e5f706c616e2e636c656172" AS tense_operation_plan
+# Ruby module MIRLoweringFunctions
+PUB STRUCT FunctionParamFact {
+  param: Param,
+  name: String,
+  mir_name: String,
+  zig_type: String,
+  mutable_scalar: Bool,
+  collection_param: Bool,
+  pointer_passed: Bool,
+  protocol_map: Bool
+}
+
+PUB FN functionParamFact__to_mir_param(self: FunctionParamFact) RETURNS MIRParam ->
+  RETURN MIRParam{ name: COPY self.mir_name, zig_type: COPY self.zig_type, pointer_passed: self.pointer_passed, lowered_node_id: NIL, ownership_consumption: NIL };
+END
+PUB STRUCT CallArgFacts {
+  ast_arg: Locatable,
+  copy_source: ?Locatable,
+  type_info: Type,
+  callee_sig: ?FunctionSignature@multiowned,
+  callee_param: ?Param,
+  callee_param_type: Type,
+  takes: Bool,
+  copy_to_owning: Bool,
+  arg_alloc: String@symbol,
+  param_index: Int64,
+  edge_plan: ?CallEdgeOwnershipPlan
+}
+PUB STRUCT CallOwnershipFacts {
+  takes_indices: [Set]Int64,
+  consumed_names: []String,
+  consumed_operands: []OwnershipOperandFact
+}
+
+PUB FN callOwnershipFacts__takes?(self: CallOwnershipFacts, index_value: Int64) RETURNS Bool ->
+  RETURN self.takes_indices.contains?(index_value);
+END
+PUB FN callOwnershipFacts__takes_any?(self: CallOwnershipFacts) RETURNS Bool ->
+  RETURN !(self.takes_indices.empty?());
+END
+PUB FN callOwnershipFacts__ownership_contract(self: CallOwnershipFacts) RETURNS !OwnershipContract@multiowned ->
+  RETURN TRY (ownershipContract__consume_operands(TRY (callOwnershipFacts__operands(self))));
+END
+PUB FN callOwnershipFacts__operands(self: CallOwnershipFacts) RETURNS ![]OwnershipOperandFact ->
+  IF !((self.consumed_operands.length() == 0)) THEN
+    RETURN COPY self.consumed_operands;
+  END
+  RETURN self.consumed_names |> SELECT ownershipOperandFact__owned_binding(_, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "call ownership");
+END
+PUB STRUCT StdlibCallArgFact {
+  index: Int64,
+  ast_arg: Locatable,
+  takes: Bool,
+  coerce_type: ?String@symbol,
+  sink_type: ?Type,
+  declared_byte_string: Bool
+}
+
+PUB FN stdlibCallArgFact__coerce_zig(self: StdlibCallArgFact, arg_zig: String) RETURNS !String ->
+  MUTABLE type_sym: ?String@symbol = COPY self.coerce_type;
+  IF type_sym EXISTS AS type_sym_value THEN
+    IF !(([:Int64, :Float64, :Int32, :Int16, :Int8, :UInt64, :UInt32, :UInt16, :UInt8, :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong, :TargetULongLong, :Bool] |> DISTINCT _).contains?(type_sym_value)) THEN
+      RETURN COPY arg_zig;
+    END
+    MUTABLE zig_t = TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY type_sym_value })))));
+    RETURN "@as(${zig_t}, ${arg_zig})";
+  ELSE
+    RETURN COPY arg_zig;
+  END
+END
+PUB STRUCT StdlibCallFacts {
+  args: []StdlibCallArgFact,
+  ownership: CallOwnershipFacts
+}
+
+PUB FN stdlibCallFacts__takes?(self: StdlibCallFacts, index_value: Int64) RETURNS Bool ->
+  MUTABLE fact: ?StdlibCallArgFact = COPY self.args[index_value];
+  RETURN !(!((((fact != NIL) AND fact.takes))));
+END
+PUB FN stdlibCallFacts__ast_arg(self: StdlibCallFacts, index_value: Int64) RETURNS Locatable EFFECTS REENTRANT ->
+  RETURN COPY stdlibCallFacts__ast_arg((UNWRAP (self.args[index_value])));
+END
+PUB FN stdlibCallFacts__coerce_zig(self: StdlibCallFacts, arg_zig: String, index_value: Int64) RETURNS !String EFFECTS REENTRANT ->
+  MUTABLE fact: ?StdlibCallArgFact = COPY self.args[index_value];
+  IF fact EXISTS AS fact_value THEN
+    RETURN TRY (stdlibCallArgFact__coerce_zig(fact_value, arg_zig));
+  ELSE
+    RETURN COPY arg_zig;
+  END
+END
+PUB STRUCT StdlibArgumentMaterialization {
+  mir_args: []Emittable,
+  consumed_names: []String,
+  consumed_operands: []OwnershipOperandFact,
+  val_alloc_placeholder: ?String@symbol
+}
+PUB STRUCT FunctionEntryPlan {
+  prologue: []Emittable,
+  takes_mir: []Emittable
+}
+PUB STRUCT CatchLoweringPlan {
+  clauses: []MIRCatchClause,
+  default_body: []Emittable,
+  default_action: CatchDefaultAction,
+  snapshot_type: ?Type
+}
+PUB STRUCT FunctionLoweringContext {
+  bindings: {String}CleanupEntry@multiowned,
+  binding_types: {String}Type,
+  collection_params: [Set]String,
+  protocol_map_allocators: {String}String,
+  mutable_scalar_params: [Set]String,
+  param_names: [Set]String,
+  takes_param_names: [Set]String,
+  heap_carry_return_vars: ?[Set]String,
+  returned_names: [Set]String,
+  snapshot_types: [Set]String,
+  fn_alloc_marked_names: {String}Bool,
+  lowered_alloc_names: [Set]String,
+  lowered_guarded_cleanup_names: [Set]String,
+  decl_zig_name_map: {Int64}String,
+  guarded_cleanup_names: {String}Bool,
+  fn_name_rename_map: {String}String,
+  has_rt: Bool,
+  tail_call: Bool,
+  zig_name: String,
+  return_payload_zig: String,
+  return_type: Type,
+  heap_carry_return: Bool,
+  has_catch: Bool,
+  source_start_line: Int64
+}
+PUB STRUCT FunctionState {
+  current_function_context: ?FunctionLoweringContext,
+  pending_stmts: []Stmt,
+  current_decl_alloc: ?String@symbol,
+  current_expected_type: ?Type,
+  current_sink_type: ?Type,
+  current_reassignment_target: ?String,
+  current_bindings: {String}CleanupEntry@multiowned,
+  current_binding_types: {String}Type,
+  fn_alloc_marked_names: {String}Bool,
+  lowered_alloc_names: [Set]String,
+  lowered_guarded_cleanup_names: [Set]String,
+  decl_zig_name_map: {Int64}String,
+  guarded_cleanup_names: {String}Bool,
+  fn_name_rename_map: {String}String,
+  node_store_types: [Set]String
+}
+
+PUB FN functionState__activate_mut(MUTABLE self: FunctionState, context: FunctionLoweringContext) RETURNS Void ->
+  self.current_function_context = COPY context;
+  self.current_bindings = COPY context.bindings;
+  self.current_binding_types = COPY context.binding_types;
+  self.decl_zig_name_map = COPY context.decl_zig_name_map;
+  self.fn_alloc_marked_names = COPY context.fn_alloc_marked_names;
+  self.lowered_alloc_names = COPY context.lowered_alloc_names;
+  self.lowered_guarded_cleanup_names = COPY context.lowered_guarded_cleanup_names;
+  self.fn_name_rename_map = COPY context.fn_name_rename_map;
+  self.guarded_cleanup_names = COPY context.guarded_cleanup_names;
+  self.node_store_types = Set[];
+END
+PRIVATE FN functionState__current_decl_heap?(self: FunctionState) RETURNS Bool ->
+  RETURN (self.current_decl_alloc == :heap);
+END
+PUB FN functionState__current_decl_or_frame_alloc(self: FunctionState) RETURNS String@symbol ->
+  IF functionState__current_decl_heap?(self) THEN
+    RETURN :heap;
+  ELSE
+    RETURN :frame;
+  END
+END
+PUB FN functionState__bindings(self: FunctionState) RETURNS !{String}CleanupEntry@multiowned ->
+  RETURN COPY self.current_bindings;
+END
+PUB FN functionState__binding_types(self: FunctionState) RETURNS !{String}Type ->
+  RETURN COPY self.current_binding_types;
+END
+PUB FN functionState__alloc_marked_names(self: FunctionState) RETURNS !{String}Bool ->
+  RETURN COPY self.fn_alloc_marked_names;
+END
+PUB FN functionState__decl_zig_names(self: FunctionState) RETURNS !{Int64}String ->
+  RETURN COPY self.decl_zig_name_map;
+END
+PUB FN functionState__rename_map(self: FunctionState) RETURNS !{String}String ->
+  RETURN COPY self.fn_name_rename_map;
+END
+PUB STRUCT KeptEdgeCallFrame {
+  temps: []String,
+  moved_sources: []String
+}
+# End Ruby module MIRLoweringFunctions
