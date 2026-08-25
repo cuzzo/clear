@@ -11647,7 +11647,7 @@ FN inlineBc__ownership_effect(self: InlineBc) RETURNS !OwnershipEffect EFFECTS R
         NIL
       END);
     END
-    RETURN TRY (ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) == TRUE), &heap_return, (TRY (functionSignature__fixed_return?(sig_value_mutable)) AND type__void?(functionSignature__return_type(sig_value_mutable))), (TRY (functionSignature__mutates_receiver?(&sig_value_mutable)) AND !(heap_return)), NIL, CAST(functionSignature__return_type(sig_value_mutable) AS ?Type), IF heap_return THEN
+    RETURN TRY (ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) == TRUE), heap_return, (TRY (functionSignature__fixed_return?(sig_value_mutable)) AND type__void?(functionSignature__return_type(sig_value_mutable))), (TRY (functionSignature__mutates_receiver?(&sig_value_mutable)) AND !(heap_return)), NIL, CAST(functionSignature__return_type(sig_value_mutable) AS ?Type), IF heap_return THEN
       :heap
     ELSE
       NIL
@@ -11816,7 +11816,7 @@ END
 FN shardedMapPut__ownership_effect(self: ShardedMapPut) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE rtoc_sig = COPY self.stdlib_def;
   MUTABLE heap_return = (TRY (functionSignature__heap_return_alloc?(&rtoc_sig)) == TRUE);
-  RETURN TRY (ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&rtoc_sig)) == TRUE), &heap_return, !(!((((TRY (functionSignature__fixed_return?(self.stdlib_def)) AND type__void?(functionSignature__return_type(self.stdlib_def))) AND !(shardedMapPut__has_alloc_metadata?(self)))))), (shardedMapPut__mutating_receiver_allocator_op?(self) AND !(heap_return)), NIL, CAST(functionSignature__return_type(self.stdlib_def) AS ?Type), IF heap_return THEN
+  RETURN TRY (ownershipEffect__from_callable_facts((TRY (functionSignature__emits_allocating?(&rtoc_sig)) == TRUE), heap_return, !(!((((TRY (functionSignature__fixed_return?(self.stdlib_def)) AND type__void?(functionSignature__return_type(self.stdlib_def))) AND !(shardedMapPut__has_alloc_metadata?(self)))))), (shardedMapPut__mutating_receiver_allocator_op?(self) AND !(heap_return)), NIL, CAST(functionSignature__return_type(self.stdlib_def) AS ?Type), IF heap_return THEN
     :heap
   ELSE
     TRY (inlineAllocMetadata__single_alloc(self.resolved_allocs))
@@ -12103,7 +12103,7 @@ END
 PUB FN ownershipEffect__owned(alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform, requires_hoist: Bool = TRUE, target_var: ?String = NIL) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN OwnershipEffect{ produces_owned: TRUE, alloc: COPY alloc, cleanup_kind: COPY cleanup_kind, requires_hoist: requires_hoist, target_var: COPY target_var };
 END
-FN ownershipEffect__from_callable_facts(emits_allocating: Bool, MUTABLE heap_return_alloc: Bool, fixed_void_without_alloc_metadata: Bool, mutates_receiver_without_heap_return: Bool, result_owns: ?Bool, result_type: ?Type, alloc: ?String@symbol, target_var: ?String) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+FN ownershipEffect__from_callable_facts(emits_allocating: Bool, heap_return_alloc: Bool, fixed_void_without_alloc_metadata: Bool, mutates_receiver_without_heap_return: Bool, result_owns: ?Bool, result_type: ?Type, alloc: ?String@symbol, target_var: ?String) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE active = (emits_allocating OR heap_return_alloc);
   MUTABLE explicitly_not_owned = (heap_return_alloc AND (result_owns == FALSE));
   MUTABLE unknown_owned_result = FALSE;
@@ -14189,7 +14189,7 @@ FN indexedStore__ownership_effect(self: IndexedStore) RETURNS !OwnershipEffect E
   TRY (functionSignature__fixed_return?(rtoc_local_receiver_225)) } == TRUE) AND type__void?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_226 = (KEEP self.entry);
   functionSignature__return_type(rtoc_local_receiver_226) }))) AND !(indexedStore__has_alloc_metadata?(self))))));
   RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_227 = (KEEP self.entry);
-  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_227)) } == TRUE), &heap_return, fixed_void, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_228 = (KEEP self.entry);
+  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_227)) } == TRUE), heap_return, fixed_void, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_228 = (KEEP self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_228)) } AND !(heap_return)), NIL, CAST({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_229 = (KEEP self.entry);
   functionSignature__return_type(rtoc_local_receiver_229) } AS ?Type), IF heap_return THEN
     :heap
@@ -14350,7 +14350,7 @@ FN externTrampoline__ownership_effect(self: ExternTrampoline) RETURNS !Ownership
     RETURN ownershipEffect__owned(self.alloc_kind, :resource, FALSE);
   END
   RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_235 = (KEEP self.stdlib_def);
-  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_235)) } == TRUE), &heap_return, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_236 = (KEEP self.stdlib_def);
+  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_235)) } == TRUE), heap_return, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_236 = (KEEP self.stdlib_def);
   TRY (functionSignature__fixed_return?(rtoc_local_receiver_236)) } AND type__void?(actual_return)), ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_237 = (KEEP self.stdlib_def);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_237)) } AND !(heap_return)), NIL, self.return_type, self.alloc_kind, NIL));
 END
