@@ -10,6 +10,7 @@ REQUIRE "../annotator/helpers/function_signature.clear"
 REQUIRE "../annotator/helpers/intrinsic_contract.clear"
 REQUIRE "../ast/async_result_shape.clear"
 EXTERN FN compilerStringDump(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerByteStringLiteral(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
@@ -2064,19 +2065,7 @@ PRIVATE FN mIREmitter__zig_byte_string_literal(self: MIREmitter, text: String) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE escaped = (text.bytes() |> SELECT PARTIAL MATCH _ START
-      92 -> "\\\\",
-      34 -> "\\\"",
-      10 -> "\\n",
-      13 -> "\\r",
-      9 -> "\\t",
-      0 -> "\\x00",
-      1 ..= 31 -> "\\x${compilerFormatTemplate("%02x")}",
-      127 -> "\\x${compilerFormatTemplate("%02x")}",
-      128 ..= 255 -> "\\x${compilerFormatTemplate("%02x")}",
-      DEFAULT -> codepointToString(_)
-    END).join("");
-    RETURN "\"${escaped}\"";
+    RETURN compilerByteStringLiteral(text);
 }
 END
 PRIVATE FN mIREmitter__emit_fallible_lock_binding(MUTABLE self: MIREmitter, node: FallibleLockBinding) RETURNS !String

@@ -190,6 +190,29 @@ pub fn compilerStringDump(value: []const u8) []const u8 {
     return out.toOwnedSlice(allocator) catch @panic("string dump allocation failed");
 }
 
+// `zig_byte_string_literal`: a Zig literal for a BYTE string, where every
+// non-ASCII byte is escaped individually rather than decoded. Note the
+// lowercase hex -- Ruby writes `%02x` here and `String#dump` writes uppercase,
+// and the two must not be unified.
+pub fn compilerByteStringLiteral(value: []const u8) []const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    out.append(allocator, '"') catch @panic("byte literal allocation failed");
+    for (value) |byte| {
+        switch (byte) {
+            0x5C => out.appendSlice(allocator, "\\\\") catch @panic("byte literal allocation failed"),
+            0x22 => out.appendSlice(allocator, "\\\"") catch @panic("byte literal allocation failed"),
+            0x0A => out.appendSlice(allocator, "\\n") catch @panic("byte literal allocation failed"),
+            0x0D => out.appendSlice(allocator, "\\r") catch @panic("byte literal allocation failed"),
+            0x09 => out.appendSlice(allocator, "\\t") catch @panic("byte literal allocation failed"),
+            0x00 => out.appendSlice(allocator, "\\x00") catch @panic("byte literal allocation failed"),
+            0x01...0x08, 0x0B, 0x0C, 0x0E...0x1F, 0x7F, 0x80...0xFF => out.print(allocator, "\\x{x:0>2}", .{byte}) catch @panic("byte literal allocation failed"),
+            else => out.append(allocator, byte) catch @panic("byte literal allocation failed"),
+        }
+    }
+    out.append(allocator, '"') catch @panic("byte literal allocation failed");
+    return out.toOwnedSlice(allocator) catch @panic("byte literal allocation failed");
+}
+
 pub fn compilerZigTranslateC(
     zig: []const u8,
     source_dir: []const u8,
@@ -667,4 +690,17 @@ test "compiler string dump leaves invalid utf8 as raw byte escapes" {
     try std.testing.expectEqualStrings("\"\\xFF\"", compilerStringDump("\xFF"));
     // A truncated sequence must not read past the end.
     try std.testing.expectEqualStrings("\"\\xC3\"", compilerStringDump("\xC3"));
+}
+
+test "compiler byte string literal escapes every non-ascii byte" {
+    try std.testing.expectEqualStrings("\"\"", compilerByteStringLiteral(""));
+    try std.testing.expectEqualStrings("\"plain\"", compilerByteStringLiteral("plain"));
+    try std.testing.expectEqualStrings(
+        "\"\\\\ \\\" \\n \\r \\t \\x00\"",
+        compilerByteStringLiteral("\\ \" \n \r \t \x00"),
+    );
+    // Lowercase hex here, unlike String#dump's uppercase.
+    try std.testing.expectEqualStrings("\"\\x01\\x1f\\x7f\\x80\\xff\"", compilerByteStringLiteral("\x01\x1F\x7F\x80\xFF"));
+    // A UTF-8 sequence stays byte-escaped rather than decoded.
+    try std.testing.expectEqualStrings("\"caf\\xc3\\xa9\"", compilerByteStringLiteral("caf\xC3\xA9"));
 }
