@@ -986,10 +986,17 @@ module MIRLoweringVariables
       # frame-to-heap copy path without reconstructing a type from Zig text.
       source_type = Type.from_node!(node.value, context: "reassignment value type")
       target_type = assign_alloc ? Type.new(source_type, location: assign_alloc) : source_type
+      # A reassignment IS a destination, so it must scope the sink type the way
+      # every other assignment form does. Without this the enclosing
+      # expression's sink leaks in -- inside a block expression a COPY was
+      # rendered with the BLOCK's result type and dupeValue cloned the wrong
+      # type entirely.
       value = with_reassignment_target(target_name) do
-        with_decl_alloc(assign_alloc) do
-          lowered = lower(node.value)
-          place_value_for_destination(lowered, node.value, assign_alloc, target_type)
+        with_sink_type(target_type) do
+          with_decl_alloc(assign_alloc) do
+            lowered = lower(node.value)
+            place_value_for_destination(lowered, node.value, assign_alloc, target_type)
+          end
         end
       end
       # Some synthetic/branch-local BindExpr reassignments do not retain a

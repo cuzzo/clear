@@ -1,0 +1,25 @@
+# Test: a reassignment inside a block expression must COPY at the SOURCE's
+# type, not at the block's result type. `lower_assignment` never scoped the
+# sink type, so the enclosing block's `String` leaked in and the COPY of a
+# `Leaf` was emitted as `dupeValue([]const u8, ...)` -- Zig rejected it with
+# "expected type Leaf, found []const u8".
+#
+# This is the shape a self-hosted visitor emits whenever a callee stamps
+# through a union-wrapped MUTABLE argument and the wrap is unwrapped back.
+
+STRUCT Leaf { tag: String }
+UNION Item { Leaf: Leaf }
+
+FN main() RETURNS Void ->
+  MUTABLE captured: Leaf = Leaf{ tag: "start" };
+  it: Item = Item{ Leaf: Leaf{ tag: "stamped" } };
+  value: String = {
+    res: String = "ok";
+    PARTIAL MATCH it START
+      Item.Leaf AS li -> captured = COPY li;,
+    END
+    res
+  };
+  ASSERT captured.tag == "stamped";
+  ASSERT value == "ok";
+END
