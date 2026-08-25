@@ -693,7 +693,10 @@ PUB FN type__zig_type_name_for(value: String@symbol) RETURNS String ->
   IF (value == :TCPClient) THEN
     RETURN "i32";
   END
-  RETURN COPY CAST(value AS String);
+  # Every other arm returns a static literal; a symbol's bytes are interned and
+  # equally static, so copying only THIS one gave the return mixed provenance
+  # and the caller could not know whether to free it.
+  RETURN CAST(value AS String);
 END
 PUB FN type__deinit_resource_close_plan() RETURNS ResourceClosePlan ->
   RETURN ResourceClosePlan{ actions: [ResourceCloseAction{ call_kind: COPY ResourceCloseCallKind.Method, name: "deinit", runtime_heap_alloc_args: 0, field_path: List[] }] };

@@ -605,7 +605,10 @@ module FnCompat
     binary = File.join(dir, 'fn_compat')
     File.write(source, clear_source(targets, by_name))
 
-    build = %w[./clear build] + [source, '-o', binary, '--no-stack-check'] + package_flags
+    # The harness is one long main plus the target's whole package; the default
+    # fiber stack overflows once the corpus is more than a few dozen calls.
+    build = %w[./clear build] + [source, '-o', binary, '--no-stack-check',
+                                 '--default-stack', 'Huge'] + package_flags
     # zig_type.clear and friends call into compiler_regex.zig; the native dir
     # and its pcre2 link have to travel with the harness build.
     env = {
@@ -676,48 +679,62 @@ module FnCompat
     encoded
   end
 
-  # Bind the call's result, then render it. An optional result cannot be
-  # rendered inline: an IF-expression yielding a heap String is rejected, and
-  # evaluating the call twice would double any side effect. The slots are
-  # declared ONCE and reassigned -- a fresh local per call overflows the
-  # fiber stack long before the corpus is interesting.
-  def clear_render_stmts(expr, result_type)
-    case result_type
-    when :bool
-      ['  fnCompatText = "false";', "  IF #{expr} THEN", '    fnCompatText = "true";', '  END']
-    when :symbol
-      ["  fnCompatText = \":\" $+ CAST(#{expr} AS String);"]
-    when :string
-      ["  fnCompatText = \"\\\"\" $+ #{expr} $+ \"\\\"\";"]
-    when :int
-      ["  fnCompatText = #{expr}.toString();"]
-    when :opt_string
-      ["  fnCompatOptString = #{expr};",
-       '  fnCompatText = "nil";',
-       '  IF fnCompatOptString EXISTS AS fnCompatOptStringValue THEN',
-       '    fnCompatText = "\\"" $+ fnCompatOptStringValue $+ "\\"";',
-       '  END']
-    when :opt_symbol
-      ["  fnCompatOptSymbol = #{expr};",
-       '  fnCompatText = "nil";',
-       '  IF fnCompatOptSymbol EXISTS AS fnCompatOptSymbolValue THEN',
-       '    fnCompatText = ":" $+ CAST(fnCompatOptSymbolValue AS String);',
-       '  END']
-    when :opt_int
-      ["  fnCompatOptInt = #{expr};",
-       '  fnCompatText = "nil";',
-       '  IF fnCompatOptInt EXISTS AS fnCompatOptIntValue THEN',
-       '    fnCompatText = fnCompatOptIntValue.toString();',
-       '  END']
-    else raise "fn_compat: unsupported result type #{result_type}"
-    end
-  end
+  # Render the result through a helper FN rather than a reassigned slot: a slot
+  # frees its previous value on reassignment, and these results are often
+  # .rodata. A helper also keeps each runner's frame small.
+  RENDERERS = {
+    bool: 'fnCompatBoolText',
+    symbol: 'fnCompatSymbolText',
+    string: 'fnCompatStringText',
+    int: 'fnCompatIntText',
+    opt_string: 'fnCompatOptStringText',
+    opt_symbol: 'fnCompatOptSymbolText',
+    opt_int: 'fnCompatOptIntText',
+  }.freeze
+
+  RENDERER_DEFS = <<~CLEAR
+    PRIVATE FN fnCompatBoolText(value: Bool) RETURNS String ->
+      IF value THEN
+        RETURN "true";
+      END
+      RETURN "false";
+    END
+    PRIVATE FN fnCompatSymbolText(value: String@symbol) RETURNS String ->
+      RETURN ":" $+ CAST(value AS String);
+    END
+    PRIVATE FN fnCompatStringText(value: String) RETURNS String ->
+      RETURN "\\"" $+ value $+ "\\"";
+    END
+    PRIVATE FN fnCompatIntText(value: Int64) RETURNS String ->
+      RETURN value.toString();
+    END
+    PRIVATE FN fnCompatOptStringText(value: ?String) RETURNS String ->
+      IF value EXISTS AS present THEN
+        RETURN "\\"" $+ present $+ "\\"";
+      END
+      RETURN "nil";
+    END
+    PRIVATE FN fnCompatOptSymbolText(value: ?String@symbol) RETURNS String ->
+      IF value EXISTS AS present THEN
+        RETURN ":" $+ CAST(present AS String);
+      END
+      RETURN "nil";
+    END
+    PRIVATE FN fnCompatOptIntText(value: ?Int64) RETURNS String ->
+      IF value EXISTS AS present THEN
+        RETURN present.toString();
+      END
+      RETURN "nil";
+    END
+  CLEAR
 
   def clear_source(targets, by_name)
     units = targets.map(&:clear_unit).uniq
     requires = units.map { |unit| "REQUIRE \"pkg:rtoc_#{unit.unpack1('H*')}\";" }.join("\n")
-    body = targets.flat_map do |target|
-      by_name.fetch(target.name, []).each_with_index.map do |call, index|
+    # One FN per target: a single main holding every call overflows the fiber
+    # stack once the corpus is more than a few dozen calls.
+    runners = targets.each_with_index.map do |target, target_index|
+      calls = by_name.fetch(target.name, []).each_with_index.map do |call, index|
         args = call['args'].map { |a| clear_literal(a) }.join(', ')
         expr = if target.prelude
                  target.clear_call
@@ -726,19 +743,19 @@ module FnCompat
                else
                  "#{target.clear_call}(#{args})"
                end
+        renderer = RENDERERS.fetch(target.result_type)
         lines = []
         lines << format(target.prelude, args) if target.prelude
-        lines.concat(clear_render_stmts(expr, target.result_type))
-        lines << "  print(\"#{target.name}|#{index}|\" $+ fnCompatText);"
+        lines << "  print(\"#{target.name}|#{index}|\" $+ #{renderer}(#{expr}));"
         lines.join("\n")
       end
-    end.join("\n")
-
-    preludes = if targets.any?(&:prelude)
-      "  MUTABLE fnCompatEffects: EffectSet@multiowned = TRY (effectSet__new(fnCompatEmptySet()));\n"
-    else
-      ''
+      slots = []
+      slots << '  MUTABLE fnCompatEffects: EffectSet@multiowned = TRY (effectSet__new(fnCompatEmptySet()));' if target.prelude
+      name = "fnCompatRun#{target_index}"
+      ["PRIVATE FN #{name}() RETURNS !Void ->", *slots, *calls, 'END'].join("\n")
     end
+    body = runners.each_index.map { |i| "  TRY (fnCompatRun#{i}());" }.join("\n")
+    runner_defs = runners.join("\n")
 
     <<~CLEAR
       #{requires}
@@ -748,12 +765,12 @@ module FnCompat
         RETURN empty;
       END
 
+      #{RENDERER_DEFS}
+
+      #{runner_defs}
+
       FN main() RETURNS !Void ->
-        MUTABLE fnCompatText: String = "";
-        MUTABLE fnCompatOptString: ?String = NIL;
-        MUTABLE fnCompatOptSymbol: ?String@symbol = NIL;
-        MUTABLE fnCompatOptInt: ?Int64 = NIL;
-      #{preludes}#{body}
+      #{body}
       END
     CLEAR
   end
