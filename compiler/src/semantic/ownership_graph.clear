@@ -266,7 +266,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF source_node EXISTS AS source_node_value THEN
       MUTABLE source_node_value_mutable = COPY source_node_value;
       IF ownershipNode__moved?(source_node_value_mutable) THEN
-        RETURN "cannot borrow '${source}': already moved";
+        RETURN COPY "cannot borrow '${source}': already moved";
       END
       IF mutable_value THEN
         MUTABLE conflict: ?String = TRY (ownershipGraph__find_borrow_conflict(rtoc_self_view, source));
@@ -283,7 +283,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN NIL;
     ELSE
-      RETURN "cannot borrow '${source}': not declared";
+      RETURN COPY "cannot borrow '${source}': not declared";
     END
 }
 END

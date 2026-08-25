@@ -61,16 +61,16 @@ PUB FN zigType__fallible_return_type(self: ZigType) RETURNS String ->
   IF zigType__top_level_error_union?(self) THEN
     RETURN COPY self.source;
   END
-  RETURN "!${self.source}";
+  RETURN COPY "!${self.source}";
 END
 PUB FN zigType__concrete_fallible_return_type(self: ZigType) RETURNS String ->
   IF zigType__top_level_concrete_error_union?(self) THEN
     RETURN COPY self.source;
   END
   IF zigType__inferred_error_union?(self) THEN
-    RETURN "anyerror${self.source}";
+    RETURN COPY "anyerror${self.source}";
   END
-  RETURN "anyerror!${self.source}";
+  RETURN COPY "anyerror!${self.source}";
 END
 PUB FN zigType__fallible_return_type_for(self: ZigType, reentrant: Bool) RETURNS String ->
   IF reentrant THEN
@@ -83,11 +83,11 @@ PUB FN zigType__anyerror_return_type(self: ZigType) RETURNS String ->
   IF zigType__top_level_error_union?(self) THEN
     RETURN COPY self.source;
   END
-  RETURN "anyerror!${self.source}";
+  RETURN COPY "anyerror!${self.source}";
 END
 PUB FN zigType__cast_target_type(self: ZigType) RETURNS String ->
   IF zigType__inferred_error_union?(self) THEN
-    RETURN "anyerror${self.source}";
+    RETURN COPY "anyerror${self.source}";
   END
   RETURN COPY self.source;
 END

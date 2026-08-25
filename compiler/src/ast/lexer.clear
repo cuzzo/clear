@@ -145,7 +145,7 @@ PUB FN token__display_value(self: Token) RETURNS String ->
       RETURN COPY float64.toString();
     END
   END
-  RETURN "";
+  RETURN COPY "";
 END
 PUB FN token__start_line(self: Token) RETURNS Int64 ->
   RETURN self.line;

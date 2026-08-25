@@ -85,7 +85,7 @@ PUB FN mIREmitter__emit(MUTABLE self: MIREmitter, node: ?Emittable) RETURNS !Str
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node == NIL) THEN
-      RETURN "";
+      RETURN COPY "";
     ELSE_IF node IS_A MIRProgram AS rtoc_m_i_r_program THEN
       RETURN TRY (mIREmitter__emit_program(&rtoc_self_view, rtoc_m_i_r_program));
     ELSE_IF node IS_A FnDef AS rtoc_fn_def THEN
@@ -137,9 +137,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A BreakStmt AS rtoc_break_stmt THEN
       RETURN TRY (mIREmitter__emit_break(&rtoc_self_view, rtoc_break_stmt));
     ELSE_IF (node IS_A ContinueStmt) THEN
-      RETURN "continue;";
+      RETURN COPY "continue;";
     ELSE_IF (node IS_A Panic) THEN
-      RETURN "@panic(${compilerInspectValue()});";
+      RETURN COPY "@panic(${compilerInspectValue()});";
     ELSE_IF node IS_A AssertStmt AS rtoc_assert_stmt THEN
       RETURN TRY (mIREmitter__emit_assert_stmt(&rtoc_self_view, rtoc_assert_stmt));
     ELSE_IF node IS_A AssertRaisesCheck AS rtoc_assert_raises_check THEN
@@ -151,9 +151,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A Sort AS rtoc_sort THEN
       RETURN TRY (mIREmitter__emit_sort(&rtoc_self_view, rtoc_sort));
     ELSE_IF node IS_A SoaFieldAccess AS rtoc_soa_field_access THEN
-      RETURN "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_soa_field_access.soa_expr))}.data.items(.${rtoc_soa_field_access.field_name})";
+      RETURN COPY "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_soa_field_access.soa_expr))}.data.items(.${rtoc_soa_field_access.field_name})";
     ELSE_IF node IS_A TryOrPanic AS rtoc_try_or_panic THEN
-      RETURN "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_try_or_panic.expr))} catch @panic(${compilerInspectValue()})";
+      RETURN COPY "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_try_or_panic.expr))} catch @panic(${compilerInspectValue()})";
     ELSE_IF node IS_A IndexInsert AS rtoc_index_insert THEN
       RETURN TRY (mIREmitter__emit_index_insert(&rtoc_self_view, rtoc_index_insert));
     ELSE_IF node IS_A BatchWindowPush AS rtoc_batch_window_push THEN
@@ -181,7 +181,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A DirectTenseMap AS rtoc_direct_tense_map THEN
       RETURN TRY (mIREmitter__emit_direct_tense_map(&rtoc_self_view, rtoc_direct_tense_map));
     ELSE_IF node IS_A AsyncPayloadTake AS rtoc_async_payload_take THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_async_payload_take.source)))}.value";
+      RETURN COPY "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_async_payload_take.source)))}.value";
     ELSE_IF node IS_A ShardConcurrentEach AS rtoc_shard_concurrent_each THEN
       RETURN TRY (mIREmitter__emit_shard_concurrent_each(&rtoc_self_view, rtoc_shard_concurrent_each));
     ELSE_IF node IS_A MIRDoBlock AS rtoc_m_i_r_do_block THEN
@@ -189,11 +189,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A CatchWrapper AS rtoc_catch_wrapper THEN
       RETURN TRY (mIREmitter__emit_catch_wrapper(&rtoc_self_view, rtoc_catch_wrapper));
     ELSE_IF node IS_A Comment AS rtoc_comment THEN
-      RETURN "// ${rtoc_comment.text}";
+      RETURN COPY "// ${rtoc_comment.text}";
     ELSE_IF node IS_A Suppress AS rtoc_suppress THEN
-      RETURN "_ = &${rtoc_suppress.name};";
+      RETURN COPY "_ = &${rtoc_suppress.name};";
     ELSE_IF node IS_A PubConst AS rtoc_pub_const THEN
-      RETURN "pub const ${rtoc_pub_const.name} = ${rtoc_pub_const.value};";
+      RETURN COPY "pub const ${rtoc_pub_const.name} = ${rtoc_pub_const.value};";
     ELSE_IF node IS_A ModuleVar AS rtoc_module_var THEN
       RETURN "${IF (rtoc_module_var.visibility == :pub) THEN
         "pub "
@@ -201,7 +201,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ""
       END}var ${rtoc_module_var.name}: ${rtoc_module_var.zig_type} = undefined;";
     ELSE_IF node IS_A ModuleConstFree AS rtoc_module_const_free THEN
-      RETURN "defer CheatLib.cleanup(@TypeOf(${rtoc_module_const_free.name}), ${rtoc_self_view.rt_name}.heapAlloc(), &${rtoc_module_const_free.name});";
+      RETURN COPY "defer CheatLib.cleanup(@TypeOf(${rtoc_module_const_free.name}), ${rtoc_self_view.rt_name}.heapAlloc(), &${rtoc_module_const_free.name});";
     ELSE_IF node IS_A ProtocolAdapterDef AS rtoc_protocol_adapter_def THEN
       RETURN mIREmitter__emit_protocol_adapter_def(rtoc_self_view, rtoc_protocol_adapter_def);
     ELSE_IF node IS_A HeapCreate AS rtoc_heap_create THEN
@@ -265,7 +265,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A FallibleLockBinding AS rtoc_fallible_lock_binding THEN
       RETURN TRY (mIREmitter__emit_fallible_lock_binding(&rtoc_self_view, rtoc_fallible_lock_binding));
     ELSE_IF (node IS_A Noop) OR (node IS_A AllocMark) OR (node IS_A ReturnMark) OR (node IS_A TransferMark) OR (node IS_A ReassignMark) OR (node IS_A FieldCleanupMark) OR (node IS_A OwnedCreate) OR (node IS_A OwnedDestroy) OR (node IS_A OwnedTransfer) OR (node IS_A OwnedBorrow) OR (node IS_A OwnedStore) OR (node IS_A OwnedReturn) THEN
-      RETURN "";
+      RETURN COPY "";
     ELSE_IF node IS_A Call AS rtoc_call THEN
       RETURN TRY (mIREmitter__emit_call(&rtoc_self_view, rtoc_call));
     ELSE_IF node IS_A RuntimeCall AS rtoc_runtime_call THEN
@@ -283,9 +283,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A MIRBinOp AS rtoc_m_i_r_bin_op THEN
       RETURN TRY (mIREmitter__emit_bin_op(&rtoc_self_view, rtoc_m_i_r_bin_op));
     ELSE_IF node IS_A FallibleOk AS rtoc_fallible_ok THEN
-      RETURN "if (${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_fallible_ok.expr))}) |_| true else |_| false";
+      RETURN COPY "if (${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_fallible_ok.expr))}) |_| true else |_| false";
     ELSE_IF node IS_A FutureReady AS rtoc_future_ready THEN
-      RETURN "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_future_ready.expr))}.isReady()";
+      RETURN COPY "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_future_ready.expr))}.isReady()";
     ELSE_IF node IS_A MIRUnaryOp AS rtoc_m_i_r_unary_op THEN
       RETURN TRY (mIREmitter__emit_unary_op(&rtoc_self_view, rtoc_m_i_r_unary_op));
     ELSE_IF node IS_A Lit AS rtoc_lit THEN
@@ -293,13 +293,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A SymbolLit AS rtoc_symbol_lit THEN
       RETURN mIREmitter__symbol_literal_name(&rtoc_self_view, CAST(rtoc_symbol_lit.value AS String));
     ELSE_IF (node IS_A VoidLiteral) THEN
-      RETURN "{}";
+      RETURN COPY "{}";
     ELSE_IF node IS_A DefaultValue AS rtoc_default_value THEN
       RETURN TRY (mIREmitter__emit_default_value(rtoc_self_view, rtoc_default_value));
     ELSE_IF node IS_A EnumTag AS rtoc_enum_tag THEN
-      RETURN ".${rtoc_enum_tag.variant}";
+      RETURN COPY ".${rtoc_enum_tag.variant}";
     ELSE_IF node IS_A EnumOrdinal AS rtoc_enum_ordinal THEN
-      RETURN "@intFromEnum(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_enum_ordinal.value))})";
+      RETURN COPY "@intFromEnum(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_enum_ordinal.value))})";
     ELSE_IF node IS_A Ident AS rtoc_ident THEN
       RETURN COPY (rtoc_self_view.ident_overrides[CAST(rtoc_ident.name AS String)] OR_ELSE CAST(rtoc_ident.name AS String));
     ELSE_IF node IS_A MIRDestructureTarget AS rtoc_m_i_r_destructure_target THEN
@@ -313,13 +313,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A CapabilityLockAddress AS rtoc_capability_lock_address THEN
       RETURN TRY (mIREmitter__emit_capability_lock_address(&rtoc_self_view, rtoc_capability_lock_address));
     ELSE_IF node IS_A FnRef AS rtoc_fn_ref THEN
-      RETURN "&${rtoc_fn_ref.name}";
+      RETURN COPY "&${rtoc_fn_ref.name}";
     ELSE_IF node IS_A LockAcquire AS rtoc_lock_acquire THEN
       RETURN TRY (mIREmitter__emit_lock_acquire(&rtoc_self_view, rtoc_lock_acquire));
     ELSE_IF node IS_A TypeOf AS rtoc_type_of THEN
-      RETURN "@TypeOf(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_type_of.expr))})";
+      RETURN COPY "@TypeOf(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_type_of.expr))})";
     ELSE_IF node IS_A TypeEq AS rtoc_type_eq THEN
-      RETURN "(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_type_eq.left))} == ${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_type_eq.right))})";
+      RETURN COPY "(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_type_eq.left))} == ${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_type_eq.right))})";
     ELSE_IF node IS_A StructInit AS rtoc_struct_init THEN
       RETURN TRY (mIREmitter__emit_struct_init(&rtoc_self_view, rtoc_struct_init));
     ELSE_IF node IS_A ArrayInit AS rtoc_array_init THEN
@@ -337,12 +337,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A TryExpr AS rtoc_try_expr THEN
       MUTABLE try_expr: Emittable = COPY rtoc_try_expr.expr;
       IF try_expr IS_A MIROptionalUnwrap AS rtoc_optional_unwrap THEN
-        RETURN "(try ${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_optional_unwrap.expr))}).?";
+        RETURN COPY "(try ${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_optional_unwrap.expr))}).?";
       ELSE
-        RETURN "try ${TRY (mIREmitter__emit(&rtoc_self_view, try_expr))}";
+        RETURN COPY "try ${TRY (mIREmitter__emit(&rtoc_self_view, try_expr))}";
       END
     ELSE_IF node IS_A TryOptional AS rtoc_try_optional THEN
-      RETURN "(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_try_optional.expr))} orelse return error.TryOptional)";
+      RETURN COPY "(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_try_optional.expr))} orelse return error.TryOptional)";
     ELSE_IF node IS_A TryCatch AS rtoc_try_catch THEN
       RETURN TRY (mIREmitter__emit_try_catch(&rtoc_self_view, rtoc_try_catch));
     ELSE_IF node IS_A BreakExpr AS rtoc_break_expr THEN
@@ -354,45 +354,45 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A IfOptional AS rtoc_if_optional THEN
       RETURN TRY (mIREmitter__emit_if_optional(&rtoc_self_view, rtoc_if_optional));
     ELSE_IF node IS_A Comptime AS rtoc_comptime THEN
-      RETURN "comptime ${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_comptime.expr))}";
+      RETURN COPY "comptime ${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_comptime.expr))}";
     ELSE_IF node IS_A UnionVariantGet AS rtoc_union_variant_get THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_union_variant_get.object)))}.${rtoc_union_variant_get.variant}";
+      RETURN COPY "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_union_variant_get.object)))}.${rtoc_union_variant_get.variant}";
     ELSE_IF node IS_A ListItems AS rtoc_list_items THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_list_items.list)))}.items";
+      RETURN COPY "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_list_items.list)))}.items";
     ELSE_IF node IS_A ListLength AS rtoc_list_length THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_list_length.expr)))}.len";
+      RETURN COPY "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_list_length.expr)))}.len";
     ELSE_IF node IS_A AddressOf AS rtoc_address_of THEN
-      RETURN "&${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_address_of.expr))}";
+      RETURN COPY "&${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_address_of.expr))}";
     ELSE_IF node IS_A Deref AS rtoc_deref THEN
-      RETURN "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_deref.expr))}.*";
+      RETURN COPY "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_deref.expr))}.*";
     ELSE_IF node IS_A PointerCast AS rtoc_pointer_cast THEN
       RETURN TRY (mIREmitter__emit_pointer_cast(&rtoc_self_view, rtoc_pointer_cast));
     ELSE_IF node IS_A ConstCast AS rtoc_const_cast THEN
-      RETURN "@constCast(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_const_cast.expr))})";
+      RETURN COPY "@constCast(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_const_cast.expr))})";
     ELSE_IF node IS_A DefaultStreamCapacity AS rtoc_default_stream_capacity THEN
       RETURN TRY (mIREmitter__emit_default_stream_capacity(&rtoc_self_view, rtoc_default_stream_capacity));
     ELSE_IF node IS_A NextPromiseList AS rtoc_next_promise_list THEN
       RETURN TRY (mIREmitter__emit_next_promise_list(&rtoc_self_view, rtoc_next_promise_list));
     ELSE_IF node IS_A MIROptionalUnwrap AS rtoc_optional_unwrap_node THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_optional_unwrap_node.expr)))}.?";
+      RETURN COPY "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_optional_unwrap_node.expr)))}.?";
     ELSE_IF node IS_A ForeignOwnedUnwrap AS rtoc_foreign_owned_unwrap THEN
-      RETURN "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_foreign_owned_unwrap.expr)))}.?";
+      RETURN COPY "${mIREmitter__paren_if_try(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, rtoc_foreign_owned_unwrap.expr)))}.?";
     ELSE_IF node IS_A CFunctionAdapter AS rtoc_c_function_adapter THEN
       RETURN TRY (mIREmitter__emit_c_function_adapter(&rtoc_self_view, rtoc_c_function_adapter));
     ELSE_IF node IS_A ForeignSliceView AS rtoc_foreign_slice_view THEN
-      RETURN "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_foreign_slice_view.pointer))}[0..@intCast(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_foreign_slice_view.count))})]";
+      RETURN COPY "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_foreign_slice_view.pointer))}[0..@intCast(${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_foreign_slice_view.count))})]";
     ELSE_IF node IS_A AllocatorRef AS rtoc_allocator_ref THEN
       RETURN TRY (mIREmitter__emit_allocator_ref(rtoc_self_view, rtoc_allocator_ref));
     ELSE_IF (node IS_A Undef) THEN
       IF TRY (type__zig_type(CAST(node AS Type))) THEN
-        RETURN "@as(${TRY (type__zig_type(CAST(node AS Type)))}, undefined)";
+        RETURN COPY "@as(${TRY (type__zig_type(CAST(node AS Type)))}, undefined)";
       ELSE
-        RETURN "undefined";
+        RETURN COPY "undefined";
       END
     ELSE_IF node IS_A TypeSentinel AS rtoc_type_sentinel THEN
       RETURN mIREmitter__emit_type_sentinel(rtoc_self_view, rtoc_type_sentinel);
     ELSE_IF node IS_A IterRange AS rtoc_iter_range THEN
-      RETURN "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_iter_range.start))}..${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_iter_range.end_val))}";
+      RETURN COPY "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_iter_range.start))}..${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_iter_range.end_val))}";
     ELSE_IF node IS_A MIRRangeLit AS rtoc_m_i_r_range_lit THEN
       RETURN TRY (mIREmitter__emit_range_lit(&rtoc_self_view, rtoc_m_i_r_range_lit));
     ELSE_IF node IS_A HasField AS rtoc_has_field THEN
@@ -477,7 +477,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (layer == "!") THEN
       RETURN "${label}: {\n    const ${binding} = ${source} catch |__tense_err| break :${label} __tense_err;\n    break :${label} ${tail};\n}\n".trim();
     ELSE_IF (layer == "?") THEN
-      RETURN "if (${source}) |${binding}| ${tail} else null";
+      RETURN COPY "if (${source}) |${binding}| ${tail} else null";
     ELSE
       panic("unsupported immediate tense-map layer {}");
     END
@@ -960,7 +960,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(coercible.contains?(coerce_type_value)) THEN
         RETURN COPY rendered_arg;
       END
-      RETURN "@as(${TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY coerce_type_value })))))}, ${rendered_arg})";
+      RETURN COPY "@as(${TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY coerce_type_value })))))}, ${rendered_arg})";
     ELSE
       RETURN COPY rendered_arg;
     END
@@ -2483,7 +2483,7 @@ PRIVATE FN mIREmitter__emit_destructure_target(self: MIREmitter, node: MIRDestru
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (CAST(node.name AS String) == "_") THEN
-      RETURN "_";
+      RETURN COPY "_";
     END
     MUTABLE annotation: String = "";
     IF node.annotation THEN
@@ -2492,7 +2492,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       annotation = "";
     END
     IF (node.declaration_kind == :const) OR (node.declaration_kind == :var) THEN
-      RETURN "${node.declaration_kind} ${node.name}${annotation}";
+      RETURN COPY "${node.declaration_kind} ${node.name}${annotation}";
     ELSE
       RETURN COPY CAST(node.name AS String);
     END
@@ -3717,7 +3717,7 @@ PRIVATE FN mIREmitter__paren_if_try(self: MIREmitter, expr: String) RETURNS Stri
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF expr.startsWith?("try ") THEN
-      RETURN "(${expr})";
+      RETURN COPY "(${expr})";
     ELSE
       RETURN COPY expr;
     END

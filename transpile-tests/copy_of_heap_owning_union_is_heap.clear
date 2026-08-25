@@ -1,0 +1,41 @@
+# Test: copying a heap-owning union into a local places that local on the heap.
+# The literal scan could not see it -- the value is a COPY of a BINDING, not a
+# literal built here -- so a frame owner ended up holding heap children.
+
+PUB STRUCT Ident { name: String }
+PUB UNION Lifetime { SymbolValue: String@symbol, ArrayValue: []Ident }
+PUB STRUCT Decl { return_lifetime: ?Lifetime }
+
+FN names(node: Decl) RETURNS ![]String ->
+  MUTABLE lifetime_opt: ?Lifetime = COPY node.return_lifetime;
+  IF (lifetime_opt == NIL) THEN
+    RETURN List[];
+  END
+  MUTABLE lifetime: Lifetime = COPY UNWRAP (lifetime_opt);
+  IF lifetime IS_A String@symbol AS sym THEN
+    RETURN [COPY "wildcard"];
+  END
+
+  MUTABLE out: []String = List[];
+  MUTABLE items = (CAST(lifetime AS []Ident));
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    &out.append(COPY UNWRAP (items[i]).name);
+    i = i + 1;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE ids: []Ident = List[];
+  &ids.append(Ident{ name: COPY "alpha" });
+  &ids.append(Ident{ name: COPY "beta" });
+  MUTABLE d = Decl{ return_lifetime: Lifetime{ ArrayValue: GIVE ids } };
+
+  MUTABLE got = TRY (names(d));
+  ASSERT got.length() == 2;
+  ASSERT UNWRAP (got[1]) == "beta";
+
+  ASSERT (TRY (names(Decl{ return_lifetime: NIL }))).length() == 0;
+  ASSERT (TRY (names(Decl{ return_lifetime: Lifetime{ SymbolValue: COPY :any } }))).length() == 1;
+END

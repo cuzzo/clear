@@ -2957,10 +2957,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY mir_method_call.method;
     END
     IF source_node IS_A MIRBgBlock AS mir_bg_block THEN
-      RETURN "MIR::BgBlock";
+      RETURN COPY "MIR::BgBlock";
     END
     IF source_node IS_A StreamSpawn AS stream_spawn THEN
-      RETURN "MIR::StreamSpawn";
+      RETURN COPY "MIR::StreamSpawn";
     END
     IF (respondsTo?(source_node, "reason") AND source_node.reason) THEN
       RETURN COPY CAST(source_node.reason AS String);
@@ -3721,7 +3721,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE ti = TRY (type__from_node_mut(node, "discard owned type"));
     ti = TRY (type__success_type(ti));
     IF TRY (type__string?(ti)) THEN
-      RETURN "[]const u8";
+      RETURN COPY "[]const u8";
     END
     RETURN TRY (type__zig_type(ti));
 }
@@ -8845,7 +8845,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       FALSE
     END;
     IF (type__shared?(type_info) AND type__generic_type_parameter?(type_info)) THEN
-      RETURN "CheatLib.Arc(${type__resolved(type_info)})";
+      RETURN COPY "CheatLib.Arc(${type__resolved(type_info)})";
     END
     IF (IF sym != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_293 = CAST(sym AS SymbolEntry);
@@ -8864,16 +8864,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END;
       MUTABLE handle = "CheatLib.Rc(${payload})";
       IF type__optional?(type_info) THEN
-        RETURN "?${handle}";
+        RETURN COPY "?${handle}";
       ELSE
         RETURN handle;
       END
     END
     IF ((param.takes AND TRY (type__any_rc?(type_info))) AND type__collection?(type_info)) THEN
-      RETURN "*const ${base_zig}";
+      RETURN COPY "*const ${base_zig}";
     END
     IF ((((is_user_struct OR polymorphic_generic_struct) OR type__collection?(type_info)) OR type__canonical_stream?(type_info)) OR atomic_sync) THEN
-      RETURN "anytype";
+      RETURN COPY "anytype";
     END
     RETURN COPY base_zig;
 }
@@ -11429,7 +11429,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         NIL
       END) OR_ELSE identifier__name(identifier));
     ELSE_IF node IS_A GetField AS get_field THEN
-      RETURN "${mIRLowering__build_field_path_zig(rtoc_self_view, castLocatableToFieldPathNode(get_field.target))}.${get_field.field}";
+      RETURN COPY "${mIRLowering__build_field_path_zig(rtoc_self_view, castLocatableToFieldPathNode(get_field.target))}.${get_field.field}";
     ELSE
       RETURN COPY CAST(node AS String);
     END

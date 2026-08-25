@@ -10974,7 +10974,7 @@ PUB FN unnestRightName(node: Locatable) RETURNS String ->
       RETURN COPY identifier.name;
     END
   END
-  RETURN "";
+  RETURN COPY "";
 END
 PUB FN aST__capture_expr_source_type(node: Locatable) RETURNS !Type ->
   IF aST__node_error_union_type(node) EXISTS AS fallible THEN

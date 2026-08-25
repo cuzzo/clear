@@ -869,7 +869,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (CAST({:give: "already GAVE it away", :takes: "already TOOK it away", :return: "already RETURNED it", :next: "already consumed it via NEXT", :share: "already SHARED it", :collect: "already COLLECTED it", :capture: "already captured it", :move: "already MOVED it"} AS {String@symbol}String))[action] != NIL THEN
     RETURN COPY ((CAST({:give: "already GAVE it away", :takes: "already TOOK it away", :return: "already RETURNED it", :next: "already consumed it via NEXT", :share: "already SHARED it", :collect: "already COLLECTED it", :capture: "already captured it", :move: "already MOVED it"} AS {String@symbol}String))[action])?;
     ELSE
-    RETURN "already consumed it";
+    RETURN COPY "already consumed it";
     END
 }
 END
@@ -880,7 +880,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (CAST({:give: "was already GIVEN away", :takes: "was already TAKEN away", :return: "was already RETURNED", :next: "was already consumed via NEXT", :share: "was already SHARED", :collect: "was already COLLECTED", :capture: "was already captured", :move: "was already MOVED"} AS {String@symbol}String))[action] != NIL THEN
     RETURN COPY ((CAST({:give: "was already GIVEN away", :takes: "was already TAKEN away", :return: "was already RETURNED", :next: "was already consumed via NEXT", :share: "was already SHARED", :collect: "was already COLLECTED", :capture: "was already captured", :move: "was already MOVED"} AS {String@symbol}String))[action])?;
     ELSE
-    RETURN "was already consumed";
+    RETURN COPY "was already consumed";
     END
 }
 END

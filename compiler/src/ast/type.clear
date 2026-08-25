@@ -802,23 +802,23 @@ PRIVATE FN type__project_inline_collection(expression: TypeExpression, type: Typ
 END
 PUB FN type__surface_name_type(t: Type) RETURNS !String EFFECTS REENTRANT ->
   IF type__tense?(t) THEN
-    RETURN "~${TRY (type__surface_name_type(TRY (type__tense_type(t))))}";
+    RETURN COPY "~${TRY (type__surface_name_type(TRY (type__tense_type(t))))}";
   END
   IF type__error_union?(t) THEN
     MUTABLE payload: ?Type = TRY (type__payload_type(t));
-    RETURN "!${TRY (type__surface_name_type(UNWRAP (payload)))}";
+    RETURN COPY "!${TRY (type__surface_name_type(UNWRAP (payload)))}";
   END
   IF type__optional?(t) THEN
     MUTABLE wrapped: Type = CAST(TRY (type__wrapped_type(t)) AS Type);
     MUTABLE inner = TRY (type__surface_name_type(wrapped));
-    RETURN "?${inner}";
+    RETURN COPY "?${inner}";
   END
   IF type__array?(t) THEN
     MUTABLE element: Type = CAST(TRY (type__element_type(t)) AS Type);
-    RETURN "${type__array_capacity_suffix(type__capacity(t))}${TRY (type__surface_name_type(element))}";
+    RETURN COPY "${type__array_capacity_suffix(type__capacity(t))}${TRY (type__surface_name_type(element))}";
   END
   IF type__map?(t) THEN
-    RETURN "{${TRY (type__surface_name_type(TRY (type__key_type(t))))}}${TRY (type__surface_name_type(TRY (type__value_type(t))))}";
+    RETURN COPY "{${TRY (type__surface_name_type(TRY (type__key_type(t))))}}${TRY (type__surface_name_type(TRY (type__value_type(t))))}";
   END
   IF type__fn_type?(t) THEN
     RETURN TRY (type__function_type_surface_name(t));
@@ -4438,14 +4438,14 @@ PRIVATE FN type__compute_zig_type(self: Type, MUTABLE is_param: Bool = FALSE, MU
         facts = "__clearProtocolFacts_${protocol_value}";
       END
     END
-    RETURN "${facts}(${symbol(UNWRAP (type__projection_owner(self)))}).${symbol(UNWRAP (type__projection_member(self)))}";
+    RETURN COPY "${facts}(${symbol(UNWRAP (type__projection_owner(self)))}).${symbol(UNWRAP (type__projection_member(self)))}";
   END
   IF type__tense?(self) THEN
     RETURN TRY (type__tense_zig_type(self, is_param, is_field));
   END
   IF type__error_union?(self) THEN
     inner_zig = TRY (type__zig_type((TRY (type__error_union_payload_with_outer_capabilities(self))), is_param, is_field));
-    RETURN "!${inner_zig}";
+    RETURN COPY "!${inner_zig}";
   END
   IF type__optional?(self) THEN
     MUTABLE inner = UNWRAP (TRY (type__wrapped_type(self)));
@@ -4453,16 +4453,16 @@ PRIVATE FN type__compute_zig_type(self: Type, MUTABLE is_param: Bool = FALSE, MU
       RETURN TRY (type__zig_type(inner, is_param, is_field));
     END
     inner_zig = TRY (type__nested_zig_type(UNWRAP (TRY (type__wrapped_type(self))), is_param, is_field));
-    RETURN "?${inner_zig}";
+    RETURN COPY "?${inner_zig}";
   END
   IF type__node?(self) THEN
-    RETURN "CheatLib.NodeRef(${type__zig_type_name_for(type__resolved(self))})";
+    RETURN COPY "CheatLib.NodeRef(${type__zig_type_name_for(type__resolved(self))})";
   END
   IF type__plain_indirect_value?(self) THEN
     MUTABLE pointee = TRY (type__copy_type(self));
     TRY (type__strip_layout_mut(&pointee));
     type__mark_stack_value_mut(&pointee);
-    RETURN "*${TRY (type__zig_type(pointee, is_param, is_field))}";
+    RETURN COPY "*${TRY (type__zig_type(pointee, is_param, is_field))}";
   END
   IF type__fn_type?(self) THEN
     MUTABLE fn_raw = UNWRAP (type__function_type(self));
@@ -4487,68 +4487,68 @@ PRIVATE FN type__compute_zig_type(self: Type, MUTABLE is_param: Bool = FALSE, MU
     RETURN COPY wrapped_zig_value;
   END
   IF TRY (type__c_string?(self)) THEN
-    RETURN "[*:0]const u8";
+    RETURN COPY "[*:0]const u8";
   END
   IF TRY (type__c_array_view?(self)) THEN
-    RETURN "[*]const ${TRY (type__nested_zig_type(UNWRAP (TRY (type__element_type(self))), TRUE))}";
+    RETURN COPY "[*]const ${TRY (type__nested_zig_type(UNWRAP (TRY (type__element_type(self))), TRUE))}";
   END
   IF type__target_size?(self) THEN
     IF type__signed_integer?(self) THEN
-      RETURN "isize";
+      RETURN COPY "isize";
     ELSE
-      RETURN "usize";
+      RETURN COPY "usize";
     END
   END
   IF ((type__resolved(self) == :String) OR TRY (type__string?(self))) THEN
-    RETURN "[]const u8";
+    RETURN COPY "[]const u8";
   END
   IF type__rank?(self) THEN
     base_zig = TRY (type__nested_zig_type(UNWRAP (TRY (type__element_type(self))), is_param, is_field));
     IF TRY (type__dynamic_rank?(self)) THEN
       MUTABLE rank_value = TRY (type__rank(self));
-      RETURN "CheatLib.Grid(${base_zig}, ${rank_value.toString()})";
+      RETURN COPY "CheatLib.Grid(${base_zig}, ${rank_value.toString()})";
     END
-    RETURN "[${type__capacity_text(type__capacity(self))}]${base_zig}";
+    RETURN COPY "[${type__capacity_text(type__capacity(self))}]${base_zig}";
   END
   IF type__pool?(self) THEN
     base_zig = TRY (type__nested_zig_type(UNWRAP (TRY (type__element_type(self))), is_param, is_field));
     IF type__soa?(self) THEN
-      RETURN "CheatLib.SoaPool(${base_zig})";
+      RETURN COPY "CheatLib.SoaPool(${base_zig})";
     END
     IF type__sharded?(self) THEN
       current_shard_count = UNWRAP (type__shard_count(self));
-      RETURN "CheatLib.ShardedPool(${base_zig}, ${current_shard_count.toString()})";
+      RETURN COPY "CheatLib.ShardedPool(${base_zig}, ${current_shard_count.toString()})";
     END
-    RETURN "CheatLib.Pool(${base_zig})";
+    RETURN COPY "CheatLib.Pool(${base_zig})";
   END
   IF type__set_collection?(self) THEN
     MUTABLE elem = UNWRAP (TRY (type__element_type(self)));
     IF type__symbol?(elem) THEN
-      RETURN "CheatLib.InternedStringSet()";
+      RETURN COPY "CheatLib.InternedStringSet()";
     END
     base_zig = TRY (type__nested_zig_type(elem, is_param, is_field));
-    RETURN "CheatLib.Set(${base_zig})";
+    RETURN COPY "CheatLib.Set(${base_zig})";
   END
   IF type__list_collection?(self) THEN
     base_zig = TRY (type__nested_zig_type(UNWRAP (TRY (type__element_type(self))), is_param, is_field));
     IF type__soa?(self) THEN
-      RETURN "CheatLib.SoaList(${base_zig})";
+      RETURN COPY "CheatLib.SoaList(${base_zig})";
     END
     IF type__sharded?(self) THEN
       current_shard_count = UNWRAP (type__shard_count(self));
-      RETURN "CheatLib.ShardedList(${base_zig}, ${current_shard_count.toString()})";
+      RETURN COPY "CheatLib.ShardedList(${base_zig}, ${current_shard_count.toString()})";
     END
-    RETURN "std.ArrayListUnmanaged(${base_zig})";
+    RETURN COPY "std.ArrayListUnmanaged(${base_zig})";
   END
   IF type__fixed_soa?(self) THEN
     base_zig = TRY (type__nested_zig_type(UNWRAP (TRY (type__element_type(self))), is_param, is_field));
-    RETURN "CheatLib.SoaList(${base_zig})";
+    RETURN COPY "CheatLib.SoaList(${base_zig})";
   END
   IF type__array?(self) THEN
     base_zig = TRY (type__nested_zig_type(UNWRAP (TRY (type__element_type(self))), is_param, is_field));
     MUTABLE array_capacity_value: ?TypeArrayCapacity = type__capacity(self);
     IF ((type__dynamic?(self) AND !(is_param)) AND !(is_field)) THEN
-      RETURN "std.ArrayListUnmanaged(${base_zig})";
+      RETURN COPY "std.ArrayListUnmanaged(${base_zig})";
     ELSE_IF type__integer_array_capacity?(array_capacity_value) THEN
       MUTABLE current_capacity = type__array_capacity_integer(array_capacity_value);
       zig = "[${type__integer_string(current_capacity)}]${base_zig}";

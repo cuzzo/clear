@@ -1861,7 +1861,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (CAST({:give: "already GAVE it away", :takes: "already TOOK it away", :return: "already RETURNED it", :next: "already consumed it via NEXT", :share: "already SHARED it", :collect: "already COLLECTED it", :capture: "already captured it", :move: "already MOVED it"} AS {String@symbol}String))[action] != NIL THEN
     RETURN COPY ((CAST({:give: "already GAVE it away", :takes: "already TOOK it away", :return: "already RETURNED it", :next: "already consumed it via NEXT", :share: "already SHARED it", :collect: "already COLLECTED it", :capture: "already captured it", :move: "already MOVED it"} AS {String@symbol}String))[action])?;
     ELSE
-    RETURN "already consumed it";
+    RETURN COPY "already consumed it";
     END
 }
 END
@@ -1872,7 +1872,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (CAST({:give: "was already GIVEN away", :takes: "was already TAKEN away", :return: "was already RETURNED", :next: "was already consumed via NEXT", :share: "was already SHARED", :collect: "was already COLLECTED", :capture: "was already captured", :move: "was already MOVED"} AS {String@symbol}String))[action] != NIL THEN
     RETURN COPY ((CAST({:give: "was already GIVEN away", :takes: "was already TAKEN away", :return: "was already RETURNED", :next: "was already consumed via NEXT", :share: "was already SHARED", :collect: "was already COLLECTED", :capture: "was already captured", :move: "was already MOVED"} AS {String@symbol}String))[action])?;
     ELSE
-    RETURN "was already consumed";
+    RETURN COPY "was already consumed";
     END
 }
 END
@@ -9253,7 +9253,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF var_node IS_A GetIndex AS get_index THEN
       RETURN capabilityPlan__var_name_for(Locatable{ GetIndex: COPY get_index });
     ELSE
-      RETURN "__unknown";
+      RETURN COPY "__unknown";
     END
 }
 END
@@ -9776,10 +9776,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN COPY storage_qualifier_value;
       END
       IF symbolEntry__locked?(entry_value) THEN
-        RETURN "@locked";
+        RETURN COPY "@locked";
       END
       IF symbolEntry__write_locked?(entry_value) THEN
-        RETURN "@writeLocked";
+        RETURN COPY "@writeLocked";
       END
       RETURN NIL;
     ELSE
@@ -17019,7 +17019,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (TRUE AND node.field) THEN
       RETURN COPY CAST(node.field AS String);
     END
-    RETURN "<field>";
+    RETURN COPY "<field>";
 }
 END
 PRIVATE FN typeAnalysisSession__validate_no_multi_object_atomic_mut(self: TypeAnalysisSession, node: WithBlock) RETURNS !Void

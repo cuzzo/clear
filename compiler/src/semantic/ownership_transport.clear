@@ -76,11 +76,11 @@ PUB FN ownershipTransportFacts__source_display(node: Locatable) RETURNS String E
   IF node IS_A Identifier AS identifier THEN
     RETURN COPY identifier__name(identifier);
   ELSE_IF node IS_A GetField AS get_field THEN
-    RETURN "${ownershipTransportFacts__source_display(get_field.target)}.${get_field.field}";
+    RETURN COPY "${ownershipTransportFacts__source_display(get_field.target)}.${get_field.field}";
   ELSE_IF node IS_A GetIndex AS get_index THEN
-    RETURN "${ownershipTransportFacts__source_display(get_index.target)}[...]";
+    RETURN COPY "${ownershipTransportFacts__source_display(get_index.target)}[...]";
   ELSE
-    RETURN "value";
+    RETURN COPY "value";
   END
 END
 PUB FN ownershipTransportFacts__next_ordinal(MUTABLE self: OwnershipTransportFacts) RETURNS Int64

@@ -250,7 +250,7 @@ PRIVATE FN emit__collect_result_names(nodes: []Emittable, id: Int64) RETURNS ![]
 END
 PRIVATE FN emit__fsm_fact_guard_name(name: String) RETURNS String ->
   IF emit__fsm_ctx_name?(name) THEN
-    RETURN "";
+    RETURN COPY "";
   END
   IF emit__fsm_ctx_field_prefix(name) != NIL THEN
   RETURN (emit__fsm_ctx_field_prefix(name))?;

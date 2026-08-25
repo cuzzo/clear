@@ -236,7 +236,7 @@ PUB FN capabilityPlan__var_name_for(var_node: Locatable) RETURNS String ->
   IF var_node IS_A GetField AS get_field THEN
     RETURN COPY CAST(get_field.field AS String);
   END
-  RETURN "__unknown";
+  RETURN COPY "__unknown";
 END
 PUB FN capabilityPlan__transition_from(request: CapabilityRequest, target: CapabilityTargetFact, borrowed_qualifier: ?String) RETURNS !CapabilityTransition ->
   MUTABLE capability = (request.source.capability OR_ELSE request.capability);

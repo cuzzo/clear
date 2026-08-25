@@ -408,12 +408,12 @@ PRIVATE FN pipelineMaterializer__normalized_zig_type(self: PipelineMaterializer,
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF zig_type EXISTS AS zig_type_value THEN
       IF (zig_type_value.length() == 0) THEN
-        RETURN "void";
+        RETURN COPY "void";
       ELSE
         RETURN COPY zig_type_value;
       END
     ELSE
-      RETURN "void";
+      RETURN COPY "void";
     END
 }
 END
