@@ -3054,7 +3054,14 @@ class MIRChecker
     when MIR::BatchWindowFlush
       check_owned_expr_position_for_unhoisted(node.value_expr, "BatchWindow value")
     else
-      node.child_exprs.each { |expr| check_expr_for_unhoisted(expr) }
+      # A node's own owned-position children are ownership-binding positions in
+      # STATEMENT position too -- the same rule the expression walk applies. An
+      # IfOptional's branches are the case that matters: they read a capture
+      # that exists only inside them, so they can never be hoisted out.
+      owned_sources = node.owned_position_source_exprs.to_set
+      node.child_exprs.each do |expr|
+        check_expr_sources_for_unhoisted(expr, "expression", owned_position: owned_sources.include?(expr))
+      end
     end
     node.body_slots.each { |slot| check_stmts_for_unhoisted(slot.body) }
     nil

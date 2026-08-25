@@ -131,7 +131,7 @@ PUB FN mIRParam__zig_type(self: MIRParam) RETURNS String ->
   COPY self.zig_type;
 END
 PUB FN mIRParam__pointer_passed(self: MIRParam) RETURNS Any@multiowned ->
-  KEEP self.pointer_passed;
+  RETURN KEEP self.pointer_passed;
 END
 PUB FN mIRParam__lowered_node_id(self: MIRParam) RETURNS ?LoweredNodeId ->
   COPY self.lowered_node_id;
@@ -215,7 +215,7 @@ PUB FN mIRStructDef__fields(self: MIRStructDef) RETURNS String ->
   COPY self.fields;
 END
 PUB FN mIRStructDef__methods(self: MIRStructDef) RETURNS Any@multiowned ->
-  KEEP self.methods;
+  RETURN KEEP self.methods;
 END
 PUB FN mIRStructDef__visibility(self: MIRStructDef) RETURNS String@symbol ->
   COPY self.visibility;
@@ -376,7 +376,7 @@ PUB FN mIREnumDef__name(self: MIREnumDef) RETURNS String ->
   COPY self.name;
 END
 PUB FN mIREnumDef__variants(self: MIREnumDef) RETURNS Any@multiowned ->
-  KEEP self.variants;
+  RETURN KEEP self.variants;
 END
 PUB FN mIREnumDef__visibility(self: MIREnumDef) RETURNS String@symbol ->
   COPY self.visibility;
@@ -8042,7 +8042,7 @@ PUB FN mIRMethodCall__try_wrap(self: MIRMethodCall) RETURNS Bool ->
   self.try_wrap;
 END
 PUB FN mIRMethodCall__callable_contract(self: MIRMethodCall) RETURNS ?CallableContract@multiowned ->
-  KEEP self.callable_contract;
+  RETURN KEEP self.callable_contract;
 END
 PUB FN mIRMethodCall__owned_result_alloc(self: MIRMethodCall) RETURNS ?String@symbol ->
   self.owned_result_alloc;

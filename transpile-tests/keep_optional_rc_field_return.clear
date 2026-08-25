@@ -1,0 +1,22 @@
+# Test: KEEP of an optional Rc FIELD, returned. The retain reads the capture the
+# optional-unwrap binds, and the statement-position walk hoisted it out of that
+# capture's scope -- the Zig then read a binding that did not exist yet.
+
+PUB STRUCT Contract { arity: Int64 }
+PUB STRUCT Call { contract: ?Contract@multiowned, name: String }
+
+PUB FN call__contract(self: Call) RETURNS ?Contract@multiowned ->
+  RETURN KEEP self.contract;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE held: Contract@multiowned = Contract{ arity: 2 };
+  MUTABLE call = Call{ contract: GIVE held, name: COPY "f" };
+
+  MUTABLE got: ?Contract@multiowned = call__contract(call);
+  ASSERT got != NIL;
+  ASSERT UNWRAP (got).arity == 2;
+
+  MUTABLE empty = Call{ contract: NIL, name: COPY "g" };
+  ASSERT call__contract(empty) == NIL;
+END

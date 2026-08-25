@@ -30,7 +30,7 @@ PUB FN cHeaderImporterParam__type(self: CHeaderImporterParam) RETURNS String ->
   self.type;
 END
 PUB FN cHeaderImporterParam__mutable(self: CHeaderImporterParam) RETURNS Any@multiowned ->
-  KEEP self.mutable;
+  RETURN KEEP self.mutable;
 END
 PUB FN cHeaderImporter__expand(source: String, source_dir: String) RETURNS !String ->
   RETURN {

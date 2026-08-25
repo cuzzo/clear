@@ -1102,6 +1102,17 @@ module MIRHoistLowering
     prefix = T.let([], T::Array[MIR::Node])
     return prefix unless stmt.respond_to?(:child_exprs)
 
+    # The capture binds only inside the branches, so nothing may be hoisted
+    # across that boundary -- the rule normalize_allocating_used_expr already
+    # applies when the same node is reached as an EXPRESSION. In statement
+    # position the branches are ordinary child_exprs, and hoisting a branch's
+    # retain out left it reading a capture that does not exist yet.
+    if stmt.is_a?(MIR::IfOptional)
+      optional_prefix, optional_normalized = normalize_allocating_used_expr(stmt.optional)
+      replace_mir_expr_child!(stmt, stmt.optional, optional_normalized)
+      return optional_prefix
+    end
+
     stmt.child_exprs.each do |child|
       next unless child
 
