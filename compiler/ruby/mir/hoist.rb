@@ -384,6 +384,11 @@ module Hoist
 
   sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
   def self.noreturn_value?(node)
+    # `CAST(panic("...") AS T)` is how the translation spells an unreachable
+    # fallback: the cast's own type is T, but nothing after it runs. Reading
+    # only the outer type made a `RETURN CAST(panic(...) AS T)` bind the panic
+    # to a temp, and everything the binding emitted was unreachable code.
+    return noreturn_value?(T.unsafe(node).value) if node.is_a?(AST::Cast)
     return false unless node.respond_to?(:resolved_type)
     resolved = T.unsafe(node).resolved_type
     resolved = resolved.resolved if resolved.is_a?(Type)

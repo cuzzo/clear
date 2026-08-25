@@ -1,0 +1,20 @@
+# Test: RETURN CAST(panic("...") AS T) is a terminator, not a value. The cast's
+# own type is T, so the return bound the panic to a temp -- and everything the
+# binding emitted after it was unreachable code.
+
+PUB STRUCT Token { text: String, line: Int64 }
+PUB STRUCT Ident { name: String, token: Token }
+PUB UNION Node { Ident: Ident, Other: Ident }
+
+FN node_token(n: Node) RETURNS Token ->
+  PARTIAL MATCH n START
+    Node.Ident AS item -> RETURN COPY item.token;
+  END
+  RETURN CAST(panic("unreachable node accessor") AS Token);
+END
+
+FN main() RETURNS Void ->
+  MUTABLE t = node_token(Node{ Ident: Ident{ name: COPY "x", token: Token{ text: COPY "here", line: 7 } } });
+  ASSERT t.text == "here";
+  ASSERT t.line == 7;
+END
