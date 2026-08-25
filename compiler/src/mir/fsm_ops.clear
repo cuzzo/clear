@@ -310,12 +310,11 @@ PUB FN lowerer__new(ctx_id: Int64, arg_mirs: []Emittable) RETURNS Lowerer@multio
 END
 FN fsmOps__referenced_state_fields(ops_or_expr: []OpsOrExprItem) RETURNS ![]String ->
   MUTABLE out: []String = List[];
-  fsmOps__walk(WalkValue{ OpsArrayValue: COPY ops_or_expr }, %(node: ?WalkValue) USE(MUTABLE out) -> {
-  IF node? IS_A StateField AS state_field THEN
+  FOR node IN fsmOps__walk_collect(WalkValue{ OpsArrayValue: COPY ops_or_expr }) DO
+    IF node IS_A StateField AS state_field THEN
       &out.append(COPY state_field.name);
+    END
   END
-  rubyToClearVoid()
-  });
   RETURN dedupeStrings(out);
 END
 FN fsmOps__alloc_state_fields(ops: []Stmt) RETURNS ![]String ->
@@ -404,6 +403,61 @@ FN fsmOps__walk(node: ?WalkValue, block: FN(?WalkValue) -> Void) RETURNS Void EF
   ELSE
     RETURN;
   END
+END
+# Collecting walk: a visitor accumulating into a caller local would have to
+# capture that local mutably, which CLEAR cannot express.
+FN fsmOps__walk_collect(node: ?WalkValue) RETURNS []WalkValue EFFECTS REENTRANT ->
+  MUTABLE walked: []WalkValue = List[];
+  IF node EXISTS AS node_value THEN
+    IF node_value IS_A []Expr AS expr_array THEN
+      FOR expr_item IN expr_array DO
+      walked = (walked + fsmOps__walk_collect(castExprToOptionalWalkValue(expr_item)));
+      END
+      RETURN walked;
+    END
+    IF node_value IS_A []OpsOrExprItem AS ops_array THEN
+      FOR ops_item IN ops_array DO
+      walked = (walked + fsmOps__walk_collect(castOpsOrExprItemToOptionalWalkValue(ops_item)));
+      END
+      RETURN walked;
+    END
+    &walked.append(COPY node_value);
+    IF node_value IS_A AssignField AS assign_field THEN
+      walked = (walked + fsmOps__walk_collect(castExprToOptionalWalkValue(assign_field.value)));
+    ELSE_IF node_value IS_A LetConst AS let_const THEN
+      walked = (walked + fsmOps__walk_collect(WalkValue{ IntCast: COPY let_const.value }));
+    ELSE_IF node_value IS_A ErrDeferCall AS err_defer_call THEN
+      FOR err_defer_arg IN err_defer_call.args DO
+      walked = (walked + fsmOps__walk_collect(WalkValue{ StateField: COPY err_defer_arg }));
+      END
+    ELSE_IF node_value IS_A StmtCall AS stmt_call THEN
+      walked = (walked + fsmOps__walk_collect(WalkValue{ ArrayValue: COPY stmt_call.args }));
+    ELSE_IF node_value IS_A CallExpr AS call_expr THEN
+      walked = (walked + fsmOps__walk_collect(WalkValue{ ArrayValue: COPY call_expr.args }));
+    ELSE_IF node_value IS_A IoSubmit AS io_submit THEN
+      walked = (walked + fsmOps__walk_collect(castWaiterToOptionalWalkValue(io_submit.waiter)));
+      walked = (walked + fsmOps__walk_collect(WalkValue{ ArrayValue: COPY io_submit.extra_args }));
+    ELSE_IF node_value IS_A IfFieldSubLtZeroReturnCall AS if_field_sub_lt_zero_return_call THEN
+      FOR return_arg IN if_field_sub_lt_zero_return_call.return_args DO
+      walked = (walked + fsmOps__walk_collect(WalkValue{ SubField: COPY return_arg }));
+      END
+    ELSE_IF node_value IS_A SubField AS sub_field THEN
+      walked = (walked + fsmOps__walk_collect(WalkValue{ StateField: COPY sub_field.base }));
+    ELSE_IF node_value IS_A AddrOf AS addr_of THEN
+      walked = (walked + fsmOps__walk_collect(castExprToOptionalWalkValue(addrOf__expr(addr_of))));
+    ELSE_IF node_value IS_A IntCast AS int_cast THEN
+      walked = (walked + fsmOps__walk_collect(castExprToOptionalWalkValue(intCast__expr(int_cast))));
+    ELSE_IF node_value IS_A AllocExpr AS alloc_expr THEN
+      walked = (walked + fsmOps__walk_collect(WalkValue{ LocalRef: COPY alloc_expr.count }));
+    ELSE_IF node_value IS_A SliceUntilIntCast AS slice_until_int_cast THEN
+      walked = (walked + fsmOps__walk_collect(WalkValue{ StateField: COPY slice_until_int_cast.base }));
+      walked = (walked + fsmOps__walk_collect(WalkValue{ SubField: COPY slice_until_int_cast.end_expr }));
+    ELSE_IF node_value IS_A FsmOpsBinOp AS fsm_ops_bin_op THEN
+      walked = (walked + fsmOps__walk_collect(WalkValue{ CallExpr: COPY fsm_ops_bin_op.left }));
+      walked = (walked + fsmOps__walk_collect(WalkValue{ IntCast: COPY fsm_ops_bin_op.right }));
+    END
+  END
+  RETURN walked;
 END
 # End Ruby module FsmOps
 FN castExprToOpsOrExprItem(value: Expr) RETURNS OpsOrExprItem ->
