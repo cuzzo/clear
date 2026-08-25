@@ -11304,3 +11304,159 @@ PUB FN aST__node_retain_error_channel(node: Locatable) RETURNS ?Bool ->
   END
   RETURN NIL;
 END
+# A slot NAMES a body plus its position among same-named siblings. The slot
+# used to carry a writer closure; a CLEAR lambda cannot reach the owning node,
+# so the closure wrote into a copy and the transform was silently discarded.
+PUB STRUCT ASTBodySlot {
+  body: []Locatable,
+  name: String@symbol,
+  index: Int64
+}
+PUB FN aST__body_slots(node: ?Locatable) RETURNS ![]ASTBodySlot ->
+  MUTABLE slots: []ASTBodySlot = List[];
+  IF !((node != NIL)) THEN
+    RETURN slots;
+  END
+  MUTABLE inner: Locatable = COPY UNWRAP (node);
+  IF inner IS_A IfStatement AS if_statement THEN
+    &slots.append(ASTBodySlot{ body: COPY if_statement.then_branch, name: :then_branch, index: 0 });
+    IF (if_statement.else_branch != NIL) THEN
+      MUTABLE else_branch_body: []Locatable = COPY UNWRAP (if_statement.else_branch);
+      IF !(else_branch_body.empty?()) THEN
+        &slots.append(ASTBodySlot{ body: COPY else_branch_body, name: :else_branch, index: 0 });
+      END
+    END
+  ELSE_IF inner IS_A IfBind AS if_bind THEN
+    &slots.append(ASTBodySlot{ body: COPY if_bind.then_branch, name: :then_branch, index: 0 });
+    IF !(if_bind.else_branch.empty?()) THEN
+      &slots.append(ASTBodySlot{ body: COPY if_bind.else_branch, name: :else_branch, index: 0 });
+    END
+  ELSE_IF inner IS_A WhileLoop AS while_loop THEN
+    &slots.append(ASTBodySlot{ body: COPY while_loop.do_branch, name: :do_branch, index: 0 });
+  ELSE_IF inner IS_A WhileBindLoop AS while_bind_loop THEN
+    &slots.append(ASTBodySlot{ body: COPY while_bind_loop.do_branch, name: :do_branch, index: 0 });
+  ELSE_IF inner IS_A ForRange AS for_range THEN
+    &slots.append(ASTBodySlot{ body: COPY for_range.body, name: :body, index: 0 });
+  ELSE_IF inner IS_A ForEach AS for_each THEN
+    &slots.append(ASTBodySlot{ body: COPY for_each.body, name: :body, index: 0 });
+  ELSE_IF inner IS_A BgBlock AS bg_block THEN
+    &slots.append(ASTBodySlot{ body: COPY bg_block.body, name: :body, index: 0 });
+  ELSE_IF inner IS_A BgStreamBlock AS bg_stream_block THEN
+    &slots.append(ASTBodySlot{ body: COPY bg_stream_block.body, name: :body, index: 0 });
+  ELSE_IF inner IS_A DeferStmt AS defer_stmt THEN
+    &slots.append(ASTBodySlot{ body: COPY defer_stmt.body, name: :body, index: 0 });
+  ELSE_IF inner IS_A WithBlock AS with_block THEN
+    &slots.append(ASTBodySlot{ body: COPY with_block.body, name: :body, index: 0 });
+    IF (with_block.arms != NIL) THEN
+      MUTABLE arms: []WithMatchArm = COPY UNWRAP (with_block.arms);
+      MUTABLE arm_idx: Int64 = 0;
+      WHILE (arm_idx < arms.length()) DO
+        MUTABLE arm: WithMatchArm = COPY UNWRAP (arms[arm_idx]);
+        &slots.append(ASTBodySlot{ body: COPY arm.body, name: :arms, index: COPY arm_idx });
+        arm_idx = (arm_idx + 1);
+      END
+    END
+  ELSE_IF inner IS_A MatchStatement AS match_statement THEN
+    MUTABLE cases: []MatchCase = COPY match_statement.cases;
+    MUTABLE case_idx: Int64 = 0;
+    WHILE (case_idx < cases.length()) DO
+      MUTABLE match_case: MatchCase = COPY UNWRAP (cases[case_idx]);
+      &slots.append(ASTBodySlot{ body: COPY match_case.body, name: :cases, index: COPY case_idx });
+      case_idx = (case_idx + 1);
+    END
+    IF (match_statement.default_case != NIL) THEN
+      MUTABLE default_case_body: []Locatable = COPY UNWRAP (match_statement.default_case);
+      &slots.append(ASTBodySlot{ body: COPY default_case_body, name: :default_case, index: 0 });
+    END
+  ELSE_IF inner IS_A DoBlock AS do_block THEN
+    MUTABLE branches: []DoBranch = COPY do_block.branches;
+    MUTABLE branch_idx: Int64 = 0;
+    WHILE (branch_idx < branches.length()) DO
+      MUTABLE branch: DoBranch = COPY UNWRAP (branches[branch_idx]);
+      &slots.append(ASTBodySlot{ body: COPY branch.body, name: :branches, index: COPY branch_idx });
+      branch_idx = (branch_idx + 1);
+    END
+  END
+  RETURN slots;
+END
+PUB FN aST__replace_body(node: Locatable, slot: ASTBodySlot, new_body: []Locatable) RETURNS Locatable ->
+  PARTIAL MATCH node START
+    Locatable.IfStatement AS item ->
+      MUTABLE updated: IfStatement = COPY item;
+      IF (slot.name == :then_branch) THEN
+        updated.then_branch = COPY new_body;
+      ELSE
+        updated.else_branch = COPY new_body;
+      END
+      RETURN Locatable{ IfStatement: COPY updated };,
+    Locatable.IfBind AS item ->
+      MUTABLE updated: IfBind = COPY item;
+      IF (slot.name == :then_branch) THEN
+        updated.then_branch = COPY new_body;
+      ELSE
+        updated.else_branch = COPY new_body;
+      END
+      RETURN Locatable{ IfBind: COPY updated };,
+    Locatable.WhileLoop AS item ->
+      MUTABLE updated: WhileLoop = COPY item;
+      updated.do_branch = COPY new_body;
+      RETURN Locatable{ WhileLoop: COPY updated };,
+    Locatable.WhileBindLoop AS item ->
+      MUTABLE updated: WhileBindLoop = COPY item;
+      updated.do_branch = COPY new_body;
+      RETURN Locatable{ WhileBindLoop: COPY updated };,
+    Locatable.ForRange AS item ->
+      MUTABLE updated: ForRange = COPY item;
+      updated.body = COPY new_body;
+      RETURN Locatable{ ForRange: COPY updated };,
+    Locatable.ForEach AS item ->
+      MUTABLE updated: ForEach = COPY item;
+      updated.body = COPY new_body;
+      RETURN Locatable{ ForEach: COPY updated };,
+    Locatable.BgBlock AS item ->
+      MUTABLE updated: BgBlock = COPY item;
+      updated.body = COPY new_body;
+      RETURN Locatable{ BgBlock: COPY updated };,
+    Locatable.BgStreamBlock AS item ->
+      MUTABLE updated: BgStreamBlock = COPY item;
+      updated.body = COPY new_body;
+      RETURN Locatable{ BgStreamBlock: COPY updated };,
+    Locatable.DeferStmt AS item ->
+      MUTABLE updated: DeferStmt = COPY item;
+      updated.body = COPY new_body;
+      RETURN Locatable{ DeferStmt: COPY updated };,
+    Locatable.WithBlock AS item ->
+      MUTABLE updated: WithBlock = COPY item;
+      IF (slot.name == :body) THEN
+        updated.body = COPY new_body;
+      ELSE_IF (updated.arms != NIL) THEN
+        MUTABLE arms: []WithMatchArm = COPY UNWRAP (updated.arms);
+        MUTABLE arm: WithMatchArm = COPY UNWRAP (arms[slot.index]);
+        arm.body = COPY new_body;
+        arms[slot.index] = COPY arm;
+        updated.arms = COPY arms;
+      END
+      RETURN Locatable{ WithBlock: COPY updated };,
+    Locatable.MatchStatement AS item ->
+      MUTABLE updated: MatchStatement = COPY item;
+      IF (slot.name == :cases) THEN
+        MUTABLE cases: []MatchCase = COPY updated.cases;
+        MUTABLE match_case: MatchCase = COPY UNWRAP (cases[slot.index]);
+        match_case.body = COPY new_body;
+        cases[slot.index] = COPY match_case;
+        updated.cases = COPY cases;
+      ELSE
+        updated.default_case = COPY new_body;
+      END
+      RETURN Locatable{ MatchStatement: COPY updated };,
+    Locatable.DoBlock AS item ->
+      MUTABLE updated: DoBlock = COPY item;
+      MUTABLE branches: []DoBranch = COPY updated.branches;
+      MUTABLE branch: DoBranch = COPY UNWRAP (branches[slot.index]);
+      branch.body = COPY new_body;
+      branches[slot.index] = COPY branch;
+      updated.branches = COPY branches;
+      RETURN Locatable{ DoBlock: COPY updated };,
+  END
+  RETURN COPY node;
+END

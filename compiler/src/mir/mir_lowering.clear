@@ -9686,6 +9686,27 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
+# One intrinsic argument, lowered under its registry fact: the fact's sink
+# type scopes the lowering, and a TAKES argument with a pre-resolved allocator
+# also scopes that allocator. Ruby wrote this as an `each_with_index.map`
+# whose collection ruby-to-clear could not type, so both call sites were left
+# as `unsupportedRuby` stubs that did not even resolve.
+PRIVATE FN mIRLowering__lower_intrinsic_arg(MUTABLE self: MIRLowering, arg: Locatable, sink_type: ?Type, takes: Bool, pre_resolved_alloc: ?String@symbol) RETURNS !Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLowering__with_sink_type(rtoc_self_view, sink_type, %() USE(arg, takes, pre_resolved_alloc, MUTABLE rtoc_self_view) -> {
+    IF (takes AND (pre_resolved_alloc != NIL)) THEN
+      mIRLowering__with_decl_alloc(rtoc_self_view, pre_resolved_alloc, %() USE(arg, MUTABLE rtoc_self_view) -> {
+        TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(arg)))
+      })
+    ELSE
+      TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(arg)))
+    END
+    });
+}
+END
 PRIVATE FN mIRLowering__intrinsic_signature_for(self: MIRLowering, node: Node) RETURNS !?FunctionSignature@multiowned
   REQUIRES self: LOCAL
 ->
@@ -10392,44 +10413,35 @@ PRIVATE FN mIRLowering__function_body_has_value_return?(self: MIRLowering, nodes
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN nodes |> ANY (  IF _ IS_A ReturnNode THEN
-      !(FALSE)
-    ELSE
-      {
-    MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE body_slots =   IF _ IS_A Locatable THEN
-      TRY (aST__body_slots(castNodeToOptionalLocatable(_)))
-    ELSE
-      List[]
-    END;
-    MUTABLE bodies =   IF body_slots.empty?() THEN
-      {
-    MUTABLE rtoc_value_block_marker = 0;
-    reflected = COPY _;
-    ([IF (aST__node_body(_) EXISTS) THEN
-      reflected.body()
-    ELSE
-      NIL
-    END, IF respondsTo?(_, "then_body") THEN
-      reflected.then_body
-    ELSE
-      NIL
-    END, IF respondsTo?(_, "else_body") THEN
-      reflected.else_body
-    ELSE
-      NIL
-    END, IF respondsTo?(_, "do_branch") THEN
-      reflected.do_branch
-    ELSE
-      NIL
-    END])
-    }
-    ELSE
-      body_slots |> SELECT _.body()
-    END;
-    bodies |> ANY mIRLowering__function_body_has_value_return?(rtoc_self_view, Kernel.Array(_))
-    }
-    END);
+    FOR stmt IN nodes DO
+      IF stmt IS_A ReturnNode AS return_node THEN
+        IF (return_node.value != NIL) THEN
+          RETURN TRUE;
+        END
+      ELSE
+        MUTABLE located: ?Locatable = castNodeToOptionalLocatable(stmt);
+        MUTABLE bodies: [][]Locatable = List[];
+        FOR slot IN (TRY (aST__body_slots(located))) DO
+          &bodies.append(COPY slot.body);
+        END
+        IF bodies.empty?() AND (located != NIL) THEN
+          MUTABLE node_body: ?[]Locatable = aST__node_body(UNWRAP (located));
+          IF (node_body != NIL) THEN
+            &bodies.append(COPY UNWRAP (node_body));
+          END
+        END
+        FOR body IN bodies DO
+          MUTABLE rtoc_body_nodes: []Node = List[];
+          FOR rtoc_body_stmt IN body DO
+            &rtoc_body_nodes.append(castLocatableToNode(rtoc_body_stmt));
+          END
+          IF TRY (mIRLowering__function_body_has_value_return?(rtoc_self_view, rtoc_body_nodes)) THEN
+            RETURN TRUE;
+          END
+        END
+      END
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN mIRLowering__concrete_call_type_owned_return?(self: MIRLowering, ti: Type, sig_obj: ?FunctionSignature) RETURNS Bool
@@ -10662,10 +10674,31 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END) THEN
       
         END
-        MUTABLE lowered_args = unsupportedRuby("CallNode at 2589:21: each_with_index requires a statically typed collection");
+        MUTABLE lowered_args: []Emittable = List[];
+        MUTABLE intrinsic_i: Int64 = 0;
+        WHILE (intrinsic_i < intrinsic_args.length()) DO
+          MUTABLE recv_fact = COPY stdlib_facts.args[(intrinsic_i + 1)];
+          MUTABLE recv_sink: ?Type = NIL;
+          IF recv_fact EXISTS AS recv_fact_value THEN
+            recv_sink = COPY recv_fact_value.sink_type;
+          END
+          &lowered_args.append(TRY (mIRLowering__lower_intrinsic_arg(&rtoc_self_view, UNWRAP (intrinsic_args[intrinsic_i]), recv_sink, callOwnershipFacts__takes?(ownership_facts, (intrinsic_i + 1)), pre_resolved_alloc)));
+          intrinsic_i = (intrinsic_i + 1);
+        END
         mir_args = ([obj_mir] + lowered_args);
       ELSE
-        mir_args = unsupportedRuby("CallNode at 2598:6: each_with_index requires a statically typed collection");
+        MUTABLE plain_args: []Emittable = List[];
+        MUTABLE plain_i: Int64 = 0;
+        WHILE (plain_i < intrinsic_args.length()) DO
+          MUTABLE plain_fact = COPY stdlib_facts.args[plain_i];
+          MUTABLE plain_sink: ?Type = NIL;
+          IF plain_fact EXISTS AS plain_fact_value THEN
+            plain_sink = COPY plain_fact_value.sink_type;
+          END
+          &plain_args.append(TRY (mIRLowering__lower_intrinsic_arg(&rtoc_self_view, UNWRAP (intrinsic_args[plain_i]), plain_sink, callOwnershipFacts__takes?(ownership_facts, plain_i), pre_resolved_alloc)));
+          plain_i = (plain_i + 1);
+        END
+        mir_args = COPY plain_args;
       END
       IF (node.zig_pattern == "CheatLib.len({0})") THEN
         MUTABLE len_expr: ?MIRCast = TRY (mIRLowering__lower_direct_length(&rtoc_self_view, node));
@@ -11081,7 +11114,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_ternary_value_412 = List[];
     END
     rtoc_ternary_value_412? };
-    MUTABLE args: []Emittable = unsupportedRuby("CallNode at 2961:17: each_with_index requires a statically typed collection");
+    MUTABLE args: []Emittable = List[];
+    MUTABLE extern_arg_i: Int64 = 0;
+    WHILE (extern_arg_i < runtime_ast_args.length()) DO
+      MUTABLE extern_param: ?Param = COPY sig_params[extern_arg_i];
+      MUTABLE lowered_extern: Emittable = TRY (mIRLowering__lower_c_abi_callback_arg(&rtoc_self_view, UNWRAP (runtime_ast_args[extern_arg_i]), extern_param, source));
+      IF (((source != NIL) AND (source.abi == :c)) AND TRY (mIRLowering__c_abi_param_uses_address?(rtoc_self_view, extern_param))) THEN
+        &args.append(Emittable{ AddressOf: COPY AddressOf{ expr: COPY lowered_extern, lowered_node_id: NIL, ownership_consumption: NIL } });
+      ELSE
+        &args.append(COPY lowered_extern);
+      END
+      extern_arg_i = (extern_arg_i + 1);
+    END
     MUTABLE args_with_types = {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE rtoc_indexed_items_413: []Emittable = args;

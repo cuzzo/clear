@@ -229,10 +229,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     # A slot NAMES a body; the transformed body is written back into the node
     # by that name. The slot used to carry a writer closure, which could not
     # reach the owning node from inside a CLEAR lambda and wrote to a copy.
-    FOR _ IN (TRY (aST__body_slots(&stmt))) DO
-    MUTABLE rtoc_slot_4 = COPY _;
+    MUTABLE rtoc_slot_node: ?Locatable = COPY stmt;
+    FOR _ IN (TRY (aST__body_slots(rtoc_slot_node))) DO
+    MUTABLE rtoc_slot_4: ASTBodySlot = COPY _;
     MUTABLE rtoc_transformed_3 = COPY TRY (mIRPass__transform_body(rtoc_self_view, rtoc_slot_4.body, branch_ctx));
-    stmt = aST__replace_body(stmt, rtoc_slot_4.name, rtoc_transformed_3);
+    stmt = aST__replace_body(stmt, rtoc_slot_4, rtoc_transformed_3);
     END
     IF stmt IS_A VarDecl AS var_decl THEN
       MUTABLE var_decl_mutable = COPY var_decl;

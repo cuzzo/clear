@@ -4290,7 +4290,7 @@ PUB STRUCT CatchWrapper {
   clauses: []MIRCatchClause,
   default_body: Any@multiowned,
   default_action: Any@multiowned,
-  snapshot_type: Any@multiowned,
+  snapshot_type: ?Type,
   rt_name: String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -6624,10 +6624,10 @@ FN snapshotTransaction__owned_effect_for_alloc(self: SnapshotTransaction, alloc:
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT SnapshotMultiTxn {
-  cells: Emittable,
+  cells: []Emittable,
   rt: String,
   alloc: String@symbol,
-  aliases: Any@multiowned,
+  aliases: []String,
   body: []Emittable,
   conflict_action: Emittable,
   retries: ?Int64,
@@ -6642,7 +6642,7 @@ FN snapshotMultiTxn__stmt?(self: SnapshotMultiTxn) RETURNS Bool ->
   RETURN TRUE;
 END
 FN snapshotMultiTxn__child_exprs(self: SnapshotMultiTxn) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  MUTABLE values: []Emittable = [self.cells];
+  MUTABLE values: []Emittable = COPY self.cells;
   IF self.conflict_action THEN
     &values.append(COPY self.conflict_action);
   END
@@ -6919,7 +6919,7 @@ END
 PUB STRUCT WithMatchDispatch {
   cell: Emittable,
   alias_name: String,
-  snapshot_mode: Any@multiowned,
+  snapshot_mode: Bool,
   rt_name: String,
   arms: []MIRWithMatchArm,
   lowered_node_id: ?LoweredNodeId,

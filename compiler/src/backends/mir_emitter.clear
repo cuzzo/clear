@@ -1769,7 +1769,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE then_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, if_stmt_mutable.then_body, return_kind));
       MUTABLE else_zig = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, (if_stmt_mutable.else_body OR_ELSE List[]), return_kind));
       MUTABLE else_body: ?[]Emittable = COPY if_stmt_mutable.else_body;
-      IF ((else_body != NIL) AND !((UNWRAP (else_body)).empty?())) THEN
+      IF ((else_body != NIL) AND !(else_body.empty?())) THEN
         RETURN "if (${TRY (mIREmitter__emit(&rtoc_self_view, if_stmt_mutable.cond))}) {\n${mIREmitter__indent_block(rtoc_self_view, then_zig, 4)}\n} else {\n${mIREmitter__indent_block(rtoc_self_view, else_zig, 4)}\n}";
       ELSE
         RETURN "if (${TRY (mIREmitter__emit(&rtoc_self_view, if_stmt_mutable.cond))}) {\n${mIREmitter__indent_block(rtoc_self_view, then_zig, 4)}\n}";
@@ -1799,10 +1799,10 @@ PRIVATE FN mIREmitter__flow_body_terminates?(self: MIREmitter, stmts: []Emittabl
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((TRUE AND !((stmts.length() == 0)))) THEN
+    IF stmts.empty?() THEN
       RETURN FALSE;
     END
-    MUTABLE last: ?Emittable = COPY stmts.last();
+    MUTABLE last: Emittable = COPY UNWRAP (stmts.last());
     IF last IS_A ReturnStmt AS return_stmt THEN
       RETURN TRUE;
     ELSE_IF last IS_A PolymorphicFlowSignal AS polymorphic_flow_signal THEN
@@ -1813,8 +1813,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, if_stmt.then_body)) THEN
         RETURN FALSE;
       END
-      MUTABLE else_body = if_stmt.else_body;
-      IF !((else_body AND !(else_body.empty?()))) THEN
+      MUTABLE else_body: []Emittable = COPY (if_stmt.else_body OR_ELSE List[]);
+      IF else_body.empty?() THEN
         RETURN FALSE;
       END
       RETURN mIREmitter__flow_body_terminates?(rtoc_self_view, else_body);
@@ -1839,11 +1839,17 @@ PRIVATE FN mIREmitter__indent_block(self: MIREmitter, code: String, spaces: Int6
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE pad = compilerRepeatString(" ", spaces);
-    RETURN regexReplaceAll((code.split("\n") |> SELECT (IF (_.trim().length() == 0) THEN
-      _
-    ELSE
-      "${pad}${_}"
-    END)).join(""), "\\s+\\z", "");
+    # An IF EXPRESSION may not produce a heap String, and Ruby's `lines` keeps
+    # the newline that `split` drops -- joining with "" ran every line together.
+    MUTABLE padded: []String = List[];
+    FOR line IN code.split("\n") DO
+      IF (line.trim().length() == 0) THEN
+        &padded.append(COPY line);
+      ELSE
+        &padded.append("${pad}${line}");
+      END
+    END
+    RETURN regexReplaceAll(padded.join("\n"), "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_snapshot_transaction(MUTABLE self: MIREmitter, node: SnapshotTransaction) RETURNS !String
@@ -1870,9 +1876,20 @@ PRIVATE FN mIREmitter__emit_snapshot_multi_txn(MUTABLE self: MIREmitter, node: S
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_zig = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
-    MUTABLE cells_tuple = ".{ ${(node.cells) |> SELECT (TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ")} }";
+    MUTABLE cell_parts: []String = List[];
+    FOR cell IN node.cells DO
+      &cell_parts.append(TRY (mIREmitter__emit(&rtoc_self_view, cell)));
+    END
+    MUTABLE cells_tuple = ".{ ${cell_parts.join(", ")} }";
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
-    MUTABLE alias_decls = unsupportedRuby("CallNode at 1585:18: each_with_index requires a statically typed collection").join("\n            ");
+    MUTABLE alias_parts: []String = List[];
+    MUTABLE alias_index: Int64 = 0;
+    WHILE (alias_index < node.aliases.length()) DO
+      MUTABLE alias_name: String = COPY UNWRAP (node.aliases[alias_index]);
+      &alias_parts.append("const ${alias_name} = views[${alias_index.toString()}]; _ = &${alias_name};");
+      alias_index = (alias_index + 1);
+    END
+    MUTABLE alias_decls = alias_parts.join("\n            ");
     MUTABLE core = regexReplaceAll("CheatLib.versionedUpdateMulti(${cells_tuple}, ${node.rt}, ${alloc}, struct {\n    fn run(views: anytype) anyerror!void {\n        ${alias_decls}\n        ${body_zig}\n    }\n}.run, .{})\n", "\\s+\\z", "");
     RETURN TRY (mIREmitter__wrap_conflict_handler(&rtoc_self_view, core, castEmittableToOptionalFailureAction(node.conflict_action), node.retries));
 }
@@ -1883,9 +1900,26 @@ PRIVATE FN mIREmitter__emit_with_match_dispatch(MUTABLE self: MIREmitter, node: 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cell_zig = TRY (mIREmitter__emit(&rtoc_self_view, node.cell));
-    MUTABLE arms = node.arms;
-    MUTABLE arm_strs = unsupportedRuby("CallNode at 1607:15: each_with_index requires a statically typed collection");
-    MUTABLE chain = (arm_strs.join(" ") + " else { unreachable; }");
+    MUTABLE arms = COPY node.arms;
+    MUTABLE arm_strs: []String = List[];
+    MUTABLE arm_index: Int64 = 0;
+    WHILE (arm_index < arms.length()) DO
+      MUTABLE arm: MIRWithMatchArm = COPY UNWRAP (arms[arm_index]);
+      MUTABLE probe = TRY (mIREmitter__emit_with_match_probe(rtoc_self_view, arm.family, cell_zig, node.snapshot_mode));
+      MUTABLE head: String = "else if (comptime ${probe})";
+      IF (arm_index == 0) THEN
+        head = "if (comptime ${probe})";
+      END
+      MUTABLE body_zig = TRY (mIREmitter__emit_body(&rtoc_self_view, arm.body));
+      MUTABLE prelude = TRY (mIREmitter__emit_with_match_prelude(&rtoc_self_view, arm, cell_zig, node.alias_name, node.rt_name, node.snapshot_mode));
+      MUTABLE inner: String = COPY body_zig;
+      IF !(prelude.empty?()) THEN
+        inner = "${prelude}\n${body_zig}";
+      END
+      &arm_strs.append("${head} {\n    ${inner}\n}");
+      arm_index = (arm_index + 1);
+    END
+    MUTABLE chain = (arm_strs.join(" ") $+ " else { unreachable; }");
     RETURN "${chain}\n_ = &${cell_zig};";
 }
 END
@@ -1972,7 +2006,7 @@ PRIVATE FN mIREmitter__emit_failure_action(MUTABLE self: MIREmitter, action: Fai
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE kind = COPY action.kind;
     MUTABLE error_name = COPY CAST(action.error_type AS String);
-    IF (kind IS_A Raise) THEN
+    IF (kind == FailureActionKind.Raise) THEN
       RETURN "${action.rt_name}.setError(.${action.error_kind}, @intFromEnum(ErrorName.${error_name}), ${mIREmitter__zig_string_literal(rtoc_self_view, action.default_message)}, ${action.line});\nreturn error.CheatError;";
     ELSE_IF (kind == FailureActionKind.Exit) THEN
       MUTABLE message: String = "";
@@ -1984,7 +2018,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN "${action.rt_name}.setError(.${action.error_kind}, @intFromEnum(ErrorName.${error_name}), ${message}, ${action.line});\nreturn error.CheatError;";
     ELSE_IF (kind == FailureActionKind.Pass) THEN
       RETURN "break :${TRY (mIREmitter__required_failure_label(rtoc_self_view, action))};";
-    ELSE_IF (kind IS_A Return) THEN
+    ELSE_IF (kind == FailureActionKind.Return) THEN
       RETURN "return ${TRY (mIREmitter__emit(&rtoc_self_view, UNWRAP (action.return_value)))};";
     ELSE_IF (kind == FailureActionKind.Block) THEN
       RETURN "${TRY (mIREmitter__emit_body(&rtoc_self_view, action.body))}\nbreak :${TRY (mIREmitter__required_failure_label(rtoc_self_view, action))};";
@@ -2796,7 +2830,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN "return ${inner_call} catch {\n${mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_catch_default_body(&rtoc_self_view, node)), 4)}\n};";
     END
     MUTABLE clauses = COPY node.clauses;
-    MUTABLE branch_parts = unsupportedRuby("CallNode at 2461:19: each_with_index requires an array-shaped collection");
+    MUTABLE branch_parts: []String = List[];
+    MUTABLE clause_index: Int64 = 0;
+    WHILE (clause_index < clauses.length()) DO
+      MUTABLE clause: MIRCatchClause = COPY UNWRAP (clauses[clause_index]);
+      &branch_parts.append(TRY (mIREmitter__emit_catch_clause(&rtoc_self_view, clause, node.rt_name, node.snapshot_type, (clause_index == 0))));
+      clause_index = (clause_index + 1);
+    END
     &branch_parts.append(TRY (mIREmitter__emit_catch_default(&rtoc_self_view, node)));
     MUTABLE branch_chain = branch_parts.join(" else ");
     RETURN "return ${inner_call} catch {\n${mIREmitter__indent_block(rtoc_self_view, branch_chain, 4)}\n};";
