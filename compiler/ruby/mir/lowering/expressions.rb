@@ -2574,7 +2574,12 @@ module MIRLoweringExpressions
         function_state.guarded_cleanup_names[transfer_name] = true
       end
     end
-    body = lower_body(node.body)
+    # The block's own statements each flush the SHARED pending list, so an
+    # enclosing statement's already-hoisted temps (a sibling call argument's,
+    # say) would be swept into this block -- past the point that uses them.
+    # Isolate the pending list; this block produces none of its own.
+    body, stolen_pending = lower_head { lower_body(node.body) }
+    function_state.pending_stmts.concat(stolen_pending)
     # A Void block (the rewriter's fused EACH wrapper: init statements + the
     # loop, no value) has NO result — it is a statement sequence, not a value
     # block. Lowering a nil result crashed even the error path (nil.token).

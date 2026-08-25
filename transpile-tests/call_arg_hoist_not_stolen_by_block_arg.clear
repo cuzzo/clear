@@ -1,0 +1,28 @@
+# Test: one call argument's hoisted temps stay OUT of a sibling argument's
+# value block. A block argument's statements each flushed the SHARED pending
+# list, sweeping an earlier argument's temps inside the block -- past the call
+# that reads them.
+
+PUB STRUCT Wrapped { name: String }
+PUB UNION Input { Wrapped: Wrapped, StringValue: String }
+
+FN wrap(text: String) RETURNS Wrapped ->
+  RETURN Wrapped{ name: COPY text };
+END
+
+FN build(a: Input, xs: []String, ys: []String, zs: []String) RETURNS String ->
+  MUTABLE label: String = "?";
+  PARTIAL MATCH a START
+    Input.Wrapped AS w -> label = COPY w.name;,
+    Input.StringValue AS t -> label = COPY t;
+  END
+  RETURN label $+ xs.length().toString() $+ ys.length().toString() $+ zs.length().toString();
+END
+
+FN main() RETURNS Void ->
+  MUTABLE got = build(Input{ Wrapped: COPY wrap(COPY "n") },
+    ( { MUTABLE e1: []String = List[]; e1 } ),
+    ( { MUTABLE e2: []String = List[]; e2 } ),
+    ( { MUTABLE e3: []String = List[]; e3 } ));
+  ASSERT got == "n000";
+END
