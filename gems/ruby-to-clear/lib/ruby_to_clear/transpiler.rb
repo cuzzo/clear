@@ -188,6 +188,7 @@ module RubyToClear
       @current_function_name = nil
       @direct_return_value_depth = 0
       @generated_local_index = 0
+      @union_writeback_frames = nil
       @constructor_placeholder_param_names = nil
       @current_instance_field_names = Set.new
       @current_instance_method_names = Set.new

@@ -80,8 +80,59 @@ module RubyToClear
 
     def argument_for_parameter(arg_node, param_info)
       code = visit(arg_node)
-      code = wrap_argument_for_parameter_type(code, arg_node, param_info && param_info[:type])
-      param_info && param_info[:mutable] ? mutable_argument_code(code) : code
+      wrapped = wrap_argument_for_parameter_type(code, arg_node, param_info && param_info[:type])
+      return wrapped unless param_info && param_info[:mutable]
+
+      union_writeback_argument(code, wrapped) || mutable_argument_code(wrapped)
+    end
+
+    # Wrapping a variant payload into its union builds a NEW value, so a
+    # callee that mutates its MUTABLE parameter writes into that temporary and
+    # the caller's variable never changes. Ruby has no such copy: the same
+    # object is passed. Hoist the wrap into a named MUTABLE local, borrow THAT,
+    # and unwrap the payload back into the caller's variable afterwards.
+    #
+    # Without this the annotator's `stamp_type!(node, value)` compiles and runs
+    # and stamps nothing -- 162 of its 226 stamp sites take this shape.
+    def union_writeback_argument(code, wrapped)
+      return nil unless @union_writeback_frames
+      return nil if wrapped == code
+      return nil unless mutable_storage_path?(code)
+
+      match = /\A([A-Za-z_]\w*)\{ (\w+): (?:COPY )?#{Regexp.escape(code)} \}\z/.match(wrapped)
+      return nil unless match
+
+      temporary = next_generated_local("union_writeback")
+      @union_writeback_frames << {
+        temporary: temporary, union: match[1], variant: match[2], target: code, wrapped: wrapped
+      }
+      "&#{temporary}"
+    end
+
+    def wrap_union_writeback(call, frames, void_result)
+      setup = frames.map { |f| "MUTABLE #{f[:temporary]}: #{f[:union]} = #{f[:wrapped]};" }
+      restore = frames.map do |f|
+        item = "#{f[:temporary]}_item"
+        "PARTIAL MATCH #{f[:temporary]} START " \
+          "#{f[:union]}.#{f[:variant]} AS #{item} -> #{f[:target]} = COPY #{item};, END"
+      end
+      body = if void_result
+        "#{call};\n#{restore.join("\n")}\nNIL"
+      else
+        result = next_generated_local("union_writeback_result")
+        "MUTABLE #{result} = #{call};\n#{restore.join("\n")}\n#{result}"
+      end
+      "{ MUTABLE rtoc_value_block_marker = 0; #{setup.join(' ')}\n#{body} }"
+    end
+
+    def void_returning_call?(node)
+      owner = if node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+        @current_class
+      else
+        clear_type_for_receiver_node(node.receiver)
+      end
+      return_type = method_return_type_for(node.name.to_s, owner.to_s.empty? ? nil : owner)
+      return_type.nil? || return_type.to_s == "Void" || return_type.to_s == "!Void"
     end
 
     # CLEAR correctly rejects `f(&self, self.field)`: the mutable borrow of
@@ -600,6 +651,20 @@ module RubyToClear
     # --- Node Visitors ---
 
     def visit_call_node(node)
+      outer_frames = @union_writeback_frames
+      @union_writeback_frames = []
+      begin
+        code = visit_call_node_inner(node)
+        frames = @union_writeback_frames
+      ensure
+        @union_writeback_frames = outer_frames
+      end
+      return code if frames.empty?
+
+      wrap_union_writeback(code, frames, void_returning_call?(node))
+    end
+
+    def visit_call_node_inner(node)
       if (with_object = each_with_object_expression(node))
         return with_object
       end
