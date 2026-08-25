@@ -30,14 +30,14 @@ END
 FN diagnosticRegistry__lookup(code: String@symbol) RETURNS !?{String@symbol}?DiagnosticEntryValue ->
   RETURN COPY diagnosticRegistry__all()[code];
 END
-FN diagnosticRegistry__known?(code: String@symbol) RETURNS Bool ->
+PUB FN diagnosticRegistry__known?(code: String@symbol) RETURNS Bool ->
   RETURN diagnosticRegistry__all().contains?(code);
 END
 # keys() hands back map-owned Strings, not interned handles; see KeyList.
 FN diagnosticRegistry__codes() RETURNS ![]String ->
   RETURN diagnosticRegistry__all().keys();
 END
-FN diagnosticRegistry__pending?(code: String@symbol) RETURNS Bool ->
+PUB FN diagnosticRegistry__pending?(code: String@symbol) RETURNS Bool ->
   IF ((code == :PRIMITIVE_PASSED_AS_MUTABLE) OR (code == :GIVE_BAD_TARGET)) THEN
     RETURN TRUE;
   END
@@ -121,7 +121,7 @@ END
 FN diagnosticRegistry__positional_template_args_complete?(template: String, args: Any[]) RETURNS Bool ->
   RETURN (diagnosticRegistry__positional_placeholder_count(template) <= args.length());
 END
-FN diagnosticRegistry__positional_placeholder_count(template: String) RETURNS Int64 ->
+PUB FN diagnosticRegistry__positional_placeholder_count(template: String) RETURNS Int64 ->
   MUTABLE count: Int64 = 0;
   MUTABLE i: Int64 = 0;
   WHILE (i < (template.codepointCount() - 1)) DO

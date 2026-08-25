@@ -79,7 +79,7 @@ module FnCompat
       ruby_call: ->(args) { EffectSet.new(Set.new(args.first)).to_s },
       clear_unit: 'semantic/effect_set.clear',
       clear_call: 'TRY (effectSet__to_s(fnCompatEffects))',
-      prelude: '  MUTABLE fnCompatEffects: EffectSet@multiowned = TRY (effectSet__new(%s));',
+      prelude: '  fnCompatEffects = TRY (effectSet__new(%s));',
       arg_types: %i[effect_set],
       result_type: :string
     ),
@@ -89,7 +89,7 @@ module FnCompat
       ruby_call: ->(args) { EffectSet.new(Set.new(args.first)).empty? },
       clear_unit: 'semantic/effect_set.clear',
       clear_call: 'effectSet__empty?(fnCompatEffects)',
-      prelude: '  MUTABLE fnCompatEffects: EffectSet@multiowned = TRY (effectSet__new(%s));',
+      prelude: '  fnCompatEffects = TRY (effectSet__new(%s));',
       arg_types: %i[effect_set],
       result_type: :bool
     ),
@@ -110,6 +110,375 @@ module FnCompat
       clear_call: 'ownershipEdgePlanner__keep_op',
       arg_types: %i[carrier],
       result_type: :symbol
+    ),
+    Target.new(
+      name: 'type.signed_integer_symbol?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.signed_integer_symbol?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__signed_integer_symbol?',
+      arg_types: %i[type_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.unsigned_integer_symbol?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.unsigned_integer_symbol?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__unsigned_integer_symbol?',
+      arg_types: %i[type_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.integer_symbol?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.integer_symbol?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__integer_symbol?',
+      arg_types: %i[type_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.float_symbol?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.float_symbol?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__float_symbol?',
+      arg_types: %i[type_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.numeric_symbol?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.numeric_symbol?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__numeric_symbol?',
+      arg_types: %i[type_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.primitive_symbol?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.primitive_symbol?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__primitive_symbol?',
+      arg_types: %i[type_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.resource_type_symbol?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.resource_type_symbol?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__resource_type_symbol?',
+      arg_types: %i[type_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.sync_family_name_for',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.sync_family_name_for(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__sync_family_name_for',
+      arg_types: %i[sync_symbol],
+      result_type: :opt_string
+    ),
+    Target.new(
+      name: 'type.zig_type_name_for',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.zig_type_name_for(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__zig_type_name_for',
+      arg_types: %i[type_symbol],
+      result_type: :string
+    ),
+    Target.new(
+      name: 'type.logical_op?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.logical_op?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__logical_op?',
+      arg_types: %i[op_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.equality_op?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.equality_op?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__equality_op?',
+      arg_types: %i[op_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.ordering_op?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.ordering_op?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__ordering_op?',
+      arg_types: %i[op_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.bool_result_op?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.bool_result_op?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__bool_result_op?',
+      arg_types: %i[op_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.number_result_op?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.number_result_op?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__number_result_op?',
+      arg_types: %i[op_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.bitwise_op?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.bitwise_op?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__bitwise_op?',
+      arg_types: %i[op_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.shift_op?',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.shift_op?(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__shift_op?',
+      arg_types: %i[op_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'type.integer_type_max',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.integer_type_max(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__integer_type_max',
+      arg_types: %i[type_symbol],
+      result_type: :opt_int
+    ),
+    Target.new(
+      name: 'type.integer_type_min',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.integer_type_min(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__integer_type_min',
+      arg_types: %i[type_symbol],
+      result_type: :opt_int
+    ),
+    Target.new(
+      name: 'type.integer_string',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.integer_string(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__integer_string',
+      arg_types: %i[int64],
+      result_type: :string
+    ),
+    Target.new(
+      name: 'type.symbol_or_any',
+      ruby_require: 'compiler/ruby/ast/type',
+      ruby_call: ->(args) { Type.symbol_or_any(*args) },
+      clear_unit: 'ast/type.clear',
+      clear_call: 'type__symbol_or_any',
+      arg_types: %i[opt_type_symbol],
+      result_type: :symbol
+    ),
+    Target.new(
+      name: 'symbol_entry.atomic_sync?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.atomic_sync?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__atomic_sync?',
+      arg_types: %i[opt_sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.locked_sync?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.locked_sync?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__locked_sync?',
+      arg_types: %i[opt_sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.write_locked_sync?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.write_locked_sync?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__write_locked_sync?',
+      arg_types: %i[opt_sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.versioned_sync?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.versioned_sync?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__versioned_sync?',
+      arg_types: %i[opt_sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.local_sync?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.local_sync?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__local_sync?',
+      arg_types: %i[opt_sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.always_mutable_sync?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.always_mutable_sync?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__always_mutable_sync?',
+      arg_types: %i[opt_sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.locked_family_sync?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.locked_family_sync?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__locked_family_sync?',
+      arg_types: %i[opt_sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.cleanup_sync?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.cleanup_sync?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__cleanup_sync?',
+      arg_types: %i[opt_sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.sync_matches?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.sync_matches?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__sync_matches?',
+      arg_types: %i[opt_sync_symbol sync_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.rc_storage?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.rc_storage?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__rc_storage?',
+      arg_types: %i[opt_storage_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.heap_storage_value?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.heap_storage_value?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__heap_storage_value?',
+      arg_types: %i[opt_storage_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.frame_storage_value?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.frame_storage_value?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__frame_storage_value?',
+      arg_types: %i[opt_storage_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'symbol_entry.local_storage_value?',
+      ruby_require: 'compiler/ruby/ast/symbol_entry',
+      ruby_call: ->(args) { SymbolEntry.local_storage_value?(*args) },
+      clear_unit: 'ast/symbol_entry.clear',
+      clear_call: 'symbolEntry__local_storage_value?',
+      arg_types: %i[opt_storage_symbol],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'error_registry.kind_of_type',
+      ruby_require: 'compiler/ruby/ast/error_registry',
+      ruby_call: ->(args) { AST.kind_of_type(*args) },
+      clear_unit: 'ast/error_registry.clear',
+      clear_call: 'TRY (aST__kind_of_type(%s))',
+      arg_types: %i[error_type_symbol],
+      result_type: :opt_symbol
+    ),
+    Target.new(
+      name: 'error_registry.zig_name_of_type',
+      ruby_require: 'compiler/ruby/ast/error_registry',
+      ruby_call: ->(args) { AST.zig_name_of_type(*args) },
+      clear_unit: 'ast/error_registry.clear',
+      clear_call: 'TRY (aST__zig_name_of_type(%s))',
+      arg_types: %i[error_type_symbol],
+      result_type: :opt_string
+    ),
+    Target.new(
+      name: 'error_registry.id_of_type',
+      ruby_require: 'compiler/ruby/ast/error_registry',
+      ruby_call: ->(args) { AST.id_of_type(*args) },
+      clear_unit: 'ast/error_registry.clear',
+      clear_call: 'TRY (aST__id_of_type(%s))',
+      arg_types: %i[error_type_symbol],
+      result_type: :opt_int
+    ),
+    Target.new(
+      name: 'type_capabilities.ownership_surface_name_for',
+      ruby_require: 'compiler/ruby/ast/type_capabilities',
+      ruby_call: ->(args) { TypeCapabilities.ownership_surface_name_for(*args) },
+      clear_unit: 'ast/type_capabilities.clear',
+      clear_call: 'typeCapabilities__ownership_surface_name_for',
+      arg_types: %i[ownership_symbol],
+      result_type: :opt_string
+    ),
+    Target.new(
+      name: 'type_capabilities.sync_surface_name_for',
+      ruby_require: 'compiler/ruby/ast/type_capabilities',
+      ruby_call: ->(args) { TypeCapabilities.sync_surface_name_for(*args) },
+      clear_unit: 'ast/type_capabilities.clear',
+      clear_call: 'typeCapabilities__sync_surface_name_for',
+      arg_types: %i[cap_sync_symbol],
+      result_type: :opt_string
+    ),
+    Target.new(
+      name: 'diagnostic_registry.known?',
+      ruby_require: 'compiler/ruby/ast/diagnostic_registry',
+      ruby_call: ->(args) { DiagnosticRegistry.known?(*args) },
+      clear_unit: 'ast/diagnostic_registry.clear',
+      clear_call: 'diagnosticRegistry__known?',
+      arg_types: %i[diagnostic_code],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'diagnostic_registry.pending?',
+      ruby_require: 'compiler/ruby/ast/diagnostic_registry',
+      ruby_call: ->(args) { DiagnosticRegistry.pending?(*args) },
+      clear_unit: 'ast/diagnostic_registry.clear',
+      clear_call: 'diagnosticRegistry__pending?',
+      arg_types: %i[diagnostic_code],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'diagnostic_registry.positional_placeholder_count',
+      ruby_require: 'compiler/ruby/ast/diagnostic_registry',
+      ruby_call: ->(args) { DiagnosticRegistry.positional_placeholder_count(*args) },
+      clear_unit: 'ast/diagnostic_registry.clear',
+      clear_call: 'diagnosticRegistry__positional_placeholder_count',
+      arg_types: %i[template_string],
+      result_type: :int
     ),
     Target.new(
       name: 'placement.alloc',
@@ -159,7 +528,26 @@ module FnCompat
     effect_set: [[], [:yield], [:io, :yield], [:alloc_heap, :fail, :io, :yield], [:fail]],
     zig_name: ['u8', 'i64', 'f32', 'f0', 'u', 'i', 'f', 'usize', 'fn', 'var', 'const', 'anytype',
                'x64', 'u8x', 'i128', 'f64', 'bool', 'struct', 'Type', ''],
-    bool: [true, false]
+    bool: [true, false],
+    type_symbol: %i[Int8 Int16 Int32 Int64 UInt8 Byte UInt16 UInt32 UInt64 TargetInt TargetLong
+                    TargetLongLong TargetUInt TargetULong TargetULongLong Float32 Float64 String
+                    Bool Void Any File Socket Widget],
+    opt_type_symbol: [nil, :Int64, :String, :Any],
+    op_symbol: %i[AND OR NOT EQ NEQ LT GT LTE GTE ADD SUB MUL DIV MOD POW SHL SHR BAND BOR BXOR
+                  CONCAT IN RANGE],
+    sync_symbol: %i[locked writeLocked write_locked atomic versioned local always_mutable raw symbol],
+    opt_sync_symbol: [nil, :locked, :writeLocked, :write_locked, :atomic, :versioned, :local,
+                      :always_mutable, :shared, :multiowned, :sharded],
+    opt_storage_symbol: [nil, :heap, :frame, :stack, :local, :multiowned, :shared, :rodata, :borrow],
+    ownership_symbol: %i[affine multiowned shared node shared_node split link frozen copy],
+    cap_sync_symbol: %i[locked write_locked versioned atomic always_mutable local raw symbol c size none],
+    error_type_symbol: %i[LockTimeout LockCycle Deadlock UnexpectedRecursion MaxDepthExceeded
+                          MvccConflict AtomicConflict GuardFail PreconditionFail OutOfMemory Nope],
+    diagnostic_code: %i[UNWRAP_NON_OPTIONAL ILLEGAL_FIELD_LOOKUP FALLIBLE_METHOD_RECEIVER
+                        IS_OK_REQUIRES_FALLIBLE OPTIONAL_FIELD_REQUIRES_SAFE_NAV NOT_A_REAL_CODE],
+    template_string: ['plain text', 'one %{a}', '%{a} and %{b}', 'positional {0}', '{0} then {1}',
+                      '{0}{1}{2}', 'mixed %{a} {0}', ''],
+    int64: [0, 1, -1, 7, 42, 255, -128, 1024, -99999]
   }.freeze
 
   def main(argv)
@@ -170,11 +558,15 @@ module FnCompat
       parser.on('--replay', 'Replay recorded inputs through CLEAR and compare') { options[:mode] = :replay }
       parser.on('--out DIR') { |v| options[:out_dir] = File.expand_path(v) }
       parser.on('--only NAME') { |v| options[:only] = v }
+      parser.on('--units GLOB', 'Only targets whose clear_unit matches this substring list (comma-separated)') { |v| options[:units] = v.split(',') }
+      parser.on('--skip-units GLOB', 'Drop targets whose clear_unit matches any of these substrings') { |v| options[:skip_units] = v.split(',') }
       parser.on('--keep', 'Keep the generated CLEAR harness and binary') { options[:keep] = true }
       parser.on('-h', '--help') { puts parser; exit 0 }
     end.parse!(argv)
 
     targets = TARGETS.reject { |t| t.clear_unit == 'mir/placement.clear' }
+    targets = targets.select { |t| options[:units].any? { |u| t.clear_unit.include?(u) } } if options[:units]
+    targets = targets.reject { |t| options[:skip_units].any? { |u| t.clear_unit.include?(u) } } if options[:skip_units]
     targets = TARGETS.select { |t| t.name == options[:only] } if options[:only]
     abort 'fn_compat: no targets selected' if targets.empty?
     FileUtils.mkdir_p(options[:out_dir])
@@ -223,7 +615,8 @@ module FnCompat
     }
     _out, err, status = Open3.capture3(env, *build)
     unless status.success?
-      warn "fn_compat: CLEAR build failed\n#{err.lines.grep(/Error|error/).first(12).join}"
+      limit = ENV['FN_COMPAT_ERROR_LIMIT']&.to_i || 12
+      warn "fn_compat: CLEAR build failed\n#{err.lines.grep(/Error|error/).first(limit).join}"
       return 1
     end
     stdout, stderr, status = Open3.capture3(env, binary)
@@ -283,11 +676,39 @@ module FnCompat
     encoded
   end
 
-  def clear_render(expr, result_type)
+  # Bind the call's result, then render it. An optional result cannot be
+  # rendered inline: an IF-expression yielding a heap String is rejected, and
+  # evaluating the call twice would double any side effect. The slots are
+  # declared ONCE and reassigned -- a fresh local per call overflows the
+  # fiber stack long before the corpus is interesting.
+  def clear_render_stmts(expr, result_type)
     case result_type
-    when :bool   then "(IF #{expr} THEN \"true\" ELSE \"false\" END)"
-    when :symbol then "(\":\" $+ CAST(#{expr} AS String))"
-    when :string then "(\"\\\"\" $+ #{expr} $+ \"\\\"\")"
+    when :bool
+      ['  fnCompatText = "false";', "  IF #{expr} THEN", '    fnCompatText = "true";', '  END']
+    when :symbol
+      ["  fnCompatText = \":\" $+ CAST(#{expr} AS String);"]
+    when :string
+      ["  fnCompatText = \"\\\"\" $+ #{expr} $+ \"\\\"\";"]
+    when :int
+      ["  fnCompatText = #{expr}.toString();"]
+    when :opt_string
+      ["  fnCompatOptString = #{expr};",
+       '  fnCompatText = "nil";',
+       '  IF fnCompatOptString EXISTS AS fnCompatOptStringValue THEN',
+       '    fnCompatText = "\\"" $+ fnCompatOptStringValue $+ "\\"";',
+       '  END']
+    when :opt_symbol
+      ["  fnCompatOptSymbol = #{expr};",
+       '  fnCompatText = "nil";',
+       '  IF fnCompatOptSymbol EXISTS AS fnCompatOptSymbolValue THEN',
+       '    fnCompatText = ":" $+ CAST(fnCompatOptSymbolValue AS String);',
+       '  END']
+    when :opt_int
+      ["  fnCompatOptInt = #{expr};",
+       '  fnCompatText = "nil";',
+       '  IF fnCompatOptInt EXISTS AS fnCompatOptIntValue THEN',
+       '    fnCompatText = fnCompatOptIntValue.toString();',
+       '  END']
     else raise "fn_compat: unsupported result type #{result_type}"
     end
   end
@@ -298,19 +719,26 @@ module FnCompat
     body = targets.flat_map do |target|
       by_name.fetch(target.name, []).each_with_index.map do |call, index|
         args = call['args'].map { |a| clear_literal(a) }.join(', ')
-        binding_name = "fnCompatArg#{index}"
         expr = if target.prelude
-                 target.clear_call.gsub('fnCompatEffects', binding_name)
+                 target.clear_call
                elsif target.clear_call.include?('%s')
                  format(target.clear_call, args)
                else
                  "#{target.clear_call}(#{args})"
                end
-        value = clear_render(expr, target.result_type)
-        [target.prelude ? format(target.prelude, args).gsub('fnCompatEffects', binding_name) : nil,
-         "  print(\"#{target.name}|#{index}|\" $+ #{value});"].compact.join("\n")
+        lines = []
+        lines << format(target.prelude, args) if target.prelude
+        lines.concat(clear_render_stmts(expr, target.result_type))
+        lines << "  print(\"#{target.name}|#{index}|\" $+ fnCompatText);"
+        lines.join("\n")
       end
     end.join("\n")
+
+    preludes = if targets.any?(&:prelude)
+      "  MUTABLE fnCompatEffects: EffectSet@multiowned = TRY (effectSet__new(fnCompatEmptySet()));\n"
+    else
+      ''
+    end
 
     <<~CLEAR
       #{requires}
@@ -321,7 +749,11 @@ module FnCompat
       END
 
       FN main() RETURNS !Void ->
-      #{body}
+        MUTABLE fnCompatText: String = "";
+        MUTABLE fnCompatOptString: ?String = NIL;
+        MUTABLE fnCompatOptSymbol: ?String@symbol = NIL;
+        MUTABLE fnCompatOptInt: ?Int64 = NIL;
+      #{preludes}#{body}
       END
     CLEAR
   end
