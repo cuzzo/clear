@@ -8695,8 +8695,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF (TRUE AND aST__node__container_borrow(expr_value_mutable)) THEN
         MUTABLE receiver: ?Locatable = (aST__node_object(expr_value_mutable) OR_ELSE aST__node_target(expr_value_mutable));
-        IF receiver THEN
-          RETURN typeAnalysisSession__root_variable_name(rtoc_self_view, receiver);
+        IF receiver EXISTS AS receiver_value THEN
+          RETURN typeAnalysisSession__root_variable_name(rtoc_self_view, receiver_value);
         END
       END
       IF expr_value_mutable IS_A GetIndex AS get_index THEN
@@ -18850,8 +18850,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, match_node, TypeAnalysisCodeOrMessage{ SymbolValue: :PARTIAL_MATCH_EXPR_NEEDS_DEFAULT }));
     END
     MUTABLE all_types = case_types |> WHERE _ != NIL;
-    IF default_type THEN
-      &all_types.append(default_type);
+    IF default_type EXISTS AS default_type_value THEN
+      &all_types.append(default_type_value);
     END
     IF all_types.empty?() THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, match_node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_EXPR_NEEDS_CASE }));

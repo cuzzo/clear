@@ -37,8 +37,8 @@ PUB FN placeId__binding_identity(self: PlaceId) RETURNS ?BindingId ->
   MUTABLE name: ?String = COPY self.binding_name;
   MUTABLE id: ?Int64 = self.binding_id;
   IF name EXISTS AS name_value THEN
-    IF id THEN
-      RETURN BindingId{ name: COPY name_value, binding_id: UNWRAP (id) };
+    IF id EXISTS AS id_value THEN
+      RETURN BindingId{ name: COPY name_value, binding_id: id_value };
     ELSE
       RETURN NIL;
     END

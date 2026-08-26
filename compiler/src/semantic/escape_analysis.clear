@@ -1176,8 +1176,8 @@ PUB FN escapeAnalysis__loop_body_declared_names(body: []Node) RETURNS ![Set]Stri
   MUTABLE names: [Set]String = Set[];
   TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(MUTABLE names) -> {
   MUTABLE name: ?String = localBindingAnalysis__binding_decl_name(node);
-  IF name THEN
-    RETURN &names.insert(UNWRAP (name));
+  IF name EXISTS AS name_value THEN
+    RETURN &names.insert(name_value);
   END
   NIL
   }));

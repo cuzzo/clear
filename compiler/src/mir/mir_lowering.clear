@@ -11355,8 +11355,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE return_value, return_pending = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_423 = mIRLowering__runtime_state(rtoc_self_view);
     mIRLoweringRuntimeState__with_rt_name(&rtoc_mutable_receiver_423, "_rt", %() USE(return_expr, tail_alloc, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_422 = mIRLowering__lower_head(rtoc_self_view, %() USE(return_expr, tail_alloc, MUTABLE rtoc_self_view) -> {
-    IF tail_alloc THEN
-      RETURN mIRLowering__with_decl_alloc(rtoc_self_view, tail_alloc, %() USE(return_expr, MUTABLE rtoc_self_view) -> {
+    IF tail_alloc EXISTS AS tail_alloc_value THEN
+      RETURN mIRLowering__with_decl_alloc(rtoc_self_view, tail_alloc_value, %() USE(return_expr, MUTABLE rtoc_self_view) -> {
         rtoc_lambda_result_421 = TRY (mIRLowering__lower(&rtoc_self_view, castNodeToMIRLoweringLowerableStmt(return_expr)));
         rtoc_lambda_result_421
       });
@@ -15413,9 +15413,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE explicit_error_name: ?String = COPY ex.error_name;
     IF ex.kind THEN
       kind = COPY (ex.kind OR_ELSE "");
-      IF explicit_error_name THEN
+      IF explicit_error_name EXISTS AS explicit_error_name_value THEN
         error_name = explicit_error_name;
-        name_id = TRY (aST__id_of_type(type__to_sym(explicit_error_name)));
+        name_id = TRY (aST__id_of_type(type__to_sym(explicit_error_name_value)));
       ELSE
         clear_type = TRUE;
       END
@@ -16040,9 +16040,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN mIRLowering__hoist_alloc(rtoc_self_view, Emittable{ RcRetain: COPY TRY (mIRLowering__make_rc_retain(&rtoc_self_view, castLocatableToIdentifier(field_node))) }, field_node, TRUE);
       ELSE
         MUTABLE kept_orelse: ?Emittable = TRY (mIRLowering__kept_identity_orelse_field_value(&rtoc_self_view, field_node, expected_ft, field_sink_alloc));
-        IF kept_orelse THEN
-          IF mIRLowering__mir_allocates?(rtoc_self_view, kept_orelse) THEN
-            RETURN mIRLowering__hoist_alloc(rtoc_self_view, UNWRAP (kept_orelse), field_node, TRUE);
+        IF kept_orelse EXISTS AS kept_orelse_value THEN
+          IF mIRLowering__mir_allocates?(rtoc_self_view, kept_orelse_value) THEN
+            RETURN mIRLowering__hoist_alloc(rtoc_self_view, kept_orelse_value, field_node, TRUE);
           ELSE
             RETURN kept_orelse;
           END

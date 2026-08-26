@@ -880,6 +880,41 @@ module RtocPostprocess
     end
   end
 
+  # `IF x THEN ... f(x)` where x is a nilable LOCAL. Ruby's truthiness test
+  # doubles as the nil check AND the unwrap; CLEAR's does neither for the call,
+  # so the optional is passed on. EXISTS AS is the whole fix.
+  #
+  # The optional-argument rule types FIELDS, so it cannot see this -- the two
+  # together cover both halves.
+  rule(:truthiness_guard_passes_optional, kind: :mechanical,
+       summary: 'IF x THEN over a nilable local that is then passed on') do |lines, index, findings, file, fix|
+    scope = Scope.new(index)
+    lines.each_with_index do |line, position|
+      scope.observe(line)
+      next unless line =~ /\A(\s*)IF (\w+) THEN\s*\z/
+
+      indent = Regexp.last_match(1)
+      name = Regexp.last_match(2)
+      type = scope.optionals[name]
+      next unless type
+
+      body = lines[position + 1, 3].to_a
+      next unless body.any? { |later| later =~ /[(,]\s*#{Regexp.escape(name)}\s*[,)]/ }
+
+      findings << Finding.new(rule: :truthiness_guard_passes_optional, file: file, line: position + 1,
+                              message: "IF #{name} THEN ... passes #{name} (#{type}) on")
+      next unless fix
+
+      bound = "#{name}_value"
+      lines[position] = "#{indent}IF #{name} EXISTS AS #{bound} THEN"
+      body.each_with_index do |later, offset|
+        break if later =~ /\A\s*(?:END|ELSE)\b/
+
+        lines[position + 1 + offset] = later.gsub(/([(,]\s*)#{Regexp.escape(name)}(\s*[,)])/, "\\1#{bound}\\2")
+      end
+    end
+  end
+
   # `x[:field]` is Ruby hash syntax; on a struct it is a field read. Advisory
   # because CLEAR really does index a {String@symbol}V map that way.
   rule(:hash_field, kind: :advisory,
