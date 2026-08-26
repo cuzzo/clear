@@ -436,6 +436,42 @@ module FnCompat
       result_type: :string
     ),
     Target.new(
+      name: 'ast.pipeline_range_fold?',
+      ruby_require: 'compiler/ruby/ast/ast',
+      ruby_call: ->(args) { AST.pipeline_range_fold?(*args) },
+      clear_unit: 'ast/ast.clear',
+      clear_call: 'aST__pipeline_range_fold?',
+      arg_types: %i[stmt_source],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'ast.loop_node?',
+      ruby_require: 'compiler/ruby/ast/ast',
+      ruby_call: ->(args) { AST.loop_node?(*args) },
+      clear_unit: 'ast/ast.clear',
+      clear_call: 'aST__loop_node?',
+      arg_types: %i[stmt_source],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'ast.moved?',
+      ruby_require: 'compiler/ruby/ast/ast',
+      ruby_call: ->(args) { AST.moved?(*args) },
+      clear_unit: 'ast/ast.clear',
+      clear_call: 'aST__moved?',
+      arg_types: %i[stmt_source],
+      result_type: :bool
+    ),
+    Target.new(
+      name: 'ast.container_borrow?',
+      ruby_require: 'compiler/ruby/ast/ast',
+      ruby_call: ->(args) { AST.container_borrow?(*args) },
+      clear_unit: 'ast/ast.clear',
+      clear_call: 'aST__container_borrow?',
+      arg_types: %i[stmt_source],
+      result_type: :bool
+    ),
+    Target.new(
       name: 'effects.display',
       ruby_require: 'compiler/ruby/annotator/helpers/effects',
       ruby_call: ->(args) { EffectTracker.display(*args) },
@@ -581,8 +617,59 @@ module FnCompat
     effect_symbol: %i[SUSPENDS SUSPENDS_CONDITIONAL SUSPENDS_LOOP HEAP BLOCKING REENTRANT
                       LOOP_UNBOUND EXTERN YIELD IO CONTENTION CONTENTION_MAYBE BLOCKING_MAYBE
                       NOT_AN_EFFECT],
-    int64: [0, 1, -1, 7, 42, 255, -128, 1024, -99999]
+    int64: [0, 1, -1, 7, 42, 255, -128, 1024, -99999],
+    # Node-valued arguments. The domain is SOURCE, not an encoded node: both
+    # sides re-parse the same snippet, and the parser is byte-identical 8/8, so
+    # the two nodes are equal by construction and no node ENCODER is needed on
+    # the input side. Each snippet must parse to exactly one statement.
+    stmt_source: [
+      'x = 1;',
+      'x = -200;',
+      'x = 0x7F;',
+      'x = "hello";',
+      'x = TRUE;',
+      'x = 1.5;',
+      'x = a + b;',
+      'x = -a;',
+      'x = foo(1, 2);',
+      'RETURN 7;',
+      'MUTABLE y: Int64 = 3;',
+      'x = [1, 2, 3];',
+      'x = items |> COUNT _;',
+      'x = items |> SUM _;',
+      'x = items |> MIN _;',
+      'x = items |> ANY _;',
+      'x = items |> FIND _;',
+      'x = items |> DISTINCT _;',
+      'x = items |> UNNEST _;',
+      'x = items |> SELECT _;',
+      "WHILE a < b DO\n  x = 1;\nEND",
+      "FOR i IN (0_i64..=3_i64) DO\n  x = i;\nEND",
+      "FOR item IN items DO\n  x = item;\nEND",
+      "IF a THEN\n  x = 1;\nEND"
+    ]
   }.freeze
+
+  # Bare loops and IFs do not parse at top level, so a snippet is always wrapped
+  # in a function and the node taken from its body. Both sides wrap identically.
+  def wrap_snippet(snippet)
+    "FN fnCompatSnippet() RETURNS Void ->\n#{snippet}\nEND"
+  end
+
+  # Arg kinds whose recorded scalar is a source snippet that both sides parse
+  # into a live node before the call.
+  NODE_ARG_KINDS = { stmt_source: :first_statement }.freeze
+
+  # Ruby-side materializer: snippet -> live AST node, matching what the CLEAR
+  # harness helper does with the same snippet.
+  def materialize_arg(kind, value)
+    return value unless NODE_ARG_KINDS.key?(kind)
+
+    require File.expand_path('compiler/ruby/ast/parser', __dir__ + '/..')
+    source = wrap_snippet(value)
+    program = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    program.statements.first.body.first
+  end
 
   def main(argv)
     options = { out_dir: File.expand_path('tmp/fn-compat'), mode: nil, only: nil, keep: false }
@@ -619,7 +706,8 @@ module FnCompat
     targets.each do |target|
       require File.expand_path(target.ruby_require, __dir__ + '/..')
       calls = argument_tuples(target).map do |args|
-        { 'args' => args.map { |a| encode_scalar(a) }, 'result' => encode_scalar(target.ruby_call.call(args)) }
+        live = target.arg_types.zip(args).map { |kind, value| materialize_arg(kind, value) }
+        { 'args' => args.map { |a| encode_scalar(a) }, 'result' => encode_scalar(target.ruby_call.call(live)) }
       end
       payload['targets'] << { 'name' => target.name, 'calls' => calls }
     end
@@ -795,14 +883,35 @@ module FnCompat
     END
   CLEAR
 
+  # Mirrors materialize_arg on the CLEAR side: same snippet in, same node out.
+  NODE_SOURCE_HELPER = <<~CLEAR
+    PRIVATE FN fnCompatNodeFromSource(snippet: String) RETURNS !Locatable ->
+      source = "FN fnCompatSnippet() RETURNS Void ->\n" $+ snippet $+ "\nEND";
+      program = fn_compat_parser.clearParser__parse_source(source) OR_ELSE RAISE;
+      MATCH program.statements[0] {
+        WHEN FunctionDef AS fn -> RETURN fn.body[0];
+        WHEN _ -> RAISE;
+      }
+    END
+  CLEAR
+
   def clear_source(targets, by_name)
     units = targets.map(&:clear_unit).uniq
-    requires = units.map { |unit| "REQUIRE \"pkg:rtoc_#{unit.unpack1('H*')}\";" }.join("\n")
+    requires = units.map { |unit| "REQUIRE \"pkg:rtoc_#{unit.unpack1('H*')}\";" }
+    node_args = targets.any? { |t| t.arg_types.any? { |k| NODE_ARG_KINDS.key?(k) } }
+    if node_args
+      root = File.expand_path('compiler/src', __dir__ + '/..')
+      requires << "REQUIRE \"#{ParserCompat.parser_require_spec(root)}\" AS fn_compat_parser;"
+    end
+    requires = requires.uniq.join("\n")
+    node_helper = node_args ? NODE_SOURCE_HELPER : ''
     # One FN per target: a single main holding every call overflows the fiber
     # stack once the corpus is more than a few dozen calls.
     runners = targets.each_with_index.map do |target, target_index|
       calls = by_name.fetch(target.name, []).each_with_index.map do |call, index|
-        args = call['args'].map { |a| clear_literal(a) }.join(', ')
+        args = target.arg_types.zip(call['args']).map do |kind, encoded|
+          NODE_ARG_KINDS.key?(kind) ? "TRY (fnCompatNodeFromSource(#{encoded}))" : clear_literal(encoded)
+        end.join(', ')
         expr = if target.prelude
                  target.clear_call
                elsif target.clear_call.include?('%s')
@@ -832,6 +941,7 @@ module FnCompat
         RETURN empty;
       END
 
+      #{node_helper}
       #{renderer_defs_for(targets)}
 
       #{runner_defs}
