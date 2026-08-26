@@ -151,7 +151,7 @@ FN fixCollector__enable_fallibility_propagation_mut() RETURNS Void ->
     fallibility_propagation_enabled = TRUE;
   END
 END
-FN fixCollector__fallibility_propagation_enabled?() RETURNS Bool ->
+PUB FN fixCollector__fallibility_propagation_enabled?() RETURNS Bool ->
   RETURN (enabled AND fallibility_propagation_enabled);
 END
 FN fixCollector__disable_mut() RETURNS !Void ->

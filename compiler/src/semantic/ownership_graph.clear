@@ -73,10 +73,10 @@ PUB STRUCT OwnershipNode {
 FN ownershipNode__live?(self: OwnershipNode) RETURNS Bool ->
   RETURN (self.state == :live);
 END
-FN ownershipNode__moved?(self: OwnershipNode) RETURNS Bool ->
+PUB FN ownershipNode__moved?(self: OwnershipNode) RETURNS Bool ->
   RETURN (self.state == :moved);
 END
-FN ownershipNode__specific_move_action?(self: OwnershipNode) RETURNS Bool ->
+PUB FN ownershipNode__specific_move_action?(self: OwnershipNode) RETURNS Bool ->
   RETURN ((ownershipNode__moved?(self) AND !((self.move_action == NIL))) AND (self.move_action != :move));
 END
 FN ownershipNode__dropped?(self: OwnershipNode) RETURNS Bool ->
@@ -393,7 +393,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN places.length();
 }
 END
-FN ownershipGraph__can_write?(self: OwnershipGraph, path: String) RETURNS !Bool
+PUB FN ownershipGraph__can_write?(self: OwnershipGraph, path: String) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -414,7 +414,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRUE;
 }
 END
-FN ownershipGraph__live?(self: OwnershipGraph, path: String) RETURNS Bool
+PUB FN ownershipGraph__live?(self: OwnershipGraph, path: String) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -425,7 +425,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-FN ownershipGraph__moved?(self: OwnershipGraph, path: String) RETURNS Bool
+PUB FN ownershipGraph__moved?(self: OwnershipGraph, path: String) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

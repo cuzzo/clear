@@ -307,7 +307,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN scopeBindings__key?(rtoc_self_view.bindings, name);
 }
 END
-FN scope__entry?(self: Scope, name: String) RETURNS Bool
+PUB FN scope__entry?(self: Scope, name: String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -498,7 +498,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN !(scope__is_mutable?(rtoc_self_view, name));
 }
 END
-FN scope__is_restricted?(self: Scope, name: String) RETURNS Bool
+PUB FN scope__is_restricted?(self: Scope, name: String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

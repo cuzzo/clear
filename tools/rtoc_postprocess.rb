@@ -61,12 +61,31 @@ module RtocPostprocess
       @param_types = {}
       @return_types = {}
       @accessors = Set.new
+      @declared_in = {}
+      @private_callers = Hash.new { |hash, key| hash[key] = Set.new }
+      # Relative names are what findings report, so the index speaks them too.
+      root = sources.first ? sources.min_by(&:length).sub(%r{/[^/]+\z}, '') : ''
+      root = root.sub(%r{/(annotator|ast|mir|backends|semantic|compiler|ffi)\z}, '')
+      @relative_of = sources.to_h { |path| [path, path.delete_prefix("#{root}/")] }
       sources.each { |path| scan(path) }
+      sources.each { |path| scan_calls(path) }
     end
 
     def element_of(struct, field) = @element_of[[struct, field]]
 
     def variant_payloads(union) = @variant_payloads[union]
+
+    attr_reader :private_callers
+
+    # FN name -> declaring file, for every non-PUB FN some OTHER file calls.
+    def cross_file_privates
+      @cross_file_privates ||= @declared_in.each_with_object({}) do |(name, (home, visibility)), out|
+        next if visibility == 'PUB'
+        next if (@private_callers[name] - [home]).empty?
+
+        out[name] = home
+      end
+    end
 
     def field_type(struct, field) = @struct_fields[struct][field]
 
@@ -90,6 +109,14 @@ module RtocPostprocess
     end
 
     private
+
+    def scan_calls(path)
+      relative = @relative_of[path]
+      text = File.read(path)
+      text.scan(/(?<![\w.])(\w+__\w*[?!]?)\(/) do |(name)|
+        @private_callers[name] << relative if @declared_in.key?(name)
+      end
+    end
 
     def scan(path)
       current = nil
@@ -118,6 +145,9 @@ module RtocPostprocess
         end
         if (match = line.match(/\A(?:PRIVATE |PUB )?FN (\w+[?!]?)(?:<[^>]*>)?\(.*?\)\s*RETURNS (\S+)/))
           @return_types[match[1]] = match[2]
+        end
+        if (match = line.match(/\A(PRIVATE |PUB )?FN (\w+__\w*[?!]?)\(/))
+          @declared_in[match[2]] = [@relative_of[path], (match[1] || '').strip]
         end
         if (match = line.match(/\A(?:PRIVATE |PUB )?FN (\w+[?!]?)(?:<[^>]*>)?\((.*?)\)\s*(?:RETURNS|->|$)/))
           @accessors << match[1]
@@ -795,6 +825,27 @@ module RtocPostprocess
 
       findings << Finding.new(rule: :field_type_contradicted, file: file_name, line: uses.first[0],
                               message: "#{owner}.#{field} is #{declared_type}, but all #{uses.length} use(s) want #{wanted.first}")
+    end
+  end
+
+  # A non-PUB FN called from another file. Ruby has no package visibility, so
+  # ruby-to-clear guesses -- and a `?`-suffixed predicate almost always comes
+  # out private because Ruby marked it `private` for its own reasons.
+  #
+  # Cross-file is the right test rather than cross-package: it is a strict
+  # superset (a package can span files) and it needs no package map.
+  rule(:private_across_files, kind: :mechanical,
+       summary: 'non-PUB FN called from another file') do |lines, index, findings, file, fix|
+    index.cross_file_privates.each do |name, home|
+      next unless home == file
+
+      lines.each_with_index do |line, position|
+        next unless line =~ /\A(PRIVATE )?FN #{Regexp.escape(name)}\(/
+
+        findings << Finding.new(rule: :private_across_files, file: file, line: position + 1,
+                                message: "#{name} is called from #{index.private_callers[name].length} other file(s)")
+        lines[position] = line.sub(/\A(?:PRIVATE )?FN /, 'PUB FN ') if fix
+      end
     end
   end
 

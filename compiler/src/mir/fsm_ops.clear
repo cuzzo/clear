@@ -339,7 +339,7 @@ FN fsmOps__free_state_fields(ops: []Stmt) RETURNS ![]String ->
   END
   RETURN dedupeStrings(out);
 END
-FN fsmOps__finish_value_aliases_finalized_state?(expr: ?Expr, finalize_ops: []Stmt) RETURNS !Bool ->
+PUB FN fsmOps__finish_value_aliases_finalized_state?(expr: ?Expr, finalize_ops: []Stmt) RETURNS !Bool ->
   IF expr EXISTS AS expr_value THEN
     MUTABLE finalized = TRY (fsmOps__free_state_fields(finalize_ops));
     IF (finalized.length() == 0) THEN

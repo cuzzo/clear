@@ -5,7 +5,7 @@ PUB STRUCT KeptIdentityContract {
   sink: String
 }
 
-FN keptIdentityContract__rc?(self: KeptIdentityContract) RETURNS Bool ->
+PUB FN keptIdentityContract__rc?(self: KeptIdentityContract) RETURNS Bool ->
   RETURN (self.family == :multiowned);
 END
 PUB STRUCT CallEdgeOwnershipPlan {
@@ -33,7 +33,7 @@ FN param__initialize(MUTABLE self: Param) RETURNS !Void ->
   MUTABLE contract: ?String@symbol = COPY self.carrier_contract;
   self.carrier_contract = (contract OR_ELSE :polymorphic);
 END
-FN param__atomic?(self: Param) RETURNS Bool ->
+PUB FN param__atomic?(self: Param) RETURNS Bool ->
   RETURN (self.sync == :atomic);
 END
 PUB FN param__type(self: Param) RETURNS Type ->

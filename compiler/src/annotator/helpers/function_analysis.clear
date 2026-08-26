@@ -37,7 +37,7 @@ END
 PUB FN callSignatureSite__replace_arg_mut(MUTABLE self: CallSignatureSite, index_value: Int64, arg: Locatable) RETURNS Void ->
   self.args[index_value] = COPY arg;
 END
-FN callSignatureSite__explicit_mutable_argument?(self: CallSignatureSite, index_value: Int64) RETURNS Bool EFFECTS REENTRANT ->
+PUB FN callSignatureSite__explicit_mutable_argument?(self: CallSignatureSite, index_value: Int64) RETURNS Bool EFFECTS REENTRANT ->
   MUTABLE method_node: ?MethodCall = NIL;
   IF self.node IS_A MethodCall THEN
     method_node = COPY castFunctionCallNodeToOptionalMethodCall(self.node);
@@ -83,10 +83,10 @@ STRUCT CallArityPlan {
   given_args: Int64
 }
 
-FN callArityPlan__mismatch?(self: CallArityPlan) RETURNS Bool ->
+PUB FN callArityPlan__mismatch?(self: CallArityPlan) RETURNS Bool ->
   RETURN ((self.given_args < self.min_args) OR (self.given_args > self.max_args));
 END
-FN callArityPlan__exact?(self: CallArityPlan) RETURNS Bool ->
+PUB FN callArityPlan__exact?(self: CallArityPlan) RETURNS Bool ->
   RETURN (self.min_args == self.max_args);
 END
 PUB FN callArityPlan__injectable_defaults(self: CallArityPlan) RETURNS ![]Param ->

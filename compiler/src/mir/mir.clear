@@ -886,7 +886,7 @@ END
 FN testDef__body_slots(MUTABLE self: TestDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([testDef__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
-FN testDef__body(self: TestDef) RETURNS ![]Emittable ->
+PUB FN testDef__body(self: TestDef) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN testDef__mir?(self: TestDef) RETURNS Bool ->
@@ -1473,7 +1473,7 @@ FN ifBindStmt__child_exprs(self: IfBindStmt) RETURNS ![]Emittable EFFECTS REENTR
   END
   RETURN ifBindStmt__compact_child_exprs(self, exprs);
 END
-FN ifBindStmt__body_slots(MUTABLE self: IfBindStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+PUB FN ifBindStmt__body_slots(MUTABLE self: IfBindStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [ifBindStmt__body_slot(self, :then_body, self.then_body)];
   IF self.else_body != NIL THEN
     &slots.append(ifBindStmt__body_slot(self, :else_body, UNWRAP (self.else_body)));
@@ -1545,10 +1545,10 @@ PUB STRUCT WhileStmt {
 FN whileStmt__child_exprs(self: WhileStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN whileStmt__compact_child_exprs(self, [CAST(self.cond AS Any), CAST(self.update AS Any)]);
 END
-FN whileStmt__body_slots(MUTABLE self: WhileStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+PUB FN whileStmt__body_slots(MUTABLE self: WhileStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([whileStmt__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
-FN whileStmt__body(self: WhileStmt) RETURNS ![]Emittable ->
+PUB FN whileStmt__body(self: WhileStmt) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN whileStmt__mir?(self: WhileStmt) RETURNS Bool ->
@@ -1619,7 +1619,7 @@ END
 FN forStmt__body_slots(MUTABLE self: ForStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([forStmt__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
-FN forStmt__body(self: ForStmt) RETURNS ![]Emittable ->
+PUB FN forStmt__body(self: ForStmt) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN forStmt__mir?(self: ForStmt) RETURNS Bool ->
@@ -2507,7 +2507,7 @@ PUB STRUCT DebugOnly {
 FN debugOnly__body_slots(MUTABLE self: DebugOnly) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([debugOnly__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
-FN debugOnly__body(self: DebugOnly) RETURNS ![]Emittable ->
+PUB FN debugOnly__body(self: DebugOnly) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN debugOnly__mir?(self: DebugOnly) RETURNS Bool ->
@@ -3224,7 +3224,7 @@ PUB STRUCT DiscardOwned {
 FN discardOwned__child_exprs(self: DiscardOwned) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN discardOwned__compact_child_exprs(self, [CAST(self.expr AS Any)]);
 END
-FN discardOwned__expr(self: DiscardOwned) RETURNS Emittable ->
+PUB FN discardOwned__expr(self: DiscardOwned) RETURNS Emittable ->
   RETURN COPY self.expr;
 END
 FN discardOwned__mir?(self: DiscardOwned) RETURNS Bool ->
@@ -3336,7 +3336,7 @@ FN bgBlock__set_result_type(MUTABLE self: MIRBgBlock, value: ?Type) RETURNS ?Typ
   self.result_type = COPY value;
   RETURN COPY value;
 END
-FN bgBlock__boundary_fact(MUTABLE self: MIRBgBlock) RETURNS ?ExecutionBoundaryFact ->
+PUB FN bgBlock__boundary_fact(MUTABLE self: MIRBgBlock) RETURNS ?ExecutionBoundaryFact ->
   RETURN COPY self.boundary_fact;
 END
 FN bgBlock__set_boundary_fact(MUTABLE self: MIRBgBlock, value: ?ExecutionBoundaryFact) RETURNS ?ExecutionBoundaryFact ->
@@ -3413,7 +3413,7 @@ PUB STRUCT StreamSpawn {
   source_line: ?Int64
 }
 
-FN streamSpawn__boundary_fact(MUTABLE self: StreamSpawn) RETURNS ?ExecutionBoundaryFact ->
+PUB FN streamSpawn__boundary_fact(MUTABLE self: StreamSpawn) RETURNS ?ExecutionBoundaryFact ->
   RETURN COPY self.boundary_fact;
 END
 FN streamSpawn__set_boundary_fact(MUTABLE self: StreamSpawn, value: ?ExecutionBoundaryFact) RETURNS ?ExecutionBoundaryFact ->
@@ -3426,7 +3426,7 @@ END
 FN streamSpawn__body_slots(MUTABLE self: StreamSpawn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([streamSpawn__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
-FN streamSpawn__body(self: StreamSpawn) RETURNS ![]Emittable ->
+PUB FN streamSpawn__body(self: StreamSpawn) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN streamSpawn__mir?(self: StreamSpawn) RETURNS Bool ->
@@ -3496,21 +3496,21 @@ PUB STRUCT FsmStructure {
 FN fsmStructure__initialize(MUTABLE self: FsmStructure, args: Any[] = []) RETURNS Void ->
   self.facts = FsmStructureFacts{ required_move_guards: List[], move_guard_writes: List[], ownership_facts: List[], destroy_actions: List[] };
 END
-FN fsmStructure__required_move_guards(self: FsmStructure) RETURNS ![]String EFFECTS REENTRANT ->
+PUB FN fsmStructure__required_move_guards(self: FsmStructure) RETURNS ![]String EFFECTS REENTRANT ->
   RETURN COPY self.facts.required_move_guards;
 END
 PUB FN fsmStructure__set_required_move_guards(MUTABLE self: FsmStructure, value: []String) RETURNS ![]String EFFECTS REENTRANT ->
   self.facts.required_move_guards = COPY value;
   RETURN value;
 END
-FN fsmStructure__move_guard_writes(self: FsmStructure) RETURNS ![]String EFFECTS REENTRANT ->
+PUB FN fsmStructure__move_guard_writes(self: FsmStructure) RETURNS ![]String EFFECTS REENTRANT ->
   RETURN COPY self.facts.move_guard_writes;
 END
 PUB FN fsmStructure__set_move_guard_writes(MUTABLE self: FsmStructure, value: []String) RETURNS ![]String EFFECTS REENTRANT ->
   self.facts.move_guard_writes = COPY value;
   RETURN value;
 END
-FN fsmStructure__ownership_facts(self: FsmStructure) RETURNS ![]FsmOwnershipFact EFFECTS REENTRANT ->
+PUB FN fsmStructure__ownership_facts(self: FsmStructure) RETURNS ![]FsmOwnershipFact EFFECTS REENTRANT ->
   RETURN COPY self.facts.ownership_facts;
 END
 PUB FN fsmStructure__set_ownership_facts(MUTABLE self: FsmStructure, value: []FsmOwnershipFact) RETURNS ![]FsmOwnershipFact EFFECTS REENTRANT ->
@@ -3524,7 +3524,7 @@ FN fsmStructure__set_owned_result_required(MUTABLE self: FsmStructure, value: Bo
   self.owned_result_required = COPY value;
   RETURN COPY value;
 END
-FN fsmStructure__destroy_actions(self: FsmStructure) RETURNS ![]FsmDestroyAction EFFECTS REENTRANT ->
+PUB FN fsmStructure__destroy_actions(self: FsmStructure) RETURNS ![]FsmDestroyAction EFFECTS REENTRANT ->
   RETURN COPY self.facts.destroy_actions;
 END
 PUB FN fsmStructure__set_destroy_actions(MUTABLE self: FsmStructure, value: []FsmDestroyAction) RETURNS ![]FsmDestroyAction EFFECTS REENTRANT ->
@@ -4312,7 +4312,7 @@ FN catchWrapper__child_exprs(self: CatchWrapper) RETURNS ![]Emittable EFFECTS RE
   END
   RETURN catchWrapper__compact_child_exprs(self, exprs);
 END
-FN catchWrapper__clause_bodies(self: CatchWrapper) RETURNS ![][]Emittable ->
+PUB FN catchWrapper__clause_bodies(self: CatchWrapper) RETURNS ![][]Emittable ->
   MUTABLE bodies: [][]Emittable = (self.clauses) |> SELECT COPY _.body;
   IF self.default_body EXISTS AS default_body_value THEN
     IF catchWrapper__has_default(self) THEN
@@ -4425,7 +4425,7 @@ END
 FN doBlock__initialize(MUTABLE self: MIRDoBlock, code: DoBlockPlan, branch_bodies: [][]Emittable) RETURNS Void ->
   self.boundary_facts = List[];
 END
-FN doBlock__boundary_facts(self: MIRDoBlock) RETURNS ![]ExecutionBoundaryFact ->
+PUB FN doBlock__boundary_facts(self: MIRDoBlock) RETURNS ![]ExecutionBoundaryFact ->
   RETURN COPY self.boundary_facts;
 END
 FN doBlock__set_boundary_facts(MUTABLE self: MIRDoBlock, value: []ExecutionBoundaryFact) RETURNS ![]ExecutionBoundaryFact ->
@@ -6500,7 +6500,7 @@ END
 FN snapshotRead__body_slots(MUTABLE self: SnapshotRead) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([snapshotRead__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
-FN snapshotRead__body(self: SnapshotRead) RETURNS ![]Emittable ->
+PUB FN snapshotRead__body(self: SnapshotRead) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN snapshotRead__mir?(self: SnapshotRead) RETURNS Bool ->
@@ -6583,7 +6583,7 @@ FN snapshotTransaction__body_slots(MUTABLE self: SnapshotTransaction) RETURNS ![
   END
   RETURN slots;
 END
-FN snapshotTransaction__body(self: SnapshotTransaction) RETURNS ![]Emittable ->
+PUB FN snapshotTransaction__body(self: SnapshotTransaction) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN snapshotTransaction__mir?(self: SnapshotTransaction) RETURNS Bool ->
@@ -6664,7 +6664,7 @@ FN snapshotMultiTxn__body_slots(MUTABLE self: SnapshotMultiTxn) RETURNS ![]MIRBo
   END
   RETURN slots;
 END
-FN snapshotMultiTxn__body(self: SnapshotMultiTxn) RETURNS ![]Emittable ->
+PUB FN snapshotMultiTxn__body(self: SnapshotMultiTxn) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN snapshotMultiTxn__mir?(self: SnapshotMultiTxn) RETURNS Bool ->
@@ -6734,7 +6734,7 @@ END
 FN polymorphicMutate__body_slots(MUTABLE self: PolymorphicMutate) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([polymorphicMutate__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
-FN polymorphicMutate__body(self: PolymorphicMutate) RETURNS ![]Emittable ->
+PUB FN polymorphicMutate__body(self: PolymorphicMutate) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN polymorphicMutate__mir?(self: PolymorphicMutate) RETURNS Bool ->
@@ -6811,7 +6811,7 @@ FN polymorphicMutateFlow__body_slots(MUTABLE self: PolymorphicMutateFlow) RETURN
   END
   RETURN slots;
 END
-FN polymorphicMutateFlow__body(self: PolymorphicMutateFlow) RETURNS ![]Emittable ->
+PUB FN polymorphicMutateFlow__body(self: PolymorphicMutateFlow) RETURNS ![]Emittable ->
   RETURN COPY self.body;
 END
 FN polymorphicMutateFlow__mir?(self: PolymorphicMutateFlow) RETURNS Bool ->
@@ -7788,7 +7788,7 @@ END
 FN call__initialize(MUTABLE self: Call, callee: String, args: []Emittable, try_wrap: Bool, owned_return: Bool = FALSE, callable_contract: ?CallableContract = NIL) RETURNS Void ->
   self.never_success = FALSE;
 END
-FN call__owned_return?(self: Call) RETURNS Bool ->
+PUB FN call__owned_return?(self: Call) RETURNS Bool ->
   RETURN (self.owned_return == TRUE);
 END
 FN call__never_success(self: Call) RETURNS Bool ->
@@ -7893,7 +7893,7 @@ FN runtimeCall__explicit_ownership_contract(self: RuntimeCall) RETURNS ?Ownershi
   MUTABLE rtoc_owned_return_123: ?OwnershipContract@multiowned = COPY rtoc_contract_123.ownership_contract;
   RETURN rtoc_owned_return_123;
 END
-FN runtimeCall__owned_return?(self: RuntimeCall) RETURNS Bool ->
+PUB FN runtimeCall__owned_return?(self: RuntimeCall) RETURNS Bool ->
   RETURN self.spec.owned_return;
 END
 FN runtimeCall__ownership_effect(self: RuntimeCall) RETURNS OwnershipEffect EFFECTS REENTRANT ->
@@ -11816,7 +11816,7 @@ END
 FN shardedMapPut__has_alloc_metadata?(self: ShardedMapPut) RETURNS Bool ->
   RETURN !(inlineAllocMetadata__empty?(self.resolved_allocs));
 END
-FN shardedMapPut__mutating_receiver_allocator_op?(self: ShardedMapPut) RETURNS Bool ->
+PUB FN shardedMapPut__mutating_receiver_allocator_op?(self: ShardedMapPut) RETURNS Bool ->
   RETURN shardedMapPut__has_alloc_metadata?(self);
 END
 FN shardedMapPut__explicit_ownership_contract(self: ShardedMapPut) RETURNS !OwnershipContract@multiowned ->
@@ -11949,14 +11949,14 @@ END
 FN shardedMapGet__expr?(self: ShardedMapGet) RETURNS Bool ->
   RETURN TRUE;
 END
-FN mIR__const_u8_literal_cast?(node: ?Emittable) RETURNS Bool ->
+PUB FN mIR__const_u8_literal_cast?(node: ?Emittable) RETURNS Bool ->
   IF node? IS_A MIRCast AS mir_cast THEN
     RETURN !(!(((((mir_cast.method == :as) AND (mir_cast.target_type == "[]const u8")) AND cast__expr(mir_cast) IS_A Lit))));
   ELSE
     RETURN FALSE;
   END
 END
-FN mIR__expr_wrapper?(node: ?Emittable) RETURNS Bool ->
+PUB FN mIR__expr_wrapper?(node: ?Emittable) RETURNS Bool ->
   IF node EXISTS AS node_value THEN
     RETURN ((node_value IS_A MIRCast OR node_value IS_A TryExpr) OR node_value IS_A TryCatch);
   END
@@ -12041,7 +12041,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN distinct_names;
 }
 END
-FN ownershipContract__empty?(MUTABLE self: OwnershipContract) RETURNS Bool
+PUB FN ownershipContract__empty?(MUTABLE self: OwnershipContract) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -12273,7 +12273,7 @@ PUB FN ownershipEffect__of(node: ?Emittable) RETURNS !OwnershipEffect EFFECTS RE
   END
   RETURN ownershipEffect__none();
 END
-FN ownershipEffect__hoistable_owned_result?(node: ?Emittable) RETURNS !Bool ->
+PUB FN ownershipEffect__hoistable_owned_result?(node: ?Emittable) RETURNS !Bool ->
   MUTABLE effect = TRY (ownershipEffect__of(node));
   RETURN (effect.produces_owned AND effect.requires_hoist);
 END
@@ -12330,7 +12330,7 @@ END
 PRIVATE FN ownershipEffect__borrowed_break_value?(value: ?Emittable) RETURNS Bool ->
   RETURN ((value != NIL) AND (value IS_A SliceExpr));
 END
-FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS Bool ->
+PUB FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS Bool ->
   IF node EXISTS AS node_value THEN
     IF node_value IS_A MIRBlockExpr AS block THEN
       IF block.borrowed_view THEN
@@ -12514,7 +12514,7 @@ PUB FN mIR__struct_init_field_value(field: StructInitFieldInput) RETURNS ?Emitta
   END
   RETURN NIL;
 END
-FN mIR__struct_init_field_alloc(field: StructInitFieldInput) RETURNS ?String@symbol ->
+PUB FN mIR__struct_init_field_alloc(field: StructInitFieldInput) RETURNS ?String@symbol ->
   IF field IS_A StructInitField AS struct_init_field THEN
     RETURN COPY struct_init_field.alloc;
   END
@@ -12729,7 +12729,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN inlineAllocMetadata__slot(rtoc_self_view, :alloc);
 }
 END
-FN inlineAllocMetadata__key_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
+PUB FN inlineAllocMetadata__key_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12750,7 +12750,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN inlineAllocMetadata__slot(rtoc_self_view, :shard_alloc);
 }
 END
-FN inlineAllocMetadata__sink_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
+PUB FN inlineAllocMetadata__sink_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12761,7 +12761,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN inlineAllocMetadata__requires_target_alloc?(self: InlineAllocMetadata) RETURNS Bool
+PUB FN inlineAllocMetadata__requires_target_alloc?(self: InlineAllocMetadata) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12792,7 +12792,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (TRY (inlineAllocMetadata__values(rtoc_self_view))).contains?(:heap);
 }
 END
-FN inlineAllocMetadata__any_frame?(self: InlineAllocMetadata) RETURNS !Bool
+PUB FN inlineAllocMetadata__any_frame?(self: InlineAllocMetadata) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12811,7 +12811,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN inlineAllocMetadata__new(updated[:alloc], updated[:key_alloc], updated[:val_alloc], updated[:shard_alloc]);
 }
 END
-FN inlineAllocMetadata__inspect(self: InlineAllocMetadata) RETURNS String
+PUB FN inlineAllocMetadata__inspect(self: InlineAllocMetadata) RETURNS String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -13394,7 +13394,7 @@ END
 FN fsmDestroyStmt__cleanup_name(self: FsmDestroyStmt) RETURNS ?String ->
   RETURN COPY self.name;
 END
-FN fsmDestroyStmt__ctx_cleanup_target_name(self: FsmDestroyStmt) RETURNS ?String ->
+PUB FN fsmDestroyStmt__ctx_cleanup_target_name(self: FsmDestroyStmt) RETURNS ?String ->
   MUTABLE current_stmt = COPY self.stmt;
   IF current_stmt IS_A RcRelease AS rc_release THEN
     MUTABLE source = rc_release.source;
@@ -14069,11 +14069,11 @@ FN registryCall__child_exprs(self: RegistryCall) RETURNS ![]Emittable EFFECTS RE
   END
   RETURN registryCall__compact_child_exprs(self, children);
 END
-FN registryCall__has_alloc_metadata?(self: RegistryCall) RETURNS Bool ->
+PUB FN registryCall__has_alloc_metadata?(self: RegistryCall) RETURNS Bool ->
   MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY KEEP self.allocs;
   RETURN ((metadata != NIL) AND !(inlineAllocMetadata__empty?(metadata)));
 END
-FN registryCall__mutating_receiver_allocator_op?(self: RegistryCall) RETURNS !Bool ->
+PUB FN registryCall__mutating_receiver_allocator_op?(self: RegistryCall) RETURNS !Bool ->
   RETURN (registryCall__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_212 = (KEEP self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_212)) });
 END

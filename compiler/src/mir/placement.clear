@@ -11,7 +11,7 @@ STRUCT BindingFact {
   escape_reason: ?String@symbol
 }
 
-FN bindingFact__heap?(self: BindingFact) RETURNS Bool ->
+PUB FN bindingFact__heap?(self: BindingFact) RETURNS Bool ->
   RETURN (self.alloc == :heap);
 END
 FN bindingFact__frame?(self: BindingFact) RETURNS Bool ->

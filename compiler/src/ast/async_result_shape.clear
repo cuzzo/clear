@@ -24,7 +24,7 @@ END
 FN asyncResultShape__shared_promise?(self: AsyncResultShape) RETURNS Bool ->
   RETURN (self.kind == :shared_promise);
 END
-FN asyncResultShape__boxes_fallible_payload?(self: AsyncResultShape) RETURNS Bool ->
+PUB FN asyncResultShape__boxes_fallible_payload?(self: AsyncResultShape) RETURNS Bool ->
   RETURN type__error_union?(self.payload_type);
 END
 FN asyncResultShape__payload_zig_type(self: AsyncResultShape) RETURNS !String ->

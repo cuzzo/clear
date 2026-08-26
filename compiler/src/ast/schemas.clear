@@ -106,7 +106,7 @@ FN resourceClosePlan__for_field(self: ResourceClosePlan, field: String) RETURNS 
   MUTABLE mapped_actions = self.actions |> SELECT resourceCloseAction__for_field(_, field);
   RETURN ResourceClosePlan{ actions: COPY mapped_actions };
 END
-FN resourceClosePlan__empty?(self: ResourceClosePlan) RETURNS Bool EFFECTS REENTRANT ->
+PUB FN resourceClosePlan__empty?(self: ResourceClosePlan) RETURNS Bool EFFECTS REENTRANT ->
   RETURN (self.actions.length() == 0);
 END
 PUB STRUCT ResourceSchema {

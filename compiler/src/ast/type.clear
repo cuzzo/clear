@@ -4723,22 +4723,22 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
 }
 END
-FN schemas__struct?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN schemas__struct?(s: ?SchemaValue) RETURNS Bool ->
   RETURN ((s != NIL) AND (s IS_A StructSchema));
 END
-FN schemas__union?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN schemas__union?(s: ?SchemaValue) RETURNS Bool ->
   RETURN ((s != NIL) AND (s IS_A UnionSchema));
 END
-FN schemas__enum?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN schemas__enum?(s: ?SchemaValue) RETURNS Bool ->
   RETURN ((s != NIL) AND (s IS_A EnumSchema));
 END
-FN schemas__resource?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN schemas__resource?(s: ?SchemaValue) RETURNS Bool ->
   RETURN ((s != NIL) AND (s IS_A ResourceSchema));
 END
-FN schemas__inline_struct?(v: ?SchemasUnionSchemaVariantValue) RETURNS Bool ->
+PUB FN schemas__inline_struct?(v: ?SchemasUnionSchemaVariantValue) RETURNS Bool ->
   RETURN ((v != NIL) AND (v IS_A InlineStructVariant));
 END
-FN schemas__field_bearing?(s: ?SchemaValue) RETURNS Bool ->
+PUB FN schemas__field_bearing?(s: ?SchemaValue) RETURNS Bool ->
   RETURN (((s != NIL) AND (s IS_A StructSchema)) OR ((s != NIL) AND (s IS_A ResourceSchema)));
 END
 # End Ruby module Schemas

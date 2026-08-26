@@ -57,10 +57,10 @@ PUB FN intrinsicArgSpec__varargs_from_registry?(raw: ?IntrinsicArgSpecRawArgSpec
     RETURN FALSE;
   END
 END
-FN intrinsicArgSpec__unconstrained_any?(self: IntrinsicArgSpec) RETURNS Bool ->
+PUB FN intrinsicArgSpec__unconstrained_any?(self: IntrinsicArgSpec) RETURNS Bool ->
   RETURN (((self.type == :Any) AND (self.sync == NIL)) AND (self.ownership == NIL));
 END
-FN intrinsicArgSpec__capability_constrained?(self: IntrinsicArgSpec) RETURNS Bool ->
+PUB FN intrinsicArgSpec__capability_constrained?(self: IntrinsicArgSpec) RETURNS Bool ->
   RETURN (!((self.sync == NIL)) OR !((self.ownership == NIL)));
 END
 PUB FN intrinsicArgSpec__display_type(self: IntrinsicArgSpec) RETURNS String ->

@@ -103,7 +103,7 @@ PUB FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@
   END
   RETURN linearResourceFacts__new(known, linear);
 END
-FN linearResourceFacts__contains?(self: LinearResourceFacts, type_info: Type) RETURNS !Bool
+PUB FN linearResourceFacts__contains?(self: LinearResourceFacts, type_info: Type) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

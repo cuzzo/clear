@@ -82,10 +82,10 @@ PUB STRUCT CapabilityTransition {
 FN capabilityTransition__lock_capability?(self: CapabilityTransition) RETURNS Bool ->
   RETURN ([symbol("EXCLUSIVE"), :write_locked_read] |> DISTINCT _).contains?(self.capability);
 END
-FN capabilityTransition__restrict?(self: CapabilityTransition) RETURNS Bool ->
+PUB FN capabilityTransition__restrict?(self: CapabilityTransition) RETURNS Bool ->
   RETURN (self.capability == symbol("RESTRICT"));
 END
-FN capabilityTransition__borrowed?(self: CapabilityTransition) RETURNS Bool ->
+PUB FN capabilityTransition__borrowed?(self: CapabilityTransition) RETURNS Bool ->
   RETURN (self.capability == symbol("BORROWED"));
 END
 FN capabilityTransition__snapshot?(self: CapabilityTransition) RETURNS Bool ->
@@ -97,7 +97,7 @@ END
 FN capabilityTransition__deferred_lock_param?(self: CapabilityTransition) RETURNS Bool ->
   RETURN (((capabilityTransition__deferred_sync_param?(self) AND capabilityTransition__lock_capability?(self))) == TRUE);
 END
-FN capabilityTransition__deferred_sync_param?(self: CapabilityTransition) RETURNS Bool ->
+PUB FN capabilityTransition__deferred_sync_param?(self: CapabilityTransition) RETURNS Bool ->
   RETURN ((((capabilityTransition__parameter_target?(self) AND (self.sync == NIL)) AND !(capabilityTransition__declared_sync_contract?(self)))) == TRUE);
 END
 FN capabilityTransition__parameter_target?(self: CapabilityTransition) RETURNS Bool ->
@@ -115,7 +115,7 @@ END
 FN capabilityTransition__exclusive_sync?(self: CapabilityTransition) RETURNS Bool ->
   RETURN symbolEntry__locked_family_sync?(self.sync);
 END
-FN capabilityTransition__write_locked_sync?(self: CapabilityTransition) RETURNS Bool EFFECTS REENTRANT ->
+PUB FN capabilityTransition__write_locked_sync?(self: CapabilityTransition) RETURNS Bool EFFECTS REENTRANT ->
   RETURN symbolEntry__write_locked_sync?(self.sync);
 END
 PUB FN capabilityTransition__exclusive_validation_action(self: CapabilityTransition) RETURNS String@symbol ->
@@ -130,13 +130,13 @@ PUB FN capabilityTransition__exclusive_validation_action(self: CapabilityTransit
   END
   RETURN :mismatch;
 END
-FN capabilityTransition__unwraps_sync_alias?(self: CapabilityTransition) RETURNS Bool ->
+PUB FN capabilityTransition__unwraps_sync_alias?(self: CapabilityTransition) RETURNS Bool ->
   IF self.field_target THEN
     RETURN !((self.sync == NIL));
   END
   RETURN (!((self.sync == NIL)) OR capabilityTransition__deferred_lock_param?(self));
 END
-FN capabilityTransition__declares_plain_restrict_alias?(self: CapabilityTransition) RETURNS Bool ->
+PUB FN capabilityTransition__declares_plain_restrict_alias?(self: CapabilityTransition) RETURNS Bool ->
   RETURN ((capabilityTransition__restrict?(self) AND self.alias_explicit) AND (self.sync == NIL));
 END
 PUB FN capabilityTransition__declared_source_type(self: CapabilityTransition) RETURNS Type ->
@@ -215,7 +215,7 @@ END
 PUB FN withCapabilityPlan__snapshot_transitions(self: WithCapabilityPlan) RETURNS ![]CapabilityTransition ->
   RETURN self.all |> WHERE capabilityTransition__snapshot?(_);
 END
-FN withCapabilityPlan__mutable_snapshot?(self: WithCapabilityPlan) RETURNS !Bool ->
+PUB FN withCapabilityPlan__mutable_snapshot?(self: WithCapabilityPlan) RETURNS !Bool ->
   RETURN (TRY (withCapabilityPlan__snapshot_transitions(self))) |> ANY _.alias_mutable;
 END
 PUB FN withCapabilityPlan__first_transition(self: WithCapabilityPlan) RETURNS CapabilityTransition ->

@@ -645,7 +645,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__program_state(rtoc_self_view).target;
 }
 END
-FN mIRLowering__bc_target?(self: MIRLowering) RETURNS Bool
+PUB FN mIRLowering__bc_target?(self: MIRLowering) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -674,7 +674,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN functionState__current_decl_or_frame_alloc(mIRLowering__function_state(rtoc_self_view));
 }
 END
-FN mIRLowering__pipeline_guarded_cleanup_name?(self: MIRLowering, name: String) RETURNS Bool
+PUB FN mIRLowering__pipeline_guarded_cleanup_name?(self: MIRLowering, name: String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
