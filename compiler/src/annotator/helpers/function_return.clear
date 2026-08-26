@@ -84,16 +84,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
       END
     ELSE_IF (rtoc_self_view.kind == Kind.OptionalOfElement) THEN
-      RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY UNWRAP (TRY (type__element_type(receiver_value))) }));
+      RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY UNWRAP (TRY (type__element_type(UNWRAP (receiver)))) }));
     ELSE_IF (rtoc_self_view.kind == Kind.IdOfElement) THEN
-      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("Id<${type__resolved(UNWRAP (TRY (type__element_type(receiver_value))))}>") }));
+      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("Id<${type__resolved(UNWRAP (TRY (type__element_type(UNWRAP (receiver)))))}>") }));
     ELSE_IF (rtoc_self_view.kind == Kind.OptionalOfValue) THEN
-      RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY TRY (type__value_type(receiver_value)) }));
+      RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY TRY (type__value_type(UNWRAP (receiver))) }));
     ELSE_IF (rtoc_self_view.kind == Kind.ValueList) THEN
-      MUTABLE value = TRY (type__value_type(receiver_value));
+      MUTABLE value = TRY (type__value_type(UNWRAP (receiver)));
       RETURN CAST(TRY (functionReturn__element_list(rtoc_self_view, value)) AS Type);
     ELSE_IF (rtoc_self_view.kind == Kind.KeyList) THEN
-      MUTABLE key = TRY (type__key_type(receiver_value));
+      MUTABLE key = TRY (type__key_type(UNWRAP (receiver)));
       RETURN CAST(TRY (functionReturn__element_list(rtoc_self_view, key)) AS Type);
     ELSE_IF (rtoc_self_view.kind == Kind.Infer) THEN
       RETURN CAST(TRY (functionReturn__resolve_infer(rtoc_self_view, args)) AS Type);
