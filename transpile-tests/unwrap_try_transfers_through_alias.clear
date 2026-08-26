@@ -1,0 +1,49 @@
+# Test: UNWRAP (TRY (...)) in a MATCH-arm value must not double-free.
+# The unwrap normalizes into a VIEW of the temp holding the call's result, so
+# it is never hoisted -- but the temp still leaves with the arm's value. When
+# the alias shortcut skipped the hoist, the temp kept an unguarded cleanup and
+# the binding that received the arm freed the same heap parts a second time.
+
+UNION Shape {
+  Boxed: BoxedNode,
+  Plain: PlainNode
+}
+
+STRUCT BoxedNode { items: []String }
+STRUCT PlainNode { name: String }
+
+PRIVATE FN maybeShape() RETURNS !?Shape ->
+  MUTABLE items: []String = ["alpha", "beta"];
+  RETURN Shape{ Boxed: BoxedNode{ items: items } };
+END
+
+PRIVATE FN pick(tag: String@symbol) RETURNS !Shape ->
+  result = PARTIAL MATCH tag START
+    :sigil -> UNWRAP (TRY (maybeShape())),
+    DEFAULT -> Shape{ Plain: PlainNode{ name: "default" } }
+  END;
+  RETURN result;
+END
+
+FN main() RETURNS !Void ->
+  boxed = pick(:sigil) OR_ELSE RAISE;
+  MATCH boxed START
+    Shape.Boxed AS node ->
+      ASSERT node.items.length() == 2_i64, "boxed arm should carry both items";
+      ASSERT node.items[0] == "alpha", "first item should survive the transfer";
+      ASSERT node.items[1] == "beta", "second item should survive the transfer";,
+    Shape.Plain AS node ->
+      ASSERT FALSE, "sigil tag should select the boxed arm";
+  END
+
+  fallback = pick(:other) OR_ELSE RAISE;
+  MATCH fallback START
+    Shape.Boxed AS node ->
+      ASSERT FALSE, "unknown tag should select the default arm";,
+    Shape.Plain AS node ->
+      ASSERT node.name == "default", "default arm should carry its name";
+  END
+
+  print("unwrap_try_transfers_through_alias: all tests passed");
+  RETURN;
+END

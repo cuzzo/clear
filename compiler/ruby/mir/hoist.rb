@@ -1327,7 +1327,12 @@ module MIRHoistLowering
       cleanup_entry = hoist_cleanup_entry(expr, nil)
       nested = normalize_allocating_result_expr!(expr, transfer_on_success: transfer_on_success)
       prefix.concat(nested)
-      return [prefix, expr] if normalized_alloc_wrapper_alias?(expr)
+      # The alias shortcut avoids giving one buffer two cleanups. It does not
+      # apply when the child transfers: the child's cleanup is then guarded and
+      # this hoist becomes the single success-path owner -- and the hoist is
+      # also the only place the child's transfer mark can be emitted, since it
+      # is the read of the child.
+      return [prefix, expr] if normalized_alloc_wrapper_alias?(expr) && !transfer_on_success
       result_sources = transfer_on_success ? expr.ownership_source_exprs.grep(MIR::Ident) : []
       hoisted, ident = hoist_normalized_alloc_expr(
         expr,
