@@ -11666,7 +11666,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE suspends = typeAnalysisSession__with_block_suspends?(rtoc_self_view, node);
       MUTABLE summary = COPY frame_value.summary;
       &summary.with_blocks.append(node);
-      summary.with_scope_nodes[aST__node_identity(Locatable{ WithBlock: COPY Locatable{ WithBlock: COPY node } })] = (summary.with_scope_nodes[aST__node_identity(node)] OR_ELSE List[]);
+      summary.with_scope_nodes[aST__node_identity(Locatable{ WithBlock: COPY Locatable{ WithBlock: COPY Locatable{ WithBlock: COPY node } } })] = (summary.with_scope_nodes[aST__node_identity(node)] OR_ELSE List[]);
       IF suspends THEN
         &summary.suspend_points.append(COPY SuspendPointFact{ id: COPY SuspendPointId{ value: summary.suspend_points.length() }, kind: :lock, node: Locatable{ WithBlock: COPY node } });
       END
@@ -16575,7 +16575,7 @@ PRIVATE FN typeAnalysisSession__visit_DefaultArrayLit(self: TypeAnalysisSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE type_info = TRY (type__new(node.type_info));
+    MUTABLE type_info = TRY (type__new(TypeConstructionInput{ Type: COPY node.type_info }));
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ DefaultArrayLit: COPY node }, type_info));
     node.storage = :stack;
     RETURN type_info;
@@ -18226,7 +18226,7 @@ PRIVATE FN typeAnalysisSession__visit_Cast(MUTABLE self: TypeAnalysisSession, MU
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE target_type = TRY (type__new(node.target));
+    MUTABLE target_type = TRY (type__new(TypeConstructionInput{ Type: COPY node.target }));
     IF (node.value IS_A ListLit AND type__tuple?(target_type)) THEN
       node.value.coerced_type = target_type;
     ELSE_IF (node.value IS_A HashLit AND type__map?(target_type)) THEN

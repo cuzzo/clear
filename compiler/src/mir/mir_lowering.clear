@@ -4861,15 +4861,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF hoist__noreturn_value?(node.value) THEN
       RETURN inner;
     END
-    MUTABLE target_type = TRY (mIRLowering__transpile_type(rtoc_self_view, node.target));
-    MUTABLE cast_target = TRY (type__new(node.target));
+    MUTABLE target_type = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ Type: COPY node.target }));
+    MUTABLE cast_target = TRY (type__new(TypeConstructionInput{ Type: COPY node.target }));
     IF (TRY (type__byte_string?(cast_target)) AND !(type__optional?(cast_target))) THEN
       MUTABLE widened = TRY (mIRLowering__widen_symbol_to_bytes(rtoc_self_view, inner, node.value));
       IF !(widened.equal?(inner)) THEN
         RETURN widened;
       END
     END
-    MUTABLE target_base = type__resolved((TRY (type__value_payload_type((TRY (type__new(node.target)))))));
+    MUTABLE target_base = type__resolved((TRY (type__value_payload_type((TRY (type__new(TypeConstructionInput{ Type: COPY node.target })))))));
     IF (TRY (mIRLowering__enum_schemas(rtoc_self_view))).contains?(target_base) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: COPY inner, target_type: COPY target_type, method: :enumFromInt, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
@@ -15309,7 +15309,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(schema IS_A UnionSchema@multiowned) THEN
         RETURN NIL;
       END
-      MUTABLE field_key: ?MIRLoweringExpressionsReturnValue = mIRLowering__union_variant_key(rtoc_self_view, schema, node.field);
+      MUTABLE field_key: ?MIRLoweringExpressionsReturnValue = mIRLowering__union_variant_key(rtoc_self_view, schema, Field{ StringValue: COPY node.field });
       IF field_key EXISTS AS field_key_value THEN
         MUTABLE var_data = schema.variants()[field_key_value];
         IF schemas__inline_struct?(var_data) THEN

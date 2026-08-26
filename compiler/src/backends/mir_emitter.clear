@@ -3591,7 +3591,7 @@ PRIVATE FN mIREmitter__emit_move_mark(self: MIREmitter, node: MoveMark) RETURNS 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE guard = COPY (rtoc_self_view.move_guard_overrides[CAST(node.name AS String)] OR_ELSE mIREmitter__move_guard_name(rtoc_self_view, node.name));
+    MUTABLE guard = COPY (rtoc_self_view.move_guard_overrides[CAST(node.name AS String)] OR_ELSE mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY node.name }));
     RETURN "${guard} = true;";
 }
 END
@@ -3876,7 +3876,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.object IS_A StructInit OR node.object IS_A TupleLiteral) THEN
       object = "(${object})";
     END
-    RETURN "${mIREmitter__paren_if_try(rtoc_self_view, object)}.${mIREmitter__zig_field_name(rtoc_self_view, node.field)}";
+    RETURN "${mIREmitter__paren_if_try(rtoc_self_view, object)}.${mIREmitter__zig_field_name(rtoc_self_view, Name{ StringValue: COPY node.field })}";
 }
 END
 PRIVATE FN mIREmitter__emit_union_payload_get(MUTABLE self: MIREmitter, node: UnionPayloadGet) RETURNS !String

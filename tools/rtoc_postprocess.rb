@@ -655,10 +655,18 @@ module RtocPostprocess
           # union reading of an ambiguous name reported 1012 sites, nearly all
           # of them correct code passing the struct.
           next if index.structs.include?(expected)
-          next unless argument =~ /\A\w+\z/
 
-          actual = scope.struct_of(argument)
+          # A bare identifier OR a field read off a typed receiver -- limiting
+          # this to bare identifiers left `move_guard_name(node.name)` for the
+          # build to find.
+          actual = if argument =~ /\A\w+\z/
+                     scope.struct_of(argument)
+                   elsif argument =~ /\A(\w+)\.([a-z_]\w*)\z/
+                     owner = scope.struct_of(Regexp.last_match(1))
+                     owner && index.field_type(owner, Regexp.last_match(2))
+                   end
           next unless actual
+          next if actual.start_with?('?')
           next if actual == expected
 
           matching = index.variant_payloads(expected).select { |_, payload| payload == actual }
@@ -669,7 +677,7 @@ module RtocPostprocess
                                   message: "#{callee} arg #{slot + 1}: #{argument} is #{actual}, parameter is union #{expected}")
           next unless fix
 
-          lines[position] = lines[position].sub(/(#{Regexp.escape(callee)}\([^()]*?)\b#{Regexp.escape(argument)}\b/,
+          lines[position] = lines[position].sub(/(#{Regexp.escape(callee)}\([^()]*?)#{Regexp.escape(argument)}(?![\w.])/,
                                                 "\\1#{expected}{ #{variant}: COPY #{argument} }")
         end
       end
