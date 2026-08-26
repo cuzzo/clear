@@ -17397,7 +17397,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN node.steps DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _.expr));
     MUTABLE step_type = _.expr.full_type_mut({:context: "THEN step"});
-    MUTABLE binding = _.binding;
+    MUTABLE binding: ?String = _.binding;
     IF binding THEN
         MUTABLE bind_type = COPY step_type;
         IF step_type.error_union?() THEN
