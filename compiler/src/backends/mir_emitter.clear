@@ -2456,13 +2456,16 @@ PRIVATE FN mIREmitter__emit_c_extern_fn_decl(self: MIREmitter, node: CExternFnDe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE params = (node.params |> SELECT "${_.name()}: ${TRY (type__zig_type(_))}").join(", ");
-    MUTABLE library: String = "";
-    IF (node.library == "c") THEN
-      library = "c";
-    ELSE
-      library = node.library;
+    # `param.zig_type` is the param's own field; `type__zig_type(_)` asked the
+    # Type module to render the param itself.
+    MUTABLE extern_param_parts: []String = List[];
+    FOR extern_param IN node.params DO
+      &extern_param_parts.append("${extern_param.name}: ${extern_param.zig_type}");
     END
+    MUTABLE params = extern_param_parts.join(", ");
+    # Ruby's `node.library == "c" ? "c" : node.library` on a nilable library
+    # yields nil for the else, which interpolates as the empty string.
+    MUTABLE library: String = (node.library OR_ELSE "");
     MUTABLE callconv = PARTIAL MATCH node.callconv START
       :system -> ".c",
       :winapi -> ".winapi",
@@ -2475,7 +2478,11 @@ PRIVATE FN mIREmitter__emit_c_extern_struct_def(self: MIREmitter, node: CExternS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fields = (node.fields |> SELECT "${_.name()}: ${TRY (type__zig_type(_))}").join(", ");
+    MUTABLE extern_field_parts: []String = List[];
+    FOR extern_field IN node.fields DO
+      &extern_field_parts.append("${extern_field.name}: ${extern_field.zig_type}");
+    END
+    MUTABLE fields = extern_field_parts.join(", ");
     RETURN "const ${node.name} = extern struct { ${fields} };";
 }
 END
@@ -2484,7 +2491,12 @@ PRIVATE FN mIREmitter__emit_module_namespace(MUTABLE self: MIREmitter, node: Mod
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE body = ((node.items) |> SELECT:? TRY (mIREmitter__emit_container_item(&rtoc_self_view, _)) |> WHERE _ != NIL).join("\n");
+    # `emit_container_item` returns `!String`, never nil: filter_map is a map.
+    MUTABLE namespace_parts: []String = List[];
+    FOR namespace_item IN node.items DO
+      &namespace_parts.append(TRY (mIREmitter__emit_container_item(&rtoc_self_view, namespace_item)));
+    END
+    MUTABLE body = namespace_parts.join("\n");
     RETURN "const ${node.name} = struct {\n${mIREmitter__indent_block(rtoc_self_view, body, 4)}\n};";
 }
 END
@@ -2528,22 +2540,24 @@ PRIVATE FN mIREmitter__emit_let(MUTABLE self: MIREmitter, node: Let, include_sup
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE init = NIL;
+    # `init` holds emitted Zig text; inferring it from a NIL seed made every
+    # interpolation of it a NIL operand.
+    MUTABLE init: String = "";
     MUTABLE kw: String = "";
     MUTABLE sup: String = "";
     IF node.init IS_A FreezeExpr THEN
-      MUTABLE buf = "${castNameToString(node.name)}__buf";
+      MUTABLE buf = "${node.name}__buf";
       IF node.mutable THEN
         kw = "var";
       ELSE
         kw = "const";
       END
       IF (include_suppression AND (node.suppression != NIL)) THEN
-        sup = " ${node.suppression}";
+        sup = " ${(node.suppression OR_ELSE "")}";
       ELSE
         sup = "";
       END
-      RETURN "const ${buf} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.init))};\n${kw} ${castNameToString(node.name)} = ${buf}._root;${sup}";
+      RETURN "const ${buf} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.init))};\n${kw} ${node.name} = ${buf}._root;${sup}";
     END
     IF node.mutable THEN
       kw = "var";
@@ -2568,15 +2582,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         vis = "";
       END
-      RETURN "${vis}const ${castNameToString(node.name)}${ann} = ${init};";
+      RETURN "${vis}const ${node.name}${ann} = ${init};";
     END
     init = TRY (mIREmitter__emit(&rtoc_self_view, node.init));
     IF (include_suppression AND (node.suppression != NIL)) THEN
-      sup = " ${node.suppression}";
+      sup = " ${(node.suppression OR_ELSE "")}";
     ELSE
       sup = "";
     END
-    RETURN "${kw} ${castNameToString(node.name)}${ann} = ${init};${sup}";
+    RETURN "${kw} ${node.name}${ann} = ${init};${sup}";
 }
 END
 PRIVATE FN mIREmitter__emit_set(MUTABLE self: MIREmitter, node: Set) RETURNS !String
@@ -3275,7 +3289,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE slice = "${node.batch_var}_slice";
     MUTABLE val = "${node.batch_var}_val";
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
-    RETURN "if (${source}) |${slice}| {\n    defer ${node.window}.freeBatch(${slice});\n    var ${node.batch_var} = std.ArrayListUnmanaged(${node.elem_zig}){ .items = ${slice}, .capacity = ${slice}.len };\n    _ = &${node.batch_var};\n    const ${val} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr))};\n    try ${node.result_var}.append(${alloc}, ${val});\n}\n".trim();
+    RETURN "if (${source}) |${slice}| {\n    defer ${node.window}.freeBatch(${slice});\n    var ${node.batch_var} = std.ArrayListUnmanaged(${node.elem_zig}){ .items = ${slice}, .capacity = ${slice}.len };\n    _ = &${node.batch_var};\n    const ${val} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr))};\n    try ${(node.result_var OR_ELSE "")}.append(${alloc}, ${val});\n}\n".trim();
 }
 END
 PRIVATE FN mIREmitter__emit_scope_block(MUTABLE self: MIREmitter, node: ScopeBlock) RETURNS !String
@@ -3567,7 +3581,7 @@ PRIVATE FN mIREmitter__emit_container_init(self: MIREmitter, node: ContainerInit
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (node.strategy == :pool) OR (node.strategy == :list_capacity) OR (node.strategy == :set_capacity) THEN
-      RETURN "try ${node.zig_type}.initCapacity(${TRY (mIREmitter__alloc_zig(rtoc_self_view, symbol(UNWRAP (node.alloc))))}, ${node.capacity})";
+      RETURN "try ${node.zig_type}.initCapacity(${TRY (mIREmitter__alloc_zig(rtoc_self_view, symbol(UNWRAP (node.alloc))))}, ${(node.capacity OR_ELSE "")})";
     ELSE_IF (node.strategy == :array_list_empty) OR (node.strategy == :grid_empty) THEN
       RETURN "@as(${node.zig_type}, .empty)";
     ELSE_IF (node.strategy == :list_empty) OR (node.strategy == :set_empty) OR (node.strategy == :map_empty) THEN
@@ -3589,11 +3603,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.strategy == :local) THEN
       RETURN "try CheatLib.localCreate(${node.zig_base}, ${alloc}, ${inner})";
     ELSE_IF (node.strategy == :sync_only) THEN
-      RETURN "try CheatLib.${node.sync_fn}(${node.zig_base}, ${alloc}, ${inner})";
+      RETURN "try CheatLib.${(node.sync_fn OR_ELSE "")}(${node.zig_base}, ${alloc}, ${inner})";
     ELSE_IF (node.strategy == :own_only) THEN
-      RETURN "try CheatLib.${node.own_fn}(${node.zig_base}, ${alloc}, ${inner})";
+      RETURN "try CheatLib.${(node.own_fn OR_ELSE "")}(${node.zig_base}, ${alloc}, ${inner})";
     ELSE_IF (node.strategy == :both) THEN
-      RETURN "blk_cap: {\n    const __cap_inner = try CheatLib.${node.sync_fn}(${node.zig_base}, ${alloc}, ${inner});\n    const __cap_val = __cap_inner.*;\n    ${alloc}.destroy(__cap_inner);\n    break :blk_cap try CheatLib.${node.own_fn}(${node.sync_type}, ${alloc}, __cap_val);\n}\n".trim();
+      RETURN "blk_cap: {\n    const __cap_inner = try CheatLib.${(node.sync_fn OR_ELSE "")}(${node.zig_base}, ${alloc}, ${inner});\n    const __cap_val = __cap_inner.*;\n    ${alloc}.destroy(__cap_inner);\n    break :blk_cap try CheatLib.${(node.own_fn OR_ELSE "")}(${(node.sync_type OR_ELSE "")}, ${alloc}, __cap_val);\n}\n".trim();
     ELSE_IF (node.strategy == :passthrough) THEN
       RETURN inner;
     ELSE
@@ -3814,7 +3828,7 @@ PRIVATE FN mIREmitter__emit_assert_raises_check(MUTABLE self: MIREmitter, node: 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE error_check: String = "";
     IF node.error_name THEN
-      error_check = " and !${node.rt_name}.__error.matchesName(@intFromEnum(ErrorName.${node.error_name}))";
+      error_check = " and !${node.rt_name}.__error.matchesName(@intFromEnum(ErrorName.${(node.error_name OR_ELSE "")}))";
     ELSE
       error_check = "";
     END

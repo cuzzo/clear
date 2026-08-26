@@ -663,10 +663,10 @@ FN typeAlias__stmt?(self: TypeAlias) RETURNS Bool ->
 END
 PUB STRUCT CExternFnDecl {
   name: String,
-  params: String,
+  params: []FieldDef,
   return_type: String,
   library: ?String,
-  callconv: Any@multiowned,
+  callconv: ?String@symbol,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -735,7 +735,7 @@ FN cExternFnDecl__stmt?(self: CExternFnDecl) RETURNS Bool ->
 END
 PUB STRUCT CExternStructDef {
   name: String,
-  fields: String,
+  fields: []FieldDef,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
