@@ -4909,18 +4909,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE msg_mir = NIL;
     MUTABLE facts = TRY (mIRLowering__or_else_exit_facts(rtoc_self_view, node, node.token.line));
     IF mIRLowering__bc_target?(rtoc_self_view) THEN
-      msg_mir = IF node.message THEN
-        TRY (mIRLowering__lower(&rtoc_self_view, node.message))
-      ELSE
-        NIL
-      END;
+      IF node.message EXISTS AS message_value THEN
+        msg_mir = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(message_value)));
+      END
       RETURN ScopeBlock{ body: COPY [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ OrElseExitBcRewrite: COPY mIRLowering__or_else_exit_bc_reassign(rtoc_self_view, facts, msg_mir) }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "error", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "CheatError", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
-    msg_mir = IF node.message THEN
-      TRY (mIRLowering__lower(&rtoc_self_view, node.message))
-    ELSE
-      NIL
-    END;
+    IF node.message EXISTS AS message_value THEN
+      msg_mir = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(message_value)));
+    END
     RETURN TRY (mIRLowering__or_else_exit_scope(rtoc_self_view, facts, msg_mir, Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "error", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "CheatError", lowered_node_id: NIL, ownership_consumption: NIL } }));
 }
 END
@@ -16590,8 +16586,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL }
     END;
     MUTABLE msg_expr_branch_value: ?Lit = NIL;
-    IF node.message_expr THEN
-      msg_expr_branch_value = TRY (mIRLowering__lower(&rtoc_self_view, node.message_expr));
+    IF node.message_expr EXISTS AS rtoc_message_expr_present THEN
+      msg_expr_branch_value = TRY (mIRLowering__lower(&rtoc_self_view, rtoc_message_expr_present));
     ELSE
       msg_expr_branch_value = Lit{ value: "\"\"", lowered_node_id: NIL, ownership_consumption: NIL };
     END
@@ -19563,7 +19559,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     then_body = TRY (mIRLowering__lower_body(&rtoc_self_view, node.then_branch));
     IF (((node.else_branch != NIL) AND !(((node.else_branch)?).empty?()))) THEN
-      else_body = TRY (mIRLowering__lower_body(&rtoc_self_view, node.else_branch));
+      else_body = TRY (mIRLowering__lower_body(&rtoc_self_view, (node.else_branch OR_ELSE List[])));
     ELSE
       else_body = NIL;
     END
@@ -19592,7 +19588,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     then_body = (payload_bindings + TRY (mIRLowering__lower_body(&rtoc_self_view, node.then_branch)));
     IF (((node.else_branch != NIL) AND !(((node.else_branch)?).empty?()))) THEN
-      else_body = TRY (mIRLowering__lower_body(&rtoc_self_view, node.else_branch));
+      else_body = TRY (mIRLowering__lower_body(&rtoc_self_view, (node.else_branch OR_ELSE List[])));
     ELSE
       else_body = NIL;
     END
@@ -20559,7 +20555,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     };
     MUTABLE default_branch_value: ?[]Emittable = NIL;
     IF (((node.default_case != NIL) AND !(((node.default_case)?).empty?()))) THEN
-      default_branch_value = mIRLowering__lower_match_branch(&rtoc_self_view, node.default_case, facts.expr_label);
+      default_branch_value = mIRLowering__lower_match_branch(&rtoc_self_view, (node.default_case OR_ELSE List[]), facts.expr_label);
     ELSE
       default_branch_value = NIL;
     END
@@ -20845,11 +20841,11 @@ PRIVATE FN mIRLowering__return_lowering_plan(MUTABLE self: MIRLowering, node: Re
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ret_alloc: ?String@symbol = TRY (mIRLowering__return_destination_alloc(rtoc_self_view, node));
     MUTABLE value_branch_value: ?U = NIL;
-    IF node.value THEN
+    IF node.value EXISTS AS rtoc_value_present THEN
       value_branch_value = mIRLowering__with_decl_alloc(rtoc_self_view, ret_alloc, %() USE(node, ret_alloc, MUTABLE rtoc_self_view) -> {
     MUTABLE destination_type: ?Type@multiowned = TRY (mIRLowering__return_value_destination_type(rtoc_self_view, node));
     MUTABLE lowered = mIRLowering__with_expected_type(rtoc_self_view, CAST(destination_type AS ?Type), %() USE(node, MUTABLE rtoc_self_view) -> {
-      rtoc_lambda_result_768 = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
+      rtoc_lambda_result_768 = TRY (mIRLowering__lower(&rtoc_self_view, rtoc_value_present));
       rtoc_lambda_result_768
     });
     TRY (mIRLowering__place_value_for_destination(rtoc_self_view, lowered, node.value, ret_alloc, ruby_wrap_optional_Type_multiowned_TypeTypeInput(destination_type)))

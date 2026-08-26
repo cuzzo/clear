@@ -3013,7 +3013,7 @@ PRIVATE FN mIREmitter__emit_catch_default_body(MUTABLE self: MIREmitter, node: C
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE action: CatchDefaultAction = COPY CAST(node.default_action AS CatchDefaultAction);
     IF (action == CatchDefaultAction.Body) THEN
-      RETURN TRY (mIREmitter__emit_catch_body(&rtoc_self_view, node.rt_name, node.default_body, NIL));
+      RETURN TRY (mIREmitter__emit_catch_body(&rtoc_self_view, node.rt_name, (node.default_body OR_ELSE List[]), NIL));
     ELSE_IF (action == CatchDefaultAction.Propagate) THEN
       RETURN "${node.rt_name}.freeSnapshot();\nreturn error.CheatError;";
     ELSE_IF (action == CatchDefaultAction.Unreachable) THEN

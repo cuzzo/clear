@@ -3251,7 +3251,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__push_function_context_mut(rtoc_self_view, lambda_ctx);
     DEFER typeAnalysisSession__pop_function_context_mut(rtoc_self_view);
     MUTABLE return_type = typeAnalysisSession__with_body_fact_nested_body(rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> typeAnalysisSession__with_body_fact_lambda_body(rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view) -> typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ LambdaLit: COPY node }, castLambdaBodyToRoutineBody(node.body), TypeTypeInput{ SymbolValue: :Any }, TRUE)));
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ LambdaLit: COPY node }, typeAnalysisSession__build_lambda_signature(rtoc_self_view, node.params, CAST(return_type AS String@symbol))));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ LambdaLit: COPY node }, typeAnalysisSession__build_lambda_signature(rtoc_self_view, (node.params OR_ELSE List[]), CAST(return_type AS String@symbol))));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_FunctionDef(MUTABLE self: TypeAnalysisSession, MUTABLE node: FunctionDef) RETURNS !?FunctionContext@multiowned
@@ -12972,7 +12972,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     }), proc(%() USE(else_value_refinements, node, MUTABLE rtoc_self_view) -> {
     typeAnalysisSession__with_conditional_context(rtoc_self_view, %() USE(else_value_refinements, node, MUTABLE rtoc_self_view) -> {
       rtoc_lambda_result_319 = typeAnalysisSession__with_value_type_refinements(&rtoc_self_view, else_value_refinements, %() USE(node, MUTABLE rtoc_self_view) -> {
-      rtoc_lambda_result_318 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, node.else_branch));
+      rtoc_lambda_result_318 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, (node.else_branch OR_ELSE List[])));
       rtoc_lambda_result_318
     });
       rtoc_lambda_result_319
@@ -12982,7 +12982,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     })];
     TRY (typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branch_logic));
     node.then_result_type = TRY (typeAnalysisSession__expr_result_type(rtoc_self_view, node.then_branch));
-    node.else_result_type = TRY (typeAnalysisSession__expr_result_type(rtoc_self_view, node.else_branch));
+    node.else_result_type = TRY (typeAnalysisSession__expr_result_type(rtoc_self_view, (node.else_branch OR_ELSE List[])));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ IfStatement: COPY node }, :Void));
 }
 END
