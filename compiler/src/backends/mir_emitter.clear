@@ -3103,25 +3103,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE subject: String = TRY (mIREmitter__emit(&rtoc_self_view, node.subject));
     MUTABLE arms = node.arms |> SELECT {
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body));
-    MUTABLE payload: ?String = _.payload;
-    MUTABLE capture_name: String = "";
-      IF _.pointer_payload THEN
-        capture_name = "*${(payload OR_ELSE "")}";
-      ELSE
-        capture_name = payload;
-      END
+    # Ruby writes all three of these off one nilable payload; CLEAR wants the
+    # presence bound once, and an absent payload contributes nothing.
     MUTABLE capture: String = "";
-      IF payload THEN
-        capture = " |${capture_name}|";
-      ELSE
-        capture = "";
-      END
     MUTABLE suppress: String = "";
-      IF payload THEN
-        suppress = "_ = &${(payload OR_ELSE "")};\n";
-      ELSE
-        suppress = "";
+    IF _.payload EXISTS AS payload_value THEN
+      MUTABLE capture_name: String = COPY payload_value;
+      IF _.pointer_payload THEN
+        capture_name = "*${payload_value}";
       END
+      capture = " |${capture_name}|";
+      suppress = "_ = &${payload_value};\n";
+    END
     ".${_.variant} =>${capture} {\n${suppress}${body}\n}"
     };
     IF node.default_body EXISTS AS default_body THEN
