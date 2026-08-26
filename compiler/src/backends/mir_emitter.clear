@@ -2173,15 +2173,33 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entries = node.entries;
     MUTABLE n = entries.length();
     MUTABLE action: FailureAction = COPY castEmittableToFailureAction(node.action);
-    MUTABLE guard_decls = (entries |> SELECT "var ${_.guard_var}: @TypeOf(try ${TRY (mIREmitter__emit(&rtoc_self_view, _.lock_expr))}.${_.method_name}()) = undefined;").join("\n");
-    MUTABLE held_decls = (entries |> SELECT "var ${_.held_var}: bool = false;").join("\n");
-    MUTABLE ptr_init = (entries |> SELECT "@intFromPtr(${TRY (mIREmitter__emit(&rtoc_self_view, _.address_expr))})").join(", ");
-    MUTABLE order_init = (0 ..< n).to_a().join(", ");
-    MUTABLE acquire_arms = (entries |> SELECT {
-    MUTABLE lock_expr: String = TRY (mIREmitter__emit(&rtoc_self_view, _.lock_expr));
-    regexReplaceAll("${_.indexOf()} => {\n                                if (${lock_expr}.${_.method_name}()) |__g| {\n                                    ${_.guard_var} = __g;\n                                    ${_.held_var} = true;\n                                } else |__err_inner| {\n                                    __err_caught = __err_inner;\n                                    __success = false;\n                                }\n                            },\n", "\\s+\\z", "")
-    }).join("\n                                ");
-    MUTABLE release_arms = (entries |> SELECT "${_.indexOf()} => if (${_.held_var}) { ${_.guard_var}.release(); ${_.held_var} = false; },").join("\n                            ");
+    # Same two mistranslations as the panic path: `_.indexOf()` for the
+    # entry's `index` FIELD, and `(0...n).to_a` which CLEAR has no method for.
+    MUTABLE guard_parts: []String = List[];
+    MUTABLE held_parts: []String = List[];
+    MUTABLE ptr_parts: []String = List[];
+    MUTABLE acquire_parts: []String = List[];
+    MUTABLE release_parts: []String = List[];
+    FOR entry IN entries DO
+      MUTABLE lock_expr: String = TRY (mIREmitter__emit(&rtoc_self_view, entry.lock_expr));
+      &guard_parts.append("var ${entry.guard_var}: @TypeOf(try ${lock_expr}.${entry.method_name}()) = undefined;");
+      &held_parts.append("var ${entry.held_var}: bool = false;");
+      &ptr_parts.append("@intFromPtr(${TRY (mIREmitter__emit(&rtoc_self_view, entry.address_expr))})");
+      &acquire_parts.append(regexReplaceAll("${entry.index.toString()} => {\n                                if (${lock_expr}.${entry.method_name}()) |__g| {\n                                    ${entry.guard_var} = __g;\n                                    ${entry.held_var} = true;\n                                } else |__err_inner| {\n                                    __err_caught = __err_inner;\n                                    __success = false;\n                                }\n                            },\n", "\\s+\\z", ""));
+      &release_parts.append("${entry.index.toString()} => if (${entry.held_var}) { ${entry.guard_var}.release(); ${entry.held_var} = false; },");
+    END
+    MUTABLE order_parts: []String = List[];
+    MUTABLE order_index: Int64 = 0;
+    WHILE (order_index < n) DO
+      &order_parts.append(order_index.toString());
+      order_index = (order_index + 1);
+    END
+    MUTABLE guard_decls = guard_parts.join("\n");
+    MUTABLE held_decls = held_parts.join("\n");
+    MUTABLE ptr_init = ptr_parts.join(", ");
+    MUTABLE order_init = order_parts.join(", ");
+    MUTABLE acquire_arms = acquire_parts.join("\n                                ");
+    MUTABLE release_arms = release_parts.join("\n                            ");
     MUTABLE handler_switch = TRY (mIREmitter__emit_sorted_lock_handler_switch(&rtoc_self_view, action, node.matched_types, node.bubble_types, node.rt_name, CAST(node.source_line AS String)));
     MUTABLE retry_branch: String = "";
     IF node.retries THEN

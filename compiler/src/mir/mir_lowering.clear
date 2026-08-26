@@ -12966,12 +12966,78 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE branches = node.branches;
     MUTABLE n = scopeBindings__length(branches);
     MUTABLE wg_var = "__do${id}_wg";
-    MUTABLE all_branch_bodies = List[];
+    MUTABLE all_branch_bodies: [][]Emittable = List[];
     MUTABLE boundary_facts: []ExecutionBoundaryFact = ( { MUTABLE rtoc_empty_list_500: []ExecutionBoundaryFact = List[]; rtoc_empty_list_500 } );
-    MUTABLE branch_plans = unsupportedRuby("CallNode at 525:19: each_with_index requires a statically typed collection");
+    # Ruby builds this with `branches.each_with_index.map`, whose collection
+    # ruby-to-clear could not type; the body also appends to two locals the
+    # map closes over, which is why it became an `unsupportedRuby` stub rather
+    # than a partial translation.
+    MUTABLE branch_plans: []DoBranchPlan = List[];
+    MUTABLE branch_index: Int64 = 0;
+    WHILE (branch_index < n) DO
+      MUTABLE branch: DoBranch = COPY UNWRAP (branches[branch_index]);
+      MUTABLE ctx_type = "__DoBranchCtx${id.toString()}_${branch_index.toString()}";
+      MUTABLE ctx_var = "__do${id.toString()}_ctx${branch_index.toString()}";
+      MUTABLE branch_analysis: ?PassStateValue = COPY branch.capture_analysis;
+      MUTABLE pinned: Bool = COPY branch.pinned;
+      &boundary_facts.append(TRY (mIRLowering__execution_boundary_fact(rtoc_self_view, :do_branch, mIRLowering__execution_boundary_dispatch(rtoc_self_view, branch.parallel, Pinned{ BoolValue: COPY pinned }), branch_analysis)));
+      MUTABLE caps = TRY (fiberCtxBuilder__build(branch_analysis, "ctx", {}, NIL, ((id * 1000) + branch_index), TRY (mIRLowering__fiber_capture_source_overrides(rtoc_self_view, branch_analysis, {})), mIRLowering__mir_schema_lookup(rtoc_self_view)));
+      MUTABLE capture_fields: []ContextFieldDecl = [mIRLowering__context_field_decl(rtoc_self_view, "alloc", "std.mem.Allocator")];
+      FOR spec IN caps.specs DO
+        &capture_fields.append(mIRLowering__context_field_decl(rtoc_self_view, spec.name, spec.field_type_zig));
+      END
+      capture_fields = (capture_fields + mIRLowering__capture_moved_guard_fields(rtoc_self_view, caps.specs));
+      MUTABLE capture_inits: []StructInitField = [
+        mIRLowering__context_init_field(rtoc_self_view, Name{ SymbolValue: :wg }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY wg_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }),
+        mIRLowering__context_init_field(rtoc_self_view, Name{ SymbolValue: :alloc }, Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }, method: "heapAlloc", args: ( { MUTABLE rtoc_empty_args_do: []Emittable = List[]; rtoc_empty_args_do } ), fallible: FALSE, contract: COPY TRY (callableContract__no_ownership(0)), lowered_node_id: NIL, ownership_consumption: NIL } })
+      ];
+      FOR spec IN caps.specs DO
+        &capture_inits.append(mIRLowering__context_init_field(rtoc_self_view, Name{ StringValue: COPY spec.name }, COPY spec.init_value_mir));
+      END
+      MUTABLE capture_pre_decls = TRY (mIRLowering__capture_setup_stmts(rtoc_self_view, caps.specs));
+      MUTABLE branch_mir: []Emittable = TRY (mIRLowering__lower_do_branch_body(&rtoc_self_view, branch, caps));
+      &all_branch_bodies.append(COPY branch_mir);
+      MUTABLE task_cfg = mIRLowering__task_config_plan(rtoc_self_view, branch.stack_size, branch.computed_stack_tier);
+      &branch_plans.append(DoBranchPlan{
+        ctx_type: COPY ctx_type,
+        ctx_var: COPY ctx_var,
+        wg_var: COPY wg_var,
+        raw_rt_name: "__raw_rt_do${id.toString()}_${branch_index.toString()}",
+        raw_args_name: "__raw_args_do${id.toString()}_${branch_index.toString()}",
+        capture_fields: COPY capture_fields,
+        capture_inits: COPY capture_inits,
+        capture_pre_decls: COPY capture_pre_decls,
+        body: COPY branch_mir,
+        spawn_call: COPY mIRLowering__do_branch_spawn_call_plan(rtoc_self_view, wg_var, ctx_type, ctx_var, task_cfg, pinned)
+      });
+      branch_index = (branch_index + 1);
+    END
     MUTABLE do_block = MIRDoBlock{ code: COPY DoBlockPlan{ wg_var: COPY wg_var, branches: COPY branch_plans }, branch_bodies: COPY all_branch_bodies, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_facts: List[] };
     do_block.boundary_facts = boundary_facts;
     RETURN do_block;
+}
+END
+# One DO branch body, lowered under the branch's fiber capture map. Split out
+# because the Ruby original nests this inside the each_with_index map.
+PRIVATE FN mIRLowering__lower_do_branch_body(MUTABLE self: MIRLowering, branch: DoBranch, caps: FiberCtx) RETURNS ![]Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN mIRLowering__with_fiber_capture_map(rtoc_self_view, caps.capture_map, caps.capture_symbols, "__rt", %() USE(branch, caps, MUTABLE rtoc_self_view) -> {
+    MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE body_stmts: []Emittable = TRY (mIRLowering__capture_cleanup_stmts(rtoc_self_view, caps.specs, "ctx"));
+    FOR branch_stmt IN branch.body DO
+      MUTABLE lowered = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(branch_stmt)));
+      FOR pending IN (TRY (mIRLowering__flush_pending(rtoc_self_view))) DO
+        &body_stmts.append(castStmtToEmittable(pending));
+      END
+      FOR lowered_stmt IN (TRY (mIRLowering__do_branch_stmt_nodes(rtoc_self_view, branch_stmt, lowered))) DO
+        &body_stmts.append(COPY lowered_stmt);
+      END
+    END
+    TRY (mIRLowering__finalized_boundary_body_for_emit(rtoc_self_view, body_stmts))
+    });
 }
 END
 PRIVATE FN mIRLowering__do_branch_stmt_nodes(self: MIRLowering, expr: Locatable, mir: Emittable) RETURNS ![]Emittable

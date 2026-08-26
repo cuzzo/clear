@@ -27,6 +27,7 @@ require 'json'
 require 'msgpack'
 require 'fileutils'
 require 'optparse'
+require 'open3'
 
 # parser_compat.rb runs itself when it is the program; borrow its helpers by
 # taking that name away for the duration of the require.
@@ -168,12 +169,18 @@ module AnnotatorCompat
   ].freeze
 
   def main(argv)
-    options = { out_dir: File.expand_path('tmp/annotator-compat'), ruby_only: false, limit: nil }
+    options = {
+      out_dir: File.expand_path('tmp/annotator-compat'),
+      ruby_only: false,
+      limit: nil,
+      generated_root: File.expand_path('compiler/src')
+    }
     OptionParser.new do |parser|
       parser.banner = 'Usage: ruby tools/annotator_compat.rb [options]'
       parser.on('--out DIR') { |value| options[:out_dir] = File.expand_path(value) }
       parser.on('--ruby-only', 'Encode the Ruby side only (the CLEAR annotator is not built yet)') { options[:ruby_only] = true }
       parser.on('--limit N', Integer) { |value| options[:limit] = value }
+      parser.on('--generated-root DIR') { |value| options[:generated_root] = File.expand_path(value) }
       parser.on('-h', '--help') { puts parser; exit 0 }
     end.parse!(argv)
 
@@ -193,8 +200,84 @@ module AnnotatorCompat
       return ok == ruby_payload['cases'].length ? 0 : 1
     end
 
-    warn 'clear side: the self-hosted annotator does not build yet; rerun with --ruby-only'
-    1
+    clear_payload = run_clear_payload(cases, options)
+    ParserCompat.write_msgpack(File.join(options[:out_dir], 'clear.msgpack'), clear_payload)
+    puts "clear msgpack: #{File.join(options[:out_dir], 'clear.msgpack')}"
+
+    identical = compare(ruby_payload, clear_payload)
+    puts "annotator byte-compat: #{identical}/#{cases.length} cases byte-identical"
+    identical == cases.length ? 0 : 1
+  end
+
+  # The CLEAR side is the parser harness's pipeline with one step inserted:
+  # parse, ANNOTATE, then encode through the very same generated encoders. The
+  # stamps live on the AST nodes those encoders already walk, so annotation
+  # compatibility is the parse encoding of an annotated tree -- no second
+  # encoder, and no chance of the two sides encoding different field sets.
+  def run_clear_payload(cases, options)
+    generated_root = options[:generated_root]
+    dir = File.join(options[:out_dir], 'build')
+    FileUtils.mkdir_p(dir)
+    source = File.join(dir, 'annotator_compat.clear')
+    binary = File.join(dir, 'annotator_compat')
+    File.write(source, clear_harness_source(cases, generated_root))
+
+    env = {
+      'CLEAR_DISABLE_BUILD_ZIG' => '1',
+      'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8',
+      'CLEAR_EXTRA_NATIVE_DIRS' => generated_root
+    }
+    build = [LexerHarnessSupport::CLEAR, 'build', source, '-o', binary,
+             '--no-stack-check', '--main-tier', 'service',
+             *ENV.fetch('ANNOTATOR_COMPAT_BUILD_FLAGS', '--safe').split,
+             *ParserCompat.package_flags(generated_root)]
+    _out, err, status = Open3.capture3(env, *build)
+    unless status.success?
+      limit = ENV.fetch('ANNOTATOR_COMPAT_ERROR_LIMIT', '8').to_i
+      warn "annotator_compat: CLEAR build failed\n#{err.lines.grep(/Error|error/).first(limit).join}"
+      return { 'schema' => SCHEMA, 'implementation' => 'clear', 'cases' => [] }
+    end
+
+    stdout, _stderr, _status = Open3.capture3(env, binary)
+    { 'schema' => SCHEMA, 'implementation' => 'clear', 'cases' => ParserCompat.parse_clear_output(stdout) }
+  end
+
+  # The Ruby side carries `tree` plus `stamps`; the CLEAR side carries the same
+  # encoded tree. Compare the trees, which is where the stamps live.
+  def compare(ruby_payload, clear_payload)
+    clear_by_name = clear_payload['cases'].to_h { |entry| [entry['name'], entry] }
+    ruby_payload['cases'].count do |ruby_case|
+      clear_case = clear_by_name[ruby_case['name']]
+      next false unless clear_case && clear_case['status'] == 'ok' && ruby_case['status'] == 'ok'
+
+      same = clear_case['ast'] == ruby_case['ast']['tree']
+      warn "MISMATCH #{ruby_case['name']}" unless same
+      same
+    end
+  end
+
+  # Reuses ParserCompat's generated node encoders verbatim: the same encoder
+  # text, the same escaping, the same output protocol.
+  def clear_harness_source(cases, generated_root)
+    parser_source = ParserCompat.clear_harness_source(cases, generated_root)
+    annotator_spec = annotator_require_spec(generated_root)
+
+    unless parser_source.sub!(
+      'program = clearParser__parse_source(CAST(source AS String)) OR_ELSE RAISE;',
+      "program = clearParser__parse_source(CAST(source AS String)) OR_ELSE RAISE;\n" \
+      "        MUTABLE annotator = semanticAnnotator__new(NIL, NIL, NIL, FALSE, CAST(source AS String));\n" \
+      '        semanticAnnotator__annotate_mut(&annotator, &program) OR_ELSE RAISE;'
+    )
+      raise 'annotator_compat: parser harness no longer has the parse line to annotate after'
+    end
+
+    parser_source.sub(/\A/, "REQUIRE #{LexerHarnessSupport.clear_string_literal(annotator_spec)};\n")
+  end
+
+  def annotator_require_spec(generated_root)
+    group = ParserCompat.package_groups(generated_root)
+             .find { |_name, members| members.include?('annotator/annotator.clear') }
+    group ? "pkg:#{group.first}" : File.join(generated_root, 'annotator', 'annotator.clear')
   end
 
   def payload(name, cases)
