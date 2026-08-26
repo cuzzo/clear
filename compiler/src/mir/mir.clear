@@ -5959,7 +5959,7 @@ FN rcRelease__expr?(self: RcRelease) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT RcDowngrade {
-  source: String,
+  source: Emittable,
   zig_base: String,
   func: String,
   lowered_node_id: ?LoweredNodeId,
@@ -6024,7 +6024,7 @@ FN rcDowngrade__expr?(self: RcDowngrade) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT WeakUpgrade {
-  source: String,
+  source: Emittable,
   zig_base: String,
   func: String,
   lowered_node_id: ?LoweredNodeId,

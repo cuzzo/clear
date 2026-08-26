@@ -737,6 +737,65 @@ module RtocPostprocess
     end
   end
 
+  # A field passed to a parameter whose declared type it cannot be. Ruby has
+  # no field types, so the translation infers one from whatever a construction
+  # site happened to pass -- `RcDowngrade.source` came out String because a
+  # caller passed a name, while every consumer runs it through `emit`, which
+  # takes an Emittable.
+  #
+  # The consumers are the evidence: when a field is only ever handed to
+  # parameters of one type, and that is not the field's declared type, the
+  # declaration is what is wrong.
+  rule(:field_type_contradicted, kind: :advisory,
+       summary: 'field type contradicted by every use of it') do |lines, index, findings, file, _fix|
+    scope = Scope.new(index)
+    seen = {}
+    lines.each_with_index do |line, position|
+      scope.observe(line)
+      next if line.strip.start_with?('#')
+
+      line.scan(/(\w+)\(([^()]*(?:\([^()]*\)[^()]*)*)\)/) do |callee, argument_text|
+        declared = index.param_types[callee]
+        next unless declared
+
+        argument_text.split(/,\s*(?![^()]*\))/).each_with_index do |argument, slot|
+          next unless argument.strip =~ /\A(\w+)\.([a-z_]\w*)\z/
+
+          owner = scope.struct_of(Regexp.last_match(1))
+          field = Regexp.last_match(2)
+          next unless owner
+
+          actual = index.field_type(owner, field)
+          expected = declared[slot]
+          next unless actual && expected
+          next if actual == expected
+          # `Any` is a generic parameter, not evidence; and a difference that
+          # is only a capability or an optional wrapper is not a wrong TYPE.
+          next if expected.delete_suffix('@multiowned') == 'Any'
+          bare = ->(type) { type.delete_prefix('?').sub(/@(multiowned|boxed|shared|local)\z/, '') }
+          next if bare.call(actual) == bare.call(expected)
+
+          key = [file, owner, field]
+          seen[key] ||= []
+          seen[key] << [position + 1, callee, expected, actual]
+        end
+      end
+    end
+    seen.each do |(file_name, owner, field), uses|
+      # Only when EVERY use agrees on a type the declaration does not have.
+      wanted = uses.map { |use| use[2].delete_prefix('?').sub(/@(multiowned|boxed|shared|local)\z/, '') }.uniq
+      next unless wanted.length == 1
+      # One call site is a coincidence; two agreeing is evidence.
+      next unless uses.length >= 2
+
+      declared_type = index.field_type(owner, field)
+      next if declared_type.delete_prefix('?').sub(/@(multiowned|boxed|shared|local)\z/, '') == wanted.first
+
+      findings << Finding.new(rule: :field_type_contradicted, file: file_name, line: uses.first[0],
+                              message: "#{owner}.#{field} is #{declared_type}, but all #{uses.length} use(s) want #{wanted.first}")
+    end
+  end
+
   # `x[:field]` is Ruby hash syntax; on a struct it is a field read. Advisory
   # because CLEAR really does index a {String@symbol}V map that way.
   rule(:hash_field, kind: :advisory,
