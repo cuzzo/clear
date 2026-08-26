@@ -429,23 +429,29 @@ module RtocPostprocess
     scope = Scope.new(index)
     lines.each_with_index do |line, position|
       scope.observe(line)
-      owner = scope.struct_of('node')
-      next unless owner
 
       line.scan(/(\w+)\(([^()]*(?:\([^()]*\)[^()]*)*)\)/) do |callee, argument_text|
         declared = index.param_types[callee]
         next unless declared
 
         argument_text.split(/,\s*(?![^()]*\))/).each_with_index do |argument, slot|
-          next unless argument.strip =~ /\Anode\.([a-z_]\w*)\z/
-
-          actual = index.field_type(owner, Regexp.last_match(1))
+          argument = argument.strip
+          # Any typed receiver, not just `node.` -- restricting to one
+          # parameter name is what let `cleanupEntry__resource_close_plan(entry)`
+          # through, and it cost a build.
+          actual = if argument =~ /\A(\w+)\.([a-z_]\w*)\z/
+                     owner = scope.struct_of(Regexp.last_match(1))
+                     owner && index.field_type(owner, Regexp.last_match(2))
+                   elsif argument =~ /\A(\w+[?!]?)\((\w+)\)\z/
+                     index.return_types[Regexp.last_match(1)]
+                   end
           expected = declared[slot]
           next unless actual&.start_with?('?') && expected && !expected.start_with?('?')
           next if expected == 'Any@multiowned'
+          next if scope.narrowed.include?(argument.split('.').first)
 
           findings << Finding.new(rule: :optional_argument, file: file, line: position + 1,
-                                  message: "#{callee} arg #{slot + 1}: node.#{Regexp.last_match(1)} is #{actual}, parameter is #{expected}")
+                                  message: "#{callee} arg #{slot + 1}: #{argument} is #{actual}, parameter is #{expected}")
         end
       end
     end

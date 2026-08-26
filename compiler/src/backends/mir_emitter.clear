@@ -3541,7 +3541,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE g = cleanupEntry__has_moved_guard?(entry);
     MUTABLE vp = cleanupEntry__via_pointer?(entry);
     IF (cleanupEntry__kind(entry) == :resource) THEN
-      MUTABLE close = TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, cleanupEntry__resource_close_plan(entry), name));
+      MUTABLE close: String = "";
+      IF cleanupEntry__resource_close_plan(entry) EXISTS AS close_plan THEN
+        close = TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, close_plan, name));
+      END
       RETURN mIREmitter__guarded_defer(rtoc_self_view, name, close, g, errdefer);
     ELSE_IF (cleanupEntry__kind(entry) == :tuple) THEN
       RETURN mIREmitter__guarded_defer(rtoc_self_view, name, TRY (mIREmitter__render_tuple_cleanup(rtoc_self_view, entry, name, alloc)), g, errdefer);
@@ -3556,7 +3559,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (cleanupEntry__kind(entry) == :frozen) THEN
         use_name = "${name}__buf";
       ELSE
-        use_name = name;
+        use_name = COPY name;
       END
       MUTABLE use_type: String = "";
       IF vp THEN
