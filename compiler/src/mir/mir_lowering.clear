@@ -9697,13 +9697,16 @@ PRIVATE FN mIRLowering__lower_intrinsic_arg(MUTABLE self: MIRLowering, arg: Loca
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__with_sink_type(rtoc_self_view, sink_type, %() USE(arg, takes, pre_resolved_alloc, MUTABLE rtoc_self_view) -> {
+    MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE rtoc_arg_lowered: ?Emittable = NIL;
     IF (takes AND (pre_resolved_alloc != NIL)) THEN
-      mIRLowering__with_decl_alloc(rtoc_self_view, pre_resolved_alloc, %() USE(arg, MUTABLE rtoc_self_view) -> {
+      rtoc_arg_lowered = mIRLowering__with_decl_alloc(rtoc_self_view, pre_resolved_alloc, %() USE(arg, MUTABLE rtoc_self_view) -> {
         TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(arg)))
-      })
+      });
     ELSE
-      TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(arg)))
+      rtoc_arg_lowered = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(arg)));
     END
+    UNWRAP (rtoc_arg_lowered)
     });
 }
 END
@@ -12543,7 +12546,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       rtoc_ternary_value_482 = NIL;
     END
-    rtoc_ternary_value_482? }) }, matched_types: (clause?.matched_types OR_ELSE List[]), bubble_types: (clause?.bubble_types OR_ELSE List[]), retries: clause?.retries, source_line: COPY CAST(with_node.token?.line AS String), loop_label: "__acq_sort_${mIRLowering__stable_node_suffix(rtoc_self_view, Locatable{ WithBlock: COPY with_node })}", rt_name: mIRLowering__runtime_binding_name(rtoc_self_view), fallible: fallible, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL };
+    rtoc_ternary_value_482? }) }, matched_types: COPY clause?.matched_types, bubble_types: COPY clause?.bubble_types, retries: clause?.retries, source_line: COPY CAST(with_node.token?.line AS String), loop_label: "__acq_sort_${mIRLowering__stable_node_suffix(rtoc_self_view, Locatable{ WithBlock: COPY with_node })}", rt_name: mIRLowering__runtime_binding_name(rtoc_self_view), fallible: fallible, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL };
 }
 END
 PRIVATE FN mIRLowering__execution_boundary_dispatch(self: MIRLowering, parallel: ?Bool, pinned: ?Pinned) RETURNS String@symbol
