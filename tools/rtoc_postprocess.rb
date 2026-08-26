@@ -558,6 +558,21 @@ module RtocPostprocess
     end
   end
 
+  # `MUTABLE x = (opt OR_ELSE fallback)` with no annotation. The value is not
+  # optional -- that is what OR_ELSE is for -- but CLEAR infers from the left
+  # operand and every later use of x is then a ?T where a T is wanted. The
+  # annotation is the whole fix, and it is invisible until something
+  # interpolates x.
+  rule(:unannotated_or_else, kind: :advisory,
+       summary: 'un-annotated bind of an OR_ELSE result') do |lines, _index, findings, file, _fix|
+    lines.each_with_index do |line, position|
+      next unless line =~ /\A\s*MUTABLE (\w+) = \(.* OR_ELSE .*\);\s*\z/
+
+      findings << Finding.new(rule: :unannotated_or_else, file: file, line: position + 1,
+                              message: "MUTABLE #{Regexp.last_match(1)} = (... OR_ELSE ...) -- no annotation")
+    end
+  end
+
   # `x[:field]` is Ruby hash syntax; on a struct it is a field read. Advisory
   # because CLEAR really does index a {String@symbol}V map that way.
   rule(:hash_field, kind: :advisory,
