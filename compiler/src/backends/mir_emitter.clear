@@ -2779,28 +2779,28 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       else_body = TRY (mIREmitter__emit_body(&rtoc_self_view, else_stmts));
     END
     IF (node.bindings.length() == 1) THEN
-      MUTABLE b = node.bindings[0];
-      MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, b[:expr]));
+      MUTABLE b: MIRIfBinding = COPY UNWRAP (node.bindings[0]);
+      MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, b.expr));
       MUTABLE suppress: String = "";
-      IF (CAST(b[:capture] AS String) == "_") THEN
+      IF (CAST(b.capture AS String) == "_") THEN
         suppress = "";
       ELSE
-        suppress = "_ = &${b[:capture]};\n";
+        suppress = "_ = &${CAST(b.capture AS String)};\n";
       END
-      IF b[:node_ref] THEN
-        result = "{\nconst ${b[:capture]} = ${expr};\n";
-        result = (result $+ "if (!${b[:capture]}.isNil()) {\n${suppress}${then_body}\n}");
+      IF b.node_ref THEN
+        result = "{\nconst ${CAST(b.capture AS String)} = ${expr};\n";
+        result = (result $+ "if (!${CAST(b.capture AS String)}.isNil()) {\n${suppress}${then_body}\n}");
         IF else_body EXISTS AS else_body_value THEN
           result = (result $+ " else {\n${else_body_value}\n}");
         END
         result = (result $+ "\n}");
-      ELSE_IF (b[:predicate] == :stream_item) THEN
+      ELSE_IF (b.predicate == :stream_item) THEN
         IF else_body EXISTS AS else_body_value THEN
-          result = "switch (${expr}) {\n.Item => |${b[:capture]}| {\n${suppress}${then_body}\n},\n.Closed => {\n${else_body_value}\n},\n}";
+          result = "switch (${expr}) {\n.Item => |${CAST(b.capture AS String)}| {\n${suppress}${then_body}\n},\n.Closed => {\n${else_body_value}\n},\n}";
         END
-        result = (result OR "switch (${expr}) {\n.Item => |${b[:capture]}| {\n${suppress}${then_body}\n},\n.Closed => {},\n}");
-      ELSE_IF (b[:predicate] == :is_ok) THEN
-        result = "if (${expr}) |${b[:capture]}| {\n${suppress}${then_body}\n}";
+        result = (result OR "switch (${expr}) {\n.Item => |${CAST(b.capture AS String)}| {\n${suppress}${then_body}\n},\n.Closed => {},\n}");
+      ELSE_IF (b.predicate == :is_ok) THEN
+        result = "if (${expr}) |${CAST(b.capture AS String)}| {\n${suppress}${then_body}\n}";
         IF else_body EXISTS AS else_body_value THEN
           result = (result $+ " else |_| {\n${else_body_value}\n}");
         END
@@ -2809,10 +2809,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       ELSE
         MUTABLE capture: String = "";
-        IF b[:pointer_capture] THEN
-          capture = "*${b[:capture]}";
+        IF b.pointer_capture THEN
+          capture = "*${CAST(b.capture AS String)}";
         ELSE
-          capture = COPY b[:capture];
+          capture = COPY b.capture;
         END
         result = "if (${expr}) |${capture}| {\n${suppress}${then_body}\n}";
         IF else_body EXISTS AS else_body_value THEN

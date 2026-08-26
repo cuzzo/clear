@@ -1449,7 +1449,11 @@ FN ifStmt__stmt?(self: IfStmt) RETURNS Bool ->
 END
 PUB STRUCT MIRIfBinding {
   expr: Emittable,
-  capture: MirCapture
+  capture: MirCapture,
+  node_ref: ?Bool,
+  owns_capture: ?Bool,
+  predicate: ?String@symbol,
+  pointer_capture: ?Bool
 }
 
 PUB STRUCT IfBindStmt {
