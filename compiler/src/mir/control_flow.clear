@@ -475,7 +475,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN rtoc_owned_return_4;
 }
 END
-PUB FN ownershipDataflow__reverse_postorder_index(self: OwnershipDataflow) RETURNS !{Int64}Int64
+PUB FN ownershipDataflow__reverse_postorder_index(self: OwnershipDataflow) RETURNS !?{Int64}Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1732,7 +1732,7 @@ PUB FN useAfterMoveChecker__new(fn_node: FunctionDef, dataflow: OwnershipDataflo
 END
 # Ruby module LoopFrameAnalysis
 PUB UNION LoopNode { WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, ForRange: ForRange, ForEach: ForEach }
-PUB FN loopFrameAnalysis__analyze_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !{String}FunctionDef ->
+PUB FN loopFrameAnalysis__analyze_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !?{String}FunctionDef ->
   FOR _ IN fn_nodes.values() DO
   IF !(_.body) THEN
     CONTINUE;

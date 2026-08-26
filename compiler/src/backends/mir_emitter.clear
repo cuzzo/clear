@@ -4270,7 +4270,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, node.kind));
 }
 END
-PRIVATE FN mIREmitter__emit_type_sentinel(self: MIREmitter, node: TypeSentinel) RETURNS String
+PRIVATE FN mIREmitter__emit_type_sentinel(self: MIREmitter, node: TypeSentinel) RETURNS ?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

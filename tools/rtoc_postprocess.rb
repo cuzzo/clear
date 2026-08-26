@@ -915,6 +915,34 @@ module RtocPostprocess
     end
   end
 
+  # `RETURN NIL` from a function whose declared return type is not optional.
+  # Ruby returns nil freely and its sig often says otherwise, so the
+  # translation carries the declaration over unchanged. The RETURN is the
+  # evidence -- a function that returns nil returns an optional.
+  rule(:nil_return_non_optional, kind: :mechanical,
+       summary: 'RETURN NIL from a non-optional function') do |lines, _index, findings, file, fix|
+    declaration = nil
+    lines.each_with_index do |line, position|
+      if (match = line.match(/\A(?:PRIVATE |PUB )?FN (\w+[?!]?)(?:<[^>]*>)?\(.*?\)\s*RETURNS (\S+)/))
+        declaration = [position, match[1], match[2]]
+      elsif line =~ /\A(?:PRIVATE |PUB )?FN /
+        declaration = nil
+      end
+      next unless declaration && line =~ /\A\s*RETURN NIL;\s*\z/
+
+      at, name, type = declaration
+      bare = type.delete_prefix('!')
+      next if bare.start_with?('?') || %w[Void].include?(bare)
+
+      findings << Finding.new(rule: :nil_return_non_optional, file: file, line: position + 1,
+                              message: "#{name} RETURNS #{type} but returns NIL")
+      next unless fix
+
+      lines[at] = lines[at].sub(/RETURNS (!?)(\S+)/) { "RETURNS #{Regexp.last_match(1)}?#{Regexp.last_match(2)}" }
+      declaration = nil
+    end
+  end
+
   # `x[:field]` is Ruby hash syntax; on a struct it is a field read. Advisory
   # because CLEAR really does index a {String@symbol}V map that way.
   rule(:hash_field, kind: :advisory,

@@ -139,7 +139,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__lower_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   RETURN TRY (pipelineConcurrentLowerer__lower_source_plan(self, plan.source_kind, plan));
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(self: PipelineConcurrentLowerer, source_kind: PipelineConcurrentSourceKind, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(self: PipelineConcurrentLowerer, source_kind: PipelineConcurrentSourceKind, plan: PipelineConcurrentPlan) RETURNS !?PipelineConcurrentResult ->
   IF (source_kind == PipelineConcurrentSourceKind.ShardEach) THEN
     RETURN TRY (pipelineConcurrentLowerer__lower_shard_concurrent_each(self, plan.lhs, plan.conc_op, plan.smooth_node));
   ELSE_IF (source_kind == PipelineConcurrentSourceKind.BcMaterialized) THEN

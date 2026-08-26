@@ -1134,7 +1134,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__emit_auto_shape_resolved_findings_mut(self: TypeAnalysisSession, resolved_slots: {AutoSlotId}Resolution) RETURNS !{AutoSlotId}Resolution
+PRIVATE FN typeAnalysisSession__emit_auto_shape_resolved_findings_mut(self: TypeAnalysisSession, resolved_slots: {AutoSlotId}Resolution) RETURNS !?{AutoSlotId}Resolution
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7153,7 +7153,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__lookup_type_schema(self: TypeAnalysisSession, name: String@symbol) RETURNS !Any@multiowned
+PRIVATE FN typeAnalysisSession__lookup_type_schema(self: TypeAnalysisSession, name: String@symbol) RETURNS !?Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7322,7 +7322,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__fixable_mut(self: TypeAnalysisSession, node_or_token: Any, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
+PRIVATE FN typeAnalysisSession__fixable_mut(self: TypeAnalysisSession, node_or_token: Any, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}Any = {}) RETURNS !?Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7581,7 +7581,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TypeAnnotationFacts{ node: COPY node, type_obj: COPY type_obj, is_param: is_param, inner: CAST(COPY typeAnalysisSession__type_annotation_inner(rtoc_self_view, type_obj) AS Type), inner_array: (type__tense?(type_obj) AND ((TRY (type__tense_type(type_obj)) != NIL) AND (type__array?(((TRY (type__tense_type(type_obj)))?)) == TRUE))), fn_type_params: COPY TRY (typeAnalysisSession__current_function_type_params(rtoc_self_view)) };
 }
 END
-PRIVATE FN typeAnalysisSession__type_annotation_inner(self: TypeAnalysisSession, type_obj: Type) RETURNS !Type
+PRIVATE FN typeAnalysisSession__type_annotation_inner(self: TypeAnalysisSession, type_obj: Type) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17919,7 +17919,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN castOptionalUnionPayloadCompatibilityReturnValueToOptionalTypeAnalysisSessionReturnValue(TRY (unionPayloadCompatibility__unique_variant(expected_type, actual_type, schema)));
 }
 END
-PRIVATE FN typeAnalysisSession__same_return_capabilities?(self: TypeAnalysisSession, expected_t: Type, actual_t: Type) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__same_return_capabilities?(self: TypeAnalysisSession, expected_t: Type, actual_t: Type) RETURNS !?Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

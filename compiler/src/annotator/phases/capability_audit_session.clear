@@ -385,7 +385,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN capabilityAuditSession__fixable_mut(self: CapabilityAuditSession, node_or_token: Any, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
+PRIVATE FN capabilityAuditSession__fixable_mut(self: CapabilityAuditSession, node_or_token: Any, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}Any = {}) RETURNS !?Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2160,7 +2160,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN capabilityAuditSession__lookup_type_schema(self: CapabilityAuditSession, name: String@symbol) RETURNS !Any@multiowned
+PRIVATE FN capabilityAuditSession__lookup_type_schema(self: CapabilityAuditSession, name: String@symbol) RETURNS !?Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2266,7 +2266,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN caller_families[callee_name];
 }
 END
-PRIVATE FN capabilityAuditSession__compute_effects_mut(MUTABLE self: CapabilityAuditSession) RETURNS !{Any@multiowned}Any@multiowned
+PRIVATE FN capabilityAuditSession__compute_effects_mut(MUTABLE self: CapabilityAuditSession) RETURNS !?{Any@multiowned}Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2387,7 +2387,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN result;
 }
 END
-PRIVATE FN capabilityAuditSession__inherit_effects_from_callee(self: CapabilityAuditSession, MUTABLE caller_set: [Set]String@symbol, callee_set: [Set]String@symbol, site_ctx: CallContext) RETURNS ![Set]String@symbol
+PRIVATE FN capabilityAuditSession__inherit_effects_from_callee(self: CapabilityAuditSession, MUTABLE caller_set: [Set]String@symbol, callee_set: [Set]String@symbol, site_ctx: CallContext) RETURNS !?[Set]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2504,7 +2504,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN capabilityAuditSession__compute_can_fail_mut(MUTABLE self: CapabilityAuditSession) RETURNS !{Any@multiowned}Any@multiowned
+PRIVATE FN capabilityAuditSession__compute_can_fail_mut(MUTABLE self: CapabilityAuditSession) RETURNS !?{Any@multiowned}Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2808,7 +2808,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (node.fn_ref == TRUE);
 }
 END
-PRIVATE FN capabilityAuditSession__compute_fsm_eligibility_mut(self: CapabilityAuditSession) RETURNS !{Any@multiowned}Any@multiowned
+PRIVATE FN capabilityAuditSession__compute_fsm_eligibility_mut(self: CapabilityAuditSession) RETURNS !?{Any@multiowned}Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2830,7 +2830,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN capabilityAuditSession__enumerate_fsm_suspend_points_mut(self: CapabilityAuditSession) RETURNS !{Any@multiowned}Any@multiowned
+PRIVATE FN capabilityAuditSession__enumerate_fsm_suspend_points_mut(self: CapabilityAuditSession) RETURNS !?{Any@multiowned}Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3361,7 +3361,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
 }
 END
-PRIVATE FN capabilityAuditSession__validate_max_depth_mutual_cycle_mut(MUTABLE self: CapabilityAuditSession) RETURNS !{Any@multiowned}Any@multiowned
+PRIVATE FN capabilityAuditSession__validate_max_depth_mutual_cycle_mut(MUTABLE self: CapabilityAuditSession) RETURNS !?{Any@multiowned}Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -3756,7 +3756,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "has effects ${((effects |> SELECT effectTracker__display(_)) |> ORDER_BY _).join(", ")}";
 }
 END
-PRIVATE FN capabilityAuditSession__finalize_capability_audit_mut(self: CapabilityAuditSession) RETURNS !BindingAuditStore
+PRIVATE FN capabilityAuditSession__finalize_capability_audit_mut(self: CapabilityAuditSession) RETURNS !?BindingAuditStore
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
