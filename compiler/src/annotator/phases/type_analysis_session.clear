@@ -9517,7 +9517,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, guard_expr));
       MUTABLE guard_type = TRY (aST__full_type_mut(guard_expr));
       IF !((guard_type AND (guard_type.resolved() == :Bool))) THEN
-          TRY (typeAnalysisSession__error_mut(rtoc_self_view, guard_expr, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_GUARD_EXPR_MUST_BE_BOOL }, [], {:got: (guard_type OR "Unknown")}));
+          TRY (typeAnalysisSession__error_mut(rtoc_self_view, guard_expr, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_GUARD_EXPR_MUST_BE_BOOL }, [], {:got: (guard_type OR_ELSE "Unknown")}));
       END
       NIL
     });
@@ -9548,7 +9548,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, expr));
       MUTABLE pred_type = TRY (aST__full_type_mut(expr));
       IF !((pred_type AND (pred_type.resolved() == :Bool))) THEN
-          TRY (typeAnalysisSession__error_mut(rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :PRE_EXPR_MUST_BE_BOOL }, [], {:got: (pred_type OR "Unknown")}));
+          TRY (typeAnalysisSession__error_mut(rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :PRE_EXPR_MUST_BE_BOOL }, [], {:got: (pred_type OR_ELSE "Unknown")}));
       END
       NIL
     });
@@ -9597,7 +9597,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__visit(&rtoc_self_view, expr));
         MUTABLE pred_type = TRY (aST__full_type_mut(expr));
         IF !((pred_type AND (pred_type.resolved() == :Bool))) THEN
-            TRY (typeAnalysisSession__error_mut(rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :DEBUG_POST_EXPR_MUST_BE_BOOL }, [], {:got: (pred_type OR "Unknown")}));
+            TRY (typeAnalysisSession__error_mut(rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :DEBUG_POST_EXPR_MUST_BE_BOOL }, [], {:got: (pred_type OR_ELSE "Unknown")}));
         END
         NIL
       });
@@ -10390,7 +10390,6 @@ PRIVATE FN typeAnalysisSession__expression_allocates?(self: TypeAnalysisSession,
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PARTIAL MATCH node START
-      NIL -> FALSE,
       Locatable.FuncCall AS func_call -> FALSE,
       AST.MethodCall -> FALSE,
       Locatable.Identifier AS identifier -> FALSE,
@@ -15677,7 +15676,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF type__multiowned?(assignment_field_type) THEN
       MUTABLE owner = ((TRY (aST__full_type_mut(field_node.target))).resolved() OR_ELSE NIL);
-      TRY (typeAnalysisSession__keep_param_identity_mut(rtoc_self_view, assignment_node.value, CAST(assignment_field_type AS Type), "${(owner OR "field")}.${field_node.field}"));
+      TRY (typeAnalysisSession__keep_param_identity_mut(rtoc_self_view, assignment_node.value, CAST(assignment_field_type AS Type), "${(owner OR_ELSE "field")}.${field_node.field}"));
     END
     TRY (typeAnalysisSession__validate_assignment_type(rtoc_self_view, Node{ Assignment: COPY assignment_node }, TypeTypeInput{ Type: COPY assignment_field_type }, TRY (aST__full_type_mut(assignment_node.value))));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ Assignment: COPY assignment_node }, :Void));

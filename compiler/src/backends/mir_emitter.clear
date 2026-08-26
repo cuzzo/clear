@@ -3196,14 +3196,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE map: String = TRY (mIREmitter__emit(&rtoc_self_view, node.map));
     MUTABLE key: String = TRY (mIREmitter__emit(&rtoc_self_view, node.key_expr));
     MUTABLE val: String = TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr));
-    MUTABLE key_t = (node.key_zig_type OR "u8");
+    # `alloc` is a plain String@symbol here, so Ruby's `when nil` arm has no
+    # CLEAR counterpart; `key_zig_type` IS optional and wants OR_ELSE, not OR.
+    MUTABLE key_t: String = (node.key_zig_type OR_ELSE "u8");
     MUTABLE elem_t: String = (node.elem_zig_type OR_ELSE "");
-    MUTABLE alloc_str = PARTIAL MATCH node.alloc START
-      :heap -> TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap)),
-      NIL -> TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap)),
-      :frame -> TRY (mIREmitter__alloc_zig(rtoc_self_view, :frame)),
-      DEFAULT -> CAST(node.alloc AS String)
-    END;
+    MUTABLE alloc_str: String = CAST(node.alloc AS String);
+    IF (node.alloc == :heap) THEN
+      alloc_str = TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap));
+    ELSE_IF (node.alloc == :frame) THEN
+      alloc_str = TRY (mIREmitter__alloc_zig(rtoc_self_view, :frame));
+    END
     RETURN "{\n    const __idx_key_owned = try ${alloc_str}.dupe(${key_t}, ${key});\n    var __gop = ${map}.inner.getOrPut(${alloc_str}, __idx_key_owned) catch @panic(\"INDEX allocation failed\");\n    if (__gop.found_existing) {\n        ${alloc_str}.free(__idx_key_owned);\n    } else {\n        __gop.value_ptr.* = @as(std.ArrayListUnmanaged(${elem_t}), .empty);\n    }\n    __gop.value_ptr.append(${alloc_str}, ${val}) catch @panic(\"INDEX append failed\");\n}";
 }
 END
@@ -3590,7 +3592,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (node.copy_shape == :pointer) THEN
         type_arg = "@TypeOf(${src})";
       ELSE
-        type_arg = ((storage_zig_type OR "@TypeOf(${src})"));
+        type_arg = ((storage_zig_type OR_ELSE "@TypeOf(${src})"));
       END
       IF (node.copy_shape == :slice) THEN
         RETURN "${bc}: { const __copy_src = ${src}; break :${bc} try CheatLib.dupeValue(${type_arg}, __copy_src, ${alloc}); }";
@@ -3599,7 +3601,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF (node.copy_shape == :pointer) THEN
           pointer_type_arg = "@TypeOf(${src})";
         ELSE
-          pointer_type_arg = ((storage_zig_type OR "@TypeOf(__copy_src)"));
+          pointer_type_arg = ((storage_zig_type OR_ELSE "@TypeOf(__copy_src)"));
         END
         MUTABLE pointer_value: String = "";
         IF (node.copy_shape == :value) THEN
