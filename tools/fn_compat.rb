@@ -716,6 +716,26 @@ module FnCompat
     opt_int: 'fnCompatOptIntText',
   }.freeze
 
+  # Only the renderers the selected targets actually use, plus whatever those
+  # call. The FunctionReturn Kind renderer names a type that a single unit
+  # declares, so emitting it unconditionally made EVERY single-target run fail
+  # to build -- which is what turned a per-function harness into an
+  # all-or-nothing one and hid per-target byte-compat numbers behind the
+  # largest possible build.
+  def renderer_defs_for(targets)
+    chunks = RENDERER_DEFS.split(/\n(?=PRIVATE FN )/)
+    by_name = chunks.to_h { |chunk| [chunk[/PRIVATE FN (\w+)/, 1], chunk] }
+    keep = targets.map { |target| RENDERERS[target.result_type] }.compact.uniq
+    # A renderer may call another; close over that before emitting.
+    loop do
+      added = keep.flat_map { |name| by_name[name].to_s.scan(/(fnCompat\w+)\(/).flatten }.uniq - keep
+      break if added.empty?
+
+      keep.concat(added)
+    end
+    keep.filter_map { |name| by_name[name] }.join("\n")
+  end
+
   RENDERER_DEFS = <<~CLEAR
     PRIVATE FN fnCompatFunctionReturnKindText(value: Kind) RETURNS String ->
       # Ruby's `Kind#serialize` returns a String, so this renders like one --
@@ -801,7 +821,7 @@ module FnCompat
         RETURN empty;
       END
 
-      #{RENDERER_DEFS}
+      #{renderer_defs_for(targets)}
 
       #{runner_defs}
 

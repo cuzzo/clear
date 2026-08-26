@@ -130,8 +130,8 @@ END
 PUB FN mIRParam__zig_type(self: MIRParam) RETURNS String ->
   COPY self.zig_type;
 END
-PUB FN mIRParam__pointer_passed(self: MIRParam) RETURNS Any@multiowned ->
-  RETURN KEEP self.pointer_passed;
+PUB FN mIRParam__pointer_passed(self: MIRParam) RETURNS Bool ->
+  RETURN COPY self.pointer_passed;
 END
 PUB FN mIRParam__lowered_node_id(self: MIRParam) RETURNS ?LoweredNodeId ->
   COPY self.lowered_node_id;
@@ -375,8 +375,8 @@ PUB STRUCT MIREnumDef {
 PUB FN mIREnumDef__name(self: MIREnumDef) RETURNS String ->
   COPY self.name;
 END
-PUB FN mIREnumDef__variants(self: MIREnumDef) RETURNS Any@multiowned ->
-  RETURN KEEP self.variants;
+PUB FN mIREnumDef__variants(self: MIREnumDef) RETURNS []String@symbol ->
+  RETURN COPY self.variants;
 END
 PUB FN mIREnumDef__visibility(self: MIREnumDef) RETURNS String@symbol ->
   COPY self.visibility;
