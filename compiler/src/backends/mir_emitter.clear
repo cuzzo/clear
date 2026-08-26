@@ -2662,18 +2662,23 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "${mIREmitter__zig_bare_name(rtoc_self_view, name)}_moved";
 }
 END
-PRIVATE FN mIREmitter__emit_struct_init_field_value<T>(MUTABLE self: MIREmitter, value: T) RETURNS !String
+PRIVATE FN mIREmitter__emit_struct_init_field_value(MUTABLE self: MIREmitter, value: Emittable) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE inner = IF (T IS_A MIRCast AND (value.method() == :as)) THEN
-      value.expr()
-    ELSE
-      NIL
-    END;
-    IF (inner IS_A Lit AND (CAST(inner.value() AS String) == "null")) THEN
-      RETURN "null";
+    # `T IS_A MIRCast` tested the TYPE PARAMETER, not the value, and then read
+    # MIRCast's fields off the generic. The union match is the whole test.
+    PARTIAL MATCH value START
+      Emittable.MIRCast AS cast_value ->
+        IF (cast_value.method == :as) THEN
+          PARTIAL MATCH cast_value.expr START
+            Emittable.Lit AS lit_value ->
+              IF (lit_value.value == "null") THEN
+                RETURN "null";
+              END,
+          END
+        END,
     END
     RETURN TRY (mIREmitter__emit(&rtoc_self_view, value));
 }
@@ -2699,14 +2704,16 @@ PRIVATE FN mIREmitter__emit_reassign_cleanup(MUTABLE self: MIREmitter, node: Rea
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE alloc: String = "";
-    MUTABLE val: ?String = NIL;
-    MUTABLE base = mIREmitter__zig_bare_name(rtoc_self_view, node.name);
-    MUTABLE try_expr = mIREmitter__reassign_success_only_expr(rtoc_self_view, node);
-    IF try_expr THEN
+    # `val` only ever holds emitted text; the optional seed made every
+    # interpolation of it a ?String operand.
+    MUTABLE val: String = "";
+    MUTABLE base = mIREmitter__zig_bare_name(rtoc_self_view, Name{ StringValue: COPY node.name });
+    MUTABLE try_expr: ?Emittable = mIREmitter__reassign_success_only_expr(rtoc_self_view, node);
+    IF try_expr EXISTS AS try_expr_value THEN
       MUTABLE opt = "__new_${base}_opt";
       val = "__new_${base}_val";
       alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
-      RETURN (["{", "const ${opt}: ?${node.zig_type} = (${TRY (mIREmitter__emit(&rtoc_self_view, try_expr))} catch null);", "if (${opt}) |${val}| {", "    CheatLib.cleanup(@TypeOf(${node.name}), ${alloc}, &${node.name});", "    ${node.name} = ${val};", "}", "}"]).join("\n");
+      RETURN (["{", "const ${opt}: ?${node.zig_type} = (${TRY (mIREmitter__emit(&rtoc_self_view, try_expr_value))} catch null);", "if (${opt}) |${val}| {", "    CheatLib.cleanup(@TypeOf(${node.name}), ${alloc}, &${node.name});", "    ${node.name} = ${val};", "}", "}"]).join("\n");
     END
     MUTABLE tmp = "__new_${base}";
     val = TRY (mIREmitter__emit(&rtoc_self_view, node.value));
@@ -2751,8 +2758,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE then_body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.then_body));
     MUTABLE result = "if (${cond}) {\n${then_body}\n}";
-    MUTABLE else_stmts = node.else_body;
-    IF ((else_stmts) AND !(else_stmts.empty?())) THEN
+    MUTABLE else_stmts: []Emittable = (node.else_body OR_ELSE List[]);
+    IF !(else_stmts.empty?()) THEN
       MUTABLE else_body = TRY (mIREmitter__emit_body(&rtoc_self_view, else_stmts));
       result = (result $+ " else {\n${else_body}\n}");
     END
@@ -2766,12 +2773,11 @@ PRIVATE FN mIREmitter__emit_if_bind_stmt(MUTABLE self: MIREmitter, node: IfBindS
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result: String = "";
     MUTABLE then_body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.then_body));
-    MUTABLE else_stmts = node.else_body;
-    MUTABLE else_body: ?String = IF (else_stmts AND !(else_stmts.empty?())) THEN
-      TRY (mIREmitter__emit_body(&rtoc_self_view, else_stmts))
-    ELSE
-      NIL
-    END;
+    MUTABLE else_stmts: []Emittable = (node.else_body OR_ELSE List[]);
+    MUTABLE else_body: ?String = NIL;
+    IF !(else_stmts.empty?()) THEN
+      else_body = TRY (mIREmitter__emit_body(&rtoc_self_view, else_stmts));
+    END
     IF (node.bindings.length() == 1) THEN
       MUTABLE b = node.bindings[0];
       MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, b[:expr]));
