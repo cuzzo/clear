@@ -337,9 +337,26 @@ module RtocPostprocess
 
   # `x OR "literal"` is Ruby's `||` default on a nilable.
   rule(:or_default, kind: :mechanical,
-       summary: '`x OR "literal"` where OR_ELSE is meant') do |lines, _index, findings, file, fix|
+       summary: '`x OR literal` where OR_ELSE is meant') do |lines, index, findings, file, fix|
+    scope = Scope.new(index)
     lines.each_with_index do |line, position|
-      line.scan(/\((\w+(?:\.\w+)*) OR ("(?:[^"\\]|\\.)*")\)/) do |receiver, literal|
+      scope.observe(line)
+      # A symbol literal is a default too -- handling only "..." left
+      # `(node.alloc OR :heap)` for the build to find.
+      line.scan(/\((\w+(?:\.\w+)*) OR ("(?:[^"\\]|\\.)*"|:\w+|\d+|TRUE|FALSE)\)/) do |receiver, literal|
+        # `FALSE OR FALSE` is a genuine boolean OR, and so is any OR whose
+        # left side is a Bool. Rewriting those to OR_ELSE corrupts working
+        # code -- this rule reported one before the guard.
+        next if %w[TRUE FALSE].include?(receiver)
+
+        if receiver.include?('.')
+          owner = scope.struct_of(receiver.split('.').first)
+          field = index.field_type(owner, receiver.split('.').last) if owner
+          next if field && !field.start_with?('?')
+        elsif scope.bindings[receiver] == 'Bool'
+          next
+        end
+
         findings << Finding.new(rule: :or_default, file: file, line: position + 1,
                                 message: "#{receiver} OR #{literal}")
         lines[position] = lines[position].sub("(#{receiver} OR #{literal})", "(#{receiver} OR_ELSE #{literal})") if fix

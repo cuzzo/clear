@@ -8968,7 +8968,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     
       ELSE_IF (kind == :reentrant_max_depth) THEN
           MUTABLE budget = symbol("RECURSION_YIELD_BUDGET");
-          IF (((fn_node.max_depth_n OR 0)) <= budget) THEN
+          IF (((fn_node.max_depth_n OR_ELSE 0)) <= budget) THEN
             fn_node.tight_reentrance = TRUE;
           ELSE
             fn_node.tight_reentrance = FALSE;

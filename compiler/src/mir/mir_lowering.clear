@@ -1675,7 +1675,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       raise_value -> mIRLowering__lower_raise(&rtoc_self_view, node),
       AST.Cast -> TRY (mIRLowering__lower_cast(&rtoc_self_view, node)),
       MIRLoweringLowerableStmt.ThrowNode AS throw_node -> ReturnStmt{ value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "error", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "CheatError", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL },
-      MIRLoweringLowerableStmt.DieNode AS die_node -> ExprStmt{ expr: Emittable{ Call: COPY Call{ callee: "std.process.exit", args: [Emittable{ Lit: COPY Lit{ value: COPY CAST(((die_node.status OR 1)) AS String), lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL },
+      MIRLoweringLowerableStmt.DieNode AS die_node -> ExprStmt{ expr: Emittable{ Call: COPY Call{ callee: "std.process.exit", args: [Emittable{ Lit: COPY Lit{ value: COPY CAST(((die_node.status OR_ELSE 1)) AS String), lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL },
       MIRLoweringLowerableStmt.CopyNode AS copy_node -> mIRLowering__lower_copy(&rtoc_self_view, &copy_node),
       MIRLoweringLowerableStmt.KeepNode AS keep_node -> mIRLowering__lower_clone(&rtoc_self_view, keep_node),
       MIRLoweringLowerableStmt.MoveNode AS move_node -> mIRLowering__lower_move(&rtoc_self_view, move_node),
@@ -8442,7 +8442,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((source != NIL) AND (source.abi == :c)) THEN
       MUTABLE params = node.params |> SELECT {
     MUTABLE zig_type = TRY (mIRLowering__c_abi_param_zig_type(rtoc_self_view, _));
-    MIRParam{ name: COPY _.name, zig_type: COPY zig_type, pointer_passed: (_.mutable OR FALSE), lowered_node_id: NIL, ownership_consumption: NIL }
+    MIRParam{ name: COPY _.name, zig_type: COPY zig_type, pointer_passed: (_.mutable OR_ELSE FALSE), lowered_node_id: NIL, ownership_consumption: NIL }
       };
       RETURN Emittable{ CExternFnDecl: COPY CExternFnDecl{ name: (source.symbol OR node.name), params: params, return_type: TRY (type__zig_type(externFnDecl__annotation_return_type(node))), library: source.dependency, callconv: source.callconv, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
@@ -10244,7 +10244,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_indexed_output_373
     };
     MUTABLE receiver_index = IF node IS_A FuncCall THEN
-      ((node.protocol_receiver_index OR 0))
+      ((node.protocol_receiver_index OR_ELSE 0))
     ELSE
       0
     END;
@@ -11318,7 +11318,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF p_type IS_A Type THEN
         type_str = TRY (type__zig_type(p_type, {:is_param: TRUE}));
       ELSE
-        type_str = mIRLowering__transpile_type(rtoc_self_view, (p_type OR :Any), TRUE);
+        type_str = mIRLowering__transpile_type(rtoc_self_view, (p_type OR_ELSE :Any), TRUE);
       END
     MUTABLE pt_obj = IF p_type IS_A Type THEN
         p_type
@@ -16578,7 +16578,7 @@ PRIVATE FN mIRLowering__lower_raise(MUTABLE self: MIRLowering, node: Raise) RETU
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE kind = COPY CAST(((node.kind OR :Unknown)) AS String);
+    MUTABLE kind = COPY CAST(((node.kind OR_ELSE :Unknown)) AS String);
     MUTABLE error_name: ?String = COPY node.error_name;
     MUTABLE name_expr =   IF (error_name AND !(error_name.empty?())) THEN
       EnumOrdinal{ value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "ErrorName", lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY error_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL }
@@ -20425,7 +20425,7 @@ PRIVATE FN mIRLowering__match_union_lookup(self: MIRLowering, expression: Locata
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE type = TRY (type__new((expression.resolved_type OR :Any)));
+    MUTABLE type = TRY (type__new((expression.resolved_type OR_ELSE :Any)));
     IF type__generic_instance?(type) THEN
       RETURN type__generic_base(type);
     END
