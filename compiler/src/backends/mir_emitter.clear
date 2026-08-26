@@ -3600,9 +3600,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF src.startsWith?("@panic(") THEN
       RETURN src;
     END
-    MUTABLE alloc: ?String = NIL;
-    IF node.alloc EXISTS THEN
-      alloc = TRY (mIREmitter__alloc_expr(&rtoc_self_view, Alloc{ SymbolValue: COPY symbol(UNWRAP ((node.alloc)?)) }));
+    # Ruby's `node.alloc ? alloc_expr(node.alloc) : nil` -- the interpolations
+    # below all sit in the branch that only runs with an allocator, so the
+    # empty default is what Ruby's nil would have printed.
+    MUTABLE alloc: String = "";
+    IF node.alloc EXISTS AS node_alloc THEN
+      alloc = TRY (mIREmitter__alloc_expr(&rtoc_self_view, Alloc{ SymbolValue: COPY node_alloc }));
     END
     rtoc_self_view.deep_copy_counter = (rtoc_self_view.deep_copy_counter + 1);
     MUTABLE bc = "blk_copy_${rtoc_self_view.deep_copy_counter.toString()}";

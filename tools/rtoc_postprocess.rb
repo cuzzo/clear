@@ -168,12 +168,21 @@ module RtocPostprocess
       # A flat per-function set reported 159 redundant UNWRAPs of which the
       # first two sampled were both wrong -- one inside an IF expression, one
       # in a sibling ELSE_IF branch.
-      if line =~ /\A\s*(?:ELSE_IF|ELSE)\b/ || line =~ /\A\s*END\b/
+      # END closes FOR, WHILE, MATCH and WITH as well as IF, so the stack has
+      # to carry an entry for EVERY opener or it desynchronises and pops a
+      # narrowing that is still in force. That mistake put `val` back on the
+      # report after it had been correctly cleared.
+      if line =~ /\A\s*(?:ELSE_IF|ELSE)\b/
+        @narrowed = (@branch_stack.last || Set.new).dup
+      elsif line =~ /\A\s*END\b/
         @narrowed = @branch_stack.pop || Set.new
       end
-      statement_if = line =~ /\A\s*(?:IF|ELSE_IF)\b/ && line =~ /\bTHEN\s*\z/
-      if statement_if
-        @branch_stack.push(@narrowed.dup)
+      opens_block = line =~ /\bTHEN\s*\z/ ||
+                    line =~ /\A\s*(?:FOR|WHILE)\b.*\bDO\s*\z/ ||
+                    line =~ /\bSTART\s*\z/ ||
+                    line =~ /\A\s*(?:WITH|DEFER)\b.*\{\s*\z/
+      @branch_stack.push(@narrowed.dup) if opens_block && line !~ /\A\s*(?:ELSE_IF)\b/
+      if line =~ /\bTHEN\s*\z/ && line =~ /\A\s*(?:IF|ELSE_IF)\b/
         line.scan(/(\w+) (?:!= NIL|EXISTS)/) { |(name)| @narrowed << name }
         line.scan(/!\(+(\w+) == NIL\)/) { |(name)| @narrowed << name }
       end
