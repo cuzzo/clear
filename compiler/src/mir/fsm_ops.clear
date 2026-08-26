@@ -56,7 +56,7 @@ STRUCT AddrOf {
 }
 STRUCT IntCast {
   zig_type: String,
-  expr: Expr
+  expr: Expr@boxed
 }
 PUB STRUCT CallExpr {
   fn: FunctionPath,
