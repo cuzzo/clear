@@ -773,6 +773,29 @@ pub const CheatLib = struct {
         return @intCast(waiter.result);
     }
 
+    // Closures
+
+    // A CLEAR `FN(A, ...) -> R` value. Zig forbids a nested function from
+    // touching ANY runtime value of the function that encloses it -- a const
+    // pointer included -- so a lambda cannot reach its captures from the
+    // inside. The environment has to travel WITH the value, which is what this
+    // pair is: the code pointer plus the context it was built with.
+    //
+    // `ctx` is null for a lambda that captures nothing, and the callee ignores
+    // it. A capturing lambda points it at the environment holding its captures,
+    // by pointer for USE (MUTABLE x) so writes land on the original binding.
+    pub fn Closure(comptime Fn: type) type {
+        return struct {
+            const Self = @This();
+            ctx: ?*anyopaque,
+            call: *const Fn,
+
+            pub fn bind(context: ?*anyopaque, code: *const Fn) Self {
+                return .{ .ctx = context, .call = code };
+            }
+        };
+    }
+
     // List / Dynamic Array
 
     pub fn makeList(comptime T: type, allocator: std.mem.Allocator, items: []const T) !std.ArrayListUnmanaged(T) {
