@@ -58,6 +58,10 @@ sources.each do |path|
       optional_locals = {}
     end
     optional_locals[Regexp.last_match(1)] = Regexp.last_match(2) if line =~ /MUTABLE (\w+): (\?\w[\w@\[\]]*) =/
+    # A nil check narrows the binding for the rest of its branch, so an
+    # interpolation after one is already a plain String. Reporting those
+    # produced an OR_ELSE on a non-optional -- the opposite error.
+    optional_locals.delete(Regexp.last_match(1)) if line =~ /IF \(?(\w+) (?:!= NIL|EXISTS)/
     next if line.strip.start_with?('#')
 
     line.scan(/\$\{([a-z_]\w*)\}/) do |(name)|

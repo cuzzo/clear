@@ -681,7 +681,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN :shared_node;
         END
         IF current_value EXISTS AS current_value_value THEN
-          TRY (clearParser__error_mut(rtoc_self_view, tok, CodeOrMessage{ SymbolValue: :DUPLICATE_CAPABILITY_DIM }, [], {:dim: "${dim_value}", :current: "${current_value_value}", :attempted: "${(val OR_ELSE "")}"}));
+          TRY (clearParser__error_mut(rtoc_self_view, tok, CodeOrMessage{ SymbolValue: :DUPLICATE_CAPABILITY_DIM }, [], {:dim: "${dim_value}", :current: "${current_value_value}", :attempted: "${val}"}));
         END
         IF (dim_value == :ownership) THEN
           dims.ownership = val;
