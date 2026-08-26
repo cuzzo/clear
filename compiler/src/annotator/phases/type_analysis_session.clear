@@ -1338,7 +1338,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF (root != NIL) THEN
           FOR _ IN fact_frames DO
     MUTABLE rtoc_mutable_block_param_23 = COPY _;
-          ownershipTransportFacts__record_mutation(&rtoc_mutable_block_param_23, Locatable{ Assignment: COPY assignment_mutable }, UNWRAP (root), ancestors);
+          ownershipTransportFacts__record_mutation(&rtoc_mutable_block_param_23, Locatable{ Assignment: COPY assignment_mutable }, root, ancestors);
           END
         END
         MUTABLE value = assignment_mutable.value;
@@ -1373,7 +1373,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
                 IF (root != NIL) THEN
                   FOR _ IN fact_frames DO
         MUTABLE rtoc_mutable_block_param_27 = COPY _;
-                  ownershipTransportFacts__record_mutation(&rtoc_mutable_block_param_27, node, UNWRAP (root), ancestors);
+                  ownershipTransportFacts__record_mutation(&rtoc_mutable_block_param_27, node, root, ancestors);
                   END
                 END
       END
@@ -3206,7 +3206,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn_ctx: ?FunctionContext@multiowned = typeAnalysisSession__current_fn_ctx(rtoc_self_view);
     MUTABLE saved_returns: ?[]ReturnFact = NIL;
     IF fn_ctx != NIL THEN
-      saved_returns = COPY UNWRAP (fn_ctx).returns;
+      saved_returns = COPY fn_ctx.returns;
     END
     IF fn_ctx EXISTS AS fn_ctx_value THEN
       MUTABLE fn_ctx_value_mutable = COPY fn_ctx_value;
@@ -6400,10 +6400,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE entry: ?SymbolEntry@multiowned = scope__resolve_entry(scope_value_mutable, map_name);
         MUTABLE map_type: ?Type@multiowned = NIL;
         IF entry != NIL THEN
-          map_type = COPY symbolEntry__type(UNWRAP (entry));
+          map_type = COPY symbolEntry__type(entry);
         END
         IF !((map_type != NIL)) THEN
-          map_type = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (map_type) }));
+          map_type = TRY (type__new(TypeConstructionInput{ Type: COPY map_type }));
         END
         IF !((type__sharded?(map_type) AND ((IF entry != NIL THEN
           symbolEntry__sync(entry)
@@ -9752,7 +9752,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE old_scope: ?Scope@multiowned = CAST(aSTCapability__old_scope(cap) AS ?Scope@multiowned);
     MUTABLE source_entry: ?SymbolEntry@multiowned = NIL;
     IF old_scope != NIL THEN
-      source_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_216 = UNWRAP (old_scope);
+      source_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_216 = old_scope;
     scope__resolve_entry(rtoc_local_receiver_216, var_name) };
     END
     MUTABLE source_type_branch_value: ?Type = NIL;
@@ -10457,7 +10457,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE scope_entry: ?SymbolEntry = identifier_mutable.symbol;
       MUTABLE ti: ?Type@multiowned = NIL;
       IF scope_entry != NIL THEN
-        ti = COPY symbolEntry__type(UNWRAP (scope_entry));
+        ti = COPY symbolEntry__type(scope_entry);
       END
       IF scope_entry EXISTS AS scope_entry_value THEN
         MUTABLE scope_entry_value_mutable = COPY scope_entry_value;
@@ -15463,7 +15463,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE tscope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, tname));
       MUTABLE tsym: ?SymbolEntry@multiowned = NIL;
       IF tscope != NIL THEN
-        tsym = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_384 = UNWRAP (tscope);
+        tsym = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_384 = tscope;
       scope__resolve_entry(rtoc_local_receiver_384, tname) };
       END
       IF (IF (IF (IF tsym != NIL THEN
@@ -18515,7 +18515,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__resolve_variable_scope(rtoc_self_view, identifier__name(identifier)));
       MUTABLE entry: ?SymbolEntry@multiowned = NIL;
       IF scope != NIL THEN
-        entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_447 = UNWRAP (scope);
+        entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_447 = scope;
       scope__resolve_entry(rtoc_local_receiver_447, identifier__name(identifier)) };
       END
       IF scope EXISTS AS scope_value THEN
@@ -20089,7 +20089,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         NIL
       END));
       IF sym != NIL THEN
-    RETURN UNWRAP (sym).scope_depth;
+    RETURN sym.scope_depth;
       ELSE
     RETURN NIL;
       END

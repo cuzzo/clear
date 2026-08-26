@@ -3502,7 +3502,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rc_alloc: ?String@symbol = cleanupEntry__rc_alloc(entry);
       MUTABLE use_alloc: String = "";
       IF (((cleanupEntry__kind(entry) == :rc) AND (rc_alloc != NIL)) AND (alloc_override == NIL)) THEN
-        use_alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, symbol(UNWRAP (rc_alloc))));
+        use_alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, symbol(rc_alloc)));
       ELSE
         use_alloc = alloc;
       END

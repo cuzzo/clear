@@ -1735,7 +1735,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     IF (((init != NIL) AND (init IS_A InlineBc)) OR ((init != NIL) AND (init IS_A RegistryCall))) THEN
-      IF !(mIRChecker__stdlib_owned_return?(rtoc_self_view, UNWRAP (init))) THEN
+      IF !(mIRChecker__stdlib_owned_return?(rtoc_self_view, init)) THEN
         RETURN FALSE;
       END
       MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(init.stdlib_def());

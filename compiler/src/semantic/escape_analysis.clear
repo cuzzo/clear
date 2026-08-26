@@ -1109,7 +1109,7 @@ PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, arg
   MUTABLE receiver_root: ?Identifier = aST__root_identifier(receiver);
   MUTABLE receiver_sym: ?SymbolEntry = NIL;
   IF receiver_root != NIL THEN
-    receiver_sym = COPY UNWRAP (receiver_root).symbol;
+    receiver_sym = COPY receiver_root.symbol;
   END
   IF receiver_sym EXISTS AS receiver_sym_value THEN
     MUTABLE receiver_sym_value_mutable = COPY receiver_sym_value;
@@ -1236,7 +1236,7 @@ PUB FN escapeAnalysis__heap_owned_transfer_source?(arg: ?Locatable) RETURNS Bool
   MUTABLE root: ?Identifier = root_branch_value;
   MUTABLE sym: ?SymbolEntry = NIL;
   IF root != NIL THEN
-    sym = COPY UNWRAP (root).symbol;
+    sym = COPY root.symbol;
   END
   RETURN escapeAnalysis__symbol_heap?(sym);
 CATCH Transient, Input, System, NotFound, Permission, Canceled
@@ -1571,7 +1571,7 @@ PUB FN escapeAnalysis__receiver_is_param?(receiver: Locatable) RETURNS Bool ->
   MUTABLE root: ?Identifier = aST__root_identifier(receiver);
   MUTABLE sym: ?SymbolEntry = NIL;
   IF root != NIL THEN
-    sym = COPY UNWRAP (root).symbol;
+    sym = COPY root.symbol;
   END
   RETURN !(!(((((sym != NIL) AND TRUE) AND symbolEntry__is_param(sym)))));
 END

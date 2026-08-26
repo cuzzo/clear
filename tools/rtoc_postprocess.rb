@@ -134,6 +134,7 @@ module RtocPostprocess
       @bindings = {}
       @optionals = {}
       @narrowed = Set.new
+      @branch_stack = []
     end
 
     def observe(line)
@@ -155,13 +156,28 @@ module RtocPostprocess
           @bindings['_'] = element
         end
       end
-      # A nil check narrows for the rest of the branch. Reporting a narrowed
-      # binding as optional is how an earlier sweep broke working lines -- and
-      # the negated-equality spelling is how it broke one more after that, so
-      # all three forms count.
-      line.scan(/(\w+) (?:!= NIL|EXISTS)/) { |(name)| @narrowed << name }
-      line.scan(/!\(+(\w+) == NIL\)/) { |(name)| @narrowed << name }
-      line.scan(/UNWRAP \((\w+)\)/) { |(name)| @narrowed << name }
+      # Narrowing is BRANCH-SCOPED, and getting that wrong is expensive in
+      # both directions: too loose and a rule "fixes" correct lines, too
+      # tight and it misses the sites that matter.
+      #
+      #   * a statement IF opens a scope that ELSE / ELSE_IF / END closes;
+      #   * an IF EXPRESSION does NOT narrow its arms at all, so an UNWRAP
+      #     inside one is required, not redundant;
+      #   * `!= NIL`, `!(x == NIL)` and EXISTS are all the same check.
+      #
+      # A flat per-function set reported 159 redundant UNWRAPs of which the
+      # first two sampled were both wrong -- one inside an IF expression, one
+      # in a sibling ELSE_IF branch.
+      if line =~ /\A\s*(?:ELSE_IF|ELSE)\b/ || line =~ /\A\s*END\b/
+        @narrowed = @branch_stack.pop || Set.new
+      end
+      statement_if = line =~ /\A\s*(?:IF|ELSE_IF)\b/ && line =~ /\bTHEN\s*\z/
+      if statement_if
+        @branch_stack.push(@narrowed.dup)
+        line.scan(/(\w+) (?:!= NIL|EXISTS)/) { |(name)| @narrowed << name }
+        line.scan(/!\(+(\w+) == NIL\)/) { |(name)| @narrowed << name }
+      end
+      line.scan(/EXISTS AS (\w+)/) { |(name)| @narrowed << name }
     end
 
     def optional_type(name)
@@ -511,6 +527,25 @@ module RtocPostprocess
 
       findings << Finding.new(rule: :two_variant_else_arm, file: file, line: position + 1,
                               message: "#{subject} IS_A #{probe} on 2-variant #{union}; ELSE arm still uses #{subject}")
+    end
+  end
+
+  # `UNWRAP (x)` where a nil check already narrowed x. CLEAR rejects it: the
+  # declaration says optional, the flow says otherwise. Ruby writes the guard
+  # and the `T.must` separately and the translation keeps both.
+  rule(:redundant_unwrap, kind: :mechanical,
+       summary: 'UNWRAP of a value a nil check already narrowed') do |lines, index, findings, file, fix|
+    scope = Scope.new(index)
+    lines.each_with_index do |line, position|
+      narrowed_before = scope.narrowed.dup
+      scope.observe(line)
+      line.scan(/UNWRAP \((\w+)\)/) do |(name)|
+        next unless narrowed_before.include?(name)
+
+        findings << Finding.new(rule: :redundant_unwrap, file: file, line: position + 1,
+                                message: "UNWRAP (#{name}) -- already narrowed")
+        lines[position] = lines[position].gsub("UNWRAP (#{name})", name) if fix
+      end
     end
   end
 
