@@ -2230,9 +2230,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE token = (var_node.token() OR stmt.token);
       IF borrowState__conflicts_with?(body_state, UNWRAP (source), kind) THEN
           IF (kind == :mutable) THEN
-            &rtoc_self_view.errors.append("[ALIAS_VIOLATION] ${rtoc_self_view.fn_name}::${source} -- mutable borrow (RESTRICT) while already borrowed${borrowChecker__line_info(rtoc_self_view, token)}");
+            &rtoc_self_view.errors.append("[ALIAS_VIOLATION] ${rtoc_self_view.fn_name}::${(source OR_ELSE "")} -- mutable borrow (RESTRICT) while already borrowed${borrowChecker__line_info(rtoc_self_view, token)}");
           ELSE_IF borrowState__mutable?(body_state, UNWRAP (source)) THEN
-            &rtoc_self_view.errors.append("[ALIAS_VIOLATION] ${rtoc_self_view.fn_name}::${source} -- immutable borrow while mutably borrowed (RESTRICT)${borrowChecker__line_info(rtoc_self_view, token)}");
+            &rtoc_self_view.errors.append("[ALIAS_VIOLATION] ${rtoc_self_view.fn_name}::${(source OR_ELSE "")} -- immutable borrow while mutably borrowed (RESTRICT)${borrowChecker__line_info(rtoc_self_view, token)}");
           END
       END
       body_state = borrowState__add(body_state, source, kind);

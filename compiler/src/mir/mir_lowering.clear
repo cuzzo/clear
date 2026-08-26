@@ -5450,9 +5450,9 @@ PRIVATE FN mIRLowering__emit_stmts_zig(self: MIRLowering, mir_nodes: []Emittable
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (mir_nodes |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE code: ?String = TRY (mIRLowering__emit_expr(rtoc_self_view, _)); (IF !(code) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE stripped = code.trim(); (  IF mIRLowering__zig_statement_semicolon_required?(rtoc_self_view, _, stripped) THEN
-      "${indent}${code};"
+      "${indent}${(code OR_ELSE "")};"
     ELSE
-      "${indent}${code}"
+      "${indent}${(code OR_ELSE "")}"
     END) } END) } |> WHERE _ != NIL).join("\n");
 }
 END

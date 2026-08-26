@@ -2929,7 +2929,7 @@ PRIVATE FN typeAnalysisSession__emit_auto_unresolved_finding_mut(self: TypeAnaly
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE label: ?String = TRY (typeAnalysisSession__auto_slot_label(rtoc_self_view, slot));
-    MUTABLE base_msg = "Cannot infer type for ${label} \u{2014} no observed uses to drive inference.";
+    MUTABLE base_msg = "Cannot infer type for ${(label OR_ELSE "")} \u{2014} no observed uses to drive inference.";
     MUTABLE slot_id: ?AutoSlotId = typeAnalysisSession__slot_id_for(rtoc_self_view, slot);
     MUTABLE ops: [Set]Any = Set[];
     IF slot_id EXISTS AS slot_id_value THEN
@@ -9355,12 +9355,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE actual: String = "";
         IF ((snapshot_sync != NIL) AND (snapshot_layout == :indirect)) THEN
-          actual = "@boxed:${snapshot_sync}";
+          actual = "@boxed:${(snapshot_sync OR_ELSE "")}";
         ELSE_IF snapshot_sync EXISTS AS snapshot_sync_value THEN
           actual = "@${snapshot_sync_value}";
         ELSE
           IF storage THEN
-            actual = "@${storage}";
+            actual = "@${(storage OR_ELSE "")}";
           ELSE
             actual = "plain";
           END
@@ -9390,7 +9390,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             actual = "@${syn_value}";
           ELSE
             actual = (IF storage THEN
-              "@${storage}"
+              "@${(storage OR_ELSE "")}"
             ELSE
               "plain"
             END);

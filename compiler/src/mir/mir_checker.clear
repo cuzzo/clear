@@ -2625,7 +2625,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${(metadata_nodes[rtoc_idx]?.class()).name()} has allocator metadata ${inlineAllocMetadata__inspect(alloc_metadata)} for '${target}' but no MIR::AllocMark")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${(metadata_nodes[rtoc_idx]?.class()).name()} has allocator metadata ${inlineAllocMetadata__inspect(alloc_metadata)} for '${(target OR_ELSE "")}' but no MIR::AllocMark")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -2633,7 +2633,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF inlineAllocMetadata__primary(alloc_metadata) THEN
           MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(alloc_metadata);
           IF (op_alloc != container_alloc) THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${target}' is :${container_alloc}")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${(target OR_ELSE "")}' is :${container_alloc}")));
           END
       END
       MUTABLE rtoc_each_items_52 = ([InlineStoredAllocCheck{ label: :key_alloc, alloc: COPY inlineAllocMetadata__key_alloc(alloc_metadata) }, InlineStoredAllocCheck{ label: :val_alloc, alloc: COPY inlineAllocMetadata__value_alloc(alloc_metadata) }]);
@@ -2645,7 +2645,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
           END
           IF (placement__explicit_frame?(stored_alloc) AND placement__explicit_heap?(container_alloc)) THEN
-              &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "${rtoc_each_items_52[rtoc_idx_2].label} is :frame but container '${target}' is :heap (stored data will dangle after frame rewind)")));
+              &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "${rtoc_each_items_52[rtoc_idx_2].label} is :frame but container '${(target OR_ELSE "")}' is :heap (stored data will dangle after frame rewind)")));
           END
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
@@ -2870,7 +2870,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       IF !(transfers.contains?(name)) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, ruby_wrap_optional_String_Name(name), "${label} consumes '${name}' but no MIR::TransferMark exists for that binding")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, ruby_wrap_optional_String_Name(name), "${label} consumes '${(name OR_ELSE "")}' but no MIR::TransferMark exists for that binding")));
       END
     rtoc_idx = rtoc_idx + 1;
     END

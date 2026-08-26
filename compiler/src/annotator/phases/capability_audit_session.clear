@@ -1937,7 +1937,7 @@ PRIVATE FN capabilityAuditSession__emit_auto_unresolved_finding_mut(self: Capabi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE label: ?String = TRY (capabilityAuditSession__auto_slot_label(rtoc_self_view, slot));
-    MUTABLE base_msg = "Cannot infer type for ${label} \u{2014} no observed uses to drive inference.";
+    MUTABLE base_msg = "Cannot infer type for ${(label OR_ELSE "")} \u{2014} no observed uses to drive inference.";
     MUTABLE slot_id: ?AutoSlotId@multiowned = capabilityAuditSession__slot_id_for(rtoc_self_view, slot);
     MUTABLE ops: [Set]Any = Set[];
     IF slot_id EXISTS AS slot_id_value THEN
