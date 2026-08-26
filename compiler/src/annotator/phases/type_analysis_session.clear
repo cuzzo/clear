@@ -16979,7 +16979,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :ON_RETRY_NEEDS_FALLIBLE_CAP }));
     END
     TRY (typeAnalysisSession__resolve_error_selectors_mut(rtoc_self_view, node, &clause, is_snapshot_txn));
-    IF (clause.action IS_A Exit) THEN
+    IF (clause.action == ErrorActionKind.Exit) THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, clause.message));
     ELSE_IF (clause.action IS_A Return) THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, clause.value));
@@ -17089,7 +17089,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     FOR _ IN ((node.arms OR_ELSE List[])) DO
     FOR _ IN _.lock_error_clauses DO
-    IF (_.action IS_A Exit) THEN
+    IF (_.action == ErrorActionKind.Exit) THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, _.message));
     ELSE_IF (_.action == ErrorActionKind.Block) THEN
       TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, _.body()));
@@ -17676,7 +17676,7 @@ PRIVATE FN typeAnalysisSession__visit_SyncPolicyDecl(MUTABLE self: TypeAnalysisS
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN ((node.handlers OR_ELSE List[])) DO
-    IF (_.action IS_A Exit) THEN
+    IF (_.action == ErrorActionKind.Exit) THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, _.message));
     ELSE_IF (_.action == ErrorActionKind.Block) THEN
       TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, _.body()));

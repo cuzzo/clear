@@ -2933,12 +2933,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body));
     "${TRY (mIREmitter__emit_switch_patterns(&rtoc_self_view, _.patterns))} => {\n${body}\n}"
     };
-    MUTABLE default_body = node.default_body;
-    IF default_body THEN
+    IF node.default_body EXISTS AS default_body THEN
       MUTABLE body: String = "";
-      IF default_body.empty?() THEN
-        body = "";
-      ELSE
+      IF !(default_body.empty?()) THEN
         body = TRY (mIREmitter__emit_body(&rtoc_self_view, default_body));
       END
       &arms.append("else => {\n${body}\n}");
@@ -2959,11 +2956,15 @@ PRIVATE FN mIREmitter__emit_switch_pattern(MUTABLE self: MIREmitter, pattern: Sw
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF pattern IS_A EnumSwitchPattern AS enum_switch_pattern THEN
-      RETURN ".${enum_switch_pattern.variant}";
-    ELSE
-      RETURN TRY (mIREmitter__emit(&rtoc_self_view, pattern));
+    # SwitchPattern is its own union; `emit` takes an Emittable, so the other
+    # arm has to be unwrapped rather than passed through as the union.
+    PARTIAL MATCH pattern START
+      SwitchPattern.EnumSwitchPattern AS enum_switch_pattern ->
+        RETURN ".${enum_switch_pattern.variant}";,
+      SwitchPattern.Emittable AS emittable_pattern ->
+        RETURN TRY (mIREmitter__emit(&rtoc_self_view, emittable_pattern));,
     END
+    RETURN "";
 }
 END
 PRIVATE FN mIREmitter__emit_catch_wrapper(MUTABLE self: MIREmitter, node: CatchWrapper) RETURNS !String
@@ -3011,7 +3012,7 @@ PRIVATE FN mIREmitter__emit_catch_default_body(MUTABLE self: MIREmitter, node: C
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE action: CatchDefaultAction = COPY CAST(node.default_action AS CatchDefaultAction);
-    IF (action IS_A Body) THEN
+    IF (action == CatchDefaultAction.Body) THEN
       RETURN TRY (mIREmitter__emit_catch_body(&rtoc_self_view, node.rt_name, node.default_body, NIL));
     ELSE_IF (action == CatchDefaultAction.Propagate) THEN
       RETURN "${node.rt_name}.freeSnapshot();\nreturn error.CheatError;";
@@ -3123,12 +3124,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     ".${_.variant} =>${capture} {\n${suppress}${body}\n}"
     };
-    MUTABLE default_body = node.default_body;
-    IF default_body THEN
+    IF node.default_body EXISTS AS default_body THEN
       MUTABLE body: String = "";
-      IF default_body.empty?() THEN
-        body = "";
-      ELSE
+      IF !(default_body.empty?()) THEN
         body = TRY (mIREmitter__emit_body(&rtoc_self_view, default_body));
       END
       &arms.append("else => {\n${body}\n}");
@@ -3147,8 +3145,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     "if (${cond}) {\n${body}\n}"
     };
     MUTABLE result = parts.join(" else ");
-    MUTABLE default_body = node.default_body;
-    IF ((default_body) AND !(default_body.empty?())) THEN
+    MUTABLE default_body: []Emittable = (node.default_body OR_ELSE List[]);
+    IF !(default_body.empty?()) THEN
       MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, default_body));
       result = (result $+ " else {\n${body}\n}");
     END
@@ -3206,7 +3204,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE key: String = TRY (mIREmitter__emit(&rtoc_self_view, node.key_expr));
     MUTABLE val: String = TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr));
     MUTABLE key_t = (node.key_zig_type OR "u8");
-    MUTABLE elem_t = node.elem_zig_type;
+    MUTABLE elem_t: String = (node.elem_zig_type OR_ELSE "");
     MUTABLE alloc_str = PARTIAL MATCH node.alloc START
       :heap -> TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap)),
       NIL -> TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap)),
