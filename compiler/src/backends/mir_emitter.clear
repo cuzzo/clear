@@ -3195,7 +3195,7 @@ PRIVATE FN mIREmitter__emit_index_insert(MUTABLE self: MIREmitter, node: IndexIn
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE map: String = TRY (mIREmitter__emit(&rtoc_self_view, node.map));
     MUTABLE key: String = TRY (mIREmitter__emit(&rtoc_self_view, node.key_expr));
-    MUTABLE val: String = TRY (mIREmitter__emit(&rtoc_self_view, UNWRAP (value_expr)));
+    MUTABLE val: String = TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr));
     # `alloc` is a plain String@symbol here, so Ruby's `when nil` arm has no
     # CLEAR counterpart; `key_zig_type` IS optional and wants OR_ELSE, not OR.
     MUTABLE key_t: String = (node.key_zig_type OR_ELSE "u8");
@@ -3603,15 +3603,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.strategy == :passthrough) THEN
       RETURN "(if (comptime @typeInfo(@TypeOf(${src})) == .pointer and @typeInfo(@TypeOf(${src})).pointer.size == .one) (${src}).* else ${src})";
     ELSE_IF (node.strategy == :full_value) THEN
-      MUTABLE storage_zig_type =     IF (IF node.type_info != NIL THEN
-        type__error_union?(node.type_info)
-      ELSE
-        NIL
-      END) THEN
-        TRY (type__nested_zig_type(node.type_info))
-      ELSE
-        node.zig_type
-      END;
+      # CLEAR's narrowing does not reach inside an IF EXPRESSION's arms, so the
+      # presence has to be bound before either call sees it.
+      MUTABLE storage_zig_type: String = (node.zig_type OR_ELSE "");
+      IF node.type_info EXISTS AS type_info_value THEN
+        IF type__error_union?(type_info_value) THEN
+          storage_zig_type = TRY (type__nested_zig_type(type_info_value));
+        END
+      END
       MUTABLE type_arg: String = "";
       IF (node.copy_shape == :pointer) THEN
         type_arg = "@TypeOf(${src})";
@@ -4187,10 +4186,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE success_expr: TryCatch = castEmittableToTryCatch(discard_expr);
       MUTABLE opt = "${name}_opt";
       MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, success_expr.expr));
-      MUTABLE body = (["{", "const ${opt}: ?${node.zig_type} = (${expr} catch null);", "if (${opt}) |${name}_val| {", "var ${name} = ${name}_val;", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, Node{ Cleanup: COPY Cleanup{ name: COPY name, cleanup_entry: node.cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, FALSE)), 4), "}", "}"]).join("\n");
+      MUTABLE body = (["{", "const ${opt}: ?${node.zig_type} = (${expr} catch null);", "if (${opt}) |${name}_val| {", "var ${name} = ${name}_val;", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, name, node.cleanup_entry, FALSE)), 4), "}", "}"]).join("\n");
       RETURN body;
     END
-    RETURN (["{", "var ${name} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.expr))};", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, Node{ Cleanup: COPY Cleanup{ name: COPY name, cleanup_entry: node.cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, FALSE)), 4), "}"]).join("\n");
+    RETURN (["{", "var ${name} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.expr))};", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, name, node.cleanup_entry, FALSE)), 4), "}"]).join("\n");
 }
 END
 PRIVATE FN mIREmitter__discard_success_only?(self: MIREmitter, expr: Emittable) RETURNS Bool

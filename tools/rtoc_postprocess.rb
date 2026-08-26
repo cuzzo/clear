@@ -405,6 +405,89 @@ module RtocPostprocess
     end
   end
 
+  # `CAST({...} AS {K}V)` around a map literal that already has that type. The
+  # translator emits it defensively; the parser's finished translation never
+  # keeps one.
+  rule(:cast_of_map_literal, kind: :advisory,
+       summary: 'CAST around a map literal that is already typed') do |lines, _index, findings, file, _fix|
+    lines.each_with_index do |line, position|
+      next unless line =~ /CAST\(\{.*\} AS \{/
+
+      findings << Finding.new(rule: :cast_of_map_literal, file: file, line: position + 1,
+                              message: line.strip[0, 80])
+    end
+  end
+
+  # `CAST("literal" AS String)` -- a String literal is already a String.
+  rule(:cast_of_string_literal, kind: :mechanical,
+       summary: 'CAST around a String literal') do |lines, _index, findings, file, fix|
+    lines.each_with_index do |line, position|
+      line.scan(/CAST\(("(?:[^"\\]|\\.)*") AS String\)/) do |(literal)|
+        findings << Finding.new(rule: :cast_of_string_literal, file: file, line: position + 1,
+                                message: "CAST(#{literal[0, 30]} AS String)")
+        lines[position] = lines[position].sub("CAST(#{literal} AS String)", literal) if fix
+      end
+    end
+  end
+
+  # A union carrying both `X: X` and `XMultiowned: X@multiowned`. The finished
+  # parser translation collapses these; the capability belongs on the binding.
+  rule(:multiowned_variant, kind: :advisory,
+       summary: 'union variant duplicated for @multiowned') do |lines, _index, findings, file, _fix|
+    lines.each_with_index do |line, position|
+      line.scan(/(\w+)Multiowned: (\w+)@multiowned/) do |variant, payload|
+        next unless variant == payload
+
+        findings << Finding.new(rule: :multiowned_variant, file: file, line: position + 1,
+                                message: "#{variant}Multiowned: #{payload}@multiowned")
+      end
+    end
+  end
+
+  # A bare identifier that no enclosing FN declares. This is what a too-broad
+  # search-and-replace produces -- I made exactly this mistake twice while
+  # hand-fixing, replacing `node.window` file-wide instead of in one function,
+  # and each cost a full build to discover.
+  rule(:undeclared_local, kind: :advisory,
+       summary: 'identifier used with no declaration in its function') do |lines, _index, findings, file, _fix|
+    declared = Set.new
+    body = []
+    flush = lambda do
+      body.each do |position, line|
+        line.scan(/\$\{([a-z_]\w*)\}/) do |(name)|
+          next if declared.include?(name)
+
+          findings << Finding.new(rule: :undeclared_local, file: file, line: position + 1,
+                                  message: "${#{name}} -- no declaration in this function")
+        end
+      end
+      body = []
+      declared = Set.new
+    end
+    lines.each_with_index do |line, position|
+      if line =~ /\A(?:PRIVATE |PUB )?FN /
+        flush.call
+        line.scan(/(?:MUTABLE )?(\w+): /) { |(name)| declared << name }
+      end
+      declared << Regexp.last_match(1) if line =~ /MUTABLE (\w+)/
+      declared << Regexp.last_match(1) if line =~ /\A\s*(\w+) = /
+      line.scan(/AS (?:MUTABLE )?(\w+)/) { |(name)| declared << name }
+      # Lambda parameters and USE captures declare names too; without these the
+      # rule reports `%(bindings: String) USE(...)` as undeclared.
+      line.scan(/%\(([^)]*)\)/) do |(params)|
+        params.scan(/(?:MUTABLE )?(\w+):/) { |(name)| declared << name }
+      end
+      line.scan(/USE\(([^)]*)\)/) do |(captures)|
+        captures.split(',').each { |capture| declared << capture.strip.sub(/\AMUTABLE /, '') }
+      end
+      line.scan(/FOR (\w+) IN/) { |(name)| declared << name }
+      line.scan(/EXISTS AS (\w+)/) { |(name)| declared << name }
+      declared << '_'
+      body << [position, line]
+    end
+    flush.call
+  end
+
   # `x[:field]` is Ruby hash syntax; on a struct it is a field read. Advisory
   # because CLEAR really does index a {String@symbol}V map that way.
   rule(:hash_field, kind: :advisory,
