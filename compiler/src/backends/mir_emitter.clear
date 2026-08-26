@@ -226,7 +226,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A DeepCopy AS rtoc_deep_copy THEN
       RETURN TRY (mIREmitter__emit_deep_copy(&rtoc_self_view, rtoc_deep_copy));
     ELSE_IF node IS_A ContainerInit AS rtoc_container_init THEN
-      RETURN TRY (mIREmitter__emit_container_init(rtoc_self_view, rtoc_container_init));
+      RETURN TRY (mIREmitter__emit_container_init(&rtoc_self_view, rtoc_container_init));
     ELSE_IF node IS_A CapWrap AS rtoc_cap_wrap THEN
       RETURN TRY (mIREmitter__emit_cap_wrap(&rtoc_self_view, rtoc_cap_wrap));
     ELSE_IF node IS_A SharePromote AS rtoc_share_promote THEN
@@ -3652,12 +3652,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__emit_container_init(self: MIREmitter, node: ContainerInit) RETURNS !String
+PRIVATE FN mIREmitter__emit_container_init(MUTABLE self: MIREmitter, node: ContainerInit) RETURNS !String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.strategy == :pool) OR (node.strategy == :list_capacity) OR (node.strategy == :set_capacity) THEN
-      RETURN "try ${node.zig_type}.initCapacity(${TRY (mIREmitter__alloc_zig(rtoc_self_view, symbol(UNWRAP (node.alloc))))}, ${(node.capacity OR_ELSE "")})";
+      # `capacity` is an ?Emittable, not a String: Ruby interpolates the NODE,
+      # which renders through emit, so the empty-string default was wrong even
+      # where it type-checked.
+      MUTABLE capacity_zig: String = "";
+      IF node.capacity EXISTS AS capacity_value THEN
+        capacity_zig = TRY (mIREmitter__emit(&rtoc_self_view, capacity_value));
+      END
+      RETURN "try ${node.zig_type}.initCapacity(${TRY (mIREmitter__alloc_zig(rtoc_self_view, symbol(UNWRAP (node.alloc))))}, ${capacity_zig})";
     ELSE_IF (node.strategy == :array_list_empty) OR (node.strategy == :grid_empty) THEN
       RETURN "@as(${node.zig_type}, .empty)";
     ELSE_IF (node.strategy == :list_empty) OR (node.strategy == :set_empty) OR (node.strategy == :map_empty) THEN
