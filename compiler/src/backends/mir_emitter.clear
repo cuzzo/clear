@@ -3195,7 +3195,7 @@ PRIVATE FN mIREmitter__emit_index_insert(MUTABLE self: MIREmitter, node: IndexIn
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE map: String = TRY (mIREmitter__emit(&rtoc_self_view, node.map));
     MUTABLE key: String = TRY (mIREmitter__emit(&rtoc_self_view, node.key_expr));
-    MUTABLE val: String = TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr));
+    MUTABLE val: String = TRY (mIREmitter__emit(&rtoc_self_view, UNWRAP (value_expr)));
     # `alloc` is a plain String@symbol here, so Ruby's `when nil` arm has no
     # CLEAR counterpart; `key_zig_type` IS optional and wants OR_ELSE, not OR.
     MUTABLE key_t: String = (node.key_zig_type OR_ELSE "u8");
@@ -3230,7 +3230,7 @@ PRIVATE FN mIREmitter__emit_batch_window_push(MUTABLE self: MIREmitter, node: Ba
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIREmitter__emit_batch_window_emit(&rtoc_self_view, Node{ BatchWindowPush: COPY node }, "try ${node.window}.push(${TRY (mIREmitter__emit(&rtoc_self_view, node.item_expr))})"));
+    RETURN TRY (mIREmitter__emit_batch_window_emit(&rtoc_self_view, BatchWindowEmitNode{ BatchWindowPush: COPY node }, "try ${node.window}.push(${TRY (mIREmitter__emit(&rtoc_self_view, node.item_expr))})"));
 }
 END
 PRIVATE FN mIREmitter__emit_batch_window_flush(MUTABLE self: MIREmitter, node: BatchWindowFlush) RETURNS !String
@@ -3238,7 +3238,7 @@ PRIVATE FN mIREmitter__emit_batch_window_flush(MUTABLE self: MIREmitter, node: B
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIREmitter__emit_batch_window_emit(&rtoc_self_view, Node{ BatchWindowFlush: COPY node }, "try ${node.window}.flush()"));
+    RETURN TRY (mIREmitter__emit_batch_window_emit(&rtoc_self_view, BatchWindowEmitNode{ BatchWindowFlush: COPY node }, "try ${node.window}.flush()"));
 }
 END
 PRIVATE FN mIREmitter__emit_thunk_trampoline(MUTABLE self: MIREmitter, node: ThunkTrampoline) RETURNS !String
@@ -3321,15 +3321,39 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY ((CAST({:ADD: "+", :SUB: "-", :MUL: "*", :DIV: "/"} AS {String@symbol}String))[op] OR_ELSE panic("unknown thunk combine op: {}"));
 }
 END
-PRIVATE FN mIREmitter__emit_batch_window_emit(MUTABLE self: MIREmitter, node: Node, source: String) RETURNS !String
+PRIVATE FN mIREmitter__emit_batch_window_emit(MUTABLE self: MIREmitter, node: BatchWindowEmitNode, source: String) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE slice = "${node.batch_var}_slice";
-    MUTABLE val = "${node.batch_var}_val";
-    MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
-    RETURN "if (${source}) |${slice}| {\n    defer ${node.window}.freeBatch(${slice});\n    var ${node.batch_var} = std.ArrayListUnmanaged(${node.elem_zig}){ .items = ${slice}, .capacity = ${slice}.len };\n    _ = &${node.batch_var};\n    const ${val} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.value_expr))};\n    try ${(node.result_var OR_ELSE "")}.append(${alloc}, ${val});\n}\n".trim();
+    # Ruby types this `T.any(BatchWindowPush, BatchWindowFlush)`; the
+    # translation reached for the AST `Node` union, which has neither.
+    MUTABLE batch_var: String = "";
+    MUTABLE window: String = "";
+    MUTABLE elem_zig: String = "";
+    MUTABLE result_var: String = "";
+    MUTABLE node_alloc: String@symbol = :heap;
+    MUTABLE value_expr: ?Emittable = NIL;
+    PARTIAL MATCH node START
+      BatchWindowEmitNode.BatchWindowPush AS push_node ->
+        batch_var = COPY push_node.batch_var;
+        window = COPY push_node.window;
+        elem_zig = COPY push_node.elem_zig;
+        result_var = (push_node.result_var OR_ELSE "");
+        node_alloc = COPY push_node.alloc;
+        value_expr = COPY push_node.value_expr;,
+      BatchWindowEmitNode.BatchWindowFlush AS flush_node ->
+        batch_var = COPY flush_node.batch_var;
+        window = COPY flush_node.window;
+        elem_zig = COPY flush_node.elem_zig;
+        result_var = (flush_node.result_var OR_ELSE "");
+        node_alloc = COPY flush_node.alloc;
+        value_expr = COPY flush_node.value_expr;,
+    END
+    MUTABLE slice = "${batch_var}_slice";
+    MUTABLE val = "${batch_var}_val";
+    MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node_alloc));
+    RETURN "if (${source}) |${slice}| {\n    defer ${window}.freeBatch(${slice});\n    var ${batch_var} = std.ArrayListUnmanaged(${elem_zig}){ .items = ${slice}, .capacity = ${slice}.len };\n    _ = &${batch_var};\n    const ${val} = ${TRY (mIREmitter__emit(&rtoc_self_view, UNWRAP (value_expr)))};\n    try ${result_var}.append(${alloc}, ${val});\n}\n".trim();
 }
 END
 PRIVATE FN mIREmitter__emit_scope_block(MUTABLE self: MIREmitter, node: ScopeBlock) RETURNS !String

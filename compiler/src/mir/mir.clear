@@ -2831,6 +2831,7 @@ END
 FN indexInsert__stmt?(self: IndexInsert) RETURNS Bool ->
   RETURN TRUE;
 END
+PUB UNION BatchWindowEmitNode { BatchWindowPush: BatchWindowPush, BatchWindowFlush: BatchWindowFlush }
 PUB STRUCT BatchWindowPush {
   window: String,
   item_expr: Emittable,
