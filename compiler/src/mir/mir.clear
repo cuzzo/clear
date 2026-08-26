@@ -43,7 +43,7 @@ PUB STRUCT FnDef {
   ret_type: String,
   body: []Emittable,
   visibility: String@symbol,
-  can_fail: Any@multiowned,
+  can_fail: Bool,
   comptime_params: ?[]String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -364,7 +364,7 @@ FN fieldDef__owned_effect_for_alloc(self: FieldDef, alloc: ?String@symbol, clean
 END
 PUB STRUCT MIREnumDef {
   name: String,
-  variants: Any@multiowned,
+  variants: []String@symbol,
   visibility: String@symbol,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -1181,7 +1181,7 @@ FN destructureTarget__expr?(self: MIRDestructureTarget) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT DestructureSet {
-  targets: Any@multiowned,
+  targets: []Emittable,
   value: Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -1600,7 +1600,7 @@ PUB STRUCT ForStmt {
   iter: Emittable,
   capture: ?String,
   body: []Emittable,
-  index_capture: Any@multiowned,
+  index_capture: ?String,
   mark_per_iter: ?Bool,
   tight: ?Bool,
   lowered_node_id: ?LoweredNodeId,
@@ -1738,7 +1738,7 @@ PUB UNION SwitchPattern { Emittable: Emittable, EnumSwitchPattern: EnumSwitchPat
 PUB STRUCT SwitchStmt {
   subject: Emittable,
   arms: []SwitchArm,
-  default_body: Any@multiowned,
+  default_body: ?[]Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -1764,8 +1764,8 @@ FN switchStmt__body_slots(MUTABLE self: SwitchStmt) RETURNS ![]MIRBodySlot EFFEC
   &slots.append(switchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (self.arms[rtoc_idx]).body));
   rtoc_idx = rtoc_idx + 1;
   END
-  IF self.default_body THEN
-    &slots.append(switchStmt__body_slot(self, :default_body, self.default_body));
+  IF self.default_body EXISTS AS default_body_value THEN
+    &slots.append(switchStmt__body_slot(self, :default_body, default_body_value));
   END
   RETURN slots;
 END
@@ -1821,7 +1821,7 @@ END
 PUB STRUCT UnionMatchStmt {
   subject: Emittable,
   arms: []UnionMatchArm,
-  default_body: Any@multiowned,
+  default_body: ?[]Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -1841,8 +1841,8 @@ FN unionMatchStmt__body_slots(MUTABLE self: UnionMatchStmt) RETURNS ![]MIRBodySl
       rtoc_idx = rtoc_idx + 1;
       END
   END
-  IF self.default_body THEN
-    &slots.append(unionMatchStmt__body_slot(self, :default_body, self.default_body));
+  IF self.default_body EXISTS AS default_body_value THEN
+    &slots.append(unionMatchStmt__body_slot(self, :default_body, default_body_value));
   END
   RETURN slots;
 END
@@ -1897,7 +1897,7 @@ FN unionMatchStmt__stmt?(self: UnionMatchStmt) RETURNS Bool ->
 END
 PUB STRUCT IfChain {
   branches: []IfChainBranch,
-  default_body: Any@multiowned,
+  default_body: ?[]Emittable,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -1918,8 +1918,8 @@ FN ifChain__body_slots(MUTABLE self: IfChain) RETURNS ![]MIRBodySlot EFFECTS REE
   &slots.append(ifChain__body_slot(self, symbol("branches_${rtoc_idx.toString()}"), UNWRAP (self.branches[rtoc_idx]).body));
   rtoc_idx = rtoc_idx + 1;
   END
-  IF self.default_body THEN
-    &slots.append(ifChain__body_slot(self, :default_body, self.default_body));
+  IF self.default_body EXISTS AS default_body_value THEN
+    &slots.append(ifChain__body_slot(self, :default_body, default_body_value));
   END
   RETURN slots;
 END
@@ -2564,7 +2564,7 @@ PUB STRUCT Sort {
   items_expr: Emittable,
   key_a: Emittable,
   key_b: Emittable,
-  string_keys: Any@multiowned,
+  string_keys: Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -2693,7 +2693,7 @@ FN soaFieldAccess__expr?(self: SoaFieldAccess) RETURNS Bool ->
 END
 PUB STRUCT TryOrPanic {
   expr: Emittable,
-  panic_msg: Any@multiowned,
+  panic_msg: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -2762,8 +2762,8 @@ PUB STRUCT IndexInsert {
   map: Emittable,
   key_expr: Emittable,
   value_expr: Emittable,
-  key_zig_type: Any@multiowned,
-  elem_zig_type: Any@multiowned,
+  key_zig_type: ?String,
+  elem_zig_type: ?String,
   alloc: String@symbol,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -3895,8 +3895,8 @@ PUB STRUCT SuspendDescriptor {
   tail: FsmTail,
   ctx_field_decls: Any@multiowned,
   result_var: ?String,
-  result_zig_type: Any@multiowned,
-  result_needs_cleanup: Any@multiowned
+  result_zig_type: ?String,
+  result_needs_cleanup: ?Bool
 }
 PUB STRUCT FsmDispatch {
   ctx_id: Int64,
@@ -4008,7 +4008,7 @@ PUB STRUCT FsmSpawnSetup {
 PUB STRUCT CapabilityLockTarget {
   source: Emittable,
   arc_wrapped: Bool,
-  comptime_arc_unwrap: Any@multiowned,
+  comptime_arc_unwrap: ?Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -4288,7 +4288,7 @@ PUB STRUCT CatchWrapper {
   inner_call: Emittable,
   error_reassigns: Any@multiowned,
   clauses: []MIRCatchClause,
-  default_body: Any@multiowned,
+  default_body: ?[]Emittable,
   default_action: Any@multiowned,
   snapshot_type: ?Type,
   rt_name: String,
@@ -4309,8 +4309,10 @@ FN catchWrapper__child_exprs(self: CatchWrapper) RETURNS ![]Emittable EFFECTS RE
 END
 FN catchWrapper__clause_bodies(self: CatchWrapper) RETURNS ![][]Emittable ->
   MUTABLE bodies: [][]Emittable = (self.clauses) |> SELECT COPY _.body;
-  IF catchWrapper__has_default(self) THEN
-    &bodies.append(KEEP self.default_body);
+  IF self.default_body EXISTS AS default_body_value THEN
+    IF catchWrapper__has_default(self) THEN
+      &bodies.append(COPY default_body_value);
+    END
   END
   RETURN bodies;
 END
@@ -4327,8 +4329,10 @@ FN catchWrapper__body_slots(MUTABLE self: CatchWrapper) RETURNS ![]MIRBodySlot E
   &slots.append(catchWrapper__body_slot(self, symbol("clauses_${rtoc_idx.toString()}"), UNWRAP (self.clauses[rtoc_idx]).body));
   rtoc_idx = rtoc_idx + 1;
   END
-  IF catchWrapper__has_default(self) THEN
-    &slots.append(catchWrapper__body_slot(self, :default_body, self.default_body));
+  IF self.default_body EXISTS AS default_body_value THEN
+    IF catchWrapper__has_default(self) THEN
+      &slots.append(catchWrapper__body_slot(self, :default_body, default_body_value));
+    END
   END
   RETURN slots;
 END
@@ -6550,7 +6554,7 @@ PUB STRUCT SnapshotTransaction {
   conflict_action: Emittable,
   retries: ?Int64,
   with_label: String,
-  is_atomic_ptr: Any@multiowned,
+  is_atomic_ptr: ?Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -7484,7 +7488,7 @@ FN ownedReturn__owned_effect_for_alloc(self: OwnedReturn, alloc: ?String@symbol,
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT ReturnMark {
-  escaped_vars: Any@multiowned,
+  escaped_vars: []String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -8328,7 +8332,7 @@ FN indexGet__expr?(self: IndexGet) RETURNS Bool ->
 END
 PUB STRUCT ProtocolCall {
   protocol: String,
-  operation: Any@multiowned,
+  operation: String,
   receiver: Emittable,
   args: []Emittable,
   lowered_node_id: ?LoweredNodeId,
@@ -9115,7 +9119,7 @@ FN fnRef__expr?(self: FnRef) RETURNS Bool ->
 END
 PUB STRUCT LockAcquire {
   lock_expr: Emittable,
-  lock_sync: Any@multiowned,
+  lock_sync: ?String@symbol,
   fallible: Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -10878,7 +10882,7 @@ END
 PUB STRUCT IterRange {
   start: Emittable,
   end_val: Emittable,
-  capture_type: Any@multiowned,
+  capture_type: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -11358,7 +11362,7 @@ FN hasField__expr?(self: HasField) RETURNS Bool ->
 END
 PUB STRUCT ItemsAccess {
   expr: Emittable,
-  safe: Any@multiowned,
+  safe: Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -11490,8 +11494,8 @@ FN ownedSlice__expr?(self: OwnedSlice) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT LambdaExpr {
-  fn_def: Any@multiowned,
-  captures: Any@multiowned,
+  fn_def: FnDef,
+  captures: []String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }

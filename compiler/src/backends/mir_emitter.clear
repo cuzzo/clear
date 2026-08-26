@@ -2607,7 +2607,19 @@ PRIVATE FN mIREmitter__emit_destructure_set(MUTABLE self: MIREmitter, node: Dest
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE targets = (node.targets |> SELECT TRY (mIREmitter__emit(&rtoc_self_view, _))).join(", ");
-    MUTABLE suppressions = (node.targets |> SELECT:? (IF !((_ IS_A MIRDestructureTarget AND (_.declaration_kind() == :var))) THEN NIL ELSE (IF (CAST(_.name() AS String) == "_") THEN NIL ELSE " _ = &${_.name()};" END) END) |> WHERE _ != NIL).join("");
+    # The predicate reads MIRDestructureTarget's OWN fields, so the variant has
+    # to be matched out of the union first -- `_.declaration_kind()` asked the
+    # union for a method it does not have.
+    MUTABLE suppression_parts: []String = List[];
+    FOR destructure_target IN node.targets DO
+      PARTIAL MATCH destructure_target START
+        Emittable.MIRDestructureTarget AS target_value ->
+          IF ((target_value.declaration_kind == :var) AND (target_value.name != "_")) THEN
+            &suppression_parts.append(" _ = &${target_value.name};");
+          END,
+      END
+    END
+    MUTABLE suppressions = suppression_parts.join("");
     RETURN "${targets} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.value))};${suppressions}";
 }
 END
