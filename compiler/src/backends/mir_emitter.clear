@@ -2888,7 +2888,16 @@ PRIVATE FN mIREmitter__emit_for(MUTABLE self: MIREmitter, node: ForStmt) RETURNS
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE iter: String = TRY (mIREmitter__emit(&rtoc_self_view, node.iter));
-    MUTABLE captures = ([node.capture, node.index_capture]).join(", ");
+    # Ruby's `.compact` before the join: both captures are optional and an
+    # absent one contributes nothing rather than an empty slot.
+    MUTABLE capture_parts: []String = List[];
+    IF node.capture EXISTS AS for_capture THEN
+      &capture_parts.append(COPY for_capture);
+    END
+    IF node.index_capture EXISTS AS for_index_capture THEN
+      &capture_parts.append(COPY for_index_capture);
+    END
+    MUTABLE captures = capture_parts.join(", ");
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
     IF mIREmitter__i64_range_capture_cast_required?(rtoc_self_view, node) THEN
       MUTABLE raw_capture = "__${(node.capture OR_ELSE "")}_usize";
@@ -2902,7 +2911,16 @@ PRIVATE FN mIREmitter__i64_range_capture_cast_required?(self: MIREmitter, node: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE iter = COPY node.iter;
-    RETURN !(!((((((IF iter IS_A IterRange AS iter_range THEN (iter_range.capture_type == :i64) ELSE FALSE END) AND (node.index_capture == NIL)) AND node.capture IS_A String) AND !(node.capture.startsWith?("*"))))));
+    # Ruby's `node.capture.is_a?(String)` is a presence test on a nilable
+    # field, not a union test -- CLEAR spells that EXISTS.
+    IF iter IS_A IterRange AS iter_range THEN
+      IF ((iter_range.capture_type == :i64) AND (node.index_capture == NIL)) THEN
+        IF node.capture EXISTS AS for_capture_value THEN
+          RETURN !(for_capture_value.startsWith?("*"));
+        END
+      END
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN mIREmitter__emit_switch(MUTABLE self: MIREmitter, node: SwitchStmt) RETURNS !String
