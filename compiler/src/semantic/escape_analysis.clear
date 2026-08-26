@@ -1578,7 +1578,7 @@ END
 PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg_heap: [Set]String, facts: ?FunctionFacts) RETURNS !Void ->
   MUTABLE names: [Set]String = Set[];
   FOR _ IN node.captures DO
-  &names.insert(COPY CAST(_.name() AS String));
+  &names.insert(COPY CAST(capture__name(_) AS String));
   END
   IF names.empty?() THEN
     RETURN;

@@ -1425,7 +1425,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     TRY (resolutionSession__validate_c_boundary_type_mut(rtoc_self_view, node, UNWRAP (node.return_type), "return", TRUE));
     FOR _ IN node.params DO
-    TRY (resolutionSession__validate_c_boundary_type_mut(rtoc_self_view, node, _.type(), "parameter ${_.name}", FALSE));
+    TRY (resolutionSession__validate_c_boundary_type_mut(rtoc_self_view, node, param__type(_), "parameter ${_.name}", FALSE));
     END
 }
 END

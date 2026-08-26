@@ -68,8 +68,8 @@ module RtocPostprocess
     def field_type(struct, field) = @struct_fields[struct][field]
 
     # `SwitchArm` is reached as `switchArm__body`.
-    def accessor?(struct, field)
-      @accessors.include?("#{struct[0].downcase}#{struct[1..]}__#{field}")
+    def accessor_name(struct, field)
+      "#{struct[0].downcase}#{struct[1..]}__#{field}"
     end
 
     # Names that are ONLY ever enum variants -- never a struct, never a union
@@ -142,8 +142,20 @@ module RtocPostprocess
     end
 
     def observe(line)
-      reset if line =~ /\A(?:PRIVATE |PUB )?FN /
-      @bindings['node'] = Regexp.last_match(1) if line =~ /\A(?:PRIVATE |PUB )?FN \w+\(.*?node: (\w+)[,)]/
+      if line =~ /\A(?:PRIVATE |PUB )?FN /
+        reset
+        # EVERY typed parameter, not just `node:`. Typing only `node:` is why
+        # the field-call rule missed `entry.kind()` on a CleanupEntry
+        # parameter -- a whole build spent on a site the rule already knew how
+        # to describe.
+        if line =~ /\A(?:PRIVATE |PUB )?FN \w+[?!]?(?:<[^>]*>)?\((.*)\)/
+          Regexp.last_match(1).split(/,\s*(?![^<>{}\[\]]*[>}\]])/).each do |param|
+            next unless param =~ /\A(?:MUTABLE )?(\w+): \??([\w@]+)/
+
+            @bindings[Regexp.last_match(1)] = Regexp.last_match(2)
+          end
+        end
+      end
       if line =~ /MUTABLE (\w+): (\??[\w@\[\]]+) =/
         name = Regexp.last_match(1)
         type = Regexp.last_match(2)
@@ -221,14 +233,19 @@ module RtocPostprocess
       scope.observe(line)
       next if line.strip.start_with?('#')
 
-      line.scan(/\b(\w+)\.([a-z_]\w*)\(\)/) do |receiver, field|
+      line.scan(/\b(\w+)\.([a-z_]\w*[?!]?)\(\)/) do |receiver, field|
         struct = scope.struct_of(receiver)
-        next unless struct && index.field_type(struct, field)
-        next if index.accessor?(struct, field)
+        next unless struct && index.field_type(struct, field.sub(/[?!]\z/, ''))
 
+        # An accessor existing does NOT make `entry.kind()` legal -- CLEAR has
+        # no methods on a struct, so a free FN has to be CALLED as one. Where
+        # there is an accessor the call becomes `cleanupEntry__kind(entry)`;
+        # where there is none it is a plain field read.
+        accessor = index.accessor_name(struct, field)
+        replacement = index.accessors.include?(accessor) ? "#{accessor}(#{receiver})" : "#{receiver}.#{field}"
         findings << Finding.new(rule: :field_calls, file: file, line: position + 1,
-                                message: "#{receiver}.#{field}() -- #{struct} declares #{field} as a field")
-        lines[position] = lines[position].gsub("#{receiver}.#{field}()", "#{receiver}.#{field}") if fix
+                                message: "#{receiver}.#{field}() -> #{replacement}")
+        lines[position] = lines[position].gsub("#{receiver}.#{field}()", replacement) if fix
       end
     end
   end
