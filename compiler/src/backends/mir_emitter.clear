@@ -3527,7 +3527,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ELSE
           guard = "";
         END
-        result = (result $+ "\n${guard}CheatLib.releaseFields(${cleanupEntry__base_zig(entry)}, ${use_alloc}, ${name}.ctrl.data.*);");
+        result = (result $+ "\n${guard}CheatLib.releaseFields(${(cleanupEntry__base_zig(entry) OR_ELSE "")}, ${use_alloc}, ${name}.ctrl.data.*);");
       END
       RETURN result;
     END
@@ -3578,7 +3578,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ELSE
           kw = "defer";
         END
-        result = (result $+ "${kw} ${guard}CheatLib.releaseFields(${cleanupEntry__base_zig(entry)}, ${use_alloc}, ${name}.ctrl.data.*);\n");
+        result = (result $+ "${kw} ${guard}CheatLib.releaseFields(${(cleanupEntry__base_zig(entry) OR_ELSE "")}, ${use_alloc}, ${name}.ctrl.data.*);\n");
       END
       RETURN result;
     END

@@ -4120,7 +4120,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE collection_name: String = "";
       IF type__collection(type) THEN
-        collection_name = "@${type__collection(type)}";
+        collection_name = "@${(type__collection(type) OR_ELSE "")}";
       ELSE
         collection_name = "";
       END
@@ -10985,7 +10985,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         CONTINUE;
           END
           IF escape THEN
-              MUTABLE msg = "Lock rank violation: acquiring ':${capabilityTransition__lock_identity(lock_capabilities[rtoc_idx_n4]?)}' at rank ${cap_rank} while ':${castTypeToString(held_lock_types[rtoc_idx_n4]?.type)}' (rank ${held_rank}) is held. Ranks must be strictly ascending along the acquire path to prove LockCycle freedom by construction.";
+              MUTABLE msg = "Lock rank violation: acquiring ':${(capabilityTransition__lock_identity(lock_capabilities[rtoc_idx_n4]?) OR_ELSE "")}' at rank ${cap_rank} while ':${castTypeToString(held_lock_types[rtoc_idx_n4]?.type)}' (rank ${held_rank}) is held. Ranks must be strictly ascending along the acquire path to prove LockCycle freedom by construction.";
               typeAnalysisSession__note_mut(rtoc_self_view, lock_capabilities[rtoc_idx_n4]?.var_node, (msg $+ " (POSSIBLE_${(CAST(escape[:kind] AS String)).upcase()} accepted.)"));
           ELSE
               TRY (typeAnalysisSession__error_mut(rtoc_self_view, lock_capabilities[rtoc_idx_n4]?.var_node, TypeAnalysisCodeOrMessage{ SymbolValue: :LOCK_RANK_VIOLATION }, [], {:cap: capabilityTransition__lock_identity(lock_capabilities[rtoc_idx_n4]?), :cap_rank: cap_rank, :held: held_lock_types[rtoc_idx_n4]?.type, :held_rank: held_rank}));
@@ -20578,7 +20578,7 @@ PRIVATE FN typeAnalysisSession__reject_borrowed_value_mut(self: TypeAnalysisSess
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE borrowed_name = NIL;
     IF val_node IS_A GetIndex AS get_index THEN
-      borrowed_name = "${typeAnalysisSession__root_variable_name(rtoc_self_view, Locatable{ GetIndex: COPY get_index })}[index]";
+      borrowed_name = "${(typeAnalysisSession__root_variable_name(rtoc_self_view, Locatable{ GetIndex: COPY get_index }) OR_ELSE "")}[index]";
     ELSE_IF (IF val_node IS_A Identifier AS identifier THEN ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier)) != NIL) AND (((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier)))?).kind == :borrowed)) ELSE FALSE END) THEN
       borrowed_name = val_node.name();
     END

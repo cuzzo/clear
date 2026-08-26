@@ -49,7 +49,7 @@ module RtocPostprocess
   # enum variants, function signatures. Everything is keyed by its OWNER,
   # because the same field name has different types on different structs.
   class TypeIndex
-    attr_reader :struct_fields, :union_variants, :enum_variants, :structs, :param_types, :accessors
+    attr_reader :struct_fields, :union_variants, :enum_variants, :structs, :param_types, :accessors, :return_types
 
     def initialize(sources)
       @struct_fields = Hash.new { |hash, key| hash[key] = {} }
@@ -58,6 +58,7 @@ module RtocPostprocess
       @enum_variants = Hash.new { |hash, key| hash[key] = Set.new }
       @structs = Set.new
       @param_types = {}
+      @return_types = {}
       @accessors = Set.new
       sources.each { |path| scan(path) }
     end
@@ -107,6 +108,9 @@ module RtocPostprocess
         end
         if (match = line.match(/\APUB ENUM (\w+) \{ (.+?) \}/))
           match[2].split(',').each { |variant| @enum_variants[variant.strip] << match[1] }
+        end
+        if (match = line.match(/\A(?:PRIVATE |PUB )?FN (\w+[?!]?)(?:<[^>]*>)?\(.*?\)\s*RETURNS (\S+)/))
+          @return_types[match[1]] = match[2]
         end
         if (match = line.match(/\A(?:PRIVATE |PUB )?FN (\w+[?!]?)(?:<[^>]*>)?\((.*?)\)\s*(?:RETURNS|->|$)/))
           @accessors << match[1]
@@ -570,6 +574,25 @@ module RtocPostprocess
 
       findings << Finding.new(rule: :unannotated_or_else, file: file, line: position + 1,
                               message: "MUTABLE #{Regexp.last_match(1)} = (... OR_ELSE ...) -- no annotation")
+    end
+  end
+
+  # An interpolated CALL whose return type is optional. Same rule as an
+  # interpolated identifier, but typed from the signature -- and easy to miss,
+  # because the error points at a column inside a long format string and reads
+  # as if it were about the neighbouring variable.
+  rule(:optional_call_interpolation, kind: :advisory,
+       summary: 'interpolated call that returns an optional') do |lines, index, findings, file, _fix|
+    lines.each_with_index do |line, position|
+      next if line.strip.start_with?('#')
+
+      line.scan(/\$\{(\w+)\(/) do |(callee)|
+        type = index.return_types[callee]
+        next unless type&.start_with?('?')
+
+        findings << Finding.new(rule: :optional_call_interpolation, file: file, line: position + 1,
+                                message: "${#{callee}(...)} returns #{type}")
+      end
     end
   end
 
