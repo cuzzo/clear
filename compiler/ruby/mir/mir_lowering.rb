@@ -1334,7 +1334,19 @@ class MIRLowering
     return mir if heap_owned_result?(mir, ast_node)
 
     mir = MIR::TryExpr.new(mir) if Type.from_node!(ast_node, context: "heap destination placement").error_union?
-    MIR::DupeSlice.new(mir, :heap)
+    dupe_string_payload(mir, :heap)
+  end
+
+  # Widening a string to `?String` is a property of the DESTINATION, not of the
+  # bytes being copied: `dupe` takes a slice, never an optional one. Copy the
+  # payload and put the widening back around the copy.
+  sig { params(mir: MIR::Node, dest_alloc: Symbol).returns(MIR::Node) }
+  def dupe_string_payload(mir, dest_alloc)
+    if mir.is_a?(MIR::Cast) && mir.method == :as && mir.target_type.to_s.start_with?('?')
+      return MIR::Cast.new(MIR::DupeSlice.new(mir.expr, dest_alloc), mir.target_type, mir.method)
+    end
+
+    MIR::DupeSlice.new(mir, dest_alloc)
   end
 
   sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: Symbol).returns(MIR::Node) }
@@ -1349,7 +1361,7 @@ class MIRLowering
     return place_string_value_for_heap_destination(mir, ast_node) if MIR::Placement.heap?(dest_alloc)
 
     mir = MIR::TryExpr.new(mir) if Type.from_node!(ast_node, context: "string destination placement").error_union?
-    MIR::DupeSlice.new(mir, dest_alloc)
+    dupe_string_payload(mir, dest_alloc)
   end
 
   sig { params(type_info: T.nilable(Type)).returns(T.nilable(Symbol)) }

@@ -1,0 +1,33 @@
+# Test: a string assigned into an optional binding that escapes must copy the
+# PAYLOAD. Widening to ?String belongs to the destination, not to the bytes:
+# duping the widened value emitted dupe(u8, @as(?[]const u8, ...)), which Zig
+# rejects because dupe takes a slice, never an optional one.
+
+STRUCT Param { name: ?String, kind: String }
+
+PRIVATE FN build(named: Bool) RETURNS !Param ->
+  MUTABLE p_name: ?String = NIL;
+  IF named THEN
+    p_name = "comptime";
+  END
+  RETURN Param{ name: p_name, kind: "param" };
+END
+
+PRIVATE FN named?(p: Param) RETURNS Bool ->
+  IF p.name EXISTS AS actual THEN
+    RETURN actual == "comptime";
+  END
+  RETURN FALSE;
+END
+
+FN main() RETURNS !Void ->
+  named = build(TRUE) OR_ELSE RAISE;
+  ASSERT named?(named), "optional payload should survive the copy";
+  ASSERT named.kind == "param", "sibling field should be unaffected";
+
+  anonymous = build(FALSE) OR_ELSE RAISE;
+  ASSERT !named?(anonymous), "unassigned optional should stay NIL";
+
+  print("optional_string_dupes_payload: all tests passed");
+  RETURN;
+END
