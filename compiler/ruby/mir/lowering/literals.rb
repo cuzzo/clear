@@ -144,7 +144,16 @@ module MIRLoweringLiterals
         if plan.fixed_stack_or_frame?(node) && i.is_a?(AST::Literal) && [:STRING, :SYMBOL].include?(i.type)
           next lower(i)
         end
-        lowered_item = elem_type ? with_expected_type(elem_type) { lower(i) } : lower(i)
+        # A list literal is a destination for each of its items, so it must
+        # scope the sink type the way every other destination does. Without
+        # this the enclosing assignment's sink leaks in and an item was
+        # rendered with the LITERAL's own array type -- `[COPY nested]` copied
+        # a `[1]T` instead of the `T` it holds.
+        lowered_item = if elem_type
+          with_expected_type(elem_type) { with_sink_type(elem_type) { lower(i) } }
+        else
+          lower(i)
+        end
         placed_item = elem_type ? place_value_for_destination(lowered_item, i, list_alloc, elem_type) : lowered_item
         item_value = materialize_owned_sink_value(placed_item, i, list_alloc, elem_type)
         item_alloc = mir_owned_alloc(item_value) ||

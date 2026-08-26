@@ -1,0 +1,47 @@
+# Test: a list literal is a destination for each of its items, so it must scope
+# the sink type to the ELEMENT type. Without that, `body = [COPY nested]`
+# rendered the item with the literal's own array type and copied a [1]T instead
+# of the T it holds -- makeList then got '[1]T' where it wanted 'T'.
+
+UNION Shape {
+  Boxed: BoxedNode,
+  Plain: PlainNode
+}
+
+STRUCT BoxedNode { items: []String }
+STRUCT PlainNode { name: String }
+
+PRIVATE FN rewrap(seed: Shape, rounds: Int64) RETURNS ![]Shape ->
+  MUTABLE body: []Shape = List[];
+  &body.append(COPY seed);
+  MUTABLE index = 0;
+  WHILE index < rounds DO
+    MUTABLE nested: Shape = COPY UNWRAP (body[0]);
+    body = [COPY nested];
+    index = index + 1;
+  END
+  RETURN body;
+END
+
+PRIVATE FN describe(shape: Shape) RETURNS String ->
+  MATCH shape START
+    Shape.Boxed AS node -> RETURN COPY UNWRAP (node.items[0]);,
+    Shape.Plain AS node -> RETURN COPY node.name;
+  END
+END
+
+FN main() RETURNS !Void ->
+  plain = Shape{ Plain: PlainNode{ name: "seed" } };
+  out = rewrap(plain, 3_i64) OR_ELSE RAISE;
+  ASSERT out.length() == 1_i64, "rewrapping should leave exactly one element";
+  ASSERT describe(UNWRAP (out[0])) == "seed", "the element should survive every rewrap";
+
+  MUTABLE items: []String = ["alpha", "beta"];
+  boxed = Shape{ Boxed: BoxedNode{ items: items } };
+  boxed_out = rewrap(boxed, 2_i64) OR_ELSE RAISE;
+  ASSERT boxed_out.length() == 1_i64, "a heap-bearing variant should rewrap the same way";
+  ASSERT describe(UNWRAP (boxed_out[0])) == "alpha", "the variant's payload should survive";
+
+  print("list_literal_scopes_element_sink: all tests passed");
+  RETURN;
+END
