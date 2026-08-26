@@ -849,6 +849,37 @@ module RtocPostprocess
     end
   end
 
+  # A field INTERPOLATED into a string but declared as something no string can
+  # hold. `ArrayInit.count` came out Emittable while every construction site
+  # passes a String and the only consumer interpolates it -- the argument-based
+  # evidence rule cannot see that, because the field is never passed anywhere.
+  rule(:interpolated_non_string_field, kind: :advisory,
+       summary: 'field interpolated but declared as a node type') do |lines, index, findings, file, _fix|
+    scope = Scope.new(index)
+    lines.each_with_index do |line, position|
+      scope.observe(line)
+      next if line.strip.start_with?('#')
+
+      line.scan(/\$\{(\w+)\.([a-z_]\w*)\}/) do |receiver, field|
+        owner = scope.struct_of(receiver)
+        next unless owner
+
+        type = index.field_type(owner, field)
+        next unless type
+
+        bare = type.delete_prefix('?').sub(/@\w+\z/, '')
+        next if %w[String Int64 UInt64 Float64 Bool].include?(bare)
+        next if bare.end_with?('@symbol') || bare == 'String@symbol'
+        # A union or struct cannot be interpolated; either the field type is
+        # wrong or the site needs a render call.
+        next unless index.structs.include?(bare) || index.union_variants.key?(bare)
+
+        findings << Finding.new(rule: :interpolated_non_string_field, file: file, line: position + 1,
+                                message: "${#{receiver}.#{field}} but #{owner}.#{field} is #{type}")
+      end
+    end
+  end
+
   # `x[:field]` is Ruby hash syntax; on a struct it is a field read. Advisory
   # because CLEAR really does index a {String@symbol}V map that way.
   rule(:hash_field, kind: :advisory,

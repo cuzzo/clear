@@ -4007,7 +4007,20 @@ PRIVATE FN mIREmitter__emit_struct_init(MUTABLE self: MIREmitter, node: StructIn
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fields = (node.fields |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE name: ?MIRReturnValue = mIR__struct_init_field_name(_); { MUTABLE rtoc_value_block_marker = 0; MUTABLE value: ?Emittable = mIR__struct_init_field_value(_); (IF !(((name != NIL) AND (value != NIL))) THEN NIL ELSE ".${mIREmitter__zig_field_name(rtoc_self_view, castOptionalMIRReturnValueToName(name))} = ${TRY (mIREmitter__emit_struct_init_field_value(&rtoc_self_view, value))}" END) } } |> WHERE _ != NIL).join(", ");
+    # Ruby's filter_map over the fields, as a loop: an IF EXPRESSION cannot
+    # yield a ?String, and nesting two value blocks to hold `name` and `value`
+    # is what forced one here.
+    MUTABLE field_parts: []String = List[];
+    FOR struct_field IN node.fields DO
+      MUTABLE field_name: ?MIRReturnValue = mIR__struct_init_field_name(struct_field);
+      MUTABLE field_value: ?Emittable = mIR__struct_init_field_value(struct_field);
+      IF field_name EXISTS AS field_name_value THEN
+        IF field_value EXISTS AS field_value_value THEN
+          &field_parts.append(".${mIREmitter__zig_field_name(rtoc_self_view, castOptionalMIRReturnValueToName(field_name_value))} = ${TRY (mIREmitter__emit_struct_init_field_value(&rtoc_self_view, field_value_value))}");
+        END
+      END
+    END
+    MUTABLE fields = field_parts.join(", ");
     IF node.zig_type THEN
       RETURN "${(node.zig_type OR_ELSE "")}{ ${fields} }";
     ELSE
