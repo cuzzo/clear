@@ -492,18 +492,25 @@ module RtocPostprocess
   # value that is a UNION of the list shape and the single shape. The IS_A arm
   # is fine; the ELSE arm passes the union on where the payload is wanted, and
   # that only fails once something downstream declares the payload type.
-  rule(:list_is_a_else_arm, kind: :advisory,
-       summary: 'IS_A []T whose ELSE arm passes the union through') do |lines, _index, findings, file, _fix|
+  rule(:two_variant_else_arm, kind: :advisory,
+       summary: 'IS_A on a 2-variant union whose ELSE arm passes the union through') do |lines, index, findings, file, _fix|
+    scope = Scope.new(index)
     lines.each_with_index do |line, position|
-      next unless line =~ /IF (\w+) IS_A \[\](\w+)/
+      scope.observe(line)
+      next unless line =~ /IF (\w+) IS_A (\[\])?([\w@]+)/
 
       subject = Regexp.last_match(1)
-      element = Regexp.last_match(2)
+      probe = "#{Regexp.last_match(2)}#{Regexp.last_match(3)}"
+      union = scope.struct_of(subject)
+      # Only a union with exactly two variants is unambiguous: the ELSE arm can
+      # then only mean "the other payload", never "the union itself".
+      next unless union && index.union_variants[union].length == 2
+
       tail = lines[position + 1, 6].to_a.join(' ')
       next unless tail.include?('ELSE') && tail =~ /\b#{Regexp.escape(subject)}\b/
 
-      findings << Finding.new(rule: :list_is_a_else_arm, file: file, line: position + 1,
-                              message: "#{subject} IS_A []#{element} -- ELSE arm still uses #{subject}")
+      findings << Finding.new(rule: :two_variant_else_arm, file: file, line: position + 1,
+                              message: "#{subject} IS_A #{probe} on 2-variant #{union}; ELSE arm still uses #{subject}")
     end
   end
 

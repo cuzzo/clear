@@ -3470,11 +3470,13 @@ PRIVATE FN mIREmitter__alloc_expr(MUTABLE self: MIREmitter, alloc: Alloc) RETURN
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF alloc IS_A String@symbol AS string_symbol THEN
-      RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, string_symbol));
-    ELSE
-      RETURN TRY (mIREmitter__emit(&rtoc_self_view, alloc));
+    PARTIAL MATCH alloc START
+      Alloc.SymbolValue AS string_symbol ->
+        RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, string_symbol));,
+      Alloc.Emittable AS alloc_expr ->
+        RETURN TRY (mIREmitter__emit(&rtoc_self_view, alloc_expr));,
     END
+    RETURN "";
 }
 END
 FN mIREmitter__emit_stmt_list(MUTABLE self: MIREmitter, stmts: []Emittable) RETURNS !String
