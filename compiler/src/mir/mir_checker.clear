@@ -2059,7 +2059,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF idx THEN
             &available.remove(idx);
         ELSE
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_ALLOC_MISMATCH, name_lets[rtoc_idx].name(), "owned-result initializer produces :${UNWRAP (expected_alloc)} storage but no MIR::AllocMark uses :${UNWRAP (expected_alloc)} (marks: ${(UNWRAP (marks) |> SELECT ":${_.alloc()}").join(", ")})")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_ALLOC_MISMATCH, name_lets[rtoc_idx].name(), "owned-result initializer produces :${UNWRAP (expected_alloc)} storage but no MIR::AllocMark uses :${UNWRAP (expected_alloc)} (marks: ${(marks_value |> SELECT ":${_.alloc()}").join(", ")})")));
         END
       rtoc_idx = rtoc_idx + 1;
     END
@@ -2328,14 +2328,12 @@ PUB FN mIRChecker__fsm_ctx_field_target?(expr: Emittable, ctx_id: Int64, field: 
 END
 PUB FN mIRChecker__format_fsm_error(invariant: String, message: String, source: ?Locatable) RETURNS String ->
   MUTABLE loc: String = "";
-  IF (IF source != NIL THEN
-    source.line()
-  ELSE
-    NIL
-  END) THEN
+  IF source EXISTS AS source_value THEN
+    IF source_value.line() THEN
     loc = " at line ${source.line()}";
   ELSE
     loc = "";
+  END
   END
   RETURN "[FSM checker]${loc} ${invariant}: ${message}";
 END

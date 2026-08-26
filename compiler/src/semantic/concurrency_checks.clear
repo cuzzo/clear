@@ -39,13 +39,11 @@ PRIVATE FN concurrencyChecks__check_hold_across_yield_mut(fn_value: FunctionDef,
           reason = "NEXT";
       ELSE_IF scope[rtoc_idx]? IS_A FuncCall AS func_call THEN
           MUTABLE callee: ?FunctionDef = COPY fn_nodes[CAST(funcCall__name(func_call) AS String)];
-          IF (IF callee != NIL THEN
-            callee.effects.contains?(symbol("YIELD"))
-          ELSE
-            NIL
-          END) THEN
+          IF callee EXISTS AS callee_value THEN
+            IF callee_value.effects.contains?(symbol("YIELD")) THEN
             offender_token = func_call.token;
             reason = "call to '${funcCall__name(func_call)}' which yields";
+          END
           END
       END
       IF !(offender_token) THEN

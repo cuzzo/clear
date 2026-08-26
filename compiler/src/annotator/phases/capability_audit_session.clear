@@ -2474,12 +2474,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           NIL
         END)));
-      IF (IF sig != NIL THEN
-          functionSignature__needs_rt(sig)
-        ELSE
-          NIL
-        END) THEN
+      IF sig EXISTS AS sig_value THEN
+        IF functionSignature__needs_rt(sig_value) THEN
           needs_rt[callees[rtoc_idx]] = TRUE;
+      END
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -2608,12 +2606,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           NIL
         END)));
-      IF (IF sig != NIL THEN
-          functionSignature__alloc_fault(sig)
-        ELSE
-          NIL
-        END) THEN
+      IF sig EXISTS AS sig_value THEN
+        IF functionSignature__alloc_fault(sig_value) THEN
           alloc_fault[callees[rtoc_idx]] = TRUE;
+      END
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -2747,12 +2743,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE intrinsic = node.matched_stdlib_def;
-    IF (IF intrinsic != NIL THEN
-      functionSignature__recoverable_result?(intrinsic)
-    ELSE
-      NIL
-    END) THEN
+    IF intrinsic EXISTS AS intrinsic_value THEN
+      IF functionSignature__recoverable_result?(intrinsic_value) THEN
       RETURN TRUE;
+    END
     END
     MUTABLE callee: ?FunctionDef@multiowned = COPY (TRY (capabilityAuditSession__semantic_function_nodes(rtoc_self_view)))[fact.callee_name];
     RETURN ((callee != NIL) AND (callee.error_fallible == TRUE));
@@ -3127,14 +3121,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       &visited.insert(name);
       MUTABLE fn = fn_nodes[name];
-      IF (IF fn != NIL THEN
-        functionSignature__stack_tier(fn)
-      ELSE
-        NIL
-      END) THEN
+      IF fn EXISTS AS fn_value THEN
+        IF functionSignature__stack_tier(fn_value) THEN
         IF (((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[functionSignature__stack_tier(fn)] OR_ELSE 0) > ((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[max] OR_ELSE 0)) THEN
           max = functionSignature__stack_tier(fn);
         END
+      END
       END
       FOR _ IN (((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[name] OR_ELSE List[])) DO
       &queue.append(COPY _);
@@ -3503,13 +3495,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       ruby_array_concat_Any(edits_nl, CAST(eff AS []Any));
       MUTABLE rt = cycle_thunk_fns[rtoc_idx].declared_return_type();
-      IF (IF rt != NIL THEN
-          rt.error_union?()
-        ELSE
-          NIL
-        END) THEN
+      IF rt EXISTS AS rt_value THEN
+        IF rt_value.error_union?() THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
+      END
       END
       MUTABLE rt_tok = cycle_thunk_fns[rtoc_idx].return_type_token;
       IF (rt_tok == NIL) THEN
@@ -3534,13 +3524,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       ruby_array_concat_Any(edits_md, CAST(eff AS []Any));
       MUTABLE rt = cycle_thunk_fns[rtoc_idx].declared_return_type();
-      IF (IF rt != NIL THEN
-          rt.error_union?()
-        ELSE
-          NIL
-        END) THEN
+      IF rt EXISTS AS rt_value THEN
+        IF rt_value.error_union?() THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
+      END
       END
       MUTABLE rt_tok = cycle_thunk_fns[rtoc_idx].return_type_token;
       IF (rt_tok == NIL) THEN

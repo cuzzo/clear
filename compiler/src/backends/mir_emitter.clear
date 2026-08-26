@@ -4255,12 +4255,10 @@ PRIVATE FN mIREmitter__emit_if_optional(MUTABLE self: MIREmitter, node: IfOption
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE then_expr: String = TRY (mIREmitter__emit(&rtoc_self_view, node.then_expr));
-    IF (IF node.result_type != NIL THEN
-      type__optional?(node.result_type)
-    ELSE
-      NIL
-    END) THEN
-      then_expr = "@as(${TRY (type__zig_type(UNWRAP (node.result_type)))}, ${then_expr})";
+    IF node.result_type EXISTS AS result_type_value THEN
+      IF type__optional?(result_type_value) THEN
+      then_expr = "@as(${TRY (type__zig_type(result_type_value))}, ${then_expr})";
+    END
     END
     RETURN "(if (${TRY (mIREmitter__emit(&rtoc_self_view, node.optional))}) |${(node.capture OR_ELSE "")}| ${then_expr} else ${TRY (mIREmitter__emit(&rtoc_self_view, node.else_expr))})";
 }

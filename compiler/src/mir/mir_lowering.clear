@@ -4279,12 +4279,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN :heap;
       END
       MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST(root.name() AS String)];
-      IF (IF entry != NIL THEN
-        cleanupEntry__alloc(entry)
-      ELSE
-        NIL
-      END) THEN
+      IF entry EXISTS AS entry_value THEN
+        IF cleanupEntry__alloc(entry_value) THEN
         RETURN cleanupEntry__alloc(entry);
+      END
       END
     END
     IF root IS_A Identifier THEN
@@ -8660,12 +8658,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE return_type: ?Type = COPY node.return_type;
-    IF (IF return_type != NIL THEN
-      TRY (type__node_reference?(return_type))
-    ELSE
-      NIL
-    END) THEN
+    IF return_type EXISTS AS return_type_value THEN
+      IF TRY (type__node_reference?(return_type_value)) THEN
       RETURN TRUE;
+    END
     END
     MUTABLE found: Bool = FALSE;
     aST__each_locatable(node.body, %(candidate: Locatable) -> {
@@ -10463,12 +10459,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF ((sig_obj != NIL) AND (functionSignature__heap_carry_return(sig_obj) == TRUE)) THEN
         RETURN TRUE;
       END
-      IF (IF sig_obj != NIL THEN
-        TRY (functionSignature__heap_return_alloc?(&sig_obj))
-      ELSE
-        NIL
-      END) THEN
+      IF sig_obj EXISTS AS sig_obj_value THEN
+        IF TRY (functionSignature__heap_return_alloc?(&sig_obj_value)) THEN
         RETURN TRUE;
+      END
       END
       IF sig_obj EXISTS AS sig_obj_value THEN
         RETURN FALSE;
@@ -11146,15 +11140,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           type_obj_branch_value = TRY (type__new(pt));
         END
         MUTABLE type_obj: Type = type_obj_branch_value?;
-        IF (IF sig != NIL THEN
-          functionSignature__module_alias(sig)
-        ELSE
-          NIL
-        END) THEN
+        IF sig EXISTS AS sig_value THEN
+          IF functionSignature__module_alias(sig_value) THEN
           MUTABLE resolved = type__resolved(type_obj);
           IF !(((type__numeric?(type_obj) OR (resolved == :Bool)) OR (resolved == :Boolean))) THEN
             type_obj = NIL;
           END
+        END
         END
         IF NIL THEN
           field_type = COPY NIL;
@@ -12824,12 +12816,10 @@ PRIVATE FN mIRLowering__boundary_capture_shared_arc?(self: MIRLowering, symbol: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (IF captured_type != NIL THEN
-      type__shared?(captured_type)
-    ELSE
-      NIL
-    END) THEN
+    IF captured_type EXISTS AS captured_type_value THEN
+      IF type__shared?(captured_type_value) THEN
       RETURN TRUE;
+    END
     END
     IF symbol EXISTS AS symbol_value THEN
       MUTABLE type_info = symbolEntry__type(symbol_value);
@@ -12846,12 +12836,10 @@ PRIVATE FN mIRLowering__boundary_capture_multiowned_rc?(self: MIRLowering, symbo
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (IF captured_type != NIL THEN
-      type__multiowned?(captured_type)
-    ELSE
-      NIL
-    END) THEN
+    IF captured_type EXISTS AS captured_type_value THEN
+      IF type__multiowned?(captured_type_value) THEN
       RETURN TRUE;
+    END
     END
     IF symbol EXISTS AS symbol_value THEN
       MUTABLE type_info = symbolEntry__type(symbol_value);
@@ -15948,12 +15936,10 @@ PRIVATE FN mIRLowering__struct_field_wants_slice?(self: MIRLowering, ft: ?Type, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (IF node.borrowed_field_names != NIL THEN
-      node.borrowed_field_names.contains?(CAST(k AS String))
-    ELSE
-      NIL
-    END) THEN
+    IF node.borrowed_field_names EXISTS AS borrowed_field_names_value THEN
+      IF borrowed_field_names_value.contains?(CAST(k AS String)) THEN
       RETURN TRUE;
+    END
     END
     RETURN mIRLowering__aggregate_field_wants_dynamic_slice?(rtoc_self_view, ft);
 }
@@ -16106,15 +16092,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     {:name: _, :value: val, :alloc: field_sink_alloc}
     };
     MUTABLE type_name: String = "";
-    IF (IF node.type_args != NIL THEN
-      node.type_args.any?()
-    ELSE
-      NIL
-    END) THEN
+    IF node.type_args EXISTS AS type_args_value THEN
+      IF type_args_value.any?() THEN
       MUTABLE zig_args = (node.type_args |> SELECT TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY _ })))))).join(", ");
       type_name = "${node.name}(${zig_args})";
     ELSE
       type_name = COPY node.name;
+    END
     END
     MUTABLE field_operands = fields |> UNNEST { MUTABLE rtoc_value_block_marker = 0; MUTABLE field_ast = (IF literal_fields |> FIND (_._0 == CAST(_[:name] AS String)) != NIL THEN
       (literal_fields |> FIND (_._0 == CAST(_[:name] AS String))).last()
@@ -16367,14 +16351,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE raw_name = COPY CAST(node.result.name() AS String);
       MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[raw_name];
       transfer_name = mIRLowering__zig_safe_name(rtoc_self_view, raw_name);
-      IF (IF entry != NIL THEN
-        cleanupEntry__needs_cleanup?(entry)
-      ELSE
-        NIL
-      END) THEN
+      IF entry EXISTS AS entry_value THEN
+        IF cleanupEntry__needs_cleanup?(entry_value) THEN
         cleanupEntry__mark_moved_guard_mut(&entry);
         MUTABLE rtoc_index_receiver_595 = mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names;
         rtoc_index_receiver_595[transfer_name] = TRUE;
+      END
       END
     END
     MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, node.body));
@@ -17554,12 +17536,10 @@ PRIVATE FN mIRLowering__hash_literal_plan(self: MIRLowering, MUTABLE node: HashL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE expected_ti: ?Type = TRY (type__from_node(mIRLowering__function_state(rtoc_self_view).current_expected_type));
-    IF (IF expected_ti != NIL THEN
-      type__optional?(expected_ti)
-    ELSE
-      NIL
-    END) THEN
+    IF expected_ti EXISTS AS expected_ti_value THEN
+      IF type__optional?(expected_ti_value) THEN
       expected_ti = TRY (type__non_optional_type(expected_ti));
+    END
     END
     MUTABLE ti =   IF (IF expected_ti != NIL THEN
       type__map?(expected_ti)
@@ -20907,12 +20887,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       entry_branch_value = NIL;
     END
     MUTABLE entry: ?CleanupEntry@multiowned = entry_branch_value;
-    IF (IF entry != NIL THEN
-      cleanupEntry__present?(entry)
-    ELSE
-      NIL
-    END) THEN
+    IF entry EXISTS AS entry_value THEN
+      IF cleanupEntry__present?(entry_value) THEN
       RETURN (cleanupEntry__needs_cleanup?(entry) AND cleanupEntry__heap?(entry));
+    END
     END
     RETURN !(!((((root AND mIRLowering__current_function_takes_param_name?(rtoc_self_view, CAST(root.name() AS String))) AND ((root.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_769 = ((root.symbol)?);
     symbolEntry__heap_storage?(rtoc_local_receiver_769) })))));

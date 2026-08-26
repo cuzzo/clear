@@ -37,7 +37,7 @@ PUB FN mIRLoweringRuntimeState__emitter_mut(MUTABLE self: MIRLoweringRuntimeStat
   END
   current = mIREmitter__new();
   self.emitter = current;
-  RETURN UNWRAP (current);
+  RETURN current_value;
 END
 FN mIRLoweringRuntimeState__with_rt_name<U>(MUTABLE self: MIRLoweringRuntimeState, rt_name: String, blk: FN() -> U) RETURNS U ->
 MUTABLE previous = COPY self.rt_name;

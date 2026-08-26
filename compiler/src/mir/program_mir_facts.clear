@@ -153,12 +153,10 @@ PRIVATE FN programMIRFinalizer__finalized_runtime_input?(function: FunctionDef) 
   RETURN (((((((((CAST(function.name AS String) == name) OR !((function.conformance_protocol == NIL))) OR (function.uses_rt == TRUE)) OR programMIRFinalizer__function_error_context?(function)) OR (function.uses_alloc == TRUE)) OR (function.fn_value_ref == TRUE)) OR !((function.thunk_plan == NIL))) OR !((function.mutual_thunk_plan == NIL))) OR aST__recursion_yield_needed?(function));
 END
 PRIVATE FN programMIRFinalizer__function_error_context?(function: FunctionDef) RETURNS Bool ->
-  IF (IF function.pre_clauses != NIL THEN
-    type__any?(function.pre_clauses)
-  ELSE
-    NIL
-  END) THEN
+  IF function.pre_clauses EXISTS AS pre_clauses_value THEN
+    IF type__any?(pre_clauses_value) THEN
     RETURN TRUE;
+  END
   END
   IF (function.catch_clauses IS_A []Any AND type__any?(function.catch_clauses)) THEN
     RETURN TRUE;
