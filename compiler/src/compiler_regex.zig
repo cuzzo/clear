@@ -213,6 +213,26 @@ pub fn compilerByteStringLiteral(value: []const u8) []const u8 {
     return out.toOwnedSlice(allocator) catch @panic("byte literal allocation failed");
 }
 
+// Ruby's `String#chomp(separator)`, including its two special cases, which a
+// plain "strip the suffix" reading gets wrong: an EMPTY separator strips every
+// trailing newline rather than nothing, and a "\n" separator also takes the
+// "\r" of a trailing "\r\n". Found by differential corpus, not by reading.
+pub fn compilerStringChomp(value: []const u8, separator: []const u8) []const u8 {
+    if (separator.len == 0) {
+        var end = value.len;
+        while (end > 0 and value[end - 1] == '\n') {
+            end -= 1;
+            if (end > 0 and value[end - 1] == '\r') end -= 1;
+        }
+        return value[0..end];
+    }
+    if (separator.len > value.len) return value;
+    if (!std.mem.endsWith(u8, value, separator)) return value;
+    var end = value.len - separator.len;
+    if (std.mem.eql(u8, separator, "\n") and end > 0 and value[end - 1] == '\r') end -= 1;
+    return value[0..end];
+}
+
 pub fn compilerZigTranslateC(
     zig: []const u8,
     source_dir: []const u8,
@@ -703,4 +723,22 @@ test "compiler byte string literal escapes every non-ascii byte" {
     try std.testing.expectEqualStrings("\"\\x01\\x1f\\x7f\\x80\\xff\"", compilerByteStringLiteral("\x01\x1F\x7F\x80\xFF"));
     // A UTF-8 sequence stays byte-escaped rather than decoded.
     try std.testing.expectEqualStrings("\"caf\\xc3\\xa9\"", compilerByteStringLiteral("caf\xC3\xA9"));
+}
+
+test "compiler string chomp matches Ruby String#chomp(separator)" {
+    try std.testing.expectEqualStrings("a", compilerStringChomp("a;", ";"));
+    try std.testing.expectEqualStrings("a", compilerStringChomp("a", ";"));
+    // Ruby removes exactly one trailing occurrence, not all of them.
+    try std.testing.expectEqualStrings("a;", compilerStringChomp("a;;", ";"));
+    try std.testing.expectEqualStrings("", compilerStringChomp("", ";"));
+    try std.testing.expectEqualStrings("", compilerStringChomp(";", ";"));
+    // An empty separator strips every trailing newline, not nothing.
+    try std.testing.expectEqualStrings("abc", compilerStringChomp("abc", ""));
+    try std.testing.expectEqualStrings("x", compilerStringChomp("x\n\n", ""));
+    try std.testing.expectEqualStrings("x", compilerStringChomp("x\r\n", ""));
+    // A "\n" separator also takes the "\r" of a trailing "\r\n".
+    try std.testing.expectEqualStrings("x", compilerStringChomp("x\r\n", "\n"));
+    // A separator longer than the value cannot match.
+    try std.testing.expectEqualStrings("a", compilerStringChomp("a", ";;;"));
+    try std.testing.expectEqualStrings("foo", compilerStringChomp("foobar", "bar"));
 }

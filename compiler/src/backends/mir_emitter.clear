@@ -11,6 +11,7 @@ REQUIRE "../annotator/helpers/intrinsic_contract.clear"
 REQUIRE "../ast/async_result_shape.clear"
 EXTERN FN compilerStringDump(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerByteStringLiteral(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
@@ -2860,13 +2861,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cond: String = TRY (mIREmitter__emit(&rtoc_self_view, node.cond));
     MUTABLE cap: String = "";
     IF node.capture THEN
-      cap = " |${node.capture}|";
+      cap = " |${(node.capture OR_ELSE "")}|";
     ELSE
       cap = "";
     END
     MUTABLE upd: String = "";
     IF node.update THEN
-      MUTABLE update_code = (TRY (mIREmitter__emit(&rtoc_self_view, node.update))).chomp(";");
+      MUTABLE update_code = compilerStringChomp(TRY (mIREmitter__emit(&rtoc_self_view, node.update)), ";");
       upd = " : (${update_code})";
     ELSE
       upd = "";
@@ -2874,7 +2875,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
     MUTABLE capture_suppress: String = "";
     IF (node.capture AND (CAST(node.capture AS String) != "_")) THEN
-      capture_suppress = "_ = &${node.capture};\n";
+      capture_suppress = "_ = &${(node.capture OR_ELSE "")};\n";
     ELSE
       capture_suppress = "";
     END
@@ -2890,8 +2891,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE captures = ([node.capture, node.index_capture]).join(", ");
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
     IF mIREmitter__i64_range_capture_cast_required?(rtoc_self_view, node) THEN
-      MUTABLE raw_capture = "__${node.capture}_usize";
-      RETURN "for (${iter}) |${raw_capture}| {\nconst ${node.capture}: i64 = @intCast(${raw_capture});\n${body}\n}";
+      MUTABLE raw_capture = "__${(node.capture OR_ELSE "")}_usize";
+      RETURN "for (${iter}) |${raw_capture}| {\nconst ${(node.capture OR_ELSE "")}: i64 = @intCast(${raw_capture});\n${body}\n}";
     END
     RETURN "for (${iter}) |${captures}| {\n${body}\n}";
 }
@@ -3155,7 +3156,7 @@ PRIVATE FN mIREmitter__emit_break(MUTABLE self: MIREmitter, node: BreakStmt) RET
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE parts = ["break"];
     IF node.label THEN
-      &parts.append(":${node.label}");
+      &parts.append(":${(node.label OR_ELSE "")}");
     END
     IF node.value THEN
       &parts.append(TRY (mIREmitter__emit(&rtoc_self_view, node.value)));
@@ -3170,7 +3171,7 @@ PRIVATE FN mIREmitter__emit_break_expr(MUTABLE self: MIREmitter, node: BreakExpr
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE parts = ["break"];
     IF node.label THEN
-      &parts.append(":${node.label}");
+      &parts.append(":${(node.label OR_ELSE "")}");
     END
     IF node.value THEN
       &parts.append(TRY (mIREmitter__emit(&rtoc_self_view, node.value)));
@@ -3954,7 +3955,7 @@ PRIVATE FN mIREmitter__emit_struct_init(MUTABLE self: MIREmitter, node: StructIn
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fields = (node.fields |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE name: ?MIRReturnValue = mIR__struct_init_field_name(_); { MUTABLE rtoc_value_block_marker = 0; MUTABLE value: ?Emittable = mIR__struct_init_field_value(_); (IF !(((name != NIL) AND (value != NIL))) THEN NIL ELSE ".${mIREmitter__zig_field_name(rtoc_self_view, castOptionalMIRReturnValueToName(name))} = ${TRY (mIREmitter__emit_struct_init_field_value(&rtoc_self_view, value))}" END) } } |> WHERE _ != NIL).join(", ");
     IF node.zig_type THEN
-      RETURN "${node.zig_type}{ ${fields} }";
+      RETURN "${(node.zig_type OR_ELSE "")}{ ${fields} }";
     ELSE
       RETURN ".{ ${fields} }";
     END
@@ -4034,7 +4035,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       range = "${s}..";
     END
     IF node.elem_type THEN
-      RETURN "@as([]const ${node.elem_type}, ${target}[${range}])";
+      RETURN "@as([]const ${(node.elem_type OR_ELSE "")}, ${target}[${range}])";
     ELSE
       RETURN "${target}[${range}]";
     END
@@ -4048,7 +4049,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
     MUTABLE label_prefix: String = "";
     IF node.label THEN
-      label_prefix = "${node.label}: ";
+      label_prefix = "${(node.label OR_ELSE "")}: ";
     ELSE
       label_prefix = "";
     END
@@ -4132,7 +4133,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE catch_body: String = TRY (mIREmitter__emit(&rtoc_self_view, node.catch_body));
     MUTABLE cap: String = "";
     IF node.capture THEN
-      cap = " |${node.capture}|";
+      cap = " |${(node.capture OR_ELSE "")}|";
     ELSE
       cap = "";
     END
@@ -4194,7 +4195,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END) THEN
       then_expr = "@as(${TRY (type__zig_type(UNWRAP (node.result_type)))}, ${then_expr})";
     END
-    RETURN "(if (${TRY (mIREmitter__emit(&rtoc_self_view, node.optional))}) |${node.capture}| ${then_expr} else ${TRY (mIREmitter__emit(&rtoc_self_view, node.else_expr))})";
+    RETURN "(if (${TRY (mIREmitter__emit(&rtoc_self_view, node.optional))}) |${(node.capture OR_ELSE "")}| ${then_expr} else ${TRY (mIREmitter__emit(&rtoc_self_view, node.else_expr))})";
 }
 END
 PRIVATE FN mIREmitter__emit_allocator_ref(self: MIREmitter, node: AllocatorRef) RETURNS !String

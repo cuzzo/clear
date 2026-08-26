@@ -43,6 +43,7 @@ EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replace
 EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 UNION CapabilityAuditBodyFacts { BodyScanSummary: BodyScanSummary, FunctionBodySummary: FunctionBodySummary }
 UNION CapabilityAuditCall { FuncCall: FuncCall, MethodCall: MethodCall }
 UNION CapabilityAuditCodeOrMessage { StringValue: String, SymbolValue: String@symbol }
@@ -894,7 +895,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE line: ?String = COPY src_value.split("\n")[(line_num - 1)];
         IF line EXISTS AS line_value THEN
           MUTABLE text = line_value.trim();
-          text = text.chomp(";").trim();
+          text = compilerStringChomp(text, ";").trim();
           IF (text.length() == 0) THEN
             RETURN NIL;
           ELSE

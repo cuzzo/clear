@@ -19,6 +19,7 @@ EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool
 EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexFirstMatch(subject: String, regex: CompilerRegex) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
   RETURN COPY compilerRegexFirstMatch(subject, compilerRegexCompile(pattern));
 END
@@ -352,7 +353,7 @@ FN consumer_source_text(line_num: Int64) RETURNS ?String ->
     RETURN NIL;
   END
   MUTABLE text = line.trim();
-  text = text.chomp(";").trim();
+  text = compilerStringChomp(text, ";").trim();
   IF text.empty?() THEN
     RETURN NIL;
   ELSE

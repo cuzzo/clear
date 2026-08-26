@@ -26,3 +26,4 @@ EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_reg
 EXTERN FN compilerRepeatString(value: String, count: Int64) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerStringDump(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerByteStringLiteral(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
