@@ -86,11 +86,16 @@ class CleanupEntry < Hash
   # Total presence predicates -- safe on the NONE sentinel.
   # `present?` is true only for a real classifier-produced entry;
   # NONE replaces the old `nil` "this binding needs no cleanup".
+  # Identity alone was not enough: `entry.dup` (parameter materialization) and
+  # any other copy of the sentinel is a DIFFERENT object that is still empty,
+  # and it answered `present?` with true. `alloc` then cast a nil Symbol and
+  # took the compiler down with no diagnostic. Every real entry comes from a
+  # constructor that fills the recipe, so emptiness IS absence.
   sig { returns(T::Boolean) }
-  def none? = equal?(NONE)
+  def none? = equal?(NONE) || empty?
 
   sig { returns(T::Boolean) }
-  def present? = !equal?(NONE)
+  def present? = !none?
 
   sig { returns(T::Boolean) }
   def needs_cleanup? = self[:needs_cleanup] == true

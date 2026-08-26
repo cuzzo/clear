@@ -151,6 +151,28 @@ RSpec.describe CleanupClassifier do
       expect(plan.facts.entry_for("anything")).to equal(CleanupEntry::NONE)
     end
 
+    # `present?` promises "a real classifier-produced entry", but tested only
+    # object identity against the NONE sentinel. Any copy of NONE -- and
+    # `entry.dup` is on the parameter-materialization path -- answered
+    # `present?` with true, and then `alloc` cast a nil Symbol and crashed the
+    # compiler with no diagnostic.
+    it "treats a copy of the NONE sentinel as absent, not as a real entry" do
+      copy = CleanupEntry::NONE.dup
+
+      expect(copy).not_to equal(CleanupEntry::NONE)
+      expect(copy.none?).to eq(true)
+      expect(copy.present?).to eq(false)
+      expect(copy.needs_cleanup?).to eq(false)
+    end
+
+    it "still reports a built entry as present" do
+      built = CleanupEntry.build(:uniform, alloc: :heap)
+
+      expect(built.present?).to eq(true)
+      expect(built.none?).to eq(false)
+      expect(built.alloc).to eq(:heap)
+    end
+
     it "runs capture binding classification through the public plan entrypoint" do
       optional_list = Type.optional_of(Type.new(:"String[]"))
       weak_value = cleanup_identifier("weak", type: optional_list)
