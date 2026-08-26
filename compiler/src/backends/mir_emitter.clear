@@ -2417,14 +2417,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       vis = "";
     END
-    MUTABLE fields = (node.variants |> SELECT "${_[:name]}: ${_[:zig_type]},").join("\n    ");
-    MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT (TRY (mIREmitter__emit(&rtoc_self_view, _))).join("\n\n    ");
-    MUTABLE parts = mIREmitterJoinNonEmpty([fields, methods], "\n\n    ");
-    IF node.name THEN
-      RETURN "${vis}const ${castNamedEmittableReturnValueToString(node.name)} = union(enum) {\n    ${parts}\n};";
-    ELSE
-      RETURN "union(enum) {\n    ${parts}\n    }";
+    MUTABLE variant_parts: []String = List[];
+    FOR variant IN node.variants DO
+      &variant_parts.append("${CAST(variant.name AS String)}: ${variant.zig_type},");
     END
+    MUTABLE fields = variant_parts.join("\n    ");
+    MUTABLE method_parts: []String = List[];
+    FOR method IN (node.methods OR_ELSE List[]) DO
+      &method_parts.append(TRY (mIREmitter__emit(&rtoc_self_view, method)));
+    END
+    MUTABLE methods = method_parts.join("\n\n    ");
+    MUTABLE parts = mIREmitterJoinNonEmpty([fields, methods], "\n\n    ");
+    IF node.name EXISTS AS union_name THEN
+      RETURN "${vis}const ${union_name} = union(enum) {\n    ${parts}\n};";
+    END
+    RETURN "union(enum) {\n    ${parts}\n    }";
 }
 END
 PRIVATE FN mIREmitter__emit_import(self: MIREmitter, node: Import) RETURNS String
@@ -2442,7 +2449,7 @@ PRIVATE FN mIREmitter__emit_type_alias(self: MIREmitter, node: TypeAlias) RETURN
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN "pub const ${castNamedEmittableReturnValueToString(node.name)} = ${node.target};\ncomptime { _ = @typeName(${castNamedEmittableReturnValueToString(node.name)}); }";
+    RETURN "pub const ${node.name} = ${node.target};\ncomptime { _ = @typeName(${node.name}); }";
 }
 END
 PRIVATE FN mIREmitter__emit_c_extern_fn_decl(self: MIREmitter, node: CExternFnDecl) RETURNS !String
@@ -2461,7 +2468,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       :winapi -> ".winapi",
       DEFAULT -> ".c"
     END;
-    RETURN "extern \"${library}\" fn ${castNamedEmittableReturnValueToString(node.name)}(${params}) callconv(${callconv}) ${node.return_type};";
+    RETURN "extern \"${library}\" fn ${node.name}(${params}) callconv(${callconv}) ${node.return_type};";
 }
 END
 PRIVATE FN mIREmitter__emit_c_extern_struct_def(self: MIREmitter, node: CExternStructDef) RETURNS !String
@@ -2469,7 +2476,7 @@ PRIVATE FN mIREmitter__emit_c_extern_struct_def(self: MIREmitter, node: CExternS
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fields = (node.fields |> SELECT "${_.name()}: ${TRY (type__zig_type(_))}").join(", ");
-    RETURN "const ${castNamedEmittableReturnValueToString(node.name)} = extern struct { ${fields} };";
+    RETURN "const ${node.name} = extern struct { ${fields} };";
 }
 END
 PRIVATE FN mIREmitter__emit_module_namespace(MUTABLE self: MIREmitter, node: ModuleNamespace) RETURNS !String
