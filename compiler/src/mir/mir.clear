@@ -44,7 +44,7 @@ PUB STRUCT FnDef {
   body: []Emittable,
   visibility: String@symbol,
   can_fail: Any@multiowned,
-  comptime_params: Any@multiowned,
+  comptime_params: ?[]String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,

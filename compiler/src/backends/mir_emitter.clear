@@ -2201,15 +2201,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE acquire_arms = acquire_parts.join("\n                                ");
     MUTABLE release_arms = release_parts.join("\n                            ");
     MUTABLE handler_switch = TRY (mIREmitter__emit_sorted_lock_handler_switch(&rtoc_self_view, action, node.matched_types, node.bubble_types, node.rt_name, CAST(node.source_line AS String)));
-    MUTABLE retry_branch: String = "";
-    IF node.retries THEN
-      retry_branch = "if (__retry + 1 < ${node.retries}) continue;";
-    ELSE
-      retry_branch = "// no retries configured";
+    MUTABLE retry_branch: String = "// no retries configured";
+    IF node.retries EXISTS AS retries_value THEN
+      retry_branch = "if (__retry + 1 < ${retries_value.toString()}) continue;";
     END
     MUTABLE defer_releases = (entries |> SELECT "defer if (${_.held_var}) ${_.guard_var}.release();").join("\n");
     MUTABLE alias_decls = (entries |> SELECT "const ${_.alias_name} = ${_.guard_var}.get;\n_ = &${_.alias_name};").join("\n");
-    RETURN regexReplaceAll("${guard_decls}\n${held_decls}\n${node.loop_label}: {\n    var __retry: usize = 0;\n    while (true) : (__retry += 1) {\n        const __ptrs = [_]usize{ ${ptr_init} };\n        var __order = [_]u8{ ${order_init} };\n        var __i: usize = 0;\n        while (__i < ${n}) : (__i += 1) {\n            var __j: usize = 0;\n            while (__j + 1 < ${n}) : (__j += 1) {\n                if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {\n                    const __tmp = __order[__j];\n                    __order[__j] = __order[__j + 1];\n                    __order[__j + 1] = __tmp;\n                }\n            }\n        }\n        var __success = true;\n        var __err_caught: ?anyerror = null;\n        var __k: usize = 0;\n        while (__k < ${n}) : (__k += 1) {\n            const __idx = __order[__k];\n            switch (__idx) {\n                ${acquire_arms}\n                else => unreachable,\n            }\n            if (!__success) break;\n        }\n        if (__success) break :${node.loop_label};\n        var __r: usize = __k;\n        while (__r > 0) {\n            __r -= 1;\n            switch (__order[__r]) {\n                ${release_arms}\n                else => unreachable,\n            }\n        }\n        ${retry_branch}\n        ${handler_switch}\n        unreachable;\n    }\n}\n${defer_releases}\n${alias_decls}\n", "\\s+\\z", "");
+    RETURN regexReplaceAll("${guard_decls}\n${held_decls}\n${node.loop_label}: {\n    var __retry: usize = 0;\n    while (true) : (__retry += 1) {\n        const __ptrs = [_]usize{ ${ptr_init} };\n        var __order = [_]u8{ ${order_init} };\n        var __i: usize = 0;\n        while (__i < ${n.toString()}) : (__i += 1) {\n            var __j: usize = 0;\n            while (__j + 1 < ${n.toString()}) : (__j += 1) {\n                if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {\n                    const __tmp = __order[__j];\n                    __order[__j] = __order[__j + 1];\n                    __order[__j + 1] = __tmp;\n                }\n            }\n        }\n        var __success = true;\n        var __err_caught: ?anyerror = null;\n        var __k: usize = 0;\n        while (__k < ${n.toString()}) : (__k += 1) {\n            const __idx = __order[__k];\n            switch (__idx) {\n                ${acquire_arms}\n                else => unreachable,\n            }\n            if (!__success) break;\n        }\n        if (__success) break :${node.loop_label};\n        var __r: usize = __k;\n        while (__r > 0) {\n            __r -= 1;\n            switch (__order[__r]) {\n                ${release_arms}\n                else => unreachable,\n            }\n        }\n        ${retry_branch}\n        ${handler_switch}\n        unreachable;\n    }\n}\n${defer_releases}\n${alias_decls}\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_sorted_lock_handler_switch(MUTABLE self: MIREmitter, action: FailureAction, matched: []String@symbol, bubble: []String@symbol, rt_name: String, source_line: String) RETURNS !String
@@ -2219,13 +2217,19 @@ PRIVATE FN mIREmitter__emit_sorted_lock_handler_switch(MUTABLE self: MIREmitter,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE handler_arms: []String = ( { MUTABLE rtoc_empty_list_34: []String = List[]; rtoc_empty_list_34 } );
     IF !((matched.length() == 0)) THEN
-      MUTABLE matched_errs = (matched |> SELECT "error.${TRY (aST__zig_name_of_type(_))}").join(", ");
+      # Same nilable-interpolation rule as the fallible-lock handler: Ruby
+      # renders a nil name as the empty string, and CLEAR rejects `?String`.
+      MUTABLE matched_parts: []String = List[];
+      FOR matched_type IN matched DO
+        &matched_parts.append("error.${(TRY (aST__zig_name_of_type(matched_type))) OR_ELSE ""}");
+      END
+      MUTABLE matched_errs = matched_parts.join(", ");
       &handler_arms.append("${matched_errs} => { ${TRY (mIREmitter__emit_failure_action(&rtoc_self_view, action))} }");
     END
-    FOR _ IN bubble DO
-    MUTABLE zig: ?String = TRY (aST__zig_name_of_type(_));
-    MUTABLE kind: ?String@symbol = TRY (aST__kind_of_type(_));
-    &handler_arms.append("error.${zig} => { ${rt_name}.setError(.${UNWRAP (kind)}, @intFromEnum(ErrorName.${zig}), \"lock ${zig}\", ${source_line}); return error.CheatError; }");
+    FOR bubble_type IN bubble DO
+      MUTABLE zig: String = (TRY (aST__zig_name_of_type(bubble_type))) OR_ELSE "";
+      MUTABLE kind: String = CAST((TRY (aST__kind_of_type(bubble_type))) OR_ELSE symbol("") AS String);
+      &handler_arms.append("error.${zig} => { ${rt_name}.setError(.${kind}, @intFromEnum(ErrorName.${zig}), \"lock ${zig}\", ${source_line}); return error.CheatError; }");
     END
     &handler_arms.append("else => |__err_other| { ${rt_name}.setError(.System, 0, @errorName(__err_other), ${source_line}); return error.CheatError; }");
     RETURN "switch (__err_caught.?) {\n                    ${handler_arms.join(",\n                    ")},\n                }";
@@ -2236,22 +2240,28 @@ PRIVATE FN mIREmitter__emit_program(MUTABLE self: MIREmitter, node: MIRProgram) 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE parts = node.items |> SELECT:? TRY (mIREmitter__emit_container_item(&rtoc_self_view, _)) |> WHERE _ != NIL;
+    # `emit_container_item` returns `!String`, never nil, so Ruby's filter_map
+    # is a plain map here; `SELECT:?` claimed an optional selector result.
+    MUTABLE parts: []String = List[];
+    FOR container_item IN node.items DO
+      &parts.append(TRY (mIREmitter__emit_container_item(&rtoc_self_view, container_item)));
+    END
     MUTABLE symbol_pool = mIREmitter__symbol_pool_declarations(rtoc_self_view);
     IF !((symbol_pool.length() == 0)) THEN
       parts = ([symbol_pool] + parts);
     END
-    MUTABLE out = List[];
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < parts.length() DO
-    IF (rtoc_idx == 0) THEN
-        &out.append(COPY parts[rtoc_idx]);
-    ELSE_IF parts[(rtoc_idx - 1)].startsWith?("// CLR:") THEN
-        &out.append("\n${parts[rtoc_idx]}");
-    ELSE
-        &out.append("\n\n${parts[rtoc_idx]}");
-    END
-    rtoc_idx = rtoc_idx + 1;
+    MUTABLE out: []String = List[];
+    MUTABLE rtoc_idx: Int64 = 0;
+    WHILE (rtoc_idx < parts.length()) DO
+      MUTABLE part: String = COPY UNWRAP (parts[rtoc_idx]);
+      IF (rtoc_idx == 0) THEN
+        &out.append(COPY part);
+      ELSE_IF (UNWRAP (parts[(rtoc_idx - 1)])).startsWith?("// CLR:") THEN
+        &out.append("\n${part}");
+      ELSE
+        &out.append("\n\n${part}");
+      END
+      rtoc_idx = (rtoc_idx + 1);
     END
     RETURN out.join("");
 }
