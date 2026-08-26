@@ -2041,6 +2041,18 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
+# `[a, b].reject(&:empty?).join(sep)`. Written out because the machine
+# translation bound `.join` to the WHERE predicate rather than to the
+# filtered list, so every one of these joined a Bool.
+PRIVATE FN mIREmitterJoinNonEmpty(parts: []String, separator: String) RETURNS String ->
+  MUTABLE kept: []String = List[];
+  FOR part IN parts DO
+    IF !(part.empty?()) THEN
+      &kept.append(COPY part);
+    END
+  END
+  RETURN kept.join(separator);
+END
 PRIVATE FN mIREmitter__zig_string_literal(self: MIREmitter, text: String) RETURNS String
   REQUIRES self: LOCAL
 ->
@@ -2296,9 +2308,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       vis = "";
     END
-    MUTABLE comptime = ((node.comptime_params OR_ELSE List[])).join(", ");
-    MUTABLE params = (node.params |> SELECT "${_.name}: ${_.zig_type}").join(", ");
-    MUTABLE all_params = ([comptime, params]) |> WHERE !(_.empty?()).join(", ");
+    MUTABLE comptime = (node.comptime_params OR_ELSE List[]).join(", ");
+    MUTABLE param_parts: []String = List[];
+    FOR fn_param IN node.params DO
+      &param_parts.append("${fn_param.name}: ${fn_param.zig_type}");
+    END
+    MUTABLE params = param_parts.join(", ");
+    # `[comptime, params].reject(&:empty?)` bound `.join` to the WHERE
+    # predicate instead of to the filtered list.
+    MUTABLE all_param_parts: []String = List[];
+    IF !(comptime.empty?()) THEN
+      &all_param_parts.append(COPY comptime);
+    END
+    IF !(params.empty?()) THEN
+      &all_param_parts.append(COPY params);
+    END
+    MUTABLE all_params = all_param_parts.join(", ");
     MUTABLE ret: String = "";
     IF node.can_fail THEN
       ret = "!${node.ret_type}";
@@ -2310,17 +2335,25 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF runtime_param EXISTS THEN
       cache_name = mIREmitter__unique_heap_allocator_cache_name(rtoc_self_view);
     END
-    MUTABLE body = mIREmitter__with_heap_allocator_cache(&rtoc_self_view, cache_name, runtime_param?.name, %() USE(node, runtime_param, MUTABLE rtoc_self_view) -> {
-    IF runtime_param THEN
-      RETURN TRY (mIREmitter__emit_body_with_runtime(&rtoc_self_view, node.body, runtime_param.name));
-    ELSE
-      RETURN TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
+    # `runtime_param` is a FIND result, so every read of it needs the presence
+    # it was found with; the translation dropped that on three of four reads.
+    MUTABLE runtime_param_name: String = "";
+    IF runtime_param EXISTS AS runtime_param_value THEN
+      runtime_param_name = COPY runtime_param_value.name;
     END
-    NIL
+    MUTABLE body = mIREmitter__with_heap_allocator_cache(&rtoc_self_view, cache_name, runtime_param?.name, %() USE(node, runtime_param, runtime_param_name, MUTABLE rtoc_self_view) -> {
+    MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE rtoc_body_text: String = "";
+    IF (runtime_param != NIL) THEN
+      rtoc_body_text = TRY (mIREmitter__emit_body_with_runtime(&rtoc_self_view, node.body, runtime_param_name));
+    ELSE
+      rtoc_body_text = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
+    END
+    rtoc_body_text
     });
     IF ((cache_name != NIL) AND body.contains?(cache_name)) THEN
-      MUTABLE cache_init = "const ${cache_name} = ${runtime_param.name}.heapAlloc(); _ = &${cache_name};";
-      body = (CAST(Tuple{cache_init, body} AS Tuple<String, U>)) |> WHERE !(_.empty?()).join("\n");
+      MUTABLE cache_init = "const ${cache_name} = ${runtime_param_name}.heapAlloc(); _ = &${cache_name};";
+      body = mIREmitterJoinNonEmpty([cache_init, body], "\n");
     END
     RETURN "${vis}fn ${node.name}(${all_params}) ${ret} {\n${body}\n}";
 }
@@ -2336,22 +2369,27 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       vis = "";
     END
-    MUTABLE fields = ((((node.fields OR_ELSE List[]))) |> SELECT {
-    MUTABLE default: String = "";
-      IF _.default() THEN
-        default = " = ${TRY (mIREmitter__emit(&rtoc_self_view, _.default()))}";
-      ELSE
-        default = "";
+    # `f.zig_type` is the FieldDef's own field; `type__zig_type(_)` asked the
+    # Type module to render the FieldDef itself.
+    MUTABLE field_parts: []String = List[];
+    FOR field IN node.fields DO
+      MUTABLE default: String = "";
+      IF field.default EXISTS AS default_value THEN
+        default = " = ${TRY (mIREmitter__emit(&rtoc_self_view, default_value))}";
       END
-    "${mIREmitter__zig_field_name(rtoc_self_view, _.name())}: ${TRY (type__zig_type(_))}${default},"
-    }).join("\n    ");
-    MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT (TRY (mIREmitter__emit(&rtoc_self_view, _))).join("\n\n    ");
-    MUTABLE parts = ([fields, methods]) |> WHERE !(_.empty?()).join("\n\n    ");
-    IF node.name THEN
-      RETURN "${vis}const ${node.name} = struct {\n    ${parts}\n};";
-    ELSE
-      RETURN "struct {\n    ${parts}\n    }";
+      &field_parts.append("${mIREmitter__zig_field_name(rtoc_self_view, Name{ StringValue: COPY field.name })}: ${field.zig_type}${default},");
     END
+    MUTABLE fields = field_parts.join("\n    ");
+    MUTABLE method_parts: []String = List[];
+    FOR method IN (node.methods OR_ELSE List[]) DO
+      &method_parts.append(TRY (mIREmitter__emit(&rtoc_self_view, method)));
+    END
+    MUTABLE methods = method_parts.join("\n\n    ");
+    MUTABLE parts = mIREmitterJoinNonEmpty([fields, methods], "\n\n    ");
+    IF node.name EXISTS AS struct_name THEN
+      RETURN "${vis}const ${struct_name} = struct {\n    ${parts}\n};";
+    END
+    RETURN "struct {\n    ${parts}\n    }";
 }
 END
 PRIVATE FN mIREmitter__emit_enum_def(self: MIREmitter, node: MIREnumDef) RETURNS String
@@ -2381,7 +2419,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE fields = (node.variants |> SELECT "${_[:name]}: ${_[:zig_type]},").join("\n    ");
     MUTABLE methods = (((node.methods OR_ELSE List[]))) |> SELECT (TRY (mIREmitter__emit(&rtoc_self_view, _))).join("\n\n    ");
-    MUTABLE parts = ([fields, methods]) |> WHERE !(_.empty?()).join("\n\n    ");
+    MUTABLE parts = mIREmitterJoinNonEmpty([fields, methods], "\n\n    ");
     IF node.name THEN
       RETURN "${vis}const ${castNamedEmittableReturnValueToString(node.name)} = union(enum) {\n    ${parts}\n};";
     ELSE

@@ -198,9 +198,9 @@ FN param__owned_effect_for_alloc(self: MIRParam, alloc: ?String@symbol, cleanup_
   RETURN ownershipEffect__owned(alloc, cleanup_kind);
 END
 PUB STRUCT MIRStructDef {
-  name: String,
-  fields: String,
-  methods: Any@multiowned,
+  name: ?String,
+  fields: []FieldDef,
+  methods: ?[]Emittable,
   visibility: String@symbol,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
@@ -208,14 +208,14 @@ PUB STRUCT MIRStructDef {
   source_line: ?Int64
 }
 
-PUB FN mIRStructDef__name(self: MIRStructDef) RETURNS String ->
-  COPY self.name;
+PUB FN mIRStructDef__name(self: MIRStructDef) RETURNS ?String ->
+  RETURN COPY self.name;
 END
-PUB FN mIRStructDef__fields(self: MIRStructDef) RETURNS String ->
-  COPY self.fields;
+PUB FN mIRStructDef__fields(self: MIRStructDef) RETURNS []FieldDef ->
+  RETURN COPY self.fields;
 END
-PUB FN mIRStructDef__methods(self: MIRStructDef) RETURNS Any@multiowned ->
-  RETURN KEEP self.methods;
+PUB FN mIRStructDef__methods(self: MIRStructDef) RETURNS ?[]Emittable ->
+  RETURN COPY self.methods;
 END
 PUB FN mIRStructDef__visibility(self: MIRStructDef) RETURNS String@symbol ->
   COPY self.visibility;
@@ -234,11 +234,11 @@ PUB FN mIRStructDef__source_line(self: MIRStructDef) RETURNS ?Int64 ->
 END
 
 FN structDef__body_slots(MUTABLE self: MIRStructDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  IF !(self.methods) THEN
-    MUTABLE empty_body_slots: []MIRBodySlot = [];
-    RETURN empty_body_slots;
+  IF self.methods EXISTS AS methods_value THEN
+    RETURN CAST([structDef__body_slot(self, :methods, methods_value)] AS []MIRBodySlot);
   END
-  RETURN CAST([structDef__body_slot(self, :methods, self.methods)] AS []MIRBodySlot);
+  MUTABLE empty_body_slots: []MIRBodySlot = [];
+  RETURN empty_body_slots;
 END
 FN structDef__name(self: MIRStructDef) RETURNS StructDefReturnValue ->
 
@@ -299,7 +299,7 @@ END
 PUB STRUCT FieldDef {
   name: String,
   zig_type: String,
-  default: Any@multiowned,
+  default: ?Emittable,
   boxed_capture: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
