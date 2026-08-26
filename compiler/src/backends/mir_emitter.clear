@@ -2353,7 +2353,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_body_text
     });
     IF ((cache_name != NIL) AND body.contains?(cache_name)) THEN
-      MUTABLE cache_init = "const ${(cache_name OR_ELSE "")} = ${runtime_param_name}.heapAlloc(); _ = &${(cache_name OR_ELSE "")};";
+      MUTABLE cache_init = "const ${cache_name} = ${runtime_param_name}.heapAlloc(); _ = &${cache_name};";
       body = mIREmitterJoinNonEmpty([cache_init, body], "\n");
     END
     RETURN "${vis}fn ${node.name}(${all_params}) ${ret} {\n${body}\n}";
@@ -3600,7 +3600,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         type_arg = ((storage_zig_type OR "@TypeOf(${src})"));
       END
       IF (node.copy_shape == :slice) THEN
-        RETURN "${bc}: { const __copy_src = ${src}; break :${bc} try CheatLib.dupeValue(${type_arg}, __copy_src, ${(alloc OR_ELSE "")}); }";
+        RETURN "${bc}: { const __copy_src = ${src}; break :${bc} try CheatLib.dupeValue(${type_arg}, __copy_src, ${alloc}); }";
       ELSE
         MUTABLE pointer_type_arg: String = "";
         IF (node.copy_shape == :pointer) THEN
@@ -3614,7 +3614,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           pointer_value = "__copy_src";
         END
-        RETURN "${bc}: { const __copy_src = ${src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :${bc} try CheatLib.dupeValue(${pointer_type_arg}, ${pointer_value}, ${(alloc OR_ELSE "")}); } else { break :${bc} try CheatLib.dupeValue(${type_arg}, __copy_src, ${(alloc OR_ELSE "")}); } }";
+        RETURN "${bc}: { const __copy_src = ${src}; if (comptime @typeInfo(@TypeOf(__copy_src)) == .pointer and @typeInfo(@TypeOf(__copy_src)).pointer.size == .one) { break :${bc} try CheatLib.dupeValue(${pointer_type_arg}, ${pointer_value}, ${alloc}); } else { break :${bc} try CheatLib.dupeValue(${type_arg}, __copy_src, ${alloc}); } }";
       END
     ELSE
       panic("MIREmitter#emit_deep_copy: unhandled strategy :{}");

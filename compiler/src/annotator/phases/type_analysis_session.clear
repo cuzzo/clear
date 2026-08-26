@@ -9355,7 +9355,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE actual: String = "";
         IF ((snapshot_sync != NIL) AND (snapshot_layout == :indirect)) THEN
-          actual = "@boxed:${(snapshot_sync OR_ELSE "")}";
+          actual = "@boxed:${snapshot_sync}";
         ELSE_IF snapshot_sync EXISTS AS snapshot_sync_value THEN
           actual = "@${snapshot_sync_value}";
         ELSE

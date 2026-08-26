@@ -61,7 +61,7 @@ sources.each do |path|
     # A nil check narrows the binding for the rest of its branch, so an
     # interpolation after one is already a plain String. Reporting those
     # produced an OR_ELSE on a non-optional -- the opposite error.
-    optional_locals.delete(Regexp.last_match(1)) if line =~ /IF \(?(\w+) (?:!= NIL|EXISTS)/
+    line.scan(/(\w+) (?:!= NIL|EXISTS)/) { |(narrowed)| optional_locals.delete(narrowed) }
     next if line.strip.start_with?('#')
 
     line.scan(/\$\{([a-z_]\w*)\}/) do |(name)|
