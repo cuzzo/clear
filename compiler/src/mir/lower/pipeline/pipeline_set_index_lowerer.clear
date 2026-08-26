@@ -71,7 +71,7 @@ PUB FN pipelineSetIndexLowerer__lower_index(self: PipelineSetIndexLowerer, MUTAB
     MUTABLE elem_type = TRY (pipelineSetIndexLowerer__index_stream_element_type(self, &list_node, lhs_type, &range_chain_value_mutable.source));
     elem_zig = pipelineSetIndexLowerer__transpile_type_call(self, type__to_s(elem_type));
     MUTABLE map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(${elem_zig}))";
-    RETURN TRY (pipelineSetIndexLowerer__lower_stream_index(self, range_chain_value_mutable, expr_node, elem_zig, CAST(elem_type AS Type), alloc, map_type, TRY (type__from_node_mut(smooth_node, "INDEX result"))));
+    RETURN TRY (pipelineSetIndexLowerer__lower_stream_index(self, range_chain_value_mutable, expr_node, elem_zig, CAST(elem_type AS Type), alloc, map_type, TRY (type__from_node_mut(Locatable{ BinaryOp: COPY smooth_node }, "INDEX result"))));
   END
   MUTABLE elem_type: ?Type = TRY (type__element_type((TRY (aST__full_type_mut(list_node)))));
   elem_zig = pipelineSetIndexLowerer__transpile_type_call(self, PipelineTypeInput{ SymbolValue: COPY type__resolved(UNWRAP (elem_type)) });

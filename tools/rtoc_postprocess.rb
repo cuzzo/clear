@@ -672,7 +672,9 @@ module RtocPostprocess
 
         argument_text.split(/,\s*(?![^()]*\))/).each_with_index do |argument, slot|
           argument = argument.strip
-          expected = declared[slot]
+          expected = declared[slot]&.delete_prefix('?')
+          # An OPTIONAL union parameter still needs the wrap; keying on the
+          # literal `?Emittable` missed `emit(node.alloc_ref)` entirely.
           next unless expected && index.union_variants.key?(expected)
           # A name can be BOTH a union and a struct -- `Type` is a struct in
           # ast/type.clear and a union in pipeline_host.clear. Wrapping on the

@@ -3764,7 +3764,7 @@ PRIVATE FN mIREmitter__emit_freeze(MUTABLE self: MIREmitter, node: FreezeExpr) R
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN "try CheatLib.freeze(${node.zig_base}, ${TRY (mIREmitter__emit(&rtoc_self_view, node.alloc_ref))}, ${TRY (mIREmitter__emit(&rtoc_self_view, node.inner))})";
+    RETURN "try CheatLib.freeze(${node.zig_base}, ${TRY (mIREmitter__emit(&rtoc_self_view, Emittable{ AllocatorRef: COPY node.alloc_ref }))}, ${TRY (mIREmitter__emit(&rtoc_self_view, node.inner))})";
 }
 END
 PRIVATE FN mIREmitter__emit_make_list(MUTABLE self: MIREmitter, node: MakeList) RETURNS !String

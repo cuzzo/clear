@@ -1252,14 +1252,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE left = TRY (mIRLowering__place_or_branch_value_for_destination(rtoc_self_view, tryCatch__expr(try_catch_mutable), ast_node.left));
       MUTABLE right = TRY (mIRLowering__place_or_branch_value_for_destination(rtoc_self_view, try_catch_mutable.catch_body, ast_node.right));
       MUTABLE out = TryCatch{ expr: COPY left, catch_body: COPY right, capture: try_catch_mutable.capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-      out.result_type = TRY (type__from_node_mut(ast_node, "string OR destination result"));
+      out.result_type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY ast_node }, "string OR destination result"));
       RETURN Emittable{ TryCatch: COPY out };
     ELSE_IF mir IS_A Orelse AS orelse THEN
       MUTABLE orelse_mutable = COPY orelse;
       MUTABLE left = TRY (mIRLowering__place_or_branch_value_for_destination(rtoc_self_view, orelse__expr(orelse_mutable), ast_node.left));
       MUTABLE right = TRY (mIRLowering__place_or_branch_value_for_destination(rtoc_self_view, orelse_mutable.fallback, ast_node.right));
       MUTABLE out = Orelse{ expr: COPY left, fallback: COPY right, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-      out.result_type = TRY (type__from_node_mut(ast_node, "string OR destination result"));
+      out.result_type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY ast_node }, "string OR destination result"));
       RETURN Emittable{ Orelse: COPY out };
     ELSE
       RETURN TRY (mIRLowering__place_string_value_for_heap_destination(rtoc_self_view, mir, Locatable{ BinaryOp: COPY ast_node }));
@@ -5940,7 +5940,7 @@ PRIVATE FN mIRLowering__make_rc_retain(MUTABLE self: MIRLowering, value_node: Id
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE ti = TRY (type__from_node_mut(value_node, "rc retain emit"));
+    MUTABLE ti = TRY (type__from_node_mut(Locatable{ Identifier: COPY value_node }, "rc retain emit"));
     MUTABLE func: String = "";
     IF type__shared?(ti) THEN
       func = "arcRetain";
@@ -13470,9 +13470,9 @@ PRIVATE FN mIRLowering__fsm_bg_block_from_transform_mut(self: MIRLowering, MUTAB
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fsm_structure = COPY transform_result.structure;
-    MUTABLE result_type = TRY (type__tense_type((TRY (type__from_node_mut(node, "FSM BG result")))));
+    MUTABLE result_type = TRY (type__tense_type((TRY (type__from_node_mut(Locatable{ BgBlock: COPY node }, "FSM BG result")))));
     fsm_structure.owned_result_required = !(!(((TRUE AND mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type)))));
-    TRY (mIRChecker__check_fsm_structure_mut(fsm_structure, node));
+    TRY (mIRChecker__check_fsm_structure_mut(fsm_structure, Locatable{ BgBlock: COPY node }));
     MUTABLE bg = MIRBgBlock{ code: castFsmBodyToBgBlockPlan(COPY transform_result.body), captures: COPY captured, run_body: ( { MUTABLE rtoc_empty_list_516: []Emittable = List[]; rtoc_empty_list_516 } ), fsm_structure: Emittable{ FsmStructure: COPY fsm_structure }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
     bg.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BgBlock: COPY node })) }));
     bg.boundary_fact = TRY (mIRLowering__execution_boundary_fact(rtoc_self_view, :bg, mIRLowering__execution_boundary_dispatch(rtoc_self_view, node.parallel, Pinned{ BoolValue: node.pinned }), analysis));
@@ -14640,7 +14640,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END;
     MUTABLE mir_result: ?PipelineLoweringResult = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_549 = (TRY (mIRLowering__pipeline_host(rtoc_self_view)));
     TRY (pipelineHost__lower_pipeline(&rtoc_mutable_receiver_549, node)) };
-    MUTABLE result_type = TRY (type__from_node_mut(node, "pipeline result ownership"));
+    MUTABLE result_type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "pipeline result ownership"));
     MUTABLE sink_alloc: ?String@symbol = TRY (mIRLowering__complex_pipeline_sink_alloc(rtoc_self_view, mir_result, result_type, node));
     IF mir_result EXISTS AS mir_result_value THEN
       RETURN Emittable{ Pipeline: COPY Pipeline{ ast_node: node, inner: castPipelineLoweringResultToEmittable(COPY mir_result_value), source_type: source_type, stages: NIL, sink: NIL, sink_alloc: sink_alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
@@ -14909,7 +14909,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE right = mIRLowering__lower_scoped(rtoc_self_view, %() USE(fallback_type, node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_556 = mIRLowering__with_expected_type(rtoc_self_view, CAST(fallback_type AS ?Type), %() USE(node, MUTABLE rtoc_self_view) -> {
     MUTABLE fallback_mir: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.right))) AS Emittable);
-    MUTABLE merge_type = TRY (type__from_node_mut(node, "OR_ELSE merge type"));
+    MUTABLE merge_type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "OR_ELSE merge type"));
     IF TRY (type__byte_string?(merge_type)) THEN
         fallback_mir = TRY (mIRLowering__widen_symbol_to_bytes(rtoc_self_view, fallback_mir, node.right));
     ELSE_IF ((type__symbol?(merge_type) AND node.right IS_A Literal) AND (castLocatableToLiteral(node.right).type == :STRING)) THEN
@@ -14923,13 +14923,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE caught = TRY (mIRLowering__try_catch_with_provenance(rtoc_self_view, left, right, NIL, castEmittableToOptionalMIRLoweringFallback(right)));
       IF facts.left_success_optional THEN
         MUTABLE out = Orelse{ expr: Emittable{ TryCatch: COPY caught }, fallback: COPY right, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-        out.result_type = TRY (type__from_node_mut(node, "fallible optional OR_ELSE result"));
+        out.result_type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "fallible optional OR_ELSE result"));
         RETURN Emittable{ Orelse: COPY out };
       END
       RETURN Emittable{ TryCatch: COPY caught };
     END
     MUTABLE out = Orelse{ expr: COPY left, fallback: COPY right, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-    MUTABLE result_type = TRY (type__from_node_mut(node, "optional OR_ELSE result"));
+    MUTABLE result_type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "optional OR_ELSE result"));
     out.result_type = result_type;
     MUTABLE left_named_owner = (((node.left IS_A Identifier AND node.left.symbol) AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_557 = node.left.symbol;
     symbolEntry__rodata_provenance?(rtoc_local_receiver_557) })) AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_558 = node.left.symbol;
@@ -16969,7 +16969,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         SharePromote{ source: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_base: COPY zig_base, alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL }
       END;
       MUTABLE shared = IfOptional{ optional: COPY source, capture: COPY capture, then_expr: COPY shared_payload, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-      shared.result_type = TRY (type__from_node_mut(node, "SHARE optional result"));
+      shared.result_type = TRY (type__from_node_mut(Locatable{ ShareNode: COPY node }, "SHARE optional result"));
       IF type__shared?(wrapped) THEN
         RETURN Emittable{ IfOptional: COPY shared };
       END
@@ -18782,7 +18782,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(target.mutable) THEN
       RETURN :const;
     END
-    MUTABLE ft = TRY (type__from_node_mut(target, "destructure target declaration"));
+    MUTABLE ft = TRY (type__from_node_mut(Locatable{ DestructureTarget: COPY target }, "destructure target declaration"));
     MUTABLE forced_var = ((((((((type__collection?(ft) OR TRY (type__dynamic_stream?(ft))) OR TRY (type__bounded_stream?(ft))) OR type__shared_promise?(ft)) OR TRY (type__open_stream?(ft))) OR TRY (type__inf_stream?(ft))) OR ((type__array?(ft) AND type__dynamic?(ft)))) OR type__any_sync?(ft)) OR type__resource?(ft));
     IF ((target.var_mutated == TRUE) OR forced_var) THEN
       RETURN :var;

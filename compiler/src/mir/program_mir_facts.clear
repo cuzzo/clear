@@ -208,7 +208,7 @@ PRIVATE FN programMIRFinalizer__owned_or_else_lowers_through_runtime?(node: Bina
   IF !(((node.op == symbol("OR_ELSE")) OR (node.op == symbol("OR")))) THEN
     RETURN FALSE;
   END
-  MUTABLE type = TRY (type__success_type((TRY (type__from_node_mut(node, "owned OR runtime requirement")))));
+  MUTABLE type = TRY (type__success_type((TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "owned OR runtime requirement")))));
   RETURN (((((TRY (type__string?(type)) OR TRY (type__heap_ptr?(type))) OR TRY (type__collection_value?(type))) OR type__collection?(type)) OR TRY (type__needs_cleanup?(type, schema_lookup))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup)));
 END
 PRIVATE FN programMIRFinalizer__ast_call_needs_runtime?(node: Node, fn_nodes: {String}FunctionDef) RETURNS !Bool ->

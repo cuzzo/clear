@@ -69,7 +69,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwn
   MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_4: []String = List[]; rtoc_empty_list_4 } );
   IF aST__declaration_with_identifier_value?(stmt) THEN
     MUTABLE value: Identifier = CAST(stmt.value() AS Identifier);
-    MUTABLE ti = TRY (type__from_node_mut(value, "moved declaration root"));
+    MUTABLE ti = TRY (type__from_node_mut(Locatable{ Identifier: COPY value }, "moved declaration root"));
     MUTABLE entry = (self.bindings[value.name] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
     IF (mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, ti) AND cleanupEntry__present?(entry)) THEN
       &names.append(COPY value.name);
