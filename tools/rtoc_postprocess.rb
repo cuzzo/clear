@@ -352,7 +352,14 @@ module RtocPostprocess
         if receiver.include?('.')
           owner = scope.struct_of(receiver.split('.').first)
           field = index.field_type(owner, receiver.split('.').last) if owner
-          next if field && !field.start_with?('?')
+          if field && !field.start_with?('?')
+            # Not optional at all: the default is dead and OR is the wrong
+            # operator, so the fix is to DROP it, not to swap in OR_ELSE.
+            findings << Finding.new(rule: :or_default, file: file, line: position + 1,
+                                    message: "#{receiver} OR #{literal} -- #{receiver} is #{field}, drop the default")
+            lines[position] = lines[position].sub("(#{receiver} OR #{literal})", receiver) if fix
+            next
+          end
         elsif scope.bindings[receiver] == 'Bool'
           next
         end

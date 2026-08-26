@@ -1887,7 +1887,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_IDENTITY_FIELD_UNSUPPORTED }, [], {:struct: node.name, :field: _, :param: CAST(type__resolved(ft) AS String)}));
     };
     TRY (resolutionSession__stamp_field_defaults_mut(rtoc_self_view, node.field_decls));
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ StructDef: COPY node }, symbol(node.name), ScopeScopeTypeSchema{ StructSchemaMultiowned: COPY TRY (structSchema__new(node.field_decls, resolutionSession__type_params(rtoc_self_view, node.type_params), node.generic_params, {}, {}, (node.visibility OR :package))) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ StructDef: COPY node }, symbol(node.name), ScopeScopeTypeSchema{ StructSchemaMultiowned: COPY TRY (structSchema__new(node.field_decls, resolutionSession__type_params(rtoc_self_view, node.type_params), node.generic_params, {}, {}, node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END
@@ -1926,7 +1926,7 @@ PRIVATE FN resolutionSession__register_enum_declaration(self: ResolutionSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, type__to_sym(node.name), ScopeScopeTypeSchema{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, (node.visibility OR :package))) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, type__to_sym(node.name), ScopeScopeTypeSchema{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END
@@ -1941,7 +1941,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :UNION_INLINE_IN_GENERIC }));
     END
     TRY (resolutionSession__register_inline_struct_variants_mut(rtoc_self_view, node));
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, type__to_sym(node.name), ScopeScopeTypeSchema{ UnionSchemaMultiowned: COPY TRY (unionSchema__new(node.variants, resolutionSession__type_params(rtoc_self_view, node.type_params), (node.visibility OR :package))) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, type__to_sym(node.name), ScopeScopeTypeSchema{ UnionSchemaMultiowned: COPY TRY (unionSchema__new(node.variants, resolutionSession__type_params(rtoc_self_view, node.type_params), node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ UnionDef: COPY node }, :Void));
 }
 END
