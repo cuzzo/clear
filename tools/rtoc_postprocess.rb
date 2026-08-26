@@ -488,6 +488,25 @@ module RtocPostprocess
     flush.call
   end
 
+  # `IF x IS_A []T AS y ... ELSE <use x> END` -- Ruby's `body.is_a?(Array)` on a
+  # value that is a UNION of the list shape and the single shape. The IS_A arm
+  # is fine; the ELSE arm passes the union on where the payload is wanted, and
+  # that only fails once something downstream declares the payload type.
+  rule(:list_is_a_else_arm, kind: :advisory,
+       summary: 'IS_A []T whose ELSE arm passes the union through') do |lines, _index, findings, file, _fix|
+    lines.each_with_index do |line, position|
+      next unless line =~ /IF (\w+) IS_A \[\](\w+)/
+
+      subject = Regexp.last_match(1)
+      element = Regexp.last_match(2)
+      tail = lines[position + 1, 6].to_a.join(' ')
+      next unless tail.include?('ELSE') && tail =~ /\b#{Regexp.escape(subject)}\b/
+
+      findings << Finding.new(rule: :list_is_a_else_arm, file: file, line: position + 1,
+                              message: "#{subject} IS_A []#{element} -- ELSE arm still uses #{subject}")
+    end
+  end
+
   # `x[:field]` is Ruby hash syntax; on a struct it is a field read. Advisory
   # because CLEAR really does index a {String@symbol}V map that way.
   rule(:hash_field, kind: :advisory,

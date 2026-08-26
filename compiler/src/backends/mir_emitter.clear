@@ -3386,11 +3386,15 @@ PRIVATE FN mIREmitter__emit_defer_body(MUTABLE self: MIREmitter, body: DeferBody
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF body IS_A []Emittable AS array THEN
-      RETURN "{\n${mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_body(&rtoc_self_view, array)), 4)}\n}";
-    ELSE
-      RETURN TRY (mIREmitter__emit(&rtoc_self_view, body));
+    # DeferBody is a union of the two shapes Ruby's `body.is_a?(Array)` tests;
+    # the else arm has to be unwrapped, not passed through as the union.
+    PARTIAL MATCH body START
+      DeferBody.ArrayValue AS array ->
+        RETURN "{\n${mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_body(&rtoc_self_view, array)), 4)}\n}";,
+      DeferBody.Emittable AS single ->
+        RETURN TRY (mIREmitter__emit(&rtoc_self_view, single));,
     END
+    RETURN "";
 }
 END
 PRIVATE FN mIREmitter__emit_defer_like(self: MIREmitter, keyword: String, body_input: ?String) RETURNS String
