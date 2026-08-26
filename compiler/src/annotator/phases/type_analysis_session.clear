@@ -3350,7 +3350,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF typeAnalysisSession__function_has_catch_clauses?(rtoc_self_view, node) THEN
       MUTABLE candidate_snap_types = COPY body_scan.pipe_input_types;
       MUTABLE snap_types: [Set]String = Set[];
-      MUTABLE all_catch_bodies = node.catch_clauses |> SELECT _.body();
+      MUTABLE all_catch_bodies = node.catch_clauses |> SELECT _.body;
       IF typeAnalysisSession__function_has_default_catch?(rtoc_self_view, node) THEN
         &all_catch_bodies.append(node.default_catch);
       END
@@ -12103,7 +12103,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
     END
-    &matches.uniq_mut(%(protocol: Tuple<ProtocolDef, ProtocolRequirement, Type, Int64>, requirement, ignored_receiver) -> [protocol.name(), requirement.name()]);
+    &matches.uniq_mut(%(protocol: Tuple<ProtocolDef, ProtocolRequirement, Type, Int64>, requirement, ignored_receiver) -> [protocol.name, requirement.name()]);
     IF (matches.length() == 0) THEN
       RETURN FALSE;
     END
@@ -12350,7 +12350,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE signature = TRY (typeAnalysisSession__protocol_requirement_signature(rtoc_self_view, protocol, requirement, receiver));
     TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, signature, ([node.object] + node.args)));
     node.matched_signature = signature;
-    node.protocol_name = protocol.name();
+    node.protocol_name = protocol.name;
     node.protocol_operation = type__to_sym(requirement.name());
     TRY (typeAnalysisSession__stamp_resolved_call_result_mut(rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, CAST(functionSignature__return_type(signature) AS Type), functionSignature__recoverable_result?(signature)));
     IF functionSignature__reentrant(signature) THEN
@@ -16982,9 +16982,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (clause.action IS_A Exit) THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, clause.message));
     ELSE_IF (clause.action IS_A Return) THEN
-      TRY (typeAnalysisSession__visit(&rtoc_self_view, clause.value()));
+      TRY (typeAnalysisSession__visit(&rtoc_self_view, clause.value));
     ELSE_IF (clause.action == ErrorActionKind.Block) THEN
-      TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, clause.body()));
+      TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, clause.body));
     END
 }
 END
@@ -17395,8 +17395,8 @@ PRIVATE FN typeAnalysisSession__visit_ThenChain(MUTABLE self: TypeAnalysisSessio
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE last_type: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
     FOR _ IN node.steps DO
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, _.expr()));
-    MUTABLE step_type = _.expr().full_type_mut({:context: "THEN step"});
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, _.expr));
+    MUTABLE step_type = _.expr.full_type_mut({:context: "THEN step"});
     MUTABLE binding = _.binding;
     IF binding THEN
         MUTABLE bind_type = COPY step_type;

@@ -647,7 +647,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF entry.none?() THEN
         RETURN;
     END
-    MUTABLE name = COPY CAST(node.name() AS String);
+    MUTABLE name = COPY CAST(node.name AS String);
     &pairs.append(CleanupEntryPair{ place: COPY ownershipDataflow__place_for_binding_node(name, node), name: COPY name, entry: entry });
     &seen.insert(aST__node_identity(entry));
     rubyToClearVoid()

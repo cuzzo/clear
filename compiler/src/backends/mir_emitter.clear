@@ -2930,7 +2930,7 @@ PRIVATE FN mIREmitter__emit_switch(MUTABLE self: MIREmitter, node: SwitchStmt) R
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE subject: String = TRY (mIREmitter__emit(&rtoc_self_view, node.subject));
     MUTABLE arms = node.arms |> SELECT {
-    MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body()));
+    MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body));
     "${TRY (mIREmitter__emit_switch_patterns(&rtoc_self_view, _.patterns))} => {\n${body}\n}"
     };
     MUTABLE default_body = node.default_body;
@@ -3101,7 +3101,7 @@ PRIVATE FN mIREmitter__emit_union_match(MUTABLE self: MIREmitter, node: UnionMat
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE subject: String = TRY (mIREmitter__emit(&rtoc_self_view, node.subject));
     MUTABLE arms = node.arms |> SELECT {
-    MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body()));
+    MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body));
     MUTABLE payload = _.payload;
     MUTABLE capture_name: String = "";
       IF _.pointer_payload THEN
@@ -3121,7 +3121,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         suppress = "";
       END
-    ".${_.variant()} =>${capture} {\n${suppress}${body}\n}"
+    ".${_.variant} =>${capture} {\n${suppress}${body}\n}"
     };
     MUTABLE default_body = node.default_body;
     IF default_body THEN
@@ -3143,7 +3143,7 @@ PRIVATE FN mIREmitter__emit_if_chain(MUTABLE self: MIREmitter, node: IfChain) RE
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE parts = node.branches |> SELECT {
     MUTABLE cond: String = TRY (mIREmitter__emit(&rtoc_self_view, _.cond));
-    MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body()));
+    MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, _.body));
     "if (${cond}) {\n${body}\n}"
     };
     MUTABLE result = parts.join(" else ");

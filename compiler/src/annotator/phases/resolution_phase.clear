@@ -1396,7 +1396,7 @@ PRIVATE FN resolutionSession__validate_extern_return_lifetime_mut(self: Resoluti
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE parameter_names = (node.params |> SELECT _.name()) |> DISTINCT _;
+    MUTABLE parameter_names = (node.params |> SELECT _.name) |> DISTINCT _;
     MUTABLE rtoc_each_items_43 = (TRY (functionSignature__return_lifetime(signature)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_43.length() DO
@@ -1425,7 +1425,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     TRY (resolutionSession__validate_c_boundary_type_mut(rtoc_self_view, node, UNWRAP (node.return_type), "return", TRUE));
     FOR _ IN node.params DO
-    TRY (resolutionSession__validate_c_boundary_type_mut(rtoc_self_view, node, _.type(), "parameter ${_.name()}", FALSE));
+    TRY (resolutionSession__validate_c_boundary_type_mut(rtoc_self_view, node, _.type(), "parameter ${_.name}", FALSE));
     END
 }
 END

@@ -8446,7 +8446,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((source != NIL) AND (source.abi == :c)) THEN
       MUTABLE params = node.params |> SELECT {
     MUTABLE zig_type = TRY (mIRLowering__c_abi_param_zig_type(rtoc_self_view, _));
-    MIRParam{ name: COPY _.name(), zig_type: COPY zig_type, pointer_passed: (_.mutable() OR FALSE), lowered_node_id: NIL, ownership_consumption: NIL }
+    MIRParam{ name: COPY _.name, zig_type: COPY zig_type, pointer_passed: (_.mutable OR FALSE), lowered_node_id: NIL, ownership_consumption: NIL }
       };
       RETURN Emittable{ CExternFnDecl: COPY CExternFnDecl{ name: (source.symbol OR node.name), params: params, return_type: TRY (type__zig_type(externFnDecl__annotation_return_type(node))), library: source.dependency, callconv: source.callconv, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
@@ -9143,7 +9143,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF (((_ IS_A Cleanup OR _ IS_A ErrCleanup)) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_322 = TRY (ownedCompositeMaterialization__cleanup_entry(_));
     cleanupEntry__has_moved_guard?(rtoc_local_receiver_322) }) THEN
-        mIRLowering__function_state(rtoc_self_view).lowered_guarded_cleanup_names.insert(COPY CAST(_.name() AS String));
+        mIRLowering__function_state(rtoc_self_view).lowered_guarded_cleanup_names.insert(COPY CAST(_.name AS String));
     END
     END
 }
@@ -19684,11 +19684,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_lambda_result_721
     });
     MUTABLE existing_capture_names = (lowered_then |> SELECT:? (  IF _ IS_A AllocMark THEN
-      CAST(_.name() AS String)
+      CAST(_.name AS String)
     ELSE
       NIL
     END) |> WHERE _ != NIL) |> DISTINCT _;
-    capture_markers = capture_markers |> WHERE !(((aST__node_name(_) EXISTS) AND existing_capture_names.contains?(CAST(_.name() AS String))));
+    capture_markers = capture_markers |> WHERE !(((aST__node_name(_) EXISTS) AND existing_capture_names.contains?(CAST(_.name AS String))));
     MUTABLE then_body = (capture_markers + lowered_then);
     MUTABLE else_body_branch_value: ?[]Emittable = NIL;
     IF ((node.else_branch AND !(node.else_branch.empty?()))) THEN
@@ -20613,12 +20613,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE returns: []Locatable = ( { MUTABLE rtoc_empty_list_765: []Locatable = List[]; rtoc_empty_list_765 } );
     FOR _ IN ast_stmts DO
     IF (IF _ IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END) THEN
-      &returns.append(_.value());
+      &returns.append(_.value);
     END
     END
     MUTABLE ret_i: Int64 = 0;
     RETURN body |> UNNEST {
-    IF !(((IF _ IS_A ReturnStmt AS return_stmt THEN return_stmt.value ELSE FALSE END) AND mIRLowering__mir_allocates?(rtoc_self_view, _.value()))) THEN
+    IF !(((IF _ IS_A ReturnStmt AS return_stmt THEN return_stmt.value ELSE FALSE END) AND mIRLowering__mir_allocates?(rtoc_self_view, _.value))) THEN
         IF _ IS_A ReturnStmt AS return_stmt THEN
           ret_i = (ret_i + 1);
         END
@@ -20628,7 +20628,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ret_i = (ret_i + 1);
     MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_766 = mIRLowering__lowering_counters(rtoc_self_view);
     mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_766) }}";
-    MUTABLE return_value = _.value();
+    MUTABLE return_value = _.value;
     MUTABLE entry: ?CleanupEntry@multiowned = TRY (mIRLowering__hoist_cleanup_entry(rtoc_self_view, return_value, ast_value));
     MUTABLE materialized = BindingMaterialization{ name: COPY name, expr: COPY return_value, alloc: :heap, type_info: CAST(COPY mIRLowering__mir_alloc_mark_type_info(rtoc_self_view, return_value, ast_value, "unhoisted return allocation") AS Type), mutable: FALSE, cleanup_entry: entry, cleanup_mode: IF entry != NIL THEN
         :err
