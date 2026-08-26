@@ -427,6 +427,15 @@ module FnCompat
       result_type: :function_return_kind
     ),
     Target.new(
+      name: 'implementation_registration.function_name',
+      ruby_require: 'compiler/ruby/annotator/phases/implementation_registration',
+      ruby_call: ->(args) { Annotator::Phases::ImplementationRegistration.function_name(*args) },
+      clear_unit: 'annotator/phases/implementation_registration.clear',
+      clear_call: 'implementationRegistration__function_name(%s)',
+      arg_types: %i[owner_name member_name],
+      result_type: :string
+    ),
+    Target.new(
       name: 'effects.display',
       ruby_require: 'compiler/ruby/annotator/helpers/effects',
       ruby_call: ->(args) { EffectTracker.display(*args) },
@@ -567,6 +576,8 @@ module FnCompat
                       '{0}{1}{2}', 'mixed %{a} {0}', ''],
     function_return_variant: %i[Fixed ElementOf OptionalOfElement IdOfElement OptionalOfValue
                                 ValueList KeyList Infer],
+    owner_name: ['Env', 'My::Struct', 'a-b', 'x.y', 'Weird Name!', '', '_', '123', 'Ünicode', 'A_B-C.D E'],
+    member_name: ['run', 'call', 'x', '', 'with_underscore', 'q?'],
     effect_symbol: %i[SUSPENDS SUSPENDS_CONDITIONAL SUSPENDS_LOOP HEAP BLOCKING REENTRANT
                       LOOP_UNBOUND EXTERN YIELD IO CONTENTION CONTENTION_MAYBE BLOCKING_MAYBE
                       NOT_AN_EFFECT],
