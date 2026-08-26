@@ -418,6 +418,24 @@ module FnCompat
       result_type: :opt_symbol
     ),
     Target.new(
+      name: 'function_return.variant',
+      ruby_require: 'compiler/ruby/annotator/helpers/function_return',
+      ruby_call: ->(args) { FunctionReturn.variant(*args).kind.serialize },
+      clear_unit: 'annotator/helpers/function_return.clear',
+      clear_call: '(TRY (functionReturn__variant(%s))).kind',
+      arg_types: %i[function_return_variant],
+      result_type: :function_return_kind
+    ),
+    Target.new(
+      name: 'effects.display',
+      ruby_require: 'compiler/ruby/annotator/helpers/effects',
+      ruby_call: ->(args) { EffectTracker.display(*args) },
+      clear_unit: 'annotator/helpers/effects.clear',
+      clear_call: 'effectTracker__display(%s)',
+      arg_types: %i[effect_symbol],
+      result_type: :string
+    ),
+    Target.new(
       name: 'error_registry.zig_name_of_type',
       ruby_require: 'compiler/ruby/ast/error_registry',
       ruby_call: ->(args) { AST.zig_name_of_type(*args) },
@@ -547,6 +565,11 @@ module FnCompat
                         IS_OK_REQUIRES_FALLIBLE OPTIONAL_FIELD_REQUIRES_SAFE_NAV NOT_A_REAL_CODE],
     template_string: ['plain text', 'one %{a}', '%{a} and %{b}', 'positional {0}', '{0} then {1}',
                       '{0}{1}{2}', 'mixed %{a} {0}', ''],
+    function_return_variant: %i[Fixed ElementOf OptionalOfElement IdOfElement OptionalOfValue
+                                ValueList KeyList Infer],
+    effect_symbol: %i[SUSPENDS SUSPENDS_CONDITIONAL SUSPENDS_LOOP HEAP BLOCKING REENTRANT
+                      LOOP_UNBOUND EXTERN YIELD IO CONTENTION CONTENTION_MAYBE BLOCKING_MAYBE
+                      NOT_AN_EFFECT],
     int64: [0, 1, -1, 7, 42, 255, -128, 1024, -99999]
   }.freeze
 
@@ -683,6 +706,7 @@ module FnCompat
   # frees its previous value on reassignment, and these results are often
   # .rodata. A helper also keeps each runner's frame small.
   RENDERERS = {
+    function_return_kind: 'fnCompatFunctionReturnKindText',
     bool: 'fnCompatBoolText',
     symbol: 'fnCompatSymbolText',
     string: 'fnCompatStringText',
@@ -693,6 +717,18 @@ module FnCompat
   }.freeze
 
   RENDERER_DEFS = <<~CLEAR
+    PRIVATE FN fnCompatFunctionReturnKindText(value: Kind) RETURNS String ->
+      # Ruby's `Kind#serialize` returns a String, so this renders like one --
+      # quoted -- or every call reads as a mismatch against its own text.
+      IF (value == Kind.Fixed) THEN RETURN fnCompatStringText("fixed"); END
+      IF (value == Kind.ElementOf) THEN RETURN fnCompatStringText("element_of"); END
+      IF (value == Kind.OptionalOfElement) THEN RETURN fnCompatStringText("optional_of_element"); END
+      IF (value == Kind.IdOfElement) THEN RETURN fnCompatStringText("id_of_element"); END
+      IF (value == Kind.OptionalOfValue) THEN RETURN fnCompatStringText("optional_of_value"); END
+      IF (value == Kind.ValueList) THEN RETURN fnCompatStringText("value_list"); END
+      IF (value == Kind.KeyList) THEN RETURN fnCompatStringText("key_list"); END
+      RETURN fnCompatStringText("infer");
+    END
     PRIVATE FN fnCompatBoolText(value: Bool) RETURNS String ->
       IF value THEN
         RETURN "true";

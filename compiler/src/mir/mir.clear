@@ -119,7 +119,7 @@ END
 PUB STRUCT MIRParam {
   name: String,
   zig_type: String,
-  pointer_passed: Any@multiowned,
+  pointer_passed: Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -1530,8 +1530,8 @@ PUB STRUCT WhileStmt {
   body: []Emittable,
   capture: ?String,
   update: ?Emittable,
-  mark_per_iter: Any@multiowned,
-  tight: Any@multiowned,
+  mark_per_iter: ?Bool,
+  tight: ?Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -1601,8 +1601,8 @@ PUB STRUCT ForStmt {
   capture: ?String,
   body: []Emittable,
   index_capture: Any@multiowned,
-  mark_per_iter: Any@multiowned,
-  tight: Any@multiowned,
+  mark_per_iter: ?Bool,
+  tight: ?Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -3901,7 +3901,7 @@ PUB STRUCT SuspendDescriptor {
 PUB STRUCT FsmDispatch {
   ctx_id: Int64,
   arms: []FsmStateArm,
-  uses_loop_label: Any@multiowned
+  uses_loop_label: Bool
 }
 PUB STRUCT FsmPreBodySkip {
   condition: Emittable,
@@ -4007,7 +4007,7 @@ PUB STRUCT FsmSpawnSetup {
 }
 PUB STRUCT CapabilityLockTarget {
   source: Emittable,
-  arc_wrapped: Any@multiowned,
+  arc_wrapped: Bool,
   comptime_arc_unwrap: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -4071,7 +4071,7 @@ FN capabilityLockTarget__expr?(self: CapabilityLockTarget) RETURNS Bool ->
 END
 PUB STRUCT CapabilityLockAddress {
   source: Emittable,
-  arc_wrapped: Any@multiowned,
+  arc_wrapped: Bool,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -4135,8 +4135,8 @@ END
 PUB STRUCT SortedLockAcquire {
   entries: []SortedLockAcquireEntry,
   action: Emittable,
-  matched_types: Any@multiowned,
-  bubble_types: Any@multiowned,
+  matched_types: []String@symbol,
+  bubble_types: []String@symbol,
   retries: ?Int64,
   source_line: ?Int64,
   loop_label: String,
@@ -4218,8 +4218,8 @@ PUB STRUCT FallibleLockBinding {
   acquire_call: Emittable,
   action: Emittable,
   retries: ?Int64,
-  matched_types: Any@multiowned,
-  bubble_types: Any@multiowned,
+  matched_types: []String@symbol,
+  bubble_types: []String@symbol,
   source_line: ?Int64,
   acquire_block: String,
   rt_name: String,

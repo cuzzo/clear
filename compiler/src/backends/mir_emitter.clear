@@ -2081,7 +2081,7 @@ PRIVATE FN mIREmitter__emit_fallible_lock_acquire_expr(MUTABLE self: MIREmitter,
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE handler = TRY (mIREmitter__emit_fallible_lock_error_handler(&rtoc_self_view, castEmittableToFailureAction(node.action), node.retries, (node.matched_types OR_ELSE List[]), (node.bubble_types OR_ELSE List[]), node.rt_name, CAST(node.source_line AS String)));
+    MUTABLE handler = TRY (mIREmitter__emit_fallible_lock_error_handler(&rtoc_self_view, castEmittableToFailureAction(node.action), node.retries, node.matched_types, node.bubble_types, node.rt_name, CAST(node.source_line AS String)));
     MUTABLE acquire_call = TRY (mIREmitter__emit(&rtoc_self_view, node.acquire_call));
     IF node.retries THEN
       RETURN regexReplaceAll("${node.acquire_block}: {\n  var __retry: usize = 0;\n  while (true) : (__retry += 1) {\n    if (${acquire_call}) |__g| {\n      break :${node.acquire_block} __g;\n    } else |__err| {\n      ${handler}\n    }\n  }\n}\n", "\\s+\\z", "");
@@ -2096,22 +2096,23 @@ PRIVATE FN mIREmitter__emit_fallible_lock_error_handler(MUTABLE self: MIREmitter
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE action_zig = TRY (mIREmitter__emit_failure_action(&rtoc_self_view, action));
-    MUTABLE matched_arms = matched_types |> SELECT {
-    MUTABLE matched_errs = "error.${TRY (aST__zig_name_of_type(_))}";
-    MUTABLE body: String = "";
+    # `zig_name_of_type` / `kind_of_type` are nilable, and Ruby interpolates a
+    # nil as the empty string. CLEAR rejects a `?String` in interpolation, so
+    # the fallback has to be written out to keep the emitted text identical.
+    MUTABLE arms: []String = List[];
+    FOR matched_type IN matched_types DO
+      MUTABLE matched_errs = "error.${(TRY (aST__zig_name_of_type(matched_type))) OR_ELSE ""}";
+      MUTABLE body: String = COPY action_zig;
       IF retries EXISTS AS retries_value THEN
         body = "if (__retry + 1 < ${retries_value.toString()}) continue;\n${action_zig}";
-      ELSE
-        body = action_zig;
       END
-    "${matched_errs} => { ${body} }"
-    };
-    MUTABLE bubble_arms = bubble_types |> SELECT {
-    MUTABLE zig: ?String = TRY (aST__zig_name_of_type(_));
-    MUTABLE kind: ?String@symbol = TRY (aST__kind_of_type(_));
-    "error.${zig} => { ${rt_name}.setError(.${UNWRAP (kind)}, @intFromEnum(ErrorName.${zig}), \"lock ${zig}\", ${source_line}); return error.CheatError; }"
-    };
-    MUTABLE arms = (matched_arms + bubble_arms);
+      &arms.append("${matched_errs} => { ${body} }");
+    END
+    FOR bubble_type IN bubble_types DO
+      MUTABLE zig: String = (TRY (aST__zig_name_of_type(bubble_type))) OR_ELSE "";
+      MUTABLE kind: String = CAST((TRY (aST__kind_of_type(bubble_type))) OR_ELSE symbol("") AS String);
+      &arms.append("error.${zig} => { ${rt_name}.setError(.${kind}, @intFromEnum(ErrorName.${zig}), \"lock ${zig}\", ${source_line}); return error.CheatError; }");
+    END
     RETURN "switch (__err) {\n${arms.join(",\n")}\n}";
 }
 END
@@ -2132,15 +2133,36 @@ PRIVATE FN mIREmitter__emit_sorted_lock_acquire_panic(MUTABLE self: MIREmitter, 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE entries = node.entries;
+    MUTABLE entries = COPY node.entries;
     MUTABLE n = entries.length();
-    MUTABLE guard_decls = (entries |> SELECT "var ${_.guard_var}: @TypeOf(${TRY (mIREmitter__emit(&rtoc_self_view, _.lock_expr))}.${_.method_name}()) = undefined;").join("\n");
-    MUTABLE ptr_init = (entries |> SELECT "@intFromPtr(${TRY (mIREmitter__emit(&rtoc_self_view, _.address_expr))})").join(", ");
-    MUTABLE order_init = (0 ..< n).to_a().join(", ");
-    MUTABLE switch_arms = (entries |> SELECT "${_.indexOf()} => ${_.guard_var} = ${TRY (mIREmitter__emit(&rtoc_self_view, _.lock_expr))}.${_.method_name}(),").join("\n                ");
-    MUTABLE defer_releases = (entries |> SELECT "defer ${_.guard_var}.release();").join("\n");
-    MUTABLE alias_decls = (entries |> SELECT "const ${_.alias_name} = ${_.guard_var}.get;\n_ = &${_.alias_name};").join("\n");
-    RETURN regexReplaceAll("${guard_decls}\n{\n    const __ptrs = [_]usize{ ${ptr_init} };\n    var __order = [_]u8{ ${order_init} };\n    var __i: usize = 0;\n    while (__i < ${n}) : (__i += 1) {\n        var __j: usize = 0;\n        while (__j + 1 < ${n}) : (__j += 1) {\n            if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {\n                const __tmp = __order[__j];\n                __order[__j] = __order[__j + 1];\n                __order[__j + 1] = __tmp;\n            }\n        }\n    }\n    for (__order) |__idx| {\n        switch (__idx) {\n          ${switch_arms}\n          else => unreachable,\n        }\n    }\n}\n${defer_releases}\n${alias_decls}\n", "\\s+\\z", "");
+    # `_.indexOf()` was a mistranslation of Ruby's `entry.index` field, and
+    # `(0...n).to_a` has no CLEAR equivalent -- both are explicit loops here.
+    MUTABLE guard_parts: []String = List[];
+    MUTABLE ptr_parts: []String = List[];
+    MUTABLE switch_parts: []String = List[];
+    MUTABLE release_parts: []String = List[];
+    MUTABLE alias_parts: []String = List[];
+    FOR entry IN entries DO
+      MUTABLE lock_zig = TRY (mIREmitter__emit(&rtoc_self_view, entry.lock_expr));
+      &guard_parts.append("var ${entry.guard_var}: @TypeOf(${lock_zig}.${entry.method_name}()) = undefined;");
+      &ptr_parts.append("@intFromPtr(${TRY (mIREmitter__emit(&rtoc_self_view, entry.address_expr))})");
+      &switch_parts.append("${entry.index.toString()} => ${entry.guard_var} = ${lock_zig}.${entry.method_name}(),");
+      &release_parts.append("defer ${entry.guard_var}.release();");
+      &alias_parts.append("const ${entry.alias_name} = ${entry.guard_var}.get;\n_ = &${entry.alias_name};");
+    END
+    MUTABLE order_parts: []String = List[];
+    MUTABLE order_index: Int64 = 0;
+    WHILE (order_index < n) DO
+      &order_parts.append(order_index.toString());
+      order_index = (order_index + 1);
+    END
+    MUTABLE guard_decls = guard_parts.join("\n");
+    MUTABLE ptr_init = ptr_parts.join(", ");
+    MUTABLE order_init = order_parts.join(", ");
+    MUTABLE switch_arms = switch_parts.join("\n                ");
+    MUTABLE defer_releases = release_parts.join("\n");
+    MUTABLE alias_decls = alias_parts.join("\n");
+    RETURN regexReplaceAll("${guard_decls}\n{\n    const __ptrs = [_]usize{ ${ptr_init} };\n    var __order = [_]u8{ ${order_init} };\n    var __i: usize = 0;\n    while (__i < ${n.toString()}) : (__i += 1) {\n        var __j: usize = 0;\n        while (__j + 1 < ${n.toString()}) : (__j += 1) {\n            if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {\n                const __tmp = __order[__j];\n                __order[__j] = __order[__j + 1];\n                __order[__j + 1] = __tmp;\n            }\n        }\n    }\n    for (__order) |__idx| {\n        switch (__idx) {\n          ${switch_arms}\n          else => unreachable,\n        }\n    }\n}\n${defer_releases}\n${alias_decls}\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_sorted_lock_acquire_fallible(MUTABLE self: MIREmitter, node: SortedLockAcquire) RETURNS !String
@@ -2160,7 +2182,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     regexReplaceAll("${_.indexOf()} => {\n                                if (${lock_expr}.${_.method_name}()) |__g| {\n                                    ${_.guard_var} = __g;\n                                    ${_.held_var} = true;\n                                } else |__err_inner| {\n                                    __err_caught = __err_inner;\n                                    __success = false;\n                                }\n                            },\n", "\\s+\\z", "")
     }).join("\n                                ");
     MUTABLE release_arms = (entries |> SELECT "${_.indexOf()} => if (${_.held_var}) { ${_.guard_var}.release(); ${_.held_var} = false; },").join("\n                            ");
-    MUTABLE handler_switch = TRY (mIREmitter__emit_sorted_lock_handler_switch(&rtoc_self_view, action, (node.matched_types OR_ELSE List[]), (node.bubble_types OR_ELSE List[]), node.rt_name, CAST(node.source_line AS String)));
+    MUTABLE handler_switch = TRY (mIREmitter__emit_sorted_lock_handler_switch(&rtoc_self_view, action, node.matched_types, node.bubble_types, node.rt_name, CAST(node.source_line AS String)));
     MUTABLE retry_branch: String = "";
     IF node.retries THEN
       retry_branch = "if (__retry + 1 < ${node.retries}) continue;";
