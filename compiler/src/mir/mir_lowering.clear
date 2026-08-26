@@ -13583,7 +13583,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       rtoc_ternary_value_523 = {};
     END
-    rtoc_ternary_value_523? }, run_body: COPY (stream_run_body OR_ELSE List[]), fsm_structure: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
+    rtoc_ternary_value_523? }, run_body: COPY stream_run_body, fsm_structure: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
     bg.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY tense_t }));
     bg.boundary_fact = TRY (mIRLowering__execution_boundary_fact(rtoc_self_view, :bg_stream, :local, analysis));
     RETURN MIRLoweringReturnValue{ MIRBgBlock: COPY bg };

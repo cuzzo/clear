@@ -684,6 +684,35 @@ module RtocPostprocess
     end
   end
 
+  # `OR_ELSE` on a value that is not optional. Usually the residue of typing a
+  # local that the translation had left inferred -- the annotation is right and
+  # the default is now dead, but CLEAR rejects rather than ignores it.
+  rule(:or_else_on_plain, kind: :mechanical,
+       summary: 'OR_ELSE on a value that is not optional') do |lines, index, findings, file, fix|
+    scope = Scope.new(index)
+    lines.each_with_index do |line, position|
+      scope.observe(line)
+      next if line.strip.start_with?('#')
+
+      line.scan(/\((\w+) OR_ELSE ((?:"(?:[^"\\]|\\.)*"|[^()]|\([^()]*\))*)\)/) do |name, fallback|
+        declared = scope.bindings[name]
+        next unless declared
+        next if scope.optionals.key?(name)
+        # Only a local THIS FUNCTION annotated non-optional. Searching the
+        # whole file above instead stripped a needed OR_ELSE off a `message`
+        # parameter, because an unrelated function earlier in the file had a
+        # `MUTABLE message: String`. Fifth over-fire, same root cause every
+        # time: a name matched without its owner.
+        function_start = lines[0...position].rindex { |earlier| earlier =~ /\A(?:PRIVATE |PUB )?FN / } || 0
+        next unless lines[function_start...position].any? { |earlier| earlier =~ /MUTABLE #{Regexp.escape(name)}: [^?]/ }
+
+        findings << Finding.new(rule: :or_else_on_plain, file: file, line: position + 1,
+                                message: "(#{name} OR_ELSE ...) -- #{name} is #{declared}")
+        lines[position] = lines[position].sub("(#{name} OR_ELSE #{fallback})", name) if fix
+      end
+    end
+  end
+
   # `x[:field]` is Ruby hash syntax; on a struct it is a field read. Advisory
   # because CLEAR really does index a {String@symbol}V map that way.
   rule(:hash_field, kind: :advisory,

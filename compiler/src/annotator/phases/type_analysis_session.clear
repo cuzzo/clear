@@ -3482,7 +3482,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         MUTABLE type_params = TRY (functionSignature__type_params(signature));
         IF (type_params.length() > 0) THEN
-          comptime_type_args = (comptime_type_args OR_ELSE List[]);
+          comptime_type_args = comptime_type_args;
           IF (functionSignature__extern(signature) AND ((comptime_type_args.length() > 0))) THEN
             subst = {};
             MUTABLE rtoc_idx = 0;

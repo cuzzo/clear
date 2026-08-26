@@ -3628,7 +3628,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (node.copy_shape == :pointer) THEN
         type_arg = "@TypeOf(${src})";
       ELSE
-        type_arg = ((storage_zig_type OR_ELSE "@TypeOf(${src})"));
+        type_arg = (storage_zig_type);
       END
       IF (node.copy_shape == :slice) THEN
         RETURN "${bc}: { const __copy_src = ${src}; break :${bc} try CheatLib.dupeValue(${type_arg}, __copy_src, ${alloc}); }";
@@ -3637,7 +3637,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF (node.copy_shape == :pointer) THEN
           pointer_type_arg = "@TypeOf(${src})";
         ELSE
-          pointer_type_arg = ((storage_zig_type OR_ELSE "@TypeOf(__copy_src)"));
+          pointer_type_arg = (storage_zig_type);
         END
         MUTABLE pointer_value: String = "";
         IF (node.copy_shape == :value) THEN
