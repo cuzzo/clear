@@ -1,0 +1,49 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6d69722f706c6163656d656e742e636c656172" AS placement
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f72656769737472792e636c656172" AS intrinsic_registry
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172" AS function_signature
+REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f636f6e74726163742e636c656172" AS intrinsic_contract
+# Ruby module MIRLoweringVariables
+PUB STRUCT IndexedAssignmentDispatch {
+  target_var: ?String,
+  shard_direct: Bool,
+  template_kind: IntrinsicTemplateKind,
+  key_type: ?Type,
+  value_type: ?Type,
+  resolved_allocs: InlineAllocMetadata@multiowned,
+  sink_alloc: String@symbol
+}
+PUB STRUCT AutoLockAssignmentFacts {
+  var_name: String,
+  sync: ?String@symbol,
+  guard_var: String,
+  alias_var: String,
+  zig_var: String,
+  field: String,
+  cleanup_alloc: ?String@symbol,
+  alloc_sym: String@symbol
+}
+PUB STRUCT AssignmentTargetPlan {
+  target: Emittable,
+  cleanup_field: ?GetField
+}
+PUB STRUCT VarDeclFacts {
+  ft: Type,
+  binding_entry: CleanupEntry@multiowned,
+  has_mir_drop: Bool,
+  actually_mutated: Bool,
+  forced_var: Bool,
+  keyword_mutable: Bool,
+  annotation: ?Type,
+  heap_return_var: Bool,
+  decl_alloc: String@symbol,
+  init_ownership_effect: OwnershipEffect,
+  source_owned_binding: Bool,
+  has_caps: Bool,
+  bare_zig: String,
+  generic_id: Bool
+}
+# End Ruby module MIRLoweringVariables

@@ -1,0 +1,164 @@
+REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
+REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
+REQUIRE "pkg:rtoc_6d69722f636c65616e75705f656e7472792e636c656172" AS cleanup_entry
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f66756e6374696f6e732e636c656172" AS functions
+REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f736368656d615f72656769737472792e636c656172" AS schema_registry
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
+PUB STRUCT MIRLoweringOwnershipScanner {
+  schema_lookup: FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult,
+  bindings: {String}CleanupEntry@multiowned,
+  capture_map: {String}String,
+  rename_map: {String}String,
+  safe_name: FN(String) -> String
+}
+
+PUB UNION MIRLoweringOwnershipScannerScanRoot { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, ArrayValue: []Locatable, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRLoweringOwnershipScanner, stmt: Locatable) RETURNS ![]String ->
+  MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
+  TRY (aST__each_bg_block_in_stmt(stmt, %(bg_value: BgNode) USE(MUTABLE names, self) -> {
+  MUTABLE body_names: [Set]String = Set[];
+  aST__each_locatable(bg_value.body(), %(node: Locatable) USE(MUTABLE body_names) -> {
+    IF node IS_A Identifier AS identifier THEN
+        &body_names.insert(COPY identifier__name(identifier));
+    END
+    rubyToClearVoid()
+  });
+  MUTABLE rtoc_each_items_2 = (((IF selectOp__capture_analysis(bg_value) != NIL THEN
+      (selectOp__capture_analysis(bg_value)).move_mark_names()
+    ELSE
+      NIL
+    END) OR_ELSE Set[]));
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < rtoc_each_items_2.length() DO
+      IF !(body_names.contains?(CAST(rtoc_each_items_2[rtoc_idx] AS String))) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE entry = (self.bindings[CAST(rtoc_each_items_2[rtoc_idx] AS String)] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
+      IF cleanupEntry__present?(entry) THEN
+          &names.append(COPY CAST(rtoc_each_items_2[rtoc_idx] AS String));
+      END
+    rtoc_idx = rtoc_idx + 1;
+  END
+  rubyToClearVoid()
+  }));
+  RETURN CAST((names |> DISTINCT _) AS []String);
+END
+PUB FN mIRLoweringOwnershipScanner__collect_explicit_move_roots(self: MIRLoweringOwnershipScanner, node: Locatable) RETURNS ![]String ->
+  MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_3: []String = List[]; rtoc_empty_list_3 } );
+  MUTABLE collect: FN(MIRLoweringOwnershipScannerScanRoot) -> Void = %(root) USE(MUTABLE names, self) -> aST__each_locatable(root, %(child: Locatable) USE(MUTABLE names, self) -> {
+  IF !(child IS_A MoveNode) THEN
+      RETURN;
+  END
+  MUTABLE moved: ?String = mIRLoweringOwnershipScanner__moved_arg_root(self, child);
+  IF moved EXISTS AS moved_value THEN
+      &names.append(moved_value);
+  END
+  rubyToClearVoid()
+  });
+  collect(node);
+  TRY (aST__each_bg_block_in_stmt(node, %(bg_value: BgNode) USE(collect) -> {
+  IF bg_value.body() THEN
+      collect(bg_value.body());
+  END
+  rubyToClearVoid()
+  }));
+  RETURN CAST((names |> DISTINCT _) AS []String);
+END
+PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwnershipScanner, stmt: Locatable) RETURNS ![]String ->
+  MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_4: []String = List[]; rtoc_empty_list_4 } );
+  IF aST__declaration_with_identifier_value?(stmt) THEN
+    MUTABLE value: Identifier = CAST(stmt.value() AS Identifier);
+    MUTABLE ti = TRY (type__from_node_mut(value, "moved declaration root"));
+    MUTABLE entry = (self.bindings[value.name] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
+    IF (mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, ti) AND cleanupEntry__present?(entry)) THEN
+      &names.append(COPY value.name);
+    END
+  END
+  mIRLoweringOwnershipScanner__walk_ast_for_moved_args(self, stmt, %(arg: Locatable) USE(MUTABLE names, stmt, MUTABLE ti, self) -> {
+  IF mIRLoweringOwnershipScanner__arg_is_call_argument?(self, stmt, arg) THEN
+      RETURN;
+  END
+  MUTABLE ti = TRY (type__from_node_mut(arg, "moved argument root"));
+  IF !(mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, ti)) THEN
+      RETURN;
+  END
+  MUTABLE root: ?String = mIRLoweringOwnershipScanner__moved_arg_root(self, arg);
+  IF !(root) THEN
+      RETURN;
+  END
+  MUTABLE ident = (aST__root_identifier(arg) OR_ELSE NIL);
+  MUTABLE entry = (self.bindings[UNWRAP (root)] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
+  IF !(((IF ident != NIL THEN
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ident.symbol();
+  symbolEntry__heap_storage?(rtoc_local_receiver_5) }
+    ELSE
+      NIL
+    END) OR_ELSE ((cleanupEntry__present?(entry) AND entry.heap?())))) THEN
+      RETURN;
+  END
+  &names.append(UNWRAP (root));
+  rubyToClearVoid()
+  });
+  RETURN CAST((names |> DISTINCT _) AS []String);
+END
+PUB FN mIRLoweringOwnershipScanner__walk_ast_for_moved_args(self: MIRLoweringOwnershipScanner, node: Locatable, blk: FN(Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF (IF node IS_A Identifier AS identifier THEN aST__moved?(Locatable{ Identifier: COPY identifier }) ELSE FALSE END) THEN
+    blk(node);
+  END
+  IF mIRLoweringOwnershipScanner__nested_ownership_scope?(self, node) THEN
+    RETURN;
+  END
+  aST__each_child_node(node, %(child: Locatable) USE(blk, self) -> {
+  mIRLoweringOwnershipScanner__walk_ast_for_moved_args(self, child, blk);
+  rubyToClearVoid()
+  });
+END
+PUB FN mIRLoweringOwnershipScanner__moved_arg_root(self: MIRLoweringOwnershipScanner, arg: Locatable) RETURNS ?String ->
+  MUTABLE node = COPY arg;
+  IF node IS_A MoveNode AS move_node THEN
+    MUTABLE move_node = move_node.value;
+  END
+  IF node IS_A Identifier AS identifier THEN
+    RETURN COPY identifier__name(identifier);
+  END
+  RETURN NIL;
+END
+PUB FN mIRLoweringOwnershipScanner__transfer_binding_name(self: MIRLoweringOwnershipScanner, name: String) RETURNS String ->
+  MUTABLE mapped: ?String = COPY self.capture_map[name];
+  IF mapped EXISTS AS mapped_value THEN
+    RETURN COPY mapped_value;
+  END
+  MUTABLE safe = self.safe_name(name);
+  IF self.rename_map.contains?(safe) THEN
+    RETURN COPY self.rename_map[safe]?;
+  ELSE
+    RETURN safe;
+  END
+END
+PRIVATE FN mIRLoweringOwnershipScanner__arg_is_call_argument?(self: MIRLoweringOwnershipScanner, stmt: Locatable, arg: Locatable) RETURNS Bool ->
+  IF !((aST__call?(stmt) AND respondsTo?(stmt, "args"))) THEN
+    RETURN FALSE;
+  END
+  RETURN stmt.args().contains?(arg);
+END
+PRIVATE FN mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self: MIRLoweringOwnershipScanner, ti: Type) RETURNS !Bool ->
+  IF (((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) OR type__id_handle?(ti)) THEN
+    RETURN FALSE;
+  END
+  RETURN TRY (type__ownership_bearing?(ti, self.schema_lookup));
+END
+PRIVATE FN mIRLoweringOwnershipScanner__nested_ownership_scope?(self: MIRLoweringOwnershipScanner, node: Locatable) RETURNS Bool ->
+  RETURN PARTIAL MATCH node START
+    Locatable.WithBlock AS with_block -> TRUE,
+    doblock -> TRUE,
+    AST.BgBlock -> TRUE,
+    Locatable.BgStreamBlock AS bg_stream_block -> TRUE,
+    Locatable.FunctionDef AS function_def -> TRUE,
+    Locatable.LambdaLit AS lambda_lit -> TRUE,
+    DEFAULT -> FALSE
+  END;
+END
+FN rubyToClearVoid() RETURNS Void ->
+  RETURN;
+END

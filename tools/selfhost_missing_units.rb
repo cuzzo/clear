@@ -28,11 +28,20 @@ present = sources.map { |path| path.delete_prefix("#{root}/") }.to_set
 
 missing = Hash.new { |hash, key| hash[key] = [] }
 sources.each do |path|
-  File.read(path).scan(/REQUIRE "pkg:rtoc_([0-9a-f]+)"/) do |(encoded)|
-    required = [encoded].pack('H*')
-    next if present.include?(required)
+  relative = path.delete_prefix("#{root}/")
+  text = File.read(path)
 
-    missing[required] << path.delete_prefix("#{root}/")
+  text.scan(/REQUIRE "pkg:rtoc_([0-9a-f]+)"/) do |(encoded)|
+    required = [encoded].pack('H*')
+    missing[required] << relative unless present.include?(required)
+  end
+
+  # A REQUIRE also takes a path relative to the requiring FILE. Checking only
+  # the hex package form reported a clean tree while
+  # `mir_lowering.clear`'s `REQUIRE "test_lowering.clear"` still dangled.
+  text.scan(/REQUIRE "(?!pkg:)([^"]+)"/) do |(spec)|
+    required = File.expand_path(spec, File.dirname(path)).delete_prefix("#{root}/")
+    missing[required] << relative unless present.include?(required)
   end
 end
 
