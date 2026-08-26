@@ -15361,7 +15361,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END)
     END;
-    target_sync = (target_sync OR (TRY (aST__full_type_mut(target_node))).sync());
+    IF (target_sync == NIL) THEN
+      target_sync = (TRY (aST__full_type_mut(target_node))).sync();
+    END
     MUTABLE path = mIRLowering__field_access_path(rtoc_self_view, ti, target_sync, &is_rc_unwrapped, &is_locked_unwrapped);
     IF ((((path == :direct) AND target_node IS_A Identifier) AND ((target_node.symbol != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_567 = ((target_node.symbol)?);
     symbolEntry__carrier_contract(rtoc_local_receiver_567) } == :monomorphic))) AND !(is_rc_unwrapped)) THEN
@@ -18656,7 +18658,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       });
     rtoc_lambda_result_678
       });
-      assign_alloc = (assign_alloc OR mIRLowering__mir_owned_alloc(rtoc_self_view, value));
+      IF (assign_alloc == NIL) THEN
+        assign_alloc = mIRLowering__mir_owned_alloc(rtoc_self_view, value);
+      END
       value = mIRLowering__copy_container_borrow_if_needed(rtoc_self_view, value, node.value);
       IF (TRUE AND TRUE) THEN
         mIRLowering__stamp_allocating_result_target_mut(rtoc_self_view, &value, target_name, assign_alloc);

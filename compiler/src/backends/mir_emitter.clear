@@ -2798,7 +2798,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF else_body EXISTS AS else_body_value THEN
           result = "switch (${expr}) {\n.Item => |${CAST(b.capture AS String)}| {\n${suppress}${then_body}\n},\n.Closed => {\n${else_body_value}\n},\n}";
         END
-        result = (result OR "switch (${expr}) {\n.Item => |${CAST(b.capture AS String)}| {\n${suppress}${then_body}\n},\n.Closed => {},\n}");
+        IF result.empty?() THEN
+          result = "switch (${expr}) {\n.Item => |${CAST(b.capture AS String)}| {\n${suppress}${then_body}\n},\n.Closed => {},\n}";
+        END
       ELSE_IF (b.predicate == :is_ok) THEN
         result = "if (${expr}) |${CAST(b.capture AS String)}| {\n${suppress}${then_body}\n}";
         IF else_body EXISTS AS else_body_value THEN
@@ -2812,7 +2814,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF b.pointer_capture THEN
           capture = "*${CAST(b.capture AS String)}";
         ELSE
-          capture = COPY b.capture;
+          capture = CAST(b.capture AS String);
         END
         result = "if (${expr}) |${capture}| {\n${suppress}${then_body}\n}";
         IF else_body EXISTS AS else_body_value THEN
@@ -2824,15 +2826,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_self_view.if_bind_counter = (((rtoc_self_view.if_bind_counter OR_ELSE 0)) + 1);
       MUTABLE label = "__ib_${UNWRAP (rtoc_self_view.if_bind_counter).toString()}";
       MUTABLE ok_var = "__ib_ok_${UNWRAP (rtoc_self_view.if_bind_counter).toString()}";
-      MUTABLE inner = (node.bindings |> SELECT (    IF _[:node_ref] THEN
-        "const ${_[:capture]} = ${TRY (mIREmitter__emit(&rtoc_self_view, _[:expr]))}; if (${_[:capture]}.isNil()) break :${label};"
-      ELSE_IF (_[:predicate] == :stream_item) THEN
-        "const ${_[:capture]} = switch (${TRY (mIREmitter__emit(&rtoc_self_view, _[:expr]))}) { .Item => |payload| payload, .Closed => break :${label} };"
-      ELSE_IF (_[:predicate] == :is_ok) THEN
-        "const ${_[:capture]} = ${TRY (mIREmitter__emit(&rtoc_self_view, _[:expr]))} catch break :${label};"
-      ELSE
-        "const ${_[:capture]} = ${TRY (mIREmitter__emit(&rtoc_self_view, _[:expr]))} orelse break :${label};"
-      END)).join("\n");
+      # Same `b[:field]` hash syntax as the single-binding path, on what is a
+      # struct; an explicit loop also keeps the emit fallible.
+      MUTABLE inner_parts: []String = List[];
+      FOR binding IN node.bindings DO
+        MUTABLE binding_capture: String = CAST(binding.capture AS String);
+        MUTABLE binding_expr: String = TRY (mIREmitter__emit(&rtoc_self_view, binding.expr));
+        IF (binding.node_ref OR_ELSE FALSE) THEN
+          &inner_parts.append("const ${binding_capture} = ${binding_expr}; if (${binding_capture}.isNil()) break :${label};");
+        ELSE_IF (binding.predicate == :stream_item) THEN
+          &inner_parts.append("const ${binding_capture} = switch (${binding_expr}) { .Item => |payload| payload, .Closed => break :${label} };");
+        ELSE_IF (binding.predicate == :is_ok) THEN
+          &inner_parts.append("const ${binding_capture} = ${binding_expr} catch break :${label};");
+        ELSE
+          &inner_parts.append("const ${binding_capture} = ${binding_expr} orelse break :${label};");
+        END
+      END
+      MUTABLE inner = inner_parts.join("\n");
       result = "var ${ok_var}: bool = false;\n";
       result = (result $+ "${label}: {\n${inner}\n${then_body}\n${ok_var} = true;\n}");
       IF else_body EXISTS AS else_body_value THEN

@@ -20374,7 +20374,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         MUTABLE ret_alloc = TRY (functionSignature__return_alloc(&matched_def));
         IF TRY (functionSignature__emits_allocating?(&matched_def)) THEN
-          ret_alloc = (ret_alloc OR TRY (functionSignature__intrinsic_alloc(&matched_def, IntrinsicAllocationKind.Alloc)));
+          IF (ret_alloc == NIL) THEN
+            ret_alloc = TRY (functionSignature__intrinsic_alloc(&matched_def, IntrinsicAllocationKind.Alloc));
+          END
         END
         IF ret_alloc THEN
           IF ([:heap, :frame]).contains?(ret_alloc) THEN

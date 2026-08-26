@@ -22,6 +22,10 @@ PATTERNS = {
   '.members' => /\.members\b/,
   '.props' => /\.props\b/,
   'public_send' => /public_send/,
+  # Ruby hash syntax on what CLEAR declares as a struct. Not every hit is a
+  # defect -- CLEAR really does index a {String@symbol}V map this way -- so
+  # this one is a population to review, not a list to fix blindly.
+  'x[:field]' => /\w+\[:\w+\]/,
 }.freeze
 
 root = File.expand_path('../compiler/src', __dir__)
