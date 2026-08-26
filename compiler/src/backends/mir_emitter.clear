@@ -3490,7 +3490,7 @@ PUB FN mIREmitter__emit_direct_cleanup(self: MIREmitter, name: String, entry: Cl
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE alloc = (alloc_override OR_ELSE TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry)));
+    MUTABLE alloc: String = (alloc_override OR_ELSE TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry)));
     MUTABLE guarded = cleanupEntry__has_moved_guard?(entry);
     MUTABLE via_pointer = cleanupEntry__via_pointer?(entry);
     IF (cleanupEntry__kind(entry) == :resource) THEN
@@ -3501,10 +3501,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       MUTABLE rc_alloc: ?String@symbol = cleanupEntry__rc_alloc(entry);
       MUTABLE use_alloc: String = "";
-      IF (((cleanupEntry__kind(entry) == :rc) AND (rc_alloc != NIL)) AND (alloc_override == NIL)) THEN
-        use_alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, symbol(rc_alloc)));
-      ELSE
-        use_alloc = alloc;
+      use_alloc = COPY alloc;
+      IF ((cleanupEntry__kind(entry) == :rc) AND (alloc_override == NIL)) THEN
+        IF rc_alloc EXISTS AS rc_alloc_value THEN
+          use_alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, rc_alloc_value));
+        END
       END
       MUTABLE use_name: String = "";
       IF (cleanupEntry__kind(entry) == :frozen) THEN
@@ -3536,7 +3537,7 @@ PRIVATE FN mIREmitter__emit_cleanup(self: MIREmitter, name: String, entry: Clean
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE alloc = TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry));
+    MUTABLE alloc: String = TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry));
     MUTABLE g = cleanupEntry__has_moved_guard?(entry);
     MUTABLE vp = cleanupEntry__via_pointer?(entry);
     IF (entry.kind() == :resource) THEN
@@ -3545,11 +3546,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF (entry.kind() == :tuple) THEN
       RETURN mIREmitter__guarded_defer(rtoc_self_view, name, TRY (mIREmitter__render_tuple_cleanup(rtoc_self_view, entry, name, alloc)), g, errdefer);
     ELSE
-      MUTABLE use_alloc: String = "";
-      IF ((entry.kind() == :rc) AND cleanupEntry__rc_alloc(entry)) THEN
-        use_alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, cleanupEntry__rc_alloc(entry)));
-      ELSE
-        use_alloc = alloc;
+      MUTABLE use_alloc: String = COPY alloc;
+      IF (entry.kind() == :rc) THEN
+        IF cleanupEntry__rc_alloc(entry) EXISTS AS rc_alloc_value THEN
+          use_alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, rc_alloc_value));
+        END
       END
       MUTABLE use_name: String = "";
       IF (entry.kind() == :frozen) THEN
