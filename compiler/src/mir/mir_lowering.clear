@@ -3793,7 +3793,7 @@ FN mIRLowering__lower_program(MUTABLE self: MIRLowering, node: Program, use_c_al
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE needs_safety = COPY needs_safety_input;
-    TRY (mIRPassState__class_require_mut(node, :mir_pass_complete, {:consumer: "MIRLowering"}));
+    TRY (mIRPassState__class_require_mut(PassStateProgram{ Program: COPY node }, :mir_pass_complete, {:consumer: "MIRLowering"}));
     mIRLowering__reset_unit_import_dedup_mut(rtoc_self_view);
     MUTABLE rtoc_writer_receiver_92: MIRLoweringProgramState = mIRLowering__program_state(rtoc_self_view);
     rtoc_writer_receiver_92.use_debug_allocator = COPY use_debug_allocator;
@@ -4055,7 +4055,7 @@ FN mIRLowering__lower_module(MUTABLE self: MIRLowering, node: Program) RETURNS !
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (mIRPassState__class_require_mut(node, :mir_pass_complete, {:consumer: "MIRLowering.lower_module"}));
+    TRY (mIRPassState__class_require_mut(PassStateProgram{ Program: COPY node }, :mir_pass_complete, {:consumer: "MIRLowering.lower_module"}));
     mIRLowering__reset_unit_import_dedup_mut(rtoc_self_view);
     MUTABLE type_items: []Emittable = ( { MUTABLE rtoc_empty_list_107: []Emittable = List[]; rtoc_empty_list_107 } );
     MUTABLE fn_items: []Emittable = ( { MUTABLE rtoc_empty_list_108: []Emittable = List[]; rtoc_empty_list_108 } );
@@ -4444,7 +4444,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (type__fixed?(from_t) AND type__dynamic?(to_t)) THEN
       MUTABLE from_elem: ?Type = TRY (type__element_type(from_t));
       MUTABLE to_elem: ?Type = TRY (type__element_type(to_t));
-      IF (((from_elem != NIL) AND to_elem) AND (TRY (type__surface_name(TypeTypeInput{ Type: COPY UNWRAP (from_elem) })) == TRY (type__surface_name(to_elem)))) THEN
+      IF (((from_elem != NIL) AND to_elem) AND (TRY (type__surface_name(TypeTypeInput{ Type: COPY UNWRAP (from_elem) })) == TRY (type__surface_name(TypeTypeInput{ Type: COPY to_elem })))) THEN
         RETURN NIL;
       END
     END
@@ -13954,11 +13954,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF TRY (type__stream_step?((TRY (type__from_node_mut(node.right))))) THEN
         RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY right, method: "isItem", args: ( { MUTABLE rtoc_empty_list_541: []Any = List[]; rtoc_empty_list_541 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
       ELSE
-        TRY (mIRLowering__require_tense_operation_plan_mut(rtoc_self_view, node, TenseOperationKind.Exists, TenseBackendForm.OptionalTest));
+        TRY (mIRLowering__require_tense_operation_plan_mut(rtoc_self_view, Locatable{ UnaryOp: COPY node }, TenseOperationKind.Exists, TenseBackendForm.OptionalTest));
         RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: "!=", left: COPY right, right: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
     ELSE_IF (node.op == :IS_OK) THEN
-      TRY (mIRLowering__require_tense_operation_plan_mut(rtoc_self_view, node, TenseOperationKind.IsOk, TenseBackendForm.FallibleTest));
+      TRY (mIRLowering__require_tense_operation_plan_mut(rtoc_self_view, Locatable{ UnaryOp: COPY node }, TenseOperationKind.IsOk, TenseBackendForm.FallibleTest));
       RETURN Emittable{ FallibleOk: COPY FallibleOk{ expr: COPY mIRLowering__strip_try(rtoc_self_view, right), lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE_IF (node.op == :IS_READY) THEN
       RETURN Emittable{ FutureReady: COPY FutureReady{ expr: COPY right, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -14003,7 +14003,7 @@ PRIVATE FN mIRLowering__lower_optional_unwrap(MUTABLE self: MIRLowering, node: O
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (mIRLowering__require_tense_operation_plan_mut(rtoc_self_view, node, TenseOperationKind.Unwrap, TenseBackendForm.OptionalUnwrap));
+    TRY (mIRLowering__require_tense_operation_plan_mut(rtoc_self_view, Locatable{ OptionalUnwrap: COPY node }, TenseOperationKind.Unwrap, TenseBackendForm.OptionalUnwrap));
     MUTABLE target: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.target))) AS Emittable);
     IF (TRUE AND node.error_union_type) THEN
       target = mIRLowering__strip_try(rtoc_self_view, target);
@@ -16447,7 +16447,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE element_type: ?Type = TRY (type__element_type(TRY (aST__full_type_mut(node.target))));
     MUTABLE elem_zig: String = "";
     IF element_type THEN
-      elem_zig = TRY (type__zig_type((TRY (type__new(element_type)))));
+      elem_zig = TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY element_type })))));
     ELSE
       elem_zig = "u8";
     END

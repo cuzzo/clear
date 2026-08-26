@@ -3571,7 +3571,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF cleanupEntry__rc_release_fields_cleanup?(entry) THEN
         MUTABLE guard: String = "";
         IF g THEN
-          guard = "if (!${mIREmitter__move_guard_name(rtoc_self_view, name)}) ";
+          guard = "if (!${mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY name })}) ";
         ELSE
           guard = "";
         END

@@ -11067,7 +11067,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE test_body_summaries: {Int64}BodyScanSummary = {};
     FOR _ IN node.tests DO
     typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(MUTABLE test_body_summaries, _, MUTABLE rtoc_self_view) -> {
-    test_body_summaries[aST__node_identity(_)] = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(_, MUTABLE rtoc_self_view) -> {
+    test_body_summaries[aST__node_identity(Locatable{ TestThat: COPY _ })] = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(_, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit_TestThat(&rtoc_self_view, _));
       rubyToClearVoid()
     });
@@ -11081,7 +11081,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         NIL
       END) |> WHERE _ != NIL) |> DISTINCT _;
       FOR _ IN node.tests DO
-      TRY (typeAnalysisSession__validate_strict_io_mut(rtoc_self_view, _, stubbed_fns, UNWRAP (test_body_summaries[aST__node_identity(_)])));
+      TRY (typeAnalysisSession__validate_strict_io_mut(rtoc_self_view, _, stubbed_fns, UNWRAP (test_body_summaries[aST__node_identity(Locatable{ TestThat: COPY _ })])));
       END
     END
     FOR _ IN node.benchmarks DO
@@ -11647,8 +11647,8 @@ PRIVATE FN typeAnalysisSession__current_body_fact_scope_nodes(self: TypeAnalysis
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE frame: ?BodyFactFrame = COPY typeAnalysisSession__body_fact_frames(rtoc_self_view).last();
     IF frame EXISTS AS frame_value THEN
-      IF frame_value.summary.with_scope_nodes[aST__node_identity(node)] != NIL THEN
-    RETURN COPY (frame_value.summary.with_scope_nodes[aST__node_identity(node)])?;
+      IF frame_value.summary.with_scope_nodes[aST__node_identity(Locatable{ WithBlock: COPY node })] != NIL THEN
+    RETURN COPY (frame_value.summary.with_scope_nodes[aST__node_identity(Locatable{ WithBlock: COPY node })])?;
       ELSE
     RETURN CAST(( { MUTABLE rtoc_empty_list_276: []Locatable = List[]; rtoc_empty_list_276 } ) AS []Locatable);
       END
@@ -11666,7 +11666,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE suspends = typeAnalysisSession__with_block_suspends?(rtoc_self_view, node);
       MUTABLE summary = COPY frame_value.summary;
       &summary.with_blocks.append(node);
-      summary.with_scope_nodes[aST__node_identity(node)] = (summary.with_scope_nodes[aST__node_identity(node)] OR_ELSE List[]);
+      summary.with_scope_nodes[aST__node_identity(Locatable{ WithBlock: COPY Locatable{ WithBlock: COPY node } })] = (summary.with_scope_nodes[aST__node_identity(node)] OR_ELSE List[]);
       IF suspends THEN
         &summary.suspend_points.append(COPY SuspendPointFact{ id: COPY SuspendPointId{ value: summary.suspend_points.length() }, kind: :lock, node: Locatable{ WithBlock: COPY node } });
       END
@@ -12445,7 +12445,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE root: ?Identifier = aST__root_identifier(node.object);
     IF (root != NIL) THEN
-      TRY (typeAnalysisSession__emit_direct_view_access_finding_mut(rtoc_self_view, node, identifier__name(root), "VIEW"));
+      TRY (typeAnalysisSession__emit_direct_view_access_finding_mut(rtoc_self_view, Locatable{ MethodCall: COPY node }, identifier__name(root), "VIEW"));
     ELSE
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :DIRECT_VIEW_ACCESS_REQUIRES_WITH }, [], {:name: "observable", :permission: "VIEW"}));
     END
@@ -12929,7 +12929,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.result));
     IF ((node.result != NIL) AND (node.result IS_A IfStatement)) THEN
-        TRY (typeAnalysisSession__promote_to_expr_if_mut(rtoc_self_view, node, castOptionalLocatableToIfStatement(node.result)));
+        TRY (typeAnalysisSession__promote_to_expr_if_mut(rtoc_self_view, Locatable{ BlockExpr: COPY node }, castOptionalLocatableToIfStatement(node.result)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &node, TRY (aST__full_type_mut(node.result))));
     node.storage = node.result.storage();
@@ -15829,7 +15829,7 @@ PRIVATE FN typeAnalysisSession__finalize_destructure_declaration_target_mut(self
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF target.type EXISTS AS type_value THEN
-      TRY (typeAnalysisSession__validate_type_annotation_mut(rtoc_self_view, target, type_value));
+      TRY (typeAnalysisSession__validate_type_annotation_mut(rtoc_self_view, AnnotationNode{ DestructureTarget: COPY target }, type_value));
     END
     MUTABLE final_type: ?Type = COPY target.type;
     TRY (typeAnalysisSession__validate_destructure_target_type_mut(rtoc_self_view, node, castTypeToTypeTypeInput(final_type), value_type));
@@ -15861,7 +15861,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     IF target.type EXISTS AS type_value THEN
-      TRY (typeAnalysisSession__validate_type_annotation_mut(rtoc_self_view, target, type_value));
+      TRY (typeAnalysisSession__validate_type_annotation_mut(rtoc_self_view, AnnotationNode{ DestructureTarget: COPY target }, type_value));
     END
     MUTABLE target_type = TRY (scope__resolve_type(scope, target.name));
     TRY (typeAnalysisSession__validate_destructure_target_type_mut(rtoc_self_view, node, TypeTypeInput{ Type: COPY target_type }, value_type));
@@ -17186,7 +17186,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE analysis: ?CaptureAnalysis = analysis_branch_value;
     IF ((analysis != NIL) AND !(rtoc_mutable_block_param_419.pinned)) THEN
         rtoc_mutable_block_param_419.pinned = TRUE;
-        typeAnalysisSession__note_mut(rtoc_self_view, node, "DO branch auto-pinned \u{2014} captures shared/locked resource. Use @parallel to distribute.");
+        typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ DoBlock: COPY node }, "DO branch auto-pinned \u{2014} captures shared/locked resource. Use @parallel to distribute.");
     END
     END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &node, :Void));
@@ -17372,16 +17372,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((analysis != NIL) AND !(node.pinned)) THEN
       IF analysis.has_local THEN
         node.pinned = :local;
-        typeAnalysisSession__note_mut(rtoc_self_view, node, "BG block auto-pinned \u{2014} captures @local resource (same-scheduler affinity).");
+        typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ BgBlock: COPY node }, "BG block auto-pinned \u{2014} captures @local resource (same-scheduler affinity).");
       ELSE_IF analysis.has_affine_locked THEN
         node.pinned = :shared;
-        typeAnalysisSession__note_mut(rtoc_self_view, node, "BG block auto-pinned \u{2014} captures @locked resource (round-robin scheduler affinity).");
+        typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ BgBlock: COPY node }, "BG block auto-pinned \u{2014} captures @locked resource (round-robin scheduler affinity).");
       ELSE
         node.pinned = :local;
         IF analysis.has_sharded THEN
-          typeAnalysisSession__note_mut(rtoc_self_view, node, "BG block auto-pinned \u{2014} captures @sharded map (scheduler affinity for shard locality).");
+          typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ BgBlock: COPY node }, "BG block auto-pinned \u{2014} captures @sharded map (scheduler affinity for shard locality).");
         ELSE
-          typeAnalysisSession__note_mut(rtoc_self_view, node, "BG block auto-pinned \u{2014} captures shared/locked resource. Use @parallel to override.");
+          typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ BgBlock: COPY node }, "BG block auto-pinned \u{2014} captures shared/locked resource. Use @parallel to override.");
         END
       END
     END

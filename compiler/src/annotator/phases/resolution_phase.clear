@@ -1867,7 +1867,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (resolutionSession__validate_generic_bounds_mut(rtoc_self_view, node.generic_params));
     FOR _ IN node.field_decls.values() DO
     MUTABLE rtoc_mutable_block_param_57 = COPY _;
-    TRY (resolutionSession__resolve_declaration_projections_mut(rtoc_self_view, node, &rtoc_mutable_block_param_57.type, node.generic_params));
+    TRY (resolutionSession__resolve_declaration_projections_mut(rtoc_self_view, Locatable{ StructDef: COPY node }, &rtoc_mutable_block_param_57.type, node.generic_params));
     END
     FOR _ IN node.field_decls.values() DO
     IF TRY (type__preallocation_hint?(_.type)) THEN

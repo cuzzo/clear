@@ -304,7 +304,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each_zig(self: Pipe
     MUTABLE caps = TRY (fiberCtxBuilder__build(conc_op.capture_analysis, "ctx", {}, NIL, 0, {}));
     MUTABLE capture_map = TRY (pipelineConcurrentLowerer__shard_capture_map(self, map_var_name, caps));
     MUTABLE body_mir = TRY (pipelineConcurrentLowerer__callback_body_mir_with_shard_call(self, each_op.body, key_var, capture_map, caps.capture_symbols, "__rt", TRY (pipelineConcurrentLowerer__shard_direct_context(self, map_var_name, key_var))));
-    RETURN ShardConcurrentEach{ id: COPY id, map_expr: COPY pipelineConcurrentLowerer__visit_mir_call(self, map_node), map_var_name: COPY map_var_name, map_type: COPY map_type, key_type: CAST(COPY key_type AS Type), shard_count: shard_count_value, start_expr: COPY start_mir, finish_expr: COPY finish_mir, inclusive: range_node.inclusive, capacity_expr: castExprToEmittable(COPY pipelineConcurrentLowerer__stream_concurrent_capacity_mir(self, conc_op, Emittable{ Lit: COPY Lit{ value: COPY shard_count_value.toString(), lowered_node_id: NIL, ownership_consumption: NIL } })), batch_size_expr: COPY pipelineConcurrentLowerer__bounded_concurrent_batch_mir(self, conc_op), task_config_variant: COPY pipelineConcurrentLowerer__shard_task_config_variant(self, conc_op), producer_key_body: COPY producer_key_body, capture_fields: COPY TRY (pipelineConcurrentLowerer__shard_capture_fields(self, caps)), capture_inits: COPY TRY (pipelineConcurrentLowerer__shard_capture_inits(self, caps)), capture_setup: COPY TRY (pipelineConcurrentLowerer__shard_capture_setup(self, caps)), body: COPY TRY (pipelineConcurrentLowerer__append_ownership_transfers_call(self, body_mir)), key_allocates_frame: ctx.key_allocates_frame, body_allocates_frame: ctx.body_allocates_frame };
+    RETURN ShardConcurrentEach{ id: COPY id, map_expr: COPY pipelineConcurrentLowerer__visit_mir_call(self, Locatable{ Identifier: COPY map_node }), map_var_name: COPY map_var_name, map_type: COPY map_type, key_type: CAST(COPY key_type AS Type), shard_count: shard_count_value, start_expr: COPY start_mir, finish_expr: COPY finish_mir, inclusive: range_node.inclusive, capacity_expr: castExprToEmittable(COPY pipelineConcurrentLowerer__stream_concurrent_capacity_mir(self, conc_op, Emittable{ Lit: COPY Lit{ value: COPY shard_count_value.toString(), lowered_node_id: NIL, ownership_consumption: NIL } })), batch_size_expr: COPY pipelineConcurrentLowerer__bounded_concurrent_batch_mir(self, conc_op), task_config_variant: COPY pipelineConcurrentLowerer__shard_task_config_variant(self, conc_op), producer_key_body: COPY producer_key_body, capture_fields: COPY TRY (pipelineConcurrentLowerer__shard_capture_fields(self, caps)), capture_inits: COPY TRY (pipelineConcurrentLowerer__shard_capture_inits(self, caps)), capture_setup: COPY TRY (pipelineConcurrentLowerer__shard_capture_setup(self, caps)), body: COPY TRY (pipelineConcurrentLowerer__append_ownership_transfers_call(self, body_mir)), key_allocates_frame: ctx.key_allocates_frame, body_allocates_frame: ctx.body_allocates_frame };
   ELSE
     panic("SHARD target missing shard_count");
   END
@@ -400,7 +400,7 @@ PRIVATE FN pipelineConcurrentLowerer__build_bounded_concurrent_callback(self: Pi
   RETURN TRY (pipelineConcurrentLowerer__callback_record(self, id, ctx_name, fields, fn, specs));
 END
 PRIVATE FN pipelineConcurrentLowerer__bounded_stream_items_setup(self: PipelineConcurrentLowerer, lhs: Identifier, ignored_id: Int64) RETURNS PipelineConcurrentSourcePointer ->
-  MUTABLE source = pipelineConcurrentLowerer__visit_mir_call(self, lhs);
+  MUTABLE source = pipelineConcurrentLowerer__visit_mir_call(self, Locatable{ Identifier: COPY lhs });
   RETURN PipelineConcurrentSourcePointer{ setup: ( { MUTABLE rtoc_empty_list_9: []Emittable = List[]; rtoc_empty_list_9 } ), pointer: Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ FieldGet: COPY FieldGet{ object: COPY source, field: "items", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } } };
 END
 PRIVATE FN pipelineConcurrentLowerer__bounded_stream_source_move(self: PipelineConcurrentLowerer, lhs: Identifier) RETURNS ![]Emittable ->
@@ -581,7 +581,7 @@ PRIVATE FN pipelineConcurrentLowerer__stream_concurrent_element_type(self: Pipel
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__stream_concurrent_source_setup_mir(self: PipelineConcurrentLowerer, lhs: Identifier, id: Int64) RETURNS PipelineConcurrentSourcePointer ->
-  MUTABLE src = pipelineConcurrentLowerer__visit_mir_call(self, lhs);
+  MUTABLE src = pipelineConcurrentLowerer__visit_mir_call(self, Locatable{ Identifier: COPY lhs });
   RETURN PipelineConcurrentSourcePointer{ setup: ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } ), pointer: Emittable{ AddressOf: COPY AddressOf{ expr: COPY src, lowered_node_id: NIL, ownership_consumption: NIL } } };
 END
 PRIVATE FN pipelineConcurrentLowerer__stream_concurrent_capacity_mir(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp, worker_count: Emittable) RETURNS Expr ->

@@ -138,7 +138,7 @@ PUB FN emit_typo_suggestion_mut(token: ?TypoToken, name: String, candidates: []S
   MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch?(name, "\\A[A-Z]")) THEN
     NIL
   ELSE
-    TRY (closest_name(name, candidates))
+    TRY (closest_name(NameCandidate{ StringValue: COPY name }, candidates))
   END;
   MUTABLE fixes = List[];
   IF best THEN
@@ -166,7 +166,7 @@ FN variant_anchor_from_unionlit(node: Node, variant_name: String) RETURNS ?Ancho
   RETURN anchor_at(node.token().line, (node.token().column - variant_name.codepointCount()));
 END
 FN emit_variant_typo_mut(anchor: AnchorToken, name: String, candidates: []NameCandidate, message: String, fix_label: String, cascade: Bool = FALSE) RETURNS !Void ->
-  MUTABLE best = TRY (closest_name(name, candidates));
+  MUTABLE best = TRY (closest_name(NameCandidate{ StringValue: COPY name }, candidates));
   MUTABLE fixes = List[];
   IF best THEN
     &fixes.append(TRY (fix__new(fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: name, :best: best, :label: fix_label}), [edit__new(span__new(NIL, anchor.line, anchor.column, name.codepointCount()), CAST(best AS String))], :auto)));
@@ -435,7 +435,7 @@ FN emit_int_overflow_error_mut(node: Literal, val: Int64, target_type: String@sy
     MUTABLE new_suffix: ?String = COPY (CAST({:Int8: "i8", :Byte: "u8", :Int16: "i16", :UInt16: "u16", :Int32: "i32", :UInt32: "u32", :Int64: "i64", :UInt64: "u64"} AS {String@symbol}String))[best];
     IF ((new_suffix != NIL) AND (new_suffix != old_suffix)) THEN
       MUTABLE suffix_col = ((tok.column + scopeBindings__length(m[1])) + 1);
-      RETURN emit_overflow_suffix_fix_mut(node, target_type, min_value, max_value, tok, suffix_col, old_suffix, new_suffix, val);
+      RETURN emit_overflow_suffix_fix_mut(Locatable{ Literal: COPY node }, target_type, min_value, max_value, tok, suffix_col, old_suffix, new_suffix, val);
     END
   END
   MUTABLE target_name = COPY CAST(target_type AS String);

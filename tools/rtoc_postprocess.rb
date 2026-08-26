@@ -55,6 +55,7 @@ module RtocPostprocess
       @struct_fields = Hash.new { |hash, key| hash[key] = {} }
       @element_of = {}
       @union_variants = Hash.new { |hash, key| hash[key] = Set.new }
+      @variant_payloads = Hash.new { |hash, key| hash[key] = {} }
       @enum_variants = Hash.new { |hash, key| hash[key] = Set.new }
       @structs = Set.new
       @param_types = {}
@@ -64,6 +65,8 @@ module RtocPostprocess
     end
 
     def element_of(struct, field) = @element_of[[struct, field]]
+
+    def variant_payloads(union) = @variant_payloads[union]
 
     def field_type(struct, field) = @struct_fields[struct][field]
 
@@ -101,9 +104,13 @@ module RtocPostprocess
           @element_of[[current, match[1]]] = Regexp.last_match(1) if match[2] =~ /\A\?*\[\](\w+)\z/
         end
 
-        if (match = line.match(/\APUB UNION (\w+) \{ (.+?) \}/))
+        if (match = line.match(/\A(?:PUB )?UNION (\w+) \{ (.+?) \}/))
           match[2].split(',').each do |part|
-            @union_variants[match[1]] << part.split(':').first.strip if part.include?(':')
+            next unless part.include?(':')
+
+            variant, payload = part.split(':', 2).map(&:strip)
+            @union_variants[match[1]] << variant
+            @variant_payloads[match[1]][variant] = payload
           end
         end
         if (match = line.match(/\APUB ENUM (\w+) \{ (.+?) \}/))
@@ -615,6 +622,56 @@ module RtocPostprocess
 
         findings << Finding.new(rule: :optional_call_interpolation, file: file, line: position + 1,
                                 message: "${#{callee}(...)} returns #{type}")
+      end
+    end
+  end
+
+  # A scalar passed where a UNION parameter is declared. Ruby has no wrapper,
+  # so the translation passes the bare value and CLEAR wants the variant. Only
+  # fired when exactly ONE variant of that union carries the argument's type --
+  # otherwise the choice is a judgement, not a rewrite.
+  rule(:missing_union_wrap, kind: :mechanical,
+       summary: 'scalar passed where a union parameter is declared') do |lines, index, findings, file, fix|
+    scope = Scope.new(index)
+    payloads = {}
+    index.union_variants.each_key do |union|
+      # Variant -> payload type, read back from the union's own declaration.
+      payloads[union] = {}
+    end
+    lines.each_with_index do |line, position|
+      scope.observe(line)
+      next if line.strip.start_with?('#')
+
+      line.scan(/(\w+)\(([^()]*(?:\([^()]*\)[^()]*)*)\)/) do |callee, argument_text|
+        declared = index.param_types[callee]
+        next unless declared
+
+        argument_text.split(/,\s*(?![^()]*\))/).each_with_index do |argument, slot|
+          argument = argument.strip
+          expected = declared[slot]
+          next unless expected && index.union_variants.key?(expected)
+          # A name can be BOTH a union and a struct -- `Type` is a struct in
+          # ast/type.clear and a union in pipeline_host.clear. Wrapping on the
+          # union reading of an ambiguous name reported 1012 sites, nearly all
+          # of them correct code passing the struct.
+          next if index.structs.include?(expected)
+          next unless argument =~ /\A\w+\z/
+
+          actual = scope.struct_of(argument)
+          next unless actual
+          next if actual == expected
+
+          matching = index.variant_payloads(expected).select { |_, payload| payload == actual }
+          next unless matching.length == 1
+
+          variant = matching.keys.first
+          findings << Finding.new(rule: :missing_union_wrap, file: file, line: position + 1,
+                                  message: "#{callee} arg #{slot + 1}: #{argument} is #{actual}, parameter is union #{expected}")
+          next unless fix
+
+          lines[position] = lines[position].sub(/(#{Regexp.escape(callee)}\([^()]*?)\b#{Regexp.escape(argument)}\b/,
+                                                "\\1#{expected}{ #{variant}: COPY #{argument} }")
+        end
       end
     end
   end
