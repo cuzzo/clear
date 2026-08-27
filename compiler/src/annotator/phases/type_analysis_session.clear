@@ -9826,7 +9826,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE alias_entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_220 = typeAnalysisSession__current_scope(rtoc_self_view);
     scope__local_entry_mut(rtoc_local_receiver_220, alias_name) };
-    TRY (symbolEntry__mark_non_escaping_mut(&alias_entry));
+    symbolEntry__mark_non_escaping_mut(&alias_entry);
     symbolEntry__mark_borrowed_alias_mut(&alias_entry);
     TRY (typeAnalysisSession__og_declare(rtoc_self_view, alias_name, NIL, TypeTypeInput{ Type: COPY inner_type }));
 }
@@ -9870,7 +9870,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     typeAnalysisSession__record_capture_local_mut(rtoc_self_view, alias_name);
     MUTABLE sym = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_223 = typeAnalysisSession__current_scope(rtoc_self_view);
     scope__local_entry_mut(rtoc_local_receiver_223, alias_name) };
-    TRY (symbolEntry__mark_non_escaping_mut(&sym));
+    symbolEntry__mark_non_escaping_mut(&sym);
     symbolEntry__mark_borrowed_alias_mut(&sym);
     TRY (typeAnalysisSession__og_declare(rtoc_self_view, alias_name, NIL, TypeTypeInput{ Type: COPY resolved_type }));
 }
@@ -9907,7 +9907,7 @@ PRIVATE FN typeAnalysisSession__declare_view_borrow_constraints_mut(self: TypeAn
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sym = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_225 = typeAnalysisSession__current_scope(rtoc_self_view);
     scope__local_entry_mut(rtoc_local_receiver_225, alias_name) };
-    TRY (symbolEntry__mark_non_escaping_mut(&sym));
+    symbolEntry__mark_non_escaping_mut(&sym);
     symbolEntry__mark_borrowed_alias_mut(&sym);
 }
 END
@@ -9922,7 +9922,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     typeAnalysisSession__record_capture_local_mut(rtoc_self_view, alias_name);
     MUTABLE sym = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_227 = typeAnalysisSession__current_scope(rtoc_self_view);
     scope__local_entry_mut(rtoc_local_receiver_227, alias_name) };
-    TRY (symbolEntry__mark_non_escaping_mut(&sym));
+    symbolEntry__mark_non_escaping_mut(&sym);
     symbolEntry__mark_borrowed_alias_mut(&sym);
     TRY (typeAnalysisSession__og_declare(rtoc_self_view, alias_name, NIL, castTypeToTypeTypeInput(inner_type)));
 }
@@ -9944,7 +9944,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE sym = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_229 = typeAnalysisSession__current_scope(rtoc_self_view);
     scope__local_entry_mut(rtoc_local_receiver_229, alias_name) };
-    TRY (symbolEntry__mark_non_escaping_mut(&sym));
+    symbolEntry__mark_non_escaping_mut(&sym);
     symbolEntry__mark_borrowed_alias_mut(&sym);
     TRY (typeAnalysisSession__og_declare(rtoc_self_view, alias_name, NIL, TypeTypeInput{ Type: COPY resolved_type }));
     MUTABLE rtoc_mutable_receiver_230 = typeAnalysisSession__ownership_graph(rtoc_self_view);
@@ -13330,7 +13330,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF src_sym EXISTS AS src_sym_value THEN
           MUTABLE src_sym_value_mutable = COPY src_sym_value;
           IF symbolEntry__non_escaping(src_sym_value_mutable) THEN
-            TRY (symbolEntry__mark_non_escaping_mut(&entry));
+            symbolEntry__mark_non_escaping_mut(&entry);
           END
           IF container_source EXISTS AS container_source_value THEN
             MUTABLE container_source_value_mutable = COPY container_source_value;
@@ -14450,7 +14450,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     END
     IF type__observable?(node_type) THEN
-      TRY (symbolEntry__mark_non_escaping_mut(&sym));
+      symbolEntry__mark_non_escaping_mut(&sym);
     END
     IF (type__versioned?(node_type) AND (type__ownership(node_type) == :affine)) THEN
       MUTABLE cap_tok = IF value IS_A CapabilityWrap THEN
@@ -15040,7 +15040,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((plan.action == :borrow)) THEN
       RETURN;
     END
-    TRY (symbolEntry__mark_non_escaping_mut(&symbol));
+    symbolEntry__mark_non_escaping_mut(&symbol);
     symbolEntry__mark_borrowed_alias_mut(&symbol);
     MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), plan.destination);
     IF graph_node EXISTS AS graph_node_value THEN
@@ -15128,7 +15128,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE sym = COPY UNWRAP (node.symbol);
-    TRY (symbolEntry__mark_non_escaping_mut(&sym));
+    symbolEntry__mark_non_escaping_mut(&sym);
     symbolEntry__mark_borrowed_alias_mut(&sym);
 }
 END

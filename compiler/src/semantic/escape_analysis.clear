@@ -1033,7 +1033,7 @@ PUB FN escapeAnalysis__unwrap_value(node: ?DynamicValue) RETURNS ?DynamicValue -
   RETURN current;
 END
 PUB FN escapeAnalysis__push_locatable_children_mut(node: Locatable, MUTABLE stack: []?Locatable) RETURNS !Void ->
-  FOR _ IN (TRY (aST__wrapped_children(node))) DO
+  FOR _ IN (aST__wrapped_children(node)) DO
   &stack.append(_);
   END
   FOR _ IN node.class().members DO
@@ -1624,7 +1624,7 @@ PUB FN escapeAnalysis__collect_lambda_body_identifiers(node: LambdaLit) RETURNS 
     IF (current IS_A FunctionDef OR current IS_A LambdaLit) THEN
       CONTINUE;
     END
-    MUTABLE rtoc_reverse_items_25: []Locatable = (TRY (aST__expression_children(current)));
+    MUTABLE rtoc_reverse_items_25: []Locatable = (aST__expression_children(current));
     MUTABLE rtoc_reverse_i_26 = rtoc_reverse_items_25.length() - 1;
     WHILE rtoc_reverse_i_26 >= 0 DO
   &stack.append(COPY (rtoc_reverse_items_25[rtoc_reverse_i_26])?);

@@ -4513,7 +4513,7 @@ PRIVATE FN mIREmitter__render_tuple_cleanup(self: MIREmitter, entry: CleanupEntr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE statements = (TRY (cleanupEntry__tuple_cleanup_fields(entry))) |> SELECT {
+    MUTABLE statements = (cleanupEntry__tuple_cleanup_fields(entry)) |> SELECT {
     MUTABLE target = "${root_name}.@\"${UNWRAP (_[:index])}\"";
     MUTABLE close_plan: ?ResourceClosePlan = CAST(_[:close_plan] AS ?ResourceClosePlan);
     (  IF close_plan THEN
