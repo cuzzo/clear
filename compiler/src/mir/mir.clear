@@ -3864,7 +3864,7 @@ PUB STRUCT FsmGenericCtxStruct {
   promise_zig: String,
   capture_fields: []ContextFieldDecl,
   extra_field_decls: []ContextFieldDecl,
-  promoted_field_decls: Any@multiowned,
+  promoted_field_decls: []ContextFieldDecl,
   member_fns: []FsmMemberFn,
   dispatch: FsmDispatch,
   destroy_actions: []FsmDestroyAction
