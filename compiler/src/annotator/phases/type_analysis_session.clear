@@ -8730,8 +8730,7 @@ PRIVATE FN typeAnalysisSession__effects_init_mut(self: TypeAnalysisSession) RETU
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_writer_receiver_200: CapabilityAuditInputs = typeAnalysisSession__phase_audit_inputs(rtoc_self_view);
-    rtoc_writer_receiver_200.effect_state = EffectState{ direct_effects: {}, call_site_context: {}, call_site_arg_families: {} };
+    rtoc_self_view.audit_inputs.effect_state = EffectState{ direct_effects: {}, call_site_context: {}, call_site_arg_families: {} };
     RETURN typeAnalysisSession__effect_state(rtoc_self_view);
 }
 END
@@ -12888,11 +12887,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE prev_terminated = typeAnalysisSession__phase_traversal_state(rtoc_self_view).branch_terminated;
     MUTABLE stream_frame: ?StreamYieldFrame = typeAnalysisSession__current_stream_yield_frame(rtoc_self_view);
     MUTABLE prev_stream_closed: ?Bool = stream_frame?.closed;
-    MUTABLE rtoc_writer_receiver_313: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_313.branch_terminated = FALSE;
+    rtoc_self_view.traversal_state.branch_terminated = FALSE;
     DEFER {
-    MUTABLE rtoc_writer_receiver_314: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_314.branch_terminated = prev_terminated;
+    rtoc_self_view.traversal_state.branch_terminated = prev_terminated;
     IF ((stream_frame != NIL) AND !((prev_stream_closed == NIL))) THEN
       stream_frame.closed = prev_stream_closed?;
     END
@@ -15479,10 +15476,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     END
-    MUTABLE rtoc_writer_receiver_385: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_385.auto_locked_assign_name = auto_lock_name;
-    DEFER MUTABLE rtoc_writer_receiver_386: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_386.auto_locked_assign_name = previous_auto_lock;
+    rtoc_self_view.traversal_state.auto_locked_assign_name = auto_lock_name;
+    DEFER rtoc_self_view.traversal_state.auto_locked_assign_name = previous_auto_lock;
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
     IF node.value IS_A IfStatement THEN
       TRY (typeAnalysisSession__promote_to_expr_if_mut(rtoc_self_view, Locatable{ Assignment: COPY node }, &node.value));
@@ -17277,8 +17272,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     frame.closed = TRUE;
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ CloseStream: COPY node }, :Void));
-    MUTABLE rtoc_writer_receiver_421: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_421.branch_terminated = TRUE;
+    rtoc_self_view.traversal_state.branch_terminated = TRUE;
 }
 END
 PRIVATE FN typeAnalysisSession__visit_BgBlock(MUTABLE self: TypeAnalysisSession, MUTABLE node: BgBlock) RETURNS !?Bool
@@ -17287,10 +17281,8 @@ PRIVATE FN typeAnalysisSession__visit_BgBlock(MUTABLE self: TypeAnalysisSession,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__record_effect(rtoc_self_view, symbol("YIELD")));
     MUTABLE prev_bg_pinned = typeAnalysisSession__phase_traversal_state(rtoc_self_view).current_bg_pinned;
-    MUTABLE rtoc_writer_receiver_422: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_422.current_bg_pinned = !(!(node.pinned));
-    DEFER MUTABLE rtoc_writer_receiver_423: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_423.current_bg_pinned = prev_bg_pinned;
+    rtoc_self_view.traversal_state.current_bg_pinned = !(!(node.pinned));
+    DEFER rtoc_self_view.traversal_state.current_bg_pinned = prev_bg_pinned;
     MUTABLE last_type: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
     typeAnalysisSession__with_async_body_fact_frame(rtoc_self_view, AsyncBodyNode{ BgBlock: COPY node }, AsyncValidationNode{ BgBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -17738,8 +17730,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         functionContext__mark_runtime_used_mut(&rtoc_mutable_receiver_435);
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &node, :NoReturn));
-    MUTABLE rtoc_writer_receiver_436: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_436.branch_terminated = TRUE;
+    rtoc_self_view.traversal_state.branch_terminated = TRUE;
     RETURN TRUE;
 }
 END
@@ -17883,8 +17874,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ ReturnNode: COPY node }, actual));
     MUTABLE return_fact_type: Type = (value.coerced_type_info() OR actual_full);
     &fn_ctx.returns.append(COPY ReturnFact{ storage: COPY CAST(value.storage() AS ?String@symbol), type: COPY symbol((TRY (type__coercion_surface_name(castTypeToTypeTypeInput(return_fact_type))))), metatype: COPY CAST(value.metatype AS ?String@symbol) });
-    MUTABLE rtoc_writer_receiver_441: TraversalState = typeAnalysisSession__phase_traversal_state(rtoc_self_view);
-    rtoc_writer_receiver_441.branch_terminated = TRUE;
+    rtoc_self_view.traversal_state.branch_terminated = TRUE;
     RETURN TRUE;
 }
 END
