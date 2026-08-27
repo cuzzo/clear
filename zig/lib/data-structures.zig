@@ -2527,6 +2527,23 @@ pub fn bind(comptime deps: type) type {
                 return self.inner.contains(value);
             }
 
+            // Union another set into this one, the way Ruby's Set#merge and
+            // Rust's HashSet::extend do. Each element is COPIED, because both
+            // sets keep owning their own: insert takes ownership of what it is
+            // given, and `other` is only borrowed here.
+            pub fn merge(self: *Self, alloc: std.mem.Allocator, other: *const Self) !void {
+                var it = other.inner.iterator();
+                while (it.next()) |entry| {
+                    const value = entry.key_ptr.*;
+                    if (self.inner.contains(value)) continue;
+                    if (is_string) {
+                        try self.insert(alloc, try alloc.dupe(u8, value));
+                    } else {
+                        try self.insert(alloc, value);
+                    }
+                }
+            }
+
             pub fn remove(self: *Self, alloc: std.mem.Allocator, value: T) void {
                 if (is_string) {
                     if (self.inner.fetchRemove(value)) |kv| {

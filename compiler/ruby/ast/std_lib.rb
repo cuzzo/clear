@@ -1311,6 +1311,18 @@ SET_METHODS = T.let({
     borrows: :all,
     is_method: true,
   },
+  # Ruby's Set#merge and Rust's HashSet::extend: union another set in place.
+  # Both sets keep owning their own elements, so the runtime copies.
+  "merge" => {
+    arity: 1, tag: :set_method, allocates: true,
+    zig: "try {0}.merge({alloc}, &{1})",
+    bc: true,
+    alloc: :receiver_storage,
+    mutates_receiver: true,
+    return_type: :Void,
+    borrows: :all,
+    is_method: true,
+  },
   "remove" => {
     arity: 1, tag: :set_method,
     zig: "{0}.remove({alloc}, {1})",

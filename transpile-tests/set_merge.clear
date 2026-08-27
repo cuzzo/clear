@@ -1,0 +1,31 @@
+# Test: Set#merge unions another set in place, as Ruby's Set#merge and Rust's
+# HashSet::extend do. Both sets keep owning their own elements, so the source
+# survives the merge and neither side double-frees.
+
+FN main() RETURNS !Void ->
+  MUTABLE a: [Set]String = Set["x", "y"];
+  MUTABLE b: [Set]String = Set["y", "z"];
+  &a.merge(b);
+  ASSERT a.length() == 3_i64, "union should hold three distinct elements";
+  ASSERT a.contains?("x"), "an original element should be kept";
+  ASSERT a.contains?("y"), "the shared element should appear once";
+  ASSERT a.contains?("z"), "the merged element should be added";
+  ASSERT b.length() == 2_i64, "the source set should be unchanged";
+  ASSERT b.contains?("z"), "the source should still own its elements";
+
+  # Heap-allocated elements: the copy must be a real one, not an alias.
+  seed = "k";
+  MUTABLE built: [Set]String = Set["${seed}1"];
+  MUTABLE other: [Set]String = Set["${seed}2"];
+  &built.merge(other);
+  ASSERT built.length() == 2_i64, "heap elements should merge too";
+  ASSERT built.contains?("k2"), "the merged heap element should be present";
+  ASSERT other.contains?("k2"), "the source should keep its own copy";
+
+  MUTABLE empty: [Set]String = Set[];
+  &built.merge(empty);
+  ASSERT built.length() == 2_i64, "merging an empty set should change nothing";
+
+  print("set_merge: all tests passed");
+  RETURN;
+END
