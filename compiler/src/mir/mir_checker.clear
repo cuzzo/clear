@@ -274,7 +274,7 @@ PRIVATE FN linearOwnershipSnapshot__format_places(self: LinearOwnershipSnapshot,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((places |> SELECT _.path()) |> ORDER_BY _).join(",");
+    RETURN ((places |> SELECT _.path) |> ORDER_BY _).join(",");
 }
 END
 PUB FN linearOwnershipSnapshot__new(owned: [Set]PlaceId, released: [Set]PlaceId, maybe_released: [Set]PlaceId, cleanup_finalizers: [Set]PlaceId, guarded_finalizers: [Set]PlaceId, err_finalizers: [Set]PlaceId, pending_return_transfers: [Set]PlaceId, pending_block_transfers: [Set]PlaceId, alloc_kinds: {PlaceId}String@symbol) RETURNS LinearOwnershipSnapshot@multiowned ->
