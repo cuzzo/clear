@@ -1892,7 +1892,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((TRY (mIRChecker__structural_consumed_names(&rtoc_self_view, Emittable{ Let: COPY node }))).length() > 0) THEN
       RETURN TRUE;
     END
-    MUTABLE node_fact = node.ownership_consumption;
+    MUTABLE node_fact: ?OwnershipConsumptionFact = node.ownership_consumption;
     MUTABLE name = operand.name();
     IF (node_fact IS_A OwnershipConsumptionFact AND (node_fact.operands |> ANY {
     name;

@@ -3401,7 +3401,7 @@ PRIVATE FN mIREmitter__emit_defer_like(self: MIREmitter, keyword: String, body_i
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE body = COPY body_input;
+    MUTABLE body: ?String = COPY body_input;
     MUTABLE body_value: String = body?;
     IF body_value.startsWith?("{") THEN
       RETURN "${keyword} ${body_value}";

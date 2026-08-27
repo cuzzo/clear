@@ -11881,7 +11881,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (node.snapshot_mode == :transaction) THEN
       RETURN TRUE;
     END
-    MUTABLE clause = node.lock_error_clause;
+    MUTABLE clause: ?ErrorClause = node.lock_error_clause;
     IF !(clause) THEN
       RETURN FALSE;
     END

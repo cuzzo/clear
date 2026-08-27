@@ -620,7 +620,7 @@ PUB FN escapeAnalysis__param_accepts_caller_sync?(fn_node: FunctionDef, param: P
   IF !(symbolEntry__atomic_sync?(sync_value)) THEN
     RETURN TRUE;
   END
-  MUTABLE requires = fn_node.requires;
+  MUTABLE requires: ?{String}[Set]String@symbol = fn_node.requires;
   MUTABLE families = (TRUE AND requires[param.name]);
   RETURN (families.contains?(:ATOMIC) OR families.contains?(:SNAPSHOTTED));
 END
@@ -1986,7 +1986,7 @@ PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
   RETURN (TRY (type__heap_ptr?(ti)) OR TRY (type__recursive_cleanup_shape?(ti, NIL)));
 END
 PUB FN escapeAnalysis__function_def_has_return_lifetime?(fn_value: FunctionDef) RETURNS Bool ->
-  MUTABLE rl = fn_value.return_lifetime;
+  MUTABLE rl: ?ClearParserReturnLifetime = fn_value.return_lifetime;
   IF (rl == NIL) THEN
     RETURN FALSE;
   END

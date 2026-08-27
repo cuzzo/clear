@@ -17950,7 +17950,7 @@ PRIVATE FN mIRLowering__var_decl_source_transfer_required?(self: MIRLowering, no
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE plan = node.ownership_transport_plan;
+    MUTABLE plan: ?PassStateValue = node.ownership_transport_plan;
     IF (plan IS_A OwnershipTransportPlan AND (plan.action != :move)) THEN
       RETURN FALSE;
     END

@@ -253,7 +253,7 @@ PRIVATE FN programMIRFinalizer__with_block_lowers_through_runtime?(node: WithBlo
   IF (((node.snapshot_mode == :transaction) OR (node.view_kind == :materialized_view)) OR node.universal_poly) THEN
     RETURN TRUE;
   END
-  MUTABLE clause = node.lock_error_clause;
+  MUTABLE clause: ?ErrorClause = node.lock_error_clause;
   IF !(clause) THEN
     RETURN FALSE;
   END
