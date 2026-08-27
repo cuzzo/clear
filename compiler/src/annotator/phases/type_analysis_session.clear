@@ -213,7 +213,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST(TRY (functionRegistry__register_mut(typeAnalysisSession__semantic_function_registry(rtoc_self_view), node)) AS FunctionDef);
 }
 END
-PUB FN typeAnalysisSession__scope_stack(self: TypeAnalysisSession) RETURNS ![]Scope@multiowned
+PUB FN typeAnalysisSession__scope_stack(self: TypeAnalysisSession) RETURNS []Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7104,7 +7104,7 @@ PRIVATE FN typeAnalysisSession__scope_stack_for_helper(self: TypeAnalysisSession
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (typeAnalysisSession__scope_stack(rtoc_self_view));
+    RETURN (typeAnalysisSession__scope_stack(rtoc_self_view));
 }
 END
 PRIVATE FN typeAnalysisSession__current_scope(self: TypeAnalysisSession) RETURNS !Scope@multiowned

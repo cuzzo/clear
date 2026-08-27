@@ -174,19 +174,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY edge;
 }
 END
-FN ownershipGraph__remove_edge(MUTABLE self: OwnershipGraph, edge: Edge) RETURNS !?Edge
+FN ownershipGraph__remove_edge(MUTABLE self: OwnershipGraph, edge: Edge) RETURNS ?Edge
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE edge_index: ?Int64 = ownershipGraph__edge_index_in(rtoc_self_view, rtoc_self_view.edges, edge);
     IF edge_index EXISTS AS edge_index_value THEN
       MUTABLE removed = &rtoc_self_view.edges.remove(edge_index_value);
-      MUTABLE to_edges = TRY (ownershipGraph__edges_to(rtoc_self_view, Path{ StringValue: COPY edge.to }));
+      MUTABLE to_edges = (ownershipGraph__edges_to(rtoc_self_view, Path{ StringValue: COPY edge.to }));
       MUTABLE to_index: ?Int64 = ownershipGraph__edge_index_in(rtoc_self_view, to_edges, edge);
       IF to_index EXISTS AS to_index_value THEN
         &to_edges.remove(to_index_value);
       END
-      MUTABLE from_edges = TRY (ownershipGraph__edges_from(rtoc_self_view, Path{ StringValue: COPY edge.from }));
+      MUTABLE from_edges = (ownershipGraph__edges_from(rtoc_self_view, Path{ StringValue: COPY edge.from }));
       MUTABLE from_index: ?Int64 = ownershipGraph__edge_index_in(rtoc_self_view, from_edges, edge);
       IF from_index EXISTS AS from_index_value THEN
         &from_edges.remove(from_index_value);
@@ -291,9 +291,9 @@ PUB FN ownershipGraph__release_borrow(MUTABLE self: OwnershipGraph, borrower: St
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE to_remove = (TRY (ownershipGraph__edges_from(rtoc_self_view, Path{ StringValue: COPY borrower }))) |> WHERE ((_.kind == :borrows) OR (_.kind == :borrows_mut));
+    MUTABLE to_remove = ((ownershipGraph__edges_from(rtoc_self_view, Path{ StringValue: COPY borrower }))) |> WHERE ((_.kind == :borrows) OR (_.kind == :borrows_mut));
     FOR _ IN to_remove DO
-    TRY (ownershipGraph__remove_edge(&rtoc_self_view, _));
+    (ownershipGraph__remove_edge(&rtoc_self_view, _));
     END
 }
 END
@@ -331,7 +331,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE dropped_set = (to_cleanup |> SELECT ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _ })) |> DISTINCT _;
         MUTABLE to_remove = rtoc_self_view.edges |> WHERE (dropped_set.contains?(ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _.from })) OR dropped_set.contains?(ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _.to })));
         FOR _ IN to_remove DO
-        TRY (ownershipGraph__remove_edge(&rtoc_self_view, _));
+        (ownershipGraph__remove_edge(&rtoc_self_view, _));
         END
         RETURN to_cleanup;
       ELSE
@@ -368,7 +368,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &rtoc_self_view.nodes.delete(_);
     END
     FOR _ IN (rtoc_self_view.edges |> WHERE (place_set.contains?(ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _.from })) OR place_set.contains?(ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY _.to })))) DO
-    TRY (ownershipGraph__remove_edge(&rtoc_self_view, _));
+    (ownershipGraph__remove_edge(&rtoc_self_view, _));
     END
     FOR parent_key IN rtoc_self_view.children.keys() DO
       FOR place IN places DO
@@ -397,12 +397,12 @@ PUB FN ownershipGraph__can_write?(self: OwnershipGraph, path: String) RETURNS !B
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (TRY (ownershipGraph__edges_from(rtoc_self_view, Path{ StringValue: COPY path }))) |> ANY (_.kind == :borrows) THEN
+    IF ((ownershipGraph__edges_from(rtoc_self_view, Path{ StringValue: COPY path }))) |> ANY (_.kind == :borrows) THEN
       RETURN FALSE;
     END
     MUTABLE current = ownershipGraph__place_id(rtoc_self_view, Path{ StringValue: COPY path });
     WHILE TRUE DO
-      IF (TRY (ownershipGraph__edges_to(rtoc_self_view, Path{ PlaceId: COPY current }))) |> ANY ((_.kind == :borrows) OR (_.kind == :borrows_mut)) THEN
+      IF ((ownershipGraph__edges_to(rtoc_self_view, Path{ PlaceId: COPY current }))) |> ANY ((_.kind == :borrows) OR (_.kind == :borrows_mut)) THEN
         RETURN FALSE;
       END
       IF placeId__parent(current) EXISTS AS parent THEN
@@ -481,7 +481,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target_count = snapshot_value.edge_count;
     WHILE (rtoc_self_view.edges.length() > target_count) DO
       MUTABLE rtoc_mutable_alias_arg_9 = COPY UNWRAP (rtoc_self_view.edges.last());
-      TRY (ownershipGraph__remove_edge(&rtoc_self_view, rtoc_mutable_alias_arg_9));
+      (ownershipGraph__remove_edge(&rtoc_self_view, rtoc_mutable_alias_arg_9));
     END
 }
 END
@@ -608,7 +608,7 @@ PRIVATE FN ownershipGraph__find_borrow_conflict(self: OwnershipGraph, path: Stri
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE b: ?Edge = (TRY (ownershipGraph__edges_to(rtoc_self_view, Path{ StringValue: COPY path }))) |> FIND ((_.kind == :borrows) OR (_.kind == :borrows_mut));
+    MUTABLE b: ?Edge = ((ownershipGraph__edges_to(rtoc_self_view, Path{ StringValue: COPY path }))) |> FIND ((_.kind == :borrows) OR (_.kind == :borrows_mut));
     IF b EXISTS AS b_value THEN
       MUTABLE borrower_node: ?OwnershipNode = ownershipGraph__node_for(rtoc_self_view, b_value.from);
       MUTABLE line_info: String = "";
@@ -627,7 +627,7 @@ PRIVATE FN ownershipGraph__find_mutable_borrow(self: OwnershipGraph, path: Strin
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE b: ?Edge = (TRY (ownershipGraph__edges_to(rtoc_self_view, Path{ StringValue: COPY path }))) |> FIND (_.kind == :borrows_mut);
+    MUTABLE b: ?Edge = ((ownershipGraph__edges_to(rtoc_self_view, Path{ StringValue: COPY path }))) |> FIND (_.kind == :borrows_mut);
     IF b EXISTS AS b_value THEN
       RETURN "cannot borrow '${path}': mutably borrowed by '${b_value.from}'";
     ELSE
@@ -635,7 +635,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN ownershipGraph__edges_to(self: OwnershipGraph, path: Path) RETURNS ![]Edge
+PRIVATE FN ownershipGraph__edges_to(self: OwnershipGraph, path: Path) RETURNS []Edge
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -646,7 +646,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN [];
 }
 END
-PRIVATE FN ownershipGraph__edges_from(self: OwnershipGraph, path: Path) RETURNS ![]Edge
+PRIVATE FN ownershipGraph__edges_from(self: OwnershipGraph, path: Path) RETURNS []Edge
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

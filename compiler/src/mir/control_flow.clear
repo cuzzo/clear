@@ -1993,7 +1993,7 @@ PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {Str
     ELSE
       ctx.body_allocates_frame
     END;
-  TRY (mIRLowering__set_shard_context(dynamic_node, pipelineShardContext__with_frame_allocations(ctx, key_allocates_frame, body_allocates_frame)));
+  (mIRLowering__set_shard_context(dynamic_node, pipelineShardContext__with_frame_allocations(ctx, key_allocates_frame, body_allocates_frame)));
   rubyToClearVoid()
   });
 END

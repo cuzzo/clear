@@ -279,7 +279,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__program_state(rtoc_self_view).shard_context;
 }
 END
-PUB FN mIRLowering__set_shard_context(self: MIRLowering, context: ?{String@symbol}String) RETURNS !?{String@symbol}String
+PUB FN mIRLowering__set_shard_context(self: MIRLowering, context: ?{String@symbol}String) RETURNS ?{String@symbol}String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

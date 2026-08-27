@@ -127,7 +127,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY capabilityAuditSession__phase_audit_inputs(rtoc_self_view).lock_analysis.type_ranks;
 }
 END
-PRIVATE FN capabilityAuditSession__scope_stack(self: CapabilityAuditSession) RETURNS ![]Scope@multiowned
+PRIVATE FN capabilityAuditSession__scope_stack(self: CapabilityAuditSession) RETURNS []Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2111,7 +2111,7 @@ PRIVATE FN capabilityAuditSession__scope_stack_for_helper(self: CapabilityAuditS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (capabilityAuditSession__scope_stack(rtoc_self_view));
+    RETURN (capabilityAuditSession__scope_stack(rtoc_self_view));
 }
 END
 PRIVATE FN capabilityAuditSession__current_scope(self: CapabilityAuditSession) RETURNS !Scope@multiowned
