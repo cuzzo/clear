@@ -23,6 +23,9 @@ MUTABLE ownership_field_names: [Set]String@symbol = [:alloc, :allocs, :cleanup_e
 # Ruby keeps this as an array of class objects and asks `include?(stmt.class)`.
 # CLEAR has no runtime classes: Emittable is a union, so the same question is
 # a variant check, and the compiler verifies the arms are exhaustive.
+#
+# rtoc prefixes a variant whose bare name would collide (BgBlock -> MIRBgBlock),
+# so the Ruby class names are mapped onto the variants the union actually has.
 PUB FN mIRChecker__linear_statement_node?(stmt: Emittable) RETURNS Bool ->
   PARTIAL MATCH stmt START
     Emittable.AllocMark -> RETURN TRUE;,
@@ -30,18 +33,18 @@ PUB FN mIRChecker__linear_statement_node?(stmt: Emittable) RETURNS Bool ->
     Emittable.AssertStmt -> RETURN TRUE;,
     Emittable.BatchWindowFlush -> RETURN TRUE;,
     Emittable.BatchWindowPush -> RETURN TRUE;,
-    Emittable.BgBlock -> RETURN TRUE;,
+    Emittable.MIRBgBlock -> RETURN TRUE;,
     Emittable.BreakStmt -> RETURN TRUE;,
     Emittable.CatchWrapper -> RETURN TRUE;,
     Emittable.Cleanup -> RETURN TRUE;,
     Emittable.Comment -> RETURN TRUE;,
     Emittable.ContinueStmt -> RETURN TRUE;,
-    Emittable.DeferStmt -> RETURN TRUE;,
+    Emittable.MIRDeferStmt -> RETURN TRUE;,
     Emittable.DestructureSet -> RETURN TRUE;,
     Emittable.DiscardOwned -> RETURN TRUE;,
     Emittable.DebugOnly -> RETURN TRUE;,
-    Emittable.DoBlock -> RETURN TRUE;,
-    Emittable.EnumDef -> RETURN TRUE;,
+    Emittable.MIRDoBlock -> RETURN TRUE;,
+    Emittable.MIREnumDef -> RETURN TRUE;,
     Emittable.ErrCleanup -> RETURN TRUE;,
     Emittable.ErrDeferStmt -> RETURN TRUE;,
     Emittable.ExprStmt -> RETURN TRUE;,
@@ -51,7 +54,7 @@ PUB FN mIRChecker__linear_statement_node?(stmt: Emittable) RETURNS Bool ->
     Emittable.ForStmt -> RETURN TRUE;,
     Emittable.FrameRestore -> RETURN TRUE;,
     Emittable.FrameSave -> RETURN TRUE;,
-    Emittable.FsmB -> RETURN TRUE;,
+    Emittable.FsmB1Body -> RETURN TRUE;,
     Emittable.FsmGenericBody -> RETURN TRUE;,
     Emittable.FsmIoBody -> RETURN TRUE;,
     Emittable.IfBindStmt -> RETURN TRUE;,
@@ -96,7 +99,7 @@ PUB FN mIRChecker__linear_statement_node?(stmt: Emittable) RETURNS Bool ->
     Emittable.SortedLockAcquire -> RETURN TRUE;,
     Emittable.StreamSpawn -> RETURN TRUE;,
     Emittable.StreamYield -> RETURN TRUE;,
-    Emittable.StructDef -> RETURN TRUE;,
+    Emittable.MIRStructDef -> RETURN TRUE;,
     Emittable.Suppress -> RETURN TRUE;,
     Emittable.SwitchStmt -> RETURN TRUE;,
     Emittable.TestDef -> RETURN TRUE;,
