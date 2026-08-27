@@ -1736,7 +1736,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN blk();
 }
 END
-PRIVATE FN mIREmitter__restore_heap_allocator_cache(MUTABLE self: MIREmitter, cache_name: ?String, previous_name: ?String, previous_runtime: ?String) RETURNS Void
+PRIVATE FN mIREmitter__restore_heap_allocator_cache(MUTABLE self: MIREmitter, cache_name: ?String, TAKES previous_name: ?String, TAKES previous_runtime: ?String) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
