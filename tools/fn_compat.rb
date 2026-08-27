@@ -27,6 +27,7 @@ require 'open3'
 saved_program_name = $PROGRAM_NAME
 $PROGRAM_NAME = 'fn_compat_support'
 require_relative 'parser_compat'
+require_relative 'lexer_harness_support'
 $PROGRAM_NAME = saved_program_name
 
 module FnCompat
@@ -707,7 +708,12 @@ module FnCompat
       require File.expand_path(target.ruby_require, __dir__ + '/..')
       calls = argument_tuples(target).map do |args|
         live = target.arg_types.zip(args).map { |kind, value| materialize_arg(kind, value) }
-        { 'args' => args.map { |a| encode_scalar(a) }, 'result' => encode_scalar(target.ruby_call.call(live)) }
+        # A snippet carries quotes and newlines, which encode_scalar does not
+        # escape; node args round-trip through JSON so they survive the file.
+        encoded = target.arg_types.zip(args).map do |kind, value|
+          NODE_ARG_KINDS.key?(kind) ? value.to_json : encode_scalar(value)
+        end
+        { 'args' => encoded, 'result' => encode_scalar(target.ruby_call.call(live)) }
       end
       payload['targets'] << { 'name' => target.name, 'calls' => calls }
     end
@@ -731,6 +737,10 @@ module FnCompat
     # fiber stack overflows once the corpus is more than a few dozen calls.
     build = %w[./clear build] + [source, '-o', binary, '--no-stack-check',
                                  '--default-stack', 'Huge'] + package_flags
+    # Node arguments run the parser, which the self-hosted Zig backend
+    # miscompiles into a segfault. parser_compat.rb builds it with --safe for
+    # the same reason.
+    build += ['--safe'] if targets.any? { |t| t.arg_types.any? { |k| NODE_ARG_KINDS.key?(k) } }
     # zig_type.clear and friends call into compiler_regex.zig; the native dir
     # and its pcre2 link have to travel with the harness build.
     env = {
@@ -886,12 +896,10 @@ module FnCompat
   # Mirrors materialize_arg on the CLEAR side: same snippet in, same node out.
   NODE_SOURCE_HELPER = <<~CLEAR
     PRIVATE FN fnCompatNodeFromSource(snippet: String) RETURNS !Locatable ->
-      source = "FN fnCompatSnippet() RETURNS Void ->\n" $+ snippet $+ "\nEND";
-      program = fn_compat_parser.clearParser__parse_source(source) OR_ELSE RAISE;
-      MATCH program.statements[0] {
-        WHEN FunctionDef AS fn -> RETURN fn.body[0];
-        WHEN _ -> RAISE;
-      }
+      source = "FN fnCompatSnippet() RETURNS Void ->\\n" $+ snippet $+ "\\nEND";
+      program = clearParser__parse_source(source) OR_ELSE RAISE;
+      MUTABLE body: []Locatable = UNWRAP (aST__node_body(UNWRAP (program.statements[0])));
+      RETURN COPY UNWRAP (body[0]);
     END
   CLEAR
 
@@ -901,7 +909,10 @@ module FnCompat
     node_args = targets.any? { |t| t.arg_types.any? { |k| NODE_ARG_KINDS.key?(k) } }
     if node_args
       root = File.expand_path('compiler/src', __dir__ + '/..')
-      requires << "REQUIRE \"#{ParserCompat.parser_require_spec(root)}\" AS fn_compat_parser;"
+      # No alias: the harness calls required functions unqualified, the way
+      # parser_compat.rb's harness does.
+      requires << "REQUIRE \"#{ParserCompat.parser_require_spec(root)}\";"
+      requires << "REQUIRE \"pkg:rtoc_#{'ast/ast.clear'.unpack1('H*')}\";"
     end
     requires = requires.uniq.join("\n")
     node_helper = node_args ? NODE_SOURCE_HELPER : ''
@@ -910,7 +921,14 @@ module FnCompat
     runners = targets.each_with_index.map do |target, target_index|
       calls = by_name.fetch(target.name, []).each_with_index.map do |call, index|
         args = target.arg_types.zip(call['args']).map do |kind, encoded|
-          NODE_ARG_KINDS.key?(kind) ? "TRY (fnCompatNodeFromSource(#{encoded}))" : clear_literal(encoded)
+          if NODE_ARG_KINDS.key?(kind)
+            # The snippet is CLEAR source: it carries quotes, newlines and `$`,
+            # none of which survive being pasted in raw.
+            snippet = JSON.parse(encoded, quirks_mode: true)
+            "TRY (fnCompatNodeFromSource(#{LexerHarnessSupport.clear_string_expr(snippet)}))"
+          else
+            clear_literal(encoded)
+          end
         end.join(', ')
         expr = if target.prelude
                  target.clear_call
