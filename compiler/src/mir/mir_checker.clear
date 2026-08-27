@@ -258,7 +258,7 @@ END
 PRIVATE FN linearOwnershipSnapshot__place_set(names: [Set]String) RETURNS ![Set]PlaceId ->
   MUTABLE out: [Set]PlaceId = Set[];
   FOR _ IN names DO
-  &out.insert(placeId__from_path(_));
+  &out.insert(placeId__from_path(Path{ StringValue: COPY _ }));
   END
   RETURN out;
 END
