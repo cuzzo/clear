@@ -542,7 +542,7 @@ PRIVATE FN resolutionSession__current_scope(self: ResolutionSession) RETURNS !Sc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN KEEP UNWRAP (TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view)).last());
+    RETURN KEEP UNWRAP ((TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view))).last());
 }
 END
 PRIVATE FN resolutionSession__lookup_scope_for(self: ResolutionSession, name: String) RETURNS !?Scope@multiowned
@@ -574,7 +574,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
         END
-        IF outer_scope_value.equal?(TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view)).first()) THEN
+        IF outer_scope_value.equal?((TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
           RETURN outer_scope_value;
         END
         RETURN NIL;

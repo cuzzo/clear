@@ -25,6 +25,7 @@ module SelfhostFallibility
   def call_covered?(line, at)
     prefix = line[0...at]
     return true if prefix.end_with?('TRY (') || prefix =~ /TRY \(\s*\z/
+    return true if prefix.end_with?('(TRY (')
 
     # `callee(...) OR_ELSE ...` handles the error at the call itself.
     rest = line[at..]

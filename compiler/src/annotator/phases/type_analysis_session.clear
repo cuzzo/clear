@@ -7111,7 +7111,7 @@ PRIVATE FN typeAnalysisSession__current_scope(self: TypeAnalysisSession) RETURNS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN KEEP UNWRAP (TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view)).last());
+    RETURN KEEP UNWRAP ((TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).last());
 }
 END
 PRIVATE FN typeAnalysisSession__lookup_scope_for(self: TypeAnalysisSession, name: String) RETURNS !?Scope@multiowned
@@ -7143,7 +7143,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
         END
-        IF outer_scope_value.equal?(TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view)).first()) THEN
+        IF outer_scope_value.equal?((TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
           RETURN outer_scope_value;
         END
         RETURN NIL;
