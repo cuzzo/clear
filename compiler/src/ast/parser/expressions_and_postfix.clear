@@ -938,7 +938,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
       MUTABLE n_tok = clearParser__current(rtoc_self_view);
       MUTABLE n_lit = TRY (clearParser__consume_number(&rtoc_self_view));
-      MUTABLE n = token__display_value(n_lit).toInt();
+      MUTABLE n = TRY (token__display_value(n_lit).toInt());
       IF (n <= 0) THEN
         TRY (clearParser__error_mut(rtoc_self_view, n_tok, CodeOrMessage{ SymbolValue: :SIGIL_N_NONPOSITIVE }, [], {:sigil: "${TRY (token__text_mut(sigil_tok))}", :count: "${n.toString()}"}));
       END
