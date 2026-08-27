@@ -4385,14 +4385,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       "${code};"
     ELSE
       code
-    END) } END) } |> WHERE _ != NIL).join("\n");
+    END) } END) } |> WHERE _ != NIL |> SELECT UNWRAP _).join("\n");
 }
 END
 PRIVATE FN mIREmitter__semicolon_required?(self: MIREmitter, stmt: Emittable, stripped: String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((stmt.expr?() AND !(stripped.endsWith?(";"))) AND !(stripped.endsWith?("}"))) AND !(stripped.endsWith?("{")));
+    RETURN (((emittable__expr?(stmt) AND !(stripped.endsWith?(";"))) AND !(stripped.endsWith?("}"))) AND !(stripped.endsWith?("{")));
 }
 END
 PRIVATE FN mIREmitter__alloc_from_entry(self: MIREmitter, entry: CleanupEntry) RETURNS !String

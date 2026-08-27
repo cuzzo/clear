@@ -5458,7 +5458,7 @@ PRIVATE FN mIRLowering__zig_statement_semicolon_required?(self: MIRLowering, stm
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((stmt.expr?() AND !(stripped.endsWith?(";"))) AND !(stripped.endsWith?("}"))) AND !(stripped.endsWith?("{")));
+    RETURN (((emittable__expr?(stmt) AND !(stripped.endsWith?(";"))) AND !(stripped.endsWith?("}"))) AND !(stripped.endsWith?("{")));
 }
 END
 PUB FN mIRLowering__pipeline_lower_node_with_decl_alloc(MUTABLE self: MIRLowering, node: Locatable, alloc: String@symbol) RETURNS !Emittable
