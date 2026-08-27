@@ -5136,10 +5136,13 @@ class MIRLowering
       fallible = mir_node.respond_to?(:try_wrap) && T.unsafe(mir_node).try_wrap
       next unless fallible || mir_allocates?(mir_node)
 
+      offender = mir_node.class.name.to_s.split('::').last
+      offender += " '#{T.unsafe(mir_node).name}'" if mir_node.respond_to?(:name)
+      reason = fallible ? 'is fallible' : 'allocates'
       Kernel.raise CompilerError.new(node.token,
-        "DEFER body must be infallible and non-allocating: deferred code runs during scope teardown, " \
-        "which has no error channel (Zig defer). Precompute allocating values before the DEFER and " \
-        "keep only plain assignments/infallible calls inside it.",
+        "DEFER body must be infallible and non-allocating: #{offender} #{reason}. Deferred code runs " \
+        "during scope teardown, which has no error channel (Zig defer). Precompute allocating values " \
+        "before the DEFER and keep only plain assignments/infallible calls inside it.",
         nil)
     end
   end

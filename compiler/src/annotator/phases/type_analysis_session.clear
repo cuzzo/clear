@@ -11532,8 +11532,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_264: []BodyFactContext = List[]; rtoc_empty_list_264 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    DEFER frames.zip(snapshots).keys() |> EACH {
-    MUTABLE snapshot_value: Any = (frames.zip(snapshots)[_] OR_ELSE panic("missing hash key"));
+    MUTABLE rtoc_defer_pairs_0 = frames.zip(snapshots);
+    MUTABLE rtoc_defer_keys_0 = rtoc_defer_pairs_0.keys();
+    DEFER rtoc_defer_keys_0 |> EACH {
+    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_0[_] OR_ELSE panic("missing hash key"));
     bodyFactFrame__restore_context(&_, snapshot_value);
     };
     FOR _ IN frames DO
@@ -11552,8 +11554,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_267: []BodyFactContext = List[]; rtoc_empty_list_267 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    DEFER frames.zip(snapshots).keys() |> EACH {
-    MUTABLE snapshot_value: Any = (frames.zip(snapshots)[_] OR_ELSE panic("missing hash key"));
+    MUTABLE rtoc_defer_pairs_1 = frames.zip(snapshots);
+    MUTABLE rtoc_defer_keys_1 = rtoc_defer_pairs_1.keys();
+    DEFER rtoc_defer_keys_1 |> EACH {
+    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_1[_] OR_ELSE panic("missing hash key"));
     bodyFactFrame__restore_context(&_, snapshot_value);
     };
     FOR _ IN frames DO
@@ -11571,8 +11575,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_270: []BodyFactContext = List[]; rtoc_empty_list_270 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    DEFER frames.zip(snapshots).keys() |> EACH {
-    MUTABLE snapshot_value: Any = (frames.zip(snapshots)[_] OR_ELSE panic("missing hash key"));
+    MUTABLE rtoc_defer_pairs_2 = frames.zip(snapshots);
+    MUTABLE rtoc_defer_keys_2 = rtoc_defer_pairs_2.keys();
+    DEFER rtoc_defer_keys_2 |> EACH {
+    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_2[_] OR_ELSE panic("missing hash key"));
     bodyFactFrame__restore_context(&_, snapshot_value);
     };
     FOR _ IN frames DO
@@ -11593,8 +11599,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_273: []BodyFactContext = List[]; rtoc_empty_list_273 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    DEFER frames.zip(snapshots).keys() |> EACH {
-    MUTABLE snapshot_value: Any = (frames.zip(snapshots)[_] OR_ELSE panic("missing hash key"));
+    MUTABLE rtoc_defer_pairs_3 = frames.zip(snapshots);
+    MUTABLE rtoc_defer_keys_3 = rtoc_defer_pairs_3.keys();
+    DEFER rtoc_defer_keys_3 |> EACH {
+    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_3[_] OR_ELSE panic("missing hash key"));
     bodyFactFrame__restore_context(&_, snapshot_value);
     };
     FOR _ IN frames DO
@@ -11611,8 +11619,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_275: []BodyFactContext = List[]; rtoc_empty_list_275 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    DEFER frames.zip(snapshots).keys() |> EACH {
-    MUTABLE snapshot_value: Any = (frames.zip(snapshots)[_] OR_ELSE panic("missing hash key"));
+    MUTABLE rtoc_defer_pairs_4 = frames.zip(snapshots);
+    MUTABLE rtoc_defer_keys_4 = rtoc_defer_pairs_4.keys();
+    DEFER rtoc_defer_keys_4 |> EACH {
+    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_4[_] OR_ELSE panic("missing hash key"));
     bodyFactFrame__restore_context(&_, snapshot_value);
     };
     FOR _ IN frames DO
