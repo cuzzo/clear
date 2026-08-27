@@ -4417,7 +4417,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       panic("alloc_zig: unknown allocator symbol :{}");
     END
     IF (((sym == :heap) AND (rtoc_self_view.heap_allocator_cache_name != NIL)) AND (rtoc_self_view.heap_allocator_cache_runtime_name == rtoc_self_view.rt_name)) THEN
-      RETURN COPY UNWRAP ((rtoc_self_view.heap_allocator_cache_name)?);
+      RETURN COPY (rtoc_self_view.heap_allocator_cache_name)?;
     END
     RETURN placement__zig_allocator(sym, rtoc_self_view.rt_name);
 }
