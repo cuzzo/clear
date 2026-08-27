@@ -19,7 +19,6 @@ PUB STRUCT MIRChecker {
 }
 
 PUB UNION MIRCheckerAggregateExpr { Emittable: Emittable, StringValue: String, SymbolValue: String@symbol, Int64Value: Int64, Float64Value: Float64, BoolValue: Bool }
-MUTABLE ownership_field_names: [Set]String@symbol = [:alloc, :allocs, :cleanup_entry, :ownership_contract, :owned_return, :owned_result_alloc, :callable_contract, :target_var] |> DISTINCT _;
 # Ruby keeps this as an array of class objects and asks `include?(stmt.class)`.
 # CLEAR has no runtime classes: Emittable is a union, so the same question is
 # a variant check, and the compiler verifies the arms are exhaustive.
@@ -115,7 +114,6 @@ PUB FN mIRChecker__linear_statement_node?(stmt: Emittable) RETURNS Bool ->
   END
   RETURN FALSE;
 END
-audited_emittable_node_types: [168]Any@multiowned = [MIR.AddressOf, MIR.AllocMark, MIR.AllocSlice, MIR.AllocatorRef, MIR.ArrayDefaultInit, MIR.ArrayInit, MIR.AssertRaisesCheck, MIR.AssertStmt, MIR.BatchWindowFlush, MIR.BatchWindowPush, MIR.BgBlock, MIR.BinOp, MIR.BlockExpr, MIR.BreakExpr, MIR.BreakStmt, MIR.Call, MIR.CapWrap, MIR.CapabilityLockAddress, MIR.CapabilityLockTarget, MIR.CapabilityUnwrap, MIR.Cast, MIR.CatchWrapper, MIR.Cleanup, MIR.Comment, MIR.Comptime, MIR.ConcatList, MIR.ConcatStr, MIR.Conditional, MIR.ConstCast, MIR.ContainerInit, MIR.ContinueStmt, MIR.DebugOnly, MIR.DeepCopy, MIR.DefaultStreamCapacity, MIR.DeferStmt, MIR.Deref, MIR.DestroyPtr, MIR.DestructureSet, MIR.DestructureTarget, MIR.DiscardOwned, MIR.DoBlock, MIR.DupeSlice, MIR.EnumDef, MIR.EnumOrdinal, MIR.ErrCleanup, MIR.ErrDeferStmt, MIR.ExprStmt, MIR.FallibleLockBinding, MIR.FieldCleanupMark, MIR.FieldDef, MIR.FieldGet, MIR.FnDef, MIR.FnRef, MIR.ForStmt, MIR.FrameRestore, MIR.FrameSave, MIR.FreeSlice, MIR.FreezeExpr, MIR.FsmB1Body, MIR.FsmGenericBody, MIR.FsmIoBody, MIR.FsmStructure, MIR.HasField, MIR.HeapCreate, MIR.Ident, MIR.IfBindStmt, MIR.IfChain, MIR.IfOptional, MIR.IfStmt, MIR.Import, MIR.IndexGet, MIR.IndexInsert, MIR.InlineBc, MIR.ItemsAccess, MIR.IterRange, MIR.LambdaExpr, MIR.Let, MIR.ListItems, MIR.ListLength, MIR.Lit, MIR.LockAcquire, MIR.MakeList, MIR.MakeSet, MIR.MethodCall, MIR.ModuleNamespace, MIR.MoveMark, MIR.Noop, MIR.OptionalUnwrap, MIR.OrElseExitBcRewrite, MIR.Orelse, MIR.OwnedBorrow, MIR.OwnedCreate, MIR.OwnedDestroy, MIR.OwnedReturn, MIR.OwnedSlice, MIR.OwnedStore, MIR.OwnedTransfer, MIR.Panic, MIR.Param, MIR.Pipeline, MIR.PointerCast, MIR.PolymorphicFlowSignal, MIR.PolymorphicMutate, MIR.PolymorphicMutateFlow, MIR.PubConst, MIR.RangeLit, MIR.RcDowngrade, MIR.RcRelease, MIR.RcRetain, MIR.ComptimeCarrierPayload, MIR.MonomorphicKeep, MIR.ReassignMark, MIR.ReassignWithCleanup, MIR.ReturnMark, MIR.ReturnStmt, MIR.ResourceClose, MIR.RuntimeCall, MIR.ScopeBlock, MIR.Set, MIR.ShardedMapGet, MIR.ShardedMapPut, MIR.SharePromote, MIR.SliceExpr, MIR.SnapshotMultiTxn, MIR.SnapshotRead, MIR.SnapshotTransaction, MIR.SoaFieldAccess, MIR.Sort, MIR.SortedLockAcquire, MIR.StreamSpawn, MIR.StreamYield, MIR.StructDef, MIR.StructInit, MIR.Suppress, MIR.SwitchStmt, MIR.SymbolLit, MIR.TailCall, MIR.TestDef, MIR.TestPreamble, MIR.TransferMark, MIR.TryCatch, MIR.TryExpr, MIR.TryOrPanic, MIR.TryOptional, MIR.TupleLiteral, MIR.TypeAlias, MIR.TypeEq, MIR.TypeOf, MIR.TypeSentinel, MIR.UnaryOp, MIR.Undef, MIR.UnionMatchStmt, MIR.UnionPayloadGet, MIR.UnionTypeDef, MIR.UnionVariantGet, MIR.VoidLiteral, MIR.WeakUpgrade, MIR.WhileStmt, MIR.WithMatchDispatch, MIR.CExternFnDecl, MIR.CExternStructDef, MIR.FallibleOk, MIR.ForeignOwnedUnwrap, MIR.ForeignSliceView, MIR.FutureReady, MIR.ModuleConstFree, MIR.ModuleVar, MIR.ProtocolCall];
 PUB STRUCT LinearOwnershipState {
   alloc_kinds: {String}String@symbol,
   alloc_scopes: {String}String@symbol,
@@ -1776,13 +1774,6 @@ PUB FN mIRChecker__ownership_registry_errors(self: MIRChecker) RETURNS ![]String
 ->
   MUTABLE none: []String = List[];
   RETURN none;
-END
-PUB FN mIRChecker__ownership_registry_node_types(self: MIRChecker) RETURNS ![]Any@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN audited_emittable_node_types;
-}
 END
 PUB FN mIRChecker__owned_return_init?(self: MIRChecker, init: ?Emittable) RETURNS !Bool
   REQUIRES self: LOCAL
