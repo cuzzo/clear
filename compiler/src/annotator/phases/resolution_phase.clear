@@ -531,7 +531,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN resolutionSession__scope_stack_for_helper(self: ResolutionSession) RETURNS ![]Scope@multiowned
+PRIVATE FN resolutionSession__scope_stack_for_helper(self: ResolutionSession) RETURNS []Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -542,14 +542,14 @@ PRIVATE FN resolutionSession__current_scope(self: ResolutionSession) RETURNS !Sc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN KEEP UNWRAP ((TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view))).last());
+    RETURN KEEP UNWRAP (((resolutionSession__scope_stack_for_helper(rtoc_self_view))).last());
 }
 END
 PRIVATE FN resolutionSession__lookup_scope_for(self: ResolutionSession, name: String) RETURNS !?Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_reverse_items_3: []Scope@multiowned = TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view));
+    MUTABLE rtoc_reverse_items_3: []Scope@multiowned = (resolutionSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_4 = rtoc_reverse_items_3.length() - 1;
     WHILE rtoc_reverse_i_4 >= 0 DO
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ((rtoc_reverse_items_3[rtoc_reverse_i_4])?);
@@ -574,7 +574,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
         END
-        IF outer_scope_value.equal?((TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
+        IF outer_scope_value.equal?(((resolutionSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
           RETURN outer_scope_value;
         END
         RETURN NIL;
@@ -589,7 +589,7 @@ PRIVATE FN resolutionSession__lookup_type_schema(self: ResolutionSession, name: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE base_name = symbol((compilerRegexReplaceFirst((CAST(name AS String)), compilerRegexCompile("<.*>$"), "")));
-    MUTABLE rtoc_reverse_items_6: []Scope@multiowned = TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view));
+    MUTABLE rtoc_reverse_items_6: []Scope@multiowned = (resolutionSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_7 = rtoc_reverse_items_6.length() - 1;
     WHILE rtoc_reverse_i_7 >= 0 DO
       MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = ((rtoc_reverse_items_6[rtoc_reverse_i_7])?);
@@ -607,7 +607,7 @@ PRIVATE FN resolutionSession__all_known_type_names(self: ResolutionSession) RETU
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = List[];
-    FOR _ IN TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view)) DO
+    FOR _ IN (resolutionSession__scope_stack_for_helper(rtoc_self_view)) DO
     ruby_array_concat_Any(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
     END
     RETURN CAST((names |> DISTINCT _) AS []Any);
@@ -617,7 +617,7 @@ PRIVATE FN resolutionSession__with_new_scope<Result>(self: ResolutionSession, sc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER (TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view))).pop();
+  DEFER ((resolutionSession__scope_stack_for_helper(rtoc_self_view))).pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_10: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_10 = scope__new();
@@ -625,7 +625,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_10 = COPY scope;
     END
     rtoc_ternary_value_10? };
-  MUTABLE stack: []Scope@multiowned = TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view));
+  MUTABLE stack: []Scope@multiowned = (resolutionSession__scope_stack_for_helper(rtoc_self_view));
   new_scope.depth = stack.length();
   &stack.push(new_scope);
   RETURN blk();

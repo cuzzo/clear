@@ -7100,7 +7100,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
   TRY (typeAnalysisSession__check_soa_opportunity_mut(rtoc_self_view, node, item_type));
 }
 END
-PRIVATE FN typeAnalysisSession__scope_stack_for_helper(self: TypeAnalysisSession) RETURNS ![]Scope@multiowned
+PRIVATE FN typeAnalysisSession__scope_stack_for_helper(self: TypeAnalysisSession) RETURNS []Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7111,14 +7111,14 @@ PRIVATE FN typeAnalysisSession__current_scope(self: TypeAnalysisSession) RETURNS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN KEEP UNWRAP ((TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).last());
+    RETURN KEEP UNWRAP (((typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).last());
 }
 END
 PRIVATE FN typeAnalysisSession__lookup_scope_for(self: TypeAnalysisSession, name: String) RETURNS !?Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_reverse_items_165: []Scope@multiowned = TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view));
+    MUTABLE rtoc_reverse_items_165: []Scope@multiowned = (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_166 = rtoc_reverse_items_165.length() - 1;
     WHILE rtoc_reverse_i_166 >= 0 DO
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_167 = ((rtoc_reverse_items_165[rtoc_reverse_i_166])?);
@@ -7143,7 +7143,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
         END
-        IF outer_scope_value.equal?((TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
+        IF outer_scope_value.equal?(((typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
           RETURN outer_scope_value;
         END
         RETURN NIL;
@@ -7158,7 +7158,7 @@ PRIVATE FN typeAnalysisSession__lookup_type_schema(self: TypeAnalysisSession, na
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE base_name = symbol((compilerRegexReplaceFirst((CAST(name AS String)), compilerRegexCompile("<.*>$"), "")));
-    MUTABLE rtoc_reverse_items_168: []Scope@multiowned = TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view));
+    MUTABLE rtoc_reverse_items_168: []Scope@multiowned = (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_169 = rtoc_reverse_items_168.length() - 1;
     WHILE rtoc_reverse_i_169 >= 0 DO
       MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_170 = ((rtoc_reverse_items_168[rtoc_reverse_i_169])?);
@@ -7176,7 +7176,7 @@ PRIVATE FN typeAnalysisSession__all_known_type_names(self: TypeAnalysisSession) 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = List[];
-    FOR _ IN TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view)) DO
+    FOR _ IN (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view)) DO
     ruby_array_concat_Any(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
     END
     RETURN CAST((names |> DISTINCT _) AS []Any);
@@ -7186,7 +7186,7 @@ PRIVATE FN typeAnalysisSession__with_new_scope<Result>(self: TypeAnalysisSession
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER (TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).pop();
+  DEFER ((typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_172: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_172 = scope__new();
@@ -7194,7 +7194,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_172 = COPY scope;
     END
     rtoc_ternary_value_172? };
-  MUTABLE stack: []Scope@multiowned = TRY (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view));
+  MUTABLE stack: []Scope@multiowned = (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view));
   new_scope.depth = stack.length();
   &stack.push(new_scope);
   RETURN blk();

@@ -2107,7 +2107,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN msg;
 }
 END
-PRIVATE FN capabilityAuditSession__scope_stack_for_helper(self: CapabilityAuditSession) RETURNS ![]Scope@multiowned
+PRIVATE FN capabilityAuditSession__scope_stack_for_helper(self: CapabilityAuditSession) RETURNS []Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2118,14 +2118,14 @@ PRIVATE FN capabilityAuditSession__current_scope(self: CapabilityAuditSession) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN KEEP UNWRAP ((TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).last());
+    RETURN KEEP UNWRAP (((capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).last());
 }
 END
 PRIVATE FN capabilityAuditSession__lookup_scope_for(self: CapabilityAuditSession, name: String) RETURNS !?Scope@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_reverse_items_6: []Scope@multiowned = TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
+    MUTABLE rtoc_reverse_items_6: []Scope@multiowned = (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_7 = rtoc_reverse_items_6.length() - 1;
     WHILE rtoc_reverse_i_7 >= 0 DO
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = ((rtoc_reverse_items_6[rtoc_reverse_i_7])?);
@@ -2150,7 +2150,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
         END
-        IF outer_scope_value.equal?((TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
+        IF outer_scope_value.equal?(((capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
           RETURN outer_scope_value;
         END
         RETURN NIL;
@@ -2165,7 +2165,7 @@ PRIVATE FN capabilityAuditSession__lookup_type_schema(self: CapabilityAuditSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE base_name = symbol((compilerRegexReplaceFirst((CAST(name AS String)), compilerRegexCompile("<.*>$"), "")));
-    MUTABLE rtoc_reverse_items_9: []Scope@multiowned = TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
+    MUTABLE rtoc_reverse_items_9: []Scope@multiowned = (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_10 = rtoc_reverse_items_9.length() - 1;
     WHILE rtoc_reverse_i_10 >= 0 DO
       MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_11 = ((rtoc_reverse_items_9[rtoc_reverse_i_10])?);
@@ -2183,7 +2183,7 @@ PRIVATE FN capabilityAuditSession__all_known_type_names(self: CapabilityAuditSes
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = List[];
-    FOR _ IN TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view)) DO
+    FOR _ IN (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view)) DO
     ruby_array_concat_Any(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
     END
     RETURN CAST((names |> DISTINCT _) AS []Any);
@@ -2193,7 +2193,7 @@ PRIVATE FN capabilityAuditSession__with_new_scope<Result>(self: CapabilityAuditS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER (TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).pop();
+  DEFER ((capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_13: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_13 = scope__new();
@@ -2201,7 +2201,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_13 = COPY scope;
     END
     rtoc_ternary_value_13? };
-  MUTABLE stack: []Scope@multiowned = TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
+  MUTABLE stack: []Scope@multiowned = (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
   new_scope.depth = stack.length();
   &stack.push(new_scope);
   RETURN blk();
