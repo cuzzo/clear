@@ -19,6 +19,19 @@ FN main() RETURNS !Void ->
   END
   ASSERT joined == "z0n1n2", "an owned IF result should survive a loop";
 
+  # Ruby's `next nil unless code` shape: one branch owns a string, the other
+  # yields nothing. A NIL branch carries no storage, so it says nothing about
+  # ownership and must not veto the owned result.
+  MUTABLE seen = 0_i64;
+  FOR i IN (0_i64..=3_i64) DO
+    MUTABLE maybe: ?String = IF i > 1_i64 THEN "k${i.toString()}" ELSE NIL END;
+    IF maybe EXISTS AS entry THEN
+      ASSERT entry == "k${i.toString()}", "the optional owned result should survive";
+      seen = seen + 1_i64;
+    END
+  END
+  ASSERT seen == 2_i64, "only the value branches should yield a result";
+
   print("if_expr_owned_result: all tests passed");
   RETURN;
 END

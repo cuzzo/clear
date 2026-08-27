@@ -685,9 +685,16 @@ module Annotator
       # owned" is every branch yielding a non-rodata string.
       sig { params(branch_types: T::Array[Type]).returns(T::Boolean) }
       def uniformly_owned_string_branches?(branch_types)
-        return false if branch_types.empty?
+        # A NIL branch carries no storage, so it says nothing about ownership.
+        # Ruby's `next nil unless code` is exactly this shape: the value branch
+        # owns its string and the other yields nothing.
+        carriers = branch_types.reject { |type| type.resolved == :NIL }
+        return false if carriers.empty?
 
-        branch_types.all? { |type| type.string? && !type.symbol? && !type.rodata? }
+        carriers.all? do |type|
+          payload = type.optional? ? T.cast(type.wrapped_type, Type) : type
+          payload.string? && !payload.symbol? && !payload.rodata?
+        end
       end
 
       # A string result is stamped rodata so the binding copies rather than
@@ -695,10 +702,11 @@ module Annotator
       # value it allocated is never cleaned up.
       sig { params(result_type: Type, owned: T::Boolean).returns(Type) }
       def expression_result_stamp(result_type, owned)
-        return result_type unless result_type.string? && !result_type.symbol?
-        return Type.new(:String, location: :heap) if owned
+        payload = result_type.optional? ? T.cast(result_type.wrapped_type, Type) : result_type
+        return result_type unless payload.string? && !payload.symbol?
 
-        Type.new(:String, location: :rodata)
+        stamped = Type.new(:String, location: owned ? :heap : :rodata)
+        result_type.optional? ? Type.optional_of(stamped) : stamped
       end
 
       # Promotes an AST::MatchStatement that is used in expression position.
