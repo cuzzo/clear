@@ -1314,7 +1314,7 @@ FN reassignWithCleanup__stmt?(self: ReassignWithCleanup) RETURNS Bool ->
 END
 PUB STRUCT ResourceClose {
   target: Emittable@boxed,
-  close_plan: String,
+  close_plan: ResourceClosePlan,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,

@@ -4514,8 +4514,8 @@ PRIVATE FN mIREmitter__render_tuple_cleanup(self: MIREmitter, entry: CleanupEntr
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE statements = (cleanupEntry__tuple_cleanup_fields(entry)) |> SELECT {
-    MUTABLE target = "${root_name}.@\"${UNWRAP (_[:index])}\"";
-    MUTABLE close_plan: ?ResourceClosePlan = CAST(_[:close_plan] AS ?ResourceClosePlan);
+    MUTABLE target = "${root_name}.@\"${_.index.toString()}\"";
+    MUTABLE close_plan: ?ResourceClosePlan = COPY _.close_plan;
     (  IF close_plan THEN
         "${TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, UNWRAP (close_plan), target))};"
       ELSE
@@ -4531,7 +4531,7 @@ PRIVATE FN mIREmitter__emit_resource_close(MUTABLE self: MIREmitter, node: Resou
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target = TRY (mIREmitter__emit(&rtoc_self_view, node.target));
-    RETURN "${TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, UNWRAP (node.close_plan), target))};";
+    RETURN "${TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, node.close_plan, target))};";
 }
 END
 PRIVATE FN mIREmitter__direct_cleanup_statement(self: MIREmitter, name: String, body: String, guarded: Bool) RETURNS String
