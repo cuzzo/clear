@@ -429,6 +429,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PUB FN mIREmitter__emit_statements(MUTABLE self: MIREmitter, stmts: []Emittable) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIREmitter__emit_body(&rtoc_self_view, stmts));
@@ -555,6 +556,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 FN mIREmitter__emit_fsm_bg_body(self: MIREmitter, plan: Plan) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (fsmWrapperEmitter__render(castPlanToFsmBody(plan)));
@@ -657,6 +659,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PUB FN mIREmitter__emit_profile_task_site(self: MIREmitter, site: ProfileTaskSite) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "// CLEAR_PROFILE_TASK_SITE id=${site.site_id.toString()} kind=BG line=${site.line.toString()} column=${site.column.toString()} dispatch=${site.dispatch} form=${site.form}";
@@ -664,6 +667,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 FN mIREmitter__emit_task_config_plan(self: MIREmitter, plan: TaskConfigPlan) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fields = [".stack_size = .${plan.stack_variant}"];
@@ -678,6 +682,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 FN mIREmitter__emit_fiber_spawn_call(self: MIREmitter, call: FiberSpawnCall) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE callee: String = "";
@@ -778,6 +783,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 FN mIREmitter__emit_protocol_adapter_def(self: MIREmitter, node: ProtocolAdapterDef) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE facts_name = "__clearProtocolFacts_${node.protocol}";
@@ -1295,6 +1301,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_shard_cleanup_buffered(self: MIREmitter, id: Int64, string_key: Bool) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE key_cleanup: String = "";
@@ -1928,6 +1935,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_with_match_probe(self: MIREmitter, family: String@symbol, cell_zig: String, snapshot_mode: Bool) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE inner_t = "CheatLib.WithMatchInner(@TypeOf(${cell_zig}))";
@@ -1973,6 +1981,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_with_match_guard_prelude(self: MIREmitter, unwrap: String, guard_var: String, alias_name: String, rt_name: String, mode: String@symbol) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE call: String = "";
@@ -2395,6 +2404,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_enum_def(self: MIREmitter, node: MIREnumDef) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE vis: String = "";
@@ -2437,6 +2447,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_import(self: MIREmitter, node: Import) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE base = "@import(\"${node.module_path}\")";
@@ -2448,6 +2459,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_type_alias(self: MIREmitter, node: TypeAlias) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "pub const ${node.name} = ${node.target};\ncomptime { _ = @typeName(${node.name}); }";
@@ -2455,6 +2467,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_c_extern_fn_decl(self: MIREmitter, node: CExternFnDecl) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     # `param.zig_type` is the param's own field; `type__zig_type(_)` asked the
@@ -2477,6 +2490,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_c_extern_struct_def(self: MIREmitter, node: CExternStructDef) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE extern_field_parts: []String = List[];
@@ -2626,6 +2640,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_destructure_target(self: MIREmitter, node: MIRDestructureTarget) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (CAST(node.name AS String) == "_") THEN
@@ -3045,6 +3060,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_catch_snapshot_decl(self: MIREmitter, rt_name: String, snapshot_type: ?Type) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF snapshot_type EXISTS AS snapshot_type_value THEN
@@ -3084,6 +3100,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_catch_condition_group(self: MIREmitter, checks: []String, default_value: String) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (checks.length() == 0) THEN
@@ -3257,6 +3274,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_thunk_return_or_pop(self: MIREmitter) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "if (current.parent) |p| {\n    p.child_result = result;\n    if (current != &initial) ${TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap))}.destroy(current);\n    current = p;\n    continue;\n}\nreturn result;\n".trim();
@@ -3296,6 +3314,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_thunk_frame_field_decls(self: MIREmitter, fields: []ThunkFrameField, indent: String) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (fields |> SELECT "${_.name}: ${TRY (type__zig_type(_.type_info))},").join("\n${indent}");
@@ -3303,6 +3322,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_thunk_yield_statement(self: MIREmitter, policy_value: String@symbol) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (policy_value == :check) THEN
@@ -3316,6 +3336,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_thunk_combine_op(self: MIREmitter, op: String@symbol) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY ((CAST({:ADD: "+", :SUB: "-", :MUL: "*", :DIV: "/"} AS {String@symbol}String))[op] OR_ELSE panic("unknown thunk combine op: {}"));
@@ -3399,6 +3420,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_defer_like(self: MIREmitter, keyword: String, body_input: ?String) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE body: ?String = COPY body_input;
@@ -3481,6 +3503,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 FN mIREmitter__emit_stmt_list(MUTABLE self: MIREmitter, stmts: []Emittable) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIREmitter__emit_body(&rtoc_self_view, stmts));
@@ -3488,6 +3511,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PUB FN mIREmitter__emit_direct_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, alloc_override: ?String = NIL) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alloc: String = (alloc_override OR_ELSE TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry)));
@@ -3535,6 +3559,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, errdefer: Bool = FALSE) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alloc: String = TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry));
@@ -3589,6 +3614,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_move_mark(self: MIREmitter, node: MoveMark) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE guard = COPY (rtoc_self_view.move_guard_overrides[CAST(node.name AS String)] OR_ELSE mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY node.name }));
@@ -3654,6 +3680,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_container_init(MUTABLE self: MIREmitter, node: ContainerInit) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.strategy == :pool) OR (node.strategy == :list_capacity) OR (node.strategy == :set_capacity) THEN
@@ -3788,6 +3815,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_frame_save(self: MIREmitter, node: FrameSave) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "const frame_mark = ${node.rt_expr}.saveFrameMark();";
@@ -3795,6 +3823,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_frame_restore(self: MIREmitter, node: FrameRestore) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "defer ${node.rt_expr}.restoreFrameMark(frame_mark);";
@@ -3920,6 +3949,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_test_preamble(self: MIREmitter) RETURNS String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "var da = std.heap.DebugAllocator(.{}){};\n    defer _ = da.deinit();\n    const allocator = da.allocator;\n    var global_ctx = EbrContext{};\n    defer global_ctx.deinit(allocator);\n    var __rt_box = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);\n    defer __rt_box.deinit();\n    __rt_box.wireAllocator();\n    const rt: *Runtime = &__rt_box; _ = &rt;\n".trim();
@@ -4265,6 +4295,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_allocator_ref(self: MIREmitter, node: AllocatorRef) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, node.kind));
@@ -4272,6 +4303,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_type_sentinel(self: MIREmitter, node: TypeSentinel) RETURNS ?String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE t = COPY CAST(node.zig_type AS String);
@@ -4298,6 +4330,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN mIREmitter__emit_default_value(self: MIREmitter, node: DefaultValue) RETURNS !String
   REQUIRES self: LOCAL
+  EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (node.kind == :aggregate_empty) THEN
