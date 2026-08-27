@@ -83,8 +83,12 @@ module SelfhostFallibility
       close = matching_paren(result, open)
       return result unless close
 
-      result = "#{result[0...at]}TRY (#{result[at..close]})#{result[(close + 1)..]}"
-      searched = at + 5 + callee.length
+      # A chain hanging off the call needs the TRY parenthesized, or the
+      # method reads the fallible value as its receiver.
+      chained = result[close + 1] == '.'
+      wrapped = chained ? "(TRY (#{result[at..close]}))" : "TRY (#{result[at..close]})"
+      result = "#{result[0...at]}#{wrapped}#{result[(close + 1)..]}"
+      searched = at + wrapped.length - (close - at + 1) + callee.length
     end
   end
 

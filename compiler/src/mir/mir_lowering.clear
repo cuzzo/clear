@@ -1364,7 +1364,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF result IS_A Ident AS ident THEN
       RETURN TRUE;
     END
-    IF TRY (ownershipEffect__of(result)).produces_owned THEN
+    IF (TRY (ownershipEffect__of(result))).produces_owned THEN
       RETURN TRUE;
     END
     RETURN result.materializes_value?();
@@ -3598,7 +3598,7 @@ FN mIRLowering__collect_stdlib_consumed_roots(self: MIRLowering, stmt: ?Locatabl
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_86: []String = List[]; rtoc_empty_list_86 } );
     mIRLowering__walk_ast_calls(rtoc_self_view, stmt, %(call: Locatable) USE(MUTABLE names, rtoc_self_view) -> {
-    FOR _ IN TRY (mIRLowering__stdlib_call_ownership_facts(rtoc_self_view, call)).consumed_names DO
+    FOR _ IN (TRY (mIRLowering__stdlib_call_ownership_facts(rtoc_self_view, call))).consumed_names DO
     &names.append(COPY _);
     END
     rubyToClearVoid()
@@ -8013,7 +8013,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF expr IS_A RegistryCall AS registry_call THEN
       MUTABLE registry_call_mutable = COPY registry_call;
-      IF !((registryCall__has_alloc_metadata?(registry_call_mutable) OR TRY (ownershipEffect__of(Emittable{ RegistryCall: COPY registry_call_mutable })).produces_owned)) THEN
+      IF !((registryCall__has_alloc_metadata?(registry_call_mutable) OR (TRY (ownershipEffect__of(Emittable{ RegistryCall: COPY registry_call_mutable }))).produces_owned)) THEN
         RETURN;
       END
       IF TRY (registryCall__mutating_receiver_allocator_op?(registry_call_mutable)) THEN
@@ -8029,7 +8029,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
       END
     ELSE
-      IF (((alloc != NIL) AND TRY (ownershipEffect__of(expr)).produces_owned) AND (aST__node_alloc(expr) EXISTS)) THEN
+      IF (((alloc != NIL) AND (TRY (ownershipEffect__of(expr))).produces_owned) AND (aST__node_alloc(expr) EXISTS)) THEN
         expr.alloc = COPY alloc;
       END
       FOR _ IN expr.ownership_source_exprs() DO
@@ -9866,7 +9866,7 @@ PRIVATE FN mIRLowering__with_kept_edge_call_frame(MUTABLE self: MIRLowering, blk
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (mIRLowering__kept_edge_temp_stack(&rtoc_self_view)).append(KeptEdgeCallFrame{ temps: List[], moved_sources: List[] });
+    (TRY (mIRLowering__kept_edge_temp_stack(&rtoc_self_view))).append(KeptEdgeCallFrame{ temps: List[], moved_sources: List[] });
     MUTABLE args_mir = TRY (blk());
     MUTABLE frame = UNWRAP (TRY (mIRLowering__kept_edge_temp_stack(&rtoc_self_view)).pop());
     IF ((frame.temps.length() == 0) AND (frame.moved_sources.length() == 0)) THEN

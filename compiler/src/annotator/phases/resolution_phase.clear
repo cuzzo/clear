@@ -617,7 +617,7 @@ PRIVATE FN resolutionSession__with_new_scope<Result>(self: ResolutionSession, sc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view)).pop();
+  DEFER (TRY (resolutionSession__scope_stack_for_helper(rtoc_self_view))).pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_10: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_10 = scope__new();
@@ -936,7 +936,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         CONTINUE;
     END
     MUTABLE imported_schema = TRY (resolutionSession__clone_imported_schema(rtoc_self_view, schema));
-    TRY (resolutionSession__current_scope(rtoc_self_view)).declare_type(_, imported_schema);
+    (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(_, imported_schema);
     IF imported_schema IS_A UnionSchema AS union_schema THEN
         TRY (resolutionSession__import_inline_struct_variants_mut(rtoc_self_view, _, union_schema));
     END
@@ -954,7 +954,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       CONTINUE;
     END
     MUTABLE synthetic_name = symbol("${union_name}_${_}");
-    TRY (resolutionSession__current_scope(rtoc_self_view)).declare_type(synthetic_name, TRY (structSchema__new(variant.fields().transform_values(%(type) -> {
+    (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(synthetic_name, TRY (structSchema__new(variant.fields().transform_values(%(type) -> {
       rtoc_lambda_result_23 = StructField{ type: TRY (type__new(type)), default: NIL, borrowed: FALSE };
       rtoc_lambda_result_23
     }), ( { MUTABLE rtoc_empty_list_24: []String@symbol = List[]; rtoc_empty_list_24 } ), ( { MUTABLE rtoc_empty_list_25: []GenericParamDecl = List[]; rtoc_empty_list_25 } ), {}, {})));
@@ -1985,7 +1985,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (scope__resolve_type_entry(rtoc_local_receiver_62, name)) } THEN
       TRY (resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: "type", :name: name}));
     END
-    TRY (resolutionSession__current_scope(rtoc_self_view)).declare_type(name, schema);
+    (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(name, schema);
 }
 END
 PRIVATE FN resolutionSession__equivalent_extern_type_schema?(self: ResolutionSession, existing: ScopeScopeTypeSchema, incoming: ScopeScopeTypeSchema) RETURNS Bool

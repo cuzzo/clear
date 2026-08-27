@@ -31,11 +31,11 @@ FN diagnosticRegistry__lookup(code: String@symbol) RETURNS !?{String@symbol}?Dia
   RETURN COPY TRY (diagnosticRegistry__all())[code];
 END
 PUB FN diagnosticRegistry__known?(code: String@symbol) RETURNS !Bool ->
-  RETURN TRY (diagnosticRegistry__all()).contains?(code);
+  RETURN (TRY (diagnosticRegistry__all())).contains?(code);
 END
 # keys() hands back map-owned Strings, not interned handles; see KeyList.
 FN diagnosticRegistry__codes() RETURNS ![]String ->
-  RETURN TRY (diagnosticRegistry__all()).keys();
+  RETURN (TRY (diagnosticRegistry__all())).keys();
 END
 PUB FN diagnosticRegistry__pending?(code: String@symbol) RETURNS Bool ->
   IF ((code == :PRIMITIVE_PASSED_AS_MUTABLE) OR (code == :GIVE_BAD_TARGET)) THEN

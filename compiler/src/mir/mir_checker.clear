@@ -1880,7 +1880,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF init IS_A ForeignOwnedUnwrap AS foreign_owned_unwrap THEN
       RETURN TRUE;
     END
-    IF TRY (ownershipEffect__of(init)).produces_owned THEN
+    IF (TRY (ownershipEffect__of(init))).produces_owned THEN
       RETURN TRUE;
     END
     IF TRY (mIRChecker__owned_return_init?(rtoc_self_view, init)) THEN
@@ -1924,7 +1924,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     IF node? IS_A MIRBlockExpr AS mir_block_expr THEN
-      MUTABLE terminal = TRY (blockExpr__body(mir_block_expr)).reverse() |> FIND (_ IS_A BreakStmt AND (_.label() == mir_block_expr.label));
+      MUTABLE terminal = (TRY (blockExpr__body(mir_block_expr))).reverse() |> FIND (_ IS_A BreakStmt AND (_.label() == mir_block_expr.label));
       IF (terminal IS_A BreakStmt AND terminal.value()) THEN
         RETURN mIRChecker__value_constructor_expr?(rtoc_self_view, terminal.value());
       END

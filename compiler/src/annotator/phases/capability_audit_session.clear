@@ -2193,7 +2193,7 @@ PRIVATE FN capabilityAuditSession__with_new_scope<Result>(self: CapabilityAuditS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view)).pop();
+  DEFER (TRY (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_13: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_13 = scope__new();
@@ -4306,7 +4306,7 @@ PRIVATE FN capabilityAuditSession__restamp_requires_on_signatures_mut(self: Capa
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE root_scope = capabilityAuditSession__whole_program_root_scope(rtoc_self_view);
-    FOR rtoc_each_23 IN TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view)).keys() DO
+    FOR rtoc_each_23 IN (TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))).keys() DO
     MUTABLE fn_value: FunctionDef@multiowned = (TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))[rtoc_each_23] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
     MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X((IF scope__resolve_entry(root_scope, rtoc_each_23) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_49 = (scope__resolve_entry(root_scope, rtoc_each_23));
