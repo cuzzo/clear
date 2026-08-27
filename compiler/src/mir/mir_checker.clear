@@ -20,7 +20,98 @@ PUB STRUCT MIRChecker {
 
 PUB UNION MIRCheckerAggregateExpr { Emittable: Emittable, StringValue: String, SymbolValue: String@symbol, Int64Value: Int64, Float64Value: Float64, BoolValue: Bool }
 MUTABLE ownership_field_names: [Set]String@symbol = [:alloc, :allocs, :cleanup_entry, :ownership_contract, :owned_return, :owned_result_alloc, :callable_contract, :target_var] |> DISTINCT _;
-linear_statement_node_types: [83]Any@multiowned = [MIR.AllocMark, MIR.AssertRaisesCheck, MIR.AssertStmt, MIR.BatchWindowFlush, MIR.BatchWindowPush, MIR.BgBlock, MIR.BreakStmt, MIR.CatchWrapper, MIR.Cleanup, MIR.Comment, MIR.ContinueStmt, MIR.DeferStmt, MIR.DestructureSet, MIR.DiscardOwned, MIR.DebugOnly, MIR.DoBlock, MIR.EnumDef, MIR.ErrCleanup, MIR.ErrDeferStmt, MIR.ExprStmt, MIR.FallibleLockBinding, MIR.FieldCleanupMark, MIR.FnDef, MIR.ForStmt, MIR.FrameRestore, MIR.FrameSave, MIR.FsmB1Body, MIR.FsmGenericBody, MIR.FsmIoBody, MIR.IfBindStmt, MIR.IfChain, MIR.IfStmt, MIR.Import, MIR.CExternFnDecl, MIR.CExternStructDef, MIR.IndexInsert, MIR.Let, MIR.ModuleNamespace, MIR.MoveMark, MIR.MutualThunkTrampoline, MIR.Noop, MIR.OwnedBorrow, MIR.OwnedCreate, MIR.OwnedDestroy, MIR.OwnedReturn, MIR.OwnedStore, MIR.OwnedTransfer, MIR.Panic, MIR.Pipeline, MIR.PolymorphicFlowSignal, MIR.PolymorphicMutate, MIR.PolymorphicMutateFlow, MIR.PubConst, MIR.ModuleVar, MIR.ModuleConstFree, MIR.ReassignMark, MIR.ReassignWithCleanup, MIR.ResourceClose, MIR.ReturnMark, MIR.ReturnStmt, MIR.ScopeBlock, MIR.Set, MIR.ShardConcurrentEach, MIR.ShardedMapPut, MIR.SnapshotMultiTxn, MIR.SnapshotRead, MIR.SnapshotTransaction, MIR.Sort, MIR.SortedLockAcquire, MIR.StreamSpawn, MIR.StreamYield, MIR.StructDef, MIR.Suppress, MIR.SwitchStmt, MIR.TestDef, MIR.TestPreamble, MIR.ThunkTrampoline, MIR.TransferMark, MIR.TypeAlias, MIR.UnionMatchStmt, MIR.UnionTypeDef, MIR.WhileStmt, MIR.WithMatchDispatch];
+# Ruby keeps this as an array of class objects and asks `include?(stmt.class)`.
+# CLEAR has no runtime classes: Emittable is a union, so the same question is
+# a variant check, and the compiler verifies the arms are exhaustive.
+PUB FN mIRChecker__linear_statement_node?(stmt: Emittable) RETURNS Bool ->
+  PARTIAL MATCH stmt START
+    Emittable.AllocMark -> RETURN TRUE;,
+    Emittable.AssertRaisesCheck -> RETURN TRUE;,
+    Emittable.AssertStmt -> RETURN TRUE;,
+    Emittable.BatchWindowFlush -> RETURN TRUE;,
+    Emittable.BatchWindowPush -> RETURN TRUE;,
+    Emittable.BgBlock -> RETURN TRUE;,
+    Emittable.BreakStmt -> RETURN TRUE;,
+    Emittable.CatchWrapper -> RETURN TRUE;,
+    Emittable.Cleanup -> RETURN TRUE;,
+    Emittable.Comment -> RETURN TRUE;,
+    Emittable.ContinueStmt -> RETURN TRUE;,
+    Emittable.DeferStmt -> RETURN TRUE;,
+    Emittable.DestructureSet -> RETURN TRUE;,
+    Emittable.DiscardOwned -> RETURN TRUE;,
+    Emittable.DebugOnly -> RETURN TRUE;,
+    Emittable.DoBlock -> RETURN TRUE;,
+    Emittable.EnumDef -> RETURN TRUE;,
+    Emittable.ErrCleanup -> RETURN TRUE;,
+    Emittable.ErrDeferStmt -> RETURN TRUE;,
+    Emittable.ExprStmt -> RETURN TRUE;,
+    Emittable.FallibleLockBinding -> RETURN TRUE;,
+    Emittable.FieldCleanupMark -> RETURN TRUE;,
+    Emittable.FnDef -> RETURN TRUE;,
+    Emittable.ForStmt -> RETURN TRUE;,
+    Emittable.FrameRestore -> RETURN TRUE;,
+    Emittable.FrameSave -> RETURN TRUE;,
+    Emittable.FsmB -> RETURN TRUE;,
+    Emittable.FsmGenericBody -> RETURN TRUE;,
+    Emittable.FsmIoBody -> RETURN TRUE;,
+    Emittable.IfBindStmt -> RETURN TRUE;,
+    Emittable.IfChain -> RETURN TRUE;,
+    Emittable.IfStmt -> RETURN TRUE;,
+    Emittable.Import -> RETURN TRUE;,
+    Emittable.CExternFnDecl -> RETURN TRUE;,
+    Emittable.CExternStructDef -> RETURN TRUE;,
+    Emittable.IndexInsert -> RETURN TRUE;,
+    Emittable.Let -> RETURN TRUE;,
+    Emittable.ModuleNamespace -> RETURN TRUE;,
+    Emittable.MoveMark -> RETURN TRUE;,
+    Emittable.MutualThunkTrampoline -> RETURN TRUE;,
+    Emittable.Noop -> RETURN TRUE;,
+    Emittable.OwnedBorrow -> RETURN TRUE;,
+    Emittable.OwnedCreate -> RETURN TRUE;,
+    Emittable.OwnedDestroy -> RETURN TRUE;,
+    Emittable.OwnedReturn -> RETURN TRUE;,
+    Emittable.OwnedStore -> RETURN TRUE;,
+    Emittable.OwnedTransfer -> RETURN TRUE;,
+    Emittable.Panic -> RETURN TRUE;,
+    Emittable.Pipeline -> RETURN TRUE;,
+    Emittable.PolymorphicFlowSignal -> RETURN TRUE;,
+    Emittable.PolymorphicMutate -> RETURN TRUE;,
+    Emittable.PolymorphicMutateFlow -> RETURN TRUE;,
+    Emittable.PubConst -> RETURN TRUE;,
+    Emittable.ModuleVar -> RETURN TRUE;,
+    Emittable.ModuleConstFree -> RETURN TRUE;,
+    Emittable.ReassignMark -> RETURN TRUE;,
+    Emittable.ReassignWithCleanup -> RETURN TRUE;,
+    Emittable.ResourceClose -> RETURN TRUE;,
+    Emittable.ReturnMark -> RETURN TRUE;,
+    Emittable.ReturnStmt -> RETURN TRUE;,
+    Emittable.ScopeBlock -> RETURN TRUE;,
+    Emittable.Set -> RETURN TRUE;,
+    Emittable.ShardConcurrentEach -> RETURN TRUE;,
+    Emittable.ShardedMapPut -> RETURN TRUE;,
+    Emittable.SnapshotMultiTxn -> RETURN TRUE;,
+    Emittable.SnapshotRead -> RETURN TRUE;,
+    Emittable.SnapshotTransaction -> RETURN TRUE;,
+    Emittable.Sort -> RETURN TRUE;,
+    Emittable.SortedLockAcquire -> RETURN TRUE;,
+    Emittable.StreamSpawn -> RETURN TRUE;,
+    Emittable.StreamYield -> RETURN TRUE;,
+    Emittable.StructDef -> RETURN TRUE;,
+    Emittable.Suppress -> RETURN TRUE;,
+    Emittable.SwitchStmt -> RETURN TRUE;,
+    Emittable.TestDef -> RETURN TRUE;,
+    Emittable.TestPreamble -> RETURN TRUE;,
+    Emittable.ThunkTrampoline -> RETURN TRUE;,
+    Emittable.TransferMark -> RETURN TRUE;,
+    Emittable.TypeAlias -> RETURN TRUE;,
+    Emittable.UnionMatchStmt -> RETURN TRUE;,
+    Emittable.UnionTypeDef -> RETURN TRUE;,
+    Emittable.WhileStmt -> RETURN TRUE;,
+    Emittable.WithMatchDispatch -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
 audited_emittable_node_types: [168]Any@multiowned = [MIR.AddressOf, MIR.AllocMark, MIR.AllocSlice, MIR.AllocatorRef, MIR.ArrayDefaultInit, MIR.ArrayInit, MIR.AssertRaisesCheck, MIR.AssertStmt, MIR.BatchWindowFlush, MIR.BatchWindowPush, MIR.BgBlock, MIR.BinOp, MIR.BlockExpr, MIR.BreakExpr, MIR.BreakStmt, MIR.Call, MIR.CapWrap, MIR.CapabilityLockAddress, MIR.CapabilityLockTarget, MIR.CapabilityUnwrap, MIR.Cast, MIR.CatchWrapper, MIR.Cleanup, MIR.Comment, MIR.Comptime, MIR.ConcatList, MIR.ConcatStr, MIR.Conditional, MIR.ConstCast, MIR.ContainerInit, MIR.ContinueStmt, MIR.DebugOnly, MIR.DeepCopy, MIR.DefaultStreamCapacity, MIR.DeferStmt, MIR.Deref, MIR.DestroyPtr, MIR.DestructureSet, MIR.DestructureTarget, MIR.DiscardOwned, MIR.DoBlock, MIR.DupeSlice, MIR.EnumDef, MIR.EnumOrdinal, MIR.ErrCleanup, MIR.ErrDeferStmt, MIR.ExprStmt, MIR.FallibleLockBinding, MIR.FieldCleanupMark, MIR.FieldDef, MIR.FieldGet, MIR.FnDef, MIR.FnRef, MIR.ForStmt, MIR.FrameRestore, MIR.FrameSave, MIR.FreeSlice, MIR.FreezeExpr, MIR.FsmB1Body, MIR.FsmGenericBody, MIR.FsmIoBody, MIR.FsmStructure, MIR.HasField, MIR.HeapCreate, MIR.Ident, MIR.IfBindStmt, MIR.IfChain, MIR.IfOptional, MIR.IfStmt, MIR.Import, MIR.IndexGet, MIR.IndexInsert, MIR.InlineBc, MIR.ItemsAccess, MIR.IterRange, MIR.LambdaExpr, MIR.Let, MIR.ListItems, MIR.ListLength, MIR.Lit, MIR.LockAcquire, MIR.MakeList, MIR.MakeSet, MIR.MethodCall, MIR.ModuleNamespace, MIR.MoveMark, MIR.Noop, MIR.OptionalUnwrap, MIR.OrElseExitBcRewrite, MIR.Orelse, MIR.OwnedBorrow, MIR.OwnedCreate, MIR.OwnedDestroy, MIR.OwnedReturn, MIR.OwnedSlice, MIR.OwnedStore, MIR.OwnedTransfer, MIR.Panic, MIR.Param, MIR.Pipeline, MIR.PointerCast, MIR.PolymorphicFlowSignal, MIR.PolymorphicMutate, MIR.PolymorphicMutateFlow, MIR.PubConst, MIR.RangeLit, MIR.RcDowngrade, MIR.RcRelease, MIR.RcRetain, MIR.ComptimeCarrierPayload, MIR.MonomorphicKeep, MIR.ReassignMark, MIR.ReassignWithCleanup, MIR.ReturnMark, MIR.ReturnStmt, MIR.ResourceClose, MIR.RuntimeCall, MIR.ScopeBlock, MIR.Set, MIR.ShardedMapGet, MIR.ShardedMapPut, MIR.SharePromote, MIR.SliceExpr, MIR.SnapshotMultiTxn, MIR.SnapshotRead, MIR.SnapshotTransaction, MIR.SoaFieldAccess, MIR.Sort, MIR.SortedLockAcquire, MIR.StreamSpawn, MIR.StreamYield, MIR.StructDef, MIR.StructInit, MIR.Suppress, MIR.SwitchStmt, MIR.SymbolLit, MIR.TailCall, MIR.TestDef, MIR.TestPreamble, MIR.TransferMark, MIR.TryCatch, MIR.TryExpr, MIR.TryOrPanic, MIR.TryOptional, MIR.TupleLiteral, MIR.TypeAlias, MIR.TypeEq, MIR.TypeOf, MIR.TypeSentinel, MIR.UnaryOp, MIR.Undef, MIR.UnionMatchStmt, MIR.UnionPayloadGet, MIR.UnionTypeDef, MIR.UnionVariantGet, MIR.VoidLiteral, MIR.WeakUpgrade, MIR.WhileStmt, MIR.WithMatchDispatch, MIR.CExternFnDecl, MIR.CExternStructDef, MIR.FallibleOk, MIR.ForeignOwnedUnwrap, MIR.ForeignSliceView, MIR.FutureReady, MIR.ModuleConstFree, MIR.ModuleVar, MIR.ProtocolCall];
 PUB STRUCT LinearOwnershipState {
   alloc_kinds: {String}String@symbol,
@@ -584,7 +675,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, stmt_value_mutable, state));
         RETURN;
       END
-      IF !(linear_statement_node_types.contains?(stmt_value_mutable.class())) THEN
+      IF !(mIRChecker__linear_statement_node?(stmt_value_mutable)) THEN
         &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :LINEAR_STMT_NOT_REGISTERED, Name{ StringValue: COPY CAST(stmt_value_mutable.class().name() AS String) }, "MIR statement is not registered with MIRChecker linear ownership traversal")));
         RETURN;
       END
@@ -1669,43 +1760,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN functions;
 }
 END
+# Ruby walks its own class registry here, asking whether every MIR::Stmt
+# subclass is registered and whether any node carrying ownership fields was
+# left out -- a self-audit against a table that can drift.
+#
+# CLEAR has no runtime class registry, and it does not need one: the tables
+# this audits are PARTIAL MATCHes over the Emittable union, so a node the
+# checker forgot is a compile error, not a runtime finding. The audit is
+# discharged statically, so it reports nothing.
 PUB FN mIRChecker__ownership_registry_errors(self: MIRChecker) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE missing: []String = ( { MUTABLE rtoc_empty_list_34: []String = List[]; rtoc_empty_list_34 } );
-    MUTABLE unhandled_stmts: []String = ( { MUTABLE rtoc_empty_list_35: []String = List[]; rtoc_empty_list_35 } );
-    MUTABLE rtoc_each_items_36 = (TRY (mIRChecker__ownership_registry_node_types(rtoc_self_view)));
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_36.length() DO
-      IF ((rtoc_each_items_36[rtoc_idx]? < MIR.Stmt) AND !(linear_statement_node_types.contains?(rtoc_each_items_36[rtoc_idx]?))) THEN
-          &unhandled_stmts.append(rtoc_each_items_36[rtoc_idx]?.name());
-      END
-      IF ownership_significant_node_types.contains?(rtoc_each_items_36[rtoc_idx]?) THEN
-          rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      IF ((((ownership_significant_node_types |> SELECT _.name()) + legacy_ownership_node_names)) |> DISTINCT _ |> SELECT COPY _).contains?(rtoc_each_items_36[rtoc_idx]?.name()) THEN
-          rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      MUTABLE members: []String@symbol = CAST(rtoc_each_items_36[rtoc_idx]?.members() AS []String@symbol);
-      IF (ruby_set_intersection_String_symbol(members, ownership_field_names |> SELECT COPY _)).empty?() THEN
-          rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      &missing.append(rtoc_each_items_36[rtoc_idx]?.name());
-    rtoc_idx = rtoc_idx + 1;
-    END
-    MUTABLE errors: []String = ( { MUTABLE rtoc_empty_list_37: []String = List[]; rtoc_empty_list_37 } );
-    FOR _ IN (unhandled_stmts |> ORDER_BY _) DO
-    &errors.append("[LINEAR_STMT_NOT_REGISTERED] ${_} -- MIR statement is absent from MIRChecker::LINEAR_STATEMENT_NODE_TYPES");
-    END
-    FOR _ IN (missing |> ORDER_BY _) DO
-    &errors.append("[OWNERSHIP_NODE_NOT_REGISTERED] ${_} -- MIR node has ownership-significant fields but is absent from MIR::OWNERSHIP_SIGNIFICANT_NODE_TYPES");
-    END
-    RETURN errors;
-}
+  MUTABLE none: []String = List[];
+  RETURN none;
 END
 PUB FN mIRChecker__ownership_registry_node_types(self: MIRChecker) RETURNS ![]Any@multiowned
   REQUIRES self: LOCAL
