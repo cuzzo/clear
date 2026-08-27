@@ -294,7 +294,13 @@ class ProgramMIRFinalizer
       return false if fn_nodes.key?(node.name.to_s)
 
       signature = FunctionSignature.unwrap(node.matched_signature)
-      signature&.needs_rt == true || signature&.emits_allocating? == true
+      # A call that hands the caller an OWNED result needs the runtime even
+      # when it allocates nothing itself: the caller cleans that result up, and
+      # a discarded one materializes `defer CheatLib.cleanup(...)`. `pop` is
+      # exactly this shape, and dropping its result emitted an rt the
+      # signature had left out.
+      signature&.needs_rt == true || signature&.emits_allocating? == true ||
+        !signature&.return_alloc.nil?
     end
 
     sig { params(node: T.any(AST::CopyNode, AST::KeepNode), schema_lookup: Type::SchemaLookup).returns(T::Boolean) }

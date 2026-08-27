@@ -1,0 +1,35 @@
+# Test: a call that hands back an OWNED result needs the runtime that cleans it
+# up, and that cleanup must use the RECEIVER's allocator.
+#
+# `pop` allocates nothing, so the signature analysis left the rt parameter out
+# of a function discarding one -- the emitted cleanup then referenced an rt the
+# function never took. Supplying it is only half: STD_LIB marks pop
+# `return_alloc: :receiver_storage`, and defaulting to :heap frees frame
+# memory with the heap allocator ("Invalid free" under the checking allocator).
+
+STRUCT Cache { names: []String }
+
+PRIVATE FN dropLast(MUTABLE self: Cache) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE view {
+  &view.names.pop();
+}
+END
+
+FN main() RETURNS !Void ->
+  seed = "x";
+  MUTABLE ns: []String = ["${seed}1", "${seed}2", "${seed}3"];
+  MUTABLE c = Cache{ names: ns };
+
+  dropLast(&c);
+  ASSERT c.names.length() == 2_i64, "a discarded pop should shrink the field";
+  ASSERT UNWRAP (c.names[0]) == "x1", "surviving elements should be intact";
+
+  dropLast(&c);
+  ASSERT c.names.length() == 1_i64, "and shrink again without corrupting the heap";
+  ASSERT UNWRAP (c.names[0]) == "x1", "the first element should still be intact";
+
+  print("owned_result_carries_its_allocator: all tests passed");
+  RETURN;
+END

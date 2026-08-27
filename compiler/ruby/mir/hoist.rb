@@ -1621,7 +1621,10 @@ module MIRHoistLowering
 
   sig { params(mir: MIR::Node, ast_node: T.nilable(AST::Node)).returns(T.nilable(CleanupEntry)) }
   def hoist_cleanup_entry(mir, ast_node)
-    alloc = mir_owned_alloc(mir) || :heap
+    # STD_LIB marks `pop` and friends `return_alloc: :receiver_storage`: the
+    # result is owned by the caller but allocated by whoever owns the receiver.
+    # Defaulting to :heap frees frame memory with the heap allocator.
+    alloc = mir_owned_alloc(mir) || receiver_storage_cleanup_alloc(ast_node) || :heap
     case mir
     when MIR::DupeSlice, MIR::ConcatStr
       heap_string_entry(alloc: alloc)
@@ -1667,6 +1670,19 @@ module MIRHoistLowering
       raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \
             "mir_allocates? returned true but no cleanup entry is defined. Add a case."
     end
+  end
+
+  # The allocator STD_LIB's `:receiver_storage` names, resolved from the
+  # receiver's own storage. nil when the receiver is a bare parameter, whose
+  # allocator belongs to the caller and does not travel with the collection.
+  sig { params(ast_node: T.nilable(AST::Node)).returns(T.nilable(Symbol)) }
+  def receiver_storage_cleanup_alloc(ast_node)
+    return nil unless ast_node.is_a?(AST::MethodCall)
+
+    signature = FunctionSignature.unwrap(ast_node.matched_signature)
+    return nil unless signature&.return_alloc == :receiver_storage
+
+    CleanupClassifier.receiver_storage_alloc_for(ast_node)
   end
 
   sig { params(mir: MIR::DeepCopy, ast_node: T.nilable(AST::Node)).returns(String) }

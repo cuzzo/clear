@@ -905,6 +905,9 @@ module CleanupClassifier
   end
 
   sig { params(expr: AST::MethodCall).returns(T.nilable(Symbol)) }
+  def self.receiver_storage_alloc_for(expr) = receiver_storage_alloc(expr)
+
+  sig { params(expr: AST::MethodCall).returns(T.nilable(Symbol)) }
   private_class_method def self.receiver_storage_alloc(expr)
     receiver = expr.object
     symbol = receiver.respond_to?(:symbol) ? receiver.symbol : nil
