@@ -1469,12 +1469,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ownershipGraph__push_scope_mut(&rtoc_mutable_receiver_33) };
 }
 END
-PRIVATE FN typeAnalysisSession__og_pop_scope(self: TypeAnalysisSession, archive: Bool = FALSE) RETURNS !Int64
+PRIVATE FN typeAnalysisSession__og_pop_scope(self: TypeAnalysisSession, archive: Bool = FALSE) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_34 = typeAnalysisSession__ownership_graph(rtoc_self_view);
-    TRY (ownershipGraph__pop_scope_mut(&rtoc_mutable_receiver_34, archive)) };
+    (ownershipGraph__pop_scope_mut(&rtoc_mutable_receiver_34, archive)) };
 }
 END
 PRIVATE FN typeAnalysisSession__typo_anchor(self: TypeAnalysisSession, token: ?Token) RETURNS AnchorToken
@@ -3193,7 +3193,7 @@ PRIVATE FN typeAnalysisSession__with_routine_analysis_scope(self: TypeAnalysisSe
 WITH POLYMORPHIC self AS rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__module_variable_scope(rtoc_self_view), %() USE(blk, node, rtoc_self_view) -> {
     typeAnalysisSession__og_push_scope(rtoc_self_view);
-    DEFER TRY (typeAnalysisSession__og_pop_scope(rtoc_self_view, TRUE));
+    DEFER (typeAnalysisSession__og_pop_scope(rtoc_self_view, TRUE));
     blk();
     TRY (typeAnalysisSession__finalize_scope(rtoc_self_view, castRoutineNodeToLocatable(node)))
     });
@@ -12892,7 +12892,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     typeAnalysisSession__og_push_scope(rtoc_self_view);
     pushed_og_scope = TRUE;
     DEFER IF pushed_og_scope THEN
-        TRY (typeAnalysisSession__og_pop_scope(rtoc_self_view));
+        (typeAnalysisSession__og_pop_scope(rtoc_self_view));
     END
     BranchAnalysisResult{ drops: branch_logic(), snapshot: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_315 = typeAnalysisSession__ownership_graph(rtoc_self_view);
     ownershipGraph__fork_lightweight(rtoc_local_receiver_315) }, terminated: typeAnalysisSession__phase_traversal_state(rtoc_self_view).branch_terminated }

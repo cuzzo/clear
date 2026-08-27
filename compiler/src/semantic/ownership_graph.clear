@@ -125,12 +125,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (rtoc_self_view.scope_depth + 1);
 }
 END
-PUB FN ownershipGraph__pop_scope_mut(MUTABLE self: OwnershipGraph, archive: Bool = FALSE) RETURNS !Int64
+PUB FN ownershipGraph__pop_scope_mut(MUTABLE self: OwnershipGraph, archive: Bool = FALSE) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_mutable_alias_arg_1 = COPY rtoc_self_view.scope_depth;
-    TRY (ownershipGraph__prune_scope_mut(&rtoc_self_view, rtoc_mutable_alias_arg_1, archive));
+    (ownershipGraph__prune_scope_mut(&rtoc_self_view, rtoc_mutable_alias_arg_1, archive));
     rtoc_self_view.scope_depth = (rtoc_self_view.scope_depth - 1);
     RETURN (rtoc_self_view.scope_depth - 1);
 }
@@ -342,7 +342,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN ownershipGraph__prune_scope_mut(MUTABLE self: OwnershipGraph, scope_depth: Int64, archive: Bool = FALSE) RETURNS !Int64
+FN ownershipGraph__prune_scope_mut(MUTABLE self: OwnershipGraph, scope_depth: Int64, archive: Bool = FALSE) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
