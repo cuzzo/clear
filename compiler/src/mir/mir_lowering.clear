@@ -2408,8 +2408,8 @@ FN mIRLowering__merge_body_mark_names_mut(self: MIRLowering, state: OwnershipFin
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    state.body_alloc_mark_names.merge(TRY (mIRLowering__body_alloc_mark_names_in_body(rtoc_self_view, body)));
-    state.body_transfer_mark_names.merge(TRY (mIRLowering__body_transfer_mark_names_in_body(rtoc_self_view, body)));
+    &state.body_alloc_mark_names.merge(TRY (mIRLowering__body_alloc_mark_names_in_body(rtoc_self_view, body)));
+    &state.body_transfer_mark_names.merge(TRY (mIRLowering__body_transfer_mark_names_in_body(rtoc_self_view, body)));
     NIL;
 }
 END

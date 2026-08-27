@@ -152,17 +152,17 @@ PUB FN linearOwnershipState__copy(self: LinearOwnershipState) RETURNS LinearOwne
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE other = linearOwnershipState__new();
-    other.owned.merge(rtoc_self_view.owned);
-    other.released.merge(rtoc_self_view.released);
-    other.maybe_released.merge(rtoc_self_view.maybe_released);
-    other.cleanup_finalizers.merge(rtoc_self_view.cleanup_finalizers);
-    other.guarded_finalizers.merge(rtoc_self_view.guarded_finalizers);
-    other.err_finalizers.merge(rtoc_self_view.err_finalizers);
-    other.pending_return_transfers.merge(rtoc_self_view.pending_return_transfers);
-    other.pending_block_transfers.merge(rtoc_self_view.pending_block_transfers);
+    &other.owned.merge(rtoc_self_view.owned);
+    &other.released.merge(rtoc_self_view.released);
+    &other.maybe_released.merge(rtoc_self_view.maybe_released);
+    &other.cleanup_finalizers.merge(rtoc_self_view.cleanup_finalizers);
+    &other.guarded_finalizers.merge(rtoc_self_view.guarded_finalizers);
+    &other.err_finalizers.merge(rtoc_self_view.err_finalizers);
+    &other.pending_return_transfers.merge(rtoc_self_view.pending_return_transfers);
+    &other.pending_block_transfers.merge(rtoc_self_view.pending_block_transfers);
     &other.alloc_kinds.merge_mut(rtoc_self_view.alloc_kinds);
     &other.alloc_scopes.merge_mut(rtoc_self_view.alloc_scopes);
-    other.move_marks.merge(rtoc_self_view.move_marks);
+    &other.move_marks.merge(rtoc_self_view.move_marks);
     other.terminated = rtoc_self_view.terminated;
     RETURN other;
 }
@@ -1179,10 +1179,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE names: [Set]String = Set[];
     FOR _ IN states DO
-    names.merge(_.released);
+    &names.merge(_.released);
     END
     FOR _ IN states DO
-    names.merge(_.maybe_released);
+    &names.merge(_.maybe_released);
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < names.length() DO

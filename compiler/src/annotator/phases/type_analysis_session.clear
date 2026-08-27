@@ -3369,7 +3369,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rubyToClearVoid()
       });
       IF catch_body_scan.references_snapshot THEN
-        snap_types.merge(candidate_snap_types);
+        &snap_types.merge(candidate_snap_types);
       END
       node.snapshot_types = snap_types;
     END
@@ -4735,7 +4735,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       symbolEntry__inherit_ownership_identity_mut(&capture_entry, UNWRAP (owner_entry));
-      capture_entry.capabilities.merge(owner_entry.capabilities);
+      &capture_entry.capabilities.merge(owner_entry.capabilities);
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;
@@ -17072,11 +17072,11 @@ PRIVATE FN typeAnalysisSession__resolve_error_selectors_mut(self: TypeAnalysisSe
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE possible = Set[];
     IF is_snapshot_txn THEN
-      possible.merge(snapshot_possible_types);
+      &possible.merge(snapshot_possible_types);
     END
     MUTABLE capability_plan = TRY (capabilityPlan__require_for(node));
     IF ((TRY (withCapabilityPlan__locks(capability_plan))).length() > 0) THEN
-      possible.merge(lock_possible_types);
+      &possible.merge(lock_possible_types);
     END
     IF !(((TRY (withCapabilityPlan__guarded(capability_plan))).length() == 0)) THEN
       &possible.insert(:GuardFail);

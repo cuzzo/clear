@@ -115,13 +115,13 @@ PUB FN captureAnalysis__merge_nested_mut(MUTABLE self: CaptureAnalysis, nested: 
   &self.captures.merge_mut(nested.captures, %(ignored_name: Tuple<String,Type>, old, ignored_new) -> old);
   &self.capture_symbols.merge_mut(nested.capture_symbols, %(ignored_name: Tuple<String,SymbolEntry@multiowned>, old, ignored_new) -> old);
   &self.close_plans.merge_mut(nested.close_plans, %(ignored_name: Tuple<String,ResourceClosePlan>, old, ignored_new) -> old);
-  self.pointer_captures.merge(nested.pointer_captures);
-  self.string_captures.merge(nested.string_captures);
-  self.resource_captures.merge(nested.resource_captures);
-  self.site_moved.merge(nested.site_moved);
-  self.site_copied.merge(nested.site_copied);
+  &self.pointer_captures.merge(nested.pointer_captures);
+  &self.string_captures.merge(nested.string_captures);
+  &self.resource_captures.merge(nested.resource_captures);
+  &self.site_moved.merge(nested.site_moved);
+  &self.site_copied.merge(nested.site_copied);
   &self.strategies.merge_mut(nested.strategies, %(ignored_name: Tuple<String,Strategy>, old, ignored_new) -> old);
-  self.move_mark_names.merge(nested.move_mark_names);
+  &self.move_mark_names.merge(nested.move_mark_names);
   &self.alloc_mark_entries.merge_mut(nested.alloc_mark_entries, %(ignored_name: Tuple<String,String@symbol>, old, ignored_new) -> old);
 END
 PUB STRUCT CaptureContext {
