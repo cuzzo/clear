@@ -15,40 +15,40 @@ PUB FN clearParser__dispatch_stmt_rule(MUTABLE self: ClearParser, rule: ParserRu
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result = PARTIAL MATCH rule.action START
-      :parse_require -> Locatable{ RequireNode: clearParser__parse_require(&rtoc_self_view) },
-      :parse_extern_decl -> castClearParserReturnValueToLocatable(clearParser__parse_extern_decl(&rtoc_self_view)),
-      :parse_mutable_var_decl -> castClearParserReturnValueToLocatable(clearParser__parse_mutable_var_decl(&rtoc_self_view)),
-      :parse_const_decl -> Locatable{ VarDecl: clearParser__parse_const_decl(&rtoc_self_view) },
-      :parse_function_def -> Locatable{ FunctionDef: clearParser__parse_function_def(&rtoc_self_view) },
-      :parse_method_function_def -> Locatable{ FunctionDef: clearParser__parse_function_def(&rtoc_self_view, :package, TRUE) },
-      :parse_pub_visibility -> clearParser__parse_visibility_decl(&rtoc_self_view, :pub),
-      :parse_private_visibility -> clearParser__parse_visibility_decl(&rtoc_self_view, :private),
-      :parse_if_statement -> castClearParserReturnValueToLocatable(clearParser__parse_if_statement(&rtoc_self_view)),
-      :parse_comptime_statement -> castClearParserReturnValueToLocatable(clearParser__parse_comptime_statement(&rtoc_self_view)),
-      :parse_struct_def -> Locatable{ StructDef: clearParser__parse_struct_def(&rtoc_self_view) },
-      :parse_protocol_def -> Locatable{ ProtocolDef: clearParser__parse_protocol_def(&rtoc_self_view) },
-      :parse_implementation_def -> castClearParserReturnValueToLocatable(clearParser__parse_implementation_def(&rtoc_self_view)),
-      :parse_enum_def -> Locatable{ EnumDef: clearParser__parse_enum_def(&rtoc_self_view) },
-      :parse_union_def -> Locatable{ UnionDef: clearParser__parse_union_def(&rtoc_self_view) },
-      :parse_while_loop -> castClearParserReturnValueToLocatable(clearParser__parse_while_loop(&rtoc_self_view)),
+      :parse_require -> Locatable{ RequireNode: TRY (clearParser__parse_require(&rtoc_self_view)) },
+      :parse_extern_decl -> castClearParserReturnValueToLocatable(TRY (clearParser__parse_extern_decl(&rtoc_self_view))),
+      :parse_mutable_var_decl -> castClearParserReturnValueToLocatable(TRY (clearParser__parse_mutable_var_decl(&rtoc_self_view))),
+      :parse_const_decl -> Locatable{ VarDecl: TRY (clearParser__parse_const_decl(&rtoc_self_view)) },
+      :parse_function_def -> Locatable{ FunctionDef: TRY (clearParser__parse_function_def(&rtoc_self_view)) },
+      :parse_method_function_def -> Locatable{ FunctionDef: TRY (clearParser__parse_function_def(&rtoc_self_view, :package, TRUE)) },
+      :parse_pub_visibility -> TRY (clearParser__parse_visibility_decl(&rtoc_self_view, :pub)),
+      :parse_private_visibility -> TRY (clearParser__parse_visibility_decl(&rtoc_self_view, :private)),
+      :parse_if_statement -> castClearParserReturnValueToLocatable(TRY (clearParser__parse_if_statement(&rtoc_self_view))),
+      :parse_comptime_statement -> castClearParserReturnValueToLocatable(TRY (clearParser__parse_comptime_statement(&rtoc_self_view))),
+      :parse_struct_def -> Locatable{ StructDef: TRY (clearParser__parse_struct_def(&rtoc_self_view)) },
+      :parse_protocol_def -> Locatable{ ProtocolDef: TRY (clearParser__parse_protocol_def(&rtoc_self_view)) },
+      :parse_implementation_def -> castClearParserReturnValueToLocatable(TRY (clearParser__parse_implementation_def(&rtoc_self_view))),
+      :parse_enum_def -> Locatable{ EnumDef: TRY (clearParser__parse_enum_def(&rtoc_self_view)) },
+      :parse_union_def -> Locatable{ UnionDef: TRY (clearParser__parse_union_def(&rtoc_self_view)) },
+      :parse_while_loop -> castClearParserReturnValueToLocatable(TRY (clearParser__parse_while_loop(&rtoc_self_view))),
       :parse_for_range -> castClearParserReturnValueToLocatable(TRY (clearParser__parse_for_range(&rtoc_self_view))),
       :parse_tight_stmt -> TRY (clearParser__parse_tight_stmt(&rtoc_self_view)),
       :parse_return -> Locatable{ ReturnNode: TRY (clearParser__parse_return(&rtoc_self_view)) },
-      :parse_assert -> Locatable{ Assert: clearParser__parse_assert(&rtoc_self_view) },
+      :parse_assert -> Locatable{ Assert: TRY (clearParser__parse_assert(&rtoc_self_view)) },
       :parse_defer -> Locatable{ DeferStmt: TRY (clearParser__parse_defer(&rtoc_self_view)) },
-      :parse_assert_raises -> Locatable{ AssertRaises: clearParser__parse_assert_raises(&rtoc_self_view) },
-      :parse_test_block -> Locatable{ TestBlock: clearParser__parse_test_block(&rtoc_self_view) },
-      :parse_stub -> Locatable{ StubDecl: clearParser__parse_stub(&rtoc_self_view) },
-      :parse_benchmark_stmt -> Locatable{ BenchmarkStmt: clearParser__parse_benchmark_stmt(&rtoc_self_view) },
+      :parse_assert_raises -> Locatable{ AssertRaises: TRY (clearParser__parse_assert_raises(&rtoc_self_view)) },
+      :parse_test_block -> Locatable{ TestBlock: TRY (clearParser__parse_test_block(&rtoc_self_view)) },
+      :parse_stub -> Locatable{ StubDecl: TRY (clearParser__parse_stub(&rtoc_self_view)) },
+      :parse_benchmark_stmt -> Locatable{ BenchmarkStmt: TRY (clearParser__parse_benchmark_stmt(&rtoc_self_view)) },
       :parse_smash_stmt -> Locatable{ SmashStmt: TRY (clearParser__parse_smash_stmt(&rtoc_self_view)) },
       :parse_profile_stmt -> Locatable{ ProfileStmt: TRY (clearParser__parse_profile_stmt(&rtoc_self_view)) },
-      :parse_raise_stmt -> Locatable{ Raise: clearParser__parse_raise_stmt(&rtoc_self_view) },
+      :parse_raise_stmt -> Locatable{ Raise: TRY (clearParser__parse_raise_stmt(&rtoc_self_view)) },
       :parse_exit -> Locatable{ ThrowNode: TRY (clearParser__parse_exit(&rtoc_self_view)) },
       :parse_die -> Locatable{ DieNode: TRY (clearParser__parse_die(&rtoc_self_view)) },
       :parse_break -> Locatable{ BreakNode: TRY (clearParser__parse_break(&rtoc_self_view)) },
       :parse_continue -> Locatable{ ContinueNode: TRY (clearParser__parse_continue(&rtoc_self_view)) },
       :parse_with_capability -> Locatable{ WithBlock: UNWRAP (TRY (clearParser__parse_with_capability(&rtoc_self_view))) },
-      :parse_sync_policy_block -> Locatable{ SyncPolicyDecl: clearParser__parse_sync_policy_block(&rtoc_self_view) },
+      :parse_sync_policy_block -> Locatable{ SyncPolicyDecl: TRY (clearParser__parse_sync_policy_block(&rtoc_self_view)) },
       :parse_do_block -> Locatable{ DoBlock: TRY (clearParser__parse_do_block(&rtoc_self_view)) },
       :parse_bg_block -> castBgNodeToLocatable(TRY (clearParser__parse_bg_block(&rtoc_self_view))),
       :parse_yield_expr -> Locatable{ YieldExpr: TRY (clearParser__parse_yield_expr(&rtoc_self_view)) },
@@ -83,10 +83,10 @@ PRIVATE FN clearParser__parse_defer(MUTABLE self: ClearParser) RETURNS !DeferStm
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "DEFER"));
     MUTABLE body: []Locatable = List[];
-    IF clearParser__match?(rtoc_self_view, :CHAR, "{") THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :CHAR, "{")) THEN
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, "{"));
       MUTABLE stmts: []Locatable = List[];
-      WHILE !(clearParser__match?(rtoc_self_view, :CHAR, "}")) DO
+      WHILE !(TRY (clearParser__match?(rtoc_self_view, :CHAR, "}"))) DO
         &stmts.append(TRY (clearParser__parse_statement(&rtoc_self_view)));
       END
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, "}"));
@@ -205,7 +205,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE node: ?Locatable = NIL;
     rtoc_cur_0 = clearParser__current(rtoc_self_view);
     IF (rtoc_cur_0.type == :VAR_ID) THEN
-      IF clearParser__destructuring_assignment?(rtoc_self_view) THEN
+      IF TRY (clearParser__destructuring_assignment?(rtoc_self_view)) THEN
         node = Locatable{ DestructuringAssignment: COPY TRY (clearParser__parse_destructuring_assign(&rtoc_self_view)) };
       ELSE
         MUTABLE parsed = TRY (clearParser__parse_var_form(&rtoc_self_view));
@@ -229,10 +229,10 @@ PUB FN clearParser__destructuring_assignment?(self: ClearParser) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF clearParser__match_at?(rtoc_self_view, 1, :CHAR, ",") THEN
+    IF TRY (clearParser__match_at?(rtoc_self_view, 1, :CHAR, ",")) THEN
       RETURN TRUE;
     END
-    IF !(clearParser__match_at?(rtoc_self_view, 1, :CHAR, ":")) THEN
+    IF !(TRY (clearParser__match_at?(rtoc_self_view, 1, :CHAR, ":"))) THEN
       RETURN FALSE;
     END
     MUTABLE offset = 2;
@@ -278,7 +278,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE targets: []DestructureTarget = List[];
     &targets.append(TRY (clearParser__parse_destructure_target(&rtoc_self_view, default_mutable)));
     WHILE castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ","))) DO
-      &targets.append(clearParser__parse_destructure_target(&rtoc_self_view, default_mutable));
+      &targets.append(TRY (clearParser__parse_destructure_target(&rtoc_self_view, default_mutable)));
     END
     TRY (clearParser__consume(&rtoc_self_view, :CHAR, "="));
     MUTABLE value = TRY (clearParser__parse_expression(&rtoc_self_view));
@@ -312,12 +312,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target = TRY (clearParser__parse_expression(&rtoc_self_view));
     MUTABLE opt_type: ?Type = NIL;
     IF target IS_A Identifier THEN
-      IF clearParser__match?(rtoc_self_view, :CHAR, ":") THEN
+      IF TRY (clearParser__match?(rtoc_self_view, :CHAR, ":")) THEN
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, ":"));
-        opt_type = (TRY (clearParser__parse_inferred_wrapper_annotation(&rtoc_self_view)) OR_ELSE clearParser__parse_type_annotation(&rtoc_self_view));
+        opt_type = (TRY (clearParser__parse_inferred_wrapper_annotation(&rtoc_self_view)) OR_ELSE TRY (clearParser__parse_type_annotation(&rtoc_self_view)));
       END
     END
-    IF clearParser__match?(rtoc_self_view, :COMPOUND_ASSIGN) THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :COMPOUND_ASSIGN)) THEN
       IF !(((target IS_A Identifier OR target IS_A GetField) OR target IS_A GetIndex)) THEN
         TRY (clearParser__error_mut(rtoc_self_view, target_token, CodeOrMessage{ SymbolValue: :INVALID_ASSIGNMENT }));
       END
@@ -337,7 +337,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN ParsedVarForm{ node: Locatable{ Assignment: COPY asgn }, assignment: TRUE };
       END
     END
-    IF !(clearParser__match?(rtoc_self_view, :CHAR, "=")) THEN
+    IF !(TRY (clearParser__match?(rtoc_self_view, :CHAR, "="))) THEN
       IF !((opt_type == NIL)) THEN
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, "="));
       END
@@ -363,7 +363,7 @@ PUB FN clearParser__parse_inferred_wrapper_annotation(MUTABLE self: ClearParser)
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(((clearParser__match?(rtoc_self_view, :CHAR, "!") OR clearParser__match?(rtoc_self_view, :CHAR, "?")) OR clearParser__match?(rtoc_self_view, :CHAR, "~"))) THEN
+    IF !(((TRY (clearParser__match?(rtoc_self_view, :CHAR, "!")) OR TRY (clearParser__match?(rtoc_self_view, :CHAR, "?"))) OR TRY (clearParser__match?(rtoc_self_view, :CHAR, "~")))) THEN
       RETURN NIL;
     END
     MUTABLE start = token__display_value(clearParser__current(rtoc_self_view));
@@ -393,7 +393,7 @@ PRIVATE FN clearParser__parse_tight_stmt(MUTABLE self: ClearParser) RETURNS !Loc
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body: []Locatable = List[];
     MUTABLE tight_token = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "TIGHT"));
-    IF clearParser__match?(rtoc_self_view, :KEYWORD, "FOR") THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :KEYWORD, "FOR")) THEN
       MUTABLE for_node = TRY (clearParser__parse_for_range(&rtoc_self_view));
       IF for_node IS_A ForRange AS for_range THEN
         MUTABLE tight_range = COPY for_range;
@@ -407,12 +407,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN castClearParserReturnValueToLocatable(for_node);
     END
-    IF !(clearParser__match?(rtoc_self_view, :KEYWORD, "WHILE")) THEN
+    IF !(TRY (clearParser__match?(rtoc_self_view, :KEYWORD, "WHILE"))) THEN
       panic("Expected WHILE or FOR after TIGHT (got {})");
     END
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "WHILE"));
     MUTABLE cond = TRY (clearParser__parse_expression(&rtoc_self_view));
-    IF clearParser__match?(rtoc_self_view, :ARROW, "->") THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :ARROW, "->")) THEN
       TRY (clearParser__consume(&rtoc_self_view, :ARROW, "->"));
       MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
       body = ([stmt]);
@@ -431,7 +431,7 @@ PRIVATE FN clearParser__parse_return(MUTABLE self: ClearParser) RETURNS !ReturnN
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ret_token = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "RETURN"));
     MUTABLE value: ?Locatable = NIL;
-    IF !(clearParser__match?(rtoc_self_view, :CHAR, ";")) THEN
+    IF !(TRY (clearParser__match?(rtoc_self_view, :CHAR, ";"))) THEN
       value = TRY (clearParser__parse_expression(&rtoc_self_view));
     END
     TRY (clearParser__consume(&rtoc_self_view, :CHAR, ";"));
@@ -445,7 +445,7 @@ PRIVATE FN clearParser__parse_exit(MUTABLE self: ClearParser) RETURNS !ThrowNode
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE exit_token = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD));
     MUTABLE context_expr: ?Locatable = NIL;
-    IF ((!(clearParser__match?(rtoc_self_view, :CHAR, ";")) AND !(clearParser__match?(rtoc_self_view, :CHAR, ")"))) AND !(clearParser__match?(rtoc_self_view, :KEYWORD, "END"))) THEN
+    IF ((!(TRY (clearParser__match?(rtoc_self_view, :CHAR, ";"))) AND !(TRY (clearParser__match?(rtoc_self_view, :CHAR, ")")))) AND !(TRY (clearParser__match?(rtoc_self_view, :KEYWORD, "END")))) THEN
       context_expr = TRY (clearParser__parse_primary(&rtoc_self_view));
     END
     TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ";"));
@@ -460,7 +460,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE status: ?Locatable = NIL;
     MUTABLE die_token = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD));
     MUTABLE context_expr: ?Locatable = NIL;
-    IF castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :CHAR, ";")) THEN
+    IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ";"))) THEN
       status = Literal{ token: COPY clearParser__previous(rtoc_self_view), type: :NUMBER, value: TokenValue{ Int64Value: 1 }, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
     ELSE
       status = TRY (clearParser__parse_expression(&rtoc_self_view));
@@ -475,7 +475,7 @@ PUB FN clearParser__parse_block_body(MUTABLE self: ClearParser, stop_words: []St
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE stmts: []Locatable = List[];
-    WHILE !(((stop_words |> ANY clearParser__match?(rtoc_self_view, clearParser__literal_token_type(rtoc_self_view, _), _)) OR clearParser__match?(rtoc_self_view, :EOF))) DO
+    WHILE !(((stop_words |> ANY TRY (clearParser__match?(rtoc_self_view, clearParser__literal_token_type(rtoc_self_view, _), _))) OR TRY (clearParser__match?(rtoc_self_view, :EOF)))) DO
       MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
       &stmts.append(stmt);
     END
@@ -517,9 +517,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE block_token = TRY (clearParser__consume(&rtoc_self_view, :CHAR, "{"));
     MUTABLE body: []Locatable = List[];
     MUTABLE result: ?Locatable = NIL;
-    WHILE !((clearParser__match?(rtoc_self_view, :CHAR, "}") OR clearParser__match?(rtoc_self_view, :EOF))) DO
+    WHILE !((TRY (clearParser__match?(rtoc_self_view, :CHAR, "}")) OR TRY (clearParser__match?(rtoc_self_view, :EOF)))) DO
       rtoc_cur_1 = clearParser__current(rtoc_self_view);
-      IF ((rtoc_cur_1.type == :VAR_ID) AND clearParser__destructuring_assignment?(rtoc_self_view)) THEN
+      IF ((rtoc_cur_1.type == :VAR_ID) AND TRY (clearParser__destructuring_assignment?(rtoc_self_view))) THEN
         &body.append(Locatable{ DestructuringAssignment: COPY TRY (clearParser__parse_destructuring_assign(&rtoc_self_view)) });
         CONTINUE;
       END
@@ -542,7 +542,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
       END
       MUTABLE expr = TRY (clearParser__parse_expression(&rtoc_self_view));
-      IF castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :CHAR, ";")) THEN
+      IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ";"))) THEN
         &body.append(COPY expr);
         CONTINUE;
       ELSE
@@ -577,10 +577,10 @@ PUB FN clearParser__brace_literal_is_hash?(self: ClearParser) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(clearParser__match?(rtoc_self_view, :CHAR, "{")) THEN
+    IF !(TRY (clearParser__match?(rtoc_self_view, :CHAR, "{"))) THEN
       RETURN FALSE;
     END
-    IF clearParser__match_at?(rtoc_self_view, 1, :CHAR, "}") THEN
+    IF TRY (clearParser__match_at?(rtoc_self_view, 1, :CHAR, "}")) THEN
       RETURN TRUE;
     END
     MUTABLE first: ?Token = clearParser__peek_at(rtoc_self_view, 1);
@@ -615,7 +615,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             END
           ELSE_IF (token_text == ":") THEN
             IF (depth == 1) THEN
-              RETURN !(clearParser__top_level_assignment_before_brace_delimiter?(rtoc_self_view, (offset + 1)));
+              RETURN !(TRY (clearParser__top_level_assignment_before_brace_delimiter?(rtoc_self_view, (offset + 1))));
             END
           END
         END
@@ -679,8 +679,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE start = TRY (clearParser__parse_match_start(&rtoc_self_view));
     MUTABLE cases: []MatchCase = List[];
     MUTABLE default_case: ?[]Locatable = NIL;
-    WHILE !((clearParser__match?(rtoc_self_view, :KEYWORD, "END") OR clearParser__match?(rtoc_self_view, :EOF))) DO
-      IF clearParser__match?(rtoc_self_view, :KEYWORD, "DEFAULT") THEN
+    WHILE !((TRY (clearParser__match?(rtoc_self_view, :KEYWORD, "END")) OR TRY (clearParser__match?(rtoc_self_view, :EOF)))) DO
+      IF TRY (clearParser__match?(rtoc_self_view, :KEYWORD, "DEFAULT")) THEN
         TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "DEFAULT"));
         TRY (clearParser__consume(&rtoc_self_view, :ARROW));
         MUTABLE default_body: []Locatable = List[];
@@ -704,10 +704,10 @@ PRIVATE FN clearParser__parse_for_range(MUTABLE self: ClearParser) RETURNS !Clea
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body: []Locatable = List[];
     MUTABLE tok = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "FOR"));
-    MUTABLE var_name = TRY (token__text_mut(clearParser__consume(&rtoc_self_view, :VAR_ID)));
+    MUTABLE var_name = TRY (token__text_mut(TRY (clearParser__consume(&rtoc_self_view, :VAR_ID))));
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "IN"));
     MUTABLE expr = TRY (clearParser__parse_expression(&rtoc_self_view));
-    IF clearParser__match?(rtoc_self_view, :ARROW, "->") THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :ARROW, "->")) THEN
       TRY (clearParser__consume(&rtoc_self_view, :ARROW, "->"));
       MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
       body = ([stmt]);
@@ -729,8 +729,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE start = TRY (clearParser__parse_match_start(&rtoc_self_view));
     MUTABLE cases: []MatchCase = List[];
     MUTABLE default_case: ?[]Locatable = NIL;
-    WHILE !((clearParser__match?(rtoc_self_view, :KEYWORD, "END") OR clearParser__match?(rtoc_self_view, :EOF))) DO
-      IF clearParser__match?(rtoc_self_view, :KEYWORD, "DEFAULT") THEN
+    WHILE !((TRY (clearParser__match?(rtoc_self_view, :KEYWORD, "END")) OR TRY (clearParser__match?(rtoc_self_view, :EOF)))) DO
+      IF TRY (clearParser__match?(rtoc_self_view, :KEYWORD, "DEFAULT")) THEN
         TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "DEFAULT"));
         TRY (clearParser__consume(&rtoc_self_view, :ARROW));
         default_case = TRY (clearParser__parse_block_body(&rtoc_self_view, ["END"]));
@@ -762,27 +762,27 @@ PRIVATE FN clearParser__parse_match_arm(MUTABLE self: ClearParser) RETURNS !Pars
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :KEYWORD, "WHEN")) THEN
+    IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "WHEN"))) THEN
       MUTABLE condition = TRY (clearParser__parse_expression(&rtoc_self_view));
       TRY (clearParser__consume(&rtoc_self_view, :ARROW));
       RETURN ParsedMatchArm{ kind: :when, value: COPY condition, extra_values: List[], binding: NIL, destructure: NIL };
     END
-    IF clearParser__match?(rtoc_self_view, :CHAR, "{") THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :CHAR, "{")) THEN
       MUTABLE pattern = TRY (clearParser__parse_struct_pattern(&rtoc_self_view));
       TRY (clearParser__consume(&rtoc_self_view, :ARROW));
       RETURN ParsedMatchArm{ kind: :struct_pattern, value: Locatable{ StructPattern: COPY pattern }, extra_values: List[], binding: NIL, destructure: NIL };
     END
     MUTABLE first_pattern = TRY (clearParser__parse_expression(&rtoc_self_view));
     MUTABLE extra_patterns: []Locatable = List[];
-    WHILE (clearParser__match?(rtoc_self_view, :CHAR, ",") AND clearParser__multi_pattern_continues?(rtoc_self_view)) DO
+    WHILE (TRY (clearParser__match?(rtoc_self_view, :CHAR, ",")) AND TRY (clearParser__multi_pattern_continues?(rtoc_self_view))) DO
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, ","));
-      &extra_patterns.append(clearParser__parse_expression(&rtoc_self_view));
+      &extra_patterns.append(TRY (clearParser__parse_expression(&rtoc_self_view)));
     END
     MUTABLE binding: ?String = NIL;
     MUTABLE destructure: ?StructPattern = NIL;
-    IF castClearParserReturnValueToBool(clearParser__match_mut(&rtoc_self_view, :KEYWORD, "AS")) THEN
-      binding = TRY (token__text_mut(clearParser__consume(&rtoc_self_view, :VAR_ID)));
-    ELSE_IF clearParser__match?(rtoc_self_view, :CHAR, "{") THEN
+    IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "AS"))) THEN
+      binding = TRY (token__text_mut(TRY (clearParser__consume(&rtoc_self_view, :VAR_ID))));
+    ELSE_IF TRY (clearParser__match?(rtoc_self_view, :CHAR, "{")) THEN
       destructure = TRY (clearParser__parse_struct_pattern(&rtoc_self_view));
     END
     TRY (clearParser__consume(&rtoc_self_view, :ARROW));
@@ -804,22 +804,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE tok = TRY (clearParser__consume(&rtoc_self_view, :CHAR, "{"));
     MUTABLE fields: []PatternField = List[];
     MUTABLE partial: Bool = FALSE;
-    WHILE !((clearParser__match?(rtoc_self_view, :CHAR, "}") OR clearParser__match?(rtoc_self_view, :EOF))) DO
-      IF clearParser__match?(rtoc_self_view, :ELLIPSIS, "...") THEN
+    WHILE !((TRY (clearParser__match?(rtoc_self_view, :CHAR, "}")) OR TRY (clearParser__match?(rtoc_self_view, :EOF)))) DO
+      IF TRY (clearParser__match?(rtoc_self_view, :ELLIPSIS, "...")) THEN
         TRY (clearParser__consume(&rtoc_self_view, :ELLIPSIS, "..."));
         partial = TRUE;
         BREAK;
       END
       MUTABLE name_tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
       MUTABLE name = TRY (token__text_mut(name_tok));
-      IF clearParser__match?(rtoc_self_view, :CHAR, ":") THEN
+      IF TRY (clearParser__match?(rtoc_self_view, :CHAR, ":")) THEN
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, ":"));
         rtoc_cur_5 = clearParser__current(rtoc_self_view);
         IF ((rtoc_cur_5.type == :VAR_ID) AND (token__text_is?(rtoc_cur_5, "_"))) THEN
           TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
           &fields.append(PatternField{ name: COPY name, value: PatternFieldValue{ SymbolValue: :wildcard }, name_token: name_tok });
         ELSE
-          &fields.append(PatternField{ name: COPY name, value: castLocatableToPatternFieldValue(COPY clearParser__parse_expression(&rtoc_self_view)), name_token: name_tok });
+          &fields.append(PatternField{ name: COPY name, value: castLocatableToPatternFieldValue(COPY TRY (clearParser__parse_expression(&rtoc_self_view))), name_token: name_tok });
         END
       ELSE
         &fields.append(PatternField{ name: COPY name, value: PatternFieldValue{ SymbolValue: :bind }, name_token: name_tok });
@@ -851,10 +851,10 @@ PUB FN clearParser__parse_catch_filter(MUTABLE self: ClearParser) RETURNS !Catch
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF clearParser__match?(rtoc_self_view, :TYPE_ID) THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :TYPE_ID)) THEN
       MUTABLE tok = TRY (clearParser__consume(&rtoc_self_view, :TYPE_ID));
       RETURN CatchFilter{ form: :type, value: CatchFilterReturnValue{ StringValue: COPY TRY (token__text_mut(tok)) }, token: tok };
-    ELSE_IF clearParser__match?(rtoc_self_view, :STRING) THEN
+    ELSE_IF TRY (clearParser__match?(rtoc_self_view, :STRING)) THEN
       tok = clearParser__current(rtoc_self_view);
       MUTABLE str_expr = TRY (clearParser__parse_expression(&rtoc_self_view));
       MUTABLE filter_value = castLocatableToCatchFilterReturnValue(COPY str_expr);
@@ -871,12 +871,12 @@ PRIVATE FN clearParser__parse_raise_stmt(MUTABLE self: ClearParser) RETURNS !Rai
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE tok = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "RAISE"));
-    IF clearParser__match?(rtoc_self_view, :STRING) THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :STRING)) THEN
       MUTABLE msg = TRY (clearParser__parse_expression(&rtoc_self_view));
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, ";"));
       RETURN Raise{ token: COPY tok, kind: :System, error_name: NIL, message_expr: msg, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
     END
-    IF clearParser__match?(rtoc_self_view, :CHAR, ";") THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :CHAR, ";")) THEN
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, ";"));
       RETURN Raise{ token: COPY tok, kind: :System, error_name: NIL, message_expr: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
     END
@@ -891,11 +891,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       error_name = TRY (token__text_mut(first_tok));
     END
     MUTABLE message: ?Locatable = NIL;
-    IF clearParser__match?(rtoc_self_view, :CHAR, ",") THEN
+    IF TRY (clearParser__match?(rtoc_self_view, :CHAR, ",")) THEN
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, ","));
-      IF (first_is_kind AND clearParser__match?(rtoc_self_view, :TYPE_ID)) THEN
-        error_name = TRY (token__text_mut(clearParser__consume(&rtoc_self_view, :TYPE_ID)));
-        IF clearParser__match?(rtoc_self_view, :CHAR, ",") THEN
+      IF (first_is_kind AND TRY (clearParser__match?(rtoc_self_view, :TYPE_ID))) THEN
+        error_name = TRY (token__text_mut(TRY (clearParser__consume(&rtoc_self_view, :TYPE_ID))));
+        IF TRY (clearParser__match?(rtoc_self_view, :CHAR, ",")) THEN
           TRY (clearParser__consume(&rtoc_self_view, :CHAR, ","));
           message = TRY (clearParser__parse_expression(&rtoc_self_view));
         END

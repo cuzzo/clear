@@ -162,12 +162,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN pipelineLoweringBridge__pipeline_owned_cleanup_entry(self: PipelineLoweringBridge, value: Emittable, ast_node: ?Locatable) RETURNS ?CleanupEntry@multiowned
+PUB FN pipelineLoweringBridge__pipeline_owned_cleanup_entry(self: PipelineLoweringBridge, value: Emittable, ast_node: ?Locatable) RETURNS !?CleanupEntry@multiowned
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN mIRLowering__pipeline_owned_cleanup_entry(rtoc_self_view.lowering, value, ast_node);
+    RETURN TRY (mIRLowering__pipeline_owned_cleanup_entry(rtoc_self_view.lowering, value, ast_node));
 }
 END
 PUB FN pipelineLoweringBridge__pipeline_iteration_loop_marks(self: PipelineLoweringBridge) RETURNS ![]Emittable

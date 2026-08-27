@@ -891,7 +891,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE name = COPY (rtoc_self_view.fn_node.params[rtoc_idx]?.name);
       MUTABLE ti = COPY rtoc_self_view.fn_node.params[rtoc_idx]?.type;
-      IF !(ownershipDataflow__ownership_tracked_type?(rtoc_self_view, ti, TRUE)) THEN
+      IF !(TRY (ownershipDataflow__ownership_tracked_type?(rtoc_self_view, ti, TRUE))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -1005,7 +1005,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       is_heap = FALSE;
     END
-    IF !((TRUE AND ownershipDataflow__ownership_tracked_type?(rtoc_self_view, ti, is_heap))) THEN
+    IF !((TRUE AND TRY (ownershipDataflow__ownership_tracked_type?(rtoc_self_view, ti, is_heap)))) THEN
       RETURN NIL;
     END
     MUTABLE allocator = IF ti THEN
@@ -1197,7 +1197,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, place)) THEN
           RETURN;
         END
-        IF ownershipDataflow__copy_type?(rtoc_self_view, &identifier_mutable) THEN
+        IF TRY (ownershipDataflow__copy_type?(rtoc_self_view, &identifier_mutable)) THEN
           RETURN;
         END
         &step.consumed.insert(COPY place);
@@ -1273,7 +1273,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, place)) THEN
         RETURN;
     END
-    IF ownershipDataflow__copy_type?(rtoc_self_view, castLocatableToIdentifier(n)) THEN
+    IF TRY (ownershipDataflow__copy_type?(rtoc_self_view, castLocatableToIdentifier(n))) THEN
         RETURN;
     END
     &step.consumed.insert(COPY place);
@@ -1763,7 +1763,7 @@ PUB FN loopFrameAnalysis__process_loop_mut(MUTABLE loop_node: LoopNode, body: []
   END
   MUTABLE local_facts = TRY (localBindingAnalysis__direct_loop_body_facts(body));
   MUTABLE local_names = COPY local_facts.names;
-  MUTABLE has_iteration_frame_locals = (((((local_facts.iteration_frame_decls.length() > 0)) OR loopFrameAnalysis__loop_capture_frame_alloc?(castLoopNodeToLocatable(loop_node), schema_lookup))) OR TRY (loopFrameAnalysis__direct_loop_expression_frame_alloc?(body, fn_nodes, local_names)));
+  MUTABLE has_iteration_frame_locals = (((((local_facts.iteration_frame_decls.length() > 0)) OR TRY (loopFrameAnalysis__loop_capture_frame_alloc?(castLoopNodeToLocatable(loop_node), schema_lookup)))) OR TRY (loopFrameAnalysis__direct_loop_expression_frame_alloc?(body, fn_nodes, local_names)));
   MUTABLE has_extended_frame_locals = ((local_facts.frame_decls |> ANY {
   MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(_);
   ((((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_24 = UNWRAP (entry);
@@ -1797,7 +1797,7 @@ PUB FN loopFrameAnalysis__direct_loop_expression_frame_alloc?(body: []Locatable,
   END
   TRY (loopFrameAnalysis__each_loop_local_locatable(stmt, local_names, %(node: Locatable) USE(fn_nodes, MUTABLE found) -> {
     IF !(found) THEN
-        IF loopFrameAnalysis__expression_allocates_frame_value?(&node, fn_nodes) THEN
+        IF TRY (loopFrameAnalysis__expression_allocates_frame_value?(&node, fn_nodes)) THEN
           found = TRUE;
         END
     END
@@ -1819,7 +1819,7 @@ PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names
     IF (!(node.equal?(root)) AND loopFrameAnalysis__direct_loop_expression_boundary?(node)) THEN
       CONTINUE;
     END
-    IF loopFrameAnalysis__outer_mutating_receiver_call?(node, local_names) THEN
+    IF TRY (loopFrameAnalysis__outer_mutating_receiver_call?(node, local_names)) THEN
       CONTINUE;
     END
     MUTABLE rtoc_reverse_items_25: []Locatable = (TRY (loopFrameAnalysis__loop_local_children(node)));
@@ -1982,7 +1982,7 @@ PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {Str
       RETURN;
   END
   MUTABLE ctx: PipelineShardContext = CAST(dynamic_node.shard_context() AS PipelineShardContext);
-  MUTABLE key_allocates_frame = loopFrameAnalysis__key_allocates_frame?(ctx.key_expr, fn_nodes);
+  MUTABLE key_allocates_frame = TRY (loopFrameAnalysis__key_allocates_frame?(ctx.key_expr, fn_nodes));
   MUTABLE each_body = IF ((aST__node_op(node) EXISTS) AND respondsTo?(dynamic_node.op(), "body")) THEN
       dynamic_node.op().body()
     ELSE

@@ -159,12 +159,12 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !(hoist__allocating?(&rtoc_each_items_6[rtoc_idx], schema_lookup)) THEN
+      IF !(TRY (hoist__allocating?(&rtoc_each_items_6[rtoc_idx], schema_lookup))) THEN
           RETURN;
       END
       MUTABLE expected_branch_value: ?Type = NIL;
         IF hoist__empty_list_literal?(rtoc_each_items_6[rtoc_idx]) THEN
-          expected_branch_value = CAST(hoist__callee_param_type(castCallLikeToLocatable(call), rtoc_idx) AS ?Type);
+          expected_branch_value = CAST(TRY (hoist__callee_param_type(castCallLikeToLocatable(call), rtoc_idx)) AS ?Type);
         ELSE
           expected_branch_value = NIL;
         END
@@ -258,7 +258,7 @@ PRIVATE FN hoist__hoist_escape_value_mut(MUTABLE value: Locatable, MUTABLE hoist
   IF hoist__noreturn_value?(value) THEN
     RETURN COPY castLocatableToLocatable(value);
   END
-  IF hoist__allocating?(&value, schema_lookup) THEN
+  IF TRY (hoist__allocating?(&value, schema_lookup)) THEN
     RETURN Locatable{ Identifier: COPY TRY (hoist__make_temp_mut(value, &hoists, hoistCounter__next_name(&counter), TRUE, expected_type)) };
   END
   IF ((value IS_A StructLit OR value IS_A UnionVariantLit) OR value IS_A ListLit) THEN

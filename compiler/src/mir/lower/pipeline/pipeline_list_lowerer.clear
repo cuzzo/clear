@@ -51,7 +51,7 @@ PUB FN pipelineListLowerer__lower(self: PipelineListLowerer, site: PipelineSite,
   ELSE_IF op IS_A JoinOp AS join_op THEN
     RETURN TRY (pipelineListLowerer__lower_join(self, site, join_op));
   ELSE_IF op IS_A TapOp AS tap_op THEN
-    RETURN pipelineListLowerer__lower_tap(self, site, tap_op);
+    RETURN TRY (pipelineListLowerer__lower_tap(self, site, tap_op));
   ELSE
     RETURN NIL;
   END
@@ -189,7 +189,7 @@ PRIVATE FN pipelineListLowerer__lower_unnest(self: PipelineListLowerer, site: Pi
   MUTABLE elem_ti = TRY (type__new(TypeConstructionInput{ StringValue: COPY inner_elem_type }));
   MUTABLE inner_list_ti = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (unnest_node.expression))) }));
   MUTABLE expr_mir = pipelineListLowerer__visit_pipeline_expr_mir(self, list_node, UNWRAP (unnest_node.expression));
-  MUTABLE inner_owned = (ownershipEffect__of(expr_mir).produces_owned OR expr_mir IS_A MakeList);
+  MUTABLE inner_owned = (TRY (ownershipEffect__of(expr_mir)).produces_owned OR expr_mir IS_A MakeList);
   MUTABLE inner_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } );
   IF inner_owned THEN
     MUTABLE entry = cleanupEntry__build(:uniform, :heap, FALSE, NIL, TRY (type__zig_type(inner_list_ti)));
@@ -306,7 +306,7 @@ PRIVATE FN pipelineListLowerer__join_predicate_mir(self: PipelineListLowerer, li
   END
   MUTABLE left_key_mir = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "__jl");
   MUTABLE right_key_mir = pipelineListLowerer__visit_expr_call(self, list_node, key_expr, "__jr");
-  RETURN Emittable{ RuntimeCall: COPY RuntimeCall{ spec: COPY runtimeCalls__eql_spec(), args: [left_key_mir, right_key_mir], lowered_node_id: NIL, ownership_consumption: NIL } };
+  RETURN Emittable{ RuntimeCall: COPY RuntimeCall{ spec: COPY TRY (runtimeCalls__eql_spec()), args: [left_key_mir, right_key_mir], lowered_node_id: NIL, ownership_consumption: NIL } };
 END
 PRIVATE FN pipelineListLowerer__ownership_sink_marks(self: PipelineListLowerer, left_owns: Bool, right_owns: Bool) RETURNS ![]Emittable ->
   MUTABLE marks: []Emittable = ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } );

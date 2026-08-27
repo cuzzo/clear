@@ -53,7 +53,7 @@ PUB FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@
       CONTINUE;
     END
     known[key] = TRUE;
-    MUTABLE seed, dependencies = linearResourceFacts__resource_seed_and_dependencies(type_info, schema_lookup);
+    MUTABLE seed, dependencies = TRY (linearResourceFacts__resource_seed_and_dependencies(type_info, schema_lookup));
     IF seed THEN
       seeds[key] = TRUE;
     END
@@ -245,7 +245,7 @@ FN lifecyclePlanner__plan(type_info: Type, schema_lookup: FN(String@symbol) -> ?
   IF ((type__any_sync?(type_info) OR type__frozen?(type_info)) OR type__link?(type_info)) THEN
     RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :semantic, copy_strategy: :deep_clone, resource_close_plan: NIL };
   END
-  IF lifecyclePlanner__generic_parameter?(type_info, schema_lookup) THEN
+  IF TRY (lifecyclePlanner__generic_parameter?(type_info, schema_lookup)) THEN
     RETURN LifecyclePlan{ type_key: COPY type_key, drop_strategy: :generic, copy_strategy: :generic, resource_close_plan: NIL };
   END
   IF (TRY (type__string?(type_info)) OR TRY (type__recursive_cleanup_shape?(type_info, schema_lookup))) THEN
@@ -261,7 +261,7 @@ PUB FN lifecyclePlanner__monomorphic_carrier_plan(type_info: Type) RETURNS Lifec
 END
 FN lifecyclePlanner__plan_binding(type_info: Type, node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, linear_resource_facts: ?LinearResourceFacts = NIL) RETURNS !LifecyclePlan ->
   MUTABLE base = TRY (lifecyclePlanner__plan(type_info, schema_lookup, linear_resource_facts));
-  IF !(lifecyclePlanner__mutable_owned_string_binding?(type_info, node)) THEN
+  IF !(TRY (lifecyclePlanner__mutable_owned_string_binding?(type_info, node))) THEN
     RETURN base;
   END
   RETURN LifecyclePlan{ type_key: "${type__lifecycle_type_key(type_info)}|binding=mutable-owned", drop_strategy: :semantic, copy_strategy: :deep_clone, resource_close_plan: NIL };
@@ -512,7 +512,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       panic("missing annotation binding lifecycle plan for place {}");
     ELSE
-      # Ruby falls back to `lifecycleRegistry__fetch(type_info)`; the translation turned that into
+      # Ruby falls back to `TRY (lifecycleRegistry__fetch(type_info))`; the translation turned that into
       # an unwrap of a one-element list literal.
       RETURN TRY (lifecycleRegistry__fetch(rtoc_self_view, type_info));
     END

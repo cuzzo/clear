@@ -104,9 +104,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A TypeAlias AS rtoc_type_alias THEN
       RETURN mIREmitter__emit_type_alias(rtoc_self_view, rtoc_type_alias);
     ELSE_IF node IS_A CExternFnDecl AS rtoc_c_extern_fn_decl THEN
-      RETURN mIREmitter__emit_c_extern_fn_decl(rtoc_self_view, rtoc_c_extern_fn_decl);
+      RETURN TRY (mIREmitter__emit_c_extern_fn_decl(rtoc_self_view, rtoc_c_extern_fn_decl));
     ELSE_IF node IS_A CExternStructDef AS rtoc_c_extern_struct_def THEN
-      RETURN mIREmitter__emit_c_extern_struct_def(rtoc_self_view, rtoc_c_extern_struct_def);
+      RETURN TRY (mIREmitter__emit_c_extern_struct_def(rtoc_self_view, rtoc_c_extern_struct_def));
     ELSE_IF node IS_A ModuleNamespace AS rtoc_module_namespace THEN
       RETURN TRY (mIREmitter__emit_module_namespace(&rtoc_self_view, rtoc_module_namespace));
     ELSE_IF node IS_A TestDef AS rtoc_test_def THEN
@@ -306,7 +306,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A Ident AS rtoc_ident THEN
       RETURN COPY (rtoc_self_view.ident_overrides[CAST(rtoc_ident.name AS String)] OR_ELSE CAST(rtoc_ident.name AS String));
     ELSE_IF node IS_A MIRDestructureTarget AS rtoc_m_i_r_destructure_target THEN
-      RETURN mIREmitter__emit_destructure_target(rtoc_self_view, rtoc_m_i_r_destructure_target);
+      RETURN TRY (mIREmitter__emit_destructure_target(rtoc_self_view, rtoc_m_i_r_destructure_target));
     ELSE_IF node IS_A TupleLiteral AS rtoc_tuple_literal THEN
       RETURN TRY (mIREmitter__emit_tuple_literal(&rtoc_self_view, rtoc_tuple_literal));
     ELSE_IF node IS_A CapabilityUnwrap AS rtoc_capability_unwrap THEN
@@ -1587,7 +1587,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       });
     rtoc_lambda_result_21
       });
-      IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR_ELSE List[]))) THEN
+      IF !(TRY (mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR_ELSE List[])))) THEN
         fail_zig = (fail_zig $+ "\n__flow.* = .{ .kind = .skip_no_commit };\nreturn;");
       END
       guard_block = "if (!(${mIREmitter__with_ident_overrides(&rtoc_self_view, overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
@@ -1599,12 +1599,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       })})) {\n    ${mIREmitter__indent_block(rtoc_self_view, fail_zig, 12)}\n}\n";
     END
     MUTABLE fallthrough_arm: String = "";
-    IF mIREmitter__flow_always_exits?(rtoc_self_view, node) THEN
+    IF TRY (mIREmitter__flow_always_exits?(rtoc_self_view, node)) THEN
       fallthrough_arm = "unreachable";
     ELSE
       fallthrough_arm = "{}";
     END
-    MUTABLE result = regexReplaceAll(("const __PolyFlow = struct {\n    kind: enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit },\n    ret: ${TRY (type__zig_type(CAST(node.return_type AS Type)))} = undefined,\n};\nvar __poly_flow = __PolyFlow{ .kind = .cont_commit };\ntry CheatLib.polymorphicMutateFlow(${cell_zig}, ${node.rt}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}, __flow: *__PolyFlow${capture_param}) !void {\n        _ = &${node.alias_name};\n        ${capture_suppress}\n        ${guard_block}\n        ${body_zig}\n        ${IF mIREmitter__flow_body_terminates?(rtoc_self_view, node.body) THEN
+    MUTABLE result = regexReplaceAll(("const __PolyFlow = struct {\n    kind: enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit },\n    ret: ${TRY (type__zig_type(CAST(node.return_type AS Type)))} = undefined,\n};\nvar __poly_flow = __PolyFlow{ .kind = .cont_commit };\ntry CheatLib.polymorphicMutateFlow(${cell_zig}, ${node.rt}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}, __flow: *__PolyFlow${capture_param}) !void {\n        _ = &${node.alias_name};\n        ${capture_suppress}\n        ${guard_block}\n        ${body_zig}\n        ${IF TRY (mIREmitter__flow_body_terminates?(rtoc_self_view, node.body)) THEN
       ""
     ELSE
       "__flow.* = .{ .kind = .cont_commit };"
@@ -1772,7 +1772,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN "__flow.* = .{ .kind = .${return_kind}, .ret = ${ret} };\nreturn;";
     ELSE_IF stmt IS_A ScopeBlock AS scope_block THEN
       MUTABLE scope_block_mutable = COPY scope_block;
-      MUTABLE inner = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, scopeBlock__body(scope_block_mutable), return_kind));
+      MUTABLE inner = TRY (mIREmitter__emit_body_flow(&rtoc_self_view, TRY (scopeBlock__body(scope_block_mutable)), return_kind));
       RETURN "{\n${mIREmitter__indent_block(rtoc_self_view, inner, 4)}\n}";
     ELSE_IF stmt IS_A IfStmt AS if_stmt THEN
       MUTABLE if_stmt_mutable = COPY if_stmt;
@@ -1804,7 +1804,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "__flow.* = .{ ${fields.join(", ")} };\nreturn;";
 }
 END
-PRIVATE FN mIREmitter__flow_body_terminates?(self: MIREmitter, stmts: []Emittable) RETURNS Bool
+PRIVATE FN mIREmitter__flow_body_terminates?(self: MIREmitter, stmts: []Emittable) RETURNS !Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1818,7 +1818,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF last IS_A PolymorphicFlowSignal AS polymorphic_flow_signal THEN
       RETURN TRUE;
     ELSE_IF last IS_A ScopeBlock AS scope_block THEN
-      RETURN mIREmitter__flow_body_terminates?(rtoc_self_view, scopeBlock__body(scope_block));
+      RETURN mIREmitter__flow_body_terminates?(rtoc_self_view, TRY (scopeBlock__body(scope_block)));
     ELSE_IF last IS_A IfStmt AS if_stmt THEN
       IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, if_stmt.then_body)) THEN
         RETURN FALSE;
@@ -1833,15 +1833,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__flow_always_exits?(self: MIREmitter, node: PolymorphicMutateFlow) RETURNS Bool
+PRIVATE FN mIREmitter__flow_always_exits?(self: MIREmitter, node: PolymorphicMutateFlow) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE body_exits = mIREmitter__flow_body_terminates?(rtoc_self_view, node.body);
+    MUTABLE body_exits = TRY (mIREmitter__flow_body_terminates?(rtoc_self_view, node.body));
     IF !(node.guard_cond) THEN
       RETURN body_exits;
     END
-    RETURN (body_exits AND mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR_ELSE List[])));
+    RETURN (body_exits AND TRY (mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR_ELSE List[]))));
 }
 END
 PRIVATE FN mIREmitter__indent_block(self: MIREmitter, code: String, spaces: Int64) RETURNS String
@@ -2379,7 +2379,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       vis = "";
     END
-    # `f.zig_type` is the FieldDef's own field; `type__zig_type(_)` asked the
+    # `f.zig_type` is the FieldDef's own field; `TRY (type__zig_type(_))` asked the
     # Type module to render the FieldDef itself.
     MUTABLE field_parts: []String = List[];
     FOR field IN node.fields DO
@@ -2470,7 +2470,7 @@ PRIVATE FN mIREmitter__emit_c_extern_fn_decl(self: MIREmitter, node: CExternFnDe
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    # `param.zig_type` is the param's own field; `type__zig_type(_)` asked the
+    # `param.zig_type` is the param's own field; `TRY (type__zig_type(_))` asked the
     # Type module to render the param itself.
     MUTABLE extern_param_parts: []String = List[];
     FOR extern_param IN node.params DO
@@ -4029,7 +4029,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       resolved_value = "var __value = try __p.next();";
     END
-    RETURN regexReplaceAll("${node.label}: {\n    var ${node.results_var} = std.ArrayListUnmanaged(${nextPromiseList__elem_zig(node)}).empty;\n    errdefer CheatLib.cleanup(@TypeOf(${node.results_var}), ${alloc}, &${node.results_var});\n    for (${list_expr}.items) |__p| {\n        ${resolved_value}\n        defer if (comptime CheatLib.needsCleanup(@TypeOf(__value)))\n            CheatLib.cleanup(@TypeOf(__value), __p.alloc, &__value);\n        const __placed = if (comptime CheatLib.needsCleanup(@TypeOf(__value)))\n            try CheatLib.dupeValue(@TypeOf(__value), __value, ${alloc})\n        else\n            __value;\n        errdefer CheatLib.cleanup(@TypeOf(__placed), ${alloc}, &__placed);\n        try ${node.results_var}.append(${alloc}, __placed);\n    }\n    break :${node.label} ${node.results_var};\n}\n", "\\s+\\z", "");
+    RETURN regexReplaceAll("${node.label}: {\n    var ${node.results_var} = std.ArrayListUnmanaged(${TRY (nextPromiseList__elem_zig(node))}).empty;\n    errdefer CheatLib.cleanup(@TypeOf(${node.results_var}), ${alloc}, &${node.results_var});\n    for (${list_expr}.items) |__p| {\n        ${resolved_value}\n        defer if (comptime CheatLib.needsCleanup(@TypeOf(__value)))\n            CheatLib.cleanup(@TypeOf(__value), __p.alloc, &__value);\n        const __placed = if (comptime CheatLib.needsCleanup(@TypeOf(__value)))\n            try CheatLib.dupeValue(@TypeOf(__value), __value, ${alloc})\n        else\n            __value;\n        errdefer CheatLib.cleanup(@TypeOf(__placed), ${alloc}, &__placed);\n        try ${node.results_var}.append(${alloc}, __placed);\n    }\n    break :${node.label} ${node.results_var};\n}\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_struct_init(MUTABLE self: MIREmitter, node: StructInit) RETURNS !String

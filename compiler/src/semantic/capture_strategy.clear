@@ -96,19 +96,19 @@ PUB FN captureStrategy__classify(name: String, type: Type, site_info: CaptureSit
   IF is_resource THEN
     RETURN Strategy{ MoveInto: COPY MoveInto{ zig_type: COPY zig_t, ctx_init_name: COPY name, source_name: COPY name } };
   END
-  IF captureStrategy__owned_affine_promise_handle?(type) THEN
+  IF TRY (captureStrategy__owned_affine_promise_handle?(type)) THEN
     RETURN Strategy{ MoveInto: COPY MoveInto{ zig_type: COPY zig_t, ctx_init_name: COPY name, source_name: COPY name } };
   END
-  IF captureStrategy__safe_shared_across_fibers?(type) THEN
+  IF TRY (captureStrategy__safe_shared_across_fibers?(type)) THEN
     RETURN Strategy{ RcClone: COPY RcClone{ zig_type: COPY zig_t, ctx_init_name: COPY name } };
   END
   IF captureStrategy__pinned_sync_collection?(type) THEN
     RETURN Strategy{ ByValue: COPY ByValue{ zig_type: COPY zig_t, ctx_init_name: COPY name } };
   END
-  IF captureStrategy__value_like?(type, schema_lookup) THEN
+  IF TRY (captureStrategy__value_like?(type, schema_lookup)) THEN
     RETURN Strategy{ ByValue: COPY ByValue{ zig_type: COPY zig_t, ctx_init_name: COPY name } };
   END
-  IF captureStrategy__deep_copy_capture?(type, schema_lookup) THEN
+  IF TRY (captureStrategy__deep_copy_capture?(type, schema_lookup)) THEN
     MUTABLE alloc_sym = captureStrategy__fiber_copy_alloc_for(type);
     RETURN Strategy{ FreshHeapCopy: COPY FreshHeapCopy{ zig_type: COPY zig_t, ctx_init_name: COPY name, alloc_sym: COPY alloc_sym } };
   END

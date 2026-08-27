@@ -116,7 +116,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ScopeTypeEntry{ schema: COPY schema };
 }
 END
-FN scopeTypes__get_index(self: ScopeTypes, name: String@symbol) RETURNS ?ScopeTypeEntry
+FN scopeTypes__get_index(self: ScopeTypes, name: String@symbol) RETURNS !?ScopeTypeEntry
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -124,7 +124,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.entries[name];
 }
 END
-# scopeTypes__keys() hands back map-owned Strings, not interned handles; see KeyList.
+# TRY (scopeTypes__keys()) hands back map-owned Strings, not interned handles; see KeyList.
 FN scopeTypes__keys(self: ScopeTypes) RETURNS ![]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
@@ -209,22 +209,22 @@ END
 FN scope__declare_type(MUTABLE self: Scope, name: String@symbol, schema: ScopeScopeTypeSchema) RETURNS ScopeTypeEntry ->
   scope__install_type(&self, name, schema);
 END
-PUB FN scope__resolve_type_definition(self: Scope, name: String@symbol) RETURNS ?ScopeScopeTypeSchema
+PUB FN scope__resolve_type_definition(self: Scope, name: String@symbol) RETURNS !?ScopeScopeTypeSchema
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF scope__resolve_type_entry(rtoc_self_view, name) != NIL THEN
-    RETURN COPY ((scope__resolve_type_entry(rtoc_self_view, name))?).schema;
+    IF TRY (scope__resolve_type_entry(rtoc_self_view, name)) != NIL THEN
+    RETURN COPY ((TRY (scope__resolve_type_entry(rtoc_self_view, name)))?).schema;
     ELSE
     RETURN NIL;
     END
 }
 END
-PUB FN scope__resolve_type_entry(self: Scope, name: String@symbol) RETURNS ?ScopeTypeEntry
+PUB FN scope__resolve_type_entry(self: Scope, name: String@symbol) RETURNS !?ScopeTypeEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE local: ?ScopeTypeEntry = COPY scopeTypes__get_index(rtoc_self_view.type_store, name);
+    MUTABLE local: ?ScopeTypeEntry = COPY TRY (scopeTypes__get_index(rtoc_self_view.type_store, name));
     IF local EXISTS AS local_value THEN
       RETURN COPY local_value;
     END

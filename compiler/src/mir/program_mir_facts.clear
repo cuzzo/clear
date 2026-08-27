@@ -59,7 +59,7 @@ PRIVATE FN programMIRFinalizer__local_runtime_requirements(fn_nodes: {String}Fun
 END
 PRIVATE FN programMIRFinalizer__function_needs_runtime?(function: FunctionDef, cleanup: ?FrozenCleanupFacts, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF programMIRFinalizer__generic_direct_parameter_return?(function) THEN
-    RETURN (programMIRFinalizer__params_need_runtime_cleanup?(function.params) OR programMIRFinalizer__generic_return_needs_runtime?(function, fn_nodes, schema_lookup));
+    RETURN (programMIRFinalizer__params_need_runtime_cleanup?(function.params) OR TRY (programMIRFinalizer__generic_return_needs_runtime?(function, fn_nodes, schema_lookup)));
   END
   IF programMIRFinalizer__generic_projection_return?(function) THEN
     RETURN FALSE;
@@ -80,7 +80,7 @@ PRIVATE FN programMIRFinalizer__function_needs_runtime?(function: FunctionDef, c
   END
   rubyToClearVoid()
   });
-  RETURN (found OR programMIRFinalizer__return_path_needs_allocator?(function, schema_lookup));
+  RETURN (found OR TRY (programMIRFinalizer__return_path_needs_allocator?(function, schema_lookup)));
 END
 PRIVATE FN programMIRFinalizer__generic_return_needs_runtime?(function: FunctionDef, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE returned: ?String = programMIRFinalizer__generic_returned_parameter_name(function);
@@ -181,11 +181,11 @@ PRIVATE FN programMIRFinalizer__ast_node_needs_runtime?(node: Locatable, fn_node
 END
 PRIVATE FN programMIRFinalizer__ast_node_lowers_through_runtime?(node: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN PARTIAL MATCH node START
-    Locatable.FuncCall AS func_call -> programMIRFinalizer__ast_call_needs_runtime?(Node{ FuncCall: COPY func_call }, fn_nodes),
-    AST.MethodCall -> programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode(node), fn_nodes),
+    Locatable.FuncCall AS func_call -> TRY (programMIRFinalizer__ast_call_needs_runtime?(Node{ FuncCall: COPY func_call }, fn_nodes)),
+    AST.MethodCall -> TRY (programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode(node), fn_nodes)),
     AST.BgBlock -> TRUE,
     Locatable.BgStreamBlock AS bg_stream_block -> TRUE,
-    Locatable.Assignment AS assignment -> programMIRFinalizer__indexed_assignment_lowers_through_runtime?(assignment),
+    Locatable.Assignment AS assignment -> TRY (programMIRFinalizer__indexed_assignment_lowers_through_runtime?(assignment)),
     Locatable.CopyNode AS copy_node -> TRY (programMIRFinalizer__copy_node_lowers_through_runtime?(Node{ CopyNode: COPY copy_node }, schema_lookup)),
     Locatable.KeepNode AS keep_node -> TRY (programMIRFinalizer__copy_node_lowers_through_runtime?(Node{ KeepNode: COPY keep_node }, schema_lookup)),
     Locatable.BinaryOp AS binary_op -> (IF binaryOp__smooth?(binary_op) THEN
@@ -259,7 +259,7 @@ PRIVATE FN programMIRFinalizer__with_block_lowers_through_runtime?(node: WithBlo
   END
   RETURN (([ErrorActionKind.Raise, ErrorActionKind.Exit]).contains?(clause.action) OR type__any?(clause.bubble_types));
 END
-PRIVATE FN programMIRFinalizer__return_path_needs_allocator?(function: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
+PRIVATE FN programMIRFinalizer__return_path_needs_allocator?(function: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF !(function.heap_carry_return) THEN
     RETURN FALSE;
   END
@@ -268,7 +268,7 @@ PRIVATE FN programMIRFinalizer__return_path_needs_allocator?(function: FunctionD
   IF !((IF node IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END)) THEN
       RETURN;
   END
-  found = (found OR programMIRFinalizer__return_expr_needs_allocator?(function, node.value(), schema_lookup));
+  found = (found OR TRY (programMIRFinalizer__return_expr_needs_allocator?(function, node.value(), schema_lookup)));
   rubyToClearVoid()
   });
   RETURN found;

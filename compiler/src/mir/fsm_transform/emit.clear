@@ -484,13 +484,13 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     END
     MUTABLE lowered_mir = mIRLowering__with_fsm_segment_lowering_context(lowering_api, pointer_captures, inherited_capture_names, inherited_capture_names, owned_result_guards, %() USE(ast_stmts, bg_rt, ctx, eff_capture_map, id, lowering_api, want_result) -> mIRLowering__with_fiber_capture_map(lowering_api, eff_capture_map, {:rt_override: bg_rt}, %() USE(ast_stmts, ctx, id, lowering_api, want_result) -> {
     IF want_result THEN
-      RETURN mIRLowering__lower_finalized_fsm_step_mir(lowering_api, ast_stmts, FALSE, id, ctx.async_result_shape);
+      RETURN TRY (mIRLowering__lower_finalized_fsm_step_mir(lowering_api, ast_stmts, FALSE, id, ctx.async_result_shape));
     ELSE
-      RETURN mIRLowering__lower_finalized_fsm_step_mir(lowering_api, ast_stmts, TRUE);
+      RETURN TRY (mIRLowering__lower_finalized_fsm_step_mir(lowering_api, ast_stmts, TRUE));
     END
     NIL
   }));
-    MUTABLE facts: []FsmResultTransferFact = CAST(mIRLowering__last_fsm_result_transfer_facts(lowering_api) AS []FsmResultTransferFact);
+    MUTABLE facts: []FsmResultTransferFact = CAST(TRY (mIRLowering__last_fsm_result_transfer_facts(lowering_api)) AS []FsmResultTransferFact);
     seg_result_facts[UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).indexOf()] = facts;
     IF (lowered_mir == NIL) THEN
       RETURN NIL;
@@ -534,7 +534,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE tail = UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail;
   MUTABLE descriptor_branch_value: ?SuspendDescriptor = NIL;
     IF (tail IS_A IoSuspend OR tail IS_A NextSuspend) THEN
-      descriptor_branch_value = emit__build_segment_descriptor(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]), ctx, lowering, capture_map, sp_indices[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()]);
+      descriptor_branch_value = TRY (emit__build_segment_descriptor(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]), ctx, lowering, capture_map, sp_indices[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()]));
     ELSE
       descriptor_branch_value = NIL;
     END
@@ -895,7 +895,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   rtoc_map_results_37 } );
   MUTABLE pointer_captures = COPY ctx.pointer_captures;
   MUTABLE err =   IF with_node.lock_error_clause THEN
-    mIRLowering__emit_fsm_lock_error_arm_split(lowering_api, with_node.lock_error_clause, id, with_node, capture_map, pointer_captures, bg_rt)
+    TRY (mIRLowering__emit_fsm_lock_error_arm_split(lowering_api, with_node.lock_error_clause, id, with_node, capture_map, pointer_captures, bg_rt))
   ELSE
     mIRLowering__default_fsm_lock_error_arm_split(lowering_api, id)
   END;

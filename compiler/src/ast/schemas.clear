@@ -188,7 +188,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE i: Int64 = 0;
     WHILE (i < keys.length()) DO
       MUTABLE current_key: String = COPY UNWRAP (keys[i]);
-      out[current_key] = CAST(resourceSchema__normalize_field(rtoc_self_view, UNWRAP (fields[current_key])) AS StructField);
+      out[current_key] = CAST(TRY (resourceSchema__normalize_field(rtoc_self_view, UNWRAP (fields[current_key]))) AS StructField);
       i = (i + 1);
     END
     RETURN out;
@@ -533,7 +533,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE i: Int64 = 0;
     WHILE (i < keys.length()) DO
       MUTABLE current_key: String = COPY UNWRAP (keys[i]);
-      out[current_key] = CAST(structSchema__normalize_field(rtoc_self_view, UNWRAP (fields[current_key])) AS StructField);
+      out[current_key] = CAST(TRY (structSchema__normalize_field(rtoc_self_view, UNWRAP (fields[current_key]))) AS StructField);
       i = (i + 1);
     END
     RETURN out;

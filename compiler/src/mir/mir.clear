@@ -812,7 +812,7 @@ PUB STRUCT ModuleNamespace {
 }
 
 FN moduleNamespace__child_exprs(self: ModuleNamespace) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN moduleNamespace__compact_child_exprs(self, self.items);
+  RETURN TRY (moduleNamespace__compact_child_exprs(self, self.items));
 END
 FN moduleNamespace__mir?(self: ModuleNamespace) RETURNS Bool ->
   RETURN TRUE;
@@ -974,7 +974,7 @@ FN let__initialize(MUTABLE self: Let, name: String, init: Emittable, mutable_val
   self.const_visibility = NIL;
 END
 FN let__child_exprs(self: Let) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN let__compact_child_exprs(self, [CAST(self.init AS Any)]);
+  RETURN TRY (let__compact_child_exprs(self, [CAST(self.init AS Any)]));
 END
 FN let__explicit_ownership_contract(self: Let) RETURNS !?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF TRUE THEN
@@ -1044,7 +1044,7 @@ PUB STRUCT Set {
 }
 
 FN set__child_exprs(self: Set) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN set__compact_child_exprs(self, [CAST(self.target AS Any), CAST(self.value AS Any)]);
+  RETURN TRY (set__compact_child_exprs(self, [CAST(self.target AS Any), CAST(self.value AS Any)]));
 END
 FN set__mir?(self: Set) RETURNS Bool ->
   RETURN TRUE;
@@ -1190,7 +1190,7 @@ PUB STRUCT DestructureSet {
 }
 
 FN destructureSet__child_exprs(self: DestructureSet) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN destructureSet__compact_child_exprs(self, [CAST(self.value AS Any)]);
+  RETURN TRY (destructureSet__compact_child_exprs(self, [CAST(self.value AS Any)]));
 END
 FN destructureSet__mir?(self: DestructureSet) RETURNS Bool ->
   RETURN TRUE;
@@ -1257,7 +1257,7 @@ PUB STRUCT ReassignWithCleanup {
 }
 
 FN reassignWithCleanup__child_exprs(self: ReassignWithCleanup) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN reassignWithCleanup__compact_child_exprs(self, [CAST(self.value AS Any)]);
+  RETURN TRY (reassignWithCleanup__compact_child_exprs(self, [CAST(self.value AS Any)]));
 END
 FN reassignWithCleanup__mir?(self: ReassignWithCleanup) RETURNS Bool ->
   RETURN TRUE;
@@ -1322,7 +1322,7 @@ PUB STRUCT ResourceClose {
 }
 
 FN resourceClose__child_exprs(self: ResourceClose) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN resourceClose__compact_child_exprs(self, [CAST(self.target AS Any)]);
+  RETURN TRY (resourceClose__compact_child_exprs(self, [CAST(self.target AS Any)]));
 END
 FN resourceClose__mir?(self: ResourceClose) RETURNS Bool ->
   RETURN TRUE;
@@ -1389,7 +1389,7 @@ PUB STRUCT IfStmt {
 }
 
 FN ifStmt__child_exprs(self: IfStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN ifStmt__compact_child_exprs(self, [CAST(self.cond AS Any)]);
+  RETURN TRY (ifStmt__compact_child_exprs(self, [CAST(self.cond AS Any)]));
 END
 FN ifStmt__body_slots(MUTABLE self: IfStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [ifStmt__body_slot(self, :then_body, self.then_body)];
@@ -1471,7 +1471,7 @@ FN ifBindStmt__child_exprs(self: IfBindStmt) RETURNS ![]Emittable EFFECTS REENTR
   FOR binding IN self.bindings DO
     &exprs.append(COPY binding.expr);
   END
-  RETURN ifBindStmt__compact_child_exprs(self, exprs);
+  RETURN TRY (ifBindStmt__compact_child_exprs(self, exprs));
 END
 PUB FN ifBindStmt__body_slots(MUTABLE self: IfBindStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [ifBindStmt__body_slot(self, :then_body, self.then_body)];
@@ -1543,7 +1543,7 @@ PUB STRUCT WhileStmt {
 }
 
 FN whileStmt__child_exprs(self: WhileStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN whileStmt__compact_child_exprs(self, [CAST(self.cond AS Any), CAST(self.update AS Any)]);
+  RETURN TRY (whileStmt__compact_child_exprs(self, [CAST(self.cond AS Any), CAST(self.update AS Any)]));
 END
 PUB FN whileStmt__body_slots(MUTABLE self: WhileStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([whileStmt__body_slot(self, :body, self.body)] AS []MIRBodySlot);
@@ -1614,7 +1614,7 @@ PUB STRUCT ForStmt {
 }
 
 FN forStmt__child_exprs(self: ForStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN forStmt__compact_child_exprs(self, [CAST(self.iter AS Any)]);
+  RETURN TRY (forStmt__compact_child_exprs(self, [CAST(self.iter AS Any)]));
 END
 FN forStmt__body_slots(MUTABLE self: ForStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([forStmt__body_slot(self, :body, self.body)] AS []MIRBodySlot);
@@ -1759,7 +1759,7 @@ FN switchStmt__child_exprs(self: SwitchStmt) RETURNS ![]Emittable EFFECTS REENTR
     END
   END
   &pattern_exprs.append(COPY self.subject);
-  RETURN switchStmt__compact_child_exprs(self, pattern_exprs);
+  RETURN TRY (switchStmt__compact_child_exprs(self, pattern_exprs));
 END
 FN switchStmt__body_slots(MUTABLE self: SwitchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_25: []MIRBodySlot = List[]; rtoc_empty_list_25 } );
@@ -1833,7 +1833,7 @@ PUB STRUCT UnionMatchStmt {
 }
 
 FN unionMatchStmt__child_exprs(self: UnionMatchStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN unionMatchStmt__compact_child_exprs(self, [CAST(self.subject AS Any)]);
+  RETURN TRY (unionMatchStmt__compact_child_exprs(self, [CAST(self.subject AS Any)]));
 END
 FN unionMatchStmt__body_slots(MUTABLE self: UnionMatchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_27: []MIRBodySlot = List[]; rtoc_empty_list_27 } );
@@ -1913,7 +1913,7 @@ FN ifChain__child_exprs(self: IfChain) RETURNS ![]Emittable EFFECTS REENTRANT ->
   FOR branch IN self.branches DO
     &conds.append(COPY branch.cond);
   END
-  RETURN ifChain__compact_child_exprs(self, conds);
+  RETURN TRY (ifChain__compact_child_exprs(self, conds));
 END
 FN ifChain__body_slots(MUTABLE self: IfChain) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_30: []MIRBodySlot = List[]; rtoc_empty_list_30 } );
@@ -1985,7 +1985,7 @@ PUB STRUCT ReturnStmt {
 }
 
 FN returnStmt__child_exprs(self: ReturnStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN returnStmt__compact_child_exprs(self, [CAST(self.value AS Any)]);
+  RETURN TRY (returnStmt__compact_child_exprs(self, [CAST(self.value AS Any)]));
 END
 FN returnStmt__mir?(self: ReturnStmt) RETURNS Bool ->
   RETURN TRUE;
@@ -2050,7 +2050,7 @@ PUB STRUCT BreakStmt {
 }
 
 FN breakStmt__child_exprs(self: BreakStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN breakStmt__compact_child_exprs(self, [CAST(self.value AS Any)]);
+  RETURN TRY (breakStmt__compact_child_exprs(self, [CAST(self.value AS Any)]));
 END
 FN breakStmt__mir?(self: BreakStmt) RETURNS Bool ->
   RETURN TRUE;
@@ -2113,13 +2113,13 @@ PUB STRUCT BreakExpr {
 }
 
 FN breakExpr__child_exprs(self: BreakExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN breakExpr__compact_child_exprs(self, [CAST(self.value AS Any)]);
+  RETURN TRY (breakExpr__compact_child_exprs(self, [CAST(self.value AS Any)]));
 END
 FN breakExpr__ownership_source_exprs(self: BreakExpr) RETURNS ![]Emittable ->
-  RETURN breakExpr__child_exprs(self);
+  RETURN TRY (breakExpr__child_exprs(self));
 END
 FN breakExpr__owned_position_source_exprs(self: BreakExpr) RETURNS ![]Emittable ->
-  RETURN breakExpr__child_exprs(self);
+  RETURN TRY (breakExpr__child_exprs(self));
 END
 FN breakExpr__mir?(self: BreakExpr) RETURNS Bool ->
   RETURN TRUE;
@@ -2306,7 +2306,7 @@ PUB STRUCT AssertStmt {
 }
 
 FN assertStmt__child_exprs(self: AssertStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN assertStmt__compact_child_exprs(self, [CAST(self.cond AS Any)]);
+  RETURN TRY (assertStmt__compact_child_exprs(self, [CAST(self.cond AS Any)]));
 END
 FN assertStmt__mir?(self: AssertStmt) RETURNS Bool ->
   RETURN TRUE;
@@ -2373,7 +2373,7 @@ PUB STRUCT AssertRaisesCheck {
 }
 
 FN assertRaisesCheck__child_exprs(self: AssertRaisesCheck) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN assertRaisesCheck__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (assertRaisesCheck__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN assertRaisesCheck__expr(self: AssertRaisesCheck) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -2576,7 +2576,7 @@ PUB STRUCT Sort {
 }
 
 FN sort__child_exprs(self: Sort) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN sort__compact_child_exprs(self, [CAST(self.items_expr AS Any), CAST(self.key_a AS Any), CAST(self.key_b AS Any)]);
+  RETURN TRY (sort__compact_child_exprs(self, [CAST(self.items_expr AS Any), CAST(self.key_a AS Any), CAST(self.key_b AS Any)]));
 END
 FN sort__mir?(self: Sort) RETURNS Bool ->
   RETURN TRUE;
@@ -2776,7 +2776,7 @@ PUB STRUCT IndexInsert {
 }
 
 FN indexInsert__child_exprs(self: IndexInsert) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN indexInsert__compact_child_exprs(self, [CAST(self.map AS Any), CAST(self.key_expr AS Any), CAST(self.value_expr AS Any)]);
+  RETURN TRY (indexInsert__compact_child_exprs(self, [CAST(self.map AS Any), CAST(self.key_expr AS Any), CAST(self.value_expr AS Any)]));
 END
 FN indexInsert__mir?(self: IndexInsert) RETURNS Bool ->
   RETURN TRUE;
@@ -2847,10 +2847,10 @@ PUB STRUCT BatchWindowPush {
 }
 
 FN batchWindowPush__child_exprs(self: BatchWindowPush) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN batchWindowPush__compact_child_exprs(self, [CAST(self.item_expr AS Any), CAST(self.value_expr AS Any)]);
+  RETURN TRY (batchWindowPush__compact_child_exprs(self, [CAST(self.item_expr AS Any), CAST(self.value_expr AS Any)]));
 END
 FN batchWindowPush__owned_position_source_exprs(self: BatchWindowPush) RETURNS ![]Emittable ->
-  RETURN batchWindowPush__compact_child_exprs(self, [CAST(self.value_expr AS Any)]);
+  RETURN TRY (batchWindowPush__compact_child_exprs(self, [CAST(self.value_expr AS Any)]));
 END
 FN batchWindowPush__mir?(self: BatchWindowPush) RETURNS Bool ->
   RETURN TRUE;
@@ -2915,10 +2915,10 @@ PUB STRUCT BatchWindowFlush {
 }
 
 FN batchWindowFlush__child_exprs(self: BatchWindowFlush) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN batchWindowFlush__compact_child_exprs(self, [CAST(self.value_expr AS Any)]);
+  RETURN TRY (batchWindowFlush__compact_child_exprs(self, [CAST(self.value_expr AS Any)]));
 END
 FN batchWindowFlush__owned_position_source_exprs(self: BatchWindowFlush) RETURNS ![]Emittable ->
-  RETURN batchWindowFlush__compact_child_exprs(self, [CAST(self.value_expr AS Any)]);
+  RETURN TRY (batchWindowFlush__compact_child_exprs(self, [CAST(self.value_expr AS Any)]));
 END
 FN batchWindowFlush__mir?(self: BatchWindowFlush) RETURNS Bool ->
   RETURN TRUE;
@@ -3008,7 +3008,7 @@ FN deferStmt__child_exprs(self: MIRDeferStmt) RETURNS ![]Emittable EFFECTS REENT
   IF self.body IS_A Emittable AS body_expr THEN
     &exprs.append(COPY body_expr);
   END
-  RETURN deferStmt__compact_child_exprs(self, exprs);
+  RETURN TRY (deferStmt__compact_child_exprs(self, exprs));
 END
 PUB FN deferStmt__body(self: MIRDeferStmt) RETURNS DeferBody ->
   RETURN COPY self.body;
@@ -3085,7 +3085,7 @@ FN errDeferStmt__child_exprs(self: ErrDeferStmt) RETURNS ![]Emittable EFFECTS RE
   IF self.body IS_A Emittable AS body_expr THEN
     &exprs.append(COPY body_expr);
   END
-  RETURN errDeferStmt__compact_child_exprs(self, exprs);
+  RETURN TRY (errDeferStmt__compact_child_exprs(self, exprs));
 END
 PUB FN errDeferStmt__body(self: ErrDeferStmt) RETURNS DeferBody ->
   RETURN COPY self.body;
@@ -3149,7 +3149,7 @@ PUB STRUCT ExprStmt {
 }
 
 FN exprStmt__child_exprs(self: ExprStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN exprStmt__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (exprStmt__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN exprStmt__explicit_ownership_contract(self: ExprStmt) RETURNS !?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF TRUE THEN
@@ -3222,7 +3222,7 @@ PUB STRUCT DiscardOwned {
 }
 
 FN discardOwned__child_exprs(self: DiscardOwned) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN discardOwned__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (discardOwned__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 PUB FN discardOwned__expr(self: DiscardOwned) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -3667,7 +3667,7 @@ FN streamYield__expr?(self: StreamYield) RETURNS Bool ->
   RETURN TRUE;
 END
 FN streamYield__child_exprs(self: StreamYield) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN streamYield__compact_child_exprs(self, [CAST(self.value AS Any)]);
+  RETURN TRY (streamYield__compact_child_exprs(self, [CAST(self.value AS Any)]));
 END
 FN streamYield__mir?(self: StreamYield) RETURNS Bool ->
   RETURN TRUE;
@@ -4019,7 +4019,7 @@ PUB STRUCT CapabilityLockTarget {
 }
 
 FN capabilityLockTarget__child_exprs(self: CapabilityLockTarget) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN capabilityLockTarget__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (capabilityLockTarget__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN capabilityLockTarget__mir?(self: CapabilityLockTarget) RETURNS Bool ->
   RETURN TRUE;
@@ -4082,7 +4082,7 @@ PUB STRUCT CapabilityLockAddress {
 }
 
 FN capabilityLockAddress__child_exprs(self: CapabilityLockAddress) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN capabilityLockAddress__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (capabilityLockAddress__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN capabilityLockAddress__mir?(self: CapabilityLockAddress) RETURNS Bool ->
   RETURN TRUE;
@@ -4162,7 +4162,7 @@ FN sortedLockAcquire__child_exprs(self: SortedLockAcquire) RETURNS ![]Emittable 
     &entry_exprs.append(COPY entry.address_expr);
   END
   &entry_exprs.append(COPY self.action);
-  RETURN sortedLockAcquire__compact_child_exprs(self, entry_exprs);
+  RETURN TRY (sortedLockAcquire__compact_child_exprs(self, entry_exprs));
 END
 FN sortedLockAcquire__body_slots(self: SortedLockAcquire) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.action THEN
@@ -4238,7 +4238,7 @@ FN fallibleLockBinding__stmt?(self: FallibleLockBinding) RETURNS Bool ->
 END
 FN fallibleLockBinding__child_exprs(self: FallibleLockBinding) RETURNS ![]Emittable EFFECTS REENTRANT ->
   MUTABLE values: []Emittable = [self.acquire_call, self.action];
-  RETURN fallibleLockBinding__compact_child_exprs(self, values);
+  RETURN TRY (fallibleLockBinding__compact_child_exprs(self, values));
 END
 FN fallibleLockBinding__body_slots(self: FallibleLockBinding) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN TRY (emittable__body_slots(self.action));
@@ -4310,7 +4310,7 @@ FN catchWrapper__child_exprs(self: CatchWrapper) RETURNS ![]Emittable EFFECTS RE
       &exprs.append(COPY filter_message);
     END
   END
-  RETURN catchWrapper__compact_child_exprs(self, exprs);
+  RETURN TRY (catchWrapper__compact_child_exprs(self, exprs));
 END
 PUB FN catchWrapper__clause_bodies(self: CatchWrapper) RETURNS ![][]Emittable ->
   MUTABLE bodies: [][]Emittable = (self.clauses) |> SELECT COPY _.body;
@@ -4900,10 +4900,10 @@ FN heapCreate__initialize(MUTABLE self: HeapCreate, zig_type: String, init: Any,
 
 END
 FN heapCreate__child_exprs(self: HeapCreate) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN heapCreate__compact_child_exprs(self, [CAST(self.init AS Any)]);
+  RETURN TRY (heapCreate__compact_child_exprs(self, [CAST(self.init AS Any)]));
 END
 FN heapCreate__ownership_source_exprs(self: HeapCreate) RETURNS ![]Emittable ->
-  RETURN heapCreate__child_exprs(self);
+  RETURN TRY (heapCreate__child_exprs(self));
 END
 FN heapCreate__ownership_effect(self: HeapCreate) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN heapCreate__owned_effect_for_alloc(self, self.alloc);
@@ -4965,7 +4965,7 @@ FN dupeSlice__initialize(MUTABLE self: DupeSlice, source: Any, alloc: String@sym
 
 END
 FN dupeSlice__child_exprs(self: DupeSlice) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN dupeSlice__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (dupeSlice__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN dupeSlice__ownership_effect(self: DupeSlice) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN dupeSlice__owned_effect_for_alloc(self, self.alloc, :heap_string);
@@ -5032,7 +5032,7 @@ FN allocSlice__initialize(MUTABLE self: AllocSlice, elem_type: String, len: Any,
 
 END
 FN allocSlice__child_exprs(self: AllocSlice) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN allocSlice__compact_child_exprs(self, [CAST(self.len AS Any)]);
+  RETURN TRY (allocSlice__compact_child_exprs(self, [CAST(self.len AS Any)]));
 END
 FN allocSlice__ownership_effect(self: AllocSlice) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN allocSlice__owned_effect_for_alloc(self, self.alloc);
@@ -5098,7 +5098,7 @@ FN freeSlice__initialize(MUTABLE self: FreeSlice, slice: Any, alloc: Alloc) RETU
 
 END
 FN freeSlice__child_exprs(self: FreeSlice) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN freeSlice__compact_child_exprs(self, [CAST(self.slice AS Any)]);
+  RETURN TRY (freeSlice__compact_child_exprs(self, [CAST(self.slice AS Any)]));
 END
 FN freeSlice__mir?(self: FreeSlice) RETURNS Bool ->
   RETURN TRUE;
@@ -5164,7 +5164,7 @@ FN destroyPtr__initialize(MUTABLE self: DestroyPtr, ptr: Any, alloc: Alloc) RETU
 
 END
 FN destroyPtr__child_exprs(self: DestroyPtr) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN destroyPtr__compact_child_exprs(self, [CAST(self.ptr AS Any)]);
+  RETURN TRY (destroyPtr__compact_child_exprs(self, [CAST(self.ptr AS Any)]));
 END
 FN destroyPtr__mir?(self: DestroyPtr) RETURNS Bool ->
   RETURN TRUE;
@@ -5436,7 +5436,7 @@ PUB FN deepCopy__copy_shape_for_zig_type(zig_type: ?String) RETURNS String@symbo
   RETURN ((CAST({"": :inferred, "*": :pointer, "[]": :slice} AS {String}String@symbol))[text.substr(0, 2)] OR_ELSE ((CAST({"": :inferred, "*": :pointer, "[]": :slice} AS {String}String@symbol))[text.substr(0, 1)] OR_ELSE :value));
 END
 FN deepCopy__child_exprs(self: DeepCopy) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN deepCopy__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (deepCopy__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN deepCopy__ownership_effect(self: DeepCopy) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   IF (self.strategy == :passthrough) THEN
@@ -5507,7 +5507,7 @@ FN containerInit__initialize(MUTABLE self: ContainerInit, zig_type: String, stra
 
 END
 FN containerInit__child_exprs(self: ContainerInit) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN containerInit__compact_child_exprs(self, [CAST(self.capacity AS Any)]);
+  RETURN TRY (containerInit__compact_child_exprs(self, [CAST(self.capacity AS Any)]));
 END
 FN containerInit__ownership_effect(self: ContainerInit) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN containerInit__owned_effect_for_alloc(self, self.alloc);
@@ -5578,10 +5578,10 @@ FN capWrap__initialize(MUTABLE self: CapWrap, inner: Any, zig_base: String, stra
 
 END
 FN capWrap__child_exprs(self: CapWrap) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN capWrap__compact_child_exprs(self, [CAST(self.inner AS Any)]);
+  RETURN TRY (capWrap__compact_child_exprs(self, [CAST(self.inner AS Any)]));
 END
 FN capWrap__ownership_source_exprs(self: CapWrap) RETURNS ![]Emittable ->
-  RETURN capWrap__child_exprs(self);
+  RETURN TRY (capWrap__child_exprs(self));
 END
 FN capWrap__ownership_effect(self: CapWrap) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE kind = IF self.own_fn != NIL THEN
@@ -5649,10 +5649,10 @@ FN sharePromote__initialize(MUTABLE self: SharePromote, source: Emittable, zig_b
 
 END
 FN sharePromote__child_exprs(self: SharePromote) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN sharePromote__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (sharePromote__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN sharePromote__ownership_source_exprs(self: SharePromote) RETURNS ![]Emittable ->
-  RETURN sharePromote__child_exprs(self);
+  RETURN TRY (sharePromote__child_exprs(self));
 END
 FN sharePromote__ownership_effect(self: SharePromote) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN sharePromote__owned_effect_for_alloc(self, self.alloc, :rc);
@@ -5712,7 +5712,7 @@ PUB STRUCT RcRetain {
 }
 
 FN rcRetain__child_exprs(self: RcRetain) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN rcRetain__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (rcRetain__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN rcRetain__ownership_effect(self: RcRetain) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__owned(:heap, :rc);
@@ -5774,7 +5774,7 @@ PUB STRUCT ComptimeCarrierPayload {
 }
 
 FN comptimeCarrierPayload__child_exprs(self: ComptimeCarrierPayload) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN comptimeCarrierPayload__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (comptimeCarrierPayload__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN comptimeCarrierPayload__mir?(self: ComptimeCarrierPayload) RETURNS Bool ->
   RETURN TRUE;
@@ -5838,7 +5838,7 @@ PUB STRUCT MonomorphicKeep {
 }
 
 FN monomorphicKeep__child_exprs(self: MonomorphicKeep) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN monomorphicKeep__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (monomorphicKeep__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN monomorphicKeep__ownership_effect(self: MonomorphicKeep) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__owned(:heap, :rc);
@@ -5903,7 +5903,7 @@ PUB STRUCT RcRelease {
 }
 
 FN rcRelease__child_exprs(self: RcRelease) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN rcRelease__compact_child_exprs(self, [CAST(self.source AS Any), CAST(self.alloc AS Any)]);
+  RETURN TRY (rcRelease__compact_child_exprs(self, [CAST(self.source AS Any), CAST(self.alloc AS Any)]));
 END
 FN rcRelease__mir?(self: RcRelease) RETURNS Bool ->
   RETURN TRUE;
@@ -6163,10 +6163,10 @@ FN freezeExpr__initialize(MUTABLE self: FreezeExpr, inner: Emittable, zig_base: 
 
 END
 FN freezeExpr__child_exprs(self: FreezeExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN freezeExpr__compact_child_exprs(self, [CAST(self.inner AS Any)]);
+  RETURN TRY (freezeExpr__compact_child_exprs(self, [CAST(self.inner AS Any)]));
 END
 FN freezeExpr__ownership_source_exprs(self: FreezeExpr) RETURNS ![]Emittable ->
-  RETURN freezeExpr__child_exprs(self);
+  RETURN TRY (freezeExpr__child_exprs(self));
 END
 FN freezeExpr__alloc(self: FreezeExpr) RETURNS String@symbol ->
   RETURN self.alloc_ref.kind;
@@ -6233,10 +6233,10 @@ FN makeList__initialize(MUTABLE self: MakeList, elem_type: String, items: []Emit
 
 END
 FN makeList__child_exprs(self: MakeList) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN makeList__compact_child_exprs(self, [CAST(self.items AS Any)]);
+  RETURN TRY (makeList__compact_child_exprs(self, [CAST(self.items AS Any)]));
 END
 FN makeList__ownership_source_exprs(self: MakeList) RETURNS ![]Emittable ->
-  RETURN makeList__child_exprs(self);
+  RETURN TRY (makeList__child_exprs(self));
 END
 FN makeList__ownership_effect(self: MakeList) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN makeList__owned_effect_for_alloc(self, self.alloc);
@@ -6424,7 +6424,7 @@ PUB STRUCT CapabilityUnwrap {
 }
 
 FN capabilityUnwrap__child_exprs(self: CapabilityUnwrap) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN capabilityUnwrap__compact_child_exprs(self, [CAST(self.source AS Any)]);
+  RETURN TRY (capabilityUnwrap__compact_child_exprs(self, [CAST(self.source AS Any)]));
 END
 FN capabilityUnwrap__mir?(self: CapabilityUnwrap) RETURNS Bool ->
   RETURN TRUE;
@@ -6495,7 +6495,7 @@ FN snapshotRead__stmt?(self: SnapshotRead) RETURNS Bool ->
   RETURN TRUE;
 END
 FN snapshotRead__child_exprs(self: SnapshotRead) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN snapshotRead__compact_child_exprs(self, [CAST(self.cell_unwrap AS Any)]);
+  RETURN TRY (snapshotRead__compact_child_exprs(self, [CAST(self.cell_unwrap AS Any)]));
 END
 FN snapshotRead__body_slots(MUTABLE self: SnapshotRead) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([snapshotRead__body_slot(self, :body, self.body)] AS []MIRBodySlot);
@@ -6574,7 +6574,7 @@ FN snapshotTransaction__child_exprs(self: SnapshotTransaction) RETURNS ![]Emitta
   IF self.conflict_action THEN
     &values.append(COPY self.conflict_action);
   END
-  RETURN snapshotTransaction__compact_child_exprs(self, values);
+  RETURN TRY (snapshotTransaction__compact_child_exprs(self, values));
 END
 FN snapshotTransaction__body_slots(MUTABLE self: SnapshotTransaction) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [snapshotTransaction__body_slot(self, :body, self.body)];
@@ -6655,7 +6655,7 @@ FN snapshotMultiTxn__child_exprs(self: SnapshotMultiTxn) RETURNS ![]Emittable EF
   IF self.conflict_action THEN
     &values.append(COPY self.conflict_action);
   END
-  RETURN snapshotMultiTxn__compact_child_exprs(self, values);
+  RETURN TRY (snapshotMultiTxn__compact_child_exprs(self, values));
 END
 FN snapshotMultiTxn__body_slots(MUTABLE self: SnapshotMultiTxn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [snapshotMultiTxn__body_slot(self, :body, self.body)];
@@ -6729,7 +6729,7 @@ FN polymorphicMutate__stmt?(self: PolymorphicMutate) RETURNS Bool ->
   RETURN TRUE;
 END
 FN polymorphicMutate__child_exprs(self: PolymorphicMutate) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN polymorphicMutate__compact_child_exprs(self, [CAST(self.cell AS Any)]);
+  RETURN TRY (polymorphicMutate__compact_child_exprs(self, [CAST(self.cell AS Any)]));
 END
 FN polymorphicMutate__body_slots(MUTABLE self: PolymorphicMutate) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([polymorphicMutate__body_slot(self, :body, self.body)] AS []MIRBodySlot);
@@ -6802,7 +6802,7 @@ FN polymorphicMutateFlow__stmt?(self: PolymorphicMutateFlow) RETURNS Bool ->
   RETURN TRUE;
 END
 FN polymorphicMutateFlow__child_exprs(self: PolymorphicMutateFlow) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN polymorphicMutateFlow__compact_child_exprs(self, [CAST(self.cell AS Any), CAST(self.guard_cond AS Any)]);
+  RETURN TRY (polymorphicMutateFlow__compact_child_exprs(self, [CAST(self.cell AS Any), CAST(self.guard_cond AS Any)]));
 END
 FN polymorphicMutateFlow__body_slots(MUTABLE self: PolymorphicMutateFlow) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [polymorphicMutateFlow__body_slot(self, :body, self.body)];
@@ -6870,7 +6870,7 @@ PUB STRUCT PolymorphicFlowSignal {
 }
 
 FN polymorphicFlowSignal__child_exprs(self: PolymorphicFlowSignal) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN polymorphicFlowSignal__compact_child_exprs(self, [CAST(self.ret AS Any)]);
+  RETURN TRY (polymorphicFlowSignal__compact_child_exprs(self, [CAST(self.ret AS Any)]));
 END
 FN polymorphicFlowSignal__mir?(self: PolymorphicFlowSignal) RETURNS Bool ->
   RETURN TRUE;
@@ -6941,7 +6941,7 @@ FN withMatchDispatch__stmt?(self: WithMatchDispatch) RETURNS Bool ->
   RETURN TRUE;
 END
 FN withMatchDispatch__child_exprs(self: WithMatchDispatch) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN withMatchDispatch__compact_child_exprs(self, [CAST(self.cell AS Any)]);
+  RETURN TRY (withMatchDispatch__compact_child_exprs(self, [CAST(self.cell AS Any)]));
 END
 FN withMatchDispatch__body_slots(self: WithMatchDispatch) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_108: []MIRBodySlot = List[]; rtoc_empty_list_108 } );
@@ -7798,7 +7798,7 @@ FN call__set_never_success(MUTABLE self: Call, value: Bool) RETURNS Void ->
   self.never_success = COPY value;
 END
 FN call__child_exprs(self: Call) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN call__compact_child_exprs(self, [CAST(self.args AS Any)]);
+  RETURN TRY (call__compact_child_exprs(self, [CAST(self.args AS Any)]));
 END
 FN call__explicit_ownership_contract(self: Call) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF self.callable_contract != NIL THEN
@@ -7886,7 +7886,7 @@ FN runtimeCall__initialize(MUTABLE self: RuntimeCall, spec: RuntimeCallSpec, arg
 
 END
 FN runtimeCall__child_exprs(self: RuntimeCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN runtimeCall__compact_child_exprs(self, [CAST(self.args AS Any)]);
+  RETURN TRY (runtimeCall__compact_child_exprs(self, [CAST(self.args AS Any)]));
 END
 FN runtimeCall__explicit_ownership_contract(self: RuntimeCall) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
   MUTABLE rtoc_contract_123: CallableContract@multiowned = KEEP self.spec.callable_contract;
@@ -7967,7 +7967,7 @@ FN tailCall__initialize(MUTABLE self: TailCall, callee: String, args: []Any, cal
 
 END
 FN tailCall__child_exprs(self: TailCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN tailCall__compact_child_exprs(self, [CAST(self.args AS Any)]);
+  RETURN TRY (tailCall__compact_child_exprs(self, [CAST(self.args AS Any)]));
 END
 FN tailCall__explicit_ownership_contract(self: TailCall) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF self.callable_contract != NIL THEN
@@ -8077,7 +8077,7 @@ FN methodCall__initialize(MUTABLE self: MIRMethodCall, receiver: Any, method_val
 
 END
 FN methodCall__child_exprs(self: MIRMethodCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN methodCall__compact_child_exprs(self, [CAST(self.receiver AS Any), CAST(self.args AS Any)]);
+  RETURN TRY (methodCall__compact_child_exprs(self, [CAST(self.receiver AS Any), CAST(self.args AS Any)]));
 END
 FN methodCall__explicit_ownership_contract(self: MIRMethodCall) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
   IF self.callable_contract != NIL THEN
@@ -8154,7 +8154,7 @@ PUB STRUCT FieldGet {
 }
 
 FN fieldGet__child_exprs(self: FieldGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN fieldGet__compact_child_exprs(self, [CAST(self.object AS Any)]);
+  RETURN TRY (fieldGet__compact_child_exprs(self, [CAST(self.object AS Any)]));
 END
 FN fieldGet__mir?(self: FieldGet) RETURNS Bool ->
   RETURN TRUE;
@@ -8217,7 +8217,7 @@ PUB STRUCT UnionPayloadGet {
 }
 
 FN unionPayloadGet__child_exprs(self: UnionPayloadGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN unionPayloadGet__compact_child_exprs(self, [CAST(self.subject AS Any)]);
+  RETURN TRY (unionPayloadGet__compact_child_exprs(self, [CAST(self.subject AS Any)]));
 END
 FN unionPayloadGet__mir?(self: UnionPayloadGet) RETURNS Bool ->
   RETURN TRUE;
@@ -8280,7 +8280,7 @@ PUB STRUCT IndexGet {
 }
 
 FN indexGet__child_exprs(self: IndexGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN indexGet__compact_child_exprs(self, [CAST(self.object AS Any), CAST(self.index AS Any)]);
+  RETURN TRY (indexGet__compact_child_exprs(self, [CAST(self.object AS Any), CAST(self.index AS Any)]));
 END
 FN indexGet__mir?(self: IndexGet) RETURNS Bool ->
   RETURN TRUE;
@@ -8345,7 +8345,7 @@ PUB STRUCT ProtocolCall {
 }
 
 FN protocolCall__child_exprs(self: ProtocolCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN protocolCall__compact_child_exprs(self, ([self.receiver] + self.args));
+  RETURN TRY (protocolCall__compact_child_exprs(self, ([self.receiver] + self.args)));
 END
 FN protocolCall__mir?(self: ProtocolCall) RETURNS Bool ->
   RETURN TRUE;
@@ -8425,7 +8425,7 @@ PUB FN mIRBinOp__ownership_consumption(self: MIRBinOp) RETURNS ?OwnershipConsump
 END
 
 FN binOp__child_exprs(self: MIRBinOp) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN binOp__compact_child_exprs(self, [CAST(self.left AS Any), CAST(self.right AS Any)]);
+  RETURN TRY (binOp__compact_child_exprs(self, [CAST(self.left AS Any), CAST(self.right AS Any)]));
 END
 FN binOp__mir?(self: MIRBinOp) RETURNS Bool ->
   RETURN TRUE;
@@ -8501,7 +8501,7 @@ PUB FN mIRUnaryOp__ownership_consumption(self: MIRUnaryOp) RETURNS ?OwnershipCon
 END
 
 FN unaryOp__child_exprs(self: MIRUnaryOp) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN unaryOp__compact_child_exprs(self, [CAST(self.operand AS Any)]);
+  RETURN TRY (unaryOp__compact_child_exprs(self, [CAST(self.operand AS Any)]));
 END
 FN unaryOp__mir?(self: MIRUnaryOp) RETURNS Bool ->
   RETURN TRUE;
@@ -8563,7 +8563,7 @@ PUB STRUCT FallibleOk {
 }
 
 FN fallibleOk__child_exprs(self: FallibleOk) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN fallibleOk__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (fallibleOk__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN fallibleOk__mir?(self: FallibleOk) RETURNS Bool ->
   RETURN TRUE;
@@ -8625,7 +8625,7 @@ PUB STRUCT FutureReady {
 }
 
 FN futureReady__child_exprs(self: FutureReady) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN futureReady__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (futureReady__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN futureReady__mir?(self: FutureReady) RETURNS Bool ->
   RETURN TRUE;
@@ -8875,7 +8875,7 @@ PUB STRUCT EnumOrdinal {
 }
 
 FN enumOrdinal__child_exprs(self: EnumOrdinal) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN enumOrdinal__compact_child_exprs(self, [CAST(self.value AS Any)]);
+  RETURN TRY (enumOrdinal__compact_child_exprs(self, [CAST(self.value AS Any)]));
 END
 FN enumOrdinal__mir?(self: EnumOrdinal) RETURNS Bool ->
   RETURN TRUE;
@@ -9004,7 +9004,7 @@ FN tupleLiteral__child_exprs(self: TupleLiteral) RETURNS ![]Emittable EFFECTS RE
   FOR item IN self.items DO
     &values.append(COPY item);
   END
-  RETURN tupleLiteral__compact_child_exprs(self, values);
+  RETURN TRY (tupleLiteral__compact_child_exprs(self, values));
 END
 FN tupleLiteral__ownership_effect(self: TupleLiteral) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__from_children(TRY (tupleLiteral__child_exprs(self))));
@@ -9131,7 +9131,7 @@ PUB STRUCT LockAcquire {
 }
 
 FN lockAcquire__child_exprs(self: LockAcquire) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN lockAcquire__compact_child_exprs(self, [CAST(self.lock_expr AS Any)]);
+  RETURN TRY (lockAcquire__compact_child_exprs(self, [CAST(self.lock_expr AS Any)]));
 END
 FN lockAcquire__mir?(self: LockAcquire) RETURNS Bool ->
   RETURN TRUE;
@@ -9193,7 +9193,7 @@ PUB STRUCT TypeOf {
 }
 
 FN typeOf__child_exprs(self: TypeOf) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN typeOf__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (typeOf__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN typeOf__expr(self: TypeOf) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -9259,7 +9259,7 @@ PUB STRUCT TypeEq {
 }
 
 FN typeEq__child_exprs(self: TypeEq) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN typeEq__compact_child_exprs(self, [CAST(self.left AS Any), CAST(self.right AS Any)]);
+  RETURN TRY (typeEq__compact_child_exprs(self, [CAST(self.left AS Any), CAST(self.right AS Any)]));
 END
 FN typeEq__mir?(self: TypeEq) RETURNS Bool ->
   RETURN TRUE;
@@ -9329,10 +9329,10 @@ FN structInit__child_exprs(self: StructInit) RETURNS ![]Emittable EFFECTS REENTR
       &values.append(COPY value_value);
   END
   END
-  RETURN structInit__compact_child_exprs(self, values);
+  RETURN TRY (structInit__compact_child_exprs(self, values));
 END
 FN structInit__ownership_source_exprs(self: StructInit) RETURNS ![]Emittable ->
-  RETURN structInit__child_exprs(self);
+  RETURN TRY (structInit__child_exprs(self));
 END
 FN structInit__ownership_effect(self: StructInit) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__from_children(TRY (structInit__child_exprs(self))));
@@ -9392,10 +9392,10 @@ PUB STRUCT ArrayInit {
 }
 
 FN arrayInit__child_exprs(self: ArrayInit) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN arrayInit__compact_child_exprs(self, [CAST(self.items AS Any)]);
+  RETURN TRY (arrayInit__compact_child_exprs(self, [CAST(self.items AS Any)]));
 END
 FN arrayInit__ownership_source_exprs(self: ArrayInit) RETURNS ![]Emittable ->
-  RETURN arrayInit__child_exprs(self);
+  RETURN TRY (arrayInit__child_exprs(self));
 END
 FN arrayInit__mir?(self: ArrayInit) RETURNS Bool ->
   RETURN TRUE;
@@ -9463,7 +9463,7 @@ FN arrayDefaultInit__result_type(self: ArrayDefaultInit) RETURNS Type ->
   RETURN COPY self.result_type;
 END
 FN arrayDefaultInit__child_exprs(self: ArrayDefaultInit) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN arrayDefaultInit__compact_child_exprs(self, [CAST(self.default_value AS Any)]);
+  RETURN TRY (arrayDefaultInit__compact_child_exprs(self, [CAST(self.default_value AS Any)]));
 END
 FN arrayDefaultInit__ownership_source_exprs(self: ArrayDefaultInit) RETURNS ![]Emittable ->
   RETURN CAST(( { MUTABLE rtoc_empty_list_149: []Emittable = List[]; rtoc_empty_list_149 } ) AS []Emittable);
@@ -9527,7 +9527,7 @@ PUB STRUCT SliceExpr {
 }
 
 FN sliceExpr__child_exprs(self: SliceExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN sliceExpr__compact_child_exprs(self, [CAST(self.target AS Any), CAST(self.start AS Any), CAST(self.end_expr AS Any)]);
+  RETURN TRY (sliceExpr__compact_child_exprs(self, [CAST(self.target AS Any), CAST(self.start AS Any), CAST(self.end_expr AS Any)]));
 END
 FN sliceExpr__mir?(self: SliceExpr) RETURNS Bool ->
   RETURN TRUE;
@@ -9703,7 +9703,7 @@ FN concatStr__initialize(MUTABLE self: ConcatStr, parts: []Any, alloc: String@sy
 
 END
 FN concatStr__child_exprs(self: ConcatStr) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN concatStr__compact_child_exprs(self, [CAST(self.parts AS Any)]);
+  RETURN TRY (concatStr__compact_child_exprs(self, [CAST(self.parts AS Any)]));
 END
 FN concatStr__ownership_effect(self: ConcatStr) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN concatStr__owned_effect_for_alloc(self, self.alloc, :heap_string);
@@ -9783,13 +9783,13 @@ PUB FN mIRCast__ownership_consumption(self: MIRCast) RETURNS ?OwnershipConsumpti
 END
 
 FN cast__child_exprs(self: MIRCast) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN cast__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (cast__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN cast__ownership_source_exprs(self: MIRCast) RETURNS ![]Emittable ->
-  RETURN cast__child_exprs(self);
+  RETURN TRY (cast__child_exprs(self));
 END
 FN cast__owned_position_source_exprs(self: MIRCast) RETURNS ![]Emittable ->
-  RETURN cast__child_exprs(self);
+  RETURN TRY (cast__child_exprs(self));
 END
 FN cast__ownership_effect(self: MIRCast) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__of(self.expr));
@@ -9846,13 +9846,13 @@ PUB STRUCT TryExpr {
 }
 
 FN tryExpr__child_exprs(self: TryExpr) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN tryExpr__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (tryExpr__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN tryExpr__ownership_source_exprs(self: TryExpr) RETURNS ![]Emittable ->
-  RETURN tryExpr__child_exprs(self);
+  RETURN TRY (tryExpr__child_exprs(self));
 END
 FN tryExpr__owned_position_source_exprs(self: TryExpr) RETURNS ![]Emittable ->
-  RETURN tryExpr__child_exprs(self);
+  RETURN TRY (tryExpr__child_exprs(self));
 END
 FN tryExpr__ownership_effect(self: TryExpr) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__of(self.expr));
@@ -9918,16 +9918,16 @@ FN tryCatch__set_result_type(MUTABLE self: TryCatch, value: ?Type) RETURNS Void 
   self.result_type = COPY value;
 END
 FN tryCatch__child_exprs(self: TryCatch) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN tryCatch__compact_child_exprs(self, [CAST(self.expr AS Any), CAST(self.catch_body AS Any)]);
+  RETURN TRY (tryCatch__compact_child_exprs(self, [CAST(self.expr AS Any), CAST(self.catch_body AS Any)]));
 END
 FN tryCatch__ownership_source_exprs(self: TryCatch) RETURNS ![]Emittable ->
-  RETURN tryCatch__child_exprs(self);
+  RETURN TRY (tryCatch__child_exprs(self));
 END
 FN tryCatch__owned_position_source_exprs(self: TryCatch) RETURNS ![]Emittable ->
-  RETURN tryCatch__child_exprs(self);
+  RETURN TRY (tryCatch__child_exprs(self));
 END
 FN tryCatch__ownership_effect(MUTABLE self: TryCatch) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_try_fallback(TRY (ownershipEffect__of(self.expr)), TRY (ownershipEffect__of(self.catch_body)), self.result_type, self.catch_body IS_A Lit, tryCatch__call_never_success?(self, self.expr));
+  RETURN TRY (ownershipEffect__from_try_fallback(TRY (ownershipEffect__of(self.expr)), TRY (ownershipEffect__of(self.catch_body)), self.result_type, self.catch_body IS_A Lit, tryCatch__call_never_success?(self, self.expr)));
 END
 PUB FN tryCatch__expr(self: TryCatch) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -9992,16 +9992,16 @@ FN orelse__set_result_type(MUTABLE self: Orelse, value: ?Type) RETURNS Void ->
   self.result_type = COPY value;
 END
 FN orelse__child_exprs(self: Orelse) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN orelse__compact_child_exprs(self, [CAST(self.expr AS Any), CAST(self.fallback AS Any)]);
+  RETURN TRY (orelse__compact_child_exprs(self, [CAST(self.expr AS Any), CAST(self.fallback AS Any)]));
 END
 FN orelse__ownership_source_exprs(self: Orelse) RETURNS ![]Emittable ->
-  RETURN orelse__child_exprs(self);
+  RETURN TRY (orelse__child_exprs(self));
 END
 FN orelse__owned_position_source_exprs(self: Orelse) RETURNS ![]Emittable ->
-  RETURN orelse__child_exprs(self);
+  RETURN TRY (orelse__child_exprs(self));
 END
 FN orelse__ownership_effect(MUTABLE self: Orelse) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_optional_fallback(TRY (ownershipEffect__of(self.expr)), TRY (ownershipEffect__of(self.fallback)), self.result_type);
+  RETURN TRY (ownershipEffect__from_optional_fallback(TRY (ownershipEffect__of(self.expr)), TRY (ownershipEffect__of(self.fallback)), self.result_type));
 END
 PUB FN orelse__expr(self: Orelse) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -10057,13 +10057,13 @@ PUB STRUCT Conditional {
 }
 
 FN conditional__child_exprs(self: Conditional) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN conditional__compact_child_exprs(self, [CAST(self.cond AS Any), CAST(self.then_val AS Any), CAST(self.else_val AS Any)]);
+  RETURN TRY (conditional__compact_child_exprs(self, [CAST(self.cond AS Any), CAST(self.then_val AS Any), CAST(self.else_val AS Any)]));
 END
 FN conditional__ownership_source_exprs(self: Conditional) RETURNS ![]Emittable ->
-  RETURN conditional__compact_child_exprs(self, [CAST(self.then_val AS Any), CAST(self.else_val AS Any)]);
+  RETURN TRY (conditional__compact_child_exprs(self, [CAST(self.then_val AS Any), CAST(self.else_val AS Any)]));
 END
 FN conditional__owned_position_source_exprs(self: Conditional) RETURNS ![]Emittable ->
-  RETURN conditional__ownership_source_exprs(self);
+  RETURN TRY (conditional__ownership_source_exprs(self));
 END
 FN conditional__mir?(self: Conditional) RETURNS Bool ->
   RETURN TRUE;
@@ -10127,16 +10127,16 @@ FN ifOptional__set_result_type(MUTABLE self: IfOptional, value: ?Type) RETURNS V
   self.result_type = COPY value;
 END
 FN ifOptional__child_exprs(self: IfOptional) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN ifOptional__compact_child_exprs(self, [CAST(self.optional AS Any), CAST(self.then_expr AS Any), CAST(self.else_expr AS Any)]);
+  RETURN TRY (ifOptional__compact_child_exprs(self, [CAST(self.optional AS Any), CAST(self.then_expr AS Any), CAST(self.else_expr AS Any)]));
 END
 FN ifOptional__ownership_source_exprs(self: IfOptional) RETURNS ![]Emittable ->
-  RETURN ifOptional__compact_child_exprs(self, [CAST(self.then_expr AS Any), CAST(self.else_expr AS Any)]);
+  RETURN TRY (ifOptional__compact_child_exprs(self, [CAST(self.then_expr AS Any), CAST(self.else_expr AS Any)]));
 END
 FN ifOptional__owned_position_source_exprs(self: IfOptional) RETURNS ![]Emittable ->
-  RETURN ifOptional__ownership_source_exprs(self);
+  RETURN TRY (ifOptional__ownership_source_exprs(self));
 END
 FN ifOptional__ownership_effect(MUTABLE self: IfOptional) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  RETURN ownershipEffect__from_optional_fallback(TRY (ownershipEffect__of(self.then_expr)), TRY (ownershipEffect__of(self.else_expr)), self.result_type);
+  RETURN TRY (ownershipEffect__from_optional_fallback(TRY (ownershipEffect__of(self.then_expr)), TRY (ownershipEffect__of(self.else_expr)), self.result_type));
 END
 FN ifOptional__mir?(self: IfOptional) RETURNS Bool ->
   RETURN TRUE;
@@ -10187,13 +10187,13 @@ PUB STRUCT Comptime {
 }
 
 FN comptime__child_exprs(self: Comptime) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN comptime__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (comptime__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN comptime__ownership_source_exprs(self: Comptime) RETURNS ![]Emittable ->
-  RETURN comptime__child_exprs(self);
+  RETURN TRY (comptime__child_exprs(self));
 END
 FN comptime__owned_position_source_exprs(self: Comptime) RETURNS ![]Emittable ->
-  RETURN comptime__child_exprs(self);
+  RETURN TRY (comptime__child_exprs(self));
 END
 FN comptime__expr(self: Comptime) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -10252,7 +10252,7 @@ PUB STRUCT UnionVariantGet {
 }
 
 FN unionVariantGet__child_exprs(self: UnionVariantGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN unionVariantGet__compact_child_exprs(self, [CAST(self.object AS Any)]);
+  RETURN TRY (unionVariantGet__compact_child_exprs(self, [CAST(self.object AS Any)]));
 END
 FN unionVariantGet__mir?(self: UnionVariantGet) RETURNS Bool ->
   RETURN TRUE;
@@ -10314,7 +10314,7 @@ PUB STRUCT ListItems {
 }
 
 FN listItems__child_exprs(self: ListItems) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN listItems__compact_child_exprs(self, [CAST(self.list AS Any)]);
+  RETURN TRY (listItems__compact_child_exprs(self, [CAST(self.list AS Any)]));
 END
 FN listItems__mir?(self: ListItems) RETURNS Bool ->
   RETURN TRUE;
@@ -10376,7 +10376,7 @@ PUB STRUCT ListLength {
 }
 
 FN listLength__child_exprs(self: ListLength) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN listLength__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (listLength__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN listLength__expr(self: ListLength) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -10441,7 +10441,7 @@ PUB STRUCT AddressOf {
 }
 
 FN addressOf__child_exprs(self: AddressOf) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN addressOf__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (addressOf__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 PUB FN addressOf__expr(self: AddressOf) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -10506,7 +10506,7 @@ PUB STRUCT Deref {
 }
 
 FN deref__child_exprs(self: Deref) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN deref__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (deref__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 PUB FN deref__expr(self: Deref) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -10572,7 +10572,7 @@ PUB STRUCT PointerCast {
 }
 
 FN pointerCast__child_exprs(self: PointerCast) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN pointerCast__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (pointerCast__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN pointerCast__expr(self: PointerCast) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -10637,7 +10637,7 @@ PUB STRUCT ConstCast {
 }
 
 FN constCast__child_exprs(self: ConstCast) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN constCast__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (constCast__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN constCast__expr(self: ConstCast) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -10702,7 +10702,7 @@ PUB STRUCT DefaultStreamCapacity {
 }
 
 FN defaultStreamCapacity__child_exprs(self: DefaultStreamCapacity) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN defaultStreamCapacity__compact_child_exprs(self, [CAST(self.worker_count AS Any)]);
+  RETURN TRY (defaultStreamCapacity__compact_child_exprs(self, [CAST(self.worker_count AS Any)]));
 END
 FN defaultStreamCapacity__mir?(self: DefaultStreamCapacity) RETURNS Bool ->
   RETURN TRUE;
@@ -10966,13 +10966,13 @@ PUB FN mIROptionalUnwrap__ownership_consumption(self: MIROptionalUnwrap) RETURNS
 END
 
 FN optionalUnwrap__child_exprs(self: MIROptionalUnwrap) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN optionalUnwrap__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (optionalUnwrap__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN optionalUnwrap__ownership_source_exprs(self: MIROptionalUnwrap) RETURNS ![]Emittable ->
-  RETURN optionalUnwrap__child_exprs(self);
+  RETURN TRY (optionalUnwrap__child_exprs(self));
 END
 FN optionalUnwrap__owned_position_source_exprs(self: MIROptionalUnwrap) RETURNS ![]Emittable ->
-  RETURN optionalUnwrap__child_exprs(self);
+  RETURN TRY (optionalUnwrap__child_exprs(self));
 END
 FN optionalUnwrap__ownership_effect(self: MIROptionalUnwrap) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__of(self.expr));
@@ -11029,13 +11029,13 @@ PUB STRUCT TryOptional {
 }
 
 FN tryOptional__child_exprs(self: TryOptional) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN tryOptional__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (tryOptional__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN tryOptional__ownership_source_exprs(self: TryOptional) RETURNS ![]Emittable ->
-  RETURN tryOptional__child_exprs(self);
+  RETURN TRY (tryOptional__child_exprs(self));
 END
 FN tryOptional__owned_position_source_exprs(self: TryOptional) RETURNS ![]Emittable ->
-  RETURN tryOptional__child_exprs(self);
+  RETURN TRY (tryOptional__child_exprs(self));
 END
 FN tryOptional__ownership_effect(self: TryOptional) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__of(self.expr));
@@ -11092,10 +11092,10 @@ PUB STRUCT ForeignOwnedUnwrap {
 }
 
 FN foreignOwnedUnwrap__child_exprs(self: ForeignOwnedUnwrap) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN foreignOwnedUnwrap__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (foreignOwnedUnwrap__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN foreignOwnedUnwrap__ownership_source_exprs(self: ForeignOwnedUnwrap) RETURNS ![]Emittable ->
-  RETURN foreignOwnedUnwrap__child_exprs(self);
+  RETURN TRY (foreignOwnedUnwrap__child_exprs(self));
 END
 FN foreignOwnedUnwrap__mir?(self: ForeignOwnedUnwrap) RETURNS Bool ->
   RETURN TRUE;
@@ -11154,7 +11154,7 @@ PUB STRUCT ForeignSliceView {
 }
 
 FN foreignSliceView__child_exprs(self: ForeignSliceView) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN foreignSliceView__compact_child_exprs(self, [CAST(self.pointer AS Any), CAST(self.count AS Any)]);
+  RETURN TRY (foreignSliceView__compact_child_exprs(self, [CAST(self.pointer AS Any), CAST(self.count AS Any)]));
 END
 FN foreignSliceView__mir?(self: ForeignSliceView) RETURNS Bool ->
   RETURN TRUE;
@@ -11244,7 +11244,7 @@ FN rangeLit__set_result_type(MUTABLE self: MIRRangeLit, value: ?Type) RETURNS Vo
   self.result_type = COPY value;
 END
 FN rangeLit__child_exprs(self: MIRRangeLit) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN rangeLit__compact_child_exprs(self, [CAST(self.start AS Any), CAST(self.end_val AS Any)]);
+  RETURN TRY (rangeLit__compact_child_exprs(self, [CAST(self.start AS Any), CAST(self.end_val AS Any)]));
 END
 FN rangeLit__ownership_effect(self: MIRRangeLit) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__owned(:frame, :uniform, FALSE);
@@ -11307,7 +11307,7 @@ PUB STRUCT HasField {
 }
 
 FN hasField__child_exprs(self: HasField) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN hasField__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (hasField__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN hasField__expr(self: HasField) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -11373,10 +11373,10 @@ PUB STRUCT ItemsAccess {
 }
 
 FN itemsAccess__child_exprs(self: ItemsAccess) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN itemsAccess__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (itemsAccess__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN itemsAccess__ownership_source_exprs(self: ItemsAccess) RETURNS ![]Emittable ->
-  RETURN itemsAccess__child_exprs(self);
+  RETURN TRY (itemsAccess__child_exprs(self));
 END
 FN itemsAccess__expr(self: ItemsAccess) RETURNS Emittable ->
   RETURN COPY self.expr;
@@ -11441,10 +11441,10 @@ FN ownedSlice__initialize(MUTABLE self: OwnedSlice, expr: Emittable, alloc: Stri
 
 END
 FN ownedSlice__child_exprs(self: OwnedSlice) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN ownedSlice__compact_child_exprs(self, [CAST(self.expr AS Any)]);
+  RETURN TRY (ownedSlice__compact_child_exprs(self, [CAST(self.expr AS Any)]));
 END
 FN ownedSlice__ownership_source_exprs(self: OwnedSlice) RETURNS ![]Emittable ->
-  RETURN ownedSlice__child_exprs(self);
+  RETURN TRY (ownedSlice__child_exprs(self));
 END
 FN ownedSlice__ownership_effect(self: OwnedSlice) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownedSlice__owned_effect_for_alloc(self, self.alloc);
@@ -11579,13 +11579,13 @@ FN pipeline__expr?(self: Pipeline) RETURNS Bool ->
   RETURN TRUE;
 END
 FN pipeline__child_exprs(self: Pipeline) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN pipeline__compact_child_exprs(self, [CAST(self.inner AS Any)]);
+  RETURN TRY (pipeline__compact_child_exprs(self, [CAST(self.inner AS Any)]));
 END
 FN pipeline__ownership_source_exprs(self: Pipeline) RETURNS ![]Emittable ->
-  RETURN pipeline__child_exprs(self);
+  RETURN TRY (pipeline__child_exprs(self));
 END
 FN pipeline__owned_position_source_exprs(self: Pipeline) RETURNS ![]Emittable ->
-  RETURN pipeline__child_exprs(self);
+  RETURN TRY (pipeline__child_exprs(self));
 END
 FN pipeline__ownership_effect(self: Pipeline) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__from_pipeline(self.sink_alloc, self.inner));
@@ -11642,7 +11642,7 @@ FN inlineBc__initialize(MUTABLE self: InlineBc, op: String@symbol, args: []Emitt
 
 END
 FN inlineBc__child_exprs(self: InlineBc) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN inlineBc__compact_child_exprs(self, self.args);
+  RETURN TRY (inlineBc__compact_child_exprs(self, self.args));
 END
 FN inlineBc__ownership_effect(self: InlineBc) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(self.stdlib_def);
@@ -11730,7 +11730,7 @@ FN orElseExitBcRewrite__initialize(MUTABLE self: OrElseExitBcRewrite, kind: ?Str
 
 END
 FN orElseExitBcRewrite__child_exprs(self: OrElseExitBcRewrite) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN orElseExitBcRewrite__compact_child_exprs(self, [CAST(self.message AS Any)]);
+  RETURN TRY (orElseExitBcRewrite__compact_child_exprs(self, [CAST(self.message AS Any)]));
 END
 FN orElseExitBcRewrite__mir?(self: OrElseExitBcRewrite) RETURNS Bool ->
   RETURN TRUE;
@@ -11811,7 +11811,7 @@ FN shardedMapPut__expr?(self: ShardedMapPut) RETURNS Bool ->
   RETURN TRUE;
 END
 FN shardedMapPut__child_exprs(self: ShardedMapPut) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN shardedMapPut__compact_child_exprs(self, [CAST(self.target AS Any), CAST(self.key AS Any), CAST(self.value AS Any)]);
+  RETURN TRY (shardedMapPut__compact_child_exprs(self, [CAST(self.target AS Any), CAST(self.key AS Any), CAST(self.value AS Any)]));
 END
 FN shardedMapPut__has_alloc_metadata?(self: ShardedMapPut) RETURNS Bool ->
   RETURN !(inlineAllocMetadata__empty?(self.resolved_allocs));
@@ -11894,7 +11894,7 @@ FN shardedMapGet__initialize(MUTABLE self: ShardedMapGet, target: Emittable, key
 
 END
 FN shardedMapGet__child_exprs(self: ShardedMapGet) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN shardedMapGet__compact_child_exprs(self, [CAST(self.target AS Any), CAST(self.key AS Any)]);
+  RETURN TRY (shardedMapGet__compact_child_exprs(self, [CAST(self.target AS Any), CAST(self.key AS Any)]));
 END
 FN shardedMapGet__mir?(self: ShardedMapGet) RETURNS Bool ->
   RETURN TRUE;
@@ -12118,7 +12118,7 @@ FN ownershipEffect__from_callable_facts(emits_allocating: Bool, heap_return_allo
   MUTABLE unknown_owned_result = FALSE;
   IF (heap_return_alloc AND (result_owns == NIL)) THEN
     IF result_type EXISTS AS result_type_value THEN
-      unknown_owned_result = !(ownershipEffect__owned_result_type?(result_type_value));
+      unknown_owned_result = !(TRY (ownershipEffect__owned_result_type?(result_type_value)));
     END
   END
   MUTABLE missing_allocator = ((alloc == NIL) AND !(heap_return_alloc));
@@ -12294,7 +12294,7 @@ FN ownershipEffect__from_children(children: []Emittable) RETURNS !OwnershipEffec
   FOR child IN children DO
     &child_effects.append(TRY (emittable__ownership_effect(child)));
   END
-  RETURN ownershipEffect__from_effects(child_effects);
+  RETURN TRY (ownershipEffect__from_effects(child_effects));
 END
 FN ownershipEffect__from_try_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type, fallback_is_literal: Bool, left_never_success: Bool) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(left, result_type)), left}, Tuple{(left.produces_owned AND fallback_is_literal), left}, Tuple{(right.produces_owned AND left_never_success), right}]));
@@ -12321,9 +12321,9 @@ FN ownershipEffect__from_block_body(body: []Emittable, result_type: ?Type, borro
     END
   END
   RETURN TRY (ownershipEffect__first_active_effect([
-    Tuple{TRUE, ownershipEffect__transferred_break_ident_effect(stmts, value)},
+    Tuple{TRUE, TRY (ownershipEffect__transferred_break_ident_effect(stmts, value))},
     Tuple{TRUE, TRY (ownershipEffect__of(value))},
-    Tuple{TRUE, ownershipEffect__block_result_transfer_effect(stmts, value)},
+    Tuple{TRUE, TRY (ownershipEffect__block_result_transfer_effect(stmts, value))},
     Tuple{(TRY (ownershipEffect__cleanup_result_type?(result_type)) AND !((borrowed_view OR ownershipEffect__borrowed_break_value?(value)))), ownershipEffect__owned(NIL, :uniform)}
   ]));
 END
@@ -13696,7 +13696,7 @@ FN failureAction__child_exprs(self: FailureAction) RETURNS ![]Emittable EFFECTS 
   IF self.return_value EXISTS AS return_value_value THEN
     &values.append(COPY return_value_value);
   END
-  RETURN failureAction__compact_child_exprs(self, values);
+  RETURN TRY (failureAction__compact_child_exprs(self, values));
 END
 FN failureAction__body_slots(MUTABLE self: FailureAction) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF !((self.kind == FailureActionKind.Block)) THEN
@@ -13979,7 +13979,7 @@ PUB STRUCT NextPromiseList {
 }
 
 FN nextPromiseList__child_exprs(self: NextPromiseList) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN nextPromiseList__compact_child_exprs(self, [CAST(self.list_expr AS Any)]);
+  RETURN TRY (nextPromiseList__compact_child_exprs(self, [CAST(self.list_expr AS Any)]));
 END
 PUB FN nextPromiseList__elem_zig(self: NextPromiseList) RETURNS !String ->
   MUTABLE payload = TRY (type__success_type(self.async_shape.payload_type));
@@ -14067,7 +14067,7 @@ FN registryCall__child_exprs(self: RegistryCall) RETURNS ![]Emittable EFFECTS RE
   FOR _ IN self.args DO
   &children.append(COPY _.expr);
   END
-  RETURN registryCall__compact_child_exprs(self, children);
+  RETURN TRY (registryCall__compact_child_exprs(self, children));
 END
 PUB FN registryCall__has_alloc_metadata?(self: RegistryCall) RETURNS Bool ->
   MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY KEEP self.allocs;
@@ -14178,7 +14178,7 @@ FN indexedStore__child_exprs(self: IndexedStore) RETURNS ![]Emittable EFFECTS RE
   &children.append(COPY self.target);
   &children.append(COPY self.index);
   &children.append(COPY self.value);
-  RETURN indexedStore__compact_child_exprs(self, children);
+  RETURN TRY (indexedStore__compact_child_exprs(self, children));
 END
 FN indexedStore__has_alloc_metadata?(self: IndexedStore) RETURNS Bool ->
   RETURN !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_222 = (KEEP self.allocs);
@@ -14267,7 +14267,7 @@ PUB STRUCT CFunctionAdapter {
 }
 
 FN cFunctionAdapter__child_exprs(self: CFunctionAdapter) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN cFunctionAdapter__compact_child_exprs(self, [CAST(self.clear_function AS Any)]);
+  RETURN TRY (cFunctionAdapter__compact_child_exprs(self, [CAST(self.clear_function AS Any)]));
 END
 FN cFunctionAdapter__mir?(self: CFunctionAdapter) RETURNS Bool ->
   RETURN TRUE;
@@ -14349,7 +14349,7 @@ FN externTrampoline__child_exprs(self: ExternTrampoline) RETURNS ![]Emittable EF
   FOR _ IN self.runtime_args DO
   &children.append(COPY _.expr);
   END
-  RETURN externTrampoline__compact_child_exprs(self, children);
+  RETURN TRY (externTrampoline__compact_child_exprs(self, children));
 END
 FN externTrampoline__ownership_effect(self: ExternTrampoline) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE heap_return = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_234 = (KEEP self.stdlib_def);
@@ -14510,7 +14510,7 @@ PUB STRUCT ShardConcurrentEach {
 }
 
 FN shardConcurrentEach__child_exprs(self: ShardConcurrentEach) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  RETURN shardConcurrentEach__compact_child_exprs(self, [self.map_expr, self.start_expr, self.finish_expr, self.capacity_expr, self.batch_size_expr]);
+  RETURN TRY (shardConcurrentEach__compact_child_exprs(self, [self.map_expr, self.start_expr, self.finish_expr, self.capacity_expr, self.batch_size_expr]));
 END
 FN shardConcurrentEach__body_slots(MUTABLE self: ShardConcurrentEach) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([shardConcurrentEach__body_slot(self, :producer_key_body, self.producer_key_body), shardConcurrentEach__body_slot(self, :capture_setup, self.capture_setup), shardConcurrentEach__body_slot(self, :body, self.body)] AS []MIRBodySlot);

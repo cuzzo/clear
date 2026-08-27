@@ -118,7 +118,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE match_statement_mutable = COPY match_statement;
       match_statement_mutable.expr = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, matchStatement__expr(match_statement_mutable)));
       FOR _ IN match_statement_mutable.cases DO
-    MUTABLE body = COPY matchCase__body(_);
+    MUTABLE body = COPY TRY (matchCase__body(_));
     IF body THEN
           body = body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
     END

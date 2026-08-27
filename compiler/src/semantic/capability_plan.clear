@@ -45,7 +45,7 @@ PUB STRUCT CapabilityTargetFact {
 }
 
 FN capabilityTargetFact__lock_identity(self: CapabilityTargetFact) RETURNS !?String@symbol ->
-  RETURN type__base_type(self.resolved_type);
+  RETURN TRY (type__base_type(self.resolved_type));
 END
 FN capabilityTargetFact__with_source_entry(self: CapabilityTargetFact, live_symbols: {String}SymbolEntry@multiowned, key: String) RETURNS !CapabilityTargetFact ->
   IF live_symbols[key] EXISTS AS source_entry_value THEN
@@ -256,7 +256,7 @@ PUB FN capabilityPlan__refresh_function_plans_mut(fn_value: FunctionDef, with_bl
     END
     MUTABLE concrete_plan: WithCapabilityPlan = COPY CAST(plan AS WithCapabilityPlan);
     MUTABLE rtoc_writer_receiver_6: WithBlock = with_blocks[rtoc_idx]?;
-    rtoc_writer_receiver_6.capability_plan = withCapabilityPlan__refresh_live_symbols(concrete_plan, live_symbols);
+    rtoc_writer_receiver_6.capability_plan = TRY (withCapabilityPlan__refresh_live_symbols(concrete_plan, live_symbols));
   rtoc_idx = rtoc_idx + 1;
   END
 END

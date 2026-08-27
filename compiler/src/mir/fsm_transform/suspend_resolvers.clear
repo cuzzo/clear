@@ -47,7 +47,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
   IF em != NIL THEN
     state_finalize = COPY em.fsm_state_finalize;
   END
-  MUTABLE arg_mirs = io_tail.call_node.args() |> SELECT mIRLowering__lower(lowering, _);
+  MUTABLE arg_mirs = io_tail.call_node.args() |> SELECT TRY (mIRLowering__lower(lowering, _));
   MUTABLE lowerer = lowerer__new(id, arg_mirs);
   MUTABLE setup_mir = TRY (lowerer__lower_stmts(lowerer, setup_ops));
   MUTABLE state_finalize_m = TRY (lowerer__lower_stmts(lowerer, state_finalize));
@@ -80,7 +80,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
     MUTABLE ctx_ident = Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
     &ctx_field_decls.append(suspendResolvers__ctx_field_decl(result_var, result_zig_type, Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }));
     &bind_stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY result_var, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY finish_value_mir, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
-    result_needs_cleanup = (suspendResolvers__ownership_bearing_result_type?(ft, lowering) AND !(finish_value_template_owned));
+    result_needs_cleanup = (TRY (suspendResolvers__ownership_bearing_result_type?(ft, lowering)) AND !(finish_value_template_owned));
   ELSE_IF finish_value_mir THEN
     &bind_stmts.append(ExprStmt{ expr: UNWRAP (COPY finish_value_mir), discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
   END
@@ -120,7 +120,7 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
   ELSE
     NIL
   END;
-  MUTABLE result_needs_cleanup = suspendResolvers__ownership_bearing_result_type?(inner_type_info, lowering);
+  MUTABLE result_needs_cleanup = TRY (suspendResolvers__ownership_bearing_result_type?(inner_type_info, lowering));
   MUTABLE finish_call = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "finishFsmNext", args: ( { MUTABLE rtoc_empty_list_1: []Any = List[]; rtoc_empty_list_1 } ), try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
   MUTABLE err_name = "__err_${susp_idx.toString()}";
   MUTABLE finish_expr = TryCatch{ expr: Emittable{ MIRMethodCall: COPY finish_call }, catch_body: Emittable{ ScopeBlock: COPY ScopeBlock{ body: [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: COPY err_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ ReturnStmt: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, capture: COPY err_name, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };

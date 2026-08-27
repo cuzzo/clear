@@ -92,7 +92,7 @@ END
 PRIVATE FN fsmWrapperEmitter__render_destroy_task(ctx_id: Int64, destroy_actions: []FsmDestroyAction, MUTABLE mir_emitter: MIREmitter) RETURNS !String
   EFFECTS REENTRANT
 ->
-  MUTABLE extra_zig = fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, &mir_emitter);
+  MUTABLE extra_zig = TRY (fsmWrapperEmitter__render_destroy_actions(ctx_id, destroy_actions, &mir_emitter));
   MUTABLE extra: String = "";
   IF !(fsmWrapperEmitter__empty?(extra_zig)) THEN
     extra = (((extra_zig.split("\n") |> SELECT "    ${_.trim()}").join("\n")) $+ "\n");
@@ -372,7 +372,7 @@ PRIVATE FN fsmWrapperEmitter__render_spawn_setup(s: FsmSpawnSetup, blk_label: St
     &parts.append("    ${s.ctx_var}_task.profile_dispatch = ${UNWRAP (s.profile_dispatch_id).toString()};");
   END
   &parts.append("    ${s.ctx_var}.* = .{");
-  &parts.append(fsmWrapperEmitter__indent_block(fsmWrapperEmitter__render_struct_init_fields(s.ctx_init_fields, &mir_emitter), 8));
+  &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_struct_init_fields(s.ctx_init_fields, &mir_emitter)), 8));
   &parts.append("    };");
   &parts.append("    ${s.ctx_var}.task = ${s.ctx_var}_task;");
   &parts.append("    ${s.ctx_var}.rt = try CheatHeader.allocFsmTaskRuntime(${s.ctx_var}_task, ${s.rt_name});");
@@ -463,7 +463,7 @@ PRIVATE FN fsmWrapperEmitter__render_fsm_spawn_call(call: FsmSpawnCall) RETURNS 
     panic("unknown FsmSpawnCall target {}");
   END
 END
-PRIVATE FN fsmWrapperEmitter__render_destroy_actions(ctx_id: Int64, destroy_actions: []FsmDestroyAction, MUTABLE mir_emitter: MIREmitter) RETURNS String
+PRIVATE FN fsmWrapperEmitter__render_destroy_actions(ctx_id: Int64, destroy_actions: []FsmDestroyAction, MUTABLE mir_emitter: MIREmitter) RETURNS !String
   EFFECTS REENTRANT
 ->
   IF (destroy_actions.length() == 0) THEN

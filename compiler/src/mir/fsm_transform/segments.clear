@@ -133,7 +133,7 @@ PUB FN segments__split(body_input: []Locatable, lowering: Any) RETURNS !?SplitRe
   IF loop_result EXISTS AS loop_result_value THEN
     RETURN COPY loop_result_value;
   END
-  IF segments__contains_unsupported_shape?(body) THEN
+  IF TRY (segments__contains_unsupported_shape?(body)) THEN
     RETURN NIL;
   END
   MUTABLE segments: []Segment = ( { MUTABLE rtoc_empty_list_1: []Segment = List[]; rtoc_empty_list_1 } );
@@ -155,14 +155,14 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < body.length() DO
   IF body[rtoc_idx]? IS_A WhileLoop AS while_loop THEN
-      IF segments__contains_suspend_anywhere?(while_loop.do_branch) THEN
+      IF TRY (segments__contains_suspend_anywhere?(while_loop.do_branch)) THEN
         IF loop_idx EXISTS AS loop_idx_value THEN
           RETURN NIL;
         END
         loop_idx = rtoc_idx;
       END
   ELSE_IF body[rtoc_idx]? IS_A WhileBindLoop AS while_bind_loop THEN
-      IF segments__contains_suspend_anywhere?(while_bind_loop.do_branch) THEN
+      IF TRY (segments__contains_suspend_anywhere?(while_bind_loop.do_branch)) THEN
         IF loop_idx EXISTS AS loop_idx_value THEN
           RETURN NIL;
         END
@@ -176,14 +176,14 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
     MUTABLE post = TRY (segments__segment_slice(body, (loop_idx_value + 1), body.length()));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < pre.length() DO
-  IF segments__contains_suspend_anywhere?([pre[rtoc_idx]?]) THEN
+  IF TRY (segments__contains_suspend_anywhere?([pre[rtoc_idx]?])) THEN
         RETURN NIL;
   END
   rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < post.length() DO
-  IF segments__contains_suspend_anywhere?([post[rtoc_idx]?]) THEN
+  IF TRY (segments__contains_suspend_anywhere?([post[rtoc_idx]?])) THEN
         RETURN NIL;
   END
   rtoc_idx = rtoc_idx + 1;
@@ -198,7 +198,7 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
         MUTABLE s = UNWRAP (loop_body_value[index]);
         MUTABLE sus: ?SegmentTail = TRY (segments__classify_suspend(s));
         IF (sus == NIL) THEN
-          IF segments__contains_suspend_anywhere?([s]) THEN
+          IF TRY (segments__contains_suspend_anywhere?([s])) THEN
             RETURN NIL;
           END
         ELSE
@@ -215,14 +215,14 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
         MUTABLE loop_post = TRY (segments__segment_slice(loop_body_value, (sus_idx_value + 1), loop_body_value.length()));
         MUTABLE rtoc_idx = 0;
         WHILE rtoc_idx < loop_pre.length() DO
-  IF segments__contains_suspend_anywhere?([loop_pre[rtoc_idx]?]) THEN
+  IF TRY (segments__contains_suspend_anywhere?([loop_pre[rtoc_idx]?])) THEN
             RETURN NIL;
   END
   rtoc_idx = rtoc_idx + 1;
         END
         MUTABLE rtoc_idx = 0;
         WHILE rtoc_idx < loop_post.length() DO
-  IF segments__contains_suspend_anywhere?([loop_post[rtoc_idx]?]) THEN
+  IF TRY (segments__contains_suspend_anywhere?([loop_post[rtoc_idx]?])) THEN
             RETURN NIL;
   END
   rtoc_idx = rtoc_idx + 1;
@@ -272,28 +272,28 @@ PRIVATE FN segments__loop_condition_for(node: Locatable) RETURNS ?Locatable ->
   END
 END
 PRIVATE FN segments__contains_unsupported_shape?(body: []Locatable) RETURNS !Bool ->
-  RETURN body |> ANY segments__stmt_unsupported?(_);
+  RETURN body |> ANY TRY (segments__stmt_unsupported?(_));
 END
 PRIVATE FN segments__stmt_unsupported?(stmt: Locatable) RETURNS !Bool ->
   IF stmt IS_A WhileLoop AS while_loop THEN
-    RETURN segments__contains_suspend_anywhere?(while_loop.do_branch);
+    RETURN TRY (segments__contains_suspend_anywhere?(while_loop.do_branch));
   ELSE_IF stmt IS_A WhileBindLoop AS while_bind_loop THEN
-    RETURN segments__contains_suspend_anywhere?(while_bind_loop.do_branch);
+    RETURN TRY (segments__contains_suspend_anywhere?(while_bind_loop.do_branch));
   ELSE_IF stmt IS_A ForRange AS for_range THEN
-    RETURN segments__contains_suspend_anywhere?(for_range.body);
+    RETURN TRY (segments__contains_suspend_anywhere?(for_range.body));
   ELSE_IF stmt IS_A ForEach AS for_each THEN
-    RETURN segments__contains_suspend_anywhere?(for_each.body);
+    RETURN TRY (segments__contains_suspend_anywhere?(for_each.body));
   ELSE_IF stmt IS_A WithBlock AS with_block THEN
     RETURN TRUE;
   ELSE_IF stmt IS_A CatchBlock AS catch_block THEN
     RETURN TRUE;
   ELSE_IF stmt IS_A IfStatement AS if_statement THEN
-    IF segments__contains_suspend_anywhere?(if_statement.then_branch) THEN
+    IF TRY (segments__contains_suspend_anywhere?(if_statement.then_branch)) THEN
       RETURN TRUE;
     END
     MUTABLE else_branch: ?[]Locatable = if_statement.else_branch;
     IF else_branch EXISTS AS else_branch_value THEN
-      RETURN segments__contains_suspend_anywhere?(else_branch_value);
+      RETURN TRY (segments__contains_suspend_anywhere?(else_branch_value));
     ELSE
       RETURN FALSE;
     END
@@ -335,7 +335,7 @@ PRIVATE FN segments__contains_suspend_anywhere?(stmts: ?[]Locatable) RETURNS !Bo
           END
         END
       ELSE
-        IF !((segments__classify_suspend(stmt) == NIL)) THEN
+        IF !((TRY (segments__classify_suspend(stmt)) == NIL)) THEN
           RETURN TRUE;
         END
       END
@@ -348,11 +348,11 @@ PRIVATE FN segments__contains_suspend_anywhere?(stmts: ?[]Locatable) RETURNS !Bo
 END
 PUB FN segments__classify_suspend(stmt: Locatable) RETURNS !?SegmentTail ->
   IF (stmt IS_A FuncCall) OR (stmt IS_A MethodCall) OR (stmt IS_A NextExpr) THEN
-    RETURN segments__suspend_for(stmt, NIL);
+    RETURN TRY (segments__suspend_for(stmt, NIL));
   ELSE_IF stmt IS_A VarDecl AS var_decl THEN
-    RETURN segments__suspend_for(var_decl.value, var_decl.name);
+    RETURN TRY (segments__suspend_for(var_decl.value, var_decl.name));
   ELSE_IF stmt IS_A BindExpr AS bind_expr THEN
-    RETURN segments__suspend_for(bind_expr.value, bind_expr.name);
+    RETURN TRY (segments__suspend_for(bind_expr.value, bind_expr.name));
   ELSE_IF stmt IS_A Assignment AS assignment THEN
     RETURN segments__suspend_for(assignment.value, castOptionalAssignmentNameToOptionalString({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_6: ?AssignmentName = NIL;
     IF TRUE THEN
@@ -362,7 +362,7 @@ PUB FN segments__classify_suspend(stmt: Locatable) RETURNS !?SegmentTail ->
     END
     rtoc_ternary_value_6? }));
   ELSE_IF stmt IS_A DestructuringAssignment AS destructuring_assignment THEN
-    RETURN segments__suspend_for(destructuring_assignment.value, NIL);
+    RETURN TRY (segments__suspend_for(destructuring_assignment.value, NIL));
   ELSE
     RETURN NIL;
   END
@@ -371,7 +371,7 @@ PRIVATE FN segments__suspend_for(v: ?Locatable, name: ?String) RETURNS !?Segment
   IF v EXISTS AS v_value THEN
     MUTABLE value = COPY v_value;
     IF (value IS_A FuncCall) OR (value IS_A MethodCall) THEN
-      IF segments__io_suspending_call?(castLocatableToCallNode(value)) THEN
+      IF TRY (segments__io_suspending_call?(castLocatableToCallNode(value))) THEN
         RETURN SegmentTail{ IoSuspend: COPY IoSuspend{ call_node: COPY value, stdlib_def: aST__node__matched_signature(value), result_var: COPY name, next_index: NIL } };
       END
     ELSE_IF value IS_A NextExpr AS next_expr THEN
@@ -400,7 +400,7 @@ PRIVATE FN segments__io_suspending_call?(call_node: SegmentsCallNode) RETURNS !B
   RETURN FALSE;
 END
 PUB FN segments__suspending_call?(expr: Locatable) RETURNS !Bool ->
-  RETURN ((aST__call?(expr)) AND segments__io_suspending_call?(castLocatableToCallNode(expr)));
+  RETURN ((aST__call?(expr)) AND TRY (segments__io_suspending_call?(castLocatableToCallNode(expr))));
 END
 PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable ->
   MUTABLE out = List[];
@@ -419,7 +419,7 @@ PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable
   END
   MUTABLE pipe_lhs_suspends: Bool = FALSE;
   IF pipe_lhs EXISTS AS lhs_probe THEN
-    pipe_lhs_suspends = segments__io_suspending_call?(castLocatableToCallNode(lhs_probe));
+    pipe_lhs_suspends = TRY (segments__io_suspending_call?(castLocatableToCallNode(lhs_probe)));
   END
   IF pipe_lhs_suspends THEN
     MUTABLE pipe_lhs_value: Locatable = COPY UNWRAP (pipe_lhs);

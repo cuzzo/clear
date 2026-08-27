@@ -1079,7 +1079,7 @@ PRIVATE FN type__resolve_integer_op(op: String@symbol, left_type: Type, right_ty
   RETURN TRY (type__resolve_numeric_op(left_type, right_type));
 END
 PRIVATE FN type__equality_compatible?(left_type: Type, right_type: Type) RETURNS !Bool ->
-  IF ((type__any?(left_type) OR type__any?(right_type)) OR type__optional_any_comparable?(left_type, right_type)) THEN
+  IF ((type__any?(left_type) OR type__any?(right_type)) OR TRY (type__optional_any_comparable?(left_type, right_type))) THEN
     RETURN TRUE;
   END
   RETURN ((((type__resolved(left_type) == type__resolved(right_type)) OR type__optional_nil_comparable?(left_type, right_type)) OR TRY (type__optional_payload_comparable?(left_type, right_type))) OR TRY (type__scalar_comparable?(left_type, right_type)));
@@ -1916,7 +1916,7 @@ PUB FN type__primitive?(self: Type) RETURNS Bool ->
 END
 PUB FN type__accepts?(self: Type, other_type: Type) RETURNS !Bool EFFECTS REENTRANT ->
   IF type__fn_type?(self) THEN
-    RETURN type__accepts_fn_type?(self, other_type);
+    RETURN TRY (type__accepts_fn_type?(self, other_type));
   END
   IF (type__any?(self) OR type__any?(other_type)) THEN
     RETURN TRUE;
@@ -2003,7 +2003,7 @@ PUB FN type__array_overflow?(self: Type, other_type: Type) RETURNS !?Bool ->
   IF (!(type__array?(other_type)) OR !(type__array?(self))) THEN
     RETURN FALSE;
   END
-  IF (type__base_type(self) != type__base_type(other_type)) THEN
+  IF (TRY (type__base_type(self)) != TRY (type__base_type(other_type))) THEN
     RETURN FALSE;
   END
   IF (!(type__fixed?(other_type)) OR !(type__fixed?(self))) THEN
@@ -2150,7 +2150,7 @@ PUB FN type__fixed_position_type(self: Type, index_value: Int64) RETURNS !?Type 
   RETURN TRY (type__element_type(self));
 END
 PUB FN type__string?(self: Type) RETURNS !Bool ->
-  RETURN ((type__resolved(self) == :String) OR ((type__array?(self) AND (type__base_type(self) == :Byte))));
+  RETURN ((type__resolved(self) == :String) OR ((type__array?(self) AND (TRY (type__base_type(self)) == :Byte))));
 END
 PUB FN type__any?(self: Type) RETURNS Bool ->
   RETURN (type__resolved(self) == :Any);

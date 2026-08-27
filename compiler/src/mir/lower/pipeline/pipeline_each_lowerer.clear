@@ -59,7 +59,7 @@ PRIVATE FN pipelineEachLowerer__lower_source_plan(self: PipelineEachLowerer, sou
   ELSE_IF (source_kind IS_A Set) THEN
     RETURN PipelineEachResult{ ScopeBlock: COPY TRY (pipelineEachLowerer__lower_set_each(self, plan.list_node, plan.each_op)) };
   ELSE_IF (source_kind == PipelineEachSourceKind.RangeLiteral) THEN
-    RETURN PipelineEachResult{ ForStmt: COPY pipelineEachLowerer__lower_range_literal_each(self, plan.list_node, plan.each_op) };
+    RETURN PipelineEachResult{ ForStmt: COPY TRY (pipelineEachLowerer__lower_range_literal_each(self, plan.list_node, plan.each_op)) };
   ELSE_IF (source_kind == PipelineEachSourceKind.Unsupported) THEN
     RETURN NIL;
   ELSE

@@ -47,7 +47,7 @@ PUB FN derivedProgramFacts__capture(nodes: {String}FunctionDef) RETURNS !Derived
   IF !(signature) THEN
       panic("missing finalized function signature for {}");
   END
-  functions[_] = derivedProgramFacts__capture_function(_, node, UNWRAP (signature));
+  functions[_] = TRY (derivedProgramFacts__capture_function(_, node, UNWRAP (signature)));
   };
   RETURN derivedProgramFacts__new(functions);
 END
@@ -55,7 +55,7 @@ PUB FN derivedProgramFacts__to_h(self: DerivedProgramFacts) RETURNS !{String}Any
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN CAST({"functions": ( { MUTABLE rtoc_transform_values_result_2: {String}{String}Any@multiowned = {}; FOR rtoc_key IN rtoc_self_view.functions.keys() DO rtoc_transform_values_result_2[rtoc_key] = derivedFunctionFacts__to_h((rtoc_self_view.functions[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS DerivedFunctionFacts))); END rtoc_transform_values_result_2 } )} AS {String}Any@multiowned);
+    RETURN CAST({"functions": ( { MUTABLE rtoc_transform_values_result_2: {String}{String}Any@multiowned = {}; FOR rtoc_key IN rtoc_self_view.functions.keys() DO rtoc_transform_values_result_2[rtoc_key] = TRY (derivedFunctionFacts__to_h((rtoc_self_view.functions[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS DerivedFunctionFacts)))); END rtoc_transform_values_result_2 } )} AS {String}Any@multiowned);
 }
 END
 PRIVATE FN derivedProgramFacts__capture_function(name: String, node: FunctionDef, signature: FunctionSignature) RETURNS !DerivedFunctionFacts ->

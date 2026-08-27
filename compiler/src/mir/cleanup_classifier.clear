@@ -283,14 +283,14 @@ PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []Locatable, bindings:
   ELSE_IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
       cleanupClassifier__mark_iteration_values_function_mut(COPY destructuring_assignment.value, local_entries);
   ELSE_IF node IS_A FuncCall AS func_call THEN
-      cleanupClassifier__mark_call_lifetime_extensions_mut(func_call.args, cleanupClassifier__params_for_call(func_call), local_entries, NIL);
+      cleanupClassifier__mark_call_lifetime_extensions_mut(func_call.args, TRY (cleanupClassifier__params_for_call(func_call)), local_entries, NIL);
   ELSE_IF node IS_A MethodCall AS method_call THEN
       MUTABLE receiver: ?Identifier = aST__root_identifier(method_call.object);
       MUTABLE receiver_nonlocal = FALSE;
       IF receiver EXISTS AS receiver_value THEN
         receiver_nonlocal = !(local_names.contains?(COPY receiver_value.name));
       END
-      cleanupClassifier__mark_call_lifetime_extensions_mut(COPY method_call.args, cleanupClassifier__params_for_method_call(method_call) |> SKIP 1, local_entries, receiver_nonlocal);
+      cleanupClassifier__mark_call_lifetime_extensions_mut(COPY method_call.args, TRY (cleanupClassifier__params_for_method_call(method_call)) |> SKIP 1, local_entries, receiver_nonlocal);
   END
   rubyToClearVoid()
   }));
@@ -377,7 +377,7 @@ END
 PUB FN cleanupClassifier__stamp_field_pre_cleanups_mut(MUTABLE body: []Locatable, facts: FrozenCleanupFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !Void ->
   aST__each_locatable_list_mut(&body, FALSE, %(MUTABLE stmt: Locatable) USE(facts, lifecycle_registry, schema_lookup) -> {
   PARTIAL MATCH stmt START
-    Locatable.Assignment AS MUTABLE assignment -> cleanupClassifier__stamp_field_pre_cleanup_mut(&assignment, facts, schema_lookup, lifecycle_registry);
+    Locatable.Assignment AS MUTABLE assignment -> TRY (cleanupClassifier__stamp_field_pre_cleanup_mut(&assignment, facts, schema_lookup, lifecycle_registry));
   END
   rubyToClearVoid()
   });
@@ -784,7 +784,7 @@ PUB FN cleanupClassifier__takes_param_base_entry(ti: Type, schema_lookup: FN(Str
   IF (TRY (cleanupClassifier__classify_struct_cleanup_fields(ti, NIL, schema_lookup))) EXISTS AS struct_entry THEN
     RETURN COPY struct_entry;
   END
-  IF cleanupClassifier__classify_structural_product(ti, schema_lookup) EXISTS AS structural_product THEN
+  IF TRY (cleanupClassifier__classify_structural_product(ti, schema_lookup)) EXISTS AS structural_product THEN
     RETURN COPY structural_product;
   END
   IF lifecycle_registry EXISTS AS registry THEN
@@ -803,7 +803,7 @@ PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_looku
     IF (match_stmt.takes OR_ELSE FALSE) THEN
       IF match_stmt.expr IS_A Identifier AS subject THEN
         IF (subject.was_moved OR_ELSE FALSE) THEN
-          cleanupClassifier__stamp_match_as_bindings_mut(match_stmt, subject, schema_lookup, lifecycle_registry, &bindings);
+          TRY (cleanupClassifier__stamp_match_as_bindings_mut(match_stmt, subject, schema_lookup, lifecycle_registry, &bindings));
         END
       END
     END
@@ -908,26 +908,26 @@ PRIVATE FN cleanupClassifier__capture_binding_mut(name: String, expr: Locatable,
   END
 END
 PRIVATE FN cleanupClassifier__capture_entry(expr: Locatable, classification_node: Locatable, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry) RETURNS !?CleanupEntry@multiowned ->
-  IF !(aST__capture_expr_owns_result?(expr)) THEN
+  IF !(TRY (aST__capture_expr_owns_result?(expr))) THEN
     RETURN NIL;
   END
   MUTABLE expr_ti: Type = TRY (aST__capture_expr_source_type(expr));
-  MUTABLE inner_opt: ?Type = type__wrapped_type(expr_ti);
-  IF type__stream_step?(expr_ti) THEN
-    inner_opt = type__stream_step_item_type(expr_ti);
+  MUTABLE inner_opt: ?Type = TRY (type__wrapped_type(expr_ti));
+  IF TRY (type__stream_step?(expr_ti)) THEN
+    inner_opt = TRY (type__stream_step_item_type(expr_ti));
   ELSE_IF type__error_union?(expr_ti) THEN
-    inner_opt = type__success_type(expr_ti);
+    inner_opt = TRY (type__success_type(expr_ti));
   END
   IF !(inner_opt EXISTS) THEN
     RETURN NIL;
   END
   MUTABLE inner_ti: Type = COPY UNWRAP (inner_opt);
-  MUTABLE e: ?CleanupEntry@multiowned = cleanupClassifier__classify_binding(inner_ti, classification_node, schema_lookup, lifecycle_registry);
+  MUTABLE e: ?CleanupEntry@multiowned = TRY (cleanupClassifier__classify_binding(inner_ti, classification_node, schema_lookup, lifecycle_registry));
   IF !(lifecycle_registry EXISTS) THEN
     IF !(e EXISTS) THEN
-      IF cleanupClassifier__cleanup_owned_string_type?(inner_ti) THEN
+      IF TRY (cleanupClassifier__cleanup_owned_string_type?(inner_ti)) THEN
         e = COPY cleanupClassifier__entry(:heap_string, :heap, TRUE);
-      ELSE_IF type__needs_explicit_cleanup?(inner_ti, :heap, schema_lookup) THEN
+      ELSE_IF TRY (type__needs_explicit_cleanup?(inner_ti, :heap, schema_lookup)) THEN
         e = COPY cleanupClassifier__entry(:uniform);
       END
     END
@@ -936,15 +936,15 @@ PRIVATE FN cleanupClassifier__capture_entry(expr: Locatable, classification_node
     RETURN NIL;
   END
   MUTABLE entry_value = COPY UNWRAP (e);
-  IF cleanupClassifier__capture_expr_owned_alloc(expr, schema_lookup) EXISTS AS capture_alloc THEN
+  IF TRY (cleanupClassifier__capture_expr_owned_alloc(expr, schema_lookup)) EXISTS AS capture_alloc THEN
     cleanupEntry__set_alloc_mut(&entry_value, capture_alloc);
   END
   IF !(cleanupEntry__zig_type(entry_value) EXISTS) THEN
-    cleanupEntry__set_zig_type_mut(&entry_value, type__zig_type(inner_ti));
+    cleanupEntry__set_zig_type_mut(&entry_value, TRY (type__zig_type(inner_ti)));
   END
-  IF type__element_type(inner_ti) EXISTS AS elem_type THEN
+  IF TRY (type__element_type(inner_ti)) EXISTS AS elem_type THEN
     IF !(cleanupEntry__elem_zig_type(entry_value) EXISTS) THEN
-      cleanupEntry__set_elem_zig_type_mut(&entry_value, type__zig_type(elem_type));
+      cleanupEntry__set_elem_zig_type_mut(&entry_value, TRY (type__zig_type(elem_type)));
     END
   END
   RETURN COPY entry_value;
@@ -1085,8 +1085,8 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
   IF (cleanupClassifier__schema_resource?(schema) AND !(TRY (type__any_rc?(ti)))) THEN
     entry = cleanupClassifier__resource_entry(COPY UNWRAP (cleanupClassifier__schema_close_plan(schema)));
   END
-  IF cleanupClassifier__tuple_with_borrowed_element?(ti) THEN
-    entry = (entry OR_ELSE cleanupClassifier__classify_structural_product(ti, schema_lookup));
+  IF TRY (cleanupClassifier__tuple_with_borrowed_element?(ti)) THEN
+    entry = (entry OR_ELSE TRY (cleanupClassifier__classify_structural_product(ti, schema_lookup)));
   END
   IF (TRY (type__tense_observable?(ti)) AND !(type__promise_list?(ti))) THEN
     entry = (entry OR_ELSE cleanupClassifier__entry(:uniform, :heap, FALSE));
@@ -1095,28 +1095,28 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
     entry = cleanupClassifier__entry(:frozen, :heap, FALSE);
     cleanupClassifier__set_entry_fixed_alloc_mut(&entry);
   END
-  IF cleanupClassifier__stream_handle_type?(ti) THEN
+  IF TRY (cleanupClassifier__stream_handle_type?(ti)) THEN
     entry = (entry OR_ELSE cleanupClassifier__entry(:uniform, :heap, TRUE));
   END
   IF (!(entry EXISTS) AND (facts.resource_close_plan EXISTS)) THEN
     entry = cleanupClassifier__resource_entry(COPY UNWRAP (facts.resource_close_plan));
   END
-  entry = (entry OR_ELSE cleanupClassifier__classify_mutable_owning_slot(ti, node, schema_lookup));
+  entry = (entry OR_ELSE TRY (cleanupClassifier__classify_mutable_owning_slot(ti, node, schema_lookup)));
   entry = (entry OR_ELSE TRY (cleanupClassifier__classify_optional(ti, schema_lookup, node)));
   IF ((!(entry EXISTS) AND facts.heap_storage) AND TRY (type__recursive_cleanup_shape?(ti, schema_lookup))) THEN
     entry = cleanupClassifier__entry(:uniform, :heap, FALSE);
     cleanupClassifier__set_entry_fixed_alloc_mut(&entry);
   END
-  entry = (entry OR_ELSE cleanupClassifier__classify_owned_return_call(ti, node, schema_lookup));
+  entry = (entry OR_ELSE TRY (cleanupClassifier__classify_owned_return_call(ti, node, schema_lookup)));
   entry = (entry OR_ELSE TRY (cleanupClassifier__classify_collection(ti, schema_lookup, node)));
   IF ((!(entry EXISTS) AND TRY (type__direct_indexable_collection?(ti))) AND TRY (cleanupClassifier__elem_needs_cleanup?(ti, schema_lookup))) THEN
     entry = cleanupClassifier__entry(:uniform, :heap, TRUE);
   END
-  IF ((!(type__optional?(ti)) AND ((TRY (type__heap_ptr?(ti)) OR type__indirect?(ti)))) AND cleanupClassifier__ownership_bearing_type?(ti, schema_lookup)) THEN
+  IF ((!(type__optional?(ti)) AND ((TRY (type__heap_ptr?(ti)) OR type__indirect?(ti)))) AND TRY (cleanupClassifier__ownership_bearing_type?(ti, schema_lookup))) THEN
     entry = (entry OR_ELSE cleanupClassifier__entry(:uniform, :heap, TRUE));
   END
   entry = (entry OR_ELSE TRY (cleanupClassifier__classify_array_struct_strings(ti, node, schema_lookup)));
-  entry = (entry OR_ELSE cleanupClassifier__classify_rc_or_link(ti, schema_lookup));
+  entry = (entry OR_ELSE TRY (cleanupClassifier__classify_rc_or_link(ti, schema_lookup)));
   IF (type__any_sync?(ti) OR symbolEntry__cleanup_sync?(facts.sync)) THEN
     entry = (entry OR_ELSE cleanupClassifier__entry(:uniform, :heap, FALSE));
   END
@@ -1124,7 +1124,7 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
   entry = (entry OR_ELSE TRY (cleanupClassifier__classify_heap_storage(ti, node, schema_lookup, facts.sync)));
   entry = (entry OR_ELSE TRY (cleanupClassifier__classify_heap_composite(ti, node, schema_lookup, facts.sync)));
   entry = (entry OR_ELSE TRY (cleanupClassifier__classify_struct_cleanup_fields(ti, node, schema_lookup)));
-  entry = (entry OR_ELSE cleanupClassifier__classify_structural_product(ti, schema_lookup));
+  entry = (entry OR_ELSE TRY (cleanupClassifier__classify_structural_product(ti, schema_lookup)));
   entry = (entry OR_ELSE TRY (cleanupClassifier__classify_non_copy_union(ti, schema_lookup)));
   IF lifecycle EXISTS AS lifecycle_drop THEN
     IF lifecyclePlan__needs_drop?(lifecycle_drop) THEN

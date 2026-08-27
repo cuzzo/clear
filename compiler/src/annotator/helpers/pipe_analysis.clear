@@ -55,7 +55,7 @@ PUB FN selectorEffectFact__required_order(self: SelectorEffectFact) RETURNS Stri
   RETURN tenseSelectorPlan__required_order(self.plan);
 END
 PUB FN selectorEffectFact__leaf_type(self: SelectorEffectFact) RETURNS !Type EFFECTS REENTRANT ->
-  RETURN CAST(tenseSelectorPlan__leaf_type(self.plan) AS Type);
+  RETURN CAST(TRY (tenseSelectorPlan__leaf_type(self.plan)) AS Type);
 END
 PUB FN selectorEffectFact__fallible?(self: SelectorEffectFact) RETURNS Bool EFFECTS REENTRANT ->
   RETURN tenseSelectorPlan__fallible?(self.plan);

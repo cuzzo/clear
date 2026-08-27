@@ -110,7 +110,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF node IS_A MatchStatement AS match_statement THEN
       MUTABLE match_statement_mutable = COPY match_statement;
       FOR _ IN match_statement_mutable.cases DO
-      TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, matchCase__body(_)));
+      TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, TRY (matchCase__body(_))));
       END
       MUTABLE default_body: ?[]Locatable = COPY match_statement_mutable.default_case;
       IF default_body EXISTS AS default_body_value THEN

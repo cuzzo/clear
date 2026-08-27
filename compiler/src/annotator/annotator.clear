@@ -77,7 +77,7 @@ PUB FN semanticAnnotator__lookup_type_schema(self: SemanticAnnotator, name: Stri
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE base_name = symbol((compilerRegexReplaceFirst((CAST(name AS String)), compilerRegexCompile("<.*>$"), "")));
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = (TRY (semanticAnnotator__semantic_root_scope(rtoc_self_view)));
-    scope__resolve_type_definition(rtoc_local_receiver_3, base_name) };
+    TRY (scope__resolve_type_definition(rtoc_local_receiver_3, base_name)) };
 }
 END
 PRIVATE FN semanticAnnotator__semantic_id_index(self: SemanticAnnotator) RETURNS SemanticIdIndex
