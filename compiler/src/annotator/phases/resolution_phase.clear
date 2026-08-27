@@ -617,7 +617,7 @@ PRIVATE FN resolutionSession__with_new_scope<Result>(self: ResolutionSession, sc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER ((resolutionSession__scope_stack_for_helper(rtoc_self_view))).pop();
+  DEFER rtoc_self_view.scope_stack.pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_10: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_10 = scope__new();

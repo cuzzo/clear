@@ -2193,7 +2193,7 @@ PRIVATE FN capabilityAuditSession__with_new_scope<Result>(self: CapabilityAuditS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER ((capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).pop();
+  DEFER rtoc_self_view.scope_stack.pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_13: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_13 = scope__new();
