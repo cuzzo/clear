@@ -5138,6 +5138,7 @@ class MIRLowering
 
       offender = mir_node.class.name.to_s.split('::').last
       offender += " '#{T.unsafe(mir_node).name}'" if mir_node.respond_to?(:name)
+      offender += " to '#{T.unsafe(mir_node).callee}'" if mir_node.respond_to?(:callee)
       reason = fallible ? 'is fallible' : 'allocates'
       where = node.token.respond_to?(:line) ? " (DEFER at line #{node.token.line})" : ''
       Kernel.raise CompilerError.new(node.token,
