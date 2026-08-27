@@ -312,7 +312,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.fn_name = fn_def.name;
     rtoc_self_view.captured_names = (captured_names |> SELECT _.toString()) |> DISTINCT _;
     rtoc_self_view.errors = List[];
-    MUTABLE nodes: []Emittable = TRY (mIR__nodes(NodeRoot{ Emittable: castBodyToEmittable(fn_def.body) }));
+    MUTABLE nodes: []Emittable = TRY (mIR__nodes(NodeRoot{ ArrayValue: COPY fn_def.body }));
     MUTABLE allocs: {String}[]AllocMark = {};
     MUTABLE cleanups: {String}[]MIRCheckerCleanupMarksByNameValueItem = {};
     MUTABLE err_cleanups: {String}[]MIRCheckerCleanupMarksByNameValueItem = {};
