@@ -137,7 +137,7 @@ module MIRLoweringControlFlow
       else_body = lower_body_with_break(node.else_branch || [], label)
       if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
       if_stmt.comptime = node.comptime
-      block = MIR::BlockExpr.new(label, [if_stmt])
+      block = with_expression_result_type(MIR::BlockExpr.new(label, [if_stmt]), node)
       return with_pending(cond_pending, block)
     end
 
@@ -146,6 +146,17 @@ module MIRLoweringControlFlow
     if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
     if_stmt.comptime = node.comptime
     with_pending(cond_pending, if_stmt)
+  end
+
+  # A BlockExpr derives its ownership from its result type, so an expression
+  # form that yields an OWNED value has to carry one. Without it the binding
+  # that receives an owned IF/MATCH result never takes ownership, and the value
+  # its branches allocated is never freed.
+  sig { params(block: MIR::BlockExpr, node: AST::Node).returns(MIR::BlockExpr) }
+  def with_expression_result_type(block, node)
+    T.bind(self, MIRLowering) rescue nil
+    block.result_type = Type.from_node!(node, context: "expression-form block result")
+    block
   end
 
   sig { params(node: AST::IfStatement, condition: AST::IsA).returns(MIR::Node) }
@@ -161,7 +172,9 @@ module MIRLoweringControlFlow
       label = "__if_#{lowering_counters.next_block_expr_id}"
       then_body = payload_bindings + lower_body_with_break(node.then_branch, label)
       else_body = lower_body_with_break(node.else_branch || [], label)
-      block = MIR::BlockExpr.new(label, [MIR::IfStmt.new(cond, then_body, else_body)])
+      block = with_expression_result_type(
+        MIR::BlockExpr.new(label, [MIR::IfStmt.new(cond, then_body, else_body)]), node
+      )
       return with_pending(subject_pending, block)
     end
 
@@ -827,7 +840,7 @@ module MIRLoweringControlFlow
       result = lower_if_chain_match(node, facts)
     end
 
-    expr_label ? MIR::BlockExpr.new(expr_label, [result]) : result
+    expr_label ? with_expression_result_type(MIR::BlockExpr.new(expr_label, [result]), node) : result
   end
 
   sig { params(node: AST::MatchStatement, facts: MatchLoweringFacts).returns(MIR::IfChain) }

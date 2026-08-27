@@ -669,12 +669,36 @@ module Annotator
         end
 
         result_type ||= value_types.find { |type| !type.any? } || value_types.first || then_result
-        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
+        owned_result = uniformly_owned_string_branches?(value_types)
+        unless owned_result || result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           error!(if_node, :IF_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
         end
 
         if_node.expr_mode = true
-        stamp_type!(if_node, (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type)
+        stamp_type!(if_node, expression_result_stamp(result_type, owned_result))
+      end
+
+      # A branch result is implicitly copyable OR the whole expression owns its
+      # value. Rust draws the same line: `if c { format!(..) } else { format!(..) }`
+      # is ordinary, while mixing an owned String with a borrowed &str is not.
+      # CLEAR's String carries both, separated by provenance, so "uniformly
+      # owned" is every branch yielding a non-rodata string.
+      sig { params(branch_types: T::Array[Type]).returns(T::Boolean) }
+      def uniformly_owned_string_branches?(branch_types)
+        return false if branch_types.empty?
+
+        branch_types.all? { |type| type.string? && !type.symbol? && !type.rodata? }
+      end
+
+      # A string result is stamped rodata so the binding copies rather than
+      # frees. An owned result must keep its heap provenance instead, or the
+      # value it allocated is never cleaned up.
+      sig { params(result_type: Type, owned: T::Boolean).returns(Type) }
+      def expression_result_stamp(result_type, owned)
+        return result_type unless result_type.string? && !result_type.symbol?
+        return Type.new(:String, location: :heap) if owned
+
+        Type.new(:String, location: :rodata)
       end
 
       # Promotes an AST::MatchStatement that is used in expression position.
@@ -725,12 +749,13 @@ module Annotator
         end
 
         result_type ||= value_types.first || all_types.first
-        unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
+        owned_result = uniformly_owned_string_branches?(value_types)
+        unless owned_result || result_type.implicitly_copyable? { |t| lookup_type_schema(t) }
           error!(match_node, :MATCH_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
         end
 
         match_node.expr_mode = true
-        stamp_type!(match_node, (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type)
+        stamp_type!(match_node, expression_result_stamp(result_type, owned_result))
       end
 
       sig { params(parent_node: AST::Node).returns(T.nilable(Type)) }

@@ -1,0 +1,24 @@
+# Test: an IF expression whose branches are uniformly heap-owned must be
+# allowed. Rust accepts `if c { format!(..) } else { format!(..) }`; CLEAR
+# rejected it because the result was force-stamped rodata, so an owned string
+# would have leaked. Mixed provenance stays rejected -- Rust rejects that too
+# (&str vs String) -- but same-ownership branches are ordinary code.
+
+PRIVATE FN decorate(code: String, semi: Bool) RETURNS String ->
+  RETURN IF semi THEN "${code};" ELSE "${code}!" END;
+END
+
+FN main() RETURNS !Void ->
+  ASSERT decorate("x", TRUE) == "x;", "the THEN branch should own its result";
+  ASSERT decorate("y", FALSE) == "y!", "the ELSE branch should own its result";
+
+  MUTABLE joined = "";
+  FOR i IN (0_i64..=2_i64) DO
+    part = IF i > 0_i64 THEN "n${i.toString()}" ELSE "z${i.toString()}" END;
+    joined = joined $+ part;
+  END
+  ASSERT joined == "z0n1n2", "an owned IF result should survive a loop";
+
+  print("if_expr_owned_result: all tests passed");
+  RETURN;
+END
