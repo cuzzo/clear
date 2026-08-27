@@ -4604,12 +4604,6 @@ FN castNameToString(value: Name) RETURNS String ->
   END
   RETURN "";
 END
-FN castNamedEmittableReturnValueToString(value: NamedEmittableReturnValue) RETURNS String ->
-  IF value IS_A String AS cast_payload THEN
-    RETURN cast_payload;
-  END
-  RETURN "";
-END
 FN castOptionalMIRReturnValueToName(value: ?MIRReturnValue) RETURNS Name ->
   IF value == NIL THEN
     panic("Invalid cast to Name");
