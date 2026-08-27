@@ -1697,7 +1697,7 @@ PRIVATE FN mIREmitter__with_ident_overrides<U>(MUTABLE self: MIREmitter, overrid
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE previous: {String}String = COPY rtoc_self_view.ident_overrides;
   DEFER rtoc_self_view.ident_overrides = previous;
-  rtoc_self_view.ident_overrides = overrides.keys() |> REDUCE(COPY previous) { acc[_] = COPY UNWRAP (overrides[_]); acc };
+  rtoc_self_view.ident_overrides = overrides.keys() |> REDUCE(COPY rtoc_self_view.ident_overrides) { acc[_] = COPY UNWRAP (overrides[_]); acc };
   RETURN blk();
 }
 END
@@ -1707,7 +1707,7 @@ PRIVATE FN mIREmitter__with_move_guard_overrides<U>(MUTABLE self: MIREmitter, ov
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE previous: {String}String = COPY rtoc_self_view.move_guard_overrides;
   DEFER rtoc_self_view.move_guard_overrides = previous;
-  rtoc_self_view.move_guard_overrides = overrides.keys() |> REDUCE(COPY previous) { acc[_] = COPY UNWRAP (overrides[_]); acc };
+  rtoc_self_view.move_guard_overrides = overrides.keys() |> REDUCE(COPY rtoc_self_view.move_guard_overrides) { acc[_] = COPY UNWRAP (overrides[_]); acc };
   RETURN blk();
 }
 END
