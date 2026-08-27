@@ -966,7 +966,8 @@ PUB FN mIRChecker__linear_move_mark_mut(MUTABLE self: MIRChecker, name: String, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-  DEFER &state.move_marks.insert(COPY name);
+  MUTABLE rtoc_defer_move_mark: String = COPY name;
+  DEFER &state.move_marks.insert(rtoc_defer_move_mark);
   IF ((state.released.contains?(name) OR state.pending_return_transfers.contains?(name)) OR state.pending_block_transfers.contains?(name)) THEN
       RETURN;
   END
