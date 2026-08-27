@@ -1743,8 +1743,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF cache_name EXISTS AS cache_name_value THEN
       &rtoc_self_view.heap_allocator_cache_names.pop();
     END
-    rtoc_self_view.heap_allocator_cache_name = COPY previous_name;
-    rtoc_self_view.heap_allocator_cache_runtime_name = COPY previous_runtime;
+    rtoc_self_view.heap_allocator_cache_name = previous_name;
+    rtoc_self_view.heap_allocator_cache_runtime_name = previous_runtime;
 }
 END
 PRIVATE FN mIREmitter__emit_body_flow(MUTABLE self: MIREmitter, stmts: []Emittable, return_kind: String@symbol) RETURNS !String
