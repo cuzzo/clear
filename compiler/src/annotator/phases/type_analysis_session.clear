@@ -9156,7 +9156,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (s.line != e.line) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_205: []Edit = List[]; rtoc_empty_list_205 } ) AS []Edit);
     END
-    MUTABLE end_col = (e.column + (CAST(e.value() AS String)).codepointCount());
+    MUTABLE end_col = (e.column + (CAST(e.value AS String)).codepointCount());
     RETURN CAST([edit__new(span__new(NIL, s.line, s.column, (end_col - s.column)), replacement)] AS []Edit);
 }
 END

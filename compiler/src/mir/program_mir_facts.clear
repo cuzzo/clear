@@ -257,7 +257,7 @@ PRIVATE FN programMIRFinalizer__with_block_lowers_through_runtime?(node: WithBlo
   IF !(clause) THEN
     RETURN FALSE;
   END
-  RETURN (([ErrorActionKind.Raise, ErrorActionKind.Exit]).contains?(clause.action()) OR type__any?(clause.bubble_types()));
+  RETURN (([ErrorActionKind.Raise, ErrorActionKind.Exit]).contains?(clause.action) OR type__any?(clause.bubble_types));
 END
 PRIVATE FN programMIRFinalizer__return_path_needs_allocator?(function: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Bool ->
   IF !(function.heap_carry_return) THEN

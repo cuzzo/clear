@@ -199,6 +199,21 @@ module RtocPostprocess
         @bindings[name] = type.delete_prefix('?')
         type.start_with?('?') ? @optionals[name] = type : @optionals.delete(name)
       end
+      # An UNANNOTATED local bound straight from a typed field carries that
+      # field's type. Without this, `MUTABLE fn = node.fn_def;` left `fn`
+      # untyped and the field-call rule could not see that `fn.name()` on the
+      # next line is a FIELD -- one more build spent on a site the rule already
+      # knew how to describe.
+      if line =~ /\A\s*(?:MUTABLE )?(\w+) = (\w+)\.([a-z_]\w*);\s*\z/
+        name = Regexp.last_match(1)
+        receiver_type = @bindings[Regexp.last_match(2)]
+        field = @index.field_type(receiver_type, Regexp.last_match(3)) if receiver_type
+        if field
+          bare = field.delete_prefix('?').sub(/@\w+\z/, '')
+          @bindings[name] = bare
+          field.start_with?('?') ? @optionals[name] = field : @optionals.delete(name)
+        end
+      end
       owner = @bindings['node']
       if owner
         if line =~ /FOR (\w+) IN [\w.]*\.([a-z_]\w*)\b/ && (element = @index.element_of(owner, Regexp.last_match(2)))

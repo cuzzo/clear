@@ -1894,7 +1894,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE node_fact = node.ownership_consumption;
     MUTABLE name = operand.name();
-    IF (node_fact IS_A OwnershipConsumptionFact AND (node_fact.operands() |> ANY {
+    IF (node_fact IS_A OwnershipConsumptionFact AND (node_fact.operands |> ANY {
     name;
     (!((name == NIL)) AND !(name.empty?()))
     })) THEN

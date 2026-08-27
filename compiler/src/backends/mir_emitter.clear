@@ -393,7 +393,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN COPY "undefined";
       END
     ELSE_IF node IS_A TypeSentinel AS rtoc_type_sentinel THEN
-      RETURN mIREmitter__emit_type_sentinel(rtoc_self_view, rtoc_type_sentinel);
+      RETURN UNWRAP (mIREmitter__emit_type_sentinel(rtoc_self_view, rtoc_type_sentinel));
     ELSE_IF node IS_A IterRange AS rtoc_iter_range THEN
       RETURN COPY "${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_iter_range.start))}..${TRY (mIREmitter__emit(&rtoc_self_view, rtoc_iter_range.end_val))}";
     ELSE_IF node IS_A MIRRangeLit AS rtoc_m_i_r_range_lit THEN
@@ -4346,7 +4346,7 @@ PRIVATE FN mIREmitter__emit_lambda(MUTABLE self: MIREmitter, node: LambdaExpr) R
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn = node.fn_def;
     MUTABLE fn_zig = TRY (mIREmitter__emit_fn_def(&rtoc_self_view, fn));
-    RETURN "&(struct { ${fn_zig} }).${fn.name()}";
+    RETURN "&(struct { ${fn_zig} }).${fn.name}";
 }
 END
 PRIVATE FN mIREmitter__emit_items_access(MUTABLE self: MIREmitter, node: ItemsAccess) RETURNS !String
