@@ -1,0 +1,32 @@
+# Test: HashMap#merge_mut folds another map's entries in, as Ruby's Hash#merge!
+# and Rust's HashMap::extend do. The source is borrowed, so its values are
+# copied -- it survives the merge intact and neither side double-frees.
+
+FN main() RETURNS !Void ->
+  MUTABLE a: {String}String = {"x": "1"};
+  MUTABLE b: {String}String = {"y": "2"};
+  &a.merge_mut(b);
+  ASSERT a.length() == 2_i64, "both entries should be present";
+  ASSERT UNWRAP (a["x"]) == "1", "the original entry should survive";
+  ASSERT UNWRAP (a["y"]) == "2", "the merged entry should be added";
+  ASSERT b.length() == 1_i64, "the source map should be unchanged";
+  ASSERT UNWRAP (b["y"]) == "2", "the source should keep its own value";
+
+  # A duplicate key takes the merged value, as Ruby's merge! does.
+  MUTABLE over: {String}String = {"x": "9"};
+  &a.merge_mut(over);
+  ASSERT a.length() == 2_i64, "a duplicate key should not grow the map";
+  ASSERT UNWRAP (a["x"]) == "9", "the merged value should win";
+
+  # Heap-allocated values: the copy must be real, not an alias.
+  seed = "v";
+  MUTABLE built: {String}String = {"p": "${seed}1"};
+  MUTABLE more: {String}String = {"q": "${seed}2"};
+  &built.merge_mut(more);
+  ASSERT built.length() == 2_i64, "heap values should merge too";
+  ASSERT UNWRAP (built["q"]) == "v2", "the merged heap value should be present";
+  ASSERT UNWRAP (more["q"]) == "v2", "the source should keep its own copy";
+
+  print("map_merge_mut: all tests passed");
+  RETURN;
+END

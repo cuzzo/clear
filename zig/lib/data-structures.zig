@@ -161,6 +161,28 @@ pub fn bind(comptime deps: type) type {
 
     // Both key copies and bucket array go to frameAlloc (bump, ~2 ns per alloc).
     // Keys are re-copied to heapAlloc by mapPromote() when the map escapes its frame.
+    // Ruby's Hash#merge! and Rust's HashMap::extend: fold another map's entries
+    // into this one, overwriting on a duplicate key. Both sides arrive as the
+    // StringMap wrapper the transpiler builds, so this goes through its own
+    // `put`, which owns the allocator it was constructed with. `src` is only
+    // borrowed, so each value is copied before it is handed over.
+    pub fn mapMerge(
+        comptime V: type,
+        key_alloc: std.mem.Allocator,
+        bucket_alloc: std.mem.Allocator,
+        dst: anytype,
+        src: anytype,
+    ) !void {
+        var it = src.inner.iterator();
+        while (it.next()) |entry| {
+            const value = if (comptime needsCleanup(V))
+                try dupeValue(V, entry.value_ptr.*, bucket_alloc)
+            else
+                entry.value_ptr.*;
+            try dst.put(key_alloc, bucket_alloc, entry.key_ptr.*, value);
+        }
+    }
+
     pub fn mapPut(comptime V: type, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
         if (map.getPtr(key)) |val_ptr| {
             cleanup(V, bucket_alloc, val_ptr);

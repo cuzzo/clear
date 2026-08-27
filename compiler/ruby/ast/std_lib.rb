@@ -1379,6 +1379,18 @@ MAP_METHODS = T.let({
     return_type: :Void,
     is_method: true,
   },
+  # Ruby's Hash#merge! and Rust's HashMap::extend: fold another map's entries
+  # in, overwriting on a duplicate key. The source is borrowed, so values copy.
+  "merge_mut" => {
+    arity: 1, tag: :map_method, allocates: true,
+    mutates_receiver: true,
+    bc: true,
+    zig: "try CheatLib.mapMerge({val_zig}, {alloc}, {alloc}, &{0}, &{1})",
+    alloc: :receiver_storage,
+    return_type: :Void,
+    borrows: :all,
+    is_method: true,
+  },
   "delete" => {
     arity: 1, tag: :map_method,
     bc: true,
