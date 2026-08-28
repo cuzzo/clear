@@ -458,11 +458,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF marks |> ALL placement__heap?(_.alloc()) THEN
+      IF (UNWRAP (marks)) |> ALL placement__heap?(_.alloc) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :RETURN_TRANSFER_FRAME_ALLOC, UNWRAP (return_transfers[rtoc_idx]), "return ownership transfer is backed by :frame allocation; escaping owned returns must be heap")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :RETURN_TRANSFER_FRAME_ALLOC, Name{ StringValue: COPY UNWRAP (return_transfers[rtoc_idx]) }, "return ownership transfer is backed by :frame allocation; escaping owned returns must be heap")));
     rtoc_idx = rtoc_idx + 1;
     END
 }
