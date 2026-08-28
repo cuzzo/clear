@@ -1773,15 +1773,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN FALSE;
         END
         MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(rtoc_init);
-        IF !((IF sig != NIL THEN
-          TRY (functionSignature__fixed_return?(sig))
+        IF sig EXISTS AS rtoc_sig THEN
+          IF !(TRY (functionSignature__fixed_return?(rtoc_sig))) THEN
+            RETURN FALSE;
+          END
+          MUTABLE ret = functionSignature__return_type(rtoc_sig);
+          RETURN !(type__void?(ret));
         ELSE
-          NIL
-        END)) THEN
           RETURN FALSE;
         END
-        MUTABLE ret = functionSignature__return_type(sig);
-        RETURN !(type__void?(ret));
       END
     END
     RETURN FALSE;
