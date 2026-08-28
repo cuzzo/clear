@@ -634,7 +634,7 @@ PUB FN mIRChecker__check_linear_stmt_mut(MUTABLE self: MIRChecker, stmt: ?Emitta
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF stmt EXISTS AS stmt_value THEN
       MUTABLE stmt_value_mutable = COPY stmt_value;
-      IF !(stmt_value_mutable IS_A Stmt) THEN
+      IF !(emittable__stmt?(stmt_value_mutable)) THEN
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, stmt_value_mutable, state));
         RETURN;
       END
