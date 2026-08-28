@@ -644,3 +644,17 @@ PUB FN castSchemasUnionSchemaVariantInputToOptionalSchemasUnionSchemaVariantValu
   END
   panic("Invalid cast to ?SchemasUnionSchemaVariantValue");
 END
+
+# TypeSchemaLookupResult and SchemaValue are the same four variants under
+# two names rtoc synthesized separately. This is the bridge between them,
+# in the shape rtoc gives its other cast helpers.
+PUB FN castTypeSchemaLookupResultToSchemaValue(value: TypeSchemaLookupResult) RETURNS SchemaValue ->
+  PARTIAL MATCH value START
+    TypeSchemaLookupResult.EnumSchemaMultiowned AS item -> RETURN SchemaValue{ EnumSchemaMultiowned: COPY item };,
+    TypeSchemaLookupResult.StructSchemaMultiowned AS item -> RETURN SchemaValue{ StructSchemaMultiowned: COPY item };,
+    TypeSchemaLookupResult.UnionSchemaMultiowned AS item -> RETURN SchemaValue{ UnionSchemaMultiowned: COPY item };,
+    TypeSchemaLookupResult.ResourceSchemaMultiowned AS item -> RETURN SchemaValue{ ResourceSchemaMultiowned: COPY item };,
+    DEFAULT -> panic("Invalid cast to SchemaValue");
+  END
+  panic("Invalid cast to SchemaValue");
+END

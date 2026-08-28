@@ -1759,7 +1759,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF rtoc_self_view.schema_lookup EXISTS AS rtoc_lookup THEN
         schema = rtoc_lookup(type__resolved(return_type));
       END
-      IF schemas__resource?(schema) THEN
+      IF schemas__resource?(IF schema EXISTS AS rtoc_schema THEN castTypeSchemaLookupResultToSchemaValue(rtoc_schema) ELSE NIL END) THEN
         RETURN TRUE;
       END
     END
