@@ -1270,11 +1270,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_USE_AFTER_TRANSFER, Name{ StringValue: COPY UNWRAP (rtoc_each_items_25[rtoc_idx]) } "binding read after ownership was transferred")));
     rtoc_idx = rtoc_idx + 1;
     END
-    TRY (mIRChecker__check_nested_linear_expr_bodies_mut(&rtoc_self_view, expr, state));
+    TRY (mIRChecker__check_nested_linear_expr_bodies_mut(&rtoc_self_view, expr, &state));
     NIL;
 }
 END
-PUB FN mIRChecker__check_nested_linear_expr_bodies_mut(MUTABLE self: MIRChecker, expr: ?Emittable, state: LinearOwnershipState) RETURNS !Void
+PUB FN mIRChecker__check_nested_linear_expr_bodies_mut(MUTABLE self: MIRChecker, expr: ?Emittable, MUTABLE state: LinearOwnershipState) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1285,9 +1285,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN (TRY (emittable__child_exprs(UNWRAP (expr)))) DO
     IF _ IS_A MIRBlockExpr THEN
       MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, UNWRAP (emittable__body(_)), linearOwnershipState__copy(state)));
-      TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, "block-expr"));
+      TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "block-expr"));
     ELSE
-      TRY (mIRChecker__check_nested_linear_expr_bodies_mut(&rtoc_self_view, _, state));
+      TRY (mIRChecker__check_nested_linear_expr_bodies_mut(&rtoc_self_view, _, &state));
     END
     END
     NIL;
@@ -1306,7 +1306,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN;
     END
     MUTABLE callable = IF node IS_A RuntimeCall THEN
-        node.spec().callable_contract()
+        node.spec.callable_contract()
       ELSE
         node.callable_contract()
       END;
