@@ -1697,7 +1697,7 @@ PUB FN mIRChecker__check_program_mut(MUTABLE self: MIRChecker, program: MIRProgr
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (mIRPassState__class_require_mut(PassStateProgram{ MIRProgram: COPY program }, :mir_lowered, "MIRChecker"));
     MUTABLE all_errors: []String = TRY (mIRChecker__ownership_registry_errors(rtoc_self_view));
-    FOR _ IN (TRY (mIRChecker__program_functions(rtoc_self_view, mIRProgram__items(program)))) DO
+    FOR _ IN (TRY (mIRChecker__program_functions(rtoc_self_view, program.items))) DO
     ruby_array_concat_String(all_errors, TRY (mIRChecker__check_fn_mut(&rtoc_self_view, _, strict, ( { MUTABLE rtoc_empty_list_31: []String = List[]; rtoc_empty_list_31 } ))));
     END
     IF (all_errors.length() == 0) THEN
