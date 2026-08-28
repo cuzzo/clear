@@ -17846,3 +17846,19 @@ PUB FN emittable__allocs(node: Emittable) RETURNS ?InlineAllocMetadata@multiowne
   END
   RETURN NIL;
 END
+
+# InlineBc's slot holds either a registry hash or a signature, so it goes
+# through the same unwrap its own ownership_effect uses; a hash yields NIL.
+PUB FN emittable__stdlib_def(value: Emittable) RETURNS ?FunctionSignature@multiowned ->
+  PARTIAL MATCH value START
+    Emittable.ExternTrampoline AS item -> RETURN COPY item.stdlib_def;,
+    Emittable.ObservableConsumerSpawn AS item -> RETURN COPY item.stdlib_def;,
+    Emittable.ShardedMapPut AS item -> RETURN COPY item.stdlib_def;,
+    Emittable.ShardedMapGet AS item -> RETURN COPY item.stdlib_def;,
+    Emittable.RegistryCall AS item -> RETURN registryCall__stdlib_def(item);,
+    Emittable.IndexedStore AS item -> RETURN indexedStore__stdlib_def(item);,
+    Emittable.InlineBc AS item -> RETURN functionSignature__unwrap(item.stdlib_def);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

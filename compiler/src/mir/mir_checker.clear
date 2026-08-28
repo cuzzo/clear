@@ -1772,7 +1772,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF !(TRY (mIRChecker__stdlib_owned_return?(rtoc_self_view, rtoc_init))) THEN
           RETURN FALSE;
         END
-        MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(rtoc_init.stdlib_def());
+        MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(rtoc_init);
         IF !((IF sig != NIL THEN
           TRY (functionSignature__fixed_return?(sig))
         ELSE
