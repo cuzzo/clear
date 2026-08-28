@@ -330,9 +330,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF emittable__ownership_consumption(_) EXISTS THEN
         &structural_ownership_nodes.append(COPY _);
     END
-    IF (mIRChecker__allocator_metadata_node?(rtoc_self_view, _) AND !(allocator_metadata_node_ids.contains?(_.object_id()))) THEN
+    MUTABLE rtoc_node_id: ?LoweredNodeId = emittable__lowered_node_id(_);
+    MUTABLE rtoc_seen_id: Bool = FALSE;
+    IF rtoc_node_id EXISTS AS rtoc_id_value THEN
+      rtoc_seen_id = allocator_metadata_node_ids.contains?(rtoc_id_value.value);
+    END
+    IF (mIRChecker__allocator_metadata_node?(rtoc_self_view, _) AND !(rtoc_seen_id)) THEN
         &allocator_metadata_nodes.append(COPY _);
-        allocator_metadata_node_ids[_.object_id()] = TRUE;
+        IF rtoc_node_id EXISTS AS rtoc_id_store THEN
+          allocator_metadata_node_ids[rtoc_id_store.value] = TRUE;
+        END
     END
     IF _ IS_A OwnedCreate AS owned_create THEN
         &ownership_fact_nodes.append(Emittable{ OwnedCreate: COPY owned_create });
