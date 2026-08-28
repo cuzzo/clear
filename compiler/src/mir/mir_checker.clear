@@ -1282,7 +1282,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((expr != NIL)) THEN
       RETURN;
     END
-    FOR _ IN expr.child_exprs DO
+    FOR _ IN (TRY (emittable__child_exprs(UNWRAP (expr)))) DO
     IF _ IS_A MIRBlockExpr THEN
       MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state)));
       TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, "block-expr"));
