@@ -409,7 +409,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE lambda_expr_mutable = COPY lambda_expr;
         IF lambda_expr_mutable.fn_def THEN
           MUTABLE sub = mIRChecker__new(NIL, rtoc_self_view.schema_lookup);
-          rtoc_self_view.errors = ruby_array_concat_String(rtoc_self_view.errors, TRY (mIRChecker__check_fn_mut(&sub, lambda_expr_mutable.fn_def, strict, (((lambda_expr_mutable.captures OR_ELSE List[]))) |> SELECT _.toString())));
+          rtoc_self_view.errors = ruby_array_concat_String(rtoc_self_view.errors, TRY (mIRChecker__check_fn_mut(&sub, lambda_expr_mutable.fn_def, strict, (lambda_expr_mutable.captures) |> SELECT _.toString())));
         END
     END
     END
