@@ -946,13 +946,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (mark.scope != NIL) THEN
       state.alloc_scopes[name] = symbol(UNWRAP (COPY mark.scope));
     END
-    &state.released.delete(name);
-    &state.maybe_released.delete(name);
-    &state.cleanup_finalizers.delete(name);
-    &state.guarded_finalizers.delete(name);
-    &state.err_finalizers.delete(name);
-    &state.pending_return_transfers.delete(name);
-    &state.pending_block_transfers.delete(name);
+    &state.released.remove(name);
+    &state.maybe_released.remove(name);
+    &state.cleanup_finalizers.remove(name);
+    &state.guarded_finalizers.remove(name);
+    &state.err_finalizers.remove(name);
+    &state.pending_return_transfers.remove(name);
+    &state.pending_block_transfers.remove(name);
     NIL;
 }
 END
