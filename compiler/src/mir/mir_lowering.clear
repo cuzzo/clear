@@ -2138,11 +2138,11 @@ FN mIRLowering__append_transfer_marks_to_body_mut(self: MIRLowering, MUTABLE sta
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < marks.length() DO
-      IF (marks[rtoc_idx]? IS_A MoveMark AND state.move_mark_names.contains?(CAST((emittable__name(UNWRAP (marks[rtoc_idx]))()) AS String))) THEN
+      IF (marks[rtoc_idx]? IS_A MoveMark AND state.move_mark_names.contains?(CAST((emittable__name(UNWRAP (marks[rtoc_idx]))) AS String))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (marks[rtoc_idx]? IS_A TransferMark AND state.transfer_mark_names.contains?(CAST((emittable__name(UNWRAP (marks[rtoc_idx]))()) AS String))) THEN
+      IF (marks[rtoc_idx]? IS_A TransferMark AND state.transfer_mark_names.contains?(CAST((emittable__name(UNWRAP (marks[rtoc_idx]))) AS String))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -2629,11 +2629,11 @@ FN mIRLowering__append_transfer_marks_mut(self: MIRLowering, marks: []Emittable,
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < marks.length() DO
-      IF (marks[rtoc_idx]? IS_A MoveMark AND state.move_mark_names.contains?(CAST((emittable__name(UNWRAP (marks[rtoc_idx]))()) AS String))) THEN
+      IF (marks[rtoc_idx]? IS_A MoveMark AND state.move_mark_names.contains?(CAST((emittable__name(UNWRAP (marks[rtoc_idx]))) AS String))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (marks[rtoc_idx]? IS_A TransferMark AND state.transfer_mark_names.contains?(CAST((emittable__name(UNWRAP (marks[rtoc_idx]))()) AS String))) THEN
+      IF (marks[rtoc_idx]? IS_A TransferMark AND state.transfer_mark_names.contains?(CAST((emittable__name(UNWRAP (marks[rtoc_idx]))) AS String))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -6850,7 +6850,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !((CAST((emittable__name(UNWRAP (scoped[rtoc_idx]))()) AS String) == _)) THEN
+      IF !((CAST((emittable__name(UNWRAP (scoped[rtoc_idx]))) AS String) == _)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

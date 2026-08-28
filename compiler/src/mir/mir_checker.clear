@@ -1484,11 +1484,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF allocs.contains?(emittable__name(UNWRAP (nodes[rtoc_idx]))) THEN
+      IF allocs.contains?(UNWRAP (emittable__name(UNWRAP (nodes[rtoc_idx])))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ALLOCATING_LET_WITHOUT_ALLOC, emittable__name(UNWRAP (nodes[rtoc_idx]))(), "heap-allocating Let init has no MIR::AllocMark; ownership is implicit")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ALLOCATING_LET_WITHOUT_ALLOC, emittable__name(UNWRAP (nodes[rtoc_idx])), "heap-allocating Let init has no MIR::AllocMark; ownership is implicit")));
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;
@@ -1811,9 +1811,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           &materialized_owners.insert(COPY owned_create.name);
       END
       IF (body[rtoc_idx]? IS_A Cleanup OR body[rtoc_idx]? IS_A ErrCleanup) THEN
-          MUTABLE let: ?Let = COPY lets[CAST((emittable__name(UNWRAP (body[rtoc_idx]))()) AS String)];
-          IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(UNWRAP (body[rtoc_idx]))()) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, UNWRAP (let), castEmittableToMIRCheckerCleanup(body[rtoc_idx]?))))) THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, emittable__name(UNWRAP (body[rtoc_idx]))(), "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
+          MUTABLE let: ?Let = COPY lets[CAST((emittable__name(UNWRAP (body[rtoc_idx]))) AS String)];
+          IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(UNWRAP (body[rtoc_idx]))) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, UNWRAP (let), castEmittableToMIRCheckerCleanup(body[rtoc_idx]?))))) THEN
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, emittable__name(UNWRAP (body[rtoc_idx])), "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
           END
       END
       FOR _ IN (body[rtoc_idx]?.body_slots()) DO

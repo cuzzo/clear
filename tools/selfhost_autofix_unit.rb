@@ -379,7 +379,32 @@ module SelfhostAutofixUnit
     end)
   end
 
-  FIXES = [method(:redundant_unwrap_fix), method(:set_difference_fix), method(:optional_insert_fix),
+  # "HashMap.contains?: key must be String, got ?String" -- a union accessor
+  # returns an optional, and a map key is the value itself.
+  def optional_key_fix(output)
+    return nil unless output.match?(/key must be (\w+), got \?\1/)
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    line_no = loc[1].to_i
+    Fix.new(label: 'unwrap map key', apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      line = lines[i].to_s
+      at = line.index('.contains?(') or return false
+
+      open_paren = at + 10
+      close = matching_paren(line, open_paren) or return false
+      inner = line[(open_paren + 1)...close]
+      return false if inner.start_with?('UNWRAP ')
+
+      lines[i] = line[0..open_paren] + "UNWRAP (#{inner})" + line[close..]
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  FIXES = [method(:redundant_unwrap_fix), method(:optional_key_fix),
+           method(:set_difference_fix), method(:optional_insert_fix),
            method(:mutable_local_fix),
            method(:method_rename_fix), method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
            method(:mutable_arg_fix), method(:list_nil_guard_fix),
