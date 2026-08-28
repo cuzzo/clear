@@ -350,19 +350,26 @@ module SelfhostAutofixUnit
   # -- a local the body mutates has to be declared MUTABLE where it is bound.
   def mutable_local_fix(output)
     return nil unless (m = output.match(/is MUTABLE, but you passed immutable variable '(\w+)'/))
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
 
     name = m[1]
+    line_no = loc[1].to_i
     Fix.new(label: "MUTABLE #{name}", apply: lambda do |path|
       lines = File.readlines(path)
-      # It may be a local binding or a parameter of the enclosing function.
-      idx = lines.index { |l| l.match?(/^\s*#{Regexp.escape(name)}(?::[^=]*)? = /) }
+      # Search only the enclosing function. Taking the first match in the file
+      # marked an unrelated function and the loop then chased its cascade.
+      first = (0...(line_no - 1)).reverse_each.find { |k| lines[k].match?(/^(?:PUB |PRIVATE )?FN \w/) } || 0
+      last = ((line_no - 1)...lines.length).find { |k| k > first && lines[k].match?(/^(?:PUB |PRIVATE )?FN \w/) } || lines.length
+      scope = (first...last)
+
+      idx = scope.find { |k| lines[k].match?(/^\s*#{Regexp.escape(name)}(?::[^=]*)? = /) }
       if idx
         lines[idx] = lines[idx].sub(/^(\s*)#{Regexp.escape(name)}/, "\\1MUTABLE #{name}")
-      elsif (idx = lines.index { |l| l.match?(/^(?:PUB |PRIVATE )?FN .*(?<![\w])#{Regexp.escape(name)}: /) })
+      elsif (idx = scope.find { |k| lines[k].match?(/^(?:PUB |PRIVATE )?FN .*(?<![\w])#{Regexp.escape(name)}: /) })
         lines[idx] = lines[idx].sub(/(?<![\w])#{Regexp.escape(name)}: /, "MUTABLE #{name}: ")
       else
         # It may be a WITH alias, which carries its own mutability.
-        idx = lines.index { |l| l.match?(/WITH \w+ \w+ AS #{Regexp.escape(name)}\b/) }
+        idx = scope.find { |k| lines[k].match?(/WITH \w+ \w+ AS #{Regexp.escape(name)}\b/) }
         return false unless idx
 
         lines[idx] = lines[idx].sub(/AS #{Regexp.escape(name)}\b/, "AS MUTABLE #{name}")
