@@ -1612,7 +1612,7 @@ PUB FN mIRChecker__check_aggregate_expr_mut(MUTABLE self: MIRChecker, expr: ?MIR
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr EXISTS AS expr_value THEN
       MUTABLE expr_value_mutable = COPY expr_value;
-      IF rtoc_expr_node IS_A Emittable AS rtoc_expr_node THEN
+      IF expr_value_mutable IS_A Emittable AS rtoc_expr_node THEN
       IF (rtoc_expr_node IS_A MIRCast) THEN
         TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, rtoc_expr_node.expr(), owner_alloc, alloc_by_name));
       ELSE_IF (rtoc_expr_node IS_A MakeList) THEN
