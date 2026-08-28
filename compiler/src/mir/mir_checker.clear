@@ -1305,11 +1305,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((((node IS_A Call OR node IS_A RuntimeCall) OR node IS_A TailCall) OR node IS_A MIRMethodCall)) THEN
         RETURN;
     END
-    MUTABLE callable = IF node IS_A RuntimeCall THEN
-        node.spec.callable_contract()
-      ELSE
-        node.callable_contract()
-      END;
+    MUTABLE callable: ?CallableContract@multiowned = NIL;
+    IF node IS_A RuntimeCall AS rtoc_runtime_call THEN
+      callable = KEEP rtoc_runtime_call.spec.callable_contract;
+    ELSE
+      callable = emittable__callable_contract(node);
+    END
     FOR _ IN (IF callable != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_26 = callable.ownership_contract();
     TRY (ownershipContract__owned_operand_names(rtoc_local_receiver_26)) }

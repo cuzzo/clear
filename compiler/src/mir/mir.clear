@@ -17403,6 +17403,18 @@ PUB FN emittable__body(value: Emittable) RETURNS ?[]Emittable ->
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:callable_contract)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN emittable__callable_contract(value: Emittable) RETURNS ?CallableContract@multiowned ->
+  PARTIAL MATCH value START
+    Emittable.Call AS item -> RETURN COPY item.callable_contract;,
+    Emittable.TailCall AS item -> RETURN COPY item.callable_contract;,
+    Emittable.MIRMethodCall AS item -> RETURN COPY item.callable_contract;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
 PUB FN emittable__expr?(value: Emittable) RETURNS Bool ->
   PARTIAL MATCH value START
     Emittable.MIRProgram AS item -> RETURN FALSE;,
