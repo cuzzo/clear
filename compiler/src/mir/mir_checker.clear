@@ -808,7 +808,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE array_mutable = COPY array;
           TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, array_mutable, &state));
         ELSE
-          TRY (mIRChecker__check_linear_stmt_mut(&rtoc_self_view, body, &state));
+          TRY (mIRChecker__check_linear_stmt_mut(&rtoc_self_view, CAST(body AS Emittable), &state));
         END
       ELSE_IF stmt_value_mutable IS_A ErrDeferStmt AS err_defer_stmt THEN
         MUTABLE err_defer_stmt_mutable = COPY err_defer_stmt;
@@ -817,7 +817,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE array_mutable = COPY array;
           TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, array_mutable, state));
         ELSE
-          TRY (mIRChecker__check_linear_stmt_mut(&rtoc_self_view, body, &state));
+          TRY (mIRChecker__check_linear_stmt_mut(&rtoc_self_view, CAST(body AS Emittable), &state));
         END
       ELSE_IF stmt_value_mutable IS_A StreamSpawn AS stream_spawn THEN
         MUTABLE stream_spawn_mutable = COPY stream_spawn;
