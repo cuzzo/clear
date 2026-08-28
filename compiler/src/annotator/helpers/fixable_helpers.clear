@@ -769,7 +769,7 @@ FN emit_with_materialized_needs_tense_mut(node: WithBlock, name: String, got: Ty
   END)?.reg;
   MUTABLE fix = NIL;
   IF (decl AND src) THEN
-    MUTABLE token = aST__node__token(decl);
+    MUTABLE token: ?Token = aST__node__token(decl);
     IF token THEN
       MUTABLE dline = token.line;
       MUTABLE line_text = (src.split("\n")[(dline - 1)] OR "");

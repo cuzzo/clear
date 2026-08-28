@@ -539,7 +539,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_12 = (CAST((nodes |> DISTINCT _) AS []Emittable));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_12.length() DO
-      MUTABLE fact = emittable__ownership_consumption(UNWRAP (rtoc_each_items_12[rtoc_idx]));
+      MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(UNWRAP (rtoc_each_items_12[rtoc_idx]));
       IF !(fact IS_A OwnershipConsumptionFact) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_FACT_MISSING, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, UNWRAP (rtoc_each_items_12[rtoc_idx])) }, "ownership-consuming MIR node has no MIR::OwnershipConsumptionFact")));
           rtoc_idx = rtoc_idx + 1;
@@ -573,7 +573,7 @@ PUB FN mIRChecker__structural_consumed_names(MUTABLE self: MIRChecker, node: Emi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fact = emittable__ownership_consumption(node);
+    MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
     IF fact IS_A OwnershipConsumptionFact THEN
       RETURN TRY (mIRChecker__ownership_consumption_operand_names(rtoc_self_view, fact));
     END
@@ -1922,7 +1922,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     })) THEN
       RETURN TRUE;
     END
-    MUTABLE init_fact = emittable__ownership_consumption(init);
+    MUTABLE init_fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(init);
     name = operand.name();
     IF (init_fact IS_A OwnershipConsumptionFact AND (init_fact.operands() |> ANY {
     name;
@@ -3424,7 +3424,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((placement__frame?(node.alloc()) AND (cleanupEntry__scope(node) == :iteration))) THEN
         RETURN;
     END
-    MUTABLE line = emittable__source_line(node);
+    MUTABLE line: ?Int64 = emittable__source_line(node);
     &allocations.append((IF line THEN
         "${node.name()}@${line}"
       ELSE
