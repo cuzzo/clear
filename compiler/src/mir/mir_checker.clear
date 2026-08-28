@@ -1755,11 +1755,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN TRUE;
       END
       MUTABLE return_type = TRY (type__success_type(extern_trampoline.return_type));
-      MUTABLE schema = (IF rtoc_self_view.schema_lookup != NIL THEN
-        rtoc_self_view.schema_lookup(type__resolved(return_type))
-      ELSE
-        NIL
-      END);
+      MUTABLE schema: ?TypeSchemaLookupResult = NIL;
+      IF rtoc_self_view.schema_lookup EXISTS AS rtoc_lookup THEN
+        schema = rtoc_lookup(type__resolved(return_type));
+      END
       IF schemas__resource?(schema) THEN
         RETURN TRUE;
       END
