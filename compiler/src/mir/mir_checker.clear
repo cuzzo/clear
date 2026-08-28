@@ -1156,7 +1156,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       FOR _ IN states DO
         MUTABLE rtoc_mutable_block_param_24 = COPY _;
         &rtoc_mutable_block_param_24.released.remove(names[rtoc_idx]);
-        &rtoc_mutable_block_param_24.maybe_released.insert(names[rtoc_idx]);
+        &rtoc_mutable_block_param_24.maybe_released.insert(COPY UNWRAP (names[rtoc_idx]));
       END
     rtoc_idx = rtoc_idx + 1;
     END
