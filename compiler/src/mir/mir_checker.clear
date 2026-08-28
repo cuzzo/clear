@@ -399,7 +399,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF TRY (mIRChecker__owned_return_init?(rtoc_self_view, let.init)) THEN
           &owned_return_lets.append(COPY let);
         END
-        IF ((TRY (mIRChecker__expr_owned_result_alloc(rtoc_self_view, let.init)) != NIL) AND !(let__self_managed_alloc(&let))) THEN
+        IF ((TRY (mIRChecker__expr_owned_result_alloc(rtoc_self_view, let.init)) != NIL) AND !((let.self_managed_alloc OR_ELSE FALSE))) THEN
           &owned_result_lets.append(COPY let);
         END
     ELSE_IF _ IS_A ExprStmt AS expr_stmt THEN
@@ -1483,7 +1483,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF nodes[rtoc_idx]?.self_managed_alloc() THEN
+      IF nodes[rtoc_idx]?.self_managed_alloc OR_ELSE FALSE THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

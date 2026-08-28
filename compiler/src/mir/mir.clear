@@ -954,7 +954,8 @@ PUB STRUCT Let {
   module_const: ?Bool,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
-  source_line: ?Int64
+  source_line: ?Int64,
+  self_managed_alloc: ?Bool
 }
 
 FN let__module_const(self: Let) RETURNS ?Bool ->
