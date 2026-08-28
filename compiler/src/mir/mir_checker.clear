@@ -1526,10 +1526,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY destructure_set_mutable.value }, NIL, alloc_by_name));
     ELSE_IF _ IS_A ReturnStmt AS return_stmt THEN
       MUTABLE return_stmt_mutable = COPY return_stmt;
-      TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY return_stmt_mutable.value }, NIL, alloc_by_name));
+      TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY UNWRAP (return_stmt_mutable.value) }, NIL, alloc_by_name));
     ELSE_IF _ IS_A BreakStmt AS break_stmt THEN
       MUTABLE break_stmt_mutable = COPY break_stmt;
-      TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY break_stmt_mutable.value }, NIL, alloc_by_name));
+      TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY UNWRAP (break_stmt_mutable.value) }, NIL, alloc_by_name));
     ELSE_IF _ IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
       MUTABLE reassign_with_cleanup_mutable = COPY reassign_with_cleanup;
       TRY (mIRChecker__check_reassign_cleanup_alloc_mut(&rtoc_self_view, reassign_with_cleanup_mutable, alloc_by_name));
@@ -1562,26 +1562,26 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF _ IS_A SwitchStmt AS switch_stmt THEN
       MUTABLE switch_stmt_mutable = COPY switch_stmt;
       TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY switch_stmt_mutable.subject }, NIL, alloc_by_name));
-      IF switch_stmt_mutable.arms != NIL THEN
+      IF !((switch_stmt_mutable.arms).empty?()) THEN
             FOR _ IN switch_stmt_mutable.arms DO
-            TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body(), alloc_by_name));
+            TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body, alloc_by_name));
             END
       END
       TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR_ELSE List[]), alloc_by_name));
     ELSE_IF _ IS_A UnionMatchStmt AS union_match_stmt THEN
       MUTABLE union_match_stmt_mutable = COPY union_match_stmt;
       TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY union_match_stmt_mutable.subject }, NIL, alloc_by_name));
-      IF union_match_stmt_mutable.arms != NIL THEN
+      IF !((union_match_stmt_mutable.arms).empty?()) THEN
             FOR _ IN union_match_stmt_mutable.arms DO
-            TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body(), alloc_by_name));
+            TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body, alloc_by_name));
             END
       END
       TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR_ELSE List[]), alloc_by_name));
     ELSE_IF _ IS_A IfChain AS if_chain THEN
       MUTABLE if_chain_mutable = COPY if_chain;
-      IF if_chain_mutable.branches != NIL THEN
+      IF !((if_chain_mutable.branches).empty?()) THEN
             FOR _ IN if_chain_mutable.branches DO
-          TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, _.cond(), NIL, alloc_by_name));
+          TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, _.cond, NIL, alloc_by_name));
           TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body(), alloc_by_name));
             END
       END
