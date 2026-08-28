@@ -1,0 +1,31 @@
+# Test: Set#difference is Ruby's `a - b` and Rust's HashSet::difference -- the
+# elements of the receiver the argument does not have. Both inputs keep their
+# own elements, so the result owns copies and nothing is double-freed.
+
+FN main() RETURNS !Void ->
+  MUTABLE a: [Set]String = Set["x", "y", "z"];
+  MUTABLE b: [Set]String = Set["y"];
+  MUTABLE d: [Set]String = a.difference(b);
+  ASSERT d.length() == 2_i64, "the shared element should be dropped";
+  ASSERT d.contains?("x"), "an element only in the receiver is kept";
+  ASSERT d.contains?("z"), "and so is the other one";
+  ASSERT !(d.contains?("y")), "the shared element should be gone";
+  ASSERT a.length() == 3_i64, "the receiver should be unchanged";
+  ASSERT b.length() == 1_i64, "the argument should be unchanged";
+
+  # Heap elements: the result must own real copies, not aliases.
+  seed = "v";
+  MUTABLE built: [Set]String = Set["${seed}1", "${seed}2"];
+  MUTABLE drop: [Set]String = Set["${seed}1"];
+  MUTABLE rest: [Set]String = built.difference(drop);
+  ASSERT rest.length() == 1_i64, "heap elements difference the same way";
+  ASSERT rest.contains?("v2"), "the surviving heap element is present";
+  ASSERT built.contains?("v1"), "the receiver keeps its own copy";
+
+  MUTABLE none: [Set]String = Set[];
+  MUTABLE all: [Set]String = a.difference(none);
+  ASSERT all.length() == 3_i64, "differencing an empty set keeps everything";
+
+  print("set_difference: all tests passed");
+  RETURN;
+END

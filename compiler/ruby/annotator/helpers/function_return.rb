@@ -165,11 +165,23 @@ class FunctionReturn
       infer_optional_element_type(args)
     when :infer_to_list
       infer_to_list(args)
+    when :infer_receiver_type
+      infer_receiver_type(args)
     else
       raise "unknown FunctionReturn infer method: #{T.must(infer).to_s}"
     end
 
     r.is_a?(Type) ? r : Type.new(r || :Any)
+  end
+
+  # A method that returns the same shape it was called on -- Set#difference
+  # yields another set of the same element type.
+  sig { params(args: T::Array[AST::Node]).returns(Type) }
+  def infer_receiver_type(args)
+    receiver = args.first
+    return Type.new(:Any) unless receiver
+
+    receiver.type_object || Type.new(:Any)
   end
 
   sig { params(args: T::Array[AST::Node]).returns(Type) }
@@ -216,5 +228,6 @@ class FunctionReturn
   private :infer_element_type
   private :infer_optional_element_type
   private :infer_to_list
+  private :infer_receiver_type
   private :resolve_infer
 end

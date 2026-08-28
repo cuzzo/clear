@@ -1323,6 +1323,18 @@ SET_METHODS = T.let({
     borrows: :all,
     is_method: true,
   },
+  # Ruby's `a - b` and Rust's HashSet::difference: the elements of the receiver
+  # that the argument does not have.
+  "difference" => {
+    arity: 1, tag: :set_method, allocates: true,
+    zig: "try {0}.difference({alloc}, &{1})",
+    bc: true,
+    alloc: :receiver_storage,
+    return_alloc: :receiver_storage,
+    return: :infer_receiver_type,
+    borrows: :all,
+    is_method: true,
+  },
   # Ruby's Set#clear and Rust's HashSet::clear: drop every element, freeing
   # what the set owns.
   "clear" => {

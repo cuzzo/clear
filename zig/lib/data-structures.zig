@@ -2553,6 +2553,24 @@ pub fn bind(comptime deps: type) type {
             // Rust's HashSet::extend do. Each element is COPIED, because both
             // sets keep owning their own: insert takes ownership of what it is
             // given, and `other` is only borrowed here.
+            // Ruby's `a - b` and Rust's HashSet::difference: the elements of
+            // this set that `other` does not have. The result owns its own
+            // copies, since both inputs keep theirs.
+            pub fn difference(self: *const Self, alloc: std.mem.Allocator, other: *const Self) !Self {
+                var out = Self{};
+                var it = self.inner.iterator();
+                while (it.next()) |entry| {
+                    const value = entry.key_ptr.*;
+                    if (other.inner.contains(value)) continue;
+                    if (is_string) {
+                        try out.insert(alloc, try alloc.dupe(u8, value));
+                    } else {
+                        try out.insert(alloc, value);
+                    }
+                }
+                return out;
+            }
+
             // Ruby's Set#clear and Rust's HashSet::clear. The set owns its
             // string keys, so they are freed rather than merely dropped.
             pub fn clear(self: *Self, alloc: std.mem.Allocator) void {
