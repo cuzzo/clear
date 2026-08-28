@@ -1476,7 +1476,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF nodes[rtoc_idx]?.self_managed_alloc OR_ELSE FALSE THEN
+      IF (emittable__self_managed_alloc(UNWRAP (nodes[rtoc_idx])) OR_ELSE FALSE) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
