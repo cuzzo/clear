@@ -328,9 +328,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ownership_fact_nodes: []Emittable = ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } );
     FOR _ IN nodes DO
     IF emittable__ownership_consumption(_) EXISTS THEN
-    IF TRUE THEN
         &structural_ownership_nodes.append(COPY _);
-    END
     END
     IF (mIRChecker__allocator_metadata_node?(rtoc_self_view, _) AND !(allocator_metadata_node_ids.contains?(_.object_id()))) THEN
         &allocator_metadata_nodes.append(COPY _);
