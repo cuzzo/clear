@@ -358,11 +358,14 @@ module SelfhostAutofixUnit
       idx = lines.index { |l| l.match?(/^\s*#{Regexp.escape(name)}(?::[^=]*)? = /) }
       if idx
         lines[idx] = lines[idx].sub(/^(\s*)#{Regexp.escape(name)}/, "\\1MUTABLE #{name}")
+      elsif (idx = lines.index { |l| l.match?(/^(?:PUB |PRIVATE )?FN .*(?<![\w])#{Regexp.escape(name)}: /) })
+        lines[idx] = lines[idx].sub(/(?<![\w])#{Regexp.escape(name)}: /, "MUTABLE #{name}: ")
       else
-        idx = lines.index { |l| l.match?(/^(?:PUB |PRIVATE )?FN .*(?<![\w])#{Regexp.escape(name)}: /) }
+        # It may be a WITH alias, which carries its own mutability.
+        idx = lines.index { |l| l.match?(/WITH \w+ \w+ AS #{Regexp.escape(name)}\b/) }
         return false unless idx
 
-        lines[idx] = lines[idx].sub(/(?<![\w])#{Regexp.escape(name)}: /, "MUTABLE #{name}: ")
+        lines[idx] = lines[idx].sub(/AS #{Regexp.escape(name)}\b/, "AS MUTABLE #{name}")
       end
       File.write(path, lines.join)
       true
