@@ -343,20 +343,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF _ IS_A OwnedCreate AS owned_create THEN
         &ownership_fact_nodes.append(Emittable{ OwnedCreate: COPY owned_create });
-        IF owned_create IS_A OwnedTransfer THEN
-          &transfers.insert(COPY owned_create.name);
-          IF (owned_create.target() == :return) THEN
-            &return_transfers.insert(COPY owned_create.name);
-          END
-        END
     ELSE_IF _ IS_A OwnedDestroy AS owned_destroy THEN
         &ownership_fact_nodes.append(Emittable{ OwnedDestroy: COPY owned_destroy });
-        IF owned_destroy IS_A OwnedTransfer THEN
-          &transfers.insert(COPY owned_destroy.name);
-          IF (owned_destroy.target() == :return) THEN
-            &return_transfers.insert(COPY owned_destroy.name);
-          END
-        END
     ELSE_IF _ IS_A OwnedTransfer AS owned_transfer THEN
         &ownership_fact_nodes.append(Emittable{ OwnedTransfer: COPY owned_transfer });
         &transfers.insert(COPY CAST(owned_transfer.name AS String));
@@ -365,28 +353,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
     ELSE_IF _ IS_A OwnedBorrow AS owned_borrow THEN
         &ownership_fact_nodes.append(Emittable{ OwnedBorrow: COPY owned_borrow });
-        IF owned_borrow IS_A OwnedTransfer THEN
-          &transfers.insert(COPY CAST(owned_borrow.name AS String));
-          IF (owned_borrow.target() == :return) THEN
-            &return_transfers.insert(COPY CAST(owned_borrow.name AS String));
-          END
-        END
     ELSE_IF _ IS_A OwnedStore AS owned_store THEN
         &ownership_fact_nodes.append(Emittable{ OwnedStore: COPY owned_store });
-        IF owned_store IS_A OwnedTransfer THEN
-          &transfers.insert(COPY owned_store.name);
-          IF (owned_store.target == :return) THEN
-            &return_transfers.insert(COPY owned_store.name);
-          END
-        END
     ELSE_IF _ IS_A OwnedReturn AS owned_return THEN
         &ownership_fact_nodes.append(Emittable{ OwnedReturn: COPY owned_return });
-        IF owned_return IS_A OwnedTransfer THEN
-          &transfers.insert(COPY CAST(owned_return.name AS String));
-          IF (owned_return.target() == :return) THEN
-            &return_transfers.insert(COPY CAST(owned_return.name AS String));
-          END
-        END
     ELSE_IF _ IS_A AllocMark AS alloc_mark THEN
         IF allocs[alloc_mark.name] == NIL THEN
           allocs[alloc_mark.name] = List[];
