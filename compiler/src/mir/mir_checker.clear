@@ -651,7 +651,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         cleanupEntry__has_moved_guard?(rtoc_local_receiver_17) }, &state));
       ELSE_IF stmt_value_mutable IS_A ErrCleanup AS err_cleanup THEN
         MUTABLE err_cleanup_mutable = COPY err_cleanup;
-        TRY (mIRChecker__linear_register_err_cleanup_mut(&rtoc_self_view, CAST(err_cleanup_mutable.name AS String), state));
+        TRY (mIRChecker__linear_register_err_cleanup_mut(&rtoc_self_view, CAST(err_cleanup_mutable.name AS String), &state));
       ELSE_IF stmt_value_mutable IS_A TransferMark AS transfer_mark THEN
         MUTABLE transfer_mark_mutable = COPY transfer_mark;
         TRY (mIRChecker__linear_transfer_mut(&rtoc_self_view, transfer_mark_mutable.name, transfer_mark_mutable.target, transfer_mark_mutable.target_alloc, &state));
@@ -1008,7 +1008,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (state.cleanup_finalizers.contains?(name) AND !(state.guarded_finalizers.contains?(name))) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_DOUBLE_RELEASE, Name{ StringValue: COPY name }, "TransferMark and unguarded Cleanup both own the success-path release")));
     END
-    TRY (mIRChecker__linear_release_mut(&rtoc_self_view, name, target, target_alloc, state));
+    TRY (mIRChecker__linear_release_mut(&rtoc_self_view, name, target, target_alloc, &state));
     NIL;
 }
 END
@@ -1039,7 +1039,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_IMPLICIT_MOVE, names[rtoc_idx], "TransferMark(:${target}) moves a guarded cleanup binding without MIR::MoveMark")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_IMPLICIT_MOVE, Name{ StringValue: COPY UNWRAP (names[rtoc_idx]) } "TransferMark(:${target}) moves a guarded cleanup binding without MIR::MoveMark")));
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;
@@ -1064,7 +1064,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     &state.released.insert(COPY name);
-    &state.maybe_released.delete(name);
+    &state.maybe_released.remove(name);
     NIL;
 }
 END
