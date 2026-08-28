@@ -1701,7 +1701,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ruby_array_concat_String(all_errors, TRY (mIRChecker__check_fn_mut(&rtoc_self_view, _, strict, ( { MUTABLE rtoc_empty_list_31: []String = List[]; rtoc_empty_list_31 } ))));
     END
     IF (all_errors.length() == 0) THEN
-      MUTABLE rtoc_mutable_receiver_32 = mIRPassState__for_mut(MIRPassStateProgram{ MIRProgram: COPY program });
+      MUTABLE rtoc_mutable_receiver_32 = mIRPassState__for_mut(PassStateProgram{ MIRProgram: COPY program });
       TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_32, :mir_checked));
     END
     RETURN all_errors;

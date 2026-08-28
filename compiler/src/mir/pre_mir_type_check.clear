@@ -159,7 +159,7 @@ PUB FN preMirTypeCheck__verify_mut(program: Program) RETURNS !Void ->
   MUTABLE violations = List[];
   preMirTypeCheck__walk(program, &violations, {});
   IF (violations.length() == 0) THEN
-    MUTABLE rtoc_mutable_receiver_1 = (mIRPassState__for_mut(MIRPassStateProgram{ Emittable: COPY CAST(program AS Emittable) }));
+    MUTABLE rtoc_mutable_receiver_1 = (mIRPassState__for_mut(PassStateProgram{ Emittable: COPY CAST(program AS Emittable) }));
     TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_1, :premir_type_checked));
     RETURN;
   END

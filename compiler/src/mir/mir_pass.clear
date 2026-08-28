@@ -71,7 +71,7 @@ PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, ast: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE pass_state = mIRPassState__for_mut(MIRPassStateProgram{ Emittable: COPY CAST(ast AS Emittable) });
+    MUTABLE pass_state = mIRPassState__for_mut(PassStateProgram{ Emittable: COPY CAST(ast AS Emittable) });
     TRY (mIRPassState__require_mut(pass_state, :premir_type_checked, "MIRPass"));
     MUTABLE planning = TRY (mIRPlanner__plan_all_mut(rtoc_self_view.fn_nodes, rtoc_self_view.schema_lookup, rtoc_self_view.lifecycle_registry, rtoc_self_view.body_summaries, rtoc_self_view.hoist_bindings));
     rtoc_self_view.escape_placement_facts = COPY planning.escape_placements;

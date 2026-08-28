@@ -3829,7 +3829,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END) }, UNWRAP (lowered));
     END
     TRY (mIRLowering__inject_const_init_mut(rtoc_self_view, &items));
-    MUTABLE state = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_97 = mIRPassState__for_mut(MIRPassStateProgram{ ASTProgram: COPY node });
+    MUTABLE state = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_97 = mIRPassState__for_mut(PassStateProgram{ ASTProgram: COPY node });
     mIRPassState__copy(rtoc_local_receiver_97) };
     TRY (mIRPassState__mark_mut(&state, :mir_lowered));
     RETURN MIRProgram{ token: items, statements: state, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, sync_policy: NIL, mir_pass_state: NIL, language_mode: NIL };
