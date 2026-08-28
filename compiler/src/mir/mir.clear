@@ -1842,7 +1842,7 @@ FN unionMatchStmt__body_slots(MUTABLE self: UnionMatchStmt) RETURNS ![]MIRBodySl
       MUTABLE rtoc_each_items_28 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_28.length() DO
-      &slots.append(unionMatchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (UNWRAP (rtoc_each_items_28[rtoc_idx])).body));
+      &slots.append(unionMatchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_28[rtoc_idx]).body));
       rtoc_idx = rtoc_idx + 1;
       END
   END
@@ -6950,7 +6950,7 @@ FN withMatchDispatch__body_slots(self: WithMatchDispatch) RETURNS ![]MIRBodySlot
       MUTABLE rtoc_each_items_109 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_109.length() DO
-      &slots.append(withMatchDispatch__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (UNWRAP (rtoc_each_items_109[rtoc_idx])).body));
+      &slots.append(withMatchDispatch__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (rtoc_each_items_109[rtoc_idx]).body));
       rtoc_idx = rtoc_idx + 1;
       END
   END

@@ -453,7 +453,7 @@ FN lifecycleRegistry__add_monomorphic_carrier_plans_mut(MUTABLE plans: {String}L
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_5.length() DO
-      MUTABLE current_param: Param = COPY UNWRAP (UNWRAP (rtoc_each_items_5[rtoc_idx]));
+      MUTABLE current_param: Param = COPY UNWRAP (rtoc_each_items_5[rtoc_idx]);
       MUTABLE param_takes = FALSE;
       IF current_param.takes EXISTS AS takes_value THEN
         param_takes = takes_value;
