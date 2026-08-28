@@ -960,7 +960,7 @@ PUB FN mIRChecker__linear_register_cleanup_mut(MUTABLE self: MIRChecker, name: S
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (mIRChecker__linear_register_finalizer_mut(&rtoc_self_view, name, "Cleanup", &state.cleanup_finalizers, state));
+    TRY (mIRChecker__linear_register_finalizer_mut(&rtoc_self_view, name, "Cleanup", &state));
     IF guarded THEN
       &state.guarded_finalizers.insert(COPY name);
     END
@@ -971,11 +971,11 @@ PUB FN mIRChecker__linear_register_err_cleanup_mut(MUTABLE self: MIRChecker, nam
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (mIRChecker__linear_register_finalizer_mut(&rtoc_self_view, name, "ErrCleanup", &state.err_finalizers, state));
+    TRY (mIRChecker__linear_register_finalizer_mut(&rtoc_self_view, name, "ErrCleanup", &state));
     NIL;
 }
 END
-PUB FN mIRChecker__linear_register_finalizer_mut(MUTABLE self: MIRChecker, name: String, kind: String, MUTABLE finalizers: [Set]String, state: LinearOwnershipState) RETURNS !Void
+PUB FN mIRChecker__linear_register_finalizer_mut(MUTABLE self: MIRChecker, name: String, kind: String, MUTABLE state: LinearOwnershipState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -985,7 +985,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (state.cleanup_finalizers.contains?(name) OR state.err_finalizers.contains?(name)) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_DOUBLE_FINALIZER, Name{ StringValue: COPY name }, "multiple cleanup strategies registered for one owned binding")));
     END
-    &finalizers.insert(COPY name);
+    IF kind == "Cleanup" THEN
+      &state.cleanup_finalizers.insert(COPY name);
+    ELSE
+      &state.err_finalizers.insert(COPY name);
+    END
     NIL;
 }
 END
