@@ -1,0 +1,27 @@
+# Test: HashMap#clear drops every entry, as Ruby's Hash#clear and Rust's
+# HashMap::clear do. The map owns its keys and values, so both are freed
+# rather than leaked, and the map stays usable afterwards.
+
+FN main() RETURNS !Void ->
+  seed = "v";
+  MUTABLE built: {String}String = {"a": "${seed}1", "b": "${seed}2"};
+  ASSERT built.length() == 2_i64, "starts populated";
+  &built.clear();
+  ASSERT built.length() == 0_i64, "clear should empty the map";
+  ASSERT built["a"] == NIL, "a cleared key should be gone";
+
+  built["c"] = "${seed}3";
+  ASSERT built.length() == 1_i64, "the map should be reusable after clear";
+  ASSERT UNWRAP (built["c"]) == "v3", "and hold what was put next";
+
+  MUTABLE literals: {String}String = {"x": "1"};
+  &literals.clear();
+  ASSERT literals.length() == 0_i64, "rodata values clear too";
+
+  MUTABLE empty: {String}String = {};
+  &empty.clear();
+  ASSERT empty.length() == 0_i64, "clearing an empty map is a no-op";
+
+  print("map_clear: all tests passed");
+  RETURN;
+END

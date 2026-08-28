@@ -255,6 +255,19 @@ pub fn bind(comptime deps: type) type {
             }
 
 
+            // Ruby's Hash#clear and Rust's HashMap::clear. The map owns its
+            // keys and values, so both are freed rather than dropped.
+            pub fn clear(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
+                _ = key_alloc;
+                _ = bucket_alloc;
+                var it = self.inner.iterator();
+                while (it.next()) |entry| {
+                    self.alloc.free(entry.key_ptr.*);
+                    cleanup(V, self.alloc, entry.value_ptr);
+                }
+                self.inner.clearRetainingCapacity();
+            }
+
             pub fn get(self: anytype, key_in: anytype) ?V {
                 const key = keyBytes(key_in);
                 return self.inner.get(key);

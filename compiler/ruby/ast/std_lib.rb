@@ -1405,6 +1405,18 @@ MAP_METHODS = T.let({
   },
   # Ruby's Hash#merge! and Rust's HashMap::extend: fold another map's entries
   # in, overwriting on a duplicate key. The source is borrowed, so values copy.
+  # Ruby's Hash#clear and Rust's HashMap::clear: drop every entry, freeing the
+  # keys and values the map owns.
+  "clear" => {
+    arity: 0, tag: :map_method,
+    zig: "{0}.clear({alloc}, {alloc})",
+    bc: true,
+    alloc: :receiver_storage,
+    mutates_receiver: true,
+    return_type: :Void,
+    borrows: :all,
+    is_method: true,
+  },
   "merge_mut" => {
     arity: 1, tag: :map_method, allocates: true,
     mutates_receiver: true,
