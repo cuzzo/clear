@@ -1668,7 +1668,7 @@ PUB FN mIRChecker__verify_heap_create_single_indirection_mut(MUTABLE self: MIRCh
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     mIRChecker__each_heap_create(rtoc_self_view, nodes, %(hc: HeapCreate) USE(rtoc_self_view) -> {
-    MUTABLE zt = COPY TRY (type__zig_type(hc));
+    MUTABLE zt = COPY hc.zig_type;
     IF !((TRUE AND zt.lstrip().startsWith?("*"))) THEN
         RETURN;
     END
