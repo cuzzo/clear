@@ -525,7 +525,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY consumed[rtoc_idx_2]? }, "structural ownership sink consumes :${mark.alloc()} binding '${consumed[rtoc_idx_2]?}' into :${sink_alloc} sink; owned transfer allocator is incoherent")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY consumed[rtoc_idx_2]? }, "structural ownership sink consumes :${(UNWRAP (mark)).alloc} binding '${consumed[rtoc_idx_2]?}' into :${sink_alloc} sink; owned transfer allocator is incoherent")));
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -3240,7 +3240,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY consumes[rtoc_idx]? }, "ownership_contract consumes :${mark.alloc()} binding '${consumes[rtoc_idx]?}' into :${sink_alloc_value} sink; owned transfer allocator is incoherent")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY consumes[rtoc_idx]? }, "ownership_contract consumes :${(UNWRAP (mark)).alloc} binding '${consumes[rtoc_idx]?}' into :${sink_alloc_value} sink; owned transfer allocator is incoherent")));
     rtoc_idx = rtoc_idx + 1;
       END
     ELSE
