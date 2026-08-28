@@ -452,7 +452,47 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "argument N expects ?U, got T" where U is a union carrying T -- the callee
+  # takes the union, so the value needs its variant wrapper.
+  def union_arg_wrap_fix(output)
+    return nil unless (m = output.match(/argument (\d+) expects \?(\w+), got (\w+)/))
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    union, variant = m[2], m[3]
+    return nil if union == 'Name'  # handled by its own rule
+    return nil unless union_has_variant?(union, variant)
+
+    index = m[1].to_i
+    line_no = loc[1].to_i
+    Fix.new(label: "wrap argument #{index} in #{union}.#{variant}", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      line = lines[i].to_s
+      at = line.index('_mut(') || line.index('(') or return false
+
+      args = split_arguments(line, line.index('(', at)) or return false
+      target = args[index - 1] or return false
+      return false if target.strip.start_with?("#{union}{")
+
+      start = target_start(args, index)
+      lines[i] = line[0...start] + "#{union}{ #{variant}: COPY #{target.strip} }" +
+                 line[(start + target.length)..].to_s
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  def union_has_variant?(union, variant)
+    Dir.glob(File.join(ROOT, 'compiler', 'src', '**', '*.clear')).any? do |path|
+      File.foreach(path).any? do |line|
+        line.match?(/^(?:PUB )?UNION #{Regexp.escape(union)} \{/) &&
+          line.match?(/(?<![\w])#{Regexp.escape(variant)}: /)
+      end
+    end
+  end
+
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
+           method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
            method(:mutable_local_fix),

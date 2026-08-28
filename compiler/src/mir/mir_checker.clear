@@ -1581,8 +1581,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE if_chain_mutable = COPY if_chain;
       IF !((if_chain_mutable.branches).empty?()) THEN
             FOR _ IN if_chain_mutable.branches DO
-          TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, _.cond, NIL, alloc_by_name));
-          TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body(), alloc_by_name));
+          TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _.cond } NIL, alloc_by_name));
+          TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body, alloc_by_name));
             END
       END
       TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (if_chain_mutable.default_body OR_ELSE List[]), alloc_by_name));
