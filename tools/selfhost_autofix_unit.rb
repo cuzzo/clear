@@ -36,6 +36,22 @@ module SelfhostAutofixUnit
     return nil if field == 'class'
 
     line_no = loc[1].to_i
+    # A union may already have a generated dispatcher for this name, in which
+    # case the call is right and only its SHAPE is wrong -- `x.f()` should be
+    # `union__f(x)`, not a field read.
+    union_fn = union_dispatcher_for(output, field)
+    if union_fn
+      return Fix.new(label: "#{field}() -> #{union_fn}(...)", apply: lambda do |path|
+        lines = File.readlines(path)
+        i = line_no - 1
+        return false unless lines[i]&.match?(/(\w+)\.#{Regexp.escape(field)}\(\)/)
+
+        lines[i] = lines[i].gsub(/(\w+)\.#{Regexp.escape(field)}\(\)/, "#{union_fn}(\\1)")
+        File.write(path, lines.join)
+        true
+      end)
+    end
+
     Fix.new(label: "#{field}() -> #{field}", apply: lambda do |path|
       lines = File.readlines(path)
       i = line_no - 1
@@ -139,6 +155,17 @@ module SelfhostAutofixUnit
   def target_start(_args, index)
     span = @arg_spans[index - 1]
     span[0] + (span[1].length - span[1].lstrip.length)
+  end
+
+  # `Type T has no inherent METHOD named 'f'` names the receiver's union; if a
+  # `t__f` dispatcher exists, that is what the call meant.
+  def union_dispatcher_for(output, field)
+    union = output[/Type (\w+) has no inherent METHOD/, 1] or return nil
+
+    name = "#{union[0].downcase}#{union[1..]}__#{field}"
+    Dir.glob(File.join(ROOT, 'compiler', 'src', '**', '*.clear')).any? do |path|
+      File.foreach(path).any? { |l| l.match?(/^(?:PUB )?FN #{Regexp.escape(name)}\(/) }
+    end ? name : nil
   end
 
   FIXES = [method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix)].freeze

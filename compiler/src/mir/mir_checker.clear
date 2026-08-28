@@ -719,13 +719,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, state.pending_block_transfers[rtoc_idx], "TransferMark(:block_result) does not match the block break expression")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY UNWRAP (state.pending_block_transfers[rtoc_idx]) } "TransferMark(:block_result) does not match the block break expression")));
     rtoc_idx = rtoc_idx + 1;
         END
         &state.pending_block_transfers.clear();
       ELSE
         MUTABLE manual_traversal = (((((stmt_value_mutable IS_A MIRDeferStmt OR stmt_value_mutable IS_A ErrDeferStmt) OR stmt_value_mutable IS_A MIRStructDef) OR stmt_value_mutable IS_A FsmB1Body) OR stmt_value_mutable IS_A FsmGenericBody) OR stmt_value_mutable IS_A FsmIoBody);
-        IF (stmt_value_mutable.body_slots().empty?() AND !(manual_traversal)) THEN
+        IF ((TRY (emittable__body_slots(stmt_value_mutable))).empty?() AND !(manual_traversal)) THEN
           TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, stmt_value_mutable, state));
           RETURN;
         END
