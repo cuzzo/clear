@@ -198,9 +198,10 @@ module SelfhostAutofixUnit
     Fix.new(label: 'list != NIL -> !empty?', apply: lambda do |path|
       lines = File.readlines(path)
       i = line_no - 1
-      return false unless lines[i]&.match?(/([\w.]+) != NIL/)
+      # The left side may be a whole call, not just a dotted name.
+      return false unless lines[i]&.match?(/IF (.+?) != NIL THEN/)
 
-      lines[i] = lines[i].sub(/([\w.]+) != NIL/) { "!((#{Regexp.last_match(1)}).empty?())" }
+      lines[i] = lines[i].sub(/IF (.+?) != NIL THEN/) { "IF !((#{Regexp.last_match(1)}).empty?()) THEN" }
       File.write(path, lines.join)
       true
     end)

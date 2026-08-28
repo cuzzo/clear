@@ -872,7 +872,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       ELSE_IF stmt_value_mutable IS_A CatchWrapper AS catch_wrapper THEN
         MUTABLE catch_wrapper_mutable = COPY catch_wrapper;
-        IF TRY (catchWrapper__clause_bodies(catch_wrapper_mutable)) != NIL THEN
+        IF !((TRY (catchWrapper__clause_bodies(catch_wrapper_mutable))).empty?()) THEN
                 FOR _ IN (TRY (catchWrapper__clause_bodies(catch_wrapper_mutable))) DO
                 TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _, linearOwnershipState__copy(state)));
                 END
