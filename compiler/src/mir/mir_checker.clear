@@ -1767,20 +1767,22 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN TRUE;
       END
     END
-    IF (((init != NIL) AND (init IS_A InlineBc)) OR ((init != NIL) AND (init IS_A RegistryCall))) THEN
-      IF !(TRY (mIRChecker__stdlib_owned_return?(rtoc_self_view, init))) THEN
-        RETURN FALSE;
+    IF init EXISTS AS rtoc_init THEN
+      IF ((rtoc_init IS_A InlineBc) OR (rtoc_init IS_A RegistryCall)) THEN
+        IF !(TRY (mIRChecker__stdlib_owned_return?(rtoc_self_view, rtoc_init))) THEN
+          RETURN FALSE;
+        END
+        MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(rtoc_init.stdlib_def());
+        IF !((IF sig != NIL THEN
+          TRY (functionSignature__fixed_return?(sig))
+        ELSE
+          NIL
+        END)) THEN
+          RETURN FALSE;
+        END
+        MUTABLE ret = functionSignature__return_type(sig);
+        RETURN !(type__void?(ret));
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(init.stdlib_def());
-      IF !((IF sig != NIL THEN
-        TRY (functionSignature__fixed_return?(sig))
-      ELSE
-        NIL
-      END)) THEN
-        RETURN FALSE;
-      END
-      MUTABLE ret = functionSignature__return_type(sig);
-      RETURN !(type__void?(ret));
     END
     RETURN FALSE;
 }
