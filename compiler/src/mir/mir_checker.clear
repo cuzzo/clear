@@ -409,7 +409,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE lambda_expr_mutable = COPY lambda_expr;
         IF lambda_expr_mutable.fn_def THEN
           MUTABLE sub = mIRChecker__new(NIL, rtoc_self_view.schema_lookup);
-          rtoc_self_view.errors = ruby_array_concat_String(rtoc_self_view.errors, TRY (mIRChecker__check_fn_mut(&sub, lambda_expr_mutable.fn_def, strict, (((lambda_expr_mutable.captures OR List[]))) |> SELECT _.toString())));
+          rtoc_self_view.errors = ruby_array_concat_String(rtoc_self_view.errors, TRY (mIRChecker__check_fn_mut(&sub, lambda_expr_mutable.fn_def, strict, (((lambda_expr_mutable.captures OR_ELSE List[]))) |> SELECT _.toString())));
         END
     END
     END
@@ -745,7 +745,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF stmt_value_mutable IS_A IfStmt AS if_stmt THEN
         MUTABLE if_stmt_mutable = COPY if_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, if_stmt_mutable.cond, state));
-        TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_stmt_mutable.then_body, (if_stmt_mutable.else_body OR List[]), state, "if"));
+        TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_stmt_mutable.then_body, (if_stmt_mutable.else_body OR_ELSE List[]), state, "if"));
       ELSE_IF stmt_value_mutable IS_A IfBindStmt AS if_bind_stmt THEN
         MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
         IF if_bind_stmt_mutable.bindings != NIL THEN
@@ -758,7 +758,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, expr, state));
                 END
         END
-        TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_bind_stmt_mutable.then_body, (if_bind_stmt_mutable.else_body OR List[]), state, "if-bind"));
+        TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_bind_stmt_mutable.then_body, (if_bind_stmt_mutable.else_body OR_ELSE List[]), state, "if-bind"));
       ELSE_IF stmt_value_mutable IS_A WhileStmt AS while_stmt THEN
         MUTABLE while_stmt_mutable = COPY while_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, while_stmt_mutable.cond, state));
@@ -793,7 +793,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
                 &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state))), state, "match")));
                 END
         END
-        &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR List[]), linearOwnershipState__copy(state))), state, "match")));
+        &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "match")));
         TRY (mIRChecker__linear_merge_branch_states_mut(&rtoc_self_view, states, &state, "match"));
       ELSE_IF stmt_value_mutable IS_A UnionMatchStmt AS union_match_stmt THEN
         MUTABLE union_match_stmt_mutable = COPY union_match_stmt;
@@ -804,7 +804,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
                 &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state))), state, "match")));
                 END
         END
-        &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR List[]), linearOwnershipState__copy(state))), state, "match")));
+        &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "match")));
         TRY (mIRChecker__linear_merge_branch_states_mut(&rtoc_self_view, states, &state, "match"));
       ELSE_IF stmt_value_mutable IS_A IfChain AS if_chain THEN
         MUTABLE if_chain_mutable = COPY if_chain;
@@ -815,7 +815,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state))), state, "if-chain")));
                 END
         END
-        &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (if_chain_mutable.default_body OR List[]), linearOwnershipState__copy(state))), state, "if-chain")));
+        &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (if_chain_mutable.default_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "if-chain")));
         TRY (mIRChecker__linear_merge_branch_states_mut(&rtoc_self_view, states, &state, "if-chain"));
       ELSE_IF stmt_value_mutable IS_A MIRDeferStmt AS mir_defer_stmt THEN
         MUTABLE mir_defer_stmt_mutable = COPY mir_defer_stmt;
@@ -865,7 +865,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, polymorphic_mutate_flow_mutable.guard_cond, state));
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_21: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_21 } );
         &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (polymorphicMutateFlow__body(polymorphic_mutate_flow_mutable)), linearOwnershipState__copy(state))), state, "polymorphic-mutate-flow")));
-        &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (polymorphic_mutate_flow_mutable.guard_fail_body OR List[]), linearOwnershipState__copy(state))), state, "polymorphic-mutate-flow")));
+        &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (polymorphic_mutate_flow_mutable.guard_fail_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "polymorphic-mutate-flow")));
         TRY (mIRChecker__linear_merge_branch_states_mut(&rtoc_self_view, states, &state, "polymorphic-mutate-flow"));
       ELSE_IF stmt_value_mutable IS_A WithMatchDispatch AS with_match_dispatch THEN
         MUTABLE with_match_dispatch_mutable = COPY with_match_dispatch;
@@ -1383,11 +1383,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF _ IS_A IfStmt AS if_stmt THEN
       MUTABLE if_stmt_mutable = COPY if_stmt;
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, if_stmt_mutable.then_body, COPY visible));
-      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (if_stmt_mutable.else_body OR List[]), COPY visible));
+      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (if_stmt_mutable.else_body OR_ELSE List[]), COPY visible));
     ELSE_IF _ IS_A IfBindStmt AS if_bind_stmt THEN
       MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, if_bind_stmt_mutable.then_body, COPY visible));
-      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (if_bind_stmt_mutable.else_body OR List[]), COPY visible));
+      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (if_bind_stmt_mutable.else_body OR_ELSE List[]), COPY visible));
     ELSE_IF _ IS_A WhileStmt AS while_stmt THEN
       MUTABLE while_stmt_mutable = COPY while_stmt;
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, TRY (whileStmt__body(while_stmt_mutable)), COPY visible));
@@ -1416,7 +1416,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body(), COPY visible));
             END
       END
-      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR List[]), COPY visible));
+      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR_ELSE List[]), COPY visible));
     ELSE_IF _ IS_A UnionMatchStmt AS union_match_stmt THEN
       MUTABLE union_match_stmt_mutable = COPY union_match_stmt;
       IF union_match_stmt_mutable.arms != NIL THEN
@@ -1424,7 +1424,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body(), COPY visible));
             END
       END
-      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR List[]), COPY visible));
+      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR_ELSE List[]), COPY visible));
     ELSE_IF _ IS_A IfChain AS if_chain THEN
       MUTABLE if_chain_mutable = COPY if_chain;
       IF if_chain_mutable.branches != NIL THEN
@@ -1432,7 +1432,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body(), COPY visible));
             END
       END
-      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (if_chain_mutable.default_body OR List[]), COPY visible));
+      TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (if_chain_mutable.default_body OR_ELSE List[]), COPY visible));
     ELSE_IF _ IS_A MIRBgBlock AS mir_bg_block THEN
       MUTABLE mir_bg_block_mutable = COPY mir_bg_block;
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, mir_bg_block_mutable.run_body, COPY visible));
@@ -1551,7 +1551,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE if_stmt_mutable = COPY if_stmt;
       TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY if_stmt_mutable.cond }, NIL, alloc_by_name));
       TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, if_stmt_mutable.then_body, alloc_by_name));
-      TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (if_stmt_mutable.else_body OR List[]), alloc_by_name));
+      TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (if_stmt_mutable.else_body OR_ELSE List[]), alloc_by_name));
     ELSE_IF _ IS_A WhileStmt AS while_stmt THEN
       MUTABLE while_stmt_mutable = COPY while_stmt;
       TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY while_stmt_mutable.cond }, NIL, alloc_by_name));
@@ -1574,7 +1574,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body(), alloc_by_name));
             END
       END
-      TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR List[]), alloc_by_name));
+      TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR_ELSE List[]), alloc_by_name));
     ELSE_IF _ IS_A UnionMatchStmt AS union_match_stmt THEN
       MUTABLE union_match_stmt_mutable = COPY union_match_stmt;
       TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY union_match_stmt_mutable.subject }, NIL, alloc_by_name));
@@ -1583,7 +1583,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body(), alloc_by_name));
             END
       END
-      TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR List[]), alloc_by_name));
+      TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR_ELSE List[]), alloc_by_name));
     ELSE_IF _ IS_A IfChain AS if_chain THEN
       MUTABLE if_chain_mutable = COPY if_chain;
       IF if_chain_mutable.branches != NIL THEN
@@ -1592,7 +1592,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body(), alloc_by_name));
             END
       END
-      TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (if_chain_mutable.default_body OR List[]), alloc_by_name));
+      TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, (if_chain_mutable.default_body OR_ELSE List[]), alloc_by_name));
     END
     END
 }
@@ -1723,7 +1723,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF _ IS_A FnDef AS fn_def THEN
       &functions.append(COPY fn_def);
     ELSE_IF _ IS_A MIRStructDef AS mir_struct_def THEN
-      FOR _ IN ((mir_struct_def.methods OR List[])) DO
+      FOR _ IN ((mir_struct_def.methods OR_ELSE List[])) DO
       IF _ IS_A FnDef THEN
         &functions.append(_);
       END
@@ -2107,7 +2107,7 @@ PUB FN mIRChecker__check_fsm_structure_mut(structure: ?FsmStructure, source: ?Lo
   IF structure EXISTS AS structure_value THEN
     MUTABLE structure_value_mutable = COPY structure_value;
     MUTABLE captures: []FsmCaptureFact = CAST((CAST(structure_value_mutable.captures AS ?[]FsmCaptureFact) OR_ELSE List[]) AS []FsmCaptureFact);
-    MUTABLE finalize_cleanups = (structure_value_mutable.finalize_cleanups OR List[]);
+    MUTABLE finalize_cleanups = (structure_value_mutable.finalize_cleanups OR_ELSE List[]);
     MUTABLE steps: []FsmStepFact = CAST((CAST(structure_value_mutable.steps AS ?[]FsmStepFact) OR_ELSE List[]) AS []FsmStepFact);
     FOR _ IN captures DO
     IF !((KEEP _.cleanup_at == :finalize)) THEN

@@ -23,8 +23,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.test_name = COPY test_block.name;
     rtoc_self_view.lowering = COPY lowering;
     rtoc_self_view.setup_mir = TRY (mIRLowering__lower_body(&lowering, test_block.setup));
-    rtoc_self_view.test_before_each_mir = (((test_block.before_each OR List[]))) |> SELECT TRY (mIRLowering__lower_body(&lowering, _));
-    rtoc_self_view.test_after_each_mir = (((test_block.after_each OR List[]))) |> SELECT TRY (mIRLowering__lower_body(&lowering, _));
+    rtoc_self_view.test_before_each_mir = (((test_block.before_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&lowering, _));
+    rtoc_self_view.test_after_each_mir = (((test_block.after_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&lowering, _));
 }
 END
 PUB FN testBlockCtx__fresh_preamble(self: TestBlockCtx) RETURNS TestPreamble
