@@ -1484,7 +1484,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF allocs.contains?(nodes[rtoc_idx]?.name()) THEN
+      IF allocs.contains?(nodes[rtoc_idx]?.name) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
