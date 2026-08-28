@@ -545,12 +545,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF fact.operands().empty?() THEN
+      IF (UNWRAP (fact)).operands.empty?() THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_OPERAND_MISSING, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, UNWRAP (rtoc_each_items_12[rtoc_idx])) }, "ownership-consuming MIR node has no operand provenance")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE rtoc_each_items_13 = fact.operands();
+      MUTABLE rtoc_each_items_13 = (UNWRAP (fact)).operands;
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < rtoc_each_items_13.length() DO
           IF (rtoc_each_items_13[rtoc_idx_2].kind() == :non_owning) THEN
@@ -561,7 +561,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, (rtoc_each_items_13[rtoc_idx_2].name() OR fact.source()), "ownership-consuming MIR node tries to consume borrowed operand from ${rtoc_each_items_13[rtoc_idx_2].source()}")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, (rtoc_each_items_13[rtoc_idx_2].name() OR (UNWRAP (fact)).source), "ownership-consuming MIR node tries to consume borrowed operand from ${rtoc_each_items_13[rtoc_idx_2].source()}")));
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -3240,7 +3240,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(fact EXISTS) THEN
       RETURN FALSE;
     END
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_54 = fact.operands();
+    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_54 = (UNWRAP (fact)).operands;
     cleanupEntry__none?(rtoc_local_receiver_54, %(operand) -> ((operand.kind() == :owned_binding) AND operand.name())) };
 }
 END

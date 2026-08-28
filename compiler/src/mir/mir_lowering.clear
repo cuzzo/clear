@@ -2827,7 +2827,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE source = mIRLowering__ownership_fact_source(rtoc_self_view, node);
-    FOR _ IN fact.names() DO
+    FOR _ IN (UNWRAP (fact)).names DO
     &facts.append(MIRLoweringOwnershipFact{ OwnedStore: COPY OwnedStore{ name: COPY CAST(_ AS String), target: COPY fact.source, alloc: COPY fact.target_alloc, source: COPY source, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
     NIL;
@@ -2842,7 +2842,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE source = mIRLowering__ownership_fact_source(rtoc_self_view, node);
-    FOR _ IN fact.names() DO
+    FOR _ IN (UNWRAP (fact)).names DO
     &facts.append(MIRLoweringOwnershipFact{ OwnedTransfer: COPY OwnedTransfer{ name: COPY CAST(_ AS String), target: fact.target, source: COPY source, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
     NIL;
