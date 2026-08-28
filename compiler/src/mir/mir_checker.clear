@@ -1344,7 +1344,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF expr_value_mutable IS_A MIRBlockExpr AS mir_block_expr THEN
         RETURN;
       END
-      FOR _ IN expr_value_mutable.child_exprs() DO
+      FOR _ IN emittable__child_exprs(expr_value_mutable) DO
       mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, _, &names);
       END
       NIL;
@@ -1371,7 +1371,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     ELSE_IF _ IS_A MoveMark AS move_mark THEN
       IF !(visible.contains?(CAST(move_mark.name AS String))) THEN
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MOVEMARK_WITHOUT_GUARD, move_mark.name, "MIR::MoveMark has no visible guarded Cleanup/ErrCleanup; ownership marker escaped its lexical owner")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MOVEMARK_WITHOUT_GUARD, Name{ StringValue: COPY move_mark.name } "MIR::MoveMark has no visible guarded Cleanup/ErrCleanup; ownership marker escaped its lexical owner")));
       END
     ELSE_IF _ IS_A IfStmt AS if_stmt THEN
       MUTABLE if_stmt_mutable = COPY if_stmt;
@@ -1404,25 +1404,25 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, TRY (snapshotMultiTxn__body(snapshot_multi_txn_mutable)), COPY visible));
     ELSE_IF _ IS_A SwitchStmt AS switch_stmt THEN
       MUTABLE switch_stmt_mutable = COPY switch_stmt;
-      IF switch_stmt_mutable.arms != NIL THEN
+      IF !((switch_stmt_mutable.arms).empty?()) THEN
             FOR _ IN switch_stmt_mutable.arms DO
-            TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body(), COPY visible));
+            TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body, COPY visible));
             END
       END
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR_ELSE List[]), COPY visible));
     ELSE_IF _ IS_A UnionMatchStmt AS union_match_stmt THEN
       MUTABLE union_match_stmt_mutable = COPY union_match_stmt;
-      IF union_match_stmt_mutable.arms != NIL THEN
+      IF !((union_match_stmt_mutable.arms).empty?()) THEN
             FOR _ IN union_match_stmt_mutable.arms DO
-            TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body(), COPY visible));
+            TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body, COPY visible));
             END
       END
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR_ELSE List[]), COPY visible));
     ELSE_IF _ IS_A IfChain AS if_chain THEN
       MUTABLE if_chain_mutable = COPY if_chain;
-      IF if_chain_mutable.branches != NIL THEN
+      IF !((if_chain_mutable.branches).empty?()) THEN
             FOR _ IN if_chain_mutable.branches DO
-            TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body(), COPY visible));
+            TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body, COPY visible));
             END
       END
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, (if_chain_mutable.default_body OR_ELSE List[]), COPY visible));
@@ -1431,23 +1431,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, mir_bg_block_mutable.run_body, COPY visible));
     ELSE_IF _ IS_A MIRDoBlock AS mir_do_block THEN
       MUTABLE mir_do_block_mutable = COPY mir_do_block;
-      IF mir_do_block_mutable.branch_bodies != NIL THEN
+      IF !((mir_do_block_mutable.branch_bodies).empty?()) THEN
             FOR _ IN mir_do_block_mutable.branch_bodies DO
             TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _, COPY visible));
             END
       END
     ELSE_IF _ IS_A CatchWrapper AS catch_wrapper THEN
       MUTABLE catch_wrapper_mutable = COPY catch_wrapper;
-      IF TRY (catchWrapper__clause_bodies(catch_wrapper_mutable)) != NIL THEN
+      IF !((TRY (catchWrapper__clause_bodies(catch_wrapper_mutable))).empty?()) THEN
             FOR _ IN (TRY (catchWrapper__clause_bodies(catch_wrapper_mutable))) DO
             TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _, COPY visible));
             END
       END
     ELSE_IF _ IS_A WithMatchDispatch AS with_match_dispatch THEN
       MUTABLE with_match_dispatch_mutable = COPY with_match_dispatch;
-      IF with_match_dispatch_mutable.arms != NIL THEN
+      IF !((with_match_dispatch_mutable.arms).empty?()) THEN
             FOR _ IN with_match_dispatch_mutable.arms DO
-            TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body(), COPY visible));
+            TRY (mIRChecker__verify_move_mark_scope_mut(&rtoc_self_view, _.body, COPY visible));
             END
       END
     END
@@ -1462,7 +1462,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF transfers.contains?(_) THEN
       CONTINUE;
     END
-    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ERRCLEANUP_WITHOUT_TRANSFER, _, "MIR::ErrCleanup requires a matching MIR::TransferMark; success-path owner is implicit")));
+    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ERRCLEANUP_WITHOUT_TRANSFER, Name{ StringValue: COPY _ } "MIR::ErrCleanup requires a matching MIR::TransferMark; success-path owner is implicit")));
     END
 }
 END
