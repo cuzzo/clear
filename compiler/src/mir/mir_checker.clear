@@ -367,12 +367,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           cleanups[cleanup.name] = List[];
         END
         (cleanups[cleanup.name])?.append(cleanup);
-        IF cleanup IS_A ErrCleanup THEN
-          IF err_cleanups[cleanup.name] == NIL THEN
-            err_cleanups[cleanup.name] = List[];
-          END
-          (err_cleanups[cleanup.name])?.append(cleanup);
-        END
     ELSE_IF _ IS_A ErrCleanup AS err_cleanup THEN
         IF cleanups[err_cleanup.name] == NIL THEN
           cleanups[err_cleanup.name] = List[];
