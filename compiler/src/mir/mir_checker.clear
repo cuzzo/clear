@@ -384,11 +384,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
     ELSE_IF _ IS_A ErrDeferStmt AS err_defer_stmt THEN
         MUTABLE body = COPY errDeferStmt__body(err_defer_stmt);
-        IF body IS_A DestroyPtr THEN
-          MUTABLE ptr = body.ptr();
+        MUTABLE ptr: ?Emittable = NIL;
+        IF body IS_A Emittable AS body_node THEN
+          IF body_node IS_A DestroyPtr AS destroy_ptr THEN
+            ptr = COPY destroy_ptr.ptr;
+          END
         END
-        IF ptr IS_A Ident THEN
-          &errdefer_destroy_names.insert(ptr.name());
+        IF ptr EXISTS AS ptr_value THEN
+          IF ptr_value IS_A Ident AS ptr_ident THEN
+            &errdefer_destroy_names.insert(COPY CAST(ptr_ident.name AS String));
+          END
         END
     ELSE_IF _ IS_A Let AS let THEN
         IF TRY (mIRChecker__owned_return_init?(rtoc_self_view, let.init)) THEN
