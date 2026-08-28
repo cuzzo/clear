@@ -52,11 +52,12 @@ module SelfhostUnionAccessor
 
   def main(argv)
     root = File.expand_path('compiler/src', __dir__ + '/..')
-    union = field = nil
+    union = field = only = nil
     OptionParser.new do |parser|
       parser.on('--root DIR') { |v| root = File.expand_path(v) }
       parser.on('--union NAME') { |v| union = v }
       parser.on('--field NAME') { |v| field = v }
+      parser.on('--only TYPE', 'Restrict to variants whose field has this type') { |v| only = v }
     end.parse!(argv)
     abort 'usage: --union NAME --field NAME' unless union && field
 
@@ -66,7 +67,17 @@ module SelfhostUnionAccessor
     carrying = members.select { |_, type| fields[type.sub(/@\w+\z/, '')].key?(field) }
     abort "selfhost_union_accessor: no variant of #{union} carries '#{field}'" if carrying.empty?
 
-    types = carrying.map { |_, type| fields[type.sub(/@\w+\z/, '')][field] }.uniq
+    if only
+      carrying = carrying.select do |_, type|
+        fields[type.sub(/@\w+\z/, '')][field].to_s.sub(/@\w+\z/, '').delete_prefix('?') == only
+      end
+      abort "selfhost_union_accessor: no variant's '#{field}' is #{only}" if carrying.empty?
+    end
+
+    types = carrying.map { |_, type| fields[type.sub(/@\w+\z/, '')][field].delete_prefix('?') }.uniq
+    # A field can mean different things on different variants (MIR's `value` is
+    # an Emittable on some and a String on others). --only narrows the accessor
+    # to one meaning, which is what a call site asking `is_a?` actually wants.
     abort "selfhost_union_accessor: '#{field}' has mixed types #{types.inspect}" if types.length > 1
 
     result = types.first

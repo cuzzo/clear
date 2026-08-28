@@ -16977,6 +16977,25 @@ PUB FN emittable__source_line(value: Emittable) RETURNS ?Int64 ->
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:value)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN emittable__value(value: Emittable) RETURNS ?Emittable@boxed ->
+  PARTIAL MATCH value START
+    Emittable.Set AS item -> RETURN COPY item.value;,
+    Emittable.DestructureSet AS item -> RETURN COPY item.value;,
+    Emittable.ReassignWithCleanup AS item -> RETURN COPY item.value;,
+    Emittable.ReturnStmt AS item -> RETURN COPY item.value;,
+    Emittable.BreakStmt AS item -> RETURN COPY item.value;,
+    Emittable.BreakExpr AS item -> RETURN COPY item.value;,
+    Emittable.StreamYield AS item -> RETURN COPY item.value;,
+    Emittable.EnumOrdinal AS item -> RETURN COPY item.value;,
+    Emittable.IndexedStore AS item -> RETURN COPY item.value;,
+    Emittable.ShardedMapPut AS item -> RETURN COPY item.value;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
 PUB FN emittable__expr?(value: Emittable) RETURNS Bool ->
   PARTIAL MATCH value START
     Emittable.MIRProgram AS item -> RETURN FALSE;,

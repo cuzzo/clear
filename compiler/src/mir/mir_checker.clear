@@ -580,9 +580,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(mIRChecker__stdlib_takes_ownership?(rtoc_self_view, node)) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_14: []String = List[]; rtoc_empty_list_14 } ) AS []String);
     END
-    MUTABLE value = emittable__value(node);
-    IF value IS_A Ident THEN
-      RETURN CAST([CAST(value.name() AS String)] AS []String);
+    MUTABLE value: ?Emittable = emittable__value(node);
+    IF value EXISTS AS rtoc_value_node THEN
+      IF rtoc_value_node IS_A Ident AS rtoc_value_ident THEN
+        RETURN CAST([CAST(rtoc_value_ident.name AS String)] AS []String);
+      END
     END
     IF TRY (mIRChecker__allocating_expr?(rtoc_self_view, value)) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, node) }, "structural ownership sink takes a value, but the source owner is not a named MIR binding")));
