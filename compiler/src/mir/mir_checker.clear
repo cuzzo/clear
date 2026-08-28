@@ -596,7 +596,7 @@ PUB FN mIRChecker__ownership_consumption_operand_names(self: MIRChecker, fact: O
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN CAST(((fact.operands |> SELECT:? _.name |> WHERE _ != NIL) |> SELECT _.toString() |> WHERE !(_.empty?()) |> DISTINCT _) AS []String);
+    RETURN CAST(((fact.operands |> SELECT:? _.name |> WHERE _ != NIL |> SELECT UNWRAP _) |> SELECT _.toString() |> WHERE !(_.empty?()) |> DISTINCT _) AS []String);
 }
 END
 PUB FN mIRChecker__verify_linear_ownership_mut(MUTABLE self: MIRChecker, body: []Emittable) RETURNS !Void
