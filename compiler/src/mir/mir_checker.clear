@@ -1614,37 +1614,37 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE expr_value_mutable = COPY expr_value;
       IF expr_value_mutable IS_A Emittable AS rtoc_expr_node THEN
       IF rtoc_expr_node IS_A MIRCast AS rtoc_mIRCast THEN
-        TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, rtoc_mIRCast.expr, owner_alloc, alloc_by_name));
+        TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY rtoc_mIRCast.expr } owner_alloc, alloc_by_name));
       ELSE_IF rtoc_expr_node IS_A MakeList AS rtoc_makeList THEN
-        MUTABLE list_alloc = rtoc_makeList.alloc();
-        IF rtoc_makeList.items() != NIL THEN
-                FOR _ IN (rtoc_makeList.items()) DO
-                TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, _, list_alloc, alloc_by_name));
+        MUTABLE list_alloc = rtoc_makeList.alloc;
+        IF !((rtoc_makeList.items).empty?()) THEN
+                FOR _ IN (rtoc_makeList.items) DO
+                TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _ } list_alloc, alloc_by_name));
                 END
         END
       ELSE_IF rtoc_expr_node IS_A StructInit AS rtoc_structInit THEN
-        IF rtoc_structInit.fields() != NIL THEN
-                FOR _ IN (rtoc_structInit.fields()) DO
+        IF !((rtoc_structInit.fields).empty?()) THEN
+                FOR _ IN (rtoc_structInit.fields) DO
             MUTABLE field_alloc: ?String@symbol = (IF mIR__struct_init_field_alloc(_) != NIL THEN mIR__struct_init_field_alloc(_) ELSE owner_alloc END);
             TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, ruby_wrap_optional_Emittable_MIRCheckerAggregateExpr(mIR__struct_init_field_value(_)), field_alloc, alloc_by_name));
                 END
         END
       ELSE_IF rtoc_expr_node IS_A ArrayInit AS rtoc_arrayInit THEN
-        IF rtoc_arrayInit.items() != NIL THEN
-                FOR _ IN (rtoc_arrayInit.items()) DO
-                TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, _, owner_alloc, alloc_by_name));
+        IF !((rtoc_arrayInit.items).empty?()) THEN
+                FOR _ IN (rtoc_arrayInit.items) DO
+                TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _ } owner_alloc, alloc_by_name));
                 END
         END
       ELSE_IF (rtoc_expr_node IS_A DeepCopy) OR (rtoc_expr_node IS_A RcRetain) OR (rtoc_expr_node IS_A RcDowngrade) OR (rtoc_expr_node IS_A WeakUpgrade) THEN
         RETURN;
       ELSE_IF rtoc_expr_node IS_A Ident AS rtoc_ident THEN
-        MUTABLE child_alloc: ?String@symbol = COPY alloc_by_name[rtoc_ident.name()];
+        MUTABLE child_alloc: ?String@symbol = COPY alloc_by_name[rtoc_ident.name];
         IF child_alloc EXISTS AS child_alloc_value THEN
           IF owner_alloc THEN
             IF (child_alloc_value == owner_alloc) THEN
               RETURN;
             END
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, rtoc_expr_node.name(), "owned child is :${child_alloc_value} but aggregate owner is :${UNWRAP (owner_alloc)}; nested ownership placement is implicit/incoherent")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY UNWRAP (emittable__name(rtoc_expr_node)) } "owned child is :${child_alloc_value} but aggregate owner is :${UNWRAP (owner_alloc)}; nested ownership placement is implicit/incoherent")));
           ELSE
             RETURN;
           END
