@@ -1315,7 +1315,7 @@ SET_METHODS = T.let({
   # Both sets keep owning their own elements, so the runtime copies.
   "merge" => {
     arity: 1, tag: :set_method, allocates: true,
-    zig: "try {0}.merge({alloc}, &{1})",
+    zig: "try {0}.merge({alloc}, {1})",
     bc: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
@@ -1327,7 +1327,7 @@ SET_METHODS = T.let({
   # that the argument does not have.
   "difference" => {
     arity: 1, tag: :set_method, allocates: true,
-    zig: "try {0}.difference({alloc}, &{1})",
+    zig: "try {0}.difference({alloc}, {1})",
     bc: true,
     alloc: :receiver_storage,
     return_alloc: :receiver_storage,
@@ -1421,7 +1421,7 @@ MAP_METHODS = T.let({
     arity: 1, tag: :map_method, allocates: true,
     mutates_receiver: true,
     bc: true,
-    zig: "try CheatLib.mapMerge({val_zig}, {alloc}, {alloc}, &{0}, &{1})",
+    zig: "try CheatLib.mapMerge({val_zig}, {alloc}, {alloc}, &{0}, {1})",
     alloc: :receiver_storage,
     return_type: :Void,
     borrows: :all,

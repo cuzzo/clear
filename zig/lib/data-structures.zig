@@ -2569,7 +2569,8 @@ pub fn bind(comptime deps: type) type {
             // Ruby's `a - b` and Rust's HashSet::difference: the elements of
             // this set that `other` does not have. The result owns its own
             // copies, since both inputs keep theirs.
-            pub fn difference(self: *const Self, alloc: std.mem.Allocator, other: *const Self) !Self {
+            pub fn difference(self: *const Self, alloc: std.mem.Allocator, other_in: anytype) !Self {
+                const other = if (comptime @typeInfo(@TypeOf(other_in)) == .pointer) &other_in.* else &other_in;
                 var out = Self{};
                 var it = self.inner.iterator();
                 while (it.next()) |entry| {
@@ -2597,8 +2598,9 @@ pub fn bind(comptime deps: type) type {
                 self.inner.clearRetainingCapacity();
             }
 
-            pub fn merge(self: *Self, alloc: std.mem.Allocator, other: *const Self) !void {
-                var it = other.inner.iterator();
+            pub fn merge(self: *Self, alloc: std.mem.Allocator, other: anytype) !void {
+                const source = if (comptime @typeInfo(@TypeOf(other)) == .pointer) other.* else other;
+                var it = source.inner.iterator();
                 while (it.next()) |entry| {
                     const value = entry.key_ptr.*;
                     if (self.inner.contains(value)) continue;
