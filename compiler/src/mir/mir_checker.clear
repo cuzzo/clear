@@ -1652,10 +1652,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN;
         END
       ELSE
-        IF rtoc_expr_node IS_A Emittable THEN
-          FOR _ IN rtoc_expr_node.child_exprs() DO
+          FOR _ IN (TRY (emittable__child_exprs(rtoc_expr_node))) DO
           TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, _, NIL, alloc_by_name));
-          END
         END
       END
       END
