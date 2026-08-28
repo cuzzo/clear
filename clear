@@ -449,6 +449,16 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   rescue ClearBuildSupport::BuildError => e
     error e.message
   end
+
+  # CLEAR_TRANSPILE_ONLY stops after the CLEAR stage. Every error the compiler
+  # itself reports -- type, ownership, annotator -- is already decided here, and
+  # Zig codegen over a large package closure costs far more than the transpile
+  # that found them. Iterating on those errors does not need the machine code.
+  if ENV['CLEAR_TRANSPILE_ONLY'] == '1'
+    puts "clear: transpiled #{zig_code.length} bytes (CLEAR_TRANSPILE_ONLY, skipping Zig)"
+    return
+  end
+
   # Inject comptime profiling flag when building with `clear profile`.
   # This enables allocation tracking in the runtime allocator VTable
   # with zero overhead in production builds.
