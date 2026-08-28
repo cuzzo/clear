@@ -539,11 +539,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_12 = (CAST((nodes |> DISTINCT _) AS []Emittable));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_12.length() DO
-      MUTABLE fact = IF respondsTo?(UNWRAP (rtoc_each_items_12[rtoc_idx]), "ownership_consumption") THEN
-          UNWRAP (rtoc_each_items_12[rtoc_idx]).ownership_consumption()
-        ELSE
-          NIL
-        END;
+      MUTABLE fact = emittable__ownership_consumption(UNWRAP (rtoc_each_items_12[rtoc_idx]));
       IF !(fact IS_A OwnershipConsumptionFact) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_FACT_MISSING, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, UNWRAP (rtoc_each_items_12[rtoc_idx])) }, "ownership-consuming MIR node has no MIR::OwnershipConsumptionFact")));
           rtoc_idx = rtoc_idx + 1;
@@ -577,22 +573,14 @@ PUB FN mIRChecker__structural_consumed_names(MUTABLE self: MIRChecker, node: Emi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fact = IF respondsTo?(node, "ownership_consumption") THEN
-      node.ownership_consumption()
-    ELSE
-      NIL
-    END;
+    MUTABLE fact = emittable__ownership_consumption(node);
     IF fact IS_A OwnershipConsumptionFact THEN
       RETURN TRY (mIRChecker__ownership_consumption_operand_names(rtoc_self_view, fact));
     END
     IF !(mIRChecker__stdlib_takes_ownership?(rtoc_self_view, node)) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_14: []String = List[]; rtoc_empty_list_14 } ) AS []String);
     END
-    MUTABLE value = IF respondsTo?(node, "value") THEN
-      node.value()
-    ELSE
-      NIL
-    END;
+    MUTABLE value = emittable__value(node);
     IF value IS_A Ident THEN
       RETURN CAST([CAST(value.name() AS String)] AS []String);
     END
@@ -1934,11 +1922,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     })) THEN
       RETURN TRUE;
     END
-    MUTABLE init_fact = IF respondsTo?(init, "ownership_consumption") THEN
-      init.ownership_consumption()
-    ELSE
-      NIL
-    END;
+    MUTABLE init_fact = emittable__ownership_consumption(init);
     name = operand.name();
     IF (init_fact IS_A OwnershipConsumptionFact AND (init_fact.operands() |> ANY {
     name;
@@ -3290,19 +3274,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
       RETURN TRUE;
     END
-    MUTABLE sig = IF respondsTo?(node, "stdlib_def") THEN
-      node.stdlib_def()
-    ELSE
-      NIL
-    END;
+    MUTABLE sig = emittable__stdlib_def(node);
     IF !(sig) THEN
       RETURN FALSE;
     END
-    MUTABLE params = IF respondsTo?(sig, "params") THEN
-      sig.params()
-    ELSE
-      NIL
-    END;
+    MUTABLE params = emittable__params(sig);
     IF (respondsTo?(params, "any?") AND (params |> ANY (respondsTo?(_, "takes") AND _.takes()))) THEN
       RETURN TRUE;
     END
@@ -3448,11 +3424,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((placement__frame?(node.alloc()) AND (cleanupEntry__scope(node) == :iteration))) THEN
         RETURN;
     END
-    MUTABLE line = IF respondsTo?(node, "source_line") THEN
-        node.source_line()
-      ELSE
-        NIL
-      END;
+    MUTABLE line = emittable__source_line(node);
     &allocations.append((IF line THEN
         "${node.name()}@${line}"
       ELSE

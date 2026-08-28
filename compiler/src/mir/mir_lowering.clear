@@ -3226,11 +3226,7 @@ FN mIRLowering__ownership_consumption_for_node(self: MIRLowering, node: Emittabl
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fact = IF respondsTo?(node, "ownership_consumption") THEN
-      node.ownership_consumption()
-    ELSE
-      NIL
-    END;
+    MUTABLE fact = emittable__ownership_consumption(node);
     IF fact IS_A OwnershipConsumptionFact THEN
       RETURN fact;
     END
@@ -3360,11 +3356,7 @@ FN mIRLowering__ownership_operand_type(self: MIRLowering, MUTABLE ast_value: Loc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE coerced = IF respondsTo?(ast_value, "coerced_type_info") THEN
-      ast_value.coerced_type_info()
-    ELSE
-      NIL
-    END;
+    MUTABLE coerced = locatable__coerced_type_object(ast_value);
     RETURN TRY (type__new(coerced));
 }
 END
@@ -3379,11 +3371,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE (((fact_holder IS_A MIRCast OR fact_holder IS_A TryExpr) OR fact_holder IS_A TryOptional) OR fact_holder IS_A TryCatch) DO
       fact_holder = fact_holder.expr();
     END
-    MUTABLE explicit_fact = IF respondsTo?(fact_holder, "ownership_consumption") THEN
-      fact_holder.ownership_consumption()
-    ELSE
-      NIL
-    END;
+    MUTABLE explicit_fact = emittable__ownership_consumption(fact_holder);
     IF explicit_fact IS_A OwnershipConsumptionFact THEN
       RETURN TRY (mIRLowering__retarget_ownership_operands(rtoc_self_view, explicit_fact.operands, target_alloc));
     END
@@ -8622,11 +8610,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE found: Bool = FALSE;
     aST__each_locatable(node.body, %(candidate: Locatable) -> {
     MUTABLE type = TRY (aST__full_type_mut(candidate));
-    MUTABLE coerced = IF respondsTo?(candidate, "coerced_type_info") THEN
-        candidate.coerced_type_info()
-      ELSE
-        NIL
-      END;
+    MUTABLE coerced = locatable__coerced_type_object(candidate);
     IF (TRY (type__node_reference?(type)) OR coerced.node_reference?()) THEN
         found = TRUE;
         BREAK;
@@ -18432,11 +18416,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF TRY (functionSignature__heap_return_alloc?(&sig)) THEN
       RETURN TRUE;
     END
-    MUTABLE metadata = IF respondsTo?(init, "allocs") THEN
-      init.allocs()
-    ELSE
-      NIL
-    END;
+    MUTABLE metadata = emittable__allocs(init);
     IF metadata IS_A InlineAllocMetadata THEN
       RETURN (metadata.any_heap?() == TRUE);
     END
