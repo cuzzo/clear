@@ -888,11 +888,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       ELSE_IF stmt_value_mutable IS_A FsmB1Body AS fsm_b1_body THEN
         MUTABLE fsm_b1_body_mutable = COPY fsm_b1_body;
-        MUTABLE body_stmts = fsm_b1_body_mutable.ctx_struct.run_body().body_stmts() |> SELECT:? (      IF _ IS_A Emittable THEN
-          _
-        ELSE
-          NIL
-        END) |> WHERE _ != NIL;
+        MUTABLE body_stmts = COPY fsm_b1_body_mutable.ctx_struct.run_body.body_stmts;
         TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, body_stmts, linearOwnershipState__new()));
       ELSE_IF stmt_value_mutable IS_A FsmGenericBody AS fsm_generic_body THEN
         NIL;
