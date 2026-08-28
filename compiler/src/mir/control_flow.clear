@@ -889,7 +889,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name = COPY (rtoc_self_view.fn_node.emittable__name(UNWRAP (params[rtoc_idx])));
+      MUTABLE name = COPY (rtoc_self_view.fn_node.params[rtoc_idx]?.name);
       MUTABLE ti = COPY rtoc_self_view.fn_node.params[rtoc_idx]?.type;
       IF !(TRY (ownershipDataflow__ownership_tracked_type?(rtoc_self_view, ti, TRUE))) THEN
           rtoc_idx = rtoc_idx + 1;

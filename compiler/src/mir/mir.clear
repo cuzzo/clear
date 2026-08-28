@@ -12021,7 +12021,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name: ?String = COPY rtoc_self_view.emittable__name(UNWRAP (operands[rtoc_idx]));
+      MUTABLE name: ?String = COPY rtoc_self_view.operands[rtoc_idx]?.name;
       IF !(name) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;

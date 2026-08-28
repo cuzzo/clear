@@ -2881,12 +2881,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF contract.operands[rtoc_idx]?.borrowed THEN
           IF require_operands THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, Name{ StringValue: COPY (contract.emittable__name(UNWRAP (operands[rtoc_idx])) OR_ELSE label) }, "${label} tries to consume borrowed operand from ${contract.operands[rtoc_idx]?.source}")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, Name{ StringValue: COPY (contract.operands[rtoc_idx]?.name OR_ELSE label) }, "${label} tries to consume borrowed operand from ${contract.operands[rtoc_idx]?.source}")));
           END
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name: ?String = COPY contract.emittable__name(UNWRAP (operands[rtoc_idx]));
+      MUTABLE name: ?String = COPY contract.operands[rtoc_idx]?.name;
       IF ((name == NIL) OR ((name?).length() == 0)) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_OPERAND_MISSING, Name{ StringValue: COPY label }, "${label} has an ownership operand with no tracked binding")));
           rtoc_idx = rtoc_idx + 1;
@@ -3114,7 +3114,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE reason = (fact_value.captures[rtoc_idx]?.forbidden_reason OR_ELSE :not_parallel_safe);
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE, Name{ StringValue: COPY fact_value.emittable__name(UNWRAP (captures[rtoc_idx])) }, "capture '${fact_value.emittable__name(UNWRAP (captures[rtoc_idx]))}' is not safe for @parallel dispatch (storage=${compilerInspectValue()}, sync=${compilerInspectValue()}, reason=${compilerInspectValue()})")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE, Name{ StringValue: COPY fact_value.captures[rtoc_idx]?.name }, "capture '${fact_value.captures[rtoc_idx]?.name}' is not safe for @parallel dispatch (storage=${compilerInspectValue()}, sync=${compilerInspectValue()}, reason=${compilerInspectValue()})")));
     rtoc_idx = rtoc_idx + 1;
       END
       NIL;

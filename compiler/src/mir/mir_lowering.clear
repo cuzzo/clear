@@ -3190,11 +3190,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (fact != NIL) THEN
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < fact.operands.length() DO
-      IF (fact.operands[rtoc_idx]?.borrowed OR ((fact.emittable__name(UNWRAP (operands[rtoc_idx]))) == NIL)) THEN
+      IF (fact.operands[rtoc_idx]?.borrowed OR ((fact.operands[rtoc_idx]?.name) == NIL)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &operands.append(OwnershipTransferTarget{ name: COPY UNWRAP (fact.emittable__name(UNWRAP (operands[rtoc_idx]))), target: COPY fact.target, target_alloc: ( { MUTABLE rtoc_optional_or_source_75: ?String@symbol = fact.operands[rtoc_idx]?.target_alloc; MUTABLE rtoc_optional_or_result_76: ?String@symbol = NIL; IF rtoc_optional_or_source_75 != NIL THEN rtoc_optional_or_result_76 = COPY rtoc_optional_or_source_75; ELSE rtoc_optional_or_result_76 = fact.target_alloc; END rtoc_optional_or_result_76 } ) });
+      &operands.append(OwnershipTransferTarget{ name: COPY UNWRAP (fact.operands[rtoc_idx]?.name), target: COPY fact.target, target_alloc: ( { MUTABLE rtoc_optional_or_source_75: ?String@symbol = fact.operands[rtoc_idx]?.target_alloc; MUTABLE rtoc_optional_or_result_76: ?String@symbol = NIL; IF rtoc_optional_or_source_75 != NIL THEN rtoc_optional_or_result_76 = COPY rtoc_optional_or_source_75; ELSE rtoc_optional_or_result_76 = fact.target_alloc; END rtoc_optional_or_result_76 } ) });
     rtoc_idx = rtoc_idx + 1;
       END
     ELSE_IF surface_node IS_A CapWrap AS cap_wrap THEN
@@ -3213,11 +3213,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF contract EXISTS AS contract_value THEN
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < contract_value.operands.length() DO
-      IF (contract_value.operands[rtoc_idx]?.borrowed OR ((contract_value.emittable__name(UNWRAP (operands[rtoc_idx]))) == NIL)) THEN
+      IF (contract_value.operands[rtoc_idx]?.borrowed OR ((contract_value.operands[rtoc_idx]?.name) == NIL)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &operands.append(OwnershipTransferTarget{ name: COPY UNWRAP (contract_value.emittable__name(UNWRAP (operands[rtoc_idx]))), target: :owned_sink, target_alloc: COPY contract_value.operands[rtoc_idx]?.target_alloc });
+      &operands.append(OwnershipTransferTarget{ name: COPY UNWRAP (contract_value.operands[rtoc_idx]?.name), target: :owned_sink, target_alloc: COPY contract_value.operands[rtoc_idx]?.target_alloc });
     rtoc_idx = rtoc_idx + 1;
       END
     END
@@ -5225,11 +5225,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       IF patternField__bind?(pat.fields[rtoc_idx]?) THEN
-          MUTABLE field_access = FieldGet{ object: Emittable{ Ident: COPY subject }, field: COPY (pat.emittable__name(UNWRAP (fields[rtoc_idx]))), lowered_node_id: NIL, ownership_consumption: NIL };
-          &bindings.append(Let{ name: COPY (pat.emittable__name(UNWRAP (fields[rtoc_idx]))), init: Emittable{ FieldGet: COPY field_access }, mutable: FALSE, annotation: NIL, suppression: "_ = &${pat.emittable__name(UNWRAP (fields[rtoc_idx]))};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });
+          MUTABLE field_access = FieldGet{ object: Emittable{ Ident: COPY subject }, field: COPY (pat.fields[rtoc_idx]?.name), lowered_node_id: NIL, ownership_consumption: NIL };
+          &bindings.append(Let{ name: COPY (pat.fields[rtoc_idx]?.name), init: Emittable{ FieldGet: COPY field_access }, mutable: FALSE, annotation: NIL, suppression: "_ = &${pat.fields[rtoc_idx]?.name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });
       ELSE
           MUTABLE val: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, patternField__expr(pat.fields[rtoc_idx]?))) AS Emittable);
-          MUTABLE field_access = FieldGet{ object: Emittable{ Ident: COPY subject }, field: COPY (pat.emittable__name(UNWRAP (fields[rtoc_idx]))), lowered_node_id: NIL, ownership_consumption: NIL };
+          MUTABLE field_access = FieldGet{ object: Emittable{ Ident: COPY subject }, field: COPY (pat.fields[rtoc_idx]?.name), lowered_node_id: NIL, ownership_consumption: NIL };
           &conditions.append(Emittable{ MIRBinOp: COPY MIRBinOp{ op: "==", left: Emittable{ FieldGet: COPY field_access }, right: COPY val, lowered_node_id: NIL, ownership_consumption: NIL } });
       END
     rtoc_idx = rtoc_idx + 1;
@@ -8955,15 +8955,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_312: []Emittable = List[]; rtoc_empty_list_312 } );
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.params.length() DO
-      IF used_names.contains?(node.emittable__name(UNWRAP (params[rtoc_idx]))) THEN
+      IF used_names.contains?(node.params[rtoc_idx]?.name) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE suppress_name: String = "";
-        IF mutable_scalar_params.contains?(node.emittable__name(UNWRAP (params[rtoc_idx]))) THEN
-          suppress_name = "_m_${node.emittable__name(UNWRAP (params[rtoc_idx]))}";
+        IF mutable_scalar_params.contains?(node.params[rtoc_idx]?.name) THEN
+          suppress_name = "_m_${node.params[rtoc_idx]?.name}";
         ELSE
-          suppress_name = node.emittable__name(UNWRAP (params[rtoc_idx]));
+          suppress_name = node.params[rtoc_idx]?.name;
         END
       &out.append(Emittable{ Suppress: COPY Suppress{ name: COPY suppress_name, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     rtoc_idx = rtoc_idx + 1;
@@ -19661,7 +19661,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE alias_name = COPY (node.emittable__name(UNWRAP (bindings[rtoc_idx])));
+      MUTABLE alias_name = COPY (node.bindings[rtoc_idx]?.name);
       alias_owner_map[alias_name] = UNWRAP (owner);
       alias_alloc_map[alias_name] = TRY (mIRLowering__placement_for_node(rtoc_self_view, node.bindings[rtoc_idx]?.expr));
       &if_bind_aliases.insert(alias_name);

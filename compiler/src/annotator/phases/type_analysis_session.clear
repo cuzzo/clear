@@ -13415,29 +13415,29 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       IF schema THEN
-          IF !(schema.fields().key?(pat.emittable__name(UNWRAP (fields[rtoc_idx])))) THEN
+          IF !(schema.fields().key?(pat.fields[rtoc_idx]?.name)) THEN
             MUTABLE name_tok: ?Token@multiowned = COPY KEEP pat.fields[rtoc_idx]?.name_token;
             IF name_tok EXISTS AS name_tok_value THEN
               MUTABLE valid_fields = schema.fields().keys() |> WHERE !((CAST(_ AS String)).startsWith?("_"));
-              TRY (typeAnalysisSession__emit_typo_suggestion_mut(rtoc_self_view, TypoToken{ TokenMultiowned: COPY name_tok_value }, pat.emittable__name(UNWRAP (fields[rtoc_idx])), valid_fields, "MATCH struct pattern: field '${pat.emittable__name(UNWRAP (fields[rtoc_idx]))}' does not exist on type ${expr_type}", "field of ${expr_type}", :type, TRUE));
+              TRY (typeAnalysisSession__emit_typo_suggestion_mut(rtoc_self_view, TypoToken{ TokenMultiowned: COPY name_tok_value }, pat.fields[rtoc_idx]?.name, valid_fields, "MATCH struct pattern: field '${pat.fields[rtoc_idx]?.name}' does not exist on type ${expr_type}", "field of ${expr_type}", :type, TRUE));
             ELSE
-              TRY (typeAnalysisSession__error_mut(rtoc_self_view, match_node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_FIELD_UNKNOWN }, [], {:field: pat.emittable__name(UNWRAP (fields[rtoc_idx])), :type: expr_type}));
+              TRY (typeAnalysisSession__error_mut(rtoc_self_view, match_node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_FIELD_UNKNOWN }, [], {:field: pat.fields[rtoc_idx]?.name, :type: expr_type}));
             END
           END
       END
       IF patternField__bind?(pat.fields[rtoc_idx]?) THEN
-          IF (TRUE AND schema.fields().key?(pat.emittable__name(UNWRAP (fields[rtoc_idx])))) THEN
-            MUTABLE field_def = schema.fields()[pat.emittable__name(UNWRAP (fields[rtoc_idx]))];
+          IF (TRUE AND schema.fields().key?(pat.fields[rtoc_idx]?.name)) THEN
+            MUTABLE field_def = schema.fields()[pat.fields[rtoc_idx]?.name];
             MUTABLE field_type = field_def.type();
             MUTABLE rtoc_mutable_receiver_328 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-            TRY (scope__declare(&rtoc_mutable_receiver_328, pat.emittable__name(UNWRAP (fields[rtoc_idx])), NIL, field_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-            TRY (typeAnalysisSession__og_declare(rtoc_self_view, pat.emittable__name(UNWRAP (fields[rtoc_idx])), NIL, field_type));
+            TRY (scope__declare(&rtoc_mutable_receiver_328, pat.fields[rtoc_idx]?.name, NIL, field_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+            TRY (typeAnalysisSession__og_declare(rtoc_self_view, pat.fields[rtoc_idx]?.name, NIL, field_type));
           END
       ELSE
           MUTABLE field_expr = patternField__expr(pat.fields[rtoc_idx]?);
           TRY (typeAnalysisSession__visit(&rtoc_self_view, field_expr));
           IF schema THEN
-            MUTABLE field_def = schema.fields()[pat.emittable__name(UNWRAP (fields[rtoc_idx]))];
+            MUTABLE field_def = schema.fields()[pat.fields[rtoc_idx]?.name];
             MUTABLE ft = (IF field_def != NIL THEN
               field_def.type()
             ELSE
@@ -13451,7 +13451,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE val_type = field_expr.resolved_type;
             MUTABLE is_numeric_promo = (((val_type == :Int64) AND (((field_type == :Float64) OR (field_type == :Float64)))));
             IF !(((((val_type == field_type) OR (val_type == :Any)) OR (field_type == :Any)) OR is_numeric_promo)) THEN
-              TRY (typeAnalysisSession__error_mut(rtoc_self_view, match_node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_FIELD_TYPE_MISMATCH }, [], {:field: pat.emittable__name(UNWRAP (fields[rtoc_idx])), :declared: field_type, :got: val_type}));
+              TRY (typeAnalysisSession__error_mut(rtoc_self_view, match_node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_FIELD_TYPE_MISMATCH }, [], {:field: pat.fields[rtoc_idx]?.name, :declared: field_type, :got: val_type}));
             END
           END
       END
@@ -13881,15 +13881,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !(struct_schema.fields.contains?(destructure.emittable__name(UNWRAP (fields[rtoc_idx])))) THEN
+      IF !(struct_schema.fields.contains?(destructure.fields[rtoc_idx]?.name)) THEN
           TRY (typeAnalysisSession__emit_unknown_destructure_field_mut(rtoc_self_view, node, destructure.fields[rtoc_idx]?, struct_schema, variant_name));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE field_type = structField__type((struct_schema.fields[destructure.emittable__name(UNWRAP (fields[rtoc_idx]))]?));
+      MUTABLE field_type = structField__type((struct_schema.fields[destructure.fields[rtoc_idx]?.name]?));
       MUTABLE rtoc_mutable_receiver_340 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_340, destructure.emittable__name(UNWRAP (fields[rtoc_idx])), NIL, castTypeToOptionalSymbolEntryTypeInput(field_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-      TRY (typeAnalysisSession__og_declare(rtoc_self_view, destructure.emittable__name(UNWRAP (fields[rtoc_idx])), NIL, castTypeToTypeTypeInput(field_type)));
+      TRY (scope__declare(&rtoc_mutable_receiver_340, destructure.fields[rtoc_idx]?.name, NIL, castTypeToOptionalSymbolEntryTypeInput(field_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+      TRY (typeAnalysisSession__og_declare(rtoc_self_view, destructure.fields[rtoc_idx]?.name, NIL, castTypeToTypeTypeInput(field_type)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -15719,7 +15719,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE target_value_type = TRY (typeAnalysisSession__destructure_value_type_at(rtoc_self_view, node, rtoc_idx, rhs.element_type));
       IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_392 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__entry?(rtoc_local_receiver_392, node.emittable__name(UNWRAP (targets[rtoc_idx]))) } THEN
+      scope__entry?(rtoc_local_receiver_392, node.targets[rtoc_idx]?.name) } THEN
           TRY (typeAnalysisSession__finalize_destructure_assignment_target_mut(rtoc_self_view, node, node.targets[rtoc_idx]?, CAST(target_value_type AS Type)));
       ELSE
           TRY (typeAnalysisSession__finalize_destructure_declaration_target_mut(rtoc_self_view, node, node.targets[rtoc_idx]?, CAST(target_value_type AS Type)));
