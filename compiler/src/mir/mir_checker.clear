@@ -639,7 +639,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN;
       END
       IF !(mIRChecker__linear_statement_node?(stmt_value_mutable)) THEN
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :LINEAR_STMT_NOT_REGISTERED, Name{ StringValue: COPY CAST(stmt_value_mutable.class().name() AS String) }, "MIR statement is not registered with MIRChecker linear ownership traversal")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :LINEAR_STMT_NOT_REGISTERED, Name{ StringValue: COPY emittable__variant_name(stmt_value_mutable) }, "MIR statement is not registered with MIRChecker linear ownership traversal")));
         RETURN;
       END
       IF stmt_value_mutable IS_A AllocMark AS alloc_mark THEN
@@ -835,15 +835,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF stmt_value_mutable IS_A SnapshotRead AS snapshot_read THEN
         MUTABLE snapshot_read_mutable = COPY snapshot_read;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (snapshotRead__body(snapshot_read_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, CAST(snapshot_read_mutable.class().name() AS String)));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, emittable__variant_name(snapshot_read_mutable)));
       ELSE_IF stmt_value_mutable IS_A SnapshotTransaction AS snapshot_transaction THEN
         MUTABLE snapshot_transaction_mutable = COPY snapshot_transaction;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (snapshotTransaction__body(snapshot_transaction_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, CAST(snapshot_transaction_mutable.class().name() AS String)));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, emittable__variant_name(snapshot_transaction_mutable)));
       ELSE_IF stmt_value_mutable IS_A SnapshotMultiTxn AS snapshot_multi_txn THEN
         MUTABLE snapshot_multi_txn_mutable = COPY snapshot_multi_txn;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (snapshotMultiTxn__body(snapshot_multi_txn_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, CAST(snapshot_multi_txn_mutable.class().name() AS String)));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, emittable__variant_name(snapshot_multi_txn_mutable)));
       ELSE_IF stmt_value_mutable IS_A PolymorphicMutate AS polymorphic_mutate THEN
         MUTABLE polymorphic_mutate_mutable = COPY polymorphic_mutate;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (polymorphicMutate__body(polymorphic_mutate_mutable)), linearOwnershipState__copy(state)));
@@ -2287,7 +2287,7 @@ PUB FN mIRChecker__fsm_destroy_expr_label(expr: Emittable) RETURNS String ->
   IF mIRChecker__fsm_destroy_expr_path(expr) != NIL THEN
   RETURN (mIRChecker__fsm_destroy_expr_path(expr))?;
   ELSE
-  RETURN COPY CAST(expr.class().name() AS String);
+  RETURN COPY emittable__variant_name(expr);
   END
 END
 PUB FN mIRChecker__fsm_destroy_expr_path(expr: Emittable) RETURNS ?String EFFECTS REENTRANT ->
@@ -2451,7 +2451,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF reason THEN
       RETURN COPY CAST(reason AS String);
     ELSE
-      RETURN COPY CAST(node.class().name() AS String);
+      RETURN COPY emittable__variant_name(node);
     END
 }
 END
@@ -2602,7 +2602,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF node IS_A RegistryCall AS registry_call THEN
       RETURN COPY registry_call.reason;
     ELSE
-      RETURN COPY CAST(node.class().name() AS String);
+      RETURN COPY emittable__variant_name(node);
     END
 }
 END
@@ -3341,7 +3341,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF reason THEN
       RETURN COPY CAST(reason AS String);
     ELSE
-      RETURN COPY CAST(node.class().name() AS String);
+      RETURN COPY emittable__variant_name(node);
     END
 }
 END

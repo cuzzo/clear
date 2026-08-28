@@ -196,7 +196,7 @@ PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@
         ELSE
           loc = "?";
         END
-        &violations.append(CAST({:cls: UNWRAP ((CAST(node_value_mutable.class().name() AS String)).split("::").last()), :loc: loc} AS {String@symbol}String));
+        &violations.append(CAST({:cls: UNWRAP ((emittable__variant_name(node_value_mutable)).split("::").last()), :loc: loc} AS {String@symbol}String));
       END
       IF (node_value_mutable IS_A []Node OR node_value_mutable IS_A [Set]Any) THEN
         FOR _ IN node_value_mutable DO

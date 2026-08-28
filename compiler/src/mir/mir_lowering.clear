@@ -2941,7 +2941,7 @@ FN mIRLowering__ownership_fact_source(self: MIRLowering, node: Emittable) RETURN
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_node = mIRLowering__ownership_contract_source_node(rtoc_self_view, node);
     IF (source_node IS_A ReassignWithCleanup OR source_node IS_A ShardedMapPut) THEN
-      RETURN COPY CAST(source_node.class().name() AS String);
+      RETURN COPY emittable__variant_name(source_node);
     END
     IF (respondsTo?(source_node, "target_var") AND source_node.target_var) THEN
       RETURN COPY CAST(source_node.target_var AS String);
@@ -18570,7 +18570,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         node.value
       END;
-      result = NodeRoot{ Emittable: COPY TRY (mIRLowering__with_ownership_consumption_for_value(rtoc_self_view, &result, ownership_value, ownership_ast, CAST(result.class().name() AS String), :owned_sink, IF result IS_A ReassignWithCleanup THEN
+      result = NodeRoot{ Emittable: COPY TRY (mIRLowering__with_ownership_consumption_for_value(rtoc_self_view, &result, ownership_value, ownership_ast, emittable__variant_name(result), :owned_sink, IF result IS_A ReassignWithCleanup THEN
         result.alloc()
       ELSE
         assign_alloc

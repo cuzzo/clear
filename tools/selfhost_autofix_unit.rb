@@ -31,6 +31,10 @@ module SelfhostAutofixUnit
     return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
 
     field = m[1]
+    # `class` is Ruby reflection, not an attribute -- a union has no such field,
+    # and the fix is a variant-name accessor rather than a field read.
+    return nil if field == 'class'
+
     line_no = loc[1].to_i
     Fix.new(label: "#{field}() -> #{field}", apply: lambda do |path|
       lines = File.readlines(path)
@@ -62,7 +66,77 @@ module SelfhostAutofixUnit
     end)
   end
 
-  FIXES = [method(:field_call_fix), method(:boolean_or_fix)].freeze
+  # "argument N expects ?Name, got String" -- error() takes the Name union rtoc
+  # synthesized for Ruby's String-or-Symbol argument, and a bare String needs
+  # the variant that carries it. The argument index makes the target exact.
+  def name_wrap_fix(output)
+    return nil unless output.match?(/argument (\d+) expects \?Name, got String/)
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    index = output.match(/argument (\d+) expects \?Name/)[1].to_i
+    line_no = loc[1].to_i
+    Fix.new(label: "wrap argument #{index} in Name", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      line = lines[i].to_s
+      at = line.index('__error(') or return false
+
+      open_paren = line.index('(', at)
+      args = split_arguments(line, open_paren) or return false
+      target = args[index - 1] or return false
+      return false if target.strip.start_with?('Name{')
+
+      lines[i] = line[0...target_start(args, index)] +
+                 "Name{ StringValue: COPY #{target.strip} }" +
+                 line[(target_start(args, index) + target.length)..]
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  # Argument spans of a call, as [start, text] pairs over the original line.
+  def split_arguments(line, open_paren)
+    depth = 0
+    in_string = false
+    start = open_paren + 1
+    spans = []
+    i = open_paren
+    while i < line.length
+      char = line[i]
+      if in_string
+        i += 2 and next if char == '\\'
+
+        in_string = false if char == '"'
+        i += 1
+        next
+      end
+      case char
+      when '"' then in_string = true
+      when '(', '{', '[' then depth += 1
+      when ')', '}', ']'
+        depth -= 1
+        if depth.zero?
+          spans << [start, line[start...i]]
+          @arg_spans = spans
+          return spans.map(&:last)
+        end
+      when ','
+        if depth == 1
+          spans << [start, line[start...i]]
+          start = i + 1
+        end
+      end
+      i += 1
+    end
+    nil
+  end
+
+  def target_start(_args, index)
+    span = @arg_spans[index - 1]
+    span[0] + (span[1].length - span[1].lstrip.length)
+  end
+
+  FIXES = [method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix)].freeze
 
   def unit_path(relative) = File.join(ROOT, 'compiler', 'src', relative)
 
