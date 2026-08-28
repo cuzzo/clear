@@ -2002,7 +2002,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-FN mIRLowering__seed_cleanup_owner_index_mut(self: MIRLowering, state: OwnershipFinalizationContext, body: []Emittable) RETURNS Void
+FN mIRLowering__seed_cleanup_owner_index_mut(self: MIRLowering, MUTABLE state: OwnershipFinalizationContext, body: []Emittable) RETURNS Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -2048,7 +2048,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN cleanupEntry__has_moved_guard?(entry);
 }
 END
-FN mIRLowering__append_lowered_statement_packet_mut(self: MIRLowering, state: OwnershipFinalizationContext, packet: LoweredStmtPacket) RETURNS !Void
+FN mIRLowering__append_lowered_statement_packet_mut(self: MIRLowering, MUTABLE state: OwnershipFinalizationContext, packet: LoweredStmtPacket) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2075,7 +2075,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-FN mIRLowering__append_already_finalized_node_mut(self: MIRLowering, state: OwnershipFinalizationContext, node: Emittable) RETURNS !Void
+FN mIRLowering__append_already_finalized_node_mut(self: MIRLowering, MUTABLE state: OwnershipFinalizationContext, node: Emittable) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -2086,7 +2086,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-FN mIRLowering__append_ownership_finalized_node_mut(self: MIRLowering, state: OwnershipFinalizationContext, node: Emittable, body: []Emittable, line: ?Int64, col: ?Int64) RETURNS !Void
+FN mIRLowering__append_ownership_finalized_node_mut(self: MIRLowering, MUTABLE state: OwnershipFinalizationContext, node: Emittable, body: []Emittable, line: ?Int64, col: ?Int64) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2132,7 +2132,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((node IS_A ReturnStmt OR node IS_A BreakStmt) OR node IS_A ContinueStmt);
 }
 END
-FN mIRLowering__append_transfer_marks_to_body_mut(self: MIRLowering, state: OwnershipFinalizationContext, marks: []Emittable, line: ?Int64, col: ?Int64) RETURNS !Void
+FN mIRLowering__append_transfer_marks_to_body_mut(self: MIRLowering, MUTABLE state: OwnershipFinalizationContext, marks: []Emittable, line: ?Int64, col: ?Int64) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2340,7 +2340,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-FN mIRLowering__record_ownership_finalization_surface_node_mut(self: MIRLowering, state: OwnershipFinalizationContext, node: Emittable) RETURNS Void
+FN mIRLowering__record_ownership_finalization_surface_node_mut(self: MIRLowering, MUTABLE state: OwnershipFinalizationContext, node: Emittable) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2404,7 +2404,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_ternary_value_48? } };
 }
 END
-FN mIRLowering__merge_body_mark_names_mut(self: MIRLowering, state: OwnershipFinalizationContext, body: NodeRoot) RETURNS !Void
+FN mIRLowering__merge_body_mark_names_mut(self: MIRLowering, MUTABLE state: OwnershipFinalizationContext, body: NodeRoot) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2471,7 +2471,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIRLowering__mark_ownership_finalized_body_mut(rtoc_self_view, state.out));
 }
 END
-FN mIRLowering__finalize_ownership_for_mir_node_mut(self: MIRLowering, node: Emittable, body: []Emittable, state: OwnershipFinalizationContext) RETURNS !Void
+FN mIRLowering__finalize_ownership_for_mir_node_mut(self: MIRLowering, node: Emittable, body: []Emittable, MUTABLE state: OwnershipFinalizationContext) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -2509,7 +2509,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-FN mIRLowering__append_move_guard_for_transfer_mark_mut(self: MIRLowering, node: Emittable, state: OwnershipFinalizationContext) RETURNS !Void
+FN mIRLowering__append_move_guard_for_transfer_mark_mut(self: MIRLowering, node: Emittable, MUTABLE state: OwnershipFinalizationContext) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2570,7 +2570,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN mIRLowering__append_implicit_alloc_fact_mut(self: MIRLowering, node: Emittable, state: OwnershipFinalizationContext) RETURNS !Void
+FN mIRLowering__append_implicit_alloc_fact_mut(self: MIRLowering, node: Emittable, MUTABLE state: OwnershipFinalizationContext) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2588,7 +2588,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN mIRLowering__append_block_result_transfer_mut(self: MIRLowering, node: Emittable, body: []Emittable, state: OwnershipFinalizationContext) RETURNS !Void
+FN mIRLowering__append_block_result_transfer_mut(self: MIRLowering, node: Emittable, body: []Emittable, MUTABLE state: OwnershipFinalizationContext) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2622,7 +2622,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN nodes |> ANY (IF _ IS_A AllocMark AS alloc_mark THEN (alloc_mark.name == name) ELSE FALSE END);
 }
 END
-FN mIRLowering__append_transfer_marks_mut(self: MIRLowering, marks: []Emittable, state: OwnershipFinalizationContext) RETURNS !Void
+FN mIRLowering__append_transfer_marks_mut(self: MIRLowering, marks: []Emittable, MUTABLE state: OwnershipFinalizationContext) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

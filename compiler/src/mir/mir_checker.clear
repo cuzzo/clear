@@ -933,7 +933,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN mIRChecker__linear_alloc_mut(MUTABLE self: MIRChecker, mark: AllocMark, state: LinearOwnershipState) RETURNS !Void
+PUB FN mIRChecker__linear_alloc_mut(MUTABLE self: MIRChecker, mark: AllocMark, MUTABLE state: LinearOwnershipState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -956,7 +956,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__linear_register_cleanup_mut(MUTABLE self: MIRChecker, name: String, guarded: Bool, state: LinearOwnershipState) RETURNS !Void
+PUB FN mIRChecker__linear_register_cleanup_mut(MUTABLE self: MIRChecker, name: String, guarded: Bool, MUTABLE state: LinearOwnershipState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -989,7 +989,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__linear_transfer_mut(MUTABLE self: MIRChecker, name: String, target: String@symbol, target_alloc: ?String@symbol, state: LinearOwnershipState) RETURNS !Void
+PUB FN mIRChecker__linear_transfer_mut(MUTABLE self: MIRChecker, name: String, target: String@symbol, target_alloc: ?String@symbol, MUTABLE state: LinearOwnershipState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1008,7 +1008,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__linear_move_mark_mut(MUTABLE self: MIRChecker, name: String, state: LinearOwnershipState) RETURNS !Void
+PUB FN mIRChecker__linear_move_mark_mut(MUTABLE self: MIRChecker, name: String, MUTABLE state: LinearOwnershipState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1041,7 +1041,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__linear_release_mut(MUTABLE self: MIRChecker, name: String, target: String@symbol, target_alloc: ?String@symbol, state: LinearOwnershipState) RETURNS !Void
+PUB FN mIRChecker__linear_release_mut(MUTABLE self: MIRChecker, name: String, target: String@symbol, target_alloc: ?String@symbol, MUTABLE state: LinearOwnershipState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
