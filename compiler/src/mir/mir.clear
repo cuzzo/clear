@@ -12021,7 +12021,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name: ?String = COPY rtoc_self_view.operands[rtoc_idx]?.name;
+      MUTABLE name: ?String = COPY rtoc_self_view.emittable__name(UNWRAP (operands[rtoc_idx]));
       IF !(name) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -17432,6 +17432,47 @@ PUB FN emittable__init(value: Emittable) RETURNS ?Emittable@boxed ->
   PARTIAL MATCH value START
     Emittable.Let AS item -> RETURN COPY item.init;,
     Emittable.HeapCreate AS item -> RETURN COPY item.init;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:name)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN emittable__name(value: Emittable) RETURNS ?String ->
+  PARTIAL MATCH value START
+    Emittable.FnDef AS item -> RETURN COPY item.name;,
+    Emittable.MIRParam AS item -> RETURN COPY item.name;,
+    Emittable.MIRStructDef AS item -> RETURN COPY item.name;,
+    Emittable.FieldDef AS item -> RETURN COPY item.name;,
+    Emittable.MIREnumDef AS item -> RETURN COPY item.name;,
+    Emittable.UnionTypeDef AS item -> RETURN COPY item.name;,
+    Emittable.TypeAlias AS item -> RETURN COPY item.name;,
+    Emittable.CExternFnDecl AS item -> RETURN COPY item.name;,
+    Emittable.CExternStructDef AS item -> RETURN COPY item.name;,
+    Emittable.ModuleNamespace AS item -> RETURN COPY item.name;,
+    Emittable.TestDef AS item -> RETURN COPY item.name;,
+    Emittable.Let AS item -> RETURN COPY item.name;,
+    Emittable.MIRDestructureTarget AS item -> RETURN COPY item.name;,
+    Emittable.ReassignWithCleanup AS item -> RETURN COPY item.name;,
+    Emittable.Suppress AS item -> RETURN COPY item.name;,
+    Emittable.PubConst AS item -> RETURN COPY item.name;,
+    Emittable.ModuleVar AS item -> RETURN COPY item.name;,
+    Emittable.ModuleConstFree AS item -> RETURN COPY item.name;,
+    Emittable.Cleanup AS item -> RETURN COPY item.name;,
+    Emittable.ErrCleanup AS item -> RETURN COPY item.name;,
+    Emittable.MoveMark AS item -> RETURN COPY item.name;,
+    Emittable.AllocMark AS item -> RETURN COPY item.name;,
+    Emittable.OwnedCreate AS item -> RETURN COPY item.name;,
+    Emittable.OwnedDestroy AS item -> RETURN COPY item.name;,
+    Emittable.OwnedTransfer AS item -> RETURN COPY item.name;,
+    Emittable.OwnedBorrow AS item -> RETURN COPY item.name;,
+    Emittable.OwnedStore AS item -> RETURN COPY item.name;,
+    Emittable.OwnedReturn AS item -> RETURN COPY item.name;,
+    Emittable.TransferMark AS item -> RETURN COPY item.name;,
+    Emittable.ReassignMark AS item -> RETURN COPY item.name;,
+    Emittable.Ident AS item -> RETURN COPY item.name;,
+    Emittable.FnRef AS item -> RETURN COPY item.name;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;

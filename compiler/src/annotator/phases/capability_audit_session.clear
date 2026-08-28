@@ -3456,8 +3456,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plans: {String}MutualPlan = {};
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < concrete_cycle_fns.length() DO
-      MUTABLE partners = (cycle_names - [concrete_cycle_fns[rtoc_idx]?.name]);
-      MUTABLE mp: ?MutualPlan = recursiveSplitter__split_mutual(concrete_cycle_fns[rtoc_idx]?.body, concrete_cycle_fns[rtoc_idx]?.name, partners);
+      MUTABLE partners = (cycle_names - [emittable__name(UNWRAP (concrete_cycle_fns[rtoc_idx]))]);
+      MUTABLE mp: ?MutualPlan = recursiveSplitter__split_mutual(concrete_cycle_fns[rtoc_idx]?.body, emittable__name(UNWRAP (concrete_cycle_fns[rtoc_idx])), partners);
       IF (mp == NIL) THEN
           RETURN FALSE;
       END
@@ -4153,7 +4153,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (capabilityAuditSession__error_mut(rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.arg_node, CapabilityAuditCodeOrMessage{ SymbolValue: :COPY_RETAINED_NEEDS_UNIQUE }, [], {:name: rtoc_each_items_42[rtoc_idx]?.name, :carrier: rtoc_each_items_42[rtoc_idx]?.carrier}));
+      TRY (capabilityAuditSession__error_mut(rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.arg_node, CapabilityAuditCodeOrMessage{ SymbolValue: :COPY_RETAINED_NEEDS_UNIQUE }, [], {:name: emittable__name(UNWRAP (rtoc_each_items_42[rtoc_idx])), :carrier: rtoc_each_items_42[rtoc_idx]?.carrier}));
     rtoc_idx = rtoc_idx + 1;
     END
     (TRY (capabilityAuditSession__deferred_copy_retained_validations(rtoc_self_view))).clear();

@@ -1905,7 +1905,7 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
       MUTABLE by_name: {String}Int64 = {};
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < params.length() DO
-  by_name[(params[rtoc_idx]?.name)] = rtoc_idx;
+  by_name[(emittable__name(UNWRAP (params[rtoc_idx])))] = rtoc_idx;
   rtoc_idx = rtoc_idx + 1;
       END
       MUTABLE has_param_return: Bool = FALSE;

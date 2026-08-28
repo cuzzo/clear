@@ -589,7 +589,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_11 = (TRY (ownershipDataflow__cleanup_entry_pairs(rtoc_self_view, fn_node, facts)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_11.length() DO
-      MUTABLE var = COPY rtoc_each_items_11[rtoc_idx]?.name;
+      MUTABLE var = COPY emittable__name(UNWRAP (rtoc_each_items_11[rtoc_idx]));
       MUTABLE entry = COPY KEEP rtoc_each_items_11[rtoc_idx]?.entry;
       IF !(cleanupEntry__needs_cleanup?(entry)) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -889,7 +889,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name = COPY (rtoc_self_view.fn_node.params[rtoc_idx]?.name);
+      MUTABLE name = COPY (rtoc_self_view.fn_node.emittable__name(UNWRAP (params[rtoc_idx])));
       MUTABLE ti = COPY rtoc_self_view.fn_node.params[rtoc_idx]?.type;
       IF !(TRY (ownershipDataflow__ownership_tracked_type?(rtoc_self_view, ti, TRUE))) THEN
           rtoc_idx = rtoc_idx + 1;

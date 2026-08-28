@@ -707,7 +707,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         transfer_name = COPY ident_mutable.name;
         MUTABLE rtoc_idx = 0;
         WHILE rtoc_idx < selector_prefix.length() DO
-      IF !((((selector_prefix[rtoc_idx]? IS_A Cleanup OR selector_prefix[rtoc_idx]? IS_A ErrCleanup)) AND (CAST((selector_prefix[rtoc_idx]?.name()) AS String) == transfer_name))) THEN
+      IF !((((selector_prefix[rtoc_idx]? IS_A Cleanup OR selector_prefix[rtoc_idx]? IS_A ErrCleanup)) AND (CAST((emittable__name(UNWRAP (selector_prefix[rtoc_idx]))()) AS String) == transfer_name))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
