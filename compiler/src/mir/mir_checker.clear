@@ -1810,19 +1810,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF body[rtoc_idx]? IS_A Let AS let THEN
+      MUTABLE rtoc_node = UNWRAP (body[rtoc_idx]);
+      IF rtoc_node IS_A Let AS let THEN
           lets[CAST(let.name AS String)] = COPY let;
       END
-      IF body[rtoc_idx]? IS_A OwnedCreate AS owned_create THEN
+      IF rtoc_node IS_A OwnedCreate AS owned_create THEN
           &materialized_owners.insert(COPY owned_create.name);
       END
-      IF (body[rtoc_idx]? IS_A Cleanup OR body[rtoc_idx]? IS_A ErrCleanup) THEN
-          MUTABLE let: ?Let = COPY lets[CAST((emittable__name(UNWRAP (body[rtoc_idx]))) AS String)];
-          IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(UNWRAP (body[rtoc_idx]))) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, UNWRAP (let), castEmittableToMIRCheckerCleanup(body[rtoc_idx]?))))) THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, emittable__name(UNWRAP (body[rtoc_idx])), "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
+      IF (rtoc_node IS_A Cleanup OR rtoc_node IS_A ErrCleanup) THEN
+          MUTABLE let: ?Let = COPY lets[CAST((emittable__name(rtoc_node)) AS String)];
+          IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(rtoc_node)) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, UNWRAP (let), castEmittableToMIRCheckerCleanup(rtoc_node))))) THEN
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, emittable__name(rtoc_node), "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
           END
       END
-      FOR _ IN (body[rtoc_idx]?.body_slots()) DO
+      FOR _ IN (rtoc_node.body_slots()) DO
       TRY (mIRChecker__verify_cleanup_sources_in_scope_mut(&rtoc_self_view, _.body()));
       END
     rtoc_idx = rtoc_idx + 1;
