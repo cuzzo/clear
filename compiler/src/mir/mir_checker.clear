@@ -967,7 +967,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__linear_register_err_cleanup_mut(MUTABLE self: MIRChecker, name: String, state: LinearOwnershipState) RETURNS !Void
+PUB FN mIRChecker__linear_register_err_cleanup_mut(MUTABLE self: MIRChecker, name: String, MUTABLE state: LinearOwnershipState) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
