@@ -696,7 +696,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, state.pending_return_transfers[rtoc_idx], "TransferMark(:return) does not match the returned expression")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY UNWRAP (state.pending_return_transfers[rtoc_idx]) } "TransferMark(:return) does not match the returned expression")));
     rtoc_idx = rtoc_idx + 1;
         END
         &state.pending_return_transfers.clear();
