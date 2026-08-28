@@ -1480,7 +1480,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !(TRY (mIRChecker__allocating_expr?(rtoc_self_view, nodes[rtoc_idx]?.init()))) THEN
+      IF !(TRY (mIRChecker__allocating_expr?(rtoc_self_view, emittable__init(UNWRAP (nodes[rtoc_idx]))))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
