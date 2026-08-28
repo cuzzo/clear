@@ -4046,9 +4046,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_38 = clause.selectors;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_38.length() DO
-      MUTABLE expansion = PARTIAL MATCH rtoc_each_items_38[rtoc_idx].form START
-          :kind -> (TRY (aST__types_for_kind(rtoc_each_items_38[rtoc_idx].name()))) |> DISTINCT _,
-          :type -> ( { MUTABLE rtoc_pipe_src = [rtoc_each_items_38[rtoc_idx].name()]; rtoc_pipe_src |> DISTINCT _ } ),
+      MUTABLE expansion = PARTIAL MATCH UNWRAP (rtoc_each_items_38[rtoc_idx]).form START
+          :kind -> (TRY (aST__types_for_kind(UNWRAP (rtoc_each_items_38[rtoc_idx]).name()))) |> DISTINCT _,
+          :type -> ( { MUTABLE rtoc_pipe_src = [UNWRAP (rtoc_each_items_38[rtoc_idx]).name()]; rtoc_pipe_src |> DISTINCT _ } ),
           DEFAULT -> Set[]
         END;
       MUTABLE reachable = ruby_set_intersection_String_symbol_set(expansion, possible);
@@ -4056,8 +4056,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE label = COPY CAST(rtoc_each_items_38[rtoc_idx].name() AS String);
-      TRY (capabilityAuditSession__error_mut(rtoc_self_view, (rtoc_each_items_38[rtoc_idx].token() OR node), CapabilityAuditCodeOrMessage{ SymbolValue: :SELECTOR_NOT_POSSIBLE }, [], {:label: label}));
+      MUTABLE label = COPY CAST(UNWRAP (rtoc_each_items_38[rtoc_idx]).name() AS String);
+      TRY (capabilityAuditSession__error_mut(rtoc_self_view, (UNWRAP (rtoc_each_items_38[rtoc_idx]).token() OR node), CapabilityAuditCodeOrMessage{ SymbolValue: :SELECTOR_NOT_POSSIBLE }, [], {:label: label}));
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;

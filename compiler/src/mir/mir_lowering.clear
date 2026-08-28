@@ -3115,12 +3115,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rtoc_each_items_70 = (CAST(((TRY (mIRLowering__collect_bg_capture_transfer_roots(rtoc_self_view, locatable))) |> DISTINCT _) AS []String));
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_70.length() DO
-      MUTABLE safe = mIRLowering__zig_safe_name(rtoc_self_view, rtoc_each_items_70[rtoc_idx]);
+      MUTABLE safe = mIRLowering__zig_safe_name(rtoc_self_view, UNWRAP (rtoc_each_items_70[rtoc_idx]));
       MUTABLE rename_map = TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view)));
       IF rename_map.contains?(safe) THEN
             safe = UNWRAP (COPY rename_map[safe]);
       END
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[rtoc_each_items_70[rtoc_idx]] OR_ELSE mIRLowering__new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[UNWRAP (rtoc_each_items_70[rtoc_idx])] OR_ELSE mIRLowering__new());
       IF !(cleanupEntry__present?(entry)) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -4962,16 +4962,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE rtoc_each_items_148 = ((UNWRAP (mod)).ast).statements();
           MUTABLE rtoc_idx = 0;
           WHILE rtoc_idx < rtoc_each_items_148.length() DO
-      IF !(rtoc_each_items_148[rtoc_idx] IS_A FunctionDef) THEN
+      IF !(UNWRAP (rtoc_each_items_148[rtoc_idx]) IS_A FunctionDef) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (rtoc_each_items_148[rtoc_idx].name() == name) THEN
+      IF (UNWRAP (rtoc_each_items_148[rtoc_idx]).name() == name) THEN
                 rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE rtoc_index_receiver_149 = TRY (mIRLowering__fn_sigs(rtoc_self_view));
-      rtoc_index_receiver_149[rtoc_each_items_148[rtoc_idx].name()] = TRY (functionSignature__from_function_def(rtoc_each_items_148[rtoc_idx]));
+      rtoc_index_receiver_149[UNWRAP (rtoc_each_items_148[rtoc_idx]).name()] = TRY (functionSignature__from_function_def(UNWRAP (rtoc_each_items_148[rtoc_idx])));
     rtoc_idx = rtoc_idx + 1;
           END
           MUTABLE module_scope = (UNWRAP (mod)).global_scope;
@@ -5069,8 +5069,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_155 = mod_value.ast.statements();
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_155.length() DO
-    IF (rtoc_each_items_155[rtoc_idx] IS_A StructDef) OR (rtoc_each_items_155[rtoc_idx] IS_A EnumDef) OR (rtoc_each_items_155[rtoc_idx] IS_A UnionDef) THEN
-        MUTABLE vis = (functionSignature__visibility(rtoc_each_items_155[rtoc_idx]) OR :package);
+    IF (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A StructDef) OR (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A EnumDef) OR (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A UnionDef) THEN
+        MUTABLE vis = (functionSignature__visibility(UNWRAP (rtoc_each_items_155[rtoc_idx])) OR :package);
         IF (vis == :private) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -5079,21 +5079,21 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
-        MUTABLE name = COPY CAST(rtoc_each_items_155[rtoc_idx].name() AS String);
+        MUTABLE name = COPY CAST(UNWRAP (rtoc_each_items_155[rtoc_idx]).name() AS String);
         IF mIRLowering__program_state(rtoc_self_view).emitted_types.contains?(name) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
         &visible_names.insert(name);
         mIRLowering__program_state(rtoc_self_view).emitted_types.insert(name);
-        IF rtoc_each_items_155[rtoc_idx] IS_A UnionDef THEN
-          FOR rtoc_key IN rtoc_each_items_155[rtoc_idx].variants().keys() DO
-      MUTABLE var_data: Any = COPY UNWRAP (rtoc_each_items_155[rtoc_idx].variants()[rtoc_key]);
+        IF UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A UnionDef THEN
+          FOR rtoc_key IN UNWRAP (rtoc_each_items_155[rtoc_idx]).variants().keys() DO
+      MUTABLE var_data: Any = COPY UNWRAP (UNWRAP (rtoc_each_items_155[rtoc_idx]).variants()[rtoc_key]);
       IF !(schemas__inline_struct?(var_data)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE syn = "${rtoc_each_items_155[rtoc_idx].name()}_${rtoc_key}";
+      MUTABLE syn = "${UNWRAP (rtoc_each_items_155[rtoc_idx]).name()}_${rtoc_key}";
       &visible_names.insert(syn);
       mIRLowering__program_state(rtoc_self_view).emitted_types.insert(syn);
           END
@@ -6233,7 +6233,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_199 = (TRY (mIR__nodes(NodeRoot{ Emittable: COPY result_mir }))).grep(MIR.Ident);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_199.length() DO
-      MUTABLE name = COPY CAST(rtoc_each_items_199[rtoc_idx].name() AS String);
+      MUTABLE name = COPY CAST(UNWRAP (rtoc_each_items_199[rtoc_idx]).name() AS String);
       MUTABLE safe = COPY (rename_map[name] OR_ELSE name);
       MUTABLE entry = ((IF bindings[name] != NIL THEN bindings[name] ELSE bindings[safe] END) OR_ELSE mIRLowering__new());
       MUTABLE guarded = ((guarded_cleanup_names[name] == TRUE) OR (guarded_cleanup_names[safe] == TRUE));
@@ -6669,7 +6669,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rtoc_each_items_231 = (referenced |> SELECT COPY _);
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_231.length() DO
-      MUTABLE let_binding: ?LetBinding = COPY let_ast_map[rtoc_each_items_231[rtoc_idx]];
+      MUTABLE let_binding: ?LetBinding = COPY let_ast_map[UNWRAP (rtoc_each_items_231[rtoc_idx])];
       IF !(let_binding) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -7546,12 +7546,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_268 = stmt.child_exprs();
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_268.length() DO
-      IF !(rtoc_each_items_268[rtoc_idx]) THEN
+      IF !(UNWRAP (rtoc_each_items_268[rtoc_idx])) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(rtoc_self_view, rtoc_each_items_268[rtoc_idx]));
-      TRY (mIRLowering__replace_mir_expr_child_mut(rtoc_self_view, stmt, rtoc_each_items_268[rtoc_idx], normalized));
+      MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(rtoc_self_view, UNWRAP (rtoc_each_items_268[rtoc_idx])));
+      TRY (mIRLowering__replace_mir_expr_child_mut(rtoc_self_view, stmt, UNWRAP (rtoc_each_items_268[rtoc_idx]), normalized));
       ruby_array_concat_Emittable(prefix, child_prefix);
     rtoc_idx = rtoc_idx + 1;
     END
@@ -7844,9 +7844,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_281 = parent.class().members;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_281.length() DO
-      MUTABLE value = parent[rtoc_each_items_281[rtoc_idx]];
+      MUTABLE value = parent[UNWRAP (rtoc_each_items_281[rtoc_idx])];
       IF value.equal?(old_child) THEN
-          parent[rtoc_each_items_281[rtoc_idx]] = COPY new_child;
+          parent[UNWRAP (rtoc_each_items_281[rtoc_idx])] = COPY new_child;
           TRY (mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(rtoc_self_view, &parent, old_child, new_child));
           RETURN;
       ELSE_IF (value IS_A []@multiowned Any OR value IS_A {}Any) THEN

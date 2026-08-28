@@ -1562,19 +1562,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_21 = ((MATCH call_node START CallNode.FuncCall AS item -> item.args, CallNode.MethodCall AS item -> item.args END));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_21.length() DO
-    IF (rtoc_each_items_21[rtoc_idx] IS_A Identifier AND rtoc_each_items_21[rtoc_idx].was_moved) THEN
+    IF (UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A Identifier AND UNWRAP (rtoc_each_items_21[rtoc_idx]).was_moved) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
-    ELSE_IF rtoc_each_items_21[rtoc_idx] IS_A MoveNode THEN
-        IF !(rtoc_each_items_21[rtoc_idx].value() IS_A Identifier) THEN
-          TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, rtoc_each_items_21[rtoc_idx], state));
+    ELSE_IF UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A MoveNode THEN
+        IF !(UNWRAP (rtoc_each_items_21[rtoc_idx]).value() IS_A Identifier) THEN
+          TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, UNWRAP (rtoc_each_items_21[rtoc_idx]), state));
         END
-    ELSE_IF rtoc_each_items_21[rtoc_idx] IS_A ShareNode THEN
-        TRY (useAfterMoveChecker__check_share_reads(&rtoc_self_view, rtoc_each_items_21[rtoc_idx], state));
-    ELSE_IF ((rtoc_each_items_21[rtoc_idx] IS_A CopyNode OR rtoc_each_items_21[rtoc_idx] IS_A KeepNode) OR rtoc_each_items_21[rtoc_idx] IS_A FreezeNode) THEN
-        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, rtoc_each_items_21[rtoc_idx].value(), state));
+    ELSE_IF UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A ShareNode THEN
+        TRY (useAfterMoveChecker__check_share_reads(&rtoc_self_view, UNWRAP (rtoc_each_items_21[rtoc_idx]), state));
+    ELSE_IF ((UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A CopyNode OR UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A KeepNode) OR UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A FreezeNode) THEN
+        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, UNWRAP (rtoc_each_items_21[rtoc_idx]).value(), state));
     ELSE
-        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, rtoc_each_items_21[rtoc_idx], state));
+        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, UNWRAP (rtoc_each_items_21[rtoc_idx]), state));
     END
     rtoc_idx = rtoc_idx + 1;
     END

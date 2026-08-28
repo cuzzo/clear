@@ -1186,11 +1186,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_30 = TRY (resolutionSession__unbound_type_parameter_names(rtoc_self_view, _));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_30.length() DO
-      IF declared.contains?(rtoc_each_items_30[rtoc_idx]) THEN
+      IF declared.contains?(UNWRAP (rtoc_each_items_30[rtoc_idx])) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (resolutionSession__error_mut(rtoc_self_view, member, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_TYPE_ARG }, [], {:type: rtoc_each_items_30[rtoc_idx]}));
+      TRY (resolutionSession__error_mut(rtoc_self_view, member, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_TYPE_ARG }, [], {:type: UNWRAP (rtoc_each_items_30[rtoc_idx])}));
     rtoc_idx = rtoc_idx + 1;
     END
     END

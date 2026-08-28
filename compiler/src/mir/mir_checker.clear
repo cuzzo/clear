@@ -475,7 +475,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE marks: []AllocMark = COPY UNWRAP (allocs[rtoc_key]);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < marks.length() DO
-      IF !(type__untyped?((marks[rtoc_idx]?.type_info))) THEN
+      IF !(type__untyped?(UNWRAP (marks[rtoc_idx]?.type_info))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -492,15 +492,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_9 = (CAST((nodes |> DISTINCT _) AS []Emittable));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_9.length() DO
-      MUTABLE consumed = TRY (mIRChecker__structural_consumed_names(&rtoc_self_view, rtoc_each_items_9[rtoc_idx]));
+      MUTABLE consumed = TRY (mIRChecker__structural_consumed_names(&rtoc_self_view, UNWRAP (rtoc_each_items_9[rtoc_idx])));
       IF (consumed.length() == 0) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sink_alloc =   IF rtoc_each_items_9[rtoc_idx] IS_A ReassignWithCleanup THEN
-          rtoc_each_items_9[rtoc_idx].alloc()
-        ELSE_IF (respondsTo?(rtoc_each_items_9[rtoc_idx], "resolved_allocs") AND rtoc_each_items_9[rtoc_idx].resolved_allocs() IS_A InlineAllocMetadata@multiowned) THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_11 = rtoc_each_items_9[rtoc_idx].resolved_allocs();
+      MUTABLE sink_alloc =   IF UNWRAP (rtoc_each_items_9[rtoc_idx]) IS_A ReassignWithCleanup THEN
+          UNWRAP (rtoc_each_items_9[rtoc_idx]).alloc()
+        ELSE_IF (respondsTo?(UNWRAP (rtoc_each_items_9[rtoc_idx]), "resolved_allocs") AND UNWRAP (rtoc_each_items_9[rtoc_idx]).resolved_allocs() IS_A InlineAllocMetadata@multiowned) THEN
+          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_11 = UNWRAP (rtoc_each_items_9[rtoc_idx]).resolved_allocs();
       inlineAllocMetadata__value_alloc(rtoc_local_receiver_11) }
         ELSE
           NIL
@@ -541,18 +541,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_12 = (CAST((nodes |> DISTINCT _) AS []Emittable));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_12.length() DO
-      MUTABLE fact = IF respondsTo?(rtoc_each_items_12[rtoc_idx], "ownership_consumption") THEN
-          rtoc_each_items_12[rtoc_idx].ownership_consumption()
+      MUTABLE fact = IF respondsTo?(UNWRAP (rtoc_each_items_12[rtoc_idx]), "ownership_consumption") THEN
+          UNWRAP (rtoc_each_items_12[rtoc_idx]).ownership_consumption()
         ELSE
           NIL
         END;
       IF !(fact IS_A OwnershipConsumptionFact) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_FACT_MISSING, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, rtoc_each_items_12[rtoc_idx]) }, "ownership-consuming MIR node has no MIR::OwnershipConsumptionFact")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_FACT_MISSING, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, UNWRAP (rtoc_each_items_12[rtoc_idx])) }, "ownership-consuming MIR node has no MIR::OwnershipConsumptionFact")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       IF fact.operands().empty?() THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_OPERAND_MISSING, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, rtoc_each_items_12[rtoc_idx]) }, "ownership-consuming MIR node has no operand provenance")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_OPERAND_MISSING, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, UNWRAP (rtoc_each_items_12[rtoc_idx])) }, "ownership-consuming MIR node has no operand provenance")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -1133,11 +1133,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_23 = (live_states |> SKIP 1);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_23.length() DO
-      IF rtoc_each_items_23[rtoc_idx].same_state?(first) THEN
+      IF UNWRAP (rtoc_each_items_23[rtoc_idx]).same_state?(first) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "control-flow branches rejoin with different ownership state: ${TRY (linearOwnershipState__summary(first))} vs ${rtoc_each_items_23[rtoc_idx].summary()}")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "control-flow branches rejoin with different ownership state: ${TRY (linearOwnershipState__summary(first))} vs ${UNWRAP (rtoc_each_items_23[rtoc_idx]).summary()}")));
     rtoc_idx = rtoc_idx + 1;
     END
     mIRChecker__copy_linear_state_mut(rtoc_self_view, first, &into);
@@ -1265,15 +1265,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_25 = (TRY (mIRChecker__linear_expr_ident_names(rtoc_self_view, expr)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_25.length() DO
-      IF consuming_reads.contains?(rtoc_each_items_25[rtoc_idx]) THEN
+      IF consuming_reads.contains?(UNWRAP (rtoc_each_items_25[rtoc_idx])) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !((state.released.contains?(rtoc_each_items_25[rtoc_idx]) OR state.maybe_released.contains?(rtoc_each_items_25[rtoc_idx]))) THEN
+      IF !((state.released.contains?(UNWRAP (rtoc_each_items_25[rtoc_idx])) OR state.maybe_released.contains?(UNWRAP (rtoc_each_items_25[rtoc_idx])))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_USE_AFTER_TRANSFER, rtoc_each_items_25[rtoc_idx], "binding read after ownership was transferred")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_USE_AFTER_TRANSFER, UNWRAP (rtoc_each_items_25[rtoc_idx]), "binding read after ownership was transferred")));
     rtoc_idx = rtoc_idx + 1;
     END
     TRY (mIRChecker__check_nested_linear_expr_bodies_mut(&rtoc_self_view, expr, state));

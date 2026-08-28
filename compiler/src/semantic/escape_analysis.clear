@@ -1529,16 +1529,16 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
       MUTABLE rtoc_each_items_23 = node.targets;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_23.length() DO
-      IF (rtoc_each_items_23[rtoc_idx].name() == "_") THEN
+      IF (UNWRAP (rtoc_each_items_23[rtoc_idx]).name() == "_") THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (IF rtoc_each_items_23[rtoc_idx].symbol != NIL THEN
-            (rtoc_each_items_23[rtoc_idx].symbol).reg
+      IF (IF UNWRAP (rtoc_each_items_23[rtoc_idx]).symbol != NIL THEN
+            (UNWRAP (rtoc_each_items_23[rtoc_idx]).symbol).reg
           ELSE
             NIL
-          END).equal?(rtoc_each_items_23[rtoc_idx]) THEN
-            escapeAnalysis__record_binding_fact_mut(rtoc_each_items_23[rtoc_idx], symbols, binding_values);
+          END).equal?(UNWRAP (rtoc_each_items_23[rtoc_idx])) THEN
+            escapeAnalysis__record_binding_fact_mut(UNWRAP (rtoc_each_items_23[rtoc_idx]), symbols, binding_values);
       END
     rtoc_idx = rtoc_idx + 1;
       END

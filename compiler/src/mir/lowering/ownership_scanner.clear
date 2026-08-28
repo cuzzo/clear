@@ -30,13 +30,13 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
     END) OR_ELSE Set[]));
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_2.length() DO
-      IF !(body_names.contains?(CAST(rtoc_each_items_2[rtoc_idx] AS String))) THEN
+      IF !(body_names.contains?(CAST(UNWRAP (rtoc_each_items_2[rtoc_idx]) AS String))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE entry = (self.bindings[CAST(rtoc_each_items_2[rtoc_idx] AS String)] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
+      MUTABLE entry = (self.bindings[CAST(UNWRAP (rtoc_each_items_2[rtoc_idx]) AS String)] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
       IF cleanupEntry__present?(entry) THEN
-          &names.append(COPY CAST(rtoc_each_items_2[rtoc_idx] AS String));
+          &names.append(COPY CAST(UNWRAP (rtoc_each_items_2[rtoc_idx]) AS String));
       END
     rtoc_idx = rtoc_idx + 1;
   END

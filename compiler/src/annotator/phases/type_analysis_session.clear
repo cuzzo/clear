@@ -948,11 +948,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_13 = ((COPY resolution.program).statements);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_13.length() DO
-      IF rtoc_each_items_13[rtoc_idx] IS_A FunctionDef THEN
+      IF UNWRAP (rtoc_each_items_13[rtoc_idx]) IS_A FunctionDef THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__scan_kept_fn_value_use_mut(rtoc_self_view, rtoc_each_items_13[rtoc_idx], kept_fns));
+      TRY (typeAnalysisSession__scan_kept_fn_value_use_mut(rtoc_self_view, UNWRAP (rtoc_each_items_13[rtoc_idx]), kept_fns));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -1368,7 +1368,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           MUTABLE rtoc_idx = 0;
           WHILE rtoc_idx < rtoc_each_items_26.length() DO
       MUTABLE argument = actuals[rtoc_idx];
-      IF (rtoc_each_items_26[rtoc_idx].mutable() AND argument) THEN
+      IF (UNWRAP (rtoc_each_items_26[rtoc_idx]).mutable() AND argument) THEN
                 MUTABLE root: ?Identifier = aST__root_identifier(argument);
                 IF (root != NIL) THEN
                   FOR _ IN fact_frames DO
@@ -4544,13 +4544,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_84 = (path |> SKIP 1);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_84.length() DO
-      MUTABLE field_name = COPY CAST(rtoc_each_items_84[rtoc_idx] AS String);
+      MUTABLE field_name = COPY CAST(UNWRAP (rtoc_each_items_84[rtoc_idx]) AS String);
       IF (rtoc_each_items_84[rtoc_idx] == symbol("*")) THEN
           BREAK;
       END
       MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_85 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__resolve_type_definition(rtoc_local_receiver_85, current_type_name)) };
-      MUTABLE sf = (schema.fields()[field_name] OR schema.fields()[rtoc_each_items_84[rtoc_idx]]);
+      MUTABLE sf = (schema.fields()[field_name] OR schema.fields()[UNWRAP (rtoc_each_items_84[rtoc_idx])]);
       IF (sf == NIL) THEN
           TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :LIFETIME_NO_FIELD }, [], {:type: current_type_name, :field: field_name}));
       END
@@ -12195,13 +12195,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_288 = node.args();
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_288.length() DO
-      IF !(rtoc_each_items_288[rtoc_idx] IS_A MutableBorrow) THEN
+      IF !(UNWRAP (rtoc_each_items_288[rtoc_idx]) IS_A MutableBorrow) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &node.mark_explicit_mutable_argument_mut(rtoc_idx, rtoc_each_items_288[rtoc_idx].token());
+      &node.mark_explicit_mutable_argument_mut(rtoc_idx, UNWRAP (rtoc_each_items_288[rtoc_idx]).token());
       MUTABLE rtoc_index_receiver_289 = node.args();
-      rtoc_index_receiver_289[rtoc_idx] = rtoc_each_items_288[rtoc_idx].target;
+      rtoc_index_receiver_289[rtoc_idx] = UNWRAP (rtoc_each_items_288[rtoc_idx]).target;
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -12488,17 +12488,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_each_items_300 = node.args.zip(expected_args);
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_300.length() DO
-      IF (rtoc_each_items_300[rtoc_idx][1] AND TRY (typeAnalysisSession__intrinsic_arg_matches?(rtoc_self_view, rtoc_each_items_300[rtoc_idx][1], &rtoc_each_items_300[rtoc_idx][0]))) THEN
+      IF (UNWRAP (rtoc_each_items_300[rtoc_idx])[1] AND TRY (typeAnalysisSession__intrinsic_arg_matches?(rtoc_self_view, UNWRAP (rtoc_each_items_300[rtoc_idx])[1], &UNWRAP (rtoc_each_items_300[rtoc_idx])[0]))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE actual = rtoc_each_items_300[rtoc_idx][0].resolved_type;
+      MUTABLE actual = UNWRAP (rtoc_each_items_300[rtoc_idx])[0].resolved_type;
       IF (actual == :Any) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_ARG_TYPE }, [], {:index: (rtoc_idx + 1), :type: type_name, :method: node.method_name, :expected: ((IF rtoc_each_items_300[rtoc_idx][1] != NIL THEN
-            (rtoc_each_items_300[rtoc_idx][1]).type()
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_ARG_TYPE }, [], {:index: (rtoc_idx + 1), :type: type_name, :method: node.method_name, :expected: ((IF UNWRAP (rtoc_each_items_300[rtoc_idx])[1] != NIL THEN
+            (UNWRAP (rtoc_each_items_300[rtoc_idx])[1]).type()
           ELSE
             NIL
           END) OR_ELSE :Any), :got: actual}));
@@ -13516,12 +13516,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rtoc_each_items_330 = (TRY (typeAnalysisSession__match_variant_names(rtoc_self_view, arm)) |> SKIP 1);
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_330.length() DO
-      MUTABLE extra_payload: ?MatchPayload = TRY (typeAnalysisSession__normalized_match_payload(rtoc_self_view, castOptionalSchemasUnionSchemaVariantValueToOptionalMatchPayload(schema.variants[rtoc_each_items_330[rtoc_idx]]), union_subst));
+      MUTABLE extra_payload: ?MatchPayload = TRY (typeAnalysisSession__normalized_match_payload(rtoc_self_view, castOptionalSchemasUnionSchemaVariantValueToOptionalMatchPayload(schema.variants[UNWRAP (rtoc_each_items_330[rtoc_idx])]), union_subst));
       IF (head_payload == extra_payload) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_MULTI_ARM_PAYLOAD_MISMATCH }, [], {:head: variant_name_value, :other: rtoc_each_items_330[rtoc_idx], :kind: kind, :name: name}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_MULTI_ARM_PAYLOAD_MISMATCH }, [], {:head: variant_name_value, :other: UNWRAP (rtoc_each_items_330[rtoc_idx]), :kind: kind, :name: name}));
     rtoc_idx = rtoc_idx + 1;
       END
     ELSE
@@ -13713,11 +13713,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_331 = ([match_case.value] + (match_case.extra_values));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_331.length() DO
-      IF TRY (typeAnalysisSession__match_pattern_type_matches_subject?(rtoc_self_view, &rtoc_each_items_331[rtoc_idx], node, plan)) THEN
+      IF TRY (typeAnalysisSession__match_pattern_type_matches_subject?(rtoc_self_view, &UNWRAP (rtoc_each_items_331[rtoc_idx]), node, plan)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], {:case: rtoc_each_items_331[rtoc_idx].resolved_type, :expr: node.expr.resolved_type}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], {:case: UNWRAP (rtoc_each_items_331[rtoc_idx]).resolved_type, :expr: node.expr.resolved_type}));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -14202,24 +14202,24 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !((lightweightSnapshot__state_for(pre_loop_states, rtoc_each_items_361[rtoc_idx]) == :live)) THEN
+      IF !((lightweightSnapshot__state_for(pre_loop_states, UNWRAP (rtoc_each_items_361[rtoc_idx])) == :live)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), rtoc_each_items_361[rtoc_idx]);
+      MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), UNWRAP (rtoc_each_items_361[rtoc_idx]));
       IF !(((graph_node != NIL) AND (graph_node.state == :moved))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF typeAnalysisSession__captured_move_consumed_by_loop?(rtoc_self_view, rtoc_each_items_361[rtoc_idx]) THEN
+      IF typeAnalysisSession__captured_move_consumed_by_loop?(rtoc_self_view, UNWRAP (rtoc_each_items_361[rtoc_idx])) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF TRY (typeAnalysisSession__loop_value_copyable?(rtoc_self_view, rtoc_each_items_361[rtoc_idx])) THEN
+      IF TRY (typeAnalysisSession__loop_value_copyable?(rtoc_self_view, UNWRAP (rtoc_each_items_361[rtoc_idx]))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__emit_use_of_moved_in_loop_error_mut(rtoc_self_view, node, rtoc_each_items_361[rtoc_idx], graph_node, code));
+      TRY (typeAnalysisSession__emit_use_of_moved_in_loop_error_mut(rtoc_self_view, node, UNWRAP (rtoc_each_items_361[rtoc_idx]), graph_node, code));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -17546,20 +17546,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_429 = _.selectors;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_429.length() DO
-        IF !((rtoc_each_items_429[rtoc_idx].form == :type)) THEN
+        IF !((UNWRAP (rtoc_each_items_429[rtoc_idx]).form == :type)) THEN
           rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        MUTABLE name = rtoc_each_items_429[rtoc_idx].name();
+        MUTABLE name = UNWRAP (rtoc_each_items_429[rtoc_idx]).name();
         IF sync_policy_inline_only_errors.contains?(name) THEN
-            TRY (typeAnalysisSession__error_mut(rtoc_self_view, (rtoc_each_items_429[rtoc_idx].token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INLINE_ONLY }, [], {:name: name, :escape: (IF (name == :Deadlock) THEN
+            TRY (typeAnalysisSession__error_mut(rtoc_self_view, (UNWRAP (rtoc_each_items_429[rtoc_idx]).token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INLINE_ONLY }, [], {:name: name, :escape: (IF (name == :Deadlock) THEN
               "DEADLOCK"
             ELSE
               "LOCK_CYCLE"
             END)}));
         END
         IF !(sync_policy_required_errors.contains?(name)) THEN
-            TRY (typeAnalysisSession__error_mut(rtoc_self_view, (rtoc_each_items_429[rtoc_idx].token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INVALID_ERROR }, [], {:name: name, :required: sync_policy_required_errors.join(", ")}));
+            TRY (typeAnalysisSession__error_mut(rtoc_self_view, (UNWRAP (rtoc_each_items_429[rtoc_idx]).token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INVALID_ERROR }, [], {:name: name, :required: sync_policy_required_errors.join(", ")}));
         END
         &seen.append(name);
       rtoc_idx = rtoc_idx + 1;
@@ -17567,11 +17567,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_430 = _.selectors;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_430.length() DO
-        IF !((rtoc_each_items_430[rtoc_idx].form == :kind)) THEN
+        IF !((UNWRAP (rtoc_each_items_430[rtoc_idx]).form == :kind)) THEN
           rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        TRY (typeAnalysisSession__error_mut(rtoc_self_view, (rtoc_each_items_430[rtoc_idx].token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_NEEDS_TYPE_NOT_KIND }, [], {:name: rtoc_each_items_430[rtoc_idx].name()}));
+        TRY (typeAnalysisSession__error_mut(rtoc_self_view, (UNWRAP (rtoc_each_items_430[rtoc_idx]).token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_NEEDS_TYPE_NOT_KIND }, [], {:name: UNWRAP (rtoc_each_items_430[rtoc_idx]).name()}));
       rtoc_idx = rtoc_idx + 1;
     END
     END
@@ -19689,14 +19689,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_486.length() DO
       MUTABLE info: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_487 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__local_entry(rtoc_local_receiver_487, rtoc_each_items_486[rtoc_idx]) };
+      scope__local_entry(rtoc_local_receiver_487, UNWRAP (rtoc_each_items_486[rtoc_idx])) };
       IF !(info) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE is_takes = (TRUE AND symbolEntry__takes(info));
       IF !(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_488 = typeAnalysisSession__ownership_graph(rtoc_self_view);
-      ownershipGraph__live?(rtoc_local_receiver_488, rtoc_each_items_486[rtoc_idx]) } OR ((is_takes AND ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), rtoc_each_items_486[rtoc_idx]) != NIL) AND ownershipNode__moved?(((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), rtoc_each_items_486[rtoc_idx]))?))))))) THEN
+      ownershipGraph__live?(rtoc_local_receiver_488, UNWRAP (rtoc_each_items_486[rtoc_idx])) } OR ((is_takes AND ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), UNWRAP (rtoc_each_items_486[rtoc_idx])) != NIL) AND ownershipNode__moved?(((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), UNWRAP (rtoc_each_items_486[rtoc_idx])))?))))))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -19704,16 +19704,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           TRY (typeAnalysisSession__classify_ownership_mut(rtoc_self_view, UNWRAP (info)));
       END
       IF (symbolEntry__ownership_kind(info) == :resource) THEN
-          &drops.append(TRY (typeAnalysisSession__deferred_drop_for(rtoc_self_view, rtoc_each_items_486[rtoc_idx], UNWRAP (info), TRUE)));
-          TRY (typeAnalysisSession__og_drop(rtoc_self_view, rtoc_each_items_486[rtoc_idx]));
+          &drops.append(TRY (typeAnalysisSession__deferred_drop_for(rtoc_self_view, UNWRAP (rtoc_each_items_486[rtoc_idx]), UNWRAP (info), TRUE)));
+          TRY (typeAnalysisSession__og_drop(rtoc_self_view, UNWRAP (rtoc_each_items_486[rtoc_idx])));
       ELSE_IF (symbolEntry__ownership_kind(info) == :affine) THEN
           MUTABLE t = TRY (type__new(TypeConstructionInput{ Type: COPY symbolEntry__type(info) }));
           IF (TRY (type__single_future?(t)) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_491 = typeAnalysisSession__ownership_graph(rtoc_self_view);
-          ownershipGraph__live?(rtoc_local_receiver_491, rtoc_each_items_486[rtoc_idx]) }) THEN
-            TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :PROMISE_NOT_CONSUMED }, [], {:name: rtoc_each_items_486[rtoc_idx]}));
+          ownershipGraph__live?(rtoc_local_receiver_491, UNWRAP (rtoc_each_items_486[rtoc_idx])) }) THEN
+            TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :PROMISE_NOT_CONSUMED }, [], {:name: UNWRAP (rtoc_each_items_486[rtoc_idx])}));
           END
-          &drops.append(TRY (typeAnalysisSession__deferred_drop_for(rtoc_self_view, rtoc_each_items_486[rtoc_idx], UNWRAP (info))));
-          TRY (typeAnalysisSession__og_drop(rtoc_self_view, rtoc_each_items_486[rtoc_idx]));
+          &drops.append(TRY (typeAnalysisSession__deferred_drop_for(rtoc_self_view, UNWRAP (rtoc_each_items_486[rtoc_idx]), UNWRAP (info))));
+          TRY (typeAnalysisSession__og_drop(rtoc_self_view, UNWRAP (rtoc_each_items_486[rtoc_idx])));
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -19731,12 +19731,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_494.length() DO
       MUTABLE info: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_495 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__local_entry(rtoc_local_receiver_495, rtoc_each_items_494[rtoc_idx]) };
+      scope__local_entry(rtoc_local_receiver_495, UNWRAP (rtoc_each_items_494[rtoc_idx])) };
       IF !(info) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF rtoc_each_items_494[rtoc_idx].startsWith?("_") THEN
+      IF UNWRAP (rtoc_each_items_494[rtoc_idx]).startsWith?("_") THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -19765,19 +19765,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           ELSE
             loc = "";
           END
-      print("\x1B[33m[Warning]\x1B[0m Unused variable '${rtoc_each_items_494[rtoc_idx]}'${loc}");
+      print("\x1B[33m[Warning]\x1B[0m Unused variable '${UNWRAP (rtoc_each_items_494[rtoc_idx])}'${loc}");
     rtoc_idx = rtoc_idx + 1;
       END
       MUTABLE rtoc_each_items_496 = (TRY (typeAnalysisSession__current_scope(rtoc_self_view))).owned_names;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_496.length() DO
       MUTABLE info: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_497 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__local_entry(rtoc_local_receiver_497, rtoc_each_items_496[rtoc_idx]) };
+      scope__local_entry(rtoc_local_receiver_497, UNWRAP (rtoc_each_items_496[rtoc_idx])) };
       IF !(info) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF rtoc_each_items_496[rtoc_idx].startsWith?("_") THEN
+      IF UNWRAP (rtoc_each_items_496[rtoc_idx]).startsWith?("_") THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -19797,7 +19797,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__emit_mutable_unused_finding_mut(rtoc_self_view, castOptionalSymbolEntryRegInputToOptionalReg(info.reg), rtoc_each_items_496[rtoc_idx]));
+      TRY (typeAnalysisSession__emit_mutable_unused_finding_mut(rtoc_self_view, castOptionalSymbolEntryRegInputToOptionalReg(info.reg), UNWRAP (rtoc_each_items_496[rtoc_idx])));
     rtoc_idx = rtoc_idx + 1;
       END
     END

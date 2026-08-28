@@ -730,12 +730,12 @@ PRIVATE FN emit__rewrite_promoted_fsm_struct_fields_mut(MUTABLE node: Emittable,
   MUTABLE rtoc_each_items_35 = node.members;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_35.length() DO
-    MUTABLE value = node[rtoc_each_items_35[rtoc_idx]];
+    MUTABLE value = node[UNWRAP (rtoc_each_items_35[rtoc_idx])];
     IF !((value IS_A Emittable OR (((value IS_A Any[]@multiowned AND (value |> ALL _ IS_A Emittable)))))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    node[rtoc_each_items_35[rtoc_idx]] = emit__rewrite_promoted_fsm_node(&value, promoted_names, id);
+    node[UNWRAP (rtoc_each_items_35[rtoc_idx])] = emit__rewrite_promoted_fsm_node(&value, promoted_names, id);
   rtoc_idx = rtoc_idx + 1;
   END
   NIL;
