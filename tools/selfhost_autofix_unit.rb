@@ -302,7 +302,47 @@ module SelfhostAutofixUnit
     nil
   end
 
-  FIXES = [method(:redundant_unwrap_fix), method(:method_rename_fix), method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
+  # "Set.insert: argument type ?T does not match set element type T" -- indexing
+  # yields an optional, and the collection takes the value itself. Ruby's each
+  # hands over the element.
+  def optional_insert_fix(output)
+    return nil unless output.match?(/argument type \?(\w+) does not match set element type \1/)
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    line_no = loc[1].to_i
+    Fix.new(label: 'unwrap inserted element', apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      return false unless lines[i]&.match?(/\.insert\((\w+\[[^\]]+\])\)/)
+
+      lines[i] = lines[i].sub(/\.insert\((\w+\[[^\]]+\])\)/) { ".insert(COPY UNWRAP (#{Regexp.last_match(1)}))" }
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  # "Numeric operator requires numeric operands, got T[SET] and T[SET]" --
+  # Ruby spells set difference `a - b`; CLEAR spells it a.difference(b).
+  def set_difference_fix(output)
+    return nil unless output.match?(/Numeric operator requires numeric operands, got \S+\[SET\] and \S+\[SET\]/)
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    line_no = loc[1].to_i
+    Fix.new(label: 'a - b -> a.difference(b)', apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      return false unless lines[i]&.match?(/\(([\w.]+) - ([\w.]+)\)/)
+
+      lines[i] = lines[i].sub(/\(([\w.]+) - ([\w.]+)\)/) do
+        "(#{Regexp.last_match(1)}.difference(#{Regexp.last_match(2)}))"
+      end
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  FIXES = [method(:redundant_unwrap_fix), method(:set_difference_fix), method(:optional_insert_fix),
+           method(:method_rename_fix), method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
            method(:mutable_arg_fix), method(:list_nil_guard_fix),
            method(:variant_name_literal_fix)].freeze
 
