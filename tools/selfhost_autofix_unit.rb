@@ -43,7 +43,26 @@ module SelfhostAutofixUnit
     end)
   end
 
-  FIXES = [method(:field_call_fix)].freeze
+  # "Operator OR requires Bool operands" -- Ruby's `a || b` is nil-coalescing,
+  # which CLEAR spells OR_ELSE. The diagnostic only fires where the operands
+  # are not Bools, so the rewrite is unambiguous.
+  def boolean_or_fix(output)
+    return nil unless output.include?('Operator OR requires Bool operands')
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    line_no = loc[1].to_i
+    Fix.new(label: 'OR -> OR_ELSE', apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      return false unless lines[i]&.include?(' OR ')
+
+      lines[i] = lines[i].sub(' OR ', ' OR_ELSE ')
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  FIXES = [method(:field_call_fix), method(:boolean_or_fix)].freeze
 
   def unit_path(relative) = File.join(ROOT, 'compiler', 'src', relative)
 

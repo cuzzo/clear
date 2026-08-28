@@ -561,7 +561,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, (UNWRAP (rtoc_each_items_13[rtoc_idx_2]).name OR (UNWRAP (fact)).source), "ownership-consuming MIR node tries to consume borrowed operand from ${UNWRAP (rtoc_each_items_13[rtoc_idx_2]).source}")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, (UNWRAP (rtoc_each_items_13[rtoc_idx_2]).name OR_ELSE (UNWRAP (fact)).source), "ownership-consuming MIR node tries to consume borrowed operand from ${UNWRAP (rtoc_each_items_13[rtoc_idx_2]).source}")));
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
