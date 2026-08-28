@@ -1212,16 +1212,26 @@ PUB FN mIRChecker__copy_linear_state_mut(self: MIRChecker, source: LinearOwnersh
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    &target.owned.replace(source.owned);
-    &target.released.replace(source.released);
-    &target.maybe_released.replace(source.maybe_released);
-    &target.cleanup_finalizers.replace(source.cleanup_finalizers);
-    &target.guarded_finalizers.replace(source.guarded_finalizers);
-    &target.err_finalizers.replace(source.err_finalizers);
-    &target.pending_return_transfers.replace(source.pending_return_transfers);
-    &target.pending_block_transfers.replace(source.pending_block_transfers);
-    &target.alloc_kinds.replace(source.alloc_kinds);
-    &target.alloc_scopes.replace(source.alloc_scopes);
+    &target.owned.clear();
+    &target.owned.merge(source.owned);
+    &target.released.clear();
+    &target.released.merge(source.released);
+    &target.maybe_released.clear();
+    &target.maybe_released.merge(source.maybe_released);
+    &target.cleanup_finalizers.clear();
+    &target.cleanup_finalizers.merge(source.cleanup_finalizers);
+    &target.guarded_finalizers.clear();
+    &target.guarded_finalizers.merge(source.guarded_finalizers);
+    &target.err_finalizers.clear();
+    &target.err_finalizers.merge(source.err_finalizers);
+    &target.pending_return_transfers.clear();
+    &target.pending_return_transfers.merge(source.pending_return_transfers);
+    &target.pending_block_transfers.clear();
+    &target.pending_block_transfers.merge(source.pending_block_transfers);
+    &target.alloc_kinds.clear();
+    &target.alloc_kinds.merge(source.alloc_kinds);
+    &target.alloc_scopes.clear();
+    &target.alloc_scopes.merge(source.alloc_scopes);
     target.terminated = source.terminated;
     NIL;
 }

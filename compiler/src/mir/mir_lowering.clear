@@ -3026,7 +3026,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     FOR _ IN node.body_slots() DO
     MUTABLE rtoc_mutable_block_param_64 = COPY _;
-    &rtoc_mutable_block_param_64.replace(TRY (mIRLowering__append_nested_ownership_transfers_for_mir_body(rtoc_self_view, rtoc_mutable_block_param_64.body(), inherited_alloc_names, inherited_guarded_names, parent_state)));
+    &rtoc_mutable_block_param_64.clear();
+    &rtoc_mutable_block_param_64.merge(TRY (mIRLowering__append_nested_ownership_transfers_for_mir_body(rtoc_self_view, rtoc_mutable_block_param_64.body(), inherited_alloc_names, inherited_guarded_names, parent_state)));
     END
     NIL;
 }
@@ -3042,7 +3043,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       FOR _ IN expr_value.body_slots() DO
     MUTABLE rtoc_mutable_block_param_65 = COPY _;
-      &rtoc_mutable_block_param_65.replace(TRY (mIRLowering__append_nested_ownership_transfers_for_mir_body(rtoc_self_view, rtoc_mutable_block_param_65.body(), inherited_alloc_names, inherited_guarded_names, parent_state)));
+      &rtoc_mutable_block_param_65.clear();
+      &rtoc_mutable_block_param_65.merge(TRY (mIRLowering__append_nested_ownership_transfers_for_mir_body(rtoc_self_view, rtoc_mutable_block_param_65.body(), inherited_alloc_names, inherited_guarded_names, parent_state)));
       END
       mIRLowering__each_mir_expr_child(rtoc_self_view, expr_value, %(child: Emittable) USE(inherited_alloc_names, inherited_guarded_names, parent_state, rtoc_self_view) -> {
     TRY (mIRLowering__finalize_nested_mir_expr_bodies_mut(rtoc_self_view, child, inherited_alloc_names, inherited_guarded_names, parent_state));
@@ -7677,7 +7679,8 @@ PRIVATE FN mIRLowering__normalize_nested_mir_bodies_mut(self: MIRLowering, node:
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN node.body_slots() DO
     MUTABLE rtoc_mutable_block_param_278 = COPY _;
-    &rtoc_mutable_block_param_278.replace(TRY (mIRLowering__normalize_allocating_mir_body(rtoc_self_view, rtoc_mutable_block_param_278.body())));
+    &rtoc_mutable_block_param_278.clear();
+    &rtoc_mutable_block_param_278.merge(TRY (mIRLowering__normalize_allocating_mir_body(rtoc_self_view, rtoc_mutable_block_param_278.body())));
     END
     NIL;
 }
