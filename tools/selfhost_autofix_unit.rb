@@ -31,6 +31,10 @@ module SelfhostAutofixUnit
     return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
 
     field = m[1]
+    # A primitive receiver has no fields at all, so the call is a method whose
+    # CLEAR name differs -- never a field read.
+    return nil if output.match?(/Type (String|Int64|Float64|Bool|UInt64) has no inherent METHOD/)
+
     # `class` is Ruby reflection, not an attribute -- a union has no such field,
     # and the fix is a variant-name accessor rather than a field read.
     return nil if field == 'class'

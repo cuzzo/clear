@@ -1242,7 +1242,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR_ELSE "");
       MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
-      MUTABLE inner = body.lstrip();
+      MUTABLE inner = body.trimStart();
       IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
         MUTABLE alias_name = "${castNameCandidateToString(name)}_v";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(CAST(name AS String))}\\.(?=\\w)"), "${alias_name}.");
@@ -1286,7 +1286,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
       MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
-      MUTABLE inner = body.lstrip();
+      MUTABLE inner = body.trimStart();
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN literal.value IS_A Int64 ELSE FALSE END) AND (index.value() >= 0)) THEN
@@ -1318,7 +1318,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
       MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
-      MUTABLE inner = body.lstrip();
+      MUTABLE inner = body.trimStart();
       IF !(inner.empty?()) THEN
         MUTABLE alias_name = "${name}_view";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(name)}\\b"), alias_name);

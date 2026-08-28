@@ -607,7 +607,7 @@ FN emit_cap_field_needs_with_mut(node: GetField, code: String@symbol, name: Name
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
     MUTABLE body = line_text.trim();
     MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
-    MUTABLE inner = body.lstrip();
+    MUTABLE inner = body.trimStart();
     IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
       MUTABLE alias_name = "${castNameCandidateToString(name)}_v";
       MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex(CAST(name AS String))}\\.(?=\\w)", "${alias_name}.");
@@ -638,7 +638,7 @@ FN emit_foreign_index_needs_unsafe_view_mut(node: GetIndex, name: String) RETURN
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
     MUTABLE body = line_text.trim();
     MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
-    MUTABLE inner = body.lstrip();
+    MUTABLE inner = body.trimStart();
     MUTABLE index = node.index;
     MUTABLE length: String = "";
     IF ((index IS_A Literal AND index.value() IS_A Int64) AND (index.value() >= 0)) THEN
@@ -666,7 +666,7 @@ FN emit_direct_view_access_finding_mut(node: Locatable, name: String, permission
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
     MUTABLE body = line_text.trim();
     MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
-    MUTABLE inner = body.lstrip();
+    MUTABLE inner = body.trimStart();
     IF !(inner.empty?()) THEN
       MUTABLE alias_name = "${name}_view";
       MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex(name)}\\b", alias_name);

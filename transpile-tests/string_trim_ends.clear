@@ -1,0 +1,22 @@
+# Test: trimStart and trimEnd drop whitespace from one end only, as Ruby's
+# lstrip/rstrip and Rust's trim_start/trim_end do. Both return a sub-slice of
+# the input, so neither allocates.
+
+FN main() RETURNS !Void ->
+  s = "  pad  ";
+  ASSERT s.trimStart() == "pad  ", "trimStart should drop only the leading space";
+  ASSERT s.trimEnd() == "  pad", "trimEnd should drop only the trailing space";
+  ASSERT s.trim() == "pad", "trim should drop both ends";
+
+  ASSERT "none".trimStart() == "none", "a string with no padding is unchanged";
+  ASSERT "none".trimEnd() == "none", "and the same from the other end";
+  ASSERT "".trimStart() == "", "an empty string stays empty";
+  ASSERT "   ".trimEnd() == "", "all-whitespace trims away entirely";
+
+  # The common use: testing a prefix after dropping indentation.
+  indented = "   *ptr";
+  ASSERT indented.trimStart().startsWith?("*"), "the prefix should be reachable";
+
+  print("string_trim_ends: all tests passed");
+  RETURN;
+END

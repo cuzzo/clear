@@ -532,6 +532,28 @@ STD_LIB = T.let({
     is_method: true,
   },
 
+  # Ruby's lstrip / Rust's trim_start: drop leading whitespace only.
+  "trimStart" => {
+    args: [STRING_TYPE],
+    return: STRING_TYPE,
+    lifetime: "self",  # returns a sub-slice of the input; no allocation
+    zig: "std.mem.trimStart(u8, {0}, &std.ascii.whitespace)",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
+  # Ruby's rstrip / Rust's trim_end: drop trailing whitespace only.
+  "trimEnd" => {
+    args: [STRING_TYPE],
+    return: STRING_TYPE,
+    lifetime: "self",  # returns a sub-slice of the input; no allocation
+    zig: "std.mem.trimEnd(u8, {0}, &std.ascii.whitespace)",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
   # startsWith("file.txt", "file") -> true
   "startsWith?" => {
     args: [STRING_TYPE, STRING_TYPE],

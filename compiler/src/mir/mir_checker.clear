@@ -1669,7 +1669,7 @@ PUB FN mIRChecker__verify_heap_create_single_indirection_mut(MUTABLE self: MIRCh
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     mIRChecker__each_heap_create(rtoc_self_view, nodes, %(hc: HeapCreate) USE(rtoc_self_view) -> {
     MUTABLE zt = COPY hc.zig_type;
-    IF !((TRUE AND zt.lstrip().startsWith?("*"))) THEN
+    IF !((TRUE AND zt.trimStart().startsWith?("*"))) THEN
         RETURN;
     END
     &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INDIRECT_DOUBLE_BOX, ruby_wrap_optional_String_Name(rtoc_self_view.fn_name), "HeapCreate cell type is `${zt}` (already a pointer) \u{2014} boxing it yields a double indirection")));
