@@ -772,9 +772,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE switch_stmt_mutable = COPY switch_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, switch_stmt_mutable.subject, state));
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_18: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_18 } );
-        IF switch_stmt_mutable.arms != NIL THEN
+        IF !((switch_stmt_mutable.arms).empty?()) THEN
                 FOR _ IN switch_stmt_mutable.arms DO
-                &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state))), state, "match")));
+                &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body, linearOwnershipState__copy(state))), state, "match")));
                 END
         END
         &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (switch_stmt_mutable.default_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "match")));
@@ -783,9 +783,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE union_match_stmt_mutable = COPY union_match_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, union_match_stmt_mutable.subject, state));
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_19: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_19 } );
-        IF union_match_stmt_mutable.arms != NIL THEN
+        IF !((union_match_stmt_mutable.arms).empty?()) THEN
                 FOR _ IN union_match_stmt_mutable.arms DO
-                &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state))), state, "match")));
+                &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body, linearOwnershipState__copy(state))), state, "match")));
                 END
         END
         &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (union_match_stmt_mutable.default_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "match")));
@@ -793,10 +793,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF stmt_value_mutable IS_A IfChain AS if_chain THEN
         MUTABLE if_chain_mutable = COPY if_chain;
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_20: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_20 } );
-        IF if_chain_mutable.branches != NIL THEN
+        IF !((if_chain_mutable.branches).empty?()) THEN
                 FOR _ IN if_chain_mutable.branches DO
-            TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, _.cond(), state));
-            &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state))), state, "if-chain")));
+            TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, _.cond, state));
+            &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body, linearOwnershipState__copy(state))), state, "if-chain")));
                 END
         END
         &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (if_chain_mutable.default_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "if-chain")));
@@ -806,7 +806,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE body = COPY deferStmt__body(mir_defer_stmt_mutable);
         IF body IS_A []Emittable AS array THEN
           MUTABLE array_mutable = COPY array;
-          TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, array_mutable, state));
+          TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, array_mutable, &state));
         ELSE
           TRY (mIRChecker__check_linear_stmt_mut(&rtoc_self_view, body, &state));
         END
