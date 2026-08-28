@@ -553,15 +553,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_each_items_13 = (UNWRAP (fact)).operands;
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < rtoc_each_items_13.length() DO
-          IF (rtoc_each_items_13[rtoc_idx_2].kind() == :non_owning) THEN
+          IF (UNWRAP (rtoc_each_items_13[rtoc_idx_2]).kind() == :non_owning) THEN
             rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          IF !(rtoc_each_items_13[rtoc_idx_2].borrowed()) THEN
+          IF !(UNWRAP (rtoc_each_items_13[rtoc_idx_2]).borrowed()) THEN
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, (rtoc_each_items_13[rtoc_idx_2].name() OR (UNWRAP (fact)).source), "ownership-consuming MIR node tries to consume borrowed operand from ${rtoc_each_items_13[rtoc_idx_2].source()}")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, (UNWRAP (rtoc_each_items_13[rtoc_idx_2]).name() OR (UNWRAP (fact)).source), "ownership-consuming MIR node tries to consume borrowed operand from ${UNWRAP (rtoc_each_items_13[rtoc_idx_2]).source()}")));
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -1835,16 +1835,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_each_items_38 = (nodes[rtoc_idx]?.bindings());
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < rtoc_each_items_38.length() DO
-          IF !(rtoc_each_items_38[rtoc_idx_2] IS_A {}Any) THEN
+          IF !(UNWRAP (rtoc_each_items_38[rtoc_idx_2]) IS_A {}Any) THEN
             rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          MUTABLE capture = COPY CAST(rtoc_each_items_38[rtoc_idx_2][:capture] AS String);
+          MUTABLE capture = COPY CAST(UNWRAP (rtoc_each_items_38[rtoc_idx_2])[:capture] AS String);
           IF !(cleanup_names.contains?(capture)) THEN
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          IF (rtoc_each_items_38[rtoc_idx_2][:owns_capture] == TRUE) THEN
+          IF (UNWRAP (rtoc_each_items_38[rtoc_idx_2])[:owns_capture] == TRUE) THEN
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
@@ -2655,13 +2655,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_each_items_52 = ([InlineStoredAllocCheck{ label: :key_alloc, alloc: COPY inlineAllocMetadata__key_alloc(alloc_metadata) }, InlineStoredAllocCheck{ label: :val_alloc, alloc: COPY inlineAllocMetadata__value_alloc(alloc_metadata) }]);
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < rtoc_each_items_52.length() DO
-          MUTABLE stored_alloc = COPY rtoc_each_items_52[rtoc_idx_2].alloc;
+          MUTABLE stored_alloc = COPY UNWRAP (rtoc_each_items_52[rtoc_idx_2]).alloc;
           IF !(stored_alloc) THEN
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
           IF (placement__explicit_frame?(stored_alloc) AND placement__explicit_heap?(container_alloc)) THEN
-              &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "${rtoc_each_items_52[rtoc_idx_2].label} is :frame but container '${target}' is :heap (stored data will dangle after frame rewind)")));
+              &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "${UNWRAP (rtoc_each_items_52[rtoc_idx_2]).label} is :frame but container '${target}' is :heap (stored data will dangle after frame rewind)")));
           END
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
