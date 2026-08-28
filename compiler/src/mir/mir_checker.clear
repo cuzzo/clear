@@ -1819,12 +1819,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF (rtoc_node IS_A Cleanup OR rtoc_node IS_A ErrCleanup) THEN
           MUTABLE let: ?Let = COPY lets[CAST((emittable__name(rtoc_node)) AS String)];
-          IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(rtoc_node)) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, UNWRAP (let), castEmittableToMIRCheckerCleanup(rtoc_node))))) THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, emittable__name(rtoc_node), "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
+          IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(rtoc_node)) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, let, castEmittableToMIRCheckerCleanup(rtoc_node))))) THEN
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, Name{ StringValue: COPY UNWRAP (emittable__name(rtoc_node)) } "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
           END
       END
-      FOR _ IN (rtoc_node.body_slots()) DO
-      TRY (mIRChecker__verify_cleanup_sources_in_scope_mut(&rtoc_self_view, _.body()));
+      FOR _ IN (emittable__body_slots(rtoc_node)) DO
+      TRY (mIRChecker__verify_cleanup_sources_in_scope_mut(&rtoc_self_view, _.body));
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -1837,33 +1837,28 @@ PUB FN mIRChecker__verify_if_bind_capture_cleanup_ownership_mut(MUTABLE self: MI
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < nodes.length() DO
-      IF !(nodes[rtoc_idx]? IS_A IfBindStmt) THEN
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      MUTABLE cleanup_names = (((nodes[rtoc_idx]?.then_body()) |> SELECT:? (  IF (_ IS_A Cleanup OR _ IS_A ErrCleanup) THEN
-          CAST(_.name() AS String)
-        ELSE
-          NIL
-        END) |> WHERE _ != NIL)) |> DISTINCT _;
-      MUTABLE rtoc_each_items_38 = (nodes[rtoc_idx]?.bindings());
-      MUTABLE rtoc_idx_2 = 0;
-      WHILE rtoc_idx_2 < rtoc_each_items_38.length() DO
-          IF !(UNWRAP (rtoc_each_items_38[rtoc_idx_2]) IS_A {}Any) THEN
+      IF nodes[rtoc_idx]? IS_A IfBindStmt AS rtoc_node THEN
+        MUTABLE cleanup_names = ((rtoc_node.then_body |> SELECT:? (  IF (_ IS_A Cleanup OR _ IS_A ErrCleanup) THEN
+            CAST((emittable__name(_)) AS String)
+          ELSE
+            NIL
+          END) |> WHERE _ != NIL)) |> DISTINCT _;
+        MUTABLE rtoc_each_items_38 = COPY rtoc_node.bindings;
+        MUTABLE rtoc_idx_2 = 0;
+        WHILE rtoc_idx_2 < rtoc_each_items_38.length() DO
+          MUTABLE rtoc_binding = UNWRAP (rtoc_each_items_38[rtoc_idx_2]);
+          MUTABLE capture = COPY CAST(rtoc_binding.capture AS String);
+          IF !(cleanup_names.contains?(capture)) THEN
             rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          MUTABLE capture = COPY CAST(UNWRAP (rtoc_each_items_38[rtoc_idx_2])[:capture] AS String);
-          IF !(cleanup_names.contains?(capture)) THEN
-              rtoc_idx_2 = rtoc_idx_2 + 1;
-        CONTINUE;
-          END
-          IF (UNWRAP (rtoc_each_items_38[rtoc_idx_2])[:owns_capture] == TRUE) THEN
-              rtoc_idx_2 = rtoc_idx_2 + 1;
+          IF (rtoc_binding.owns_capture == TRUE) THEN
+            rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, Name{ StringValue: COPY capture }, "optional capture cleanup requires owns_capture=true; borrowed collection/field/local captures must remain owned by their source")));
-        rtoc_idx_2 = rtoc_idx_2 + 1;
+          rtoc_idx_2 = rtoc_idx_2 + 1;
+        END
       END
     rtoc_idx = rtoc_idx + 1;
     END
