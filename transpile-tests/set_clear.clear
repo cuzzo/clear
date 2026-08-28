@@ -1,0 +1,27 @@
+# Test: Set#clear drops every element, as Ruby's Set#clear and Rust's
+# HashSet::clear do. The set owns its string keys, so they are freed rather
+# than leaked, and the set stays usable afterwards.
+
+FN main() RETURNS !Void ->
+  seed = "k";
+  MUTABLE built: [Set]String = Set["${seed}1", "${seed}2", "${seed}3"];
+  ASSERT built.length() == 3_i64, "starts populated";
+  &built.clear();
+  ASSERT built.length() == 0_i64, "clear should empty the set";
+  ASSERT !(built.contains?("k1")), "a cleared element should be gone";
+
+  &built.insert("${seed}4");
+  ASSERT built.length() == 1_i64, "the set should be reusable after clear";
+  ASSERT built.contains?("k4"), "and hold what was inserted next";
+
+  MUTABLE literals: [Set]String = Set["a", "b"];
+  &literals.clear();
+  ASSERT literals.length() == 0_i64, "rodata elements clear too";
+
+  MUTABLE empty: [Set]String = Set[];
+  &empty.clear();
+  ASSERT empty.length() == 0_i64, "clearing an empty set is a no-op";
+
+  print("set_clear: all tests passed");
+  RETURN;
+END

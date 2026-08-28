@@ -1323,6 +1323,18 @@ SET_METHODS = T.let({
     borrows: :all,
     is_method: true,
   },
+  # Ruby's Set#clear and Rust's HashSet::clear: drop every element, freeing
+  # what the set owns.
+  "clear" => {
+    arity: 0, tag: :set_method,
+    zig: "{0}.clear({alloc})",
+    bc: true,
+    alloc: :receiver_storage,
+    mutates_receiver: true,
+    return_type: :Void,
+    borrows: :all,
+    is_method: true,
+  },
   "remove" => {
     arity: 1, tag: :set_method,
     zig: "{0}.remove({alloc}, {1})",

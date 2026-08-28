@@ -70,10 +70,11 @@ module SelfhostAutofixUnit
   # synthesized for Ruby's String-or-Symbol argument, and a bare String needs
   # the variant that carries it. The argument index makes the target exact.
   def name_wrap_fix(output)
-    return nil unless output.match?(/argument (\d+) expects \?Name, got String/)
+    return nil unless output.match?(/argument (\d+) expects \?Name, got \??String/)
     return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
 
     index = output.match(/argument (\d+) expects \?Name/)[1].to_i
+    output_optional = output.include?('got ?String')
     line_no = loc[1].to_i
     Fix.new(label: "wrap argument #{index} in Name", apply: lambda do |path|
       lines = File.readlines(path)
@@ -86,8 +87,12 @@ module SelfhostAutofixUnit
       target = args[index - 1] or return false
       return false if target.strip.start_with?('Name{')
 
+      inner = target.strip
+      optional = output_optional
+      inner = "UNWRAP (#{inner})" if optional
+
       lines[i] = line[0...target_start(args, index)] +
-                 "Name{ StringValue: COPY #{target.strip} }" +
+                 "Name{ StringValue: COPY #{inner} }" +
                  line[(target_start(args, index) + target.length)..]
       File.write(path, lines.join)
       true

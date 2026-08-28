@@ -2553,6 +2553,19 @@ pub fn bind(comptime deps: type) type {
             // Rust's HashSet::extend do. Each element is COPIED, because both
             // sets keep owning their own: insert takes ownership of what it is
             // given, and `other` is only borrowed here.
+            // Ruby's Set#clear and Rust's HashSet::clear. The set owns its
+            // string keys, so they are freed rather than merely dropped.
+            pub fn clear(self: *Self, alloc: std.mem.Allocator) void {
+                if (is_string) {
+                    var it = self.inner.iterator();
+                    while (it.next()) |entry| alloc.free(entry.key_ptr.*);
+                } else if (comptime needsCleanup(T)) {
+                    var it = self.inner.iterator();
+                    while (it.next()) |entry| cleanup(T, alloc, entry.key_ptr);
+                }
+                self.inner.clearRetainingCapacity();
+            }
+
             pub fn merge(self: *Self, alloc: std.mem.Allocator, other: *const Self) !void {
                 var it = other.inner.iterator();
                 while (it.next()) |entry| {
