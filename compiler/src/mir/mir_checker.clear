@@ -497,14 +497,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sink_alloc =   IF UNWRAP (rtoc_each_items_9[rtoc_idx]) IS_A ReassignWithCleanup THEN
-          UNWRAP (rtoc_each_items_9[rtoc_idx]).alloc()
-        ELSE_IF (respondsTo?(UNWRAP (rtoc_each_items_9[rtoc_idx]), "resolved_allocs") AND UNWRAP (rtoc_each_items_9[rtoc_idx]).resolved_allocs() IS_A InlineAllocMetadata@multiowned) THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_11 = UNWRAP (rtoc_each_items_9[rtoc_idx]).resolved_allocs();
-      inlineAllocMetadata__value_alloc(rtoc_local_receiver_11) }
-        ELSE
-          NIL
-        END;
+      MUTABLE sink_alloc: ?String@symbol = NIL;
+      MUTABLE rtoc_sink_node = UNWRAP (rtoc_each_items_9[rtoc_idx]);
+      IF rtoc_sink_node IS_A ReassignWithCleanup AS rtoc_reassign THEN
+        sink_alloc = COPY rtoc_reassign.alloc;
+      ELSE_IF emittable__resolved_allocs(rtoc_sink_node) EXISTS AS rtoc_allocs THEN
+        sink_alloc = COPY inlineAllocMetadata__value_alloc(rtoc_allocs);
+      END
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < consumed.length() DO
           IF !(allocs.contains?(consumed[rtoc_idx_2]?)) THEN
