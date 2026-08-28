@@ -452,9 +452,9 @@ PUB FN mIRChecker__verify_return_transfers_heap_mut(MUTABLE self: MIRChecker, re
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < return_transfers.length() DO
-      MUTABLE marks: ?[]AllocMark = COPY allocs[return_transfers[rtoc_idx]];
+      MUTABLE marks: ?[]AllocMark = COPY allocs[UNWRAP (return_transfers[rtoc_idx])];
       IF !(((marks != NIL) AND !(marks.empty?()))) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :RETURN_TRANSFER_WITHOUT_ALLOC, return_transfers[rtoc_idx], "return ownership transfer has no MIR::AllocMark")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :RETURN_TRANSFER_WITHOUT_ALLOC, Name{ StringValue: COPY UNWRAP (return_transfers[rtoc_idx]) }, "return ownership transfer has no MIR::AllocMark")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -462,7 +462,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :RETURN_TRANSFER_FRAME_ALLOC, return_transfers[rtoc_idx], "return ownership transfer is backed by :frame allocation; escaping owned returns must be heap")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :RETURN_TRANSFER_FRAME_ALLOC, UNWRAP (return_transfers[rtoc_idx]), "return ownership transfer is backed by :frame allocation; escaping owned returns must be heap")));
     rtoc_idx = rtoc_idx + 1;
     END
 }
