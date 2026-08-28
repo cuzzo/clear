@@ -187,8 +187,49 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "Operator NEQ cannot compare T[] with NIL" -- Ruby guards a collection
+  # against nil; CLEAR types it a list, so the question it can ask is whether
+  # the list is empty.
+  def list_nil_guard_fix(output)
+    return nil unless output.match?(/Operator NEQ cannot compare \S+\[\] with NIL/)
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    line_no = loc[1].to_i
+    Fix.new(label: 'list != NIL -> !empty?', apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      return false unless lines[i]&.match?(/([\w.]+) != NIL/)
+
+      lines[i] = lines[i].sub(/([\w.]+) != NIL/) { "!((#{Regexp.last_match(1)}).empty?())" }
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  # Inside an arm that narrowed the value, its variant name is already known --
+  # so asking the union for it passes a struct where the union was expected.
+  # The diagnostic names the struct, which IS the answer.
+  def variant_name_literal_fix(output)
+    return nil unless output.include?('emittable__variant_name')
+    return nil unless (m = output.match(/argument 1 expects Emittable, got (\w+)/))
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    variant = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "variant_name -> \"MIR::#{variant}\"", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      return false unless lines[i]&.match?(/emittable__variant_name\(\w+\)/)
+
+      lines[i] = lines[i].sub(/emittable__variant_name\(\w+\)/, "\"MIR::#{variant}\"")
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   FIXES = [method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
-           method(:mutable_arg_fix)].freeze
+           method(:mutable_arg_fix), method(:list_nil_guard_fix),
+           method(:variant_name_literal_fix)].freeze
 
   def unit_path(relative) = File.join(ROOT, 'compiler', 'src', relative)
 

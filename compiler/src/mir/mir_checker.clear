@@ -831,19 +831,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF stmt_value_mutable IS_A SnapshotRead AS snapshot_read THEN
         MUTABLE snapshot_read_mutable = COPY snapshot_read;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (snapshotRead__body(snapshot_read_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, emittable__variant_name(snapshot_read_mutable)));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "MIR::SnapshotRead"));
       ELSE_IF stmt_value_mutable IS_A SnapshotTransaction AS snapshot_transaction THEN
         MUTABLE snapshot_transaction_mutable = COPY snapshot_transaction;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (snapshotTransaction__body(snapshot_transaction_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, emittable__variant_name(snapshot_transaction_mutable)));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "MIR::SnapshotTransaction"));
       ELSE_IF stmt_value_mutable IS_A SnapshotMultiTxn AS snapshot_multi_txn THEN
         MUTABLE snapshot_multi_txn_mutable = COPY snapshot_multi_txn;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (snapshotMultiTxn__body(snapshot_multi_txn_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, emittable__variant_name(snapshot_multi_txn_mutable)));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "MIR::SnapshotMultiTxn"));
       ELSE_IF stmt_value_mutable IS_A PolymorphicMutate AS polymorphic_mutate THEN
         MUTABLE polymorphic_mutate_mutable = COPY polymorphic_mutate;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (polymorphicMutate__body(polymorphic_mutate_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, "polymorphic-mutate"));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "polymorphic-mutate"));
       ELSE_IF stmt_value_mutable IS_A PolymorphicMutateFlow AS polymorphic_mutate_flow THEN
         MUTABLE polymorphic_mutate_flow_mutable = COPY polymorphic_mutate_flow;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, polymorphic_mutate_flow_mutable.guard_cond, state));
@@ -854,9 +854,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF stmt_value_mutable IS_A WithMatchDispatch AS with_match_dispatch THEN
         MUTABLE with_match_dispatch_mutable = COPY with_match_dispatch;
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_22: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_22 } );
-        IF with_match_dispatch_mutable.arms != NIL THEN
+        IF !((with_match_dispatch_mutable.arms).empty?()) THEN
                 FOR _ IN with_match_dispatch_mutable.arms DO
-                &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state))), state, "with-match")));
+                &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body, linearOwnershipState__copy(state))), state, "with-match")));
                 END
         END
         TRY (mIRChecker__linear_merge_branch_states_mut(&rtoc_self_view, states, &state, "with-match"));
@@ -865,7 +865,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, mir_bg_block_mutable.run_body, linearOwnershipState__new()));
       ELSE_IF stmt_value_mutable IS_A MIRDoBlock AS mir_do_block THEN
         MUTABLE mir_do_block_mutable = COPY mir_do_block;
-        IF mir_do_block_mutable.branch_bodies != NIL THEN
+        IF !((mir_do_block_mutable.branch_bodies).empty?()) THEN
                 FOR _ IN mir_do_block_mutable.branch_bodies DO
                 TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _, linearOwnershipState__new()));
                 END
