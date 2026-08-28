@@ -635,7 +635,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF stmt EXISTS AS stmt_value THEN
       MUTABLE stmt_value_mutable = COPY stmt_value;
       IF !(emittable__stmt?(stmt_value_mutable)) THEN
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, stmt_value_mutable, state));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, stmt_value_mutable, &state));
         RETURN;
       END
       IF !(mIRChecker__linear_statement_node?(stmt_value_mutable)) THEN
@@ -684,7 +684,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         FOR _ IN (TRY (mIRChecker__linear_expr_consumed_names(rtoc_self_view, return_stmt_mutable.value))) DO
         &return_reads.insert(COPY _);
         END
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, return_stmt_mutable.value, state, return_reads));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, return_stmt_mutable.value, &state, return_reads));
         MUTABLE returned_names = TRY (mIRChecker__linear_expr_ident_names(rtoc_self_view, return_stmt_mutable.value));
         TRY (mIRChecker__verify_guarded_transfers_moved_mut(&rtoc_self_view, state.pending_return_transfers, state, :return));
         FOR _ IN state.pending_return_transfers DO
@@ -707,7 +707,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         FOR _ IN (TRY (mIRChecker__linear_expr_consumed_names(rtoc_self_view, break_stmt_mutable.value))) DO
         &block_reads.insert(COPY _);
         END
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, break_stmt_mutable.value, state, block_reads));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, break_stmt_mutable.value, &state, block_reads));
         MUTABLE break_names = TRY (mIRChecker__linear_expr_ident_names(rtoc_self_view, break_stmt_mutable.value));
         TRY (mIRChecker__verify_guarded_transfers_moved_mut(&rtoc_self_view, state.pending_block_transfers, state, :block_result));
         FOR _ IN state.pending_block_transfers DO
@@ -726,33 +726,33 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         MUTABLE manual_traversal = (((((stmt_value_mutable IS_A MIRDeferStmt OR stmt_value_mutable IS_A ErrDeferStmt) OR stmt_value_mutable IS_A MIRStructDef) OR stmt_value_mutable IS_A FsmB1Body) OR stmt_value_mutable IS_A FsmGenericBody) OR stmt_value_mutable IS_A FsmIoBody);
         IF ((TRY (emittable__body_slots(stmt_value_mutable))).empty?() AND !(manual_traversal)) THEN
-          TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, stmt_value_mutable, state));
+          TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, stmt_value_mutable, &state));
           RETURN;
         END
       END
       IF stmt_value_mutable IS_A IfStmt AS if_stmt THEN
         MUTABLE if_stmt_mutable = COPY if_stmt;
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, if_stmt_mutable.cond, state));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, if_stmt_mutable.cond, &state));
         TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_stmt_mutable.then_body, (if_stmt_mutable.else_body OR_ELSE List[]), &state, "if"));
       ELSE_IF stmt_value_mutable IS_A IfBindStmt AS if_bind_stmt THEN
         MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
         IF !((if_bind_stmt_mutable.bindings).empty?()) THEN
                 FOR _ IN if_bind_stmt_mutable.bindings DO
             MUTABLE expr = COPY _.expr;
-            TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, expr, state));
+            TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, expr, &state));
                 END
         END
         TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_bind_stmt_mutable.then_body, (if_bind_stmt_mutable.else_body OR_ELSE List[]), &state, "if-bind"));
       ELSE_IF stmt_value_mutable IS_A WhileStmt AS while_stmt THEN
         MUTABLE while_stmt_mutable = COPY while_stmt;
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, while_stmt_mutable.cond, state));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, while_stmt_mutable.cond, &state));
         MUTABLE body_state = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (whileStmt__body(while_stmt_mutable)), linearOwnershipState__copy(state)));
         MUTABLE projected = linearOwnershipState__copy(state);
         TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &projected, body_state, "while"));
         TRY (mIRChecker__linear_require_same_state_mut(&rtoc_self_view, state, projected, "while"));
       ELSE_IF stmt_value_mutable IS_A ForStmt AS for_stmt THEN
         MUTABLE for_stmt_mutable = COPY for_stmt;
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, for_stmt_mutable.iter, state));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, for_stmt_mutable.iter, &state));
         MUTABLE body_state = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (forStmt__body(for_stmt_mutable)), linearOwnershipState__copy(state)));
         MUTABLE projected = linearOwnershipState__copy(state);
         TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &projected, body_state, "for"));
@@ -770,7 +770,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (debugOnly__body(debug_only_mutable)), linearOwnershipState__copy(state)));
       ELSE_IF stmt_value_mutable IS_A SwitchStmt AS switch_stmt THEN
         MUTABLE switch_stmt_mutable = COPY switch_stmt;
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, switch_stmt_mutable.subject, state));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, switch_stmt_mutable.subject, &state));
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_18: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_18 } );
         IF !((switch_stmt_mutable.arms).empty?()) THEN
                 FOR _ IN switch_stmt_mutable.arms DO
@@ -781,7 +781,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (mIRChecker__linear_merge_branch_states_mut(&rtoc_self_view, states, &state, "match"));
       ELSE_IF stmt_value_mutable IS_A UnionMatchStmt AS union_match_stmt THEN
         MUTABLE union_match_stmt_mutable = COPY union_match_stmt;
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, union_match_stmt_mutable.subject, state));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, union_match_stmt_mutable.subject, &state));
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_19: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_19 } );
         IF !((union_match_stmt_mutable.arms).empty?()) THEN
                 FOR _ IN union_match_stmt_mutable.arms DO
@@ -795,7 +795,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_20: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_20 } );
         IF !((if_chain_mutable.branches).empty?()) THEN
                 FOR _ IN if_chain_mutable.branches DO
-            TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, _.cond, state));
+            TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, _.cond, &state));
             &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body, linearOwnershipState__copy(state))), state, "if-chain")));
                 END
         END
@@ -846,7 +846,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "polymorphic-mutate"));
       ELSE_IF stmt_value_mutable IS_A PolymorphicMutateFlow AS polymorphic_mutate_flow THEN
         MUTABLE polymorphic_mutate_flow_mutable = COPY polymorphic_mutate_flow;
-        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, polymorphic_mutate_flow_mutable.guard_cond, state));
+        TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, polymorphic_mutate_flow_mutable.guard_cond, &state));
         MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_21: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_21 } );
         &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (polymorphicMutateFlow__body(polymorphic_mutate_flow_mutable)), linearOwnershipState__copy(state))), state, "polymorphic-mutate-flow")));
         &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (polymorphic_mutate_flow_mutable.guard_fail_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "polymorphic-mutate-flow")));
@@ -1236,7 +1236,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__check_linear_expr_uses_mut(MUTABLE self: MIRChecker, expr: ?Emittable, state: LinearOwnershipState, transfer_reads: [Set]String = Set[]) RETURNS !Void
+PUB FN mIRChecker__check_linear_expr_uses_mut(MUTABLE self: MIRChecker, expr: ?Emittable, MUTABLE state: LinearOwnershipState, transfer_reads: [Set]String = Set[]) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1247,7 +1247,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF expr? IS_A Pipeline AS pipeline THEN
       MUTABLE pipeline_mutable = COPY pipeline;
-      TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, pipeline_mutable.inner, state, consuming_reads));
+      TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, pipeline_mutable.inner, &state, consuming_reads));
       RETURN;
     END
     IF expr? IS_A MIRBlockExpr AS mir_block_expr THEN
@@ -1267,7 +1267,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_USE_AFTER_TRANSFER, UNWRAP (rtoc_each_items_25[rtoc_idx]), "binding read after ownership was transferred")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_USE_AFTER_TRANSFER, Name{ StringValue: COPY UNWRAP (rtoc_each_items_25[rtoc_idx]) } "binding read after ownership was transferred")));
     rtoc_idx = rtoc_idx + 1;
     END
     TRY (mIRChecker__check_nested_linear_expr_bodies_mut(&rtoc_self_view, expr, state));
@@ -1282,7 +1282,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((expr != NIL)) THEN
       RETURN;
     END
-    FOR _ IN expr.child_exprs() DO
+    FOR _ IN expr.child_exprs DO
     IF _ IS_A MIRBlockExpr THEN
       MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state)));
       TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, "block-expr"));
