@@ -1871,20 +1871,18 @@ PUB FN mIRChecker__verify_no_structural_rc_handle_copies_mut(MUTABLE self: MIRCh
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < nodes.length() DO
-      IF !(nodes[rtoc_idx]? IS_A DeepCopy) THEN
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
+      IF nodes[rtoc_idx]? IS_A DeepCopy AS rtoc_node THEN
+        MUTABLE zig_type = COPY CAST((rtoc_node.zig_type) AS String);
+        IF zig_type.startsWith?("?") THEN
+            zig_type = zig_type.substr(1, (zig_type.length() - 1));
+        END
+        MUTABLE direct_ref_handle = (["CheatLib.Rc(", "CheatLib.Arc(", "CheatLib.WeakRc(", "CheatLib.WeakArc("]) |> ANY zig_type.startsWith?(_);
+        IF !(direct_ref_handle) THEN
+            rtoc_idx = rtoc_idx + 1;
+      CONTINUE;
+        END
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_STRUCTURAL_RC_COPY, rtoc_node.zig_type, "reference-counted handles must be retained, upgraded, or downgraded; MIR::DeepCopy may not structurally duplicate an Rc/Arc handle")));
       END
-      MUTABLE zig_type = COPY CAST((nodes[rtoc_idx]?.zig_type()) AS String);
-      IF zig_type.startsWith?("?") THEN
-          zig_type = zig_type.substr(1, (zig_type.length() - 1));
-      END
-      MUTABLE direct_ref_handle = (["CheatLib.Rc(", "CheatLib.Arc(", "CheatLib.WeakRc(", "CheatLib.WeakArc("]) |> ANY zig_type.startsWith?(_);
-      IF !(direct_ref_handle) THEN
-          rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_STRUCTURAL_RC_COPY, nodes[rtoc_idx]?.zig_type(), "reference-counted handles must be retained, upgraded, or downgraded; MIR::DeepCopy may not structurally duplicate an Rc/Arc handle")));
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;
