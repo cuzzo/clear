@@ -742,29 +742,29 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, expr, state));
                 END
         END
-        TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_bind_stmt_mutable.then_body, (if_bind_stmt_mutable.else_body OR_ELSE List[]), state, "if-bind"));
+        TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_bind_stmt_mutable.then_body, (if_bind_stmt_mutable.else_body OR_ELSE List[]), &state, "if-bind"));
       ELSE_IF stmt_value_mutable IS_A WhileStmt AS while_stmt THEN
         MUTABLE while_stmt_mutable = COPY while_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, while_stmt_mutable.cond, state));
         MUTABLE body_state = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (whileStmt__body(while_stmt_mutable)), linearOwnershipState__copy(state)));
         MUTABLE projected = linearOwnershipState__copy(state);
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, projected, body_state, "while"));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &projected, body_state, "while"));
         TRY (mIRChecker__linear_require_same_state_mut(&rtoc_self_view, state, projected, "while"));
       ELSE_IF stmt_value_mutable IS_A ForStmt AS for_stmt THEN
         MUTABLE for_stmt_mutable = COPY for_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, for_stmt_mutable.iter, state));
         MUTABLE body_state = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (forStmt__body(for_stmt_mutable)), linearOwnershipState__copy(state)));
         MUTABLE projected = linearOwnershipState__copy(state);
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, projected, body_state, "for"));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &projected, body_state, "for"));
         TRY (mIRChecker__linear_require_same_state_mut(&rtoc_self_view, state, projected, "for"));
       ELSE_IF stmt_value_mutable IS_A ScopeBlock AS scope_block THEN
         MUTABLE scope_block_mutable = COPY scope_block;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (scopeBlock__body(scope_block_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, "scope"));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "scope"));
       ELSE_IF stmt_value_mutable IS_A MIRBlockExpr AS mir_block_expr THEN
         MUTABLE mir_block_expr_mutable = COPY mir_block_expr;
         MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (blockExpr__body(mir_block_expr_mutable)), linearOwnershipState__copy(state)));
-        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, "scope"));
+        TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "scope"));
       ELSE_IF stmt_value_mutable IS_A DebugOnly AS debug_only THEN
         MUTABLE debug_only_mutable = COPY debug_only;
         TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (debugOnly__body(debug_only_mutable)), linearOwnershipState__copy(state)));
