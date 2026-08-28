@@ -349,10 +349,16 @@ module SelfhostAutofixUnit
     name = m[1]
     Fix.new(label: "MUTABLE #{name}", apply: lambda do |path|
       lines = File.readlines(path)
+      # It may be a local binding or a parameter of the enclosing function.
       idx = lines.index { |l| l.match?(/^\s*#{Regexp.escape(name)}(?::[^=]*)? = /) }
-      return false unless idx
+      if idx
+        lines[idx] = lines[idx].sub(/^(\s*)#{Regexp.escape(name)}/, "\\1MUTABLE #{name}")
+      else
+        idx = lines.index { |l| l.match?(/^(?:PUB |PRIVATE )?FN .*(?<![\w])#{Regexp.escape(name)}: /) }
+        return false unless idx
 
-      lines[idx] = lines[idx].sub(/^(\s*)#{Regexp.escape(name)}/, "\\1MUTABLE #{name}")
+        lines[idx] = lines[idx].sub(/(?<![\w])#{Regexp.escape(name)}: /, "MUTABLE #{name}: ")
+      end
       File.write(path, lines.join)
       true
     end)

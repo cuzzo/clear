@@ -1096,7 +1096,7 @@ PUB FN mIRChecker__linear_project_branch_state(MUTABLE self: MIRChecker, branch_
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE projected = linearOwnershipState__copy(branch_state);
-    TRY (mIRChecker__prune_scope_locals_mut(&rtoc_self_view, outer_state, projected, label));
+    TRY (mIRChecker__prune_scope_locals_mut(&rtoc_self_view, outer_state, &projected, label));
     RETURN projected;
 }
 END
@@ -1180,12 +1180,12 @@ PUB FN mIRChecker__linear_exit_scope_mut(MUTABLE self: MIRChecker, MUTABLE outer
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE projected = linearOwnershipState__copy(inner);
-    TRY (mIRChecker__prune_scope_locals_mut(&rtoc_self_view, outer, projected, label));
+    TRY (mIRChecker__prune_scope_locals_mut(&rtoc_self_view, outer, &projected, label));
     mIRChecker__copy_linear_state_mut(rtoc_self_view, projected, &outer);
     NIL;
 }
 END
-PUB FN mIRChecker__prune_scope_locals_mut(MUTABLE self: MIRChecker, outer: LinearOwnershipState, projected: LinearOwnershipState, label: String) RETURNS !Void
+PUB FN mIRChecker__prune_scope_locals_mut(MUTABLE self: MIRChecker, outer: LinearOwnershipState, MUTABLE projected: LinearOwnershipState, label: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1195,13 +1195,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "scope-local owned binding '${_}' exits without cleanup or transfer")));
     END
     &projected.owned.remove(_);
-    &projected.released.delete(_);
-    &projected.cleanup_finalizers.delete(_);
-    &projected.guarded_finalizers.delete(_);
-    &projected.err_finalizers.delete(_);
-    &projected.pending_return_transfers.delete(_);
-    &projected.pending_block_transfers.delete(_);
-    &projected.maybe_released.delete(_);
+    &projected.released.remove(_);
+    &projected.cleanup_finalizers.remove(_);
+    &projected.guarded_finalizers.remove(_);
+    &projected.err_finalizers.remove(_);
+    &projected.pending_return_transfers.remove(_);
+    &projected.pending_block_transfers.remove(_);
+    &projected.maybe_released.remove(_);
     &projected.alloc_kinds.delete(_);
     &projected.alloc_scopes.delete(_);
     END
