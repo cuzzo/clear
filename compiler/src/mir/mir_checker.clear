@@ -513,16 +513,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF !(transfers.contains?(consumed[rtoc_idx_2]?)) THEN
               &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, Name{ StringValue: COPY consumed[rtoc_idx_2]? }, "structural ownership sink consumes '${consumed[rtoc_idx_2]?}' but no MIR::TransferMark exists for that binding")));
           END
-          MUTABLE mark = (IF allocs[consumed[rtoc_idx_2]?] != NIL THEN
-              (allocs[consumed[rtoc_idx_2]?]).first()
-            ELSE
-              NIL
-            END);
+          MUTABLE mark: ?AllocMark = NIL;
+          IF allocs[consumed[rtoc_idx_2]?] EXISTS AS rtoc_mark_list THEN
+            mark = rtoc_mark_list.first();
+          END
           IF !((mark AND sink_alloc)) THEN
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          IF (mark.alloc() == sink_alloc) THEN
+          IF ((UNWRAP (mark)).alloc == sink_alloc) THEN
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
