@@ -120,7 +120,7 @@ END
 FN intrinsicContract__normalized_takes_indices(emit: IntrinsicEmit, params: []Param) RETURNS ![Set]Int64 ->
   MUTABLE indices: [Set]Int64 = Set[];
   FOR _ IN emit.takes_args DO
-  &indices.insert(_);
+  &indices.insert(COPY _);
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
@@ -134,7 +134,7 @@ END
 FN intrinsicContract__normalized_argument_takes_indices(emit: IntrinsicEmit) RETURNS ![Set]Int64 ->
   MUTABLE indices: [Set]Int64 = Set[];
   FOR _ IN emit.takes_args DO
-  &indices.insert(_);
+  &indices.insert(COPY _);
   END
   RETURN indices;
 END

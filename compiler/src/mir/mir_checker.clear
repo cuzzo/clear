@@ -682,7 +682,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE return_stmt_mutable = COPY return_stmt;
         MUTABLE return_reads = COPY state.pending_return_transfers;
         FOR _ IN (TRY (mIRChecker__linear_expr_consumed_names(rtoc_self_view, return_stmt_mutable.value))) DO
-        &return_reads.insert(_);
+        &return_reads.insert(COPY _);
         END
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, return_stmt_mutable.value, state, return_reads));
         MUTABLE returned_names = TRY (mIRChecker__linear_expr_ident_names(rtoc_self_view, return_stmt_mutable.value));
@@ -705,7 +705,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE break_stmt_mutable = COPY break_stmt;
         MUTABLE block_reads = COPY state.pending_block_transfers;
         FOR _ IN (TRY (mIRChecker__linear_expr_consumed_names(rtoc_self_view, break_stmt_mutable.value))) DO
-        &block_reads.insert(_);
+        &block_reads.insert(COPY _);
         END
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, break_stmt_mutable.value, state, block_reads));
         MUTABLE break_names = TRY (mIRChecker__linear_expr_ident_names(rtoc_self_view, break_stmt_mutable.value));
@@ -1237,7 +1237,7 @@ PUB FN mIRChecker__check_linear_expr_uses_mut(MUTABLE self: MIRChecker, expr: ?E
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE consuming_reads: [Set]String = COPY transfer_reads;
     FOR _ IN (TRY (mIRChecker__linear_expr_consumed_names(rtoc_self_view, expr))) DO
-    &consuming_reads.insert(_);
+    &consuming_reads.insert(COPY _);
     END
     IF expr? IS_A Pipeline AS pipeline THEN
       MUTABLE pipeline_mutable = COPY pipeline;
@@ -1713,7 +1713,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF _ IS_A MIRStructDef AS mir_struct_def THEN
       FOR _ IN ((mir_struct_def.methods OR_ELSE List[])) DO
       IF _ IS_A FnDef THEN
-        &functions.append(_);
+        &functions.append(COPY _);
       END
       END
     ELSE_IF _ IS_A ModuleNamespace AS module_namespace THEN

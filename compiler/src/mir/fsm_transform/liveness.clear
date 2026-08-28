@@ -255,14 +255,14 @@ PUB FN liveness__walk_idents(node: ?AstIdentWalkRoot, block: FN(String) -> Void)
       IF (rtoc_walk_child_8 == Array) THEN
         FOR _ IN rtoc_walk_child_8.reverse() DO
         IF _ IS_A Locatable THEN
-          &stack.append(_);
+          &stack.append(COPY _);
         END
         END
       ELSE_IF (rtoc_walk_child_8 == Hash) THEN
         rtoc_walk_child_8.keys() |> EACH {
   MUTABLE child: Any = (rtoc_walk_child_8[_] OR_ELSE panic("missing hash key"));
   IF _ IS_A Locatable THEN
-            &stack.append(_);
+            &stack.append(COPY _);
   END
   IF child IS_A Locatable THEN
             &stack.append(child);

@@ -1838,13 +1838,13 @@ PUB FN loopFrameAnalysis__loop_local_children(node: Locatable) RETURNS ![]Locata
   IF (value == Array) THEN
       FOR _ IN value DO
       IF _ IS_A Locatable THEN
-        &children.append(_);
+        &children.append(COPY _);
       END
       END
   ELSE_IF (value == Hash) THEN
       FOR _ IN value.values() DO
       IF _ IS_A Locatable THEN
-        &children.append(_);
+        &children.append(COPY _);
       END
       END
   ELSE_IF (value IS_A Locatable) THEN

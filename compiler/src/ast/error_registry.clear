@@ -109,7 +109,7 @@ PUB FN aST__types_for_kind(kind: String@symbol) RETURNS ![]String@symbol ->
   (TRY (aST__error_types())).keys() |> EACH {
   MUTABLE meta: ErrorTypeEntry = ((TRY (aST__error_types()))[_] OR_ELSE CAST(panic("missing hash key") AS ErrorTypeEntry));
   IF (meta.kind == kind) THEN
-    &types.append(_);
+    &types.append(COPY _);
   END
   };
   RETURN types;

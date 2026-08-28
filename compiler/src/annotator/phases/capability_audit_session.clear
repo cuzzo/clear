@@ -2405,7 +2405,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &caller_set.insert(suspends_conditional);
       END
     ELSE
-      &caller_set.insert(_);
+      &caller_set.insert(COPY _);
     END
     END
     RETURN NIL;

@@ -16689,7 +16689,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE maybe_projection = {symbol("CONTENTION"): symbol("CONTENTION_MAYBE"), symbol("BLOCKING"): symbol("BLOCKING_MAYBE")};
             MUTABLE target_effects = TRY (typeAnalysisSession__effect_direct_effects_for(rtoc_self_view, fn_ctx_name));
             FOR _ IN concrete DO
-            &target_effects.insert(_);
+            &target_effects.insert(COPY _);
             END
             FOR _ IN maybe_set DO
             &target_effects.insert((maybe_projection[_] OR_ELSE _));

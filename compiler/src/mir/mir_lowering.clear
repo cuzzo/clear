@@ -797,7 +797,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       FOR _ IN node.child_exprs() DO
       IF _ IS_A Emittable THEN
-        &pending.append(_);
+        &pending.append(COPY _);
       END
       END
       IF ((include_bodies OR node IS_A ScopeBlock) OR node IS_A MIRBlockExpr) THEN
@@ -6856,7 +6856,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       cleanupEntry__mark_moved_guard_mut(&rtoc_mutable_receiver_245);
       MUTABLE rtoc_index_receiver_246 = mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names;
       rtoc_index_receiver_246[_] = TRUE;
-      mIRLowering__function_state(rtoc_self_view).lowered_guarded_cleanup_names.insert(_);
+      mIRLowering__function_state(rtoc_self_view).lowered_guarded_cleanup_names.insert(COPY _);
     rtoc_idx = rtoc_idx + 1;
     END
     END
@@ -7298,7 +7298,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE body = COPY mir.body;
     FOR _ IN body DO
     IF _ IS_A AllocMark THEN
-      &marks.append(_);
+      &marks.append(COPY _);
     END
     END
     MUTABLE break_stmt = body.reverse().grep(MIR.BreakStmt).first();

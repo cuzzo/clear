@@ -1034,7 +1034,7 @@ PUB FN escapeAnalysis__unwrap_value(node: ?DynamicValue) RETURNS ?DynamicValue -
 END
 PUB FN escapeAnalysis__push_locatable_children_mut(node: Locatable, MUTABLE stack: []?Locatable) RETURNS !Void ->
   FOR _ IN (aST__wrapped_children(node)) DO
-  &stack.append(_);
+  &stack.append(COPY _);
   END
   FOR _ IN node.class().members DO
   MUTABLE value = COPY node.substr(_, 1);
