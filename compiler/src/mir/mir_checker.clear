@@ -1284,7 +1284,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     FOR _ IN (TRY (emittable__child_exprs(UNWRAP (expr)))) DO
     IF _ IS_A MIRBlockExpr THEN
-      MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body(), linearOwnershipState__copy(state)));
+      MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, UNWRAP (emittable__body(_)), linearOwnershipState__copy(state)));
       TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, "block-expr"));
     ELSE
       TRY (mIRChecker__check_nested_linear_expr_bodies_mut(&rtoc_self_view, _, state));

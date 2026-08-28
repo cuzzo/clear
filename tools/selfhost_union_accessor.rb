@@ -69,7 +69,8 @@ module SelfhostUnionAccessor
 
     if only
       carrying = carrying.select do |_, type|
-        fields[type.sub(/@\w+\z/, '')][field].to_s.sub(/@\w+\z/, '').delete_prefix('?') == only
+        candidate = fields[type.sub(/@\w+\z/, '')][field].to_s.sub(/@\w+\z/, '').delete_prefix('?')
+        candidate == only || candidate == "[]#{only}"
       end
       abort "selfhost_union_accessor: no variant's '#{field}' is #{only}" if carrying.empty?
     end
