@@ -44,9 +44,12 @@ module SelfhostAutofixUnit
       return Fix.new(label: "#{field}() -> #{union_fn}(...)", apply: lambda do |path|
         lines = File.readlines(path)
         i = line_no - 1
-        return false unless lines[i]&.match?(/(\w+)\.#{Regexp.escape(field)}\(\)/)
+        # The call may carry arguments, which move after the receiver.
+        return false unless lines[i]&.match?(/(\w+)\.#{Regexp.escape(field)}\(/)
 
-        lines[i] = lines[i].gsub(/(\w+)\.#{Regexp.escape(field)}\(\)/, "#{union_fn}(\\1)")
+        lines[i] = lines[i].gsub(/(\w+)\.#{Regexp.escape(field)}\((\)|)/) do
+          Regexp.last_match(2).empty? ? "#{union_fn}(#{Regexp.last_match(1)}, " : "#{union_fn}(#{Regexp.last_match(1)})"
+        end
         File.write(path, lines.join)
         true
       end)
@@ -228,7 +231,78 @@ module SelfhostAutofixUnit
     end)
   end
 
-  FIXES = [method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
+  # "Unknown method 'delete' on Set<...>. Available: ... remove ..." -- Ruby's
+  # Set#delete is CLEAR's remove. The diagnostic names the receiver type and
+  # lists the method that means the same thing.
+  RENAMES = { 'delete' => 'remove' }.freeze
+
+  def method_rename_fix(output)
+    return nil unless (m = output.match(/Unknown method '(\w+)' on (\w+)</))
+    return nil unless (target = RENAMES[m[1]])
+    return nil unless output.include?(" #{target},") || output.include?(" #{target}\n")
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    from = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "#{from}() -> #{target}()", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      return false unless lines[i]&.include?(".#{from}(")
+
+      lines[i] = lines[i].sub(".#{from}(", ".#{target}(")
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  # "Cannot unwrap non-optional type T" -- an UNWRAP applied where the value is
+  # already present. The element-unwrap sweeps over-apply on lists whose
+  # indexing the compiler can prove total, and this takes those back out.
+  def redundant_unwrap_fix(output)
+    return nil unless output.include?('Cannot unwrap non-optional type')
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    line_no = loc[1].to_i
+    Fix.new(label: 'drop redundant UNWRAP', apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      line = lines[i].to_s
+      at = line.index('UNWRAP (') or return false
+
+      close = matching_paren(line, at + 7) or return false
+      lines[i] = line[0...at] + line[(at + 8)...close].to_s + line[(close + 1)..].to_s
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  # Balanced close for the paren at `open`, ignoring string contents.
+  def matching_paren(text, open)
+    depth = 0
+    in_string = false
+    i = open
+    while i < text.length
+      char = text[i]
+      if in_string
+        i += 2 and next if char == '\\'
+
+        in_string = false if char == '"'
+        i += 1
+        next
+      end
+      case char
+      when '"' then in_string = true
+      when '(' then depth += 1
+      when ')'
+        depth -= 1
+        return i if depth.zero?
+      end
+      i += 1
+    end
+    nil
+  end
+
+  FIXES = [method(:redundant_unwrap_fix), method(:method_rename_fix), method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
            method(:mutable_arg_fix), method(:list_nil_guard_fix),
            method(:variant_name_literal_fix)].freeze
 
