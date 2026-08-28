@@ -3779,7 +3779,7 @@ FN mIRLowering__lower_program(MUTABLE self: MIRLowering, node: Program, use_c_al
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE needs_safety = COPY needs_safety_input;
-    TRY (mIRPassState__class_require_mut(PassStateProgram{ Program: COPY node }, :mir_pass_complete, {:consumer: "MIRLowering"}));
+    TRY (mIRPassState__class_require_mut(PassStateProgram{ Program: COPY node }, :mir_pass_complete, "MIRLowering"));
     mIRLowering__reset_unit_import_dedup_mut(rtoc_self_view);
     rtoc_self_view.state.program.use_debug_allocator = COPY use_debug_allocator;
     MUTABLE rtoc_writer_receiver_93: MIRLoweringProgramState = mIRLowering__program_state(rtoc_self_view);
@@ -4040,7 +4040,7 @@ FN mIRLowering__lower_module(MUTABLE self: MIRLowering, node: Program) RETURNS !
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (mIRPassState__class_require_mut(PassStateProgram{ Program: COPY node }, :mir_pass_complete, {:consumer: "MIRLowering.lower_module"}));
+    TRY (mIRPassState__class_require_mut(PassStateProgram{ Program: COPY node }, :mir_pass_complete, "MIRLowering.lower_module"));
     mIRLowering__reset_unit_import_dedup_mut(rtoc_self_view);
     MUTABLE type_items: []Emittable = ( { MUTABLE rtoc_empty_list_107: []Emittable = List[]; rtoc_empty_list_107 } );
     MUTABLE fn_items: []Emittable = ( { MUTABLE rtoc_empty_list_108: []Emittable = List[]; rtoc_empty_list_108 } );
