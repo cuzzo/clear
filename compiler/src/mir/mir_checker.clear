@@ -880,7 +880,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF stmt_value_mutable IS_A MIRStructDef AS mir_struct_def THEN
         MUTABLE mir_struct_def_mutable = COPY mir_struct_def;
         IF mir_struct_def_mutable.methods != NIL THEN
-                FOR _ IN mir_struct_def_mutable.methods DO
+                FOR _ IN UNWRAP (mir_struct_def_mutable.methods) DO
                 IF _ IS_A FnDef THEN
                   TRY (mIRChecker__check_linear_stmt_mut(&rtoc_self_view, _, linearOwnershipState__new()));
                 END
