@@ -1517,7 +1517,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN stmts DO
     IF _ IS_A Let AS let THEN
       MUTABLE let_mutable = COPY let;
-      TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY let_mutable.init }, alloc_by_name[castNameToString(let_mutable.name)], alloc_by_name));
+      TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY let_mutable.init }, alloc_by_name[let_mutable.name], alloc_by_name));
     ELSE_IF _ IS_A Set AS set THEN
       MUTABLE set_mutable = COPY set;
       TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY set_mutable.value }, NIL, alloc_by_name));

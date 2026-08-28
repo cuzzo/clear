@@ -403,7 +403,57 @@ module SelfhostAutofixUnit
     end)
   end
 
-  FIXES = [method(:redundant_unwrap_fix), method(:optional_key_fix),
+  # "Function 'castNameToString' argument 1 expects Name, got String" -- the
+  # value is already what the cast would produce, so the cast is redundant.
+  # rtoc inserts these wherever a Ruby String-or-Symbol could appear.
+  def redundant_cast_fix(output)
+    return nil unless (m = output.match(/Function '\w+' argument 1 expects (\w+), got (\w+)/))
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    from, to = m[1], m[2]
+    fn = "cast#{from}To#{to}"
+    return nil unless loc[2].include?("#{fn}(")
+
+    line_no = loc[1].to_i
+    Fix.new(label: "drop #{fn}", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      line = lines[i].to_s
+      at = line.index("#{fn}(") or return false
+
+      open_paren = at + fn.length
+      close = matching_paren(line, open_paren) or return false
+      lines[i] = line[0...at] + line[(open_paren + 1)...close].to_s + line[(close + 1)..].to_s
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  # "Union variant 'X' expects T, got ?T" -- the payload is optional where the
+  # variant carries the value itself. Ruby's reader hands over the value.
+  def union_payload_unwrap_fix(output)
+    return nil unless (m = output.match(/Union variant '(\w+)' expects (\w+), got \?\2/))
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    variant = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "unwrap #{variant} payload", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      line = lines[i].to_s
+      marker = "#{variant}: COPY "
+      at = line.index(marker) or return false
+
+      rest = line[(at + marker.length)..]
+      value = rest[/\A[\w.]+/] or return false
+      lines[i] = line[0...(at + marker.length)] + "UNWRAP (#{value})" + rest[value.length..].to_s
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
+           method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
            method(:mutable_local_fix),
            method(:method_rename_fix), method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
