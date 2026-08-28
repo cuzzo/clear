@@ -14632,7 +14632,7 @@ FN ruby_wrap_optional_String_symbol_StructInitFieldValue(value: ?String@symbol) 
   RETURN NIL;
 END
 
-FN emittable__explicit_ownership_contract(value: Emittable) RETURNS !?OwnershipContract@multiowned EFFECTS REENTRANT ->
+PUB FN emittable__explicit_ownership_contract(value: Emittable) RETURNS !?OwnershipContract@multiowned EFFECTS REENTRANT ->
   PARTIAL MATCH value START
     Emittable.FnDef AS payload -> RETURN fnDef__explicit_ownership_contract(payload);,
     Emittable.ProtocolAdapterDef AS payload -> RETURN protocolAdapterDef__explicit_ownership_contract(payload);,
@@ -14806,7 +14806,7 @@ FN emittable__explicit_ownership_contract(value: Emittable) RETURNS !?OwnershipC
 END
 
 
-FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF value IS_A FnDef AS payload THEN
     MUTABLE receiver = COPY payload;
     RETURN TRY (fnDef__body_slots(&receiver));
@@ -15479,7 +15479,7 @@ FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTR
   RETURN empty_body_slots;
 END
 
-FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+PUB FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   IF value IS_A FnDef AS payload THEN
     RETURN fnDef__ownership_effect(payload);
   END
@@ -15987,7 +15987,7 @@ FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EFFECT
   RETURN ownershipEffect__none();
 END
 
-FN emittable__child_exprs(value: Emittable) RETURNS ![]Emittable EFFECTS REENTRANT ->
+PUB FN emittable__child_exprs(value: Emittable) RETURNS ![]Emittable EFFECTS REENTRANT ->
   IF value IS_A FnDef AS payload THEN
     RETURN TRY (fnDef__child_exprs(payload));
   END
