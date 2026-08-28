@@ -1311,13 +1311,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       callable = emittable__callable_contract(node);
     END
-    FOR _ IN (IF callable != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_26 = callable.ownership_contract();
-    TRY (ownershipContract__owned_operand_names(rtoc_local_receiver_26)) }
-      ELSE
-        NIL
-      END) DO
-    &names.insert(COPY CAST(_ AS String));
+    IF callable EXISTS AS rtoc_callable THEN
+      IF rtoc_callable.ownership_contract EXISTS AS rtoc_contract THEN
+        FOR _ IN (TRY (ownershipContract__owned_operand_names(rtoc_contract))) DO
+          &names.insert(COPY CAST(_ AS String));
+        END
+      END
     END
     rubyToClearVoid()
     });
