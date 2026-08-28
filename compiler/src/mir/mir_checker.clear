@@ -605,7 +605,7 @@ PUB FN mIRChecker__verify_linear_ownership_mut(MUTABLE self: MIRChecker, body: [
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE final_state = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, body, linearOwnershipState__new()));
     FOR _ IN final_state.pending_return_transfers DO
-    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, _, "TransferMark(:return) was emitted but no ReturnStmt consumed that ownership transfer")));
+    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY _ } "TransferMark(:return) was emitted but no ReturnStmt consumed that ownership transfer")));
     END
     NIL;
 }
