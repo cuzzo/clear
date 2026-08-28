@@ -341,7 +341,25 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "Argument 1 ('receiver') is MUTABLE, but you passed immutable variable 'x'"
+  # -- a local the body mutates has to be declared MUTABLE where it is bound.
+  def mutable_local_fix(output)
+    return nil unless (m = output.match(/is MUTABLE, but you passed immutable variable '(\w+)'/))
+
+    name = m[1]
+    Fix.new(label: "MUTABLE #{name}", apply: lambda do |path|
+      lines = File.readlines(path)
+      idx = lines.index { |l| l.match?(/^\s*#{Regexp.escape(name)}(?::[^=]*)? = /) }
+      return false unless idx
+
+      lines[idx] = lines[idx].sub(/^(\s*)#{Regexp.escape(name)}/, "\\1MUTABLE #{name}")
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   FIXES = [method(:redundant_unwrap_fix), method(:set_difference_fix), method(:optional_insert_fix),
+           method(:mutable_local_fix),
            method(:method_rename_fix), method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
            method(:mutable_arg_fix), method(:list_nil_guard_fix),
            method(:variant_name_literal_fix)].freeze

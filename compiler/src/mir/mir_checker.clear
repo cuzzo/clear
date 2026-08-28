@@ -1194,7 +1194,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((((projected.released.contains?(_) OR projected.cleanup_finalizers.contains?(_)) OR projected.err_finalizers.contains?(_)) OR (projected.alloc_kinds[_] == :frame))) THEN
         &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "scope-local owned binding '${_}' exits without cleanup or transfer")));
     END
-    &projected.owned.delete(_);
+    &projected.owned.remove(_);
     &projected.released.delete(_);
     &projected.cleanup_finalizers.delete(_);
     &projected.guarded_finalizers.delete(_);
