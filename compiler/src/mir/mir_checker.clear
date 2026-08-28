@@ -733,7 +733,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF stmt_value_mutable IS_A IfStmt AS if_stmt THEN
         MUTABLE if_stmt_mutable = COPY if_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, if_stmt_mutable.cond, state));
-        TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_stmt_mutable.then_body, (if_stmt_mutable.else_body OR_ELSE List[]), state, "if"));
+        TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_stmt_mutable.then_body, (if_stmt_mutable.else_body OR_ELSE List[]), &state, "if"));
       ELSE_IF stmt_value_mutable IS_A IfBindStmt AS if_bind_stmt THEN
         MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
         IF if_bind_stmt_mutable.bindings != NIL THEN

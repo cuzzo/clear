@@ -168,7 +168,27 @@ module SelfhostAutofixUnit
     end ? name : nil
   end
 
-  FIXES = [method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix)].freeze
+  # "Argument N ('x') is MUTABLE. Pass 'x' as '&x'" -- CLEAR wants mutation
+  # explicit at the call site, and the diagnostic names the argument exactly.
+  def mutable_arg_fix(output)
+    return nil unless (m = output.match(/Pass '(\w+)' as '&\1'/))
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    arg = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "&#{arg}", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      return false unless lines[i]&.match?(/(?<![&\w.])#{Regexp.escape(arg)}(?![\w.])/)
+
+      lines[i] = lines[i].sub(/(?<![&\w.])#{Regexp.escape(arg)}(?![\w.])/, "&#{arg}")
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
+  FIXES = [method(:field_call_fix), method(:boolean_or_fix), method(:name_wrap_fix),
+           method(:mutable_arg_fix)].freeze
 
   def unit_path(relative) = File.join(ROOT, 'compiler', 'src', relative)
 
