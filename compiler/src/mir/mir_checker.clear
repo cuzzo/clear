@@ -540,7 +540,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_12.length() DO
       MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(UNWRAP (rtoc_each_items_12[rtoc_idx]));
-      IF !(fact IS_A OwnershipConsumptionFact) THEN
+      IF !(fact EXISTS) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_FACT_MISSING, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, UNWRAP (rtoc_each_items_12[rtoc_idx])) }, "ownership-consuming MIR node has no MIR::OwnershipConsumptionFact")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -574,7 +574,7 @@ PUB FN mIRChecker__structural_consumed_names(MUTABLE self: MIRChecker, node: Emi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
-    IF fact IS_A OwnershipConsumptionFact THEN
+    IF fact EXISTS THEN
       RETURN TRY (mIRChecker__ownership_consumption_operand_names(rtoc_self_view, fact));
     END
     IF !(mIRChecker__stdlib_takes_ownership?(rtoc_self_view, node)) THEN
@@ -1916,7 +1916,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE node_fact: ?OwnershipConsumptionFact = node.ownership_consumption;
     MUTABLE name = operand.name();
-    IF (node_fact IS_A OwnershipConsumptionFact AND (node_fact.operands |> ANY {
+    IF (node_fact EXISTS AND (node_fact.operands |> ANY {
     name;
     (!((name == NIL)) AND !(name.empty?()))
     })) THEN
@@ -1924,7 +1924,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE init_fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(init);
     name = operand.name();
-    IF (init_fact IS_A OwnershipConsumptionFact AND (init_fact.operands() |> ANY {
+    IF (init_fact EXISTS AND (init_fact.operands() |> ANY {
     name;
     (!((name == NIL)) AND !(name.empty?()))
     })) THEN
@@ -3237,7 +3237,7 @@ PRIVATE FN mIRChecker__ownership_consumption_has_no_owned_operands?(self: MIRChe
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fact = node.ownership_consumption();
-    IF !(fact IS_A OwnershipConsumptionFact) THEN
+    IF !(fact EXISTS) THEN
       RETURN FALSE;
     END
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_54 = fact.operands();

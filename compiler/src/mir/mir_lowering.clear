@@ -3227,7 +3227,7 @@ FN mIRLowering__ownership_consumption_for_node(self: MIRLowering, node: Emittabl
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
-    IF fact IS_A OwnershipConsumptionFact THEN
+    IF fact EXISTS THEN
       RETURN fact;
     END
     IF (IF node IS_A Let AS let THEN respondsTo?(let.init, "ownership_consumption") ELSE FALSE END) THEN
@@ -3372,7 +3372,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       fact_holder = fact_holder.expr();
     END
     MUTABLE explicit_fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(fact_holder);
-    IF explicit_fact IS_A OwnershipConsumptionFact THEN
+    IF explicit_fact EXISTS THEN
       RETURN TRY (mIRLowering__retarget_ownership_operands(rtoc_self_view, explicit_fact.operands, target_alloc));
     END
     IF (IF value_mir IS_A Ident AS ident THEN mIRLowering__materialized_owned_binding_visible?(rtoc_self_view, CAST(ident.name AS String)) ELSE FALSE END) THEN
@@ -7921,7 +7921,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (visible_names.length() == 0) THEN
       RETURN;
     END
-    IF !(fact IS_A OwnershipConsumptionFact) THEN
+    IF !(fact EXISTS) THEN
       IF !(((parent IS_A StructInit OR parent IS_A ArrayInit) OR parent IS_A TupleLiteral)) THEN
         RETURN;
       END
@@ -18417,7 +18417,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE metadata = emittable__allocs(init);
-    IF metadata IS_A InlineAllocMetadata THEN
+    IF metadata EXISTS THEN
       RETURN (metadata.any_heap?() == TRUE);
     END
     RETURN FALSE;
@@ -20541,7 +20541,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY value;
     END
     MUTABLE fact = value.ownership_consumption();
-    IF !((fact IS_A OwnershipConsumptionFact AND !((TRY (callOwnershipFacts__operands(fact))).empty?()))) THEN
+    IF !((fact EXISTS AND !((TRY (callOwnershipFacts__operands(fact))).empty?()))) THEN
       RETURN COPY value;
     END
     MUTABLE name = "__ret_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_767 = mIRLowering__lowering_counters(rtoc_self_view);
