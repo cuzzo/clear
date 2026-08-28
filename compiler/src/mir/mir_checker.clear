@@ -644,20 +644,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF stmt_value_mutable IS_A AllocMark AS alloc_mark THEN
         MUTABLE alloc_mark_mutable = COPY alloc_mark;
-        TRY (mIRChecker__linear_alloc_mut(&rtoc_self_view, alloc_mark_mutable, state));
+        TRY (mIRChecker__linear_alloc_mut(&rtoc_self_view, alloc_mark_mutable, &state));
       ELSE_IF stmt_value_mutable IS_A Cleanup AS cleanup THEN
         MUTABLE cleanup_mutable = COPY cleanup;
         TRY (mIRChecker__linear_register_cleanup_mut(&rtoc_self_view, CAST(cleanup_mutable.name AS String), { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_17 = CAST(cleanup_mutable.cleanup_entry AS CleanupEntry);
-        cleanupEntry__has_moved_guard?(rtoc_local_receiver_17) }, state));
+        cleanupEntry__has_moved_guard?(rtoc_local_receiver_17) }, &state));
       ELSE_IF stmt_value_mutable IS_A ErrCleanup AS err_cleanup THEN
         MUTABLE err_cleanup_mutable = COPY err_cleanup;
         TRY (mIRChecker__linear_register_err_cleanup_mut(&rtoc_self_view, CAST(err_cleanup_mutable.name AS String), state));
       ELSE_IF stmt_value_mutable IS_A TransferMark AS transfer_mark THEN
         MUTABLE transfer_mark_mutable = COPY transfer_mark;
-        TRY (mIRChecker__linear_transfer_mut(&rtoc_self_view, transfer_mark_mutable.name, transfer_mark_mutable.target, transfer_mark_mutable.target_alloc, state));
+        TRY (mIRChecker__linear_transfer_mut(&rtoc_self_view, transfer_mark_mutable.name, transfer_mark_mutable.target, transfer_mark_mutable.target_alloc, &state));
       ELSE_IF stmt_value_mutable IS_A MoveMark AS move_mark THEN
         MUTABLE move_mark_mutable = COPY move_mark;
-        TRY (mIRChecker__linear_move_mark_mut(&rtoc_self_view, CAST(move_mark_mutable.name AS String), state));
+        TRY (mIRChecker__linear_move_mark_mut(&rtoc_self_view, CAST(move_mark_mutable.name AS String), &state));
       ELSE_IF stmt_value_mutable IS_A OwnedCreate AS owned_create THEN
         NIL;
       ELSE_IF stmt_value_mutable IS_A OwnedBorrow AS owned_borrow THEN
@@ -688,7 +688,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE returned_names = TRY (mIRChecker__linear_expr_ident_names(rtoc_self_view, return_stmt_mutable.value));
         TRY (mIRChecker__verify_guarded_transfers_moved_mut(&rtoc_self_view, state.pending_return_transfers, state, :return));
         FOR _ IN state.pending_return_transfers DO
-        TRY (mIRChecker__linear_release_mut(&rtoc_self_view, _, :return, NIL, state));
+        TRY (mIRChecker__linear_release_mut(&rtoc_self_view, _, :return, NIL, &state));
         END
         MUTABLE rtoc_idx = 0;
         WHILE rtoc_idx < state.pending_return_transfers.length() DO
@@ -711,7 +711,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE break_names = TRY (mIRChecker__linear_expr_ident_names(rtoc_self_view, break_stmt_mutable.value));
         TRY (mIRChecker__verify_guarded_transfers_moved_mut(&rtoc_self_view, state.pending_block_transfers, state, :block_result));
         FOR _ IN state.pending_block_transfers DO
-        TRY (mIRChecker__linear_release_mut(&rtoc_self_view, _, :block_result, NIL, state));
+        TRY (mIRChecker__linear_release_mut(&rtoc_self_view, _, :block_result, NIL, &state));
         END
         MUTABLE rtoc_idx = 0;
         WHILE rtoc_idx < state.pending_block_transfers.length() DO
