@@ -525,7 +525,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY consumed[rtoc_idx_2]? }, "structural ownership sink consumes :${(UNWRAP (mark)).alloc} binding '${consumed[rtoc_idx_2]?}' into :${sink_alloc} sink; owned transfer allocator is incoherent")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY consumed[rtoc_idx_2]? }, "structural ownership sink consumes :${(UNWRAP (mark)).alloc} binding '${consumed[rtoc_idx_2]?}' into :${sink_alloc OR_ELSE ""} sink; owned transfer allocator is incoherent")));
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
