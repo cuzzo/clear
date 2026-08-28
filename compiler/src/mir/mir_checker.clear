@@ -189,7 +189,7 @@ PUB FN linearOwnershipState__snapshot(self: LinearOwnershipState) RETURNS !Linea
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (linearOwnershipSnapshot__from_state(rtoc_self_view));
+    RETURN TRY (linearOwnershipSnapshot__from_state(&rtoc_self_view));
 }
 END
 PUB FN linearOwnershipState__new() RETURNS LinearOwnershipState@multiowned ->
@@ -224,7 +224,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.alloc_kinds = alloc_kinds;
 }
 END
-PUB FN linearOwnershipSnapshot__from_state(state: LinearOwnershipState) RETURNS !LinearOwnershipSnapshot@multiowned ->
+PUB FN linearOwnershipSnapshot__from_state(MUTABLE state: LinearOwnershipState) RETURNS !LinearOwnershipSnapshot@multiowned ->
   RETURN linearOwnershipSnapshot__new(TRY (linearOwnershipSnapshot__place_set(state.owned)), TRY (linearOwnershipSnapshot__place_set(state.released)), TRY (linearOwnershipSnapshot__place_set(state.maybe_released)), TRY (linearOwnershipSnapshot__place_set(state.cleanup_finalizers)), TRY (linearOwnershipSnapshot__place_set(state.guarded_finalizers)), TRY (linearOwnershipSnapshot__place_set(state.err_finalizers)), TRY (linearOwnershipSnapshot__place_set(state.pending_return_transfers)), TRY (linearOwnershipSnapshot__place_set(state.pending_block_transfers)), TRY (linearOwnershipSnapshot__place_hash(state.alloc_kinds)));
 END
 PUB FN linearOwnershipSnapshot__owned(self: LinearOwnershipSnapshot) RETURNS ![Set]PlaceId
@@ -1229,9 +1229,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     &target.pending_block_transfers.clear();
     &target.pending_block_transfers.merge(source.pending_block_transfers);
     &target.alloc_kinds.clear();
-    &target.alloc_kinds.merge(source.alloc_kinds);
+    &target.alloc_kinds.merge_mut(source.alloc_kinds);
     &target.alloc_scopes.clear();
-    &target.alloc_scopes.merge(source.alloc_scopes);
+    &target.alloc_scopes.merge_mut(source.alloc_scopes);
     target.terminated = source.terminated;
     NIL;
 }
@@ -1253,7 +1253,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr? IS_A MIRBlockExpr AS mir_block_expr THEN
       MUTABLE mir_block_expr_mutable = COPY mir_block_expr;
       MUTABLE inner = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (blockExpr__body(mir_block_expr_mutable)), linearOwnershipState__copy(state)));
-      TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, state, inner, "block-expr"));
+      TRY (mIRChecker__linear_exit_scope_mut(&rtoc_self_view, &state, inner, "block-expr"));
       RETURN;
     END
     MUTABLE rtoc_each_items_25 = (TRY (mIRChecker__linear_expr_ident_names(rtoc_self_view, expr)));

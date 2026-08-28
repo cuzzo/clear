@@ -234,11 +234,16 @@ module SelfhostAutofixUnit
   # "Unknown method 'delete' on Set<...>. Available: ... remove ..." -- Ruby's
   # Set#delete is CLEAR's remove. The diagnostic names the receiver type and
   # lists the method that means the same thing.
-  RENAMES = { 'delete' => 'remove' }.freeze
+  # Keyed by receiver type where the same Ruby name means different things:
+  # Set#delete is CLEAR's remove, and a map's in-place merge is merge_mut.
+  RENAMES = {
+    ['Set', 'delete'] => 'remove',
+    ['HashMap', 'merge'] => 'merge_mut',
+  }.freeze
 
   def method_rename_fix(output)
     return nil unless (m = output.match(/Unknown method '(\w+)' on (\w+)</))
-    return nil unless (target = RENAMES[m[1]])
+    return nil unless (target = RENAMES[[m[2], m[1]]])
     return nil unless output.include?(" #{target},") || output.include?(" #{target}\n")
     return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
 
