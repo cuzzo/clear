@@ -736,7 +736,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (mIRChecker__check_linear_branch_join_mut(&rtoc_self_view, if_stmt_mutable.then_body, (if_stmt_mutable.else_body OR_ELSE List[]), &state, "if"));
       ELSE_IF stmt_value_mutable IS_A IfBindStmt AS if_bind_stmt THEN
         MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
-        IF if_bind_stmt_mutable.bindings != NIL THEN
+        IF !((if_bind_stmt_mutable.bindings).empty?()) THEN
                 FOR _ IN if_bind_stmt_mutable.bindings DO
             MUTABLE expr = IF _ IS_A {}Any THEN
                     _[:expr]
@@ -3554,7 +3554,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, discardOwned__expr(discard_owned_mutable), "DiscardOwned expression"));
     ELSE_IF node IS_A IfBindStmt AS if_bind_stmt THEN
       MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
-      IF if_bind_stmt_mutable.bindings != NIL THEN
+      IF !((if_bind_stmt_mutable.bindings).empty?()) THEN
             MUTABLE rtoc_idx = 0;
             WHILE rtoc_idx < if_bind_stmt_mutable.bindings.length() DO
             IF !(if_bind_stmt_mutable.bindings[rtoc_idx] IS_A {}Any) THEN
