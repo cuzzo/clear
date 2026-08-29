@@ -3375,7 +3375,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A StreamSpawn AS stream_spawn THEN
       RETURN "MIR::StreamSpawn";
     END
-    MUTABLE reason = PARTIAL MATCH node START
+    MUTABLE reason: ?String = PARTIAL MATCH node START
       Emittable.RegistryCall AS registry_call -> registry_call.reason,
       Emittable.Noop AS noop -> noop.reason,
       DEFAULT -> NIL
@@ -3395,7 +3395,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((stmt IS_A WhileStmt OR stmt IS_A ForStmt)) THEN
         RETURN;
     END
-    MUTABLE has_restore = TRY (mIRChecker__body_has_loop_restore?(rtoc_self_view, stmt.body()));
+    MUTABLE has_restore = TRY (mIRChecker__body_has_loop_restore?(rtoc_self_view, emittable__body(stmt)));
     IF (!(stmt.tight()) AND !(has_restore)) THEN
         IF TRY (mIRChecker__body_has_iteration_frame_alloc?(rtoc_self_view, stmt.body())) THEN
           MUTABLE allocations = TRY (mIRChecker__iteration_frame_alloc_summary(rtoc_self_view, stmt.body()));
