@@ -2676,7 +2676,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${emittable__variant_name(UNWRAP (metadata_nodes[rtoc_idx]))} has allocator metadata ${inlineAllocMetadata__inspect(alloc_metadata)} for '${target}' but no MIR::AllocMark")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${emittable__variant_name(UNWRAP (metadata_nodes[rtoc_idx]))} has allocator metadata ${inlineAllocMetadata__inspect(UNWRAP (alloc_metadata))} for '${UNWRAP (target)}' but no MIR::AllocMark")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
