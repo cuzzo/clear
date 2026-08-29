@@ -2684,19 +2684,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF inlineAllocMetadata__primary(UNWRAP (alloc_metadata)) THEN
           MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(UNWRAP (alloc_metadata));
           IF (op_alloc != container_alloc) THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${target}' is :${container_alloc}")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${UNWRAP (target)}' is :${container_alloc}")));
           END
       END
-      MUTABLE rtoc_each_items_52 = ([InlineStoredAllocCheck{ label: :key_alloc, alloc: COPY inlineAllocMetadata__key_alloc(alloc_metadata) }, InlineStoredAllocCheck{ label: :val_alloc, alloc: COPY inlineAllocMetadata__value_alloc(alloc_metadata) }]);
+      MUTABLE rtoc_each_items_52 = ([InlineStoredAllocCheck{ label: :key_alloc, alloc: COPY inlineAllocMetadata__key_alloc(UNWRAP (alloc_metadata)) }, InlineStoredAllocCheck{ label: :val_alloc, alloc: COPY inlineAllocMetadata__value_alloc(UNWRAP (alloc_metadata)) }]);
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < rtoc_each_items_52.length() DO
-          MUTABLE stored_alloc = COPY UNWRAP (rtoc_each_items_52[rtoc_idx_2]).alloc;
+          MUTABLE stored_alloc = COPY rtoc_each_items_52[rtoc_idx_2].alloc;
           IF !(stored_alloc) THEN
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
           IF (placement__explicit_frame?(stored_alloc) AND placement__explicit_heap?(container_alloc)) THEN
-              &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "${UNWRAP (rtoc_each_items_52[rtoc_idx_2]).label} is :frame but container '${target}' is :heap (stored data will dangle after frame rewind)")));
+              &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "${rtoc_each_items_52[rtoc_idx_2].label} is :frame but container '${UNWRAP (target)}' is :heap (stored data will dangle after frame rewind)")));
           END
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
@@ -2732,13 +2732,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      inlineAllocMetadata__each(metadata, %(alloc_key: String@symbol, alloc_sym: String@symbol) USE(target, rtoc_self_view) -> {
+      FOR rtoc_alloc_key IN (UNWRAP (metadata)).slots.keys() DO
+        MUTABLE alloc_sym: String@symbol = COPY UNWRAP ((UNWRAP (metadata)).slots[rtoc_alloc_key]);
+        MUTABLE alloc_key = symbol(rtoc_alloc_key);
         IF !((alloc_sym == :frame)) THEN
-            RETURN;
+        CONTINUE;
         END
         &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :CROSS_FRAME_PARAM_ALLOC, Name{ StringValue: COPY target }, "operation ${alloc_key} is :frame but '${target}' is a pointer-passed parameter (lifetime extends past this function's frame mark; buffer would dangle on return). Use :heap.")));
-        rubyToClearVoid()
-      });
+      END
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -2753,7 +2754,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       CONTINUE;
     END
     MUTABLE alloc_sym = COPY (UNWRAP (alloc_marks.first())).alloc;
-    MUTABLE cleanup_sym = (UNWRAP (cleanups[rtoc_key])).first().cleanup_entry().alloc();
+    MUTABLE cleanup_sym = (UNWRAP (cleanups[rtoc_key])).first().cleanup_entry.alloc();
     IF (alloc_sym != cleanup_sym) THEN
         &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ALLOC_CLEANUP_MISMATCH, Name{ StringValue: COPY rtoc_key }, "allocated with :${alloc_sym} but cleanup uses :${cleanup_sym}")));
     END
