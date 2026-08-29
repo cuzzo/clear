@@ -3173,27 +3173,30 @@ PRIVATE FN mIRChecker__registry_ownership_side_channel?(self: MIRChecker, node: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.stdlib_def);
+    MUTABLE sig: ?FunctionSignature@multiowned = mIRCheckerRegistryOwnershipNode__stdlib_def(node);
     IF mIRChecker__stdlib_takes_ownership?(rtoc_self_view, castMIRCheckerRegistryOwnershipNodeToEmittable(node)) THEN
       IF mIRChecker__ownership_surface_has_no_owned_operands?(rtoc_self_view, castMIRCheckerRegistryOwnershipNodeToMIRCheckerOwnershipSurfaceNode(node)) THEN
         RETURN FALSE;
       END
       RETURN TRUE;
     END
-    MUTABLE contract: OwnershipContract@multiowned = NIL;
+    MUTABLE contract: ?OwnershipContract@multiowned = NIL;
     MATCH node START
       MIRCheckerRegistryOwnershipNode.RegistryCall AS item ->
         contract = COPY item.ownership_contract;,
       MIRCheckerRegistryOwnershipNode.IndexedStore AS item ->
         contract = COPY item.ownership_contract;,
     END
-    IF (TRUE AND !(ownershipContract__empty?(&contract))) THEN
-      RETURN TRUE;
+    IF contract EXISTS AS rtoc_contract THEN
+      MUTABLE rtoc_contract_mutable = COPY rtoc_contract;
+      IF !(ownershipContract__empty?(&rtoc_contract_mutable)) THEN
+        RETURN TRUE;
+      END
     END
     IF (IF node IS_A RegistryCall AS registry_call THEN (registry_call.owned_result_alloc != NIL) ELSE FALSE END) THEN
       RETURN TRUE;
     END
-    IF node.mutating_receiver_allocator_op?() THEN
+    IF node.mutating_receiver_allocator_op? THEN
       RETURN FALSE;
     END
     IF sig EXISTS AS sig_value THEN
@@ -3865,6 +3868,17 @@ PUB FN mIRCheckerCleanupMarksByNameValueItem__cleanup_entry(value: MIRCheckerCle
   PARTIAL MATCH value START
     MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> RETURN COPY item.cleanup_entry;,
     MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> RETURN COPY item.cleanup_entry;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:stdlib_def)` and then reads it. Both variants
+# compute one, so the question is answered here.
+PUB FN mIRCheckerRegistryOwnershipNode__stdlib_def(value: MIRCheckerRegistryOwnershipNode) RETURNS ?FunctionSignature@multiowned ->
+  PARTIAL MATCH value START
+    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN registryCall__stdlib_def(item);,
+    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN indexedStore__stdlib_def(item);,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
