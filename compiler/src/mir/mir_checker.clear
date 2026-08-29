@@ -2459,16 +2459,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF target EXISTS AS target_value THEN
       RETURN COPY target_value;
     END
-    MUTABLE reason = IF node IS_A RegistryCall THEN
-      node.reason()
-    ELSE
-      NIL
-    END;
-    IF reason THEN
-      RETURN COPY CAST(reason AS String);
-    ELSE
-      RETURN COPY emittable__variant_name(node);
+    MUTABLE reason: ?String = NIL;
+    IF node IS_A Emittable AS rtoc_emittable THEN
+      IF rtoc_emittable IS_A RegistryCall AS rtoc_registry_call THEN
+        reason = COPY rtoc_registry_call.reason;
+      END
     END
+    IF reason EXISTS AS rtoc_reason THEN
+      RETURN COPY rtoc_reason;
+    END
+    IF node IS_A Emittable AS rtoc_emittable THEN
+      RETURN COPY emittable__variant_name(rtoc_emittable);
+    END
+    RETURN COPY "CallableContract";
 }
 END
 PRIVATE FN mIRChecker__verify_allocator_closed_set_mut(MUTABLE self: MIRChecker, allocs: {String}[]AllocMark, cleanups: {String}[]MIRCheckerCleanupMarksByNameValueItem, metadata_nodes: []Emittable) RETURNS !Void
