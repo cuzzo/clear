@@ -19,7 +19,7 @@ EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replace
 FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END
-UNION Plan { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
+UNION MIREmitterPlan { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
 STRUCT MIREmitter {
   deep_copy_counter: Int64,
   discard_counter: Int64,
@@ -554,7 +554,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((T IS_A FsmIoBody OR T IS_A FsmB1Body) OR T IS_A FsmGenericBody);
 }
 END
-FN mIREmitter__emit_fsm_bg_body(self: MIREmitter, plan: Plan) RETURNS !String
+FN mIREmitter__emit_fsm_bg_body(self: MIREmitter, plan: MIREmitterPlan) RETURNS !String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -4604,14 +4604,14 @@ PUB FN mIREmitter__new(state: ?EmissionState = NIL) RETURNS MIREmitter@multiowne
   mIREmitter__initialize(&self, state);
   RETURN self @multiowned;
 END
-FN castBgBlockPlanToPlan(value: BgBlockPlan) RETURNS Plan ->
+FN castBgBlockPlanToPlan(value: BgBlockPlan) RETURNS MIREmitterPlan ->
   PARTIAL MATCH value START
-    BgBlockPlan.FsmIoBody AS cast_payload -> RETURN Plan{ FsmIoBody: COPY cast_payload };,
-    BgBlockPlan.FsmB1Body AS cast_payload -> RETURN Plan{ FsmB1Body: COPY cast_payload };,
-    BgBlockPlan.FsmGenericBody AS cast_payload -> RETURN Plan{ FsmGenericBody: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to Plan");
+    BgBlockPlan.FsmIoBody AS cast_payload -> RETURN MIREmitterPlan{ FsmIoBody: COPY cast_payload };,
+    BgBlockPlan.FsmB1Body AS cast_payload -> RETURN MIREmitterPlan{ FsmB1Body: COPY cast_payload };,
+    BgBlockPlan.FsmGenericBody AS cast_payload -> RETURN MIREmitterPlan{ FsmGenericBody: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to MIREmitterPlan");
   END
-  panic("Invalid cast to Plan");
+  panic("Invalid cast to MIREmitterPlan");
 END
 FN castEmittableToFailureAction(value: Emittable) RETURNS FailureAction ->
   IF value IS_A FailureAction AS cast_payload THEN
@@ -4648,11 +4648,11 @@ FN castOptionalMIRReturnValueToName(value: ?MIRReturnValue) RETURNS Name ->
   END
   panic("Invalid cast to Name");
 END
-FN castPlanToFsmBody(value: Plan) RETURNS FsmBody ->
+FN castPlanToFsmBody(value: MIREmitterPlan) RETURNS FsmBody ->
   PARTIAL MATCH value START
-    Plan.FsmIoBody AS cast_payload -> RETURN FsmBody{ FsmIoBody: COPY cast_payload };,
-    Plan.FsmB1Body AS cast_payload -> RETURN FsmBody{ FsmB1Body: COPY cast_payload };,
-    Plan.FsmGenericBody AS cast_payload -> RETURN FsmBody{ FsmGenericBody: COPY cast_payload };,
+    MIREmitterPlan.FsmIoBody AS cast_payload -> RETURN FsmBody{ FsmIoBody: COPY cast_payload };,
+    MIREmitterPlan.FsmB1Body AS cast_payload -> RETURN FsmBody{ FsmB1Body: COPY cast_payload };,
+    MIREmitterPlan.FsmGenericBody AS cast_payload -> RETURN FsmBody{ FsmGenericBody: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to FsmBody");
   END
   panic("Invalid cast to FsmBody");

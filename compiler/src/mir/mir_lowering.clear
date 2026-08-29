@@ -50,21 +50,21 @@ REQUIRE "../semantic/escape_analysis.clear"
 REQUIRE "mir_checker.clear"
 REQUIRE "../ast/type_capabilities.clear"
 REQUIRE "../annotator/helpers/intrinsic_emit.clear"
-UNION Dispatch { SymbolValue: String@symbol, BoolValue: Bool }
-UNION Field { SymbolValue: String@symbol, StringValue: String }
+UNION MIRLoweringDispatch { SymbolValue: String@symbol, BoolValue: Bool }
+UNION MIRLoweringField { SymbolValue: String@symbol, StringValue: String }
 UNION K { StringValue: String, SymbolValue: String@symbol }
 UNION MIRLoweringFallback { ASTProgram: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Emittable: Emittable }
 UNION MIRLoweringReturnValue { Cleanup: Cleanup, ErrCleanup: ErrCleanup, InlineBc: InlineBc, RegistryCall: RegistryCall, Emittable: Emittable, ArrayValue: []Emittable, FnDef: FnDef, ArrayValue2: []FnDef, MIRBlockExpr: MIRBlockExpr, ScopeBlock: ScopeBlock, SnapshotTransaction: SnapshotTransaction, SnapshotMultiTxn: SnapshotMultiTxn, MIRBgBlock: MIRBgBlock, StreamSpawn: StreamSpawn, StringValue: String, SymbolValue: String@symbol, AssertStmt: AssertStmt, Call: Call }
 UNION MIRLoweringType { StringValue: String, SymbolValue: String@symbol, Type: Type }
 UNION Mir { Emittable: Emittable, ArrayValue: []Emittable }
-UNION Name { StringValue: String, SymbolValue: String@symbol, OwnershipIdentityPlaceId: OwnershipIdentityPlaceId, ASTProgram: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup }
+UNION MIRLoweringName { StringValue: String, SymbolValue: String@symbol, OwnershipIdentityPlaceId: OwnershipIdentityPlaceId, ASTProgram: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup }
 UNION PinMode { SymbolValue: String@symbol, BoolValue: Bool }
 UNION Pinned { BoolValue: Bool, SymbolValue: String@symbol }
 UNION ReturnTypeNode { Type: Type, SymbolValue: String@symbol, StringValue: String }
 UNION Root { Emittable: Emittable, ArrayValue: []Emittable }
 UNION RtName { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
-UNION Schema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, InlineStructVariantMultiowned: InlineStructVariant@multiowned, StructSchema: StructSchema, InlineStructVariant: InlineStructVariant }
-UNION Value { StringValue: String, SymbolValue: String@symbol, Type: Type, Float64Value: Float64, Int64Value: Int64 }
+UNION MIRLoweringSchema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, InlineStructVariantMultiowned: InlineStructVariant@multiowned, StructSchema: StructSchema, InlineStructVariant: InlineStructVariant }
+UNION MIRLoweringValue { StringValue: String, SymbolValue: String@symbol, Type: Type, Float64Value: Float64, Int64Value: Int64 }
 STRUCT MIRLowering {
   active_lifecycle_registry: ?LifecycleRegistry@multiowned,
   state: MIRLoweringState
@@ -438,7 +438,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-FN mIRLowering__fn_sig_for(self: MIRLowering, name: Name) RETURNS !?FunctionSignature@multiowned
+FN mIRLowering__fn_sig_for(self: MIRLowering, name: MIRLoweringName) RETURNS !?FunctionSignature@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5272,7 +5272,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (name.length() == 0) THEN
       RETURN TRUE;
     END
-    MUTABLE sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(rtoc_self_view, Name{ StringValue: COPY name }));
+    MUTABLE sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(rtoc_self_view, MIRLoweringName{ StringValue: COPY name }));
     IF sig EXISTS AS sig_value THEN
       RETURN (functionSignature__can_fail(sig_value) != FALSE);
     ELSE
@@ -6775,7 +6775,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE rtoc_index_receiver_237 = COPY mIRLowering__test_state(rtoc_self_view).active_stubs;
       rtoc_index_receiver_237[fn_name] = {:kind: :sequence, :var: stub_var};
-      RETURN NodeRoot{ ArrayValue: [Let{ name: Name{ StringValue: COPY "${stub_var}_seq" }, init: Emittable{ ArrayInit: COPY ArrayInit{ elem_type: "[]const u8", count: "_", items: COPY items_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: Name{ StringValue: COPY "${stub_var}_idx" }, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: "_ = &${stub_var}_idx;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] |> SELECT Emittable{ Let: COPY _ } };
+      RETURN NodeRoot{ ArrayValue: [Let{ name: MIRLoweringName{ StringValue: COPY "${stub_var}_seq" }, init: Emittable{ ArrayInit: COPY ArrayInit{ elem_type: "[]const u8", count: "_", items: COPY items_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: MIRLoweringName{ StringValue: COPY "${stub_var}_idx" }, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: "_ = &${stub_var}_idx;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] |> SELECT Emittable{ Let: COPY _ } };
     ELSE_IF (node.kind == :with) THEN
       MUTABLE val = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
       MUTABLE rtoc_index_receiver_238 = COPY mIRLowering__test_state(rtoc_self_view).active_stubs;
@@ -10081,7 +10081,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.extern_call THEN
       RETURN TRY (mIRLowering__lower_extern_method(&rtoc_self_view, node));
     END
-    MUTABLE callee_sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(rtoc_self_view, Name{ StringValue: COPY node.name }));
+    MUTABLE callee_sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(rtoc_self_view, MIRLoweringName{ StringValue: COPY node.name }));
     callee_sig = (callee_sig OR_ELSE TRY (mIRLowering__matched_call_signature(rtoc_self_view, CallNode{ MethodCall: COPY node })));
     MUTABLE lowered_recv_and_args = mIRLowering__with_kept_edge_call_frame(&rtoc_self_view, %() USE(callee_sig, node, MUTABLE rtoc_self_view) -> {
     MUTABLE recv = TRY (mIRLowering__lower_call_arg_from_facts(&rtoc_self_view, TRY (mIRLowering__call_arg_facts(rtoc_self_view, node.object, callee_sig, 0))));
@@ -10259,7 +10259,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       receiver = Emittable{ AddressOf: COPY AddressOf{ expr: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     MUTABLE sink_alloc = TRY (mIRLowering__placement_for_node(rtoc_self_view, receiver_node));
-    MUTABLE sink_type = typeExpression__of(TypeProjectionExpression{ owner: COPY (TRY (aST__full_type_mut(receiver_node))).resolved(), member: :Value, protocol: NIL });
+    MUTABLE sink_type = typeExpression__of(TypeProjectionExpression{ owner: COPY (TRY (aST__full_type_mut(receiver_node))).resolved(), member: :MIRLoweringValue, protocol: NIL });
     MUTABLE value = mIRLowering__with_sink_type(rtoc_self_view, TRY (type__new(TypeConstructionInput{ TypeExpression: COPY sink_type })), %() USE(sink_alloc, value_node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_380 = mIRLowering__with_decl_alloc(rtoc_self_view, sink_alloc, %() USE(value_node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_379 = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(value_node))) AS Emittable);
@@ -12569,7 +12569,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ContextFieldDecl{ name: COPY name, type_zig: COPY type_zig, default_value: NIL };
 }
 END
-PRIVATE FN mIRLowering__context_init_field(self: MIRLowering, name: Name, value: Emittable) RETURNS StructInitField
+PRIVATE FN mIRLowering__context_init_field(self: MIRLowering, name: MIRLoweringName, value: Emittable) RETURNS StructInitField
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12883,11 +12883,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       capture_fields = (capture_fields + TRY (mIRLowering__capture_moved_guard_fields(rtoc_self_view, caps.specs)));
       MUTABLE capture_inits: []StructInitField = [
-        mIRLowering__context_init_field(rtoc_self_view, Name{ SymbolValue: :wg }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY wg_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }),
-        mIRLowering__context_init_field(rtoc_self_view, Name{ SymbolValue: :alloc }, Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }, method: "heapAlloc", args: ( { MUTABLE rtoc_empty_args_do: []Emittable = List[]; rtoc_empty_args_do } ), fallible: FALSE, contract: COPY TRY (callableContract__no_ownership(0)), lowered_node_id: NIL, ownership_consumption: NIL } })
+        mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ SymbolValue: :wg }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY wg_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }),
+        mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ SymbolValue: :alloc }, Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }, method: "heapAlloc", args: ( { MUTABLE rtoc_empty_args_do: []Emittable = List[]; rtoc_empty_args_do } ), fallible: FALSE, contract: COPY TRY (callableContract__no_ownership(0)), lowered_node_id: NIL, ownership_consumption: NIL } })
       ];
       FOR spec IN caps.specs DO
-        &capture_inits.append(mIRLowering__context_init_field(rtoc_self_view, Name{ StringValue: COPY spec.name }, COPY spec.init_value_mir));
+        &capture_inits.append(mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ StringValue: COPY spec.name }, COPY spec.init_value_mir));
       END
       MUTABLE capture_pre_decls = TRY (mIRLowering__capture_setup_stmts(rtoc_self_view, caps.specs));
       MUTABLE branch_mir: []Emittable = TRY (mIRLowering__lower_do_branch_body(&rtoc_self_view, branch, caps));
@@ -13028,7 +13028,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     mIRLowering__context_field_decl(rtoc_self_view, _.name, ftype)
     };
     capture_fields = (capture_fields + TRY (mIRLowering__capture_moved_guard_fields(rtoc_self_view, caps.specs)));
-    MUTABLE capture_inits = ([mIRLowering__context_init_field(rtoc_self_view, Name{ SymbolValue: :inner }, Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY names.promise_var, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }), mIRLowering__context_init_field(rtoc_self_view, Name{ SymbolValue: :alloc }, Emittable{ Ident: COPY Ident{ name: COPY names.alloc_var, lowered_node_id: NIL, ownership_consumption: NIL } })] + (caps.specs |> SELECT {
+    MUTABLE capture_inits = ([mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ SymbolValue: :inner }, Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY names.promise_var, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }), mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ SymbolValue: :alloc }, Emittable{ Ident: COPY Ident{ name: COPY names.alloc_var, lowered_node_id: NIL, ownership_consumption: NIL } })] + (caps.specs |> SELECT {
     MUTABLE outer_ref: ?String = COPY outer_capture_map[_.name];
     MUTABLE init_val_branch_value: ?Ident = NIL;
       IF (((captureSpec__requires_setup?(_) OR promoted_names[_.name]) OR (outer_ref == NIL)) OR pointer_captures.contains?(_.name)) THEN
@@ -13037,7 +13037,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         init_val_branch_value = Ident{ name: COPY outer_ref, lowered_node_id: NIL, ownership_consumption: NIL };
       END
     MUTABLE init_val: Ident = init_val_branch_value?;
-    mIRLowering__context_init_field(rtoc_self_view, Name{ StringValue: COPY _.name }, Emittable{ Ident: COPY init_val })
+    mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ StringValue: COPY _.name }, Emittable{ Ident: COPY init_val })
     }));
     MUTABLE setup_stmts = TRY (mIRLowering__capture_setup_stmts(rtoc_self_view, caps.specs));
     MUTABLE fresh_heap_cleanup_names = caps.specs |> SELECT:? (IF capture_close_plans.contains?(_.name) THEN NIL ELSE IF captureSpec__needs_moved_guard?(_) THEN
@@ -13065,14 +13065,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TaskConfigPlan{ stack_variant: COPY mIRLowering__task_config_variant(lowerer, stack_size, computed_tier), profile_site_id: NIL, profile_dispatch_id: NIL };
 }
 END
-PRIVATE FN mIRLowering__profiled_task_config_plan(self: MIRLowering, base: TaskConfigPlan, site_id: Int64, dispatch: Dispatch) RETURNS TaskConfigPlan
+PRIVATE FN mIRLowering__profiled_task_config_plan(self: MIRLowering, base: TaskConfigPlan, site_id: Int64, dispatch: MIRLoweringDispatch) RETURNS TaskConfigPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TaskConfigPlan{ stack_variant: COPY base.stack_variant, profile_site_id: COPY site_id, profile_dispatch_id: mIRLowering__profile_dispatch_numeric_id(rtoc_self_view, dispatch) };
 }
 END
-PRIVATE FN mIRLowering__profile_dispatch_numeric_id(self: MIRLowering, dispatch: Dispatch) RETURNS Int64
+PRIVATE FN mIRLowering__profile_dispatch_numeric_id(self: MIRLowering, dispatch: MIRLoweringDispatch) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13111,7 +13111,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END, ctx_type: COPY ctx_type, ctx_var: COPY ctx_var, task_config: COPY task_config, pass_ctx_by_address: TRUE, runtime_name: NIL };
 }
 END
-PRIVATE FN mIRLowering__profile_dispatch_symbol(self: MIRLowering, dispatch: Dispatch) RETURNS String@symbol
+PRIVATE FN mIRLowering__profile_dispatch_symbol(self: MIRLowering, dispatch: MIRLoweringDispatch) RETURNS String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13146,8 +13146,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       pin_mode
     END)
     END;
-    MUTABLE profiled_task_cfg = mIRLowering__profiled_task_config_plan(rtoc_self_view, task_cfg, site_id, Dispatch{ SymbolValue: COPY dispatch });
-    RETURN BgSchedulerPlan{ pin_mode: pin_mode, site_id: site_id, site_line: site_line, site_col: site_col, dispatch: dispatch, profiled_task_cfg: COPY profiled_task_cfg, spawn_call: COPY mIRLowering__fiber_spawn_call_plan(rtoc_self_view, rt_name, names.ctx_type, names.ctx_var, profiled_task_cfg, PinMode{ SymbolValue: COPY dispatch }), profile_site: COPY ProfileTaskSite{ site_id: site_id, line: site_line, column: site_col, dispatch: mIRLowering__profile_dispatch_symbol(rtoc_self_view, Dispatch{ SymbolValue: COPY dispatch }), form: :stack }, arena_init: ruby_wrap_optional_Set_Emittable(COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_505: ?Set = NIL;
+    MUTABLE profiled_task_cfg = mIRLowering__profiled_task_config_plan(rtoc_self_view, task_cfg, site_id, MIRLoweringDispatch{ SymbolValue: COPY dispatch });
+    RETURN BgSchedulerPlan{ pin_mode: pin_mode, site_id: site_id, site_line: site_line, site_col: site_col, dispatch: dispatch, profiled_task_cfg: COPY profiled_task_cfg, spawn_call: COPY mIRLowering__fiber_spawn_call_plan(rtoc_self_view, rt_name, names.ctx_type, names.ctx_var, profiled_task_cfg, PinMode{ SymbolValue: COPY dispatch }), profile_site: COPY ProfileTaskSite{ site_id: site_id, line: site_line, column: site_col, dispatch: mIRLowering__profile_dispatch_symbol(rtoc_self_view, MIRLoweringDispatch{ SymbolValue: COPY dispatch }), form: :stack }, arena_init: ruby_wrap_optional_Set_Emittable(COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_505: ?Set = NIL;
     IF node.arena_mode THEN
       rtoc_ternary_value_505 = Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY names.bg_rt, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "arena_mode", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     ELSE
@@ -13444,7 +13444,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE promoted_names: {String}String = {};
     MUTABLE caps = TRY (fiberCtxBuilder__build(analysis, "ctx", promoted_names, alloc_var, id.value, TRY (mIRLowering__fiber_capture_source_overrides(rtoc_self_view, analysis)), mIRLowering__mir_schema_lookup(rtoc_self_view)));
     MUTABLE capture_fields = ((caps.specs |> SELECT mIRLowering__context_field_decl(rtoc_self_view, _.name, _.field_type_zig)) + TRY (mIRLowering__capture_moved_guard_fields(rtoc_self_view, caps.specs)));
-    MUTABLE capture_inits = ([mIRLowering__context_init_field(rtoc_self_view, Name{ SymbolValue: :stream_inner }, Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY stream_var, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }), mIRLowering__context_init_field(rtoc_self_view, Name{ SymbolValue: :alloc }, Emittable{ Ident: COPY Ident{ name: COPY alloc_var, lowered_node_id: NIL, ownership_consumption: NIL } })] + (caps.specs |> SELECT mIRLowering__context_init_field(rtoc_self_view, Name{ StringValue: COPY _.name }, _.init_value_mir)));
+    MUTABLE capture_inits = ([mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ SymbolValue: :stream_inner }, Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY stream_var, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }), mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ SymbolValue: :alloc }, Emittable{ Ident: COPY Ident{ name: COPY alloc_var, lowered_node_id: NIL, ownership_consumption: NIL } })] + (caps.specs |> SELECT mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ StringValue: COPY _.name }, _.init_value_mir)));
     MUTABLE stream_run_body: Any = NIL;
     MUTABLE stream_emit_body: []Emittable = ( { MUTABLE rtoc_empty_list_521: []Emittable = List[]; rtoc_empty_list_521 } );
     MUTABLE stream_capture_cleanups = TRY (mIRLowering__capture_cleanup_stmts(rtoc_self_view, caps.specs, "ctx"));
@@ -13733,7 +13733,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__float_literal_text(self: MIRLowering, value: Value) RETURNS String
+PRIVATE FN mIRLowering__float_literal_text(self: MIRLowering, value: MIRLoweringValue) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14488,7 +14488,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__union_variant_key(self: MIRLowering, schema: UnionSchema, field: Field) RETURNS ?MIRLoweringReturnValue
+PRIVATE FN mIRLowering__union_variant_key(self: MIRLowering, schema: UnionSchema, field: MIRLoweringField) RETURNS ?MIRLoweringReturnValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -15139,7 +15139,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     });
     MUTABLE task = mIRLowering__task_config_plan(rtoc_self_view, NIL, NIL);
     MUTABLE site_id = (id + 1);
-    MUTABLE profiled = mIRLowering__profiled_task_config_plan(rtoc_self_view, task, site_id, Dispatch{ SymbolValue: :local });
+    MUTABLE profiled = mIRLowering__profiled_task_config_plan(rtoc_self_view, task, site_id, MIRLoweringDispatch{ SymbolValue: :local });
     MUTABLE spawn = mIRLowering__fiber_spawn_call_plan(rtoc_self_view, mIRLowering__runtime_binding_name(rtoc_self_view), names.ctx_type, names.ctx_var, profiled, PinMode{ SymbolValue: :local });
     MUTABLE profile = ProfileTaskSite{ site_id: site_id, line: ((IF node.token() != NIL THEN
       (node.token()).line
@@ -15206,7 +15206,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(schema IS_A UnionSchema@multiowned) THEN
         RETURN NIL;
       END
-      MUTABLE field_key: ?MIRLoweringExpressionsReturnValue = mIRLowering__union_variant_key(rtoc_self_view, schema, Field{ StringValue: COPY node.field });
+      MUTABLE field_key: ?MIRLoweringExpressionsReturnValue = mIRLowering__union_variant_key(rtoc_self_view, schema, MIRLoweringField{ StringValue: COPY node.field });
       IF field_key EXISTS AS field_key_value THEN
         MUTABLE var_data = schema.variants()[field_key_value];
         IF schemas__inline_struct?(var_data) THEN
@@ -15682,7 +15682,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       });
     ELSE_IF schema IS_A StructSchema@multiowned AS struct_schema_multiowned THEN
       MUTABLE struct_schema_multiowned_mutable = COPY struct_schema_multiowned;
-      MUTABLE struct_subst = TRY (mIRLowering__struct_lit_type_subst(rtoc_self_view, Schema{ StructSchemaMultiowned: COPY struct_schema_multiowned_mutable }, node));
+      MUTABLE struct_subst = TRY (mIRLowering__struct_lit_type_subst(rtoc_self_view, MIRLoweringSchema{ StructSchemaMultiowned: COPY struct_schema_multiowned_mutable }, node));
       RETURN struct_schema_multiowned_mutable.fields.each_with_object({}, %(tuple_param_0, h) USE(struct_subst, rtoc_self_view) -> {
     MUTABLE k = tuple_param_0._0;
     MUTABLE f = tuple_param_0._1;
@@ -15699,7 +15699,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__struct_lit_type_subst(self: MIRLowering, schema: Schema, node: StructLit) RETURNS !{String@symbol}TypeTypeInput
+PRIVATE FN mIRLowering__struct_lit_type_subst(self: MIRLowering, schema: MIRLoweringSchema, node: StructLit) RETURNS !{String@symbol}TypeTypeInput
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -15757,7 +15757,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             ELSE
               projected_branch_value = NIL;
             END,
-            :Value ->
+            :MIRLoweringValue ->
             IF type__map?(concrete) THEN
               projected_branch_value = TRY (type__value_type(concrete));
             ELSE
@@ -18858,7 +18858,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN mIRLowering__conditional_field_assignment?(self: MIRLowering, name: Name) RETURNS Bool
+PRIVATE FN mIRLowering__conditional_field_assignment?(self: MIRLowering, name: MIRLoweringName) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -21101,7 +21101,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (FALSE OR (name.length() == 0)) THEN
       RETURN TRUE;
     END
-    MUTABLE sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(rtoc_self_view, Name{ StringValue: COPY name }));
+    MUTABLE sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(rtoc_self_view, MIRLoweringName{ StringValue: COPY name }));
     IF sig EXISTS AS sig_value THEN
       MUTABLE sig_value_mutable = COPY sig_value;
       IF functionSignature__intrinsic(sig_value_mutable) THEN
@@ -21145,15 +21145,15 @@ FN castAssignmentNameToMIRLoweringLowerableStmt(value: AssignmentName) RETURNS M
   END
   panic("Invalid cast to MIRLoweringLowerableStmt");
 END
-FN castAssignmentNameToName(value: AssignmentName) RETURNS Name ->
+FN castAssignmentNameToName(value: AssignmentName) RETURNS MIRLoweringName ->
   PARTIAL MATCH value START
-    AssignmentName.StringValue AS cast_payload -> RETURN Name{ StringValue: COPY cast_payload };,
-    AssignmentName.Identifier AS cast_payload -> RETURN Name{ Identifier: COPY cast_payload };,
-    AssignmentName.GetField AS cast_payload -> RETURN Name{ GetField: COPY cast_payload };,
-    AssignmentName.GetIndex AS cast_payload -> RETURN Name{ GetIndex: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to Name");
+    AssignmentName.StringValue AS cast_payload -> RETURN MIRLoweringName{ StringValue: COPY cast_payload };,
+    AssignmentName.Identifier AS cast_payload -> RETURN MIRLoweringName{ Identifier: COPY cast_payload };,
+    AssignmentName.GetField AS cast_payload -> RETURN MIRLoweringName{ GetField: COPY cast_payload };,
+    AssignmentName.GetIndex AS cast_payload -> RETURN MIRLoweringName{ GetIndex: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to MIRLoweringName");
   END
-  panic("Invalid cast to Name");
+  panic("Invalid cast to MIRLoweringName");
 END
 FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
   PARTIAL MATCH value START
@@ -21408,15 +21408,15 @@ FN castExprToEmittable(value: Expr) RETURNS Emittable ->
   END
   panic("Invalid cast to Emittable");
 END
-FN castFieldToOptionalMIRLoweringReturnValue(value: Field) RETURNS ?MIRLoweringReturnValue ->
+FN castFieldToOptionalMIRLoweringReturnValue(value: MIRLoweringField) RETURNS ?MIRLoweringReturnValue ->
   PARTIAL MATCH value START
-    Field.SymbolValue AS cast_payload -> RETURN MIRLoweringReturnValue{ SymbolValue: COPY cast_payload };,
-    Field.StringValue AS cast_payload -> RETURN MIRLoweringReturnValue{ StringValue: COPY cast_payload };,
+    MIRLoweringField.SymbolValue AS cast_payload -> RETURN MIRLoweringReturnValue{ SymbolValue: COPY cast_payload };,
+    MIRLoweringField.StringValue AS cast_payload -> RETURN MIRLoweringReturnValue{ StringValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to ?MIRLoweringReturnValue");
   END
   panic("Invalid cast to ?MIRLoweringReturnValue");
 END
-FN castFieldToString(value: Field) RETURNS String ->
+FN castFieldToString(value: MIRLoweringField) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21988,7 +21988,7 @@ FN castMIRLoweringTypeToTypeConstructionInput(value: MIRLoweringType) RETURNS Ty
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castNameToStringSymbol(value: Name) RETURNS String@symbol ->
+FN castNameToStringSymbol(value: MIRLoweringName) RETURNS String@symbol ->
   IF value IS_A String@symbol AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -22787,7 +22787,7 @@ FN castTypeTypeInputToZigTypeMapperType(value: TypeTypeInput) RETURNS ZigTypeMap
   END
   panic("Invalid cast to ZigTypeMapperType");
 END
-FN castValueToInt64(value: Value) RETURNS Int64 ->
+FN castValueToInt64(value: MIRLoweringValue) RETURNS Int64 ->
   IF value IS_A Int64 AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -22844,7 +22844,7 @@ FN ruby_union_scalar_equal_TypeTypeInput_String_symbol(value: TypeTypeInput, exp
   END
   FALSE;
 END
-FN ruby_union_scalar_equal_Value_Int64(value: Value, expected: Int64) RETURNS Bool ->
+FN ruby_union_scalar_equal_Value_Int64(value: MIRLoweringValue, expected: Int64) RETURNS Bool ->
   IF value IS_A Int64 AS equality_payload THEN
     RETURN equality_payload == expected;
   END
