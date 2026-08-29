@@ -471,7 +471,7 @@ module SelfhostAutofixUnit
       i = line_no - 1
       text = lines[i].to_s
       # A narrowing form binds a name and needs a real narrowing, not this.
-      pattern = /(\w+) IS_A #{Regexp.escape(type)}(?:@\w+)?(?! AS )/
+      pattern = /([\w.]+(?:\([^()]*\))?) IS_A #{Regexp.escape(type)}(?:@\w+)?(?! AS )/
       return false unless text.scan(pattern).length.positive?
 
       lines[i] = text.gsub(pattern) { "#{Regexp.last_match(1)} != NIL" }

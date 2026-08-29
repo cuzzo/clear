@@ -3196,7 +3196,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (IF node IS_A RegistryCall AS registry_call THEN (registry_call.owned_result_alloc != NIL) ELSE FALSE END) THEN
       RETURN TRUE;
     END
-    IF node.mutating_receiver_allocator_op? THEN
+    IF (mIRCheckerRegistryOwnershipNode__mutating_receiver_allocator_op?(node) OR_ELSE FALSE) THEN
       RETURN FALSE;
     END
     IF sig EXISTS AS sig_value THEN
@@ -3212,7 +3212,7 @@ PRIVATE FN mIRChecker__ownership_fact_covers_node?(self: MIRChecker, fact_source
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (emittable__ownership_consumption(node) != NIL) THEN
-    IF node.ownership_consumption() IS_A OwnershipConsumptionFact THEN
+    IF emittable__ownership_consumption(node) != NIL THEN
       RETURN TRUE;
     END
     END
@@ -3879,6 +3879,26 @@ PUB FN mIRCheckerRegistryOwnershipNode__stdlib_def(value: MIRCheckerRegistryOwne
   PARTIAL MATCH value START
     MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN registryCall__stdlib_def(item);,
     MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN indexedStore__stdlib_def(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks these of the node directly; both variants answer, so the union
+# answers too.
+PUB FN mIRCheckerRegistryOwnershipNode__mutating_receiver_allocator_op?(value: MIRCheckerRegistryOwnershipNode) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN registryCall__mutating_receiver_allocator_op?(item);,
+    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN indexedStore__mutating_receiver_allocator_op?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+PUB FN mIRCheckerRegistryOwnershipNode__ownership_consumption(value: MIRCheckerRegistryOwnershipNode) RETURNS ?OwnershipConsumptionFact ->
+  PARTIAL MATCH value START
+    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN COPY item.ownership_consumption;,
+    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN COPY item.ownership_consumption;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
