@@ -2376,16 +2376,16 @@ PRIVATE FN mIRChecker__allocator_metadata_for(self: MIRChecker, node: MIRChecker
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE carrier: ?MIRCheckerAllocatorMetadataCarrier = mIRChecker__allocator_metadata_carrier(rtoc_self_view, node);
-    IF carrier IS_A RegistryCall AS registry_call THEN
+    IF carrier? IS_A RegistryCall AS registry_call THEN
       MUTABLE rtoc_owned_return_45: ?InlineAllocMetadata@multiowned = KEEP registry_call.allocs;
       RETURN rtoc_owned_return_45;
-    ELSE_IF carrier IS_A IndexedStore AS indexed_store THEN
+    ELSE_IF carrier? IS_A IndexedStore AS indexed_store THEN
       MUTABLE rtoc_owned_return_46: ?InlineAllocMetadata@multiowned = KEEP indexed_store.allocs;
       RETURN rtoc_owned_return_46;
-    ELSE_IF carrier IS_A ShardedMapPut AS sharded_map_put THEN
+    ELSE_IF carrier? IS_A ShardedMapPut AS sharded_map_put THEN
       MUTABLE rtoc_owned_return_47: ?InlineAllocMetadata@multiowned = sharded_map_put.resolved_allocs;
       RETURN rtoc_owned_return_47;
-    ELSE_IF carrier IS_A ShardedMapGet AS sharded_map_get THEN
+    ELSE_IF carrier? IS_A ShardedMapGet AS sharded_map_get THEN
       MUTABLE rtoc_owned_return_48: ?InlineAllocMetadata@multiowned = sharded_map_get.resolved_allocs;
       RETURN rtoc_owned_return_48;
     ELSE
