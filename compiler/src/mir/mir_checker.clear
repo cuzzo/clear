@@ -2169,27 +2169,23 @@ PUB FN mIRChecker__check_fsm_structure_mut(structure: ?FsmStructure, source: ?Lo
   rtoc_idx = rtoc_idx + 1;
     END
     IF (TRUE AND (structure_value_mutable.owned_result_required != NIL)) THEN
-      MUTABLE facts: []Any = List[];
-      IF TRUE THEN
-        facts = TRY (fsmStructure__ownership_facts(structure_value_mutable));
-      ELSE
-        facts = ( { MUTABLE rtoc_empty_list_44: []Any = List[]; rtoc_empty_list_44 } );
-      END
-      MUTABLE result_facts = facts |> WHERE (_.target() == :result);
+      MUTABLE facts: []FsmOwnershipFact = TRY (fsmStructure__ownership_facts(structure_value_mutable));
+      MUTABLE result_facts = facts |> WHERE (_.target == :result);
       IF !((result_facts.length() > 0)) THEN
         RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-OWNED-RESULT-TRANSFER", "FSM BG returns an owned result but the structure has no result ownership fact. Raw inner.result assignment is unverifiable.", source);
       END
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < result_facts.length() DO
-    IF !(result_facts[rtoc_idx].move_guarded()) THEN
+    MUTABLE rtoc_fact = UNWRAP (result_facts[rtoc_idx]);
+    IF !(rtoc_fact.move_guarded) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    IF guard_writes.contains?(result_facts[rtoc_idx].name()) THEN
+    IF guard_writes.contains?(rtoc_fact.name) THEN
             rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-OWNED-RESULT-GUARD-WRITTEN", "FSM BG transfers owned result '${result_facts[rtoc_idx].name()}' but no matching move guard write is present. The segment-local cleanup would free the value before the promise consumer receives it.", source);
+    RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-OWNED-RESULT-GUARD-WRITTEN", "FSM BG transfers owned result '${rtoc_fact.name}' but no matching move guard write is present. The segment-local cleanup would free the value before the promise consumer receives it.", source);
   rtoc_idx = rtoc_idx + 1;
       END
     END
