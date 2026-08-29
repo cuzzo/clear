@@ -2156,25 +2156,16 @@ PUB FN mIRChecker__check_fsm_structure_mut(structure: ?FsmStructure, source: ?Lo
     IF structure_value_mutable.result_aliases_finalized EXISTS AS aliased THEN
       RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-RESULT-NO-FINALIZED-ALIAS", "BG body's terminal expression aliases finalized state field '${aliased}' via the bound local. The slice would escape the FSM via inner.result, but its backing memory is freed when the finalize defer fires at end of last step -> consumer reads a dangling pointer. Either compute a fresh value from the bound local before returning (e.g. wrap in a function call that returns a value type), or drop the FSM templates for this stdlib so the stackful escape-promotion path handles ownership.", source);
     END
-    MUTABLE required_guards: []Any = List[];
-    IF TRUE THEN
-      required_guards = TRY (fsmStructure__required_move_guards(structure_value_mutable));
-    ELSE
-      required_guards = ( { MUTABLE rtoc_empty_list_42: []Any = List[]; rtoc_empty_list_42 } );
-    END
-    MUTABLE guard_writes: []Any = List[];
-    IF TRUE THEN
-      guard_writes = TRY (fsmStructure__move_guard_writes(structure_value_mutable));
-    ELSE
-      guard_writes = ( { MUTABLE rtoc_empty_list_43: []Any = List[]; rtoc_empty_list_43 } );
-    END
+    MUTABLE required_guards: []String = TRY (fsmStructure__required_move_guards(structure_value_mutable));
+    MUTABLE guard_writes: []String = TRY (fsmStructure__move_guard_writes(structure_value_mutable));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < required_guards.length() DO
-    IF guard_writes.contains?(required_guards[rtoc_idx]) THEN
+    MUTABLE rtoc_guard = UNWRAP (required_guards[rtoc_idx]);
+    IF guard_writes.contains?(rtoc_guard) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-TRANSFER-GUARD-WRITTEN", "captured ctx field '${required_guards[rtoc_idx]}' is transferred out of the FSM but no `${required_guards[rtoc_idx]}_moved = true` write is present in the FSM structure. destroyTask would run the finalizer after ownership moved -> double free.", source);
+    RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-TRANSFER-GUARD-WRITTEN", "captured ctx field '${rtoc_guard}' is transferred out of the FSM but no `${rtoc_guard}_moved = true` write is present in the FSM structure. destroyTask would run the finalizer after ownership moved -> double free.", source);
   rtoc_idx = rtoc_idx + 1;
     END
     IF (TRUE AND (structure_value_mutable.owned_result_required != NIL)) THEN
