@@ -3311,7 +3311,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (mIRChecker__ownership_consumption_has_no_owned_operands?(rtoc_self_view, castMIRCheckerOwnershipSurfaceNodeToEmittable(node)) OR mIRChecker__ownership_contract_has_no_owned_operands?(rtoc_self_view, node));
 }
 END
-PRIVATE FN mIRChecker__stdlib_takes_ownership?(self: MIRChecker, node: Emittable) RETURNS Bool
+PRIVATE FN mIRChecker__stdlib_takes_ownership?(self: MIRChecker, node: Emittable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
