@@ -2383,10 +2383,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rtoc_owned_return_46: ?InlineAllocMetadata@multiowned = KEEP indexed_store.allocs;
       RETURN rtoc_owned_return_46;
     ELSE_IF carrier? IS_A ShardedMapPut AS sharded_map_put THEN
-      MUTABLE rtoc_owned_return_47: ?InlineAllocMetadata@multiowned = sharded_map_put.resolved_allocs;
+      MUTABLE rtoc_owned_return_47: ?InlineAllocMetadata@multiowned = KEEP sharded_map_put.resolved_allocs;
       RETURN rtoc_owned_return_47;
     ELSE_IF carrier? IS_A ShardedMapGet AS sharded_map_get THEN
-      MUTABLE rtoc_owned_return_48: ?InlineAllocMetadata@multiowned = sharded_map_get.resolved_allocs;
+      MUTABLE rtoc_owned_return_48: ?InlineAllocMetadata@multiowned = KEEP sharded_map_get.resolved_allocs;
       RETURN rtoc_owned_return_48;
     ELSE
       RETURN NIL;
