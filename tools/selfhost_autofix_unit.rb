@@ -347,6 +347,51 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "Cannot access field 'f' on optional '?T' without safe navigation" -- Ruby
+  # read the field off a value it had already proved present (a first/fetch it
+  # guarded, or T.must). The receiver is whatever sits immediately before the
+  # dot, so the unwrap goes around exactly that.
+  def field_on_optional_fix(output)
+    m = output.match(/Cannot access field '(\w+)' on optional '\?[\w@]+'/)
+    return nil unless m
+    return nil unless (loc = output.gsub(/\e\[[0-9;]*m/, '').match(/^\s+(\d+) \| (.*)$/))
+
+    field = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "unwrap the receiver of .#{field}", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      text = lines[i].to_s
+      needle = ".#{field}"
+      at = text.index(needle) or return false
+      return false unless text.scan(/#{Regexp.escape(needle)}(?![\w?!])/).length == 1
+
+      if text[at - 1] == ')'
+        depth = 0
+        start = nil
+        (at - 1).downto(0) do |j|
+          depth += 1 if text[j] == ')'
+          if text[j] == '('
+            depth -= 1
+            (start = j) and break if depth.zero?
+          end
+        end
+        return false unless start
+        # A call keeps its name: unwrap `f(x)`, not just the argument list.
+        start -= 1 while start.positive? && text[start - 1] =~ /[\w.]/
+      else
+        start = at
+        start -= 1 while start.positive? && text[start - 1] =~ /[\w.\[\]]/
+      end
+      receiver = text[start...at]
+      return false if receiver.strip.empty? || receiver.include?('UNWRAP')
+
+      lines[i] = text[0...start] + "(UNWRAP (#{receiver}))" + text[at..]
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   # Balanced close for the paren at `open`, ignoring string contents.
   def matching_paren(text, open)
     depth = 0
@@ -558,7 +603,7 @@ module SelfhostAutofixUnit
   end
 
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
-           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix),
+           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix),
            method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
