@@ -3662,7 +3662,7 @@ PRIVATE FN mIRChecker__block_expr_transfers_result?(self: MIRChecker, expr: Emit
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF expr IS_A MIRBlockExpr AS mir_block_expr THEN
-      RETURN TRY (blockExpr__body(mir_block_expr)) |> ANY (_ IS_A TransferMark AND (_.target == :block_result));
+      RETURN TRY (blockExpr__body(mir_block_expr)) |> ANY (IF _ IS_A TransferMark AS rtoc_mark THEN (rtoc_mark.target == :block_result) ELSE FALSE END);
     ELSE
       RETURN FALSE;
     END
@@ -3711,7 +3711,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN;
         END
       END
-      MUTABLE owned_sources: [Set]Emittable = expr_value_mutable.owned_position_source_exprs() |> DISTINCT _;
+      MUTABLE owned_sources: [Set]Emittable = emittable__owned_position_source_exprs(expr_value_mutable) |> DISTINCT _;
       FOR _ IN expr_value_mutable.child_exprs() DO
       TRY (mIRChecker__check_expr_sources_for_unhoisted(&rtoc_self_view, _, context, owned_sources.contains?(_)));
       END
