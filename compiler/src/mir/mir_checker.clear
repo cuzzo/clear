@@ -2126,29 +2126,30 @@ PUB FN mIRChecker__check_fsm_structure_mut(structure: ?FsmStructure, source: ?Lo
     END
     END
     TRY (mIRChecker__check_fsm_destroy_actions_mut(TRY (fsmStructure__destroy_actions(structure_value_mutable)), finalize_cleanups, structure_value_mutable.ctx_id, source));
-    MUTABLE cleanup_step_index = {};
-    FOR _ IN steps DO
-    FOR _ IN _.cleanups DO
-    cleanup_step_index[_] = _.index;
+    MUTABLE cleanup_step_index: {String}Int64 = {};
+    FOR rtoc_step IN steps DO
+    FOR rtoc_cleanup_name IN rtoc_step.cleanups DO
+    cleanup_step_index[rtoc_cleanup_name] = rtoc_step.index;
     END
     END
-    FOR _ IN steps DO
+    FOR rtoc_step IN steps DO
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < _.reads.length() DO
-    IF finalize_cleanups.contains?(_.reads[rtoc_idx]?) THEN
+    WHILE rtoc_idx < rtoc_step.reads.length() DO
+    MUTABLE rtoc_read = UNWRAP (rtoc_step.reads[rtoc_idx]);
+    IF finalize_cleanups.contains?(rtoc_read) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE cleanup_step: ?Any = COPY cleanup_step_index[_.reads[rtoc_idx]?];
+    MUTABLE cleanup_step: ?Int64 = COPY cleanup_step_index[rtoc_read];
     IF (cleanup_step == NIL) THEN
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    IF (cleanup_step >= _.index) THEN
+    IF (cleanup_step >= rtoc_step.index) THEN
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-STEP-READS-LIVE", "step ${_.index.toString()} reads '${_.reads[rtoc_idx]?}' but its cleanup was placed in step ${cleanup_step} (earlier). The defer fires before step ${_.index.toString()} runs -> cross-step UAF.", source);
+    RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-STEP-READS-LIVE", "step ${rtoc_step.index.toString()} reads '${rtoc_read}' but its cleanup was placed in step ${cleanup_step} (earlier). The defer fires before step ${rtoc_step.index.toString()} runs -> cross-step UAF.", source);
   rtoc_idx = rtoc_idx + 1;
     END
     END
