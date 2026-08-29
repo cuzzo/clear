@@ -1117,11 +1117,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_23 = (live_states |> SKIP 1);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_23.length() DO
-      IF linearOwnershipState__same_state?(rtoc_each_items_23[rtoc_idx], first) THEN
+      IF TRY (linearOwnershipState__same_state?(rtoc_each_items_23[rtoc_idx], first)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "control-flow branches rejoin with different ownership state: ${TRY (linearOwnershipState__summary(first))} vs ${linearOwnershipState__summary(rtoc_each_items_23[rtoc_idx])}")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "control-flow branches rejoin with different ownership state: ${TRY (linearOwnershipState__summary(first))} vs ${TRY (linearOwnershipState__summary(rtoc_each_items_23[rtoc_idx]))}")));
     rtoc_idx = rtoc_idx + 1;
     END
     mIRChecker__copy_linear_state_mut(rtoc_self_view, first, &into);
@@ -1300,7 +1300,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names: [Set]String = Set[];
     mIRChecker__walk_mir_node(rtoc_self_view, ruby_wrap_optional_Emittable_NodeRoot(expr), %(node: Emittable) USE(MUTABLE names, rtoc_self_view) -> {
     IF ((node IS_A StructInit OR node IS_A ArrayInit) OR node IS_A TupleLiteral) THEN
-        mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, node, &names);
+        TRY (mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, node, &names));
     END
     IF !((((node IS_A Call OR node IS_A RuntimeCall) OR node IS_A TailCall) OR node IS_A MIRMethodCall)) THEN
         RETURN;
@@ -1327,11 +1327,11 @@ PUB FN mIRChecker__linear_expr_ident_names(self: MIRChecker, expr: ?Emittable) R
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names: [Set]String = Set[];
-    mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, expr, &names);
+    TRY (mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, expr, &names));
     RETURN names;
 }
 END
-PUB FN mIRChecker__collect_linear_expr_ident_names(self: MIRChecker, expr: ?Emittable, MUTABLE names: [Set]String) RETURNS Void
+PUB FN mIRChecker__collect_linear_expr_ident_names(self: MIRChecker, expr: ?Emittable, MUTABLE names: [Set]String) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1344,7 +1344,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF expr_value_mutable IS_A MIRBlockExpr AS mir_block_expr THEN
         RETURN;
       END
-      FOR _ IN emittable__child_exprs(expr_value_mutable) DO
+      FOR _ IN TRY (emittable__child_exprs(expr_value_mutable)) DO
       mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, _, &names);
       END
       NIL;
@@ -1823,7 +1823,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, Name{ StringValue: COPY UNWRAP (emittable__name(rtoc_node)) } "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
           END
       END
-      FOR _ IN (emittable__body_slots(rtoc_node)) DO
+      FOR _ IN (TRY (emittable__body_slots(rtoc_node))) DO
       TRY (mIRChecker__verify_cleanup_sources_in_scope_mut(&rtoc_self_view, _.body));
       END
     rtoc_idx = rtoc_idx + 1;
@@ -3712,10 +3712,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
       MUTABLE owned_sources: [Set]Emittable = (TRY (emittable__owned_position_source_exprs(expr_value_mutable)) OR_ELSE List[]) |> DISTINCT _;
-      FOR _ IN emittable__child_exprs(expr_value_mutable) DO
+      FOR _ IN TRY (emittable__child_exprs(expr_value_mutable)) DO
       TRY (mIRChecker__check_expr_sources_for_unhoisted(&rtoc_self_view, _, context, owned_sources.contains?(_)));
       END
-      FOR _ IN emittable__body_slots(expr_value_mutable) DO
+      FOR _ IN TRY (emittable__body_slots(expr_value_mutable)) DO
       TRY (mIRChecker__check_stmts_for_unhoisted(&rtoc_self_view, _.body));
       END
       NIL;
@@ -3866,10 +3866,10 @@ END
 
 # Ruby asks these of the node directly; both variants answer, so the union
 # answers too.
-PUB FN mIRCheckerRegistryOwnershipNode__mutating_receiver_allocator_op?(value: MIRCheckerRegistryOwnershipNode) RETURNS ?Bool ->
+PUB FN mIRCheckerRegistryOwnershipNode__mutating_receiver_allocator_op?(value: MIRCheckerRegistryOwnershipNode) RETURNS !?Bool ->
   PARTIAL MATCH value START
-    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN registryCall__mutating_receiver_allocator_op?(item);,
-    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN indexedStore__mutating_receiver_allocator_op?(item);,
+    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN TRY (registryCall__mutating_receiver_allocator_op?(item));,
+    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN TRY (indexedStore__mutating_receiver_allocator_op?(item));,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;

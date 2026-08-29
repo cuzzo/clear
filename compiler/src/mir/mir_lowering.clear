@@ -7530,7 +7530,7 @@ PRIVATE FN mIRLowering__normalize_stmt_child_exprs_mut(self: MIRLowering, stmt: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE prefix: []Emittable = ( { MUTABLE rtoc_empty_list_267: []Emittable = List[]; rtoc_empty_list_267 } );
-    IF !((emittable__child_exprs(stmt) != NIL)) THEN
+    IF !((TRY (emittable__child_exprs(stmt)) != NIL)) THEN
       RETURN prefix;
     END
     MUTABLE rtoc_each_items_268 = stmt.child_exprs();
