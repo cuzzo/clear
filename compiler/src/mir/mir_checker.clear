@@ -1922,20 +1922,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE node_fact: ?OwnershipConsumptionFact = node.ownership_consumption;
-    MUTABLE name = operand.name();
-    IF (node_fact EXISTS AND (node_fact.operands |> ANY {
-    name;
-    (!((name == NIL)) AND !(name.empty?()))
-    })) THEN
-      RETURN TRUE;
+    IF node_fact EXISTS AS rtoc_node_fact THEN
+      IF (rtoc_node_fact.operands |> ANY { MUTABLE rtoc_name = _.name; (!((rtoc_name == NIL)) AND !((UNWRAP (rtoc_name)).empty?())) }) THEN
+        RETURN TRUE;
+      END
     END
     MUTABLE init_fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(init);
-    name = operand.name();
-    IF (init_fact EXISTS AND (init_fact.operands() |> ANY {
-    name;
-    (!((name == NIL)) AND !(name.empty?()))
-    })) THEN
-      RETURN TRUE;
+    IF init_fact EXISTS AS rtoc_init_fact THEN
+      IF (rtoc_init_fact.operands |> ANY { MUTABLE rtoc_name = _.name; (!((rtoc_name == NIL)) AND !((UNWRAP (rtoc_name)).empty?())) }) THEN
+        RETURN TRUE;
+      END
     END
     RETURN FALSE;
 }
