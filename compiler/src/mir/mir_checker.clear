@@ -3395,10 +3395,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((stmt IS_A WhileStmt OR stmt IS_A ForStmt)) THEN
         RETURN;
     END
-    MUTABLE has_restore = TRY (mIRChecker__body_has_loop_restore?(rtoc_self_view, emittable__body(stmt)));
-    IF (!(stmt.tight()) AND !(has_restore)) THEN
-        IF TRY (mIRChecker__body_has_iteration_frame_alloc?(rtoc_self_view, stmt.body())) THEN
-          MUTABLE allocations = TRY (mIRChecker__iteration_frame_alloc_summary(rtoc_self_view, stmt.body()));
+    MUTABLE has_restore = TRY (mIRChecker__body_has_loop_restore?(rtoc_self_view, (emittable__body(stmt) OR_ELSE List[])));
+    IF (!(emittable__tight(stmt) OR_ELSE FALSE) AND !(has_restore)) THEN
+        IF TRY (mIRChecker__body_has_iteration_frame_alloc?(rtoc_self_view, NodeRoot{ ArrayValue: (emittable__body(stmt) OR_ELSE List[]) })) THEN
+          MUTABLE allocations = TRY (mIRChecker__iteration_frame_alloc_summary(rtoc_self_view, NodeRoot{ ArrayValue: (emittable__body(stmt) OR_ELSE List[]) }));
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :FRAME_NO_REWIND, ruby_wrap_optional_String_Name(rtoc_self_view.fn_name), "loop body has iteration-scoped frame allocations but no restoreLoopMark defer (allocations: ${allocations})")));
         END
     ELSE_IF has_restore THEN
@@ -3908,6 +3908,16 @@ PUB FN emittableCalleeName(value: Emittable) RETURNS ?String ->
   PARTIAL MATCH value START
     Emittable.Call AS item -> RETURN COPY item.callee;,
     Emittable.TailCall AS item -> RETURN COPY item.callee;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby reads stmt.tight after testing the two loop variants that have it.
+PUB FN emittable__tight(value: Emittable) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    Emittable.WhileStmt AS item -> RETURN COPY item.tight;,
+    Emittable.ForStmt AS item -> RETURN COPY item.tight;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
