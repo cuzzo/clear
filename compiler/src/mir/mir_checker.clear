@@ -3558,7 +3558,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(TRY (diagnosticRegistry__known?(kind))) THEN
       panic("{}Add an entry in src/ast/diagnostic_registry.rb (category: :mir).");
     END
-    RETURN "[${kind}] ${rtoc_self_view.fn_name}::${castOptionalNameToString(name)} -- ${msg}";
+    RETURN "[${kind}] ${UNWRAP (rtoc_self_view.fn_name)}::${castOptionalNameToString(name)} -- ${msg}";
 }
 END
 PRIVATE FN mIRChecker__verify_unhoisted_allocs_mut(MUTABLE self: MIRChecker, body: []Emittable) RETURNS ![]Emittable
