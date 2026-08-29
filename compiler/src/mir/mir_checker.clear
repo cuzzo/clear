@@ -2494,8 +2494,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE marks: []AllocMark = COPY UNWRAP (allocs[rtoc_key]);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < marks.length() DO
-      MUTABLE scope: ?String@symbol = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_50 = marks[rtoc_idx]?;
-      cleanupEntry__scope(rtoc_local_receiver_50) };
+      MUTABLE rtoc_mark = UNWRAP (marks[rtoc_idx]);
+      MUTABLE scope: ?String@symbol = rtoc_mark.scope;
       IF valid_alloc_scopes.contains?(scope) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
