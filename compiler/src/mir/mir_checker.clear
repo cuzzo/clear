@@ -2359,11 +2359,7 @@ END
 PUB FN mIRChecker__format_fsm_error(invariant: String, message: String, source: ?Locatable) RETURNS String ->
   MUTABLE loc: String = "";
   IF source EXISTS AS source_value THEN
-    IF source_value.line() THEN
-    loc = " at line ${source.line()}";
-  ELSE
-    loc = "";
-  END
+    loc = " at line ${(UNWRAP (locatable__token(source_value))).line.toString()}";
   END
   RETURN "[FSM checker]${loc} ${invariant}: ${message}";
 END
