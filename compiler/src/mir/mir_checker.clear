@@ -3292,16 +3292,16 @@ PRIVATE FN mIRChecker__ownership_contract_has_no_owned_operands?(self: MIRChecke
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE contract = PARTIAL MATCH node START
-      MIRCheckerOwnershipSurfaceNode.RegistryCall AS registry_call -> KEEP registry_call.ownership_contract,
-      MIRCheckerOwnershipSurfaceNode.IndexedStore AS indexed_store -> KEEP indexed_store.ownership_contract,
-      DEFAULT -> NIL
-    END;
-    IF !(contract IS_A OwnershipContract@multiowned) THEN
-      RETURN FALSE;
+    MUTABLE contract: ?OwnershipContract@multiowned = NIL;
+    PARTIAL MATCH node START
+      MIRCheckerOwnershipSurfaceNode.RegistryCall AS registry_call -> contract = KEEP registry_call.ownership_contract;,
+      MIRCheckerOwnershipSurfaceNode.IndexedStore AS indexed_store -> contract = KEEP indexed_store.ownership_contract;,
+      DEFAULT -> NIL;
     END
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_55 = contract.operands();
-    cleanupEntry__none?(rtoc_local_receiver_55, %(operand) -> ((operand.kind() == :owned_binding) AND operand.name())) };
+    IF contract EXISTS AS rtoc_contract THEN
+      RETURN !(rtoc_contract.operands |> ANY (((_.kind == :owned_binding) AND (_.name != NIL))));
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN mIRChecker__ownership_surface_has_no_owned_operands?(self: MIRChecker, node: MIRCheckerOwnershipSurfaceNode) RETURNS Bool
@@ -3318,7 +3318,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
       RETURN TRUE;
     END
-    MUTABLE sig = emittable__stdlib_def(node);
+    MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(node);
     IF !(sig) THEN
       RETURN FALSE;
     END
