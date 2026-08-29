@@ -2176,7 +2176,7 @@ PUB FN mIRChecker__check_fsm_structure_mut(structure: ?FsmStructure, source: ?Lo
       END
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < result_facts.length() DO
-    MUTABLE rtoc_fact = UNWRAP (result_facts[rtoc_idx]);
+    MUTABLE rtoc_fact = result_facts[rtoc_idx];
     IF !(rtoc_fact.move_guarded) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -2199,7 +2199,7 @@ PUB FN mIRChecker__check_fsm_destroy_actions_mut(actions: []FsmDestroyAction, fi
     RETURN;
   END
   IF ctx_id EXISTS AS ctx_id_value THEN
-    MUTABLE cleanup_names = actions |> SELECT:? _.cleanup_name() |> WHERE _ != NIL;
+    MUTABLE cleanup_names = actions |> SELECT:? fsmDestroyAction__cleanup_name(_) |> WHERE _ != NIL;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < finalize_cleanups.length() DO
     IF cleanup_names.contains?(finalize_cleanups[rtoc_idx]?) THEN

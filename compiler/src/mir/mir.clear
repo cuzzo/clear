@@ -17894,3 +17894,14 @@ PUB FN emittable__expr(value: Emittable) RETURNS ?Emittable@boxed ->
   END
   RETURN NIL;
 END
+
+# Ruby answers cleanup_name per variant: the two that name a cleanup return
+# it, the lock release has none.
+PUB FN fsmDestroyAction__cleanup_name(value: FsmDestroyAction) RETURNS ?String ->
+  PARTIAL MATCH value START
+    FsmDestroyAction.FsmDestroyCleanup AS item -> RETURN COPY item.name;,
+    FsmDestroyAction.FsmDestroyStmt AS item -> RETURN COPY item.name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
