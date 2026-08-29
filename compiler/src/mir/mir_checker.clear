@@ -2681,8 +2681,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE container_alloc = (UNWRAP ((UNWRAP (allocs[UNWRAP (target)])).first())).alloc;
-      IF inlineAllocMetadata__primary(alloc_metadata) THEN
-          MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(alloc_metadata);
+      IF inlineAllocMetadata__primary(UNWRAP (alloc_metadata)) THEN
+          MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(UNWRAP (alloc_metadata));
           IF (op_alloc != container_alloc) THEN
             &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${target}' is :${container_alloc}")));
           END
