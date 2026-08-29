@@ -2754,7 +2754,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       CONTINUE;
     END
     MUTABLE alloc_sym = COPY (UNWRAP (alloc_marks.first())).alloc;
-    MUTABLE cleanup_sym = (UNWRAP (cleanups[rtoc_key])).first().cleanup_entry.alloc();
+    MUTABLE cleanup_sym = cleanupEntry__alloc(UNWRAP (mIRCheckerCleanupMarksByNameValueItem__cleanup_entry((UNWRAP ((UNWRAP (cleanups[rtoc_key])).first())))));
     IF (alloc_sym != cleanup_sym) THEN
         &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ALLOC_CLEANUP_MISMATCH, Name{ StringValue: COPY rtoc_key }, "allocated with :${alloc_sym} but cleanup uses :${cleanup_sym}")));
     END
@@ -3851,4 +3851,15 @@ FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
     RETURN symbol(value_value);
   END
   NIL;
+END
+
+# Ruby asks `respond_to?(:cleanup_entry)` and then reads it. Both variants
+# carry one, so the question is answered here.
+PUB FN mIRCheckerCleanupMarksByNameValueItem__cleanup_entry(value: MIRCheckerCleanupMarksByNameValueItem) RETURNS ?CleanupEntry@multiowned ->
+  PARTIAL MATCH value START
+    MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> RETURN COPY item.cleanup_entry;,
+    MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> RETURN COPY item.cleanup_entry;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END
