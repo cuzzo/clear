@@ -2566,7 +2566,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_TARGET, Name{ StringValue: COPY mIRChecker__allocator_metadata_label(rtoc_self_view, rtoc_source) }, "${emittable__variant_name(rtoc_node)} has allocator metadata ${inlineAllocMetadata__inspect(UNWRAP (metadata))} but no target binding; allocator use is not checker-verifiable against binding placement")));
+      MUTABLE rtoc_metadata = UNWRAP (metadata);
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_TARGET, Name{ StringValue: COPY mIRChecker__allocator_metadata_label(rtoc_self_view, rtoc_source) }, "${emittable__variant_name(rtoc_node)} has allocator metadata ${inlineAllocMetadata__inspect(rtoc_metadata)} but no target binding; allocator use is not checker-verifiable against binding placement")));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -2667,7 +2668,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE requires_target_alloc = inlineAllocMetadata__requires_target_alloc?(UNWRAP (alloc_metadata));
+      MUTABLE rtoc_bound_2671 = UNWRAP (alloc_metadata);
+      MUTABLE requires_target_alloc = inlineAllocMetadata__requires_target_alloc?(rtoc_bound_2671);
       IF !(allocs.contains?(UNWRAP (target))) THEN
           IF param_names.contains?((target OR_ELSE "")) THEN
             rtoc_idx = rtoc_idx + 1;
@@ -2677,18 +2679,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${emittable__variant_name(UNWRAP (metadata_nodes[rtoc_idx]))} has allocator metadata ${inlineAllocMetadata__inspect(UNWRAP (alloc_metadata))} for '${UNWRAP (target)}' but no MIR::AllocMark")));
+          MUTABLE rtoc_bound_2682 = UNWRAP (alloc_metadata);
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${emittable__variant_name(UNWRAP (metadata_nodes[rtoc_idx]))} has allocator metadata ${inlineAllocMetadata__inspect(rtoc_bound_2682)} for '${UNWRAP (target)}' but no MIR::AllocMark")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE container_alloc = (UNWRAP ((UNWRAP (allocs[UNWRAP (target)])).first())).alloc;
-      IF inlineAllocMetadata__primary(UNWRAP (alloc_metadata)) THEN
-          MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(UNWRAP (alloc_metadata));
+      MUTABLE rtoc_bound_2688 = UNWRAP (alloc_metadata);
+      IF inlineAllocMetadata__primary(rtoc_bound_2688) THEN
+          MUTABLE rtoc_bound_2690 = UNWRAP (alloc_metadata);
+          MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(rtoc_bound_2690);
           IF (op_alloc != container_alloc) THEN
             &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${UNWRAP (target)}' is :${container_alloc}")));
           END
       END
-      MUTABLE rtoc_each_items_52 = ([InlineStoredAllocCheck{ label: :key_alloc, alloc: COPY inlineAllocMetadata__key_alloc(UNWRAP (alloc_metadata)) }, InlineStoredAllocCheck{ label: :val_alloc, alloc: COPY inlineAllocMetadata__value_alloc(UNWRAP (alloc_metadata)) }]);
+      MUTABLE rtoc_bound_2696 = UNWRAP (alloc_metadata);
+      MUTABLE rtoc_bound_2697 = UNWRAP (alloc_metadata);
+      MUTABLE rtoc_each_items_52 = ([InlineStoredAllocCheck{ label: :key_alloc, alloc: COPY inlineAllocMetadata__key_alloc(rtoc_bound_2696) }, InlineStoredAllocCheck{ label: :val_alloc, alloc: COPY inlineAllocMetadata__value_alloc(rtoc_bound_2697) }]);
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < rtoc_each_items_52.length() DO
           MUTABLE stored_alloc: ?String@symbol = COPY (rtoc_each_items_52[rtoc_idx_2]).alloc;
@@ -3250,7 +3257,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE sink_alloc: ?String@symbol = (IF mIRChecker__allocator_metadata_for(rtoc_self_view, node) != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_53: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(rtoc_self_view, node);
-    inlineAllocMetadata__sink_alloc(UNWRAP (rtoc_local_receiver_53)) }
+    MUTABLE rtoc_bound_3260 = UNWRAP (rtoc_local_receiver_53);
+    inlineAllocMetadata__sink_alloc(rtoc_bound_3260) }
     ELSE
       NIL
     END);

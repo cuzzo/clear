@@ -508,6 +508,44 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "requires parameter 'self' to be bound under one of: LOCAL" -- the callee
+  # wants a binding, not a freshly computed value. Ruby had a receiver;
+  # hoisting the argument into a local restores one.
+  def local_bound_argument_fix(output)
+    m = output.match(/Call to '([\w?!]+)' requires parameter '\w+' to be bound under one of: LOCAL/)
+    return nil unless m
+    return nil unless (loc = output.gsub(/\e\[[0-9;]*m/, '').match(/^\s+(\d+) \| (.*)$/))
+
+    callee = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "bind the receiver passed to #{callee}", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      text = lines[i].to_s
+      at = text.index("#{callee}(") or return false
+      open_paren = at + callee.length
+      close = matching_paren(text, open_paren) or return false
+      args = text[(open_paren + 1)...close].to_s
+      # Only the receiver -- the first argument -- has to be a binding.
+      depth = 0
+      cut = args.length
+      args.each_char.with_index do |c, j|
+        depth += 1 if c == '('
+        depth -= 1 if c == ')'
+        (cut = j) and break if c == ',' && depth.zero?
+      end
+      receiver = args[0...cut].strip
+      return false if receiver.empty? || receiver =~ /\A[\w.]+\z/
+
+      indent = text[/\A\s*/]
+      name = "rtoc_bound_#{line_no}"
+      lines[i] = "#{indent}MUTABLE #{name} = #{receiver};\n" +
+                 text[0...(open_paren + 1)] + name + text[(open_paren + 1 + cut)..].to_s
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   # Balanced close for the paren at `open`, ignoring string contents.
   def matching_paren(text, open)
     depth = 0
@@ -733,7 +771,7 @@ module SelfhostAutofixUnit
   end
 
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
-           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix), method(:is_a_optional_struct_fix), method(:no_overload_dispatch_fix),
+           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix), method(:is_a_optional_struct_fix), method(:no_overload_dispatch_fix), method(:local_bound_argument_fix),
            method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
