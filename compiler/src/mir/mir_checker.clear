@@ -2397,11 +2397,21 @@ PRIVATE FN mIRChecker__allocator_metadata_carrier(self: MIRChecker, node: MIRChe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (node IS_A RegistryCall) OR (node IS_A IndexedStore) OR (node IS_A ShardedMapPut) OR (node IS_A ShardedMapGet) THEN
-      RETURN COPY node;
-    ELSE
-      RETURN NIL;
+    IF node IS_A Emittable AS rtoc_emittable THEN
+      IF rtoc_emittable IS_A RegistryCall AS rtoc_carrier THEN
+        RETURN MIRCheckerAllocatorMetadataCarrier{ RegistryCall: COPY rtoc_carrier };
+      END
+      IF rtoc_emittable IS_A IndexedStore AS rtoc_carrier THEN
+        RETURN MIRCheckerAllocatorMetadataCarrier{ IndexedStore: COPY rtoc_carrier };
+      END
+      IF rtoc_emittable IS_A ShardedMapPut AS rtoc_carrier THEN
+        RETURN MIRCheckerAllocatorMetadataCarrier{ ShardedMapPut: COPY rtoc_carrier };
+      END
+      IF rtoc_emittable IS_A ShardedMapGet AS rtoc_carrier THEN
+        RETURN MIRCheckerAllocatorMetadataCarrier{ ShardedMapGet: COPY rtoc_carrier };
+      END
     END
+    RETURN NIL;
 }
 END
 PRIVATE FN mIRChecker__allocator_metadata_target(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS ?String
