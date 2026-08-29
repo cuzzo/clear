@@ -3349,22 +3349,22 @@ PRIVATE FN mIRChecker__ownership_node_name(self: MIRChecker, node: Emittable) RE
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (node IS_A MIRCast OR node IS_A TryExpr) THEN
-      RETURN mIRChecker__ownership_node_name(rtoc_self_view, emittable__expr(node));
+      RETURN mIRChecker__ownership_node_name(rtoc_self_view, UNWRAP (emittable__expr(node)));
     END
-    MUTABLE target = PARTIAL MATCH node START
+    MUTABLE target: ?String = PARTIAL MATCH node START
       Emittable.RegistryCall AS registry_call -> registry_call.target_var,
       Emittable.IndexedStore AS indexed_store -> indexed_store.target_var,
       Emittable.ShardedMapPut AS sharded_map_put -> sharded_map_put.target_var,
       DEFAULT -> NIL
     END;
-    IF target THEN
-      RETURN COPY CAST(target AS String);
+    IF target EXISTS AS rtoc_target THEN
+      RETURN COPY rtoc_target;
     END
     IF node IS_A RuntimeCall AS runtime_call THEN
       RETURN COPY runtime_call.spec.callee;
     END
     IF (node IS_A Call OR node IS_A TailCall) THEN
-      RETURN COPY CAST(node.callee() AS String);
+      RETURN COPY UNWRAP (emittableCalleeName(node));
     END
     IF node IS_A MIRMethodCall AS mir_method_call THEN
       RETURN COPY mir_method_call.method;
@@ -3898,6 +3898,16 @@ PUB FN mIRCheckerRegistryOwnershipNode__ownership_consumption(value: MIRCheckerR
   PARTIAL MATCH value START
     MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN COPY item.ownership_consumption;,
     MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN COPY item.ownership_consumption;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby reads node.callee after testing the two variants that have one.
+PUB FN emittableCalleeName(value: Emittable) RETURNS ?String ->
+  PARTIAL MATCH value START
+    Emittable.Call AS item -> RETURN COPY item.callee;,
+    Emittable.TailCall AS item -> RETURN COPY item.callee;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
