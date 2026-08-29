@@ -2068,32 +2068,40 @@ PUB FN mIRChecker__verify_owned_result_alloc_marks_mut(MUTABLE self: MIRChecker,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR rtoc_key IN lets.group_by(:name).keys() DO
-    MUTABLE name_lets: Any = COPY UNWRAP (lets.group_by(:name)[rtoc_key]);
+    MUTABLE rtoc_groups: {String}[]Int64 = {};
+    MUTABLE rtoc_gi = 0;
+    WHILE rtoc_gi < lets.length() DO
+      MUTABLE rtoc_group_let = UNWRAP (lets[rtoc_gi]);
+      MUTABLE rtoc_group: []Int64 = COPY (rtoc_groups[rtoc_group_let.name] OR_ELSE List[]);
+      &rtoc_group.append(rtoc_gi);
+      rtoc_groups[rtoc_group_let.name] = rtoc_group;
+      rtoc_gi = rtoc_gi + 1;
+    END
+    FOR rtoc_key IN rtoc_groups.keys() DO
+    MUTABLE name_lets: []Int64 = COPY UNWRAP (rtoc_groups[rtoc_key]);
     MUTABLE marks: ?[]AllocMark = COPY allocs[rtoc_key];
-    MUTABLE available: []Any = List[];
+    MUTABLE available: []String@symbol = List[];
       IF marks EXISTS AS marks_value THEN
-        available = marks_value |> SELECT _.alloc();
-      ELSE
-        available = ( { MUTABLE rtoc_empty_list_41: []Any = List[]; rtoc_empty_list_41 } );
+        available = marks_value |> SELECT _.alloc;
       END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < name_lets.length() DO
-        MUTABLE expected_alloc: ?String@symbol = TRY (mIRChecker__expr_owned_result_alloc(rtoc_self_view, name_lets[rtoc_idx].init()));
+        MUTABLE rtoc_let = UNWRAP (lets[UNWRAP (name_lets[rtoc_idx])]);
+        MUTABLE expected_alloc: ?String@symbol = TRY (mIRChecker__expr_owned_result_alloc(rtoc_self_view, rtoc_let.init));
         IF !(expected_alloc) THEN
             rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        IF ((available.length() == 0) AND (((marks == NIL) OR (marks?).empty?()))) THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_WITHOUT_ALLOC, name_lets[rtoc_idx].name(), "owned-result initializer has no MIR::AllocMark; ownership is implicit")));
+        IF ((available.length() == 0) AND (((marks == NIL) OR (UNWRAP (marks)).empty?()))) THEN
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_WITHOUT_ALLOC, Name{ StringValue: COPY rtoc_let.name }, "owned-result initializer has no MIR::AllocMark; ownership is implicit")));
             rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        MUTABLE idx = available.indexOf(expected_alloc);
+        MUTABLE idx = available.indexOf(UNWRAP (expected_alloc));
         IF idx THEN
-            &available.remove(idx);
+            &available.remove(UNWRAP (idx));
         ELSE
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_ALLOC_MISMATCH, name_lets[rtoc_idx].name(), "owned-result initializer produces :${UNWRAP (expected_alloc)} storage but no MIR::AllocMark uses :${UNWRAP (expected_alloc)} (marks: ${(marks_value |> SELECT ":${_.alloc()}").join(", ")})")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_ALLOC_MISMATCH, Name{ StringValue: COPY rtoc_let.name }, "owned-result initializer produces :${UNWRAP (expected_alloc)} storage but no MIR::AllocMark uses :${UNWRAP (expected_alloc)} (marks: ${(marks_value |> SELECT ":${_.alloc()}").join(", ")})")));
         END
       rtoc_idx = rtoc_idx + 1;
     END
