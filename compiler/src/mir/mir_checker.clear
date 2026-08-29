@@ -3631,15 +3631,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (mIRChecker__check_stmts_for_unhoisted(&rtoc_self_view, _.body));
       END
       RETURN;
-    ELSE_IF node IS_A BatchWindowPush AS batch_window_push THEN
+    ELSE_IF node? IS_A BatchWindowPush AS batch_window_push THEN
       MUTABLE batch_window_push_mutable = COPY batch_window_push;
       TRY (mIRChecker__check_expr_for_unhoisted(&rtoc_self_view, batch_window_push_mutable.item_expr));
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, batch_window_push_mutable.value_expr, "BatchWindow value"));
-    ELSE_IF node IS_A BatchWindowFlush AS batch_window_flush THEN
+    ELSE_IF node? IS_A BatchWindowFlush AS batch_window_flush THEN
       MUTABLE batch_window_flush_mutable = COPY batch_window_flush;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, batch_window_flush_mutable.value_expr, "BatchWindow value"));
     ELSE
-      MUTABLE owned_sources = node.owned_position_source_exprs() |> DISTINCT _;
+      MUTABLE owned_sources = (UNWRAP (node)).owned_position_source_exprs |> DISTINCT _;
       FOR _ IN node.child_exprs() DO
       TRY (mIRChecker__check_expr_sources_for_unhoisted(&rtoc_self_view, _, "expression", owned_sources.contains?(_)));
       END
