@@ -1969,7 +1969,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node? IS_A MIRMethodCall AS mir_method_call THEN
     IF (["create", "createBound"]).contains?(mir_method_call.method) THEN
         MUTABLE receiver = mir_method_call.receiver;
-        IF receiver? IS_A Call AS rtoc_call THEN
+        IF receiver IS_A Call AS rtoc_call THEN
           RETURN (["CheatLib.NodeStore", "CheatLib.SharedNodeStore"]).contains?(rtoc_call.callee);
         END
         RETURN FALSE;
