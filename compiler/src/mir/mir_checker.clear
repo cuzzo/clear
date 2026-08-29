@@ -1945,9 +1945,24 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     IF node? IS_A MIRBlockExpr AS mir_block_expr THEN
-      MUTABLE terminal = (TRY (blockExpr__body(mir_block_expr))).reverse() |> FIND (_ IS_A BreakStmt AND (_.label() == mir_block_expr.label));
-      IF (terminal IS_A BreakStmt AND terminal.value()) THEN
-        RETURN mIRChecker__value_constructor_expr?(rtoc_self_view, terminal.value());
+      MUTABLE rtoc_reverse_items: []Emittable = TRY (blockExpr__body(mir_block_expr));
+      MUTABLE rtoc_reverse_i = rtoc_reverse_items.length() - 1;
+      MUTABLE terminal: ?Emittable = NIL;
+      WHILE rtoc_reverse_i >= 0 DO
+        MUTABLE rtoc_item = UNWRAP (rtoc_reverse_items[rtoc_reverse_i]);
+        IF rtoc_item IS_A BreakStmt AS rtoc_break THEN
+          IF (rtoc_break.label == mir_block_expr.label) THEN
+            terminal = rtoc_item;
+            rtoc_reverse_i = -1;
+        CONTINUE;
+          END
+        END
+        rtoc_reverse_i = rtoc_reverse_i - 1;
+      END
+      IF terminal? IS_A BreakStmt AS rtoc_terminal THEN
+        IF rtoc_terminal.value EXISTS AS rtoc_terminal_value THEN
+          RETURN TRY (mIRChecker__value_constructor_expr?(rtoc_self_view, rtoc_terminal_value));
+        END
       END
       RETURN FALSE;
     END
