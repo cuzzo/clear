@@ -672,8 +672,22 @@ module SelfhostAutofixUnit
       at = line.index(marker) or return false
 
       rest = line[(at + marker.length)..]
-      value = rest[/\A[\w.]+/] or return false
-      lines[i] = line[0...(at + marker.length)] + "UNWRAP (#{value})" + rest[value.length..].to_s
+      # The whole postfix chain, not just its head: an indexed read carries
+      # `[i]`, a safe navigation carries `?`, and both make the result optional.
+      value = rest[/\A[\w.]+(?:\[[^\]]*\])?\??(?:\.\w+)*/] or return false
+      replacement =
+        if (m = value.match(/\A(.+\[[^\]]*\])\?((?:\.\w+)+)\z/))
+          # Safe navigation: what is optional is the receiver, so unwrap that
+          # and read the field off it.
+          "(UNWRAP (#{m[1]}))#{m[2]}"
+        elsif value.end_with?('?')
+          "UNWRAP (#{value[0..-2]})"
+        else
+          "UNWRAP (#{value})"
+        end
+      return false if value.include?('UNWRAP')
+
+      lines[i] = line[0...(at + marker.length)] + replacement + rest[value.length..].to_s
       File.write(path, lines.join)
       true
     end)

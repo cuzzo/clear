@@ -3149,7 +3149,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE reason = (fact_value.captures[rtoc_idx]?.forbidden_reason OR_ELSE :not_parallel_safe);
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE, Name{ StringValue: COPY fact_value.captures[rtoc_idx]?.name }, "capture '${fact_value.captures[rtoc_idx]?.name}' is not safe for @parallel dispatch (storage=${compilerInspectValue()}, sync=${compilerInspectValue()}, reason=${compilerInspectValue()})")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :BOUNDARY_CAPTURE_NOT_PARALLEL_SAFE, Name{ StringValue: COPY (UNWRAP (fact_value.captures[rtoc_idx])).name }, "capture '${UNWRAP (fact_value.captures[rtoc_idx]?.name)}' is not safe for @parallel dispatch (storage=${compilerInspectValue()}, sync=${compilerInspectValue()}, reason=${compilerInspectValue()})")));
     rtoc_idx = rtoc_idx + 1;
       END
       NIL;
@@ -3166,14 +3166,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((contract != NIL)) THEN
       RETURN FALSE;
     END
-    RETURN !(((TRY (mIRChecker__ownership_contract_consumes(rtoc_self_view, contract.ownership_contract))).length() == 0));
+    RETURN !(((TRY (mIRChecker__ownership_contract_consumes(rtoc_self_view, (UNWRAP (contract)).ownership_contract))).length() == 0));
 }
 END
 PRIVATE FN mIRChecker__registry_ownership_side_channel?(self: MIRChecker, node: MIRCheckerRegistryOwnershipNode) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.stdlib_def());
+    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.stdlib_def);
     IF mIRChecker__stdlib_takes_ownership?(rtoc_self_view, castMIRCheckerRegistryOwnershipNodeToEmittable(node)) THEN
       IF mIRChecker__ownership_surface_has_no_owned_operands?(rtoc_self_view, castMIRCheckerRegistryOwnershipNodeToMIRCheckerOwnershipSurfaceNode(node)) THEN
         RETURN FALSE;
