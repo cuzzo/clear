@@ -2948,20 +2948,25 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE contract: ?OwnershipContract@multiowned = emittable__ownership_contract(rtoc_node);
-      IF !((mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) OR (contract != NIL AND !(contract.empty?())))) THEN
+      MUTABLE rtoc_contract_present = FALSE;
+      IF contract EXISTS AS rtoc_contract THEN
+        MUTABLE rtoc_contract_mutable = COPY rtoc_contract;
+        rtoc_contract_present = !(ownershipContract__empty?(&rtoc_contract_mutable));
+      END
+      IF !((mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) OR rtoc_contract_present)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !(contract IS_A OwnershipContract@multiowned) THEN
+      IF !(contract != NIL) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, rtoc_node) }, "ownership_contract must be MIR::OwnershipContract; Hash/nil contracts make ownership unverifiable")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE consumes = TRY (mIRChecker__ownership_contract_consumes(rtoc_self_view, contract));
-      IF (mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) AND !(mIRChecker__ownership_contract_present?(rtoc_self_view, contract))) THEN
+      MUTABLE consumes = TRY (mIRChecker__ownership_contract_consumes(rtoc_self_view, UNWRAP (contract)));
+      IF (mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) AND !(mIRChecker__ownership_contract_present?(rtoc_self_view, UNWRAP (contract)))) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, rtoc_node) }, "stdlib_def declares a TAKES/consuming parameter but ownership_contract is absent; MIRChecker cannot prove whether this call consumes an owned binding")));
       END
-      TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, contract, "ownership_contract", transfers, mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node)));
+      TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, UNWRAP (contract), "ownership_contract", transfers, mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node)));
       TRY (mIRChecker__check_consumed_allocators_match_sink_mut(&rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY rtoc_node }, consumes, allocs));
     rtoc_idx = rtoc_idx + 1;
     END
@@ -3107,11 +3112,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
         END
         MUTABLE expected: Int64 = 0;
-        IF mir_do_block_mutable.branch_bodies != NIL THEN
-          expected = ((mir_do_block_mutable.branch_bodies)?).length();
+        IF !((mir_do_block_mutable.branch_bodies).empty?()) THEN
+          expected = ((mir_do_block_mutable.branch_bodies)).length();
         END
         IF (facts.length() != expected) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :BOUNDARY_FACT_REQUIRED, Name{ StringValue: COPY "MIR::DoBlock" }, "MIR::DoBlock has ${facts.length()} boundary facts for ${expected.toString()} branch bodies")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :BOUNDARY_FACT_REQUIRED, Name{ StringValue: COPY "MIR::DoBlock" }, "MIR::DoBlock has ${facts.length().toString()} boundary facts for ${expected.toString()} branch bodies")));
         END
         FOR _ IN facts DO
         TRY (mIRChecker__verify_execution_boundary_fact_mut(&rtoc_self_view, _, "MIR::DoBlock"));
