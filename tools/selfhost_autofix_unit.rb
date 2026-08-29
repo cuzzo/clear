@@ -311,6 +311,42 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "Operator $+ requires String operands, got ?String" -- a value the Ruby
+  # guarded for nil earlier, interpolated into a message where CLEAR still sees
+  # the optional. The caret picks out which interpolation, so the only edit is
+  # to unwrap that one.
+  def interpolated_optional_fix(output)
+    return nil unless output.include?('requires String operands, got ?')
+    plain = output.gsub(/\e\[[0-9;]*m/, '')
+    lines = plain.lines
+    idx = lines.index { |l| l =~ /^\s+\d+ \| / } or return nil
+    src = lines[idx]
+    caret = lines[idx + 1].to_s
+    return nil unless caret.include?('^')
+
+    bar = src.index('| ') or return nil
+    caret_bar = caret.index('| ') or return nil
+    column = caret.index('^') - (caret_bar + 2)
+    line_no = src[/^\s+(\d+) \|/, 1].to_i
+    Fix.new(label: 'unwrap the interpolated optional', apply: lambda do |path|
+      file = File.readlines(path)
+      i = line_no - 1
+      text = file[i].to_s
+      # Line as the diagnostic displayed it, so the caret column lines up.
+      at = src[(bar + 2)..].to_s.rstrip
+      offset = text.index(at) or return false
+      pos = offset + column
+      open_brace = text.rindex('${', pos) or return false
+      close = text.index('}', open_brace) or return false
+      inner = text[(open_brace + 2)...close]
+      return false if inner.include?('UNWRAP')
+
+      file[i] = text[0...open_brace] + "${UNWRAP (#{inner})}" + text[(close + 1)..].to_s
+      File.write(path, file.join)
+      true
+    end)
+  end
+
   # Balanced close for the paren at `open`, ignoring string contents.
   def matching_paren(text, open)
     depth = 0
@@ -522,7 +558,7 @@ module SelfhostAutofixUnit
   end
 
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
-           method(:optional_argument_unwrap_fix),
+           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix),
            method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
