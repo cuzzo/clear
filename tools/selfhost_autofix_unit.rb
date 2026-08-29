@@ -285,6 +285,32 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "argument N expects T, got ?T" -- a value the Ruby guarded for nil earlier
+  # in the block, passed on where CLEAR still sees the optional. The types
+  # match apart from the `?`, and the diagnostic names the value, so the only
+  # question is where to unwrap.
+  def optional_argument_unwrap_fix(output)
+    m = output.match(/Function '(\w+)' argument \d+ expects ([\w@\[\]{}]+), got \?\2(?![\w@])/)
+    return nil unless m
+    return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
+
+    name = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "unwrap #{name} at the call", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      line = lines[i].to_s
+      # Only where it is passed as a whole argument, and only if that is
+      # unambiguous on the line.
+      pattern = /(?<=[(,] |[(])#{Regexp.escape(name)}(?=[),])/
+      return false unless line.scan(pattern).length == 1
+
+      lines[i] = line.sub(pattern, "UNWRAP (#{name})")
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   # Balanced close for the paren at `open`, ignoring string contents.
   def matching_paren(text, open)
     depth = 0
@@ -496,6 +522,7 @@ module SelfhostAutofixUnit
   end
 
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
+           method(:optional_argument_unwrap_fix),
            method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
