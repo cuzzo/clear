@@ -11887,6 +11887,11 @@ END
 
 # Ruby asks `respond_to?(:storage)` and then reads it. A union variant
 # either carries the field or it does not, so the question is answered here.
+# Ruby defines this on the AST node mixin: storage == :stack || storage == :frame.
+PUB FN locatable__stack_or_frame_storage?(value: Locatable) RETURNS Bool ->
+  MUTABLE storage: ?String@symbol = locatable__storage(value);
+  RETURN ((storage == :stack) OR (storage == :frame));
+END
 PUB FN locatable__storage(value: Locatable) RETURNS ?String@symbol ->
   PARTIAL MATCH value START
     Locatable.Literal AS item -> RETURN COPY item.storage;,

@@ -15,7 +15,7 @@ PUB FN listLiteralPlan__bounded_stream?(self: ListLiteralPlan) RETURNS !Bool EFF
   RETURN TRY (type__bounded_stream?(self.type_info));
 END
 PUB FN listLiteralPlan__fixed_stack_or_frame?(self: ListLiteralPlan, node: ListLit) RETURNS Bool ->
-  RETURN (((type__fixed?(self.type_info) AND node.stack_or_frame_storage?())) == TRUE);
+  RETURN (((type__fixed?(self.type_info) AND locatable__stack_or_frame_storage?(Locatable{ ListLit: COPY node }))) == TRUE);
 END
 PUB FN listLiteralPlan__list_collection?(self: ListLiteralPlan) RETURNS Bool EFFECTS REENTRANT ->
   RETURN type__list_collection?(self.type_info);
