@@ -3489,23 +3489,13 @@ PRIVATE FN mIRChecker__body_has_frame_alloc_scope?(self: MIRChecker, stmts: ?Nod
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE found: Bool = FALSE;
-    mIRChecker__each_loop_local_node(rtoc_self_view, stmts, %(node: Emittable) USE(block) -> {
-    IF !(node IS_A AllocMark) THEN
-        RETURN;
+    FOR node IN TRY (mIRChecker__loop_local_nodes(rtoc_self_view, stmts)) DO
+      IF node IS_A AllocMark AS rtoc_mark THEN
+        IF placement__frame?(rtoc_mark.alloc) THEN
+          found = (found OR block((rtoc_mark.scope OR_ELSE :unknown)));
+        END
+      END
     END
-    MUTABLE alloc = node.alloc;
-    IF !(placement__frame?(alloc)) THEN
-        RETURN;
-    END
-    MUTABLE scope = cleanupEntry__scope(node);
-    scope = IF scope IS_A String@symbol THEN
-        scope
-      ELSE
-        :unknown
-      END;
-    found = (found OR block(scope));
-    rubyToClearVoid()
-    });
     RETURN found;
 }
 END
