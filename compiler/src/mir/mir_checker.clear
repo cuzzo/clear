@@ -2942,26 +2942,27 @@ PRIVATE FN mIRChecker__verify_explicit_ownership_contracts_mut(MUTABLE self: MIR
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < nodes.length() DO
-      IF !((emittable__ownership_contract(nodes[rtoc_idx]?) != NIL)) THEN
+      MUTABLE rtoc_node = UNWRAP (nodes[rtoc_idx]);
+      IF !((emittable__ownership_contract(rtoc_node) != NIL)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE contract = nodes[rtoc_idx]?.ownership_contract();
-      IF !((mIRChecker__stdlib_takes_ownership?(rtoc_self_view, nodes[rtoc_idx]?) OR (contract IS_A OwnershipContract@multiowned AND !(contract.empty?())))) THEN
+      MUTABLE contract: ?OwnershipContract@multiowned = emittable__ownership_contract(rtoc_node);
+      IF !((mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) OR (contract IS_A OwnershipContract@multiowned AND !(contract.empty?())))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       IF !(contract IS_A OwnershipContract@multiowned) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, nodes[rtoc_idx]?) }, "ownership_contract must be MIR::OwnershipContract; Hash/nil contracts make ownership unverifiable")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, rtoc_node) }, "ownership_contract must be MIR::OwnershipContract; Hash/nil contracts make ownership unverifiable")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE consumes = TRY (mIRChecker__ownership_contract_consumes(rtoc_self_view, contract));
-      IF (mIRChecker__stdlib_takes_ownership?(rtoc_self_view, nodes[rtoc_idx]?) AND !(mIRChecker__ownership_contract_present?(rtoc_self_view, contract))) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, nodes[rtoc_idx]?) }, "stdlib_def declares a TAKES/consuming parameter but ownership_contract is absent; MIRChecker cannot prove whether this call consumes an owned binding")));
+      IF (mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) AND !(mIRChecker__ownership_contract_present?(rtoc_self_view, contract))) THEN
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, rtoc_node) }, "stdlib_def declares a TAKES/consuming parameter but ownership_contract is absent; MIRChecker cannot prove whether this call consumes an owned binding")));
       END
-      TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, contract, "ownership_contract", transfers, mIRChecker__stdlib_takes_ownership?(rtoc_self_view, nodes[rtoc_idx]?)));
-      TRY (mIRChecker__check_consumed_allocators_match_sink_mut(&rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY nodes[rtoc_idx]? }, consumes, allocs));
+      TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, contract, "ownership_contract", transfers, mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node)));
+      TRY (mIRChecker__check_consumed_allocators_match_sink_mut(&rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY rtoc_node }, consumes, allocs));
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;

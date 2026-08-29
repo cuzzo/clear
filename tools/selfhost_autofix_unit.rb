@@ -421,6 +421,41 @@ module SelfhostAutofixUnit
     caret.index('^') - (bar + 2) + plain[idx].index('| ') + 2 - (plain[idx].index('| ') + 2)
   end
 
+  # "Cannot infer `x` from an optional value" -- Ruby needed no annotation, and
+  # CLEAR wants one only because the initializer is optional. The callee
+  # declares what it returns, so the annotation is a lookup, not a decision.
+  def infer_from_optional_fix(output)
+    m = output.match(/Cannot infer `(\w+)` from an optional value/)
+    return nil unless m
+    return nil unless (loc = output.gsub(/\e\[[0-9;]*m/, '').match(/^\s+(\d+) \| (.*)$/))
+
+    name = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "annotate #{name}", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      text = lines[i].to_s
+      decl = text.match(/\b(MUTABLE\s+)?#{Regexp.escape(name)}\s*=\s*(.+?);\s*\z/m) or return false
+      return false if text.match?(/\b#{Regexp.escape(name)}\s*:/)
+
+      init = decl[2].strip
+      callee = init[/\A(?:TRY \()?\s*([a-zA-Z_]\w*)\(/, 1] or return false
+      returns = nil
+      Dir.glob(File.join(File.dirname(path), '..', '**', '*.clear')).each do |other|
+        next unless (hit = File.read(other)[/FN #{Regexp.escape(callee)}\([^\n]*?\)\s*RETURNS\s+([\w@?\[\]{}]+)/, 1])
+
+        returns = hit
+        break
+      end
+      return false unless returns
+
+      returns = "?#{returns}" unless returns.start_with?('?')
+      lines[i] = text.sub(/\b#{Regexp.escape(name)}\s*=/, "#{name}: #{returns} =")
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   # Balanced close for the paren at `open`, ignoring string contents.
   def matching_paren(text, open)
     depth = 0
@@ -632,7 +667,7 @@ module SelfhostAutofixUnit
   end
 
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
-           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix),
+           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix),
            method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
