@@ -2419,12 +2419,12 @@ PRIVATE FN mIRChecker__allocator_metadata_target(self: MIRChecker, node: MIRChec
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE carrier: ?MIRCheckerAllocatorMetadataCarrier = mIRChecker__allocator_metadata_carrier(rtoc_self_view, node);
-    IF carrier IS_A RegistryCall AS registry_call THEN
+    IF carrier? IS_A RegistryCall AS registry_call THEN
       MUTABLE target: ?String = COPY registry_call.target_var;
       IF ((target != NIL) AND !((target.length() == 0))) THEN
         RETURN COPY target;
       END
-    ELSE_IF carrier IS_A IndexedStore AS indexed_store THEN
+    ELSE_IF carrier? IS_A IndexedStore AS indexed_store THEN
       MUTABLE target: ?String = COPY indexed_store.target_var;
       IF ((target != NIL) AND !((target.length() == 0))) THEN
         RETURN COPY target;
@@ -2433,7 +2433,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF target_expr IS_A Ident AS ident THEN
         RETURN COPY CAST(ident.name AS String);
       END
-    ELSE_IF carrier IS_A ShardedMapPut AS sharded_map_put THEN
+    ELSE_IF carrier? IS_A ShardedMapPut AS sharded_map_put THEN
       MUTABLE target: ?String = COPY sharded_map_put.target_var;
       IF ((target != NIL) AND !((target.length() == 0))) THEN
         RETURN COPY target;
@@ -2442,7 +2442,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF target_expr IS_A Ident AS ident THEN
         RETURN COPY CAST(ident.name AS String);
       END
-    ELSE_IF carrier IS_A ShardedMapGet AS sharded_map_get THEN
+    ELSE_IF carrier? IS_A ShardedMapGet AS sharded_map_get THEN
       MUTABLE target_expr = COPY sharded_map_get.target;
       IF target_expr IS_A Ident AS ident THEN
         RETURN COPY CAST(ident.name AS String);
