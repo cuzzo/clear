@@ -2508,12 +2508,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE nodes: []MIRCheckerCleanupMarksByNameValueItem = COPY UNWRAP (cleanups[rtoc_key]);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < nodes.length() DO
-      MUTABLE alloc = (MATCH nodes[rtoc_idx]? START MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> item.cleanup_entry.alloc(), MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> item.cleanup_entry.alloc() END);
+      MUTABLE rtoc_cleanup = UNWRAP (nodes[rtoc_idx]);
+      MUTABLE rtoc_entry = MATCH rtoc_cleanup START
+        MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> item.cleanup_entry,
+        MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> item.cleanup_entry
+      END;
+      MUTABLE rtoc_kind = MATCH rtoc_cleanup START
+        MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> "Cleanup",
+        MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> "ErrCleanup"
+      END;
+      MUTABLE alloc = cleanupEntry__alloc(rtoc_entry);
       IF valid_allocators.contains?(alloc) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INVALID_ALLOCATOR_MARK, Name{ StringValue: COPY rtoc_key }, "${(nodes[rtoc_idx]?.class()).name()} uses ${compilerInspectValue()}; MIR cleanup allocators must be :heap or :frame")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INVALID_ALLOCATOR_MARK, Name{ StringValue: COPY rtoc_key }, "${rtoc_kind} uses ${compilerInspectValue()}; MIR cleanup allocators must be :heap or :frame")));
     rtoc_idx = rtoc_idx + 1;
     END
     END
