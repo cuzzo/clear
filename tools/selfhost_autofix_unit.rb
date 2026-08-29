@@ -782,6 +782,22 @@ module SelfhostAutofixUnit
 
   def unit_path(relative) = File.join(ROOT, 'compiler', 'src', relative)
 
+  # The file holding the reported line, found by matching the line the
+  # diagnostic echoed at the line number it gave.
+  def locate(output)
+    plain = output.gsub(/\e\[[0-9;]*m/, '')
+    m = plain.match(/^\s+(\d+) \| (.*)$/) or return nil
+
+    number = m[1].to_i
+    text = m[2]
+    hits = Dir.glob(File.join(ROOT, 'compiler', 'src', '**', '*.clear')).select do |candidate|
+      line = File.readlines(candidate)[number - 1] or next false
+
+      line.rstrip == text.rstrip
+    end
+    hits.length == 1 ? hits.first : nil
+  end
+
   def check(relative)
     out, err, status = Open3.capture3(
       { 'RUBYOPT' => '-W0' },
@@ -815,13 +831,17 @@ module SelfhostAutofixUnit
         return 1
       end
 
+      # The compiler names no file, and the diagnostic is as likely to be in a
+      # dependency as in the unit asked about. Locate it by its own text so a
+      # fix never lands in the wrong file.
+      target = locate(output) || path
       fix = FIXES.filter_map { |f| f.call(output) }.first
       unless fix
         puts "selfhost_autofix_unit: stopped after #{applied} fix(es); needs a human:"
         puts output.lines.grep(/Compiler Error|^\s+\d+ \|/).first(3).join
         return 1
       end
-      unless fix.apply.call(path)
+      unless fix.apply.call(target)
         puts "selfhost_autofix_unit: #{fix.label} did not apply; stopping"
         return 1
       end
