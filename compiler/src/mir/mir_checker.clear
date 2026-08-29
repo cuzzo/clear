@@ -3711,12 +3711,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN;
         END
       END
-      MUTABLE owned_sources: [Set]Emittable = emittable__owned_position_source_exprs(expr_value_mutable) |> DISTINCT _;
-      FOR _ IN expr_value_mutable.child_exprs() DO
+      MUTABLE owned_sources: [Set]Emittable = (TRY (emittable__owned_position_source_exprs(expr_value_mutable)) OR_ELSE List[]) |> DISTINCT _;
+      FOR _ IN emittable__child_exprs(expr_value_mutable) DO
       TRY (mIRChecker__check_expr_sources_for_unhoisted(&rtoc_self_view, _, context, owned_sources.contains?(_)));
       END
-      FOR _ IN expr_value_mutable.body_slots() DO
-      TRY (mIRChecker__check_stmts_for_unhoisted(&rtoc_self_view, _.body()));
+      FOR _ IN emittable__body_slots(expr_value_mutable) DO
+      TRY (mIRChecker__check_stmts_for_unhoisted(&rtoc_self_view, _.body));
       END
       NIL;
     ELSE
