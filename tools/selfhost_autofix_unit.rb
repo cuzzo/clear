@@ -272,14 +272,21 @@ module SelfhostAutofixUnit
     return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
 
     line_no = loc[1].to_i
+    caret_column = caret_offset(output)
     Fix.new(label: 'drop redundant UNWRAP', apply: lambda do |path|
       lines = File.readlines(path)
       i = line_no - 1
       line = lines[i].to_s
-      at = line.index('UNWRAP (') or return false
+      if (at = line.index('UNWRAP ('))
+        close = matching_paren(line, at + 7) or return false
+        lines[i] = line[0...at] + line[(at + 8)...close].to_s + line[(close + 1)..].to_s
+      else
+        # The postfix form: the caret sits on the `?` that asks to unwrap.
+        return false unless caret_column
+        return false unless line[caret_column] == '?'
 
-      close = matching_paren(line, at + 7) or return false
-      lines[i] = line[0...at] + line[(at + 8)...close].to_s + line[(close + 1)..].to_s
+        lines[i] = line[0...caret_column] + line[(caret_column + 1)..].to_s
+      end
       File.write(path, lines.join)
       true
     end)
@@ -401,6 +408,17 @@ module SelfhostAutofixUnit
       File.write(path, lines.join)
       true
     end)
+  end
+
+  # Column the caret points at, in the source line's own coordinates.
+  def caret_offset(output)
+    plain = output.gsub(/\e\[[0-9;]*m/, '').lines
+    idx = plain.index { |l| l =~ /^\s+\d+ \| / } or return nil
+    caret = plain[idx + 1].to_s
+    return nil unless caret.include?('^')
+
+    bar = caret.index('| ') or return nil
+    caret.index('^') - (bar + 2) + plain[idx].index('| ') + 2 - (plain[idx].index('| ') + 2)
   end
 
   # Balanced close for the paren at `open`, ignoring string contents.

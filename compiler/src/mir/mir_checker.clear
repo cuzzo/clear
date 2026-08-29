@@ -2916,7 +2916,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE name: ?String = COPY contract.operands[rtoc_idx]?.name;
-      IF ((name == NIL) OR ((name?).length() == 0)) THEN
+      IF ((name == NIL) OR ((name).length() == 0)) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_OPERAND_MISSING, Name{ StringValue: COPY label }, "${label} has an ownership operand with no tracked binding")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
