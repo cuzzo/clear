@@ -1881,7 +1881,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_STRUCTURAL_RC_COPY, rtoc_node.zig_type, "reference-counted handles must be retained, upgraded, or downgraded; MIR::DeepCopy may not structurally duplicate an Rc/Arc handle")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_STRUCTURAL_RC_COPY, Name{ StringValue: COPY UNWRAP (rtoc_node.zig_type) } "reference-counted handles must be retained, upgraded, or downgraded; MIR::DeepCopy may not structurally duplicate an Rc/Arc handle")));
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -1923,13 +1923,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE node_fact: ?OwnershipConsumptionFact = node.ownership_consumption;
     IF node_fact EXISTS AS rtoc_node_fact THEN
-      IF (rtoc_node_fact.operands |> ANY { MUTABLE rtoc_name = _.name; (!((rtoc_name == NIL)) AND !((UNWRAP (rtoc_name)).empty?())) }) THEN
+      IF (rtoc_node_fact.operands |> ANY { MUTABLE rtoc_name: ?String = _.name; (!((rtoc_name == NIL)) AND !((UNWRAP (rtoc_name)).empty?())) }) THEN
         RETURN TRUE;
       END
     END
     MUTABLE init_fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(init);
     IF init_fact EXISTS AS rtoc_init_fact THEN
-      IF (rtoc_init_fact.operands |> ANY { MUTABLE rtoc_name = _.name; (!((rtoc_name == NIL)) AND !((UNWRAP (rtoc_name)).empty?())) }) THEN
+      IF (rtoc_init_fact.operands |> ANY { MUTABLE rtoc_name: ?String = _.name; (!((rtoc_name == NIL)) AND !((UNWRAP (rtoc_name)).empty?())) }) THEN
         RETURN TRUE;
       END
     END
