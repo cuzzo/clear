@@ -3248,28 +3248,28 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE sink_alloc: ?String@symbol = (IF mIRChecker__allocator_metadata_for(rtoc_self_view, node) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_53 = (mIRChecker__allocator_metadata_for(rtoc_self_view, node));
-    inlineAllocMetadata__sink_alloc(rtoc_local_receiver_53) }
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_53: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(rtoc_self_view, node);
+    inlineAllocMetadata__sink_alloc(UNWRAP (rtoc_local_receiver_53)) }
     ELSE
       NIL
     END);
     IF sink_alloc EXISTS AS sink_alloc_value THEN
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < consumes.length() DO
-      MUTABLE mark = (IF allocs[consumes[rtoc_idx]?] != NIL THEN
-            (allocs[consumes[rtoc_idx]?]).first()
-          ELSE
-            NIL
-          END);
+      MUTABLE rtoc_consumed = UNWRAP (consumes[rtoc_idx]);
+      MUTABLE mark: ?AllocMark = NIL;
+      IF allocs[rtoc_consumed] EXISTS AS rtoc_marks THEN
+        mark = rtoc_marks.first();
+      END
       IF !(mark) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (mark.alloc() == sink_alloc_value) THEN
+      IF ((UNWRAP (mark)).alloc == sink_alloc_value) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY consumes[rtoc_idx]? }, "ownership_contract consumes :${(UNWRAP (mark)).alloc} binding '${consumes[rtoc_idx]?}' into :${sink_alloc_value} sink; owned transfer allocator is incoherent")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY rtoc_consumed }, "ownership_contract consumes :${(UNWRAP (mark)).alloc} binding '${rtoc_consumed}' into :${sink_alloc_value} sink; owned transfer allocator is incoherent")));
     rtoc_idx = rtoc_idx + 1;
       END
     ELSE
@@ -3281,12 +3281,12 @@ PRIVATE FN mIRChecker__ownership_consumption_has_no_owned_operands?(self: MIRChe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fact = node.ownership_consumption();
+    MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
     IF !(fact EXISTS) THEN
       RETURN FALSE;
     END
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_54 = (UNWRAP (fact)).operands;
-    cleanupEntry__none?(rtoc_local_receiver_54, %(operand) -> ((operand.kind() == :owned_binding) AND operand.name())) };
+    cleanupEntry__none?(rtoc_local_receiver_54, %(operand) -> ((operand.kind == :owned_binding) AND operand.name())) };
 }
 END
 PRIVATE FN mIRChecker__ownership_contract_has_no_owned_operands?(self: MIRChecker, node: MIRCheckerOwnershipSurfaceNode) RETURNS Bool
