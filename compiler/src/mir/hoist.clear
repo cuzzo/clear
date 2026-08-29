@@ -159,7 +159,8 @@ PRIVATE FN hoist__collect_stmt_hoists_mut(MUTABLE stmt: Locatable, MUTABLE hoist
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !(TRY (hoist__allocating?(&UNWRAP (rtoc_each_items_6[rtoc_idx]), schema_lookup))) THEN
+      MUTABLE rtoc_hoist_node = UNWRAP (rtoc_each_items_6[rtoc_idx]);
+      IF !(TRY (hoist__allocating?(&rtoc_hoist_node, schema_lookup))) THEN
           RETURN;
       END
       MUTABLE expected_branch_value: ?Type = NIL;
