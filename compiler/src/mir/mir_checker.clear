@@ -2553,17 +2553,19 @@ PRIVATE FN mIRChecker__verify_allocator_metadata_targets_mut(MUTABLE self: MIRCh
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < metadata_nodes.length() DO
-      MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY metadata_nodes[rtoc_idx]? });
+      MUTABLE rtoc_node = UNWRAP (metadata_nodes[rtoc_idx]);
+      MUTABLE rtoc_source = MIRCheckerAllocatorMetadataSource{ Emittable: COPY rtoc_node };
+      MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(rtoc_self_view, rtoc_source);
       IF !(((metadata != NIL) AND !(inlineAllocMetadata__empty?(metadata)))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE target: ?String = mIRChecker__allocator_metadata_target(rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY metadata_nodes[rtoc_idx]? });
+      MUTABLE target: ?String = mIRChecker__allocator_metadata_target(rtoc_self_view, rtoc_source);
       IF ((target != NIL) AND !((target.length() == 0))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_TARGET, Name{ StringValue: COPY mIRChecker__allocator_metadata_label(rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY metadata_nodes[rtoc_idx]? }) }, "${(metadata_nodes[rtoc_idx]?.class()).name()} has allocator metadata ${inlineAllocMetadata__inspect(metadata)} but no target binding; allocator use is not checker-verifiable against binding placement")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_TARGET, Name{ StringValue: COPY mIRChecker__allocator_metadata_label(rtoc_self_view, rtoc_source) }, "${emittable__variant_name(rtoc_node)} has allocator metadata ${inlineAllocMetadata__inspect(metadata)} but no target binding; allocator use is not checker-verifiable against binding placement")));
     rtoc_idx = rtoc_idx + 1;
     END
 }
