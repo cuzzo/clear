@@ -2125,11 +2125,7 @@ PUB FN mIRChecker__check_fsm_structure_mut(structure: ?FsmStructure, source: ?Lo
       RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-CAPTURE-CLEANUP-PRESENT", "capture '${_.name}' has no entry in finalize_cleanups; the heap-dupe at spawn would leak.", source);
     END
     END
-    TRY (mIRChecker__check_fsm_destroy_actions_mut(TRY (fsmStructure__destroy_actions(structure_value_mutable)), finalize_cleanups, IF structure_value_mutable.ctx_id IS_A Int64 THEN
-      structure_value_mutable.ctx_id
-    ELSE
-      NIL
-    END, source));
+    TRY (mIRChecker__check_fsm_destroy_actions_mut(TRY (fsmStructure__destroy_actions(structure_value_mutable)), finalize_cleanups, structure_value_mutable.ctx_id, source));
     MUTABLE cleanup_step_index = {};
     FOR _ IN steps DO
     FOR _ IN _.cleanups DO
