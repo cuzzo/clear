@@ -2092,12 +2092,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        IF ((available.length() == 0) AND (((marks == NIL) OR (UNWRAP (marks)).empty?()))) THEN
+        IF ((available.length() == 0) AND (((marks == NIL) OR (marks).empty?()))) THEN
             &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_WITHOUT_ALLOC, Name{ StringValue: COPY rtoc_let.name }, "owned-result initializer has no MIR::AllocMark; ownership is implicit")));
             rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        MUTABLE idx = available.indexOf(UNWRAP (expected_alloc));
+        MUTABLE idx: ?Int64 = available.indexOf(UNWRAP (expected_alloc));
         IF idx THEN
             &available.remove(UNWRAP (idx));
         ELSE
