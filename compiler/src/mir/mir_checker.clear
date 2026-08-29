@@ -3402,7 +3402,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :FRAME_NO_REWIND, ruby_wrap_optional_String_Name(rtoc_self_view.fn_name), "loop body has iteration-scoped frame allocations but no restoreLoopMark defer (allocations: ${allocations})")));
         END
     ELSE_IF has_restore THEN
-        IF TRY (mIRChecker__body_has_non_iteration_frame_alloc?(rtoc_self_view, (emittable__body(stmt) OR_ELSE List[]))) THEN
+        IF TRY (mIRChecker__body_has_non_iteration_frame_alloc?(rtoc_self_view, NodeRoot{ ArrayValue: (emittable__body(stmt) OR_ELSE List[]) })) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :FRAME_NO_REWIND, ruby_wrap_optional_String_Name(rtoc_self_view.fn_name), "loop restore encloses frame allocations not scoped to one iteration")));
         END
     END
@@ -3436,16 +3436,17 @@ PRIVATE FN mIRChecker__body_has_loop_restore?(self: MIRChecker, stmts: []Emittab
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE found: Bool = FALSE;
-    mIRChecker__each_loop_local_node(rtoc_self_view, NodeRoot{ ArrayValue: COPY stmts }, %(node: Emittable) -> {
-    IF !(node IS_A MIRDeferStmt) THEN
-        RETURN;
+    FOR node IN TRY (mIRChecker__loop_local_nodes(rtoc_self_view, NodeRoot{ ArrayValue: COPY stmts })) DO
+      IF node IS_A MIRDeferStmt AS rtoc_defer THEN
+        IF rtoc_defer.body IS_A Emittable AS rtoc_defer_body THEN
+        IF rtoc_defer_body IS_A MIRMethodCall AS rtoc_call THEN
+          IF (rtoc_call.method == "restoreLoopMark") THEN
+            found = TRUE;
+          END
+        END
+        END
+      END
     END
-    MUTABLE body = node.body();
-    IF (body IS_A MIRMethodCall AND (body.method() == "restoreLoopMark")) THEN
-        found = TRUE;
-    END
-    rubyToClearVoid()
-    });
     RETURN found;
 }
 END
@@ -3472,7 +3473,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(node IS_A AllocMark) THEN
         RETURN;
     END
-    IF !((placement__frame?(node.alloc()) AND (cleanupEntry__scope(node) == :iteration))) THEN
+    IF !((placement__frame?(node.alloc) AND (cleanupEntry__scope(node) == :iteration))) THEN
         RETURN;
     END
     MUTABLE line: ?Int64 = emittable__source_line(node);
@@ -3509,6 +3510,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rubyToClearVoid()
     });
     RETURN found;
+}
+END
+PRIVATE FN mIRChecker__loop_local_nodes(self: MIRChecker, root: ?NodeRoot) RETURNS ![]Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (mIR__nodes_until(root, %(node: Emittable) USE(rtoc_self_view) -> mIRChecker__loop_local_boundary?(rtoc_self_view, node)));
 }
 END
 PRIVATE FN mIRChecker__each_loop_local_node(self: MIRChecker, root: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void
