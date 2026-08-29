@@ -1996,7 +1996,7 @@ PUB FN mIRChecker__stdlib_owned_return?(self: MIRChecker, node: Emittable) RETUR
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.stdlib_def());
+    MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(node);
     IF sig EXISTS AS sig_value THEN
       MUTABLE sig_value_mutable = COPY sig_value;
       MUTABLE ret_type = functionSignature__return_type(sig_value_mutable);
