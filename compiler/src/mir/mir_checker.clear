@@ -2690,7 +2690,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_each_items_52 = ([InlineStoredAllocCheck{ label: :key_alloc, alloc: COPY inlineAllocMetadata__key_alloc(UNWRAP (alloc_metadata)) }, InlineStoredAllocCheck{ label: :val_alloc, alloc: COPY inlineAllocMetadata__value_alloc(UNWRAP (alloc_metadata)) }]);
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < rtoc_each_items_52.length() DO
-          MUTABLE stored_alloc = COPY rtoc_each_items_52[rtoc_idx_2].alloc;
+          MUTABLE stored_alloc: ?String@symbol = COPY (rtoc_each_items_52[rtoc_idx_2]).alloc;
           IF !(stored_alloc) THEN
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
