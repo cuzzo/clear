@@ -3469,21 +3469,18 @@ PRIVATE FN mIRChecker__iteration_frame_alloc_summary(self: MIRChecker, stmts: ?N
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE allocations: []String = ( { MUTABLE rtoc_empty_list_56: []String = List[]; rtoc_empty_list_56 } );
-    mIRChecker__each_loop_local_node(rtoc_self_view, stmts, %(node: Emittable) USE(MUTABLE allocations) -> {
-    IF !(node IS_A AllocMark) THEN
-        RETURN;
+    FOR node IN TRY (mIRChecker__loop_local_nodes(rtoc_self_view, stmts)) DO
+      IF node IS_A AllocMark AS rtoc_mark THEN
+        IF (placement__frame?(rtoc_mark.alloc) AND ((rtoc_mark.scope OR_ELSE :none) == :iteration)) THEN
+          MUTABLE line: ?Int64 = rtoc_mark.source_line;
+          IF line EXISTS AS rtoc_line THEN
+            &allocations.append("${rtoc_mark.name}@${rtoc_line.toString()}");
+          ELSE
+            &allocations.append(COPY rtoc_mark.name);
+          END
+        END
+      END
     END
-    IF !((placement__frame?(node.alloc) AND (cleanupEntry__scope(node) == :iteration))) THEN
-        RETURN;
-    END
-    MUTABLE line: ?Int64 = emittable__source_line(node);
-    &allocations.append((IF line THEN
-        "${node.name()}@${line}"
-      ELSE
-        CAST(node.name() AS String)
-      END));
-    rubyToClearVoid()
-    });
     RETURN (CAST((allocations |> DISTINCT _) AS []String)).join(", ");
 }
 END
@@ -3496,7 +3493,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(node IS_A AllocMark) THEN
         RETURN;
     END
-    MUTABLE alloc = node.alloc();
+    MUTABLE alloc = node.alloc;
     IF !(placement__frame?(alloc)) THEN
         RETURN;
     END
