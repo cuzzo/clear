@@ -2112,9 +2112,9 @@ END
 PUB FN mIRChecker__check_fsm_structure_mut(structure: ?FsmStructure, source: ?Locatable = NIL) RETURNS !Void ->
   IF structure EXISTS AS structure_value THEN
     MUTABLE structure_value_mutable = COPY structure_value;
-    MUTABLE captures: []FsmCaptureFact = CAST((CAST(structure_value_mutable.captures AS ?[]FsmCaptureFact) OR_ELSE List[]) AS []FsmCaptureFact);
-    MUTABLE finalize_cleanups = (structure_value_mutable.finalize_cleanups OR_ELSE List[]);
-    MUTABLE steps: []FsmStepFact = CAST((CAST(structure_value_mutable.steps AS ?[]FsmStepFact) OR_ELSE List[]) AS []FsmStepFact);
+    MUTABLE captures: []FsmCaptureFact = COPY structure_value_mutable.captures;
+    MUTABLE finalize_cleanups: []String = COPY structure_value_mutable.finalize_cleanups;
+    MUTABLE steps: []FsmStepFact = COPY structure_value_mutable.steps;
     FOR _ IN captures DO
     IF !((KEEP _.cleanup_at == :finalize)) THEN
       RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-CAPTURE-FINALIZE", "capture '${_.name}' has cleanup_at=${compilerInspectValue()}; captures may be read by any step and MUST cleanup at FSM finalize. Cleanup placed in an earlier step fires before later steps run -> UAF.", source);

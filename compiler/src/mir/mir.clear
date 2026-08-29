@@ -3482,12 +3482,12 @@ FN streamSpawn__stmt?(self: StreamSpawn) RETURNS Bool ->
 END
 PUB UNION FsmDestroyAction { FsmDestroyCleanup: FsmDestroyCleanup, FsmDestroyStmt: FsmDestroyStmt, FsmDestroyLockRelease: FsmDestroyLockRelease }
 PUB STRUCT FsmStructure {
-  captures: Any@multiowned,
-  state_fields: Any@multiowned,
-  steps: Any@multiowned,
-  finalize_cleanups: Any@multiowned,
+  captures: []FsmCaptureFact,
+  state_fields: []FsmStateFieldFact,
+  steps: []FsmStepFact,
+  finalize_cleanups: []String,
   ctx_id: Int64,
-  result_aliases_finalized: Any@multiowned,
+  result_aliases_finalized: ?String,
   facts: FsmStructureFacts,
   lowered_node_id: ?LoweredNodeId,
   owned_result_required: ?Bool,
