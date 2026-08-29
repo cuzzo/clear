@@ -3285,8 +3285,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(fact EXISTS) THEN
       RETURN FALSE;
     END
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_54 = (UNWRAP (fact)).operands;
-    cleanupEntry__none?(rtoc_local_receiver_54, %(operand) -> ((operand.kind == :owned_binding) AND operand.name())) };
+    RETURN !((UNWRAP (fact)).operands |> ANY (((_.kind == :owned_binding) AND (_.name != NIL))));
 }
 END
 PRIVATE FN mIRChecker__ownership_contract_has_no_owned_operands?(self: MIRChecker, node: MIRCheckerOwnershipSurfaceNode) RETURNS Bool
