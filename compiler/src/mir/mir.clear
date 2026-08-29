@@ -14186,7 +14186,7 @@ PUB STRUCT RegistryCall {
   suppress_try: Bool
 }
 
-FN registryCall__stdlib_def(self: RegistryCall) RETURNS FunctionSignature@multiowned ->
+PUB FN registryCall__stdlib_def(self: RegistryCall) RETURNS FunctionSignature@multiowned ->
   RETURN KEEP self.entry;
 END
 FN registryCall__child_exprs(self: RegistryCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -14297,7 +14297,7 @@ PUB STRUCT IndexedStore {
   value_type: ?Type
 }
 
-FN indexedStore__stdlib_def(self: IndexedStore) RETURNS FunctionSignature@multiowned ->
+PUB FN indexedStore__stdlib_def(self: IndexedStore) RETURNS FunctionSignature@multiowned ->
   RETURN KEEP self.entry;
 END
 FN indexedStore__child_exprs(self: IndexedStore) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -14311,7 +14311,7 @@ FN indexedStore__has_alloc_metadata?(self: IndexedStore) RETURNS Bool ->
   RETURN !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_222 = (KEEP self.allocs);
   inlineAllocMetadata__empty?(rtoc_local_receiver_222) });
 END
-FN indexedStore__mutating_receiver_allocator_op?(self: IndexedStore) RETURNS !Bool ->
+PUB FN indexedStore__mutating_receiver_allocator_op?(self: IndexedStore) RETURNS !Bool ->
   RETURN (indexedStore__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_223 = (KEEP self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_223)) });
 END

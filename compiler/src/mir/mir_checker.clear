@@ -3737,25 +3737,6 @@ PUB FN mIRChecker__new(fn_name: ?String = NIL, schema_lookup: ?FN(String@symbol)
   mIRChecker__initialize(&self, fn_name, schema_lookup);
   RETURN self @multiowned;
 END
-FN castBodyToEmittable(value: Body) RETURNS Emittable ->
-  PARTIAL MATCH value START
-    Body.MIRProgram AS cast_payload -> RETURN Emittable{ MIRProgram: COPY cast_payload };,
-    Body.MIRStructDef AS cast_payload -> RETURN Emittable{ MIRStructDef: COPY cast_payload };,
-    Body.MIRDestructureTarget AS cast_payload -> RETURN Emittable{ MIRDestructureTarget: COPY cast_payload };,
-    Body.MIRUnaryOp AS cast_payload -> RETURN Emittable{ MIRUnaryOp: COPY cast_payload };,
-    Body.MIRMethodCall AS cast_payload -> RETURN Emittable{ MIRMethodCall: COPY cast_payload };,
-    Body.MIRCast AS cast_payload -> RETURN Emittable{ MIRCast: COPY cast_payload };,
-    Body.MIRDeferStmt AS cast_payload -> RETURN Emittable{ MIRDeferStmt: COPY cast_payload };,
-    Body.MIROptionalUnwrap AS cast_payload -> RETURN Emittable{ MIROptionalUnwrap: COPY cast_payload };,
-    Body.MIRBlockExpr AS cast_payload -> RETURN Emittable{ MIRBlockExpr: COPY cast_payload };,
-    Body.MIRRangeLit AS cast_payload -> RETURN Emittable{ MIRRangeLit: COPY cast_payload };,
-    Body.MIREnumDef AS cast_payload -> RETURN Emittable{ MIREnumDef: COPY cast_payload };,
-    Body.MIRDoBlock AS cast_payload -> RETURN Emittable{ MIRDoBlock: COPY cast_payload };,
-    Body.MIRBgBlock AS cast_payload -> RETURN Emittable{ MIRBgBlock: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to Emittable");
-  END
-  panic("Invalid cast to Emittable");
-END
 FN castEmittableToMIRCheckerCleanup(value: Emittable) RETURNS MIRCheckerCleanup ->
   PARTIAL MATCH value START
     Emittable.Cleanup AS cast_payload -> RETURN MIRCheckerCleanup{ Cleanup: COPY cast_payload };,
