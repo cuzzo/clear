@@ -3319,14 +3319,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(node);
-    IF !(sig) THEN
-      RETURN FALSE;
+    IF sig EXISTS AS rtoc_sig THEN
+      IF (TRY (functionSignature__params(rtoc_sig))) |> ANY (_.takes OR_ELSE FALSE) THEN
+        RETURN TRUE;
+      END
+      MUTABLE rtoc_sig_mutable = COPY rtoc_sig;
+      RETURN TRY (functionSignature__takes_ownership?(&rtoc_sig_mutable));
     END
-    MUTABLE params = emittable__params(sig);
-    IF (respondsTo?(params, "any?") AND (params |> ANY (respondsTo?(_, "takes") AND _.takes()))) THEN
-      RETURN TRUE;
-    END
-    RETURN sig.takes_ownership?();
+    RETURN FALSE;
 }
 END
 PRIVATE FN mIRChecker__ownership_contract_consumes(self: MIRChecker, contract: OwnershipContract) RETURNS ![]String
@@ -3336,7 +3336,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (ownershipContract__owned_operand_names(contract));
 }
 END
-PRIVATE FN mIRChecker__ownership_contract_present?(self: MIRChecker, contract: OwnershipContract) RETURNS Bool
+PRIVATE FN mIRChecker__ownership_contract_present?(self: MIRChecker, MUTABLE contract: OwnershipContract) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3349,7 +3349,7 @@ PRIVATE FN mIRChecker__ownership_node_name(self: MIRChecker, node: Emittable) RE
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (node IS_A MIRCast OR node IS_A TryExpr) THEN
-      RETURN mIRChecker__ownership_node_name(rtoc_self_view, node.expr());
+      RETURN mIRChecker__ownership_node_name(rtoc_self_view, emittable__expr(node));
     END
     MUTABLE target = PARTIAL MATCH node START
       Emittable.RegistryCall AS registry_call -> registry_call.target_var,
