@@ -273,7 +273,7 @@ PRIVATE FN pipelineHost__build_materializer_host(MUTABLE self: PipelineHost) RET
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN runtimeHost__new(%(node) USE(rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, node)), %(value, name, fallback_alloc, type_info, ast_node, context, known_allocating) USE(MUTABLE fact, rtoc_self_view) -> {
+    RETURN pipelineMaterializerRuntimeHost__new(%(node) USE(rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, node)), %(value, name, fallback_alloc, type_info, ast_node, context, known_allocating) USE(MUTABLE fact, rtoc_self_view) -> {
     MUTABLE fact: ?PipelineBridgeAllocationFact = TRY (pipelineLoweringBridge__pipeline_alloc_mark_fact(rtoc_self_view.lowering_bridge, value, name, fallback_alloc, type_info, ast_node, context, known_allocating));
     IF fact THEN
       RETURN AllocationFact{ alloc: COPY fact.alloc, mark: COPY fact.mark };
