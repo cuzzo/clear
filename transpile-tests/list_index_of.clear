@@ -1,0 +1,16 @@
+# Ruby's Array#index / Rust's iter().position(): the position of the first
+# equal element, or NIL. A pure read -- the list keeps owning its elements.
+FN main() RETURNS Void ->
+  allocs: []String@symbol = [:heap, :frame, :heap];
+  ASSERT allocs.indexOf(:frame) == 1, "finds a symbol element";
+  ASSERT allocs.indexOf(:heap) == 0, "duplicates resolve to the earliest";
+  ASSERT allocs.indexOf(:arena) == NIL, "a missing element is NIL";
+
+  nums = [7_i64, 3_i64, 9_i64];
+  ASSERT nums.indexOf(9_i64) == 2, "finds a numeric element";
+
+  names = ["heap", "frame"];
+  ASSERT names.indexOf("frame") == 1, "strings compare by content";
+  ASSERT names.length() == 2, "the searched list is left intact";
+  ASSERT names[1] == "frame", "and still owns its elements";
+END

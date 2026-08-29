@@ -602,6 +602,16 @@ STD_LIB = T.let({
       borrows: :all,
       is_method: true,
     },
+    # Ruby's Array#index / Rust's iter().position(). Pure read, so it
+    # borrows both operands and allocates nothing.
+    {
+      args: [:"Any[]", :Any],
+      return: :"?Int64",
+      zig: "CheatLib.sliceIndexOf({0}, {1})",
+      bc: true,
+      borrows: :all,
+      is_method: true,
+    },
   ],
 
   # replace("hello world", "world", "CLEAR") -> "hello CLEAR"

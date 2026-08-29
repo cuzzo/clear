@@ -1077,3 +1077,24 @@ test "BG pattern: by-value capture is isolated from post-spawn mutation of outer
     // Must be 5.0 * 2.0 = 10.0 (snapshot at spawn), NOT 99.0 * 2.0.
     try std.testing.expectEqual(@as(f64, 10.0), result.value);
 }
+
+test "sliceIndexOf finds the first match and reports absence" {
+    const nums = [_]i64{ 7, 3, 9, 3 };
+    try std.testing.expectEqual(@as(?i64, 0), CheatLib.sliceIndexOf(nums[0..], @as(i64, 7)));
+    // Duplicates resolve to the earliest position, the way Array#index does.
+    try std.testing.expectEqual(@as(?i64, 1), CheatLib.sliceIndexOf(nums[0..], @as(i64, 3)));
+    try std.testing.expectEqual(@as(?i64, null), CheatLib.sliceIndexOf(nums[0..], @as(i64, 42)));
+
+    // Strings compare by content, matching sliceContains.
+    const words = [_][]const u8{ "heap", "frame" };
+    try std.testing.expectEqual(@as(?i64, 1), CheatLib.sliceIndexOf(words[0..], "frame"));
+    try std.testing.expectEqual(@as(?i64, null), CheatLib.sliceIndexOf(words[0..], "arena"));
+
+    // An ArrayList receiver goes through the .items branch.
+    var list: std.ArrayListUnmanaged(i64) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try list.append(std.testing.allocator, 5);
+    try list.append(std.testing.allocator, 6);
+    try std.testing.expectEqual(@as(?i64, 1), CheatLib.sliceIndexOf(list, @as(i64, 6)));
+    try std.testing.expectEqual(@as(?i64, null), CheatLib.sliceIndexOf(list, @as(i64, 4)));
+}

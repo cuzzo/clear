@@ -1057,6 +1057,18 @@ pub const CheatLib = struct {
         return false;
     }
 
+    // Ruby's Array#index / Rust's iter().position(): the position of the
+    // first equal element, or null. Pure read; borrows both operands.
+    pub fn sliceIndexOf(container: anytype, item: anytype) ?i64 {
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
+        const slice = if (@hasField(@TypeOf(c), "items")) c.items else c;
+        for (slice, 0..) |elem, i| {
+            if (eql(elem, item)) return @intCast(i);
+        }
+        return null;
+    }
+
     // Byte-level character access: returns a single-byte slice ([]const u8).
     // Used by CLEAR's String@raw buf[i] indexing.
     pub noinline fn charAt(str: []const u8, index: anytype) []const u8 {
