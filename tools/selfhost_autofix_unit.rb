@@ -316,7 +316,15 @@ module SelfhostAutofixUnit
   # the optional. The caret picks out which interpolation, so the only edit is
   # to unwrap that one.
   def interpolated_optional_fix(output)
-    return nil unless output.include?('requires String operands, got ?')
+    got = output[/requires String operands, got ([\w@?]+)/, 1] or return nil
+    # How the interpolation has to be spelled for each thing Ruby's #{} took
+    # for granted.
+    render = case got
+             when /\A\?String\z/ then ->(e) { "UNWRAP (#{e})" }
+             when 'Type' then ->(e) { "type__to_s(#{e})" }
+             when /\A\??(Int64|Float64|Bool)\z/ then ->(e) { "#{e}.toString()" }
+             end
+    return nil unless render
     plain = output.gsub(/\e\[[0-9;]*m/, '')
     lines = plain.lines
     idx = lines.index { |l| l =~ /^\s+\d+ \| / } or return nil
@@ -328,7 +336,7 @@ module SelfhostAutofixUnit
     caret_bar = caret.index('| ') or return nil
     column = caret.index('^') - (caret_bar + 2)
     line_no = src[/^\s+(\d+) \|/, 1].to_i
-    Fix.new(label: 'unwrap the interpolated optional', apply: lambda do |path|
+    Fix.new(label: "render the interpolated #{got}", apply: lambda do |path|
       file = File.readlines(path)
       i = line_no - 1
       text = file[i].to_s
@@ -339,9 +347,12 @@ module SelfhostAutofixUnit
       open_brace = text.rindex('${', pos) or return false
       close = text.index('}', open_brace) or return false
       inner = text[(open_brace + 2)...close]
-      return false if inner.include?('UNWRAP')
+      # Idempotence: only skip when this very rendering is already there.
+      return false if render.call(inner) == "#{inner}" || inner == render.call(inner)
+      return false if inner.start_with?('UNWRAP (') && got.start_with?('?String')
+      return false if inner.start_with?('type__to_s(')
 
-      file[i] = text[0...open_brace] + "${UNWRAP (#{inner})}" + text[(close + 1)..].to_s
+      file[i] = text[0...open_brace] + "${#{render.call(inner)}}" + text[(close + 1)..].to_s
       File.write(path, file.join)
       true
     end)

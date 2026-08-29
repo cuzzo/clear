@@ -2762,7 +2762,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ti THEN
         MUTABLE no_caps = (((!(type__any_sync?(ti)) AND !(type__multiowned?(ti))) AND !(type__shared?(ti))) AND !(TRY (type__heap_ptr?(ti))));
         IF (no_caps AND ((type__primitive?(ti) OR type__id_handle?(ti)))) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :COPY_CLEANUP, Name{ StringValue: COPY rtoc_key }, "cleanup emitted for value type ${ti} (primitive or Id<T>) that can never own heap memory -- needs_explicit_cleanup? or visit_CopyNode missed the gate")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :COPY_CLEANUP, Name{ StringValue: COPY rtoc_key }, "cleanup emitted for value type ${type__to_s(ti)} (primitive or Id<T>) that can never own heap memory -- needs_explicit_cleanup? or visit_CopyNode missed the gate")));
         END
     END
     END
@@ -2775,11 +2775,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < transfers.length() DO
-      IF allocs.contains?(transfers[rtoc_idx]) THEN
+      IF allocs.contains?(UNWRAP (transfers[rtoc_idx])) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :TRANSFER_WITHOUT_ALLOC, transfers[rtoc_idx], "MIR::TransferMark present but no MIR::AllocMark (transfer event missing allocation source)")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :TRANSFER_WITHOUT_ALLOC, Name{ StringValue: COPY UNWRAP (transfers[rtoc_idx]) } "MIR::TransferMark present but no MIR::AllocMark (transfer event missing allocation source)")));
     rtoc_idx = rtoc_idx + 1;
     END
     FOR rtoc_key IN allocs.keys() DO
@@ -2820,7 +2820,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(required_mark) THEN
         CONTINUE;
     END
-    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :CLEANUP_REQUIRED_WITHOUT_FINALIZER, Name{ StringValue: COPY rtoc_key }, "AllocMark type ${required_mark.type_info} requires cleanup, but no Cleanup, ErrCleanup, ErrDeferStmt(DestroyPtr), or TransferMark closes the ownership path")));
+    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :CLEANUP_REQUIRED_WITHOUT_FINALIZER, Name{ StringValue: COPY rtoc_key }, "AllocMark type ${type__to_s((UNWRAP (required_mark)).type_info)} requires cleanup, but no Cleanup, ErrCleanup, ErrDeferStmt(DestroyPtr), or TransferMark closes the ownership path")));
     END
     NIL;
 }
@@ -2871,23 +2871,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MIR_CALL_NO_CONTRACT, Name{ StringValue: COPY label }, "${node_kind} has no typed callable/effect contract; argument ownership is unverifiable")));
       RETURN;
     END
-    MUTABLE sig = COPY contract.signature;
+    MUTABLE sig = COPY (UNWRAP (contract)).signature;
     IF !(TRUE) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MIR_CALL_NO_CONTRACT, Name{ StringValue: COPY label }, "${node_kind} callable contract does not carry a FunctionSignature")));
       RETURN;
     END
-    MUTABLE ownership = COPY contract.ownership_contract;
+    MUTABLE ownership = COPY (UNWRAP (contract)).ownership_contract;
     IF !(TRUE) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY label }, "${node_kind} callable contract has no typed ownership contract")));
       RETURN;
     END
-    IF ((TRY (functionSignature__params(sig))).length() < contract.checked_arg_count) THEN
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MIR_CALL_NO_CONTRACT, Name{ StringValue: COPY label }, "${node_kind} callable contract covers ${(TRY (functionSignature__params(sig))).length()} params but callsite has ${contract.checked_arg_count.toString()} args")));
+    IF ((TRY (functionSignature__params(sig))).length() < (UNWRAP (contract)).checked_arg_count) THEN
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MIR_CALL_NO_CONTRACT, Name{ StringValue: COPY label }, "${node_kind} callable contract covers ${(TRY (functionSignature__params(sig))).length().toString()} params but callsite has ${(UNWRAP (contract)).checked_arg_count.toString()} args")));
     END
-    IF (TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, contract.checked_arg_count)) AND !(ownership.covers_consuming_params)) THEN
+    IF (TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, (UNWRAP (contract)).checked_arg_count)) AND !(ownership.covers_consuming_params)) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY label }, "${node_kind} target declares TAKES/consuming params but concrete consumed bindings are absent")));
     END
-    TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, ownership, "${node_kind} ownership_contract", transfers, TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, contract.checked_arg_count))));
+    TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, ownership, "${node_kind} ownership_contract", transfers, TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, (UNWRAP (contract)).checked_arg_count))));
     TRY (mIRChecker__check_consumed_allocators_match_sink_mut(&rtoc_self_view, MIRCheckerAllocatorMetadataSource{ CallableContractMultiowned: COPY UNWRAP (contract) }, TRY (ownershipContract__owned_operand_names(ownership)), allocs));
     NIL;
 }
@@ -2910,7 +2910,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF contract.operands[rtoc_idx]?.borrowed THEN
           IF require_operands THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, Name{ StringValue: COPY (contract.operands[rtoc_idx]?.name OR_ELSE label) }, "${label} tries to consume borrowed operand from ${contract.operands[rtoc_idx]?.source}")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, Name{ StringValue: COPY (contract.operands[rtoc_idx]?.name OR_ELSE label) }, "${label} tries to consume borrowed operand from ${UNWRAP (contract.operands[rtoc_idx]?.source)}")));
           END
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
