@@ -12568,6 +12568,43 @@ FN mIR__collect_nodes_inner(root: ?NodeRoot, stop_at_block_expr: Bool) RETURNS !
   END
   RETURN out;
 END
+# Collecting walk that honours a stop predicate, the counterpart of
+# each_node_until. Callers that record into their own state need the nodes
+# back rather than a callback, for the reason mIR__nodes gives above.
+PUB FN mIR__nodes_until(root: ?NodeRoot, stop: FN(Emittable) -> Bool) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  RETURN TRY (mIR__collect_nodes_until_inner(root, stop));
+END
+FN mIR__collect_nodes_until_inner(root: ?NodeRoot, stop: FN(Emittable) -> Bool) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE out: []Emittable = List[];
+  IF root EXISTS AS root_value THEN
+    IF root_value IS_A []Emittable AS array THEN
+      FOR _ IN array DO
+        out = (out + TRY (mIR__collect_nodes_until_inner(NodeRoot{ Emittable: COPY _ }, stop)));
+      END
+      RETURN out;
+    END
+    MUTABLE node: ?Emittable = NIL;
+    IF root_value IS_A Emittable AS root_node THEN
+      node = COPY root_node;
+    END
+    IF node == NIL THEN
+      RETURN out;
+    END
+    MUTABLE node_value = COPY UNWRAP (node);
+    &out.append(COPY node_value);
+    # The stopping node is reported, but nothing beneath it is.
+    IF stop(node_value) THEN
+      RETURN out;
+    END
+    FOR _ IN TRY (emittable__child_exprs(node_value)) DO
+      out = (out + TRY (mIR__collect_nodes_until_inner(NodeRoot{ Emittable: COPY _ }, stop)));
+    END
+    FOR _ IN TRY (emittable__body_slots(node_value)) DO
+      out = (out + TRY (mIR__collect_nodes_until_inner(NodeRoot{ ArrayValue: COPY _.body }, stop)));
+    END
+  END
+  RETURN out;
+END
 PUB FN mIR__each_surface_node(root: ?NodeRoot, blk: FN(Emittable) -> Void) RETURNS !Void ->
   TRY (mIR__each_surface_node_inner(UNWRAP (root), blk));
 END

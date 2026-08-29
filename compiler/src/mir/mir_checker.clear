@@ -3391,9 +3391,9 @@ PRIVATE FN mIRChecker__verify_frame_rewind_mut(MUTABLE self: MIRChecker, body: [
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    mIRChecker__each_frame_rewind_node(rtoc_self_view, NodeRoot{ ArrayValue: COPY body }, %(stmt: Emittable) USE(rtoc_self_view) -> {
+    FOR stmt IN TRY (mIRChecker__frame_rewind_nodes(rtoc_self_view, NodeRoot{ ArrayValue: COPY body })) DO
     IF !((stmt IS_A WhileStmt OR stmt IS_A ForStmt)) THEN
-        RETURN;
+        CONTINUE;
     END
     MUTABLE has_restore = TRY (mIRChecker__body_has_loop_restore?(rtoc_self_view, (emittable__body(stmt) OR_ELSE List[])));
     IF (!(emittable__tight(stmt) OR_ELSE FALSE) AND !(has_restore)) THEN
@@ -3402,12 +3402,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :FRAME_NO_REWIND, ruby_wrap_optional_String_Name(rtoc_self_view.fn_name), "loop body has iteration-scoped frame allocations but no restoreLoopMark defer (allocations: ${allocations})")));
         END
     ELSE_IF has_restore THEN
-        IF TRY (mIRChecker__body_has_non_iteration_frame_alloc?(rtoc_self_view, stmt.body())) THEN
+        IF TRY (mIRChecker__body_has_non_iteration_frame_alloc?(rtoc_self_view, (emittable__body(stmt) OR_ELSE List[]))) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :FRAME_NO_REWIND, ruby_wrap_optional_String_Name(rtoc_self_view.fn_name), "loop restore encloses frame allocations not scoped to one iteration")));
         END
     END
-    rubyToClearVoid()
-    });
+    END
+}
+END
+PRIVATE FN mIRChecker__frame_rewind_nodes(self: MIRChecker, root: ?NodeRoot) RETURNS ![]Emittable
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN TRY (mIR__nodes_until(root, %(node: Emittable) USE(rtoc_self_view) -> mIRChecker__frame_rewind_boundary?(rtoc_self_view, node)));
 }
 END
 PRIVATE FN mIRChecker__each_frame_rewind_node(self: MIRChecker, root: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void
