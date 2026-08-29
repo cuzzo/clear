@@ -2680,7 +2680,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE container_alloc = (UNWRAP (allocs[UNWRAP (target)])).first().alloc();
+      MUTABLE container_alloc = (UNWRAP ((UNWRAP (allocs[UNWRAP (target)])).first())).alloc;
       IF inlineAllocMetadata__primary(alloc_metadata) THEN
           MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(alloc_metadata);
           IF (op_alloc != container_alloc) THEN
