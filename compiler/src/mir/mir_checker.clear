@@ -2652,7 +2652,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     acc
     };
     IF rtoc_self_view.captured_names EXISTS AS captured_names_value THEN
-      param_names = (param_names BIT_OR captured_names_value);
+      &param_names.merge(captured_names_value);
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < metadata_nodes.length() DO
