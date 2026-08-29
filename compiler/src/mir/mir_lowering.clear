@@ -3300,7 +3300,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
       RETURN TRUE;
     END
-    IF !(respondsTo?(node, "stdlib_def")) THEN
+    IF !((emittable__stdlib_def(node) != NIL)) THEN
       RETURN FALSE;
     END
     MUTABLE sig = node.stdlib_def();
@@ -7262,11 +7262,11 @@ PRIVATE FN mIRLowering__mir_explicit_result_type(self: MIRLowering, mir: Emittab
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE raw_type =   IF (respondsTo?(mir, "result_type") AND mir.result_type()) THEN
+    MUTABLE raw_type =   IF ((emittable__result_type(mir) != NIL) AND mir.result_type()) THEN
       mir.result_type()
     ELSE_IF (respondsTo?(mir, "return_type") AND mir.return_type()) THEN
       mir.return_type()
-    ELSE_IF respondsTo?(mir, "callable_contract") THEN
+    ELSE_IF (emittable__callable_contract(mir) != NIL) THEN
       (IF mir.callable_contract() != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_256 = (mir.callable_contract()).signature;
     functionSignature__return_type(rtoc_local_receiver_256) }
@@ -7530,7 +7530,7 @@ PRIVATE FN mIRLowering__normalize_stmt_child_exprs_mut(self: MIRLowering, stmt: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE prefix: []Emittable = ( { MUTABLE rtoc_empty_list_267: []Emittable = List[]; rtoc_empty_list_267 } );
-    IF !(respondsTo?(stmt, "child_exprs")) THEN
+    IF !((emittable__child_exprs(stmt) != NIL)) THEN
       RETURN prefix;
     END
     MUTABLE rtoc_each_items_268 = stmt.child_exprs();
@@ -7825,7 +7825,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF old_child.equal?(new_child) THEN
       RETURN;
     END
-    IF !((respondsTo?(parent, "mir?") AND parent.mir?())) THEN
+    IF !(((emittable__mir?(parent) != NIL) AND parent.mir?())) THEN
       RETURN;
     END
     IF !(respondsTo?(parent.class(), "members")) THEN
@@ -10073,7 +10073,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF node.zig_pattern EXISTS AS zig_pattern_value THEN
       MUTABLE zig_pattern_value_mutable = COPY zig_pattern_value;
-      IF (((node.object IS_A OptionalUnwrap AND node.object.safe_navigation?())) OR ((respondsTo?(node.object, "safe_nav_chain") AND (node.object.safe_nav_chain == TRUE)))) THEN
+      IF (((node.object IS_A OptionalUnwrap AND node.object.safe_navigation?())) OR (((locatable__safe_nav_chain(node.object) != NIL) AND (node.object.safe_nav_chain == TRUE)))) THEN
         RETURN Emittable{ IfOptional: COPY TRY (mIRLowering__lower_safe_nav_method_call(&rtoc_self_view, &node)) };
       END
       RETURN TRY (mIRLowering__lower_intrinsic(&rtoc_self_view, Node{ MethodCall: COPY node }));
@@ -14848,7 +14848,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(type__any?(value_payload)) THEN
       RETURN value_payload;
     END
-    MUTABLE error_union = IF respondsTo?(node.left, "error_union_type") THEN
+    MUTABLE error_union = IF (locatable__error_union_type(node.left) != NIL) THEN
       node.left.error_union_type
     ELSE
       NIL
@@ -18405,7 +18405,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF init IS_A Call AS call THEN
       RETURN FALSE;
     END
-    IF !(respondsTo?(init, "stdlib_def")) THEN
+    IF !((emittable__stdlib_def(init) != NIL)) THEN
       RETURN FALSE;
     END
     MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(init.stdlib_def());

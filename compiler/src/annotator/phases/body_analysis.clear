@@ -109,3 +109,13 @@ END
 # Ruby module Annotator::Phases::BodyAnalysis
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
+
+# Ruby asks `respond_to?(:can_smash_token)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here.
+PUB FN asyncValidationNode__can_smash_token(value: AsyncValidationNode) RETURNS ?Token ->
+  PARTIAL MATCH value START
+    AsyncValidationNode.BgBlock AS item -> RETURN COPY item.can_smash_token;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

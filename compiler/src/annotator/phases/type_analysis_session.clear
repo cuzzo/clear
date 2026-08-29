@@ -1741,12 +1741,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF ((pt != NIL) AND !(pt IS_A Type)) THEN
             pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(pt))));
           END
-          MUTABLE param_admits_shared = ((pt != NIL) AND (IF respondsTo?(pt, "shared?") THEN
+          MUTABLE param_admits_shared = ((pt != NIL) AND (IF (typeTypeInput__shared?(pt) != NIL) THEN
             type__shared?(pt)
           ELSE
             FALSE
           END));
-          MUTABLE param_admits_multi = ((pt != NIL) AND (IF respondsTo?(pt, "multiowned?") THEN
+          MUTABLE param_admits_multi = ((pt != NIL) AND (IF (typeTypeInput__multiowned?(pt) != NIL) THEN
             pt.multiowned?()
           ELSE
             FALSE
@@ -2482,7 +2482,7 @@ PRIVATE FN typeAnalysisSession__emit_can_smash_unsupported_error_mut(self: TypeA
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fix = NIL;
-    MUTABLE tok = IF respondsTo?(node, "can_smash_token") THEN
+    MUTABLE tok = IF (asyncValidationNode__can_smash_token(node) != NIL) THEN
       node.can_smash_token
     ELSE
       NIL
@@ -10403,7 +10403,7 @@ PRIVATE FN typeAnalysisSession__resolve_collection_method(MUTABLE self: TypeAnal
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE obj_type = TRY (aST__full_type_mut(node.object));
-    MUTABLE implicit_safe_nav = ((obj_type.optional?() AND respondsTo?(node.object, "safe_nav_chain")) AND (node.object.safe_nav_chain == TRUE));
+    MUTABLE implicit_safe_nav = ((obj_type.optional?() AND (locatable__safe_nav_chain(node.object) != NIL)) AND (node.object.safe_nav_chain == TRUE));
     IF implicit_safe_nav THEN
       obj_type = TRY (type__wrapped_type(obj_type));
     END
@@ -12760,7 +12760,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN FALSE;
       END
       MUTABLE receiver_type = TRY (aST__full_type_mut(node.object));
-      MUTABLE implicit_safe_nav = ((receiver_type.optional?() AND respondsTo?(node.object, "safe_nav_chain")) AND (node.object.safe_nav_chain == TRUE));
+      MUTABLE implicit_safe_nav = ((receiver_type.optional?() AND (locatable__safe_nav_chain(node.object) != NIL)) AND (node.object.safe_nav_chain == TRUE));
       MUTABLE resolution_receiver = COPY node.object;
       IF implicit_safe_nav THEN
         resolution_receiver = COPY node.object;
@@ -15869,7 +15869,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.target));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.index));
     MUTABLE target_type_info = TRY (aST__full_type_mut(node.target));
-    MUTABLE implicit_safe_nav = ((target_type_info.optional?() AND respondsTo?(node.target, "safe_nav_chain")) AND (node.target.safe_nav_chain == TRUE));
+    MUTABLE implicit_safe_nav = ((target_type_info.optional?() AND (locatable__safe_nav_chain(node.target) != NIL)) AND (node.target.safe_nav_chain == TRUE));
     IF implicit_safe_nav THEN
       target_type_info = TRY (type__wrapped_type(target_type_info));
     END
@@ -15986,7 +15986,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :DIRECT_VIEW_ACCESS_REQUIRES_WITH }, [], {:name: "observable", :permission: "VIEW"}));
       END
     END
-    MUTABLE implicit_safe_nav = ((target_type.optional?() AND respondsTo?(node.target, "safe_nav_chain")) AND (node.target.safe_nav_chain == TRUE));
+    MUTABLE implicit_safe_nav = ((target_type.optional?() AND (locatable__safe_nav_chain(node.target) != NIL)) AND (node.target.safe_nav_chain == TRUE));
     IF ((target_type.optional?() AND !(node.target IS_A OptionalUnwrap)) AND !(implicit_safe_nav)) THEN
       TRY (typeAnalysisSession__emit_optional_field_safe_nav_finding_mut(rtoc_self_view, node, target_type));
       target_type = TRY (type__wrapped_type(target_type));
@@ -19083,7 +19083,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE result_type: Type = result_type_branch_value?;
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ CopyNode: COPY node }, result_type));
     MUTABLE ti = TRY (aST__full_type_mut(Locatable{ CopyNode: COPY node }));
-    MUTABLE source_sync = IF respondsTo?(node.value, "symbol") THEN
+    MUTABLE source_sync = IF (locatable__symbol(node.value) != NIL) THEN
       (IF node.value.symbol != NIL THEN
       (node.value.symbol).sync()
     ELSE
@@ -19289,7 +19289,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :KEEP_WITH_SCOPED }, [], {:name: root.name()}));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ KeepNode: COPY node }, TRY (aST__full_type_mut(node.value))));
-    IF respondsTo?(node.value, "storage") THEN
+    IF (locatable__storage(node.value) != NIL) THEN
       node.storage = node.value.storage();
     END
     IF type EXISTS AS type_value THEN
@@ -19743,7 +19743,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (respondsTo?(info.reg, "var_used") AND info.reg.var_used) THEN
+      IF ((symbolEntryRegInput__var_used(info.reg) != NIL) AND info.reg.var_used) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -19784,11 +19784,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !((symbolEntry__read(info) OR ((respondsTo?(info.reg, "var_used") AND info.reg.var_used)))) THEN
+      IF !((symbolEntry__read(info) OR (((symbolEntryRegInput__var_used(info.reg) != NIL) AND info.reg.var_used)))) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (respondsTo?(info.reg, "var_mutated") AND info.reg.var_mutated) THEN
+      IF ((symbolEntryRegInput__var_mutated(info.reg) != NIL) AND info.reg.var_mutated) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -20297,7 +20297,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       curr =     IF (aST__node_target(curr) EXISTS) THEN
         curr.target
-      ELSE_IF respondsTo?(curr, "object") THEN
+      ELSE_IF (locatable__object(curr) != NIL) THEN
         curr.object
       ELSE
         NIL

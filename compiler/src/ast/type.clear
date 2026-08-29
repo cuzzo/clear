@@ -5036,3 +5036,23 @@ END
 PUB FN type__from_node(value: ?Type) RETURNS !?Type EFFECTS REENTRANT ->
   RETURN COPY value;
 END
+
+# Ruby asks `respond_to?(:shared?)` and then reads it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN typeTypeInput__shared?(value: TypeTypeInput) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN type__shared?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:multiowned?)` and then reads it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN typeTypeInput__multiowned?(value: TypeTypeInput) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN type__multiowned?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

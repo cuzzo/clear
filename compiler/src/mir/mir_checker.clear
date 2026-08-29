@@ -2933,7 +2933,7 @@ PRIVATE FN mIRChecker__function_signature_takes_ownership?(self: MIRChecker, sig
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (functionSignature__params(sig))).first(checked_arg_count) |> ANY (respondsTo?(_, "takes") AND _.takes());
+    RETURN (TRY (functionSignature__params(sig))) |> LIMIT checked_arg_count |> ANY (_.takes OR_ELSE FALSE);
 }
 END
 PRIVATE FN mIRChecker__verify_explicit_ownership_contracts_mut(MUTABLE self: MIRChecker, nodes: []Emittable, transfers: [Set]String, allocs: {String}[]AllocMark) RETURNS !Void
@@ -2942,7 +2942,7 @@ PRIVATE FN mIRChecker__verify_explicit_ownership_contracts_mut(MUTABLE self: MIR
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < nodes.length() DO
-      IF !(respondsTo?(nodes[rtoc_idx]?, "ownership_contract")) THEN
+      IF !((emittable__ownership_contract(nodes[rtoc_idx]?) != NIL)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -3202,7 +3202,7 @@ PRIVATE FN mIRChecker__ownership_fact_covers_node?(self: MIRChecker, fact_source
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF respondsTo?(node, "ownership_consumption") THEN
+    IF (emittable__ownership_consumption(node) != NIL) THEN
     IF node.ownership_consumption() IS_A OwnershipConsumptionFact THEN
       RETURN TRUE;
     END

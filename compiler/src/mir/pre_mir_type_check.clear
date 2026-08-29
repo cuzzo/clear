@@ -191,7 +191,7 @@ PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@
       IF (IF node_value_mutable IS_A Locatable AS locatable THEN type__untyped?(locatable.full_type()) ELSE FALSE END) THEN
         MUTABLE tok: ?Token = walkNode__token(node_value_mutable);
         MUTABLE loc: String = "";
-        IF (TRUE AND respondsTo?(tok, "line")) THEN
+        IF (TRUE AND TRUE) THEN
           loc = "${tok.line()}:${tok.column()}";
         ELSE
           loc = "?";

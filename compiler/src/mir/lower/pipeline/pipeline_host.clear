@@ -660,7 +660,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF tenseSelectorPlan__asynchronous?(tense_plan) THEN
       MUTABLE promise_name = "__select_promise${id.toString()}";
       MUTABLE expression_type_branch_value: ?Type = NIL;
-      IF (respondsTo?(op.expression, "error_union_type") AND op.expression.error_union_type) THEN
+      IF ((locatable__error_union_type(op.expression) != NIL) AND op.expression.error_union_type) THEN
         expression_type_branch_value = TRY (type__new(op.expression.error_union_type));
       ELSE
         expression_type_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (op.expression))) }));

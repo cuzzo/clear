@@ -234,12 +234,12 @@ FN emit_use_of_moved_error_mut(use_node: Identifier, og_node: OwnershipNode) RET
         IF ((pt != NIL) AND !(pt IS_A Type)) THEN
           pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(pt))));
         END
-        MUTABLE param_admits_shared = ((pt != NIL) AND (IF respondsTo?(pt, "shared?") THEN
+        MUTABLE param_admits_shared = ((pt != NIL) AND (IF (typeTypeInput__shared?(pt) != NIL) THEN
           type__shared?(pt)
         ELSE
           FALSE
         END));
-        MUTABLE param_admits_multi = ((pt != NIL) AND (IF respondsTo?(pt, "multiowned?") THEN
+        MUTABLE param_admits_multi = ((pt != NIL) AND (IF (typeTypeInput__multiowned?(pt) != NIL) THEN
           pt.multiowned?()
         ELSE
           FALSE
@@ -802,7 +802,7 @@ FN emit_with_restrict_immutable_error_mut(node: WithBlock, var_node: Identifier)
 END
 FN emit_can_smash_unsupported_error_mut(node: AsyncValidationNode) RETURNS !Void ->
   MUTABLE fix = NIL;
-  MUTABLE tok = IF respondsTo?(node, "can_smash_token") THEN
+  MUTABLE tok = IF (asyncValidationNode__can_smash_token(node) != NIL) THEN
     node.can_smash_token
   ELSE
     NIL

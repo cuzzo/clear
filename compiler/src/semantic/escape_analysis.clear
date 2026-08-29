@@ -763,7 +763,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
   WHILE rtoc_idx < nodes.length() DO
     IF (nodes[rtoc_idx]? IS_A MethodCall) THEN
         MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-        IF respondsTo?(nodes[rtoc_idx]?, "matched_signature") THEN
+        IF (locatable__matched_signature(nodes[rtoc_idx]?) != NIL) THEN
           sig_branch_value = functionSignature__unwrap(nodes[rtoc_idx]?.matched_signature);
         ELSE
           sig_branch_value = NIL;

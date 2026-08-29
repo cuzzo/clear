@@ -137,7 +137,7 @@ PUB FN mIRLoweringOwnershipScanner__transfer_binding_name(self: MIRLoweringOwner
   END
 END
 PRIVATE FN mIRLoweringOwnershipScanner__arg_is_call_argument?(self: MIRLoweringOwnershipScanner, stmt: Locatable, arg: Locatable) RETURNS Bool ->
-  IF !((aST__call?(stmt) AND respondsTo?(stmt, "args"))) THEN
+  IF !((aST__call?(stmt) AND (locatable__args(stmt) != NIL))) THEN
     RETURN FALSE;
   END
   RETURN stmt.args().contains?(arg);
