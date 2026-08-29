@@ -2038,15 +2038,16 @@ PUB FN mIRChecker__verify_owned_return_alloc_marks_mut(MUTABLE self: MIRChecker,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < lets.length() DO
-      MUTABLE marks: ?[]AllocMark = COPY allocs[castNameToString(emittable__name(UNWRAP (lets[rtoc_idx])))];
+      MUTABLE rtoc_let = UNWRAP (lets[rtoc_idx]);
+      MUTABLE marks: ?[]AllocMark = COPY allocs[rtoc_let.name];
       IF !(marks) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RETURN_WITHOUT_ALLOC, emittable__name(UNWRAP (lets[rtoc_idx])), "owned-return initializer is heap-provenance but no MIR::AllocMark exists")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RETURN_WITHOUT_ALLOC, Name{ StringValue: COPY rtoc_let.name }, "owned-return initializer is heap-provenance but no MIR::AllocMark exists")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE mark_allocs = marks |> SELECT _.alloc();
       IF mark_allocs |> ANY placement__frame?(_) THEN
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RETURN_ALLOC_NOT_HEAP, emittable__name(UNWRAP (lets[rtoc_idx])), "owned-return initializer is heap-provenance but MIR::AllocMark uses :frame")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RETURN_ALLOC_NOT_HEAP, Name{ StringValue: COPY rtoc_let.name }, "owned-return initializer is heap-provenance but MIR::AllocMark uses :frame")));
       END
     rtoc_idx = rtoc_idx + 1;
     END
