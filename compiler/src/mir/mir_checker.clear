@@ -2045,7 +2045,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE mark_allocs = marks |> SELECT _.alloc();
+      MUTABLE mark_allocs = (UNWRAP (marks)) |> SELECT _.alloc;
       IF mark_allocs |> ANY placement__frame?(_) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RETURN_ALLOC_NOT_HEAP, Name{ StringValue: COPY rtoc_let.name }, "owned-return initializer is heap-provenance but MIR::AllocMark uses :frame")));
       END
