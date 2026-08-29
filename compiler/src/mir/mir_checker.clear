@@ -1117,7 +1117,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_23 = (live_states |> SKIP 1);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_23.length() DO
-      IF TRY (linearOwnershipState__same_state?(rtoc_each_items_23[rtoc_idx], first)) THEN
+      MUTABLE rtoc_state = rtoc_each_items_23[rtoc_idx];
+      IF TRY (linearOwnershipState__same_state?(rtoc_state, first)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
