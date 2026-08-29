@@ -2327,12 +2327,17 @@ PUB FN mIRChecker__fsm_destroy_field_segment?(segment: String) RETURNS Bool ->
   IF (segment.length() == 0) THEN
     RETURN FALSE;
   END
-  MUTABLE bytes: []Int64 = segment.bytes();
-  MUTABLE first = UNWRAP (bytes[0]);
-  IF !(mIRChecker__fsm_destroy_field_segment_head_byte?(first)) THEN
+  IF !(mIRChecker__fsm_destroy_field_segment_head_byte?(byteAt(segment, 0))) THEN
     RETURN FALSE;
   END
-  RETURN (bytes |> SKIP 1) |> ALL mIRChecker__fsm_destroy_field_segment_tail_byte?(_);
+  MUTABLE rtoc_byte_i = 1;
+  WHILE rtoc_byte_i < segment.length() DO
+    IF !(mIRChecker__fsm_destroy_field_segment_tail_byte?(byteAt(segment, rtoc_byte_i))) THEN
+      RETURN FALSE;
+    END
+    rtoc_byte_i = rtoc_byte_i + 1;
+  END
+  RETURN TRUE;
 END
 PUB FN mIRChecker__fsm_destroy_field_segment_head_byte?(byte: Int64) RETURNS Bool ->
   RETURN (((byte == 95) OR (((byte >= 65) AND (byte <= 90)))) OR (((byte >= 97) AND (byte <= 122))));
