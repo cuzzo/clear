@@ -1986,8 +1986,8 @@ PUB FN mIRChecker__ownership_source_expr(self: MIRChecker, node: Emittable) RETU
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE current: Emittable = COPY node;
-    WHILE (respondsTo?(current, "expr") AND ((((current IS_A MIRCast OR current IS_A TryExpr) OR current IS_A TryOptional) OR current IS_A MIROptionalUnwrap))) DO
-      current = CAST(current.expr() AS Emittable);
+    WHILE ((((current IS_A MIRCast OR current IS_A TryExpr) OR current IS_A TryOptional) OR current IS_A MIROptionalUnwrap)) DO
+      current = UNWRAP (emittable__expr(current));
     END
     RETURN current;
 }

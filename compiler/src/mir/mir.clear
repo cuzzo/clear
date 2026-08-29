@@ -17862,3 +17862,35 @@ PUB FN emittable__stdlib_def(value: Emittable) RETURNS ?FunctionSignature@multio
   END
   RETURN NIL;
 END
+
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN emittable__expr(value: Emittable) RETURNS ?Emittable@boxed ->
+  PARTIAL MATCH value START
+    Emittable.AssertRaisesCheck AS item -> RETURN COPY item.expr;,
+    Emittable.TryOrPanic AS item -> RETURN COPY item.expr;,
+    Emittable.ExprStmt AS item -> RETURN COPY item.expr;,
+    Emittable.DiscardOwned AS item -> RETURN COPY item.expr;,
+    Emittable.FallibleOk AS item -> RETURN COPY item.expr;,
+    Emittable.FutureReady AS item -> RETURN COPY item.expr;,
+    Emittable.TypeOf AS item -> RETURN COPY item.expr;,
+    Emittable.MIRCast AS item -> RETURN COPY item.expr;,
+    Emittable.TryExpr AS item -> RETURN COPY item.expr;,
+    Emittable.TryCatch AS item -> RETURN COPY item.expr;,
+    Emittable.Orelse AS item -> RETURN COPY item.expr;,
+    Emittable.Comptime AS item -> RETURN COPY item.expr;,
+    Emittable.ListLength AS item -> RETURN COPY item.expr;,
+    Emittable.AddressOf AS item -> RETURN COPY item.expr;,
+    Emittable.Deref AS item -> RETURN COPY item.expr;,
+    Emittable.PointerCast AS item -> RETURN COPY item.expr;,
+    Emittable.ConstCast AS item -> RETURN COPY item.expr;,
+    Emittable.MIROptionalUnwrap AS item -> RETURN COPY item.expr;,
+    Emittable.TryOptional AS item -> RETURN COPY item.expr;,
+    Emittable.ForeignOwnedUnwrap AS item -> RETURN COPY item.expr;,
+    Emittable.HasField AS item -> RETURN COPY item.expr;,
+    Emittable.ItemsAccess AS item -> RETURN COPY item.expr;,
+    Emittable.OwnedSlice AS item -> RETURN COPY item.expr;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
