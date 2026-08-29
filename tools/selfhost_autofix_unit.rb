@@ -480,6 +480,34 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "No overload for 'f' matches arguments (T)" -- not an intrinsic at all, but
+  # a method on T that rtoc emitted as one. The diagnostic names both, so the
+  # free function it means is `t__f`.
+  def no_overload_dispatch_fix(output)
+    m = output.match(/No overload for '([\w?!]+)' matches arguments \(([\w@]+)[,)]/)
+    return nil unless m
+    return nil unless (loc = output.gsub(/\e\[[0-9;]*m/, '').match(/^\s+(\d+) \| (.*)$/))
+
+    field, type = m[1], m[2].sub(/@\w+\z/, '')
+    fn = "#{type[0].downcase}#{type[1..]}__#{field}"
+    root = File.expand_path('../compiler/src', __dir__)
+    return nil unless Dir.glob(File.join(root, '**', '*.clear'))
+                         .any? { |f| File.read(f).include?("FN #{fn}(") }
+
+    line_no = loc[1].to_i
+    Fix.new(label: "#{field}() -> #{fn}(...)", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      text = lines[i].to_s
+      pattern = /([A-Za-z_]\w*)\.#{Regexp.escape(field)}\(\)/
+      return false unless text.scan(pattern).length == 1
+
+      lines[i] = text.sub(pattern) { "#{fn}(#{Regexp.last_match(1)})" }
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   # Balanced close for the paren at `open`, ignoring string contents.
   def matching_paren(text, open)
     depth = 0
@@ -691,7 +719,7 @@ module SelfhostAutofixUnit
   end
 
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
-           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix), method(:is_a_optional_struct_fix),
+           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix), method(:is_a_optional_struct_fix), method(:no_overload_dispatch_fix),
            method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
@@ -718,11 +746,21 @@ module SelfhostAutofixUnit
     abort "no such unit: #{relative}" unless File.exist?(path)
 
     applied = 0
+    # A diagnostic seen twice means the last fix did not move the file
+    # forward: two rules are undoing each other, and looping just burns runs.
+    seen = {}
     max.times do
       output, ok = check(relative)
       if ok
         puts "selfhost_autofix_unit: #{relative} type-checks after #{applied} fix(es)"
         return 0
+      end
+
+      signature = output.lines.grep(/Compiler Error|^\s+\d+ \| /).first(2).join
+      if (earlier = seen[signature])
+        puts "selfhost_autofix_unit: no progress -- '#{earlier}' left this diagnostic unchanged:"
+        puts signature
+        return 1
       end
 
       fix = FIXES.filter_map { |f| f.call(output) }.first
@@ -735,6 +773,7 @@ module SelfhostAutofixUnit
         puts "selfhost_autofix_unit: #{fix.label} did not apply; stopping"
         return 1
       end
+      seen[signature] = fix.label
       applied += 1
       puts "  #{applied}. #{fix.label}"
     end
