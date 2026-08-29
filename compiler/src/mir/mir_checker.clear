@@ -2948,7 +2948,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE contract: ?OwnershipContract@multiowned = emittable__ownership_contract(rtoc_node);
-      IF !((mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) OR (contract IS_A OwnershipContract@multiowned AND !(contract.empty?())))) THEN
+      IF !((mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) OR (contract != NIL AND !(contract.empty?())))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

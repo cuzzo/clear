@@ -456,6 +456,30 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "Runtime IS_A requires a union-typed value on the left, got ?T" where the
+  # test names that same T -- Ruby's `x.is_a?(T)` on a value already typed T is
+  # asking whether it is there at all.
+  def is_a_optional_struct_fix(output)
+    m = output.match(/Runtime IS_A requires a union-typed value on the left, got \?([\w@]+)/)
+    return nil unless m
+    return nil unless (loc = output.gsub(/\e\[[0-9;]*m/, '').match(/^\s+(\d+) \| (.*)$/))
+
+    type = m[1].sub(/@\w+\z/, '')
+    line_no = loc[1].to_i
+    Fix.new(label: "test presence instead of IS_A #{type}", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      text = lines[i].to_s
+      # A narrowing form binds a name and needs a real narrowing, not this.
+      pattern = /(\w+) IS_A #{Regexp.escape(type)}(?:@\w+)?(?! AS )/
+      return false unless text.scan(pattern).length.positive?
+
+      lines[i] = text.gsub(pattern) { "#{Regexp.last_match(1)} != NIL" }
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   # Balanced close for the paren at `open`, ignoring string contents.
   def matching_paren(text, open)
     depth = 0
@@ -667,7 +691,7 @@ module SelfhostAutofixUnit
   end
 
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
-           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix),
+           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix), method(:is_a_optional_struct_fix),
            method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
