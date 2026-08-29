@@ -3639,7 +3639,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE batch_window_flush_mutable = COPY batch_window_flush;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, batch_window_flush_mutable.value_expr, "BatchWindow value"));
     ELSE
-      MUTABLE owned_sources = (UNWRAP (node)).owned_position_source_exprs |> DISTINCT _;
+      MUTABLE owned_sources = (TRY (emittable__owned_position_source_exprs(UNWRAP (node))) OR_ELSE List[]) |> DISTINCT _;
       FOR _ IN node.child_exprs() DO
       TRY (mIRChecker__check_expr_sources_for_unhoisted(&rtoc_self_view, _, "expression", owned_sources.contains?(_)));
       END

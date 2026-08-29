@@ -14,6 +14,7 @@
 #
 #   ruby tools/selfhost_union_accessor.rb --union Emittable --field ownership_consumption
 require 'optparse'
+require 'set'
 
 module SelfhostUnionAccessor
   extend self
@@ -65,7 +66,44 @@ module SelfhostUnionAccessor
     members = variants[union] or abort "selfhost_union_accessor: no union '#{union}'"
 
     carrying = members.select { |_, type| fields[type.sub(/@\w+\z/, '')].key?(field) }
-    abort "selfhost_union_accessor: no variant of #{union} carries '#{field}'" if carrying.empty?
+    if carrying.empty?
+      # Ruby's respond_to? is as true for a method as for an attribute, so a
+      # variant that computes the answer counts as carrying it.
+      methods = Set.new
+      returns = {}
+      Dir.glob(File.join(root, '**', '*.clear')).each do |path|
+        body = File.read(path)
+        body.scan(/FN ([\w?!]+)\(/) { |m| methods << m[0] }
+        body.scan(/FN ([\w?!]+)\([^\n]*?\)\s*RETURNS\s+([\w@?\[\]{}!]+)/) { |n, r| returns[n] = r }
+      end
+      via = members.filter_map do |name, type|
+        bare = type.sub(/@\w+\z/, '')
+        callee = "#{bare[0].downcase}#{bare[1..]}__#{field}"
+        [name, callee] if methods.include?(callee)
+      end
+      abort "selfhost_union_accessor: no variant of #{union} carries '#{field}'" if via.empty?
+
+      rets = via.map { |_, m| returns[m].to_s.delete_prefix('!') }.uniq
+      abort "selfhost_union_accessor: '#{field}' returns #{rets.inspect}" if rets.length > 1
+
+      result = rets.first.start_with?('?') ? rets.first : "?#{rets.first}"
+      fn = "#{union[0].downcase}#{union[1..]}__#{field}"
+      fallible = returns[via.first[1]].to_s.start_with?('!')
+      puts "# Ruby asks `respond_to?(:#{field})` and then calls it. The variants that"
+      puts '# can answer compute it; the rest do not respond.'
+      puts "PUB FN #{fn}(value: #{union}) RETURNS #{fallible ? '!' : ''}#{result} EFFECTS REENTRANT ->"
+      puts '  PARTIAL MATCH value START'
+      via.each do |name, callee|
+        call = fallible ? "TRY (#{callee}(item))" : "#{callee}(item)"
+        puts "    #{union}.#{name} AS item -> RETURN #{call};,"
+      end
+      puts '    DEFAULT -> RETURN NIL;'
+      puts '  END'
+      puts '  RETURN NIL;'
+      puts 'END'
+      warn "selfhost_union_accessor: #{via.length}/#{members.length} variants compute '#{field}'"
+      return 0
+    end
 
     if only
       carrying = carrying.select do |_, type|
