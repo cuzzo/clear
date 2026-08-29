@@ -340,7 +340,7 @@ END
 PRIVATE FN programMIRFinalizer__function_facts(name: String, needs_runtime: Bool) RETURNS FunctionMIRFacts ->
   RETURN FunctionMIRFacts{ name: COPY name, needs_runtime: COPY needs_runtime };
 END
-FN castLocatableToNode(value: Locatable) RETURNS Node ->
+PRIVATE FN castLocatableToNode(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.MIRProgram AS cast_payload -> RETURN Node{ MIRProgram: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
@@ -474,6 +474,6 @@ FN castLocatableToNode(value: Locatable) RETURNS Node ->
   END
   panic("Invalid cast to Node");
 END
-FN rubyToClearVoid() RETURNS Void ->
+PRIVATE FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

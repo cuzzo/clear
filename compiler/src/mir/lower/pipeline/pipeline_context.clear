@@ -731,7 +731,7 @@ FN castFieldToPipelineSoaFieldSetItem(value: Field) RETURNS PipelineSoaFieldSetI
   END
   panic("Invalid cast to PipelineSoaFieldSetItem");
 END
-FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
+PRIVATE FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
   PARTIAL MATCH value START
     Locatable.Identifier AS cast_payload -> RETURN AssignmentName{ Identifier: COPY cast_payload };,
     Locatable.GetField AS cast_payload -> RETURN AssignmentName{ GetField: COPY cast_payload };,
@@ -740,13 +740,13 @@ FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
   END
   panic("Invalid cast to AssignmentName");
 END
-FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+PRIVATE FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
   IF value IS_A GetField AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to GetField");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+PRIVATE FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

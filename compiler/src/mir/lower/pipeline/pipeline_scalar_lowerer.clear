@@ -135,13 +135,13 @@ PRIVATE FN pipelineScalarLowerer__with_iteration_rewind(self: PipelineScalarLowe
   END
   RETURN (COPY (TRY (pipelineScalarLowerer__loop_mark_stmts_call(self))) + body);
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-FN rubyToClearVoid() RETURNS Void ->
+PRIVATE FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 PUB FN pipelineScalarLowerer__visit_expr_call(self: PipelineScalarLowerer, arg0: Locatable, arg1: Locatable, arg2: String) RETURNS Emittable ->

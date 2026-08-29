@@ -72,6 +72,6 @@ FN ruby_wrap_optional_String_FunctionSignatureLifetimeInput(value: ?String) RETU
   END
   NIL;
 END
-FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+PRIVATE FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END

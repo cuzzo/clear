@@ -20702,7 +20702,7 @@ FN castAnnotationTypeShapeToTypeConstructionInput(value: AnnotationTypeShape) RE
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+PRIVATE FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -20711,7 +20711,7 @@ FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
+PRIVATE FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     AutoConstraintCollectorDeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorDeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
@@ -20719,14 +20719,14 @@ FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCo
   END
   panic("Invalid cast to Locatable");
 END
-FN castAutoConstraintCollectorObservedTypeToTypeConstructionInput(value: AutoConstraintCollectorObservedType) RETURNS TypeConstructionInput ->
+PRIVATE FN castAutoConstraintCollectorObservedTypeToTypeConstructionInput(value: AutoConstraintCollectorObservedType) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     AutoConstraintCollectorObservedType.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to TypeConstructionInput");
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
+PRIVATE FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
   PARTIAL MATCH value START
     AutoConstraintCollectorSlotDeclNode.VarDecl AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorSlotDeclNode.BindExpr AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ BindExpr: COPY cast_payload };,
@@ -20869,7 +20869,7 @@ FN castBodyToNodes(value: Body) RETURNS Nodes ->
   END
   panic("Invalid cast to Nodes");
 END
-FN castCodeOrMessageToOptionalString(value: TypeAnalysisCodeOrMessage) RETURNS ?String ->
+PRIVATE FN castCodeOrMessageToOptionalString(value: TypeAnalysisCodeOrMessage) RETURNS ?String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -20937,7 +20937,7 @@ FN castDeclarationNodeToOptionalSymbolEntryRegInput(value: DeclarationNode) RETU
   END
   panic("Invalid cast to ?SymbolEntryRegInput");
 END
-FN castDiagnosticKwValueToAnyMultiowned(value: DiagnosticKwValue) RETURNS Any@multiowned ->
+PRIVATE FN castDiagnosticKwValueToAnyMultiowned(value: DiagnosticKwValue) RETURNS Any@multiowned ->
   IF value IS_A Any@multiowned AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21125,50 +21125,50 @@ FN castLocatableToCallLikeNode(value: Locatable) RETURNS CallLikeNode ->
   END
   panic("Invalid cast to CallLikeNode");
 END
-FN castLocatableToCallNode(value: Locatable) RETURNS TypeAnalysisCallNode ->
+PRIVATE FN castLocatableToCallNode(value: Locatable) RETURNS TypeAnalysisCallNode ->
   PARTIAL MATCH value START
     Locatable.FuncCall AS cast_payload -> RETURN TypeAnalysisCallNode{ FuncCall: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to TypeAnalysisCallNode");
   END
   panic("Invalid cast to TypeAnalysisCallNode");
 END
-FN castLocatableToConcurrentOp(value: Locatable) RETURNS ConcurrentOp ->
+PRIVATE FN castLocatableToConcurrentOp(value: Locatable) RETURNS ConcurrentOp ->
   IF value IS_A ConcurrentOp AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to ConcurrentOp");
 END
-FN castLocatableToFuncCall(value: Locatable) RETURNS FuncCall ->
+PRIVATE FN castLocatableToFuncCall(value: Locatable) RETURNS FuncCall ->
   IF value IS_A FuncCall AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to FuncCall");
 END
-FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+PRIVATE FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
   IF value IS_A GetField AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to GetField");
 END
-FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+PRIVATE FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Identifier");
 END
-FN castLocatableToIfStatement(value: Locatable) RETURNS IfStatement ->
+PRIVATE FN castLocatableToIfStatement(value: Locatable) RETURNS IfStatement ->
   IF value IS_A IfStatement AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to IfStatement");
 END
-FN castLocatableToIsA(value: Locatable) RETURNS IsA ->
+PRIVATE FN castLocatableToIsA(value: Locatable) RETURNS IsA ->
   IF value IS_A IsA AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to IsA");
 END
-FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+PRIVATE FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -21289,7 +21289,7 @@ FN castLocatableToMatchStatement(value: Locatable) RETURNS MatchStatement ->
   END
   RETURN panic("Invalid cast to MatchStatement");
 END
-FN castLocatableToNode(value: Locatable) RETURNS Node ->
+PRIVATE FN castLocatableToNode(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
@@ -21495,13 +21495,13 @@ FN castLocatableToOptionalBgSourceWalkValue(value: Locatable) RETURNS ?BgSourceW
   END
   panic("Invalid cast to ?BgSourceWalkValue");
 END
-FN castLocatableToOptionalIdentifier(value: Locatable) RETURNS ?Identifier ->
+PRIVATE FN castLocatableToOptionalIdentifier(value: Locatable) RETURNS ?Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN NIL;
 END
-FN castLocatableToSelectOp(value: Locatable) RETURNS SelectOp ->
+PRIVATE FN castLocatableToSelectOp(value: Locatable) RETURNS SelectOp ->
   IF value IS_A SelectOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21519,13 +21519,13 @@ FN castLocatableToSyncPolicyDecl(value: Locatable) RETURNS SyncPolicyDecl ->
   END
   RETURN panic("Invalid cast to SyncPolicyDecl");
 END
-FN castLocatableToTenseNavigation(value: Locatable) RETURNS TenseNavigation ->
+PRIVATE FN castLocatableToTenseNavigation(value: Locatable) RETURNS TenseNavigation ->
   IF value IS_A TenseNavigation AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to TenseNavigation");
 END
-FN castLocatableToWhereOp(value: Locatable) RETURNS WhereOp ->
+PRIVATE FN castLocatableToWhereOp(value: Locatable) RETURNS WhereOp ->
   IF value IS_A WhereOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21546,7 +21546,7 @@ FN castMatchSchemaToStructSchemaMultiowned(value: MatchSchema) RETURNS StructSch
   END
   RETURN panic("Invalid cast to StructSchema@multiowned");
 END
-FN castNameCandidateToOptionalDiagnosticKwValue(value: NameCandidate) RETURNS ?DiagnosticKwValue ->
+PRIVATE FN castNameCandidateToOptionalDiagnosticKwValue(value: NameCandidate) RETURNS ?DiagnosticKwValue ->
   PARTIAL MATCH value START
     NameCandidate.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     NameCandidate.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
@@ -21554,7 +21554,7 @@ FN castNameCandidateToOptionalDiagnosticKwValue(value: NameCandidate) RETURNS ?D
   END
   panic("Invalid cast to ?DiagnosticKwValue");
 END
-FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
+PRIVATE FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21568,7 +21568,7 @@ FN castNodeToFunctionCallNode(value: Node) RETURNS FunctionCallNode ->
   END
   panic("Invalid cast to FunctionCallNode");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+PRIVATE FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -21683,7 +21683,7 @@ FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castNodeToOptionalLocatable(value: Node) RETURNS ?Locatable ->
+PRIVATE FN castNodeToOptionalLocatable(value: Node) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -21897,7 +21897,7 @@ FN castOptionalFunctionContextLifetimeSourceToString(value: ?FunctionContextLife
   END
   RETURN "";
 END
-FN castOptionalFunctionSignatureReturnValueToOptionalStringSymbol(value: ?FunctionSignatureReturnValue) RETURNS ?String@symbol ->
+PRIVATE FN castOptionalFunctionSignatureReturnValueToOptionalStringSymbol(value: ?FunctionSignatureReturnValue) RETURNS ?String@symbol ->
   IF value != NIL THEN
     IF value IS_A String@symbol AS cast_payload THEN
       RETURN cast_payload;
@@ -21923,7 +21923,7 @@ FN castOptionalLocatableToIfStatement(value: ?Locatable) RETURNS IfStatement ->
   END
   RETURN panic("Invalid cast to IfStatement");
 END
-FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
+PRIVATE FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
   IF value == NIL THEN
     panic("Invalid cast to ?X");
   END
@@ -22022,7 +22022,7 @@ FN castOptionalUnionPayloadCompatibilityReturnValueToOptionalTypeAnalysisSession
   END
   panic("Invalid cast to ?TypeAnalysisSessionReturnValue");
 END
-FN castProgramToLocatable(value: Program) RETURNS Locatable ->
+PRIVATE FN castProgramToLocatable(value: Program) RETURNS Locatable ->
   RETURN Locatable{ Program: COPY value };
 END
 FN castRoutineBodyToOptionalLocatable(value: RoutineBody) RETURNS ?Locatable ->
@@ -22265,7 +22265,7 @@ FN castTypeToAnnotationTypeShape(value: Type) RETURNS AnnotationTypeShape ->
   END
   panic("Invalid cast to AnnotationTypeShape");
 END
-FN castTypeToAutoConstraintCollectorObservedType(value: Type) RETURNS AutoConstraintCollectorObservedType ->
+PRIVATE FN castTypeToAutoConstraintCollectorObservedType(value: Type) RETURNS AutoConstraintCollectorObservedType ->
   PARTIAL MATCH value START
     Type.SymbolValue AS cast_payload -> RETURN AutoConstraintCollectorObservedType{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to AutoConstraintCollectorObservedType");
@@ -22303,7 +22303,7 @@ FN castTypeToOptionalStringSymbol(value: Type) RETURNS ?String@symbol ->
   END
   RETURN NIL;
 END
-FN castTypeToOptionalSymbolEntryTypeInput(value: Type) RETURNS ?SymbolEntryTypeInput ->
+PRIVATE FN castTypeToOptionalSymbolEntryTypeInput(value: Type) RETURNS ?SymbolEntryTypeInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN SymbolEntryTypeInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN SymbolEntryTypeInput{ SymbolValue: COPY cast_payload };,
@@ -22320,7 +22320,7 @@ FN castTypeToOptionalTypeAnalysisSessionReturnValue(value: Type) RETURNS ?TypeAn
   END
   panic("Invalid cast to ?TypeAnalysisSessionReturnValue");
 END
-FN castTypeToOptionalTypeTypeInput(value: Type) RETURNS ?TypeTypeInput ->
+PRIVATE FN castTypeToOptionalTypeTypeInput(value: Type) RETURNS ?TypeTypeInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeTypeInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeTypeInput{ SymbolValue: COPY cast_payload };,
@@ -22350,7 +22350,7 @@ FN castTypeToType(value: Type) RETURNS Type ->
   END
   panic("Invalid cast to Type");
 END
-FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -22359,10 +22359,10 @@ FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+PRIVATE FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
+PRIVATE FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
   PARTIAL MATCH value START
     TypeTypeInput.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     TypeTypeInput.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
@@ -22370,13 +22370,13 @@ FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RETURNS ?D
   END
   panic("Invalid cast to ?DiagnosticKwValue");
 END
-FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
+PRIVATE FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
@@ -22386,10 +22386,10 @@ FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeCo
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN rubyToClearVoid() RETURNS Void ->
+PRIVATE FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+PRIVATE FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);
@@ -22399,7 +22399,7 @@ FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   END
   RETURN result;
 END
-FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
+PRIVATE FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
   MUTABLE result: []Edit = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);
@@ -22455,13 +22455,13 @@ FN ruby_set_union<T>(left: [Set]T, right: [Set]T) RETURNS [Set]T ->
   };
   RETURN result;
 END
-FN ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol(value: FunctionSignatureLifetimeSource, expected: String@symbol) RETURNS Bool ->
+PRIVATE FN ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol(value: FunctionSignatureLifetimeSource, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END
   FALSE;
 END
-FN ruby_union_scalar_equal_TypeTypeInput_String_symbol(value: TypeTypeInput, expected: String@symbol) RETURNS Bool ->
+PRIVATE FN ruby_union_scalar_equal_TypeTypeInput_String_symbol(value: TypeTypeInput, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END
@@ -22517,13 +22517,13 @@ FN ruby_wrap_optional_Any_multiowned_ReturnDescriptor(value: ?Any@multiowned) RE
   END
   NIL;
 END
-FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+PRIVATE FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END
   NIL;
 END
-FN ruby_wrap_optional_Int64_DiagnosticKwValue(value: ?Int64) RETURNS ?DiagnosticKwValue ->
+PRIVATE FN ruby_wrap_optional_Int64_DiagnosticKwValue(value: ?Int64) RETURNS ?DiagnosticKwValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN DiagnosticKwValue{ Int64Value: COPY optional_payload };
   END
@@ -22535,7 +22535,7 @@ FN ruby_wrap_optional_Int64_TypeAnalysisSessionReturnValue(value: ?Int64) RETURN
   END
   NIL;
 END
-FN ruby_wrap_optional_String_DiagnosticKwValue(value: ?String) RETURNS ?DiagnosticKwValue ->
+PRIVATE FN ruby_wrap_optional_String_DiagnosticKwValue(value: ?String) RETURNS ?DiagnosticKwValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN DiagnosticKwValue{ StringValue: COPY optional_payload };
   END
@@ -22553,13 +22553,13 @@ FN ruby_wrap_optional_String_symbol_TypeAnalysisSessionReturnValue(value: ?Strin
   END
   NIL;
 END
-FN ruby_wrap_optional_Type_multiowned_X(value: ?Type@multiowned) RETURNS ?X ->
+PRIVATE FN ruby_wrap_optional_Type_multiowned_X(value: ?Type@multiowned) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ Type: Type{ Type: COPY optional_payload } };
   END
   NIL;
 END
-FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
+PRIVATE FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
   IF value EXISTS AS value_value THEN
     RETURN symbol(value_value);
   END

@@ -162,7 +162,7 @@ PRIVATE FN pipelinePlanBuilder__execution_for(self: PipelinePlanBuilder, termina
     panic("unsupported pipeline terminal: {}");
   END
 END
-FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+PRIVATE FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

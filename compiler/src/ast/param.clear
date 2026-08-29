@@ -43,7 +43,7 @@ PUB FN param__set_type(MUTABLE self: Param, val: ?TypeTypeInput) RETURNS !Void -
   self.type = TRY (type__new(castTypeTypeInputToTypeConstructionInput((val OR_ELSE type__type_input_symbol_or_any(NIL)))));
 END
 # End Ruby module AST
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,

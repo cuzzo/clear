@@ -2077,13 +2077,13 @@ PUB FN resolutionPhase__run(program: Program, importer: ?ModuleImporter, source_
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
-FN castCodeOrMessageToOptionalString(value: ResolutionCodeOrMessage) RETURNS ?String ->
+PRIVATE FN castCodeOrMessageToOptionalString(value: ResolutionCodeOrMessage) RETURNS ?String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN NIL;
 END
-FN castLocatableToNode(value: Locatable) RETURNS Node ->
+PRIVATE FN castLocatableToNode(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
@@ -2198,7 +2198,7 @@ FN castLocatableToNode(value: Locatable) RETURNS Node ->
   END
   panic("Invalid cast to Node");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+PRIVATE FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2348,7 +2348,7 @@ FN castTypeToOptionalSchemasUnionSchemaVariantValue(value: Type) RETURNS ?Schema
   END
   panic("Invalid cast to ?SchemasUnionSchemaVariantValue");
 END
-FN castTypeToOptionalSymbolEntryTypeInput(value: Type) RETURNS ?SymbolEntryTypeInput ->
+PRIVATE FN castTypeToOptionalSymbolEntryTypeInput(value: Type) RETURNS ?SymbolEntryTypeInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN SymbolEntryTypeInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN SymbolEntryTypeInput{ SymbolValue: COPY cast_payload };,
@@ -2356,7 +2356,7 @@ FN castTypeToOptionalSymbolEntryTypeInput(value: Type) RETURNS ?SymbolEntryTypeI
   END
   panic("Invalid cast to ?SymbolEntryTypeInput");
 END
-FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -2365,7 +2365,7 @@ FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+PRIVATE FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
 FN castTypeToValue(value: Type) RETURNS Value ->
@@ -2377,7 +2377,7 @@ FN castTypeToValue(value: Type) RETURNS Value ->
   END
   panic("Invalid cast to Value");
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
@@ -2396,25 +2396,25 @@ FN castValueToTypeConstructionInput(value: Value) RETURNS TypeConstructionInput 
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+PRIVATE FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_array_concat_Type(left: []Type, right: []Type) RETURNS []Type ->
+PRIVATE FN ruby_array_concat_Type(left: []Type, right: []Type) RETURNS []Type ->
   MUTABLE result: []Type = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol(value: FunctionSignatureLifetimeSource, expected: String@symbol) RETURNS Bool ->
+PRIVATE FN ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol(value: FunctionSignatureLifetimeSource, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END
   FALSE;
 END
-FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
+PRIVATE FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
   IF value EXISTS AS value_value THEN
     RETURN symbol(value_value);
   END

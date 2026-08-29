@@ -588,7 +588,7 @@ PUB FN scope__new() RETURNS Scope@multiowned ->
   RETURN self @multiowned;
 END
 # Ruby module ScopeHelper
-FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+PRIVATE FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END

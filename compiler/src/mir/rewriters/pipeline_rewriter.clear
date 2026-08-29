@@ -1360,19 +1360,19 @@ PUB FN pipelineRewriter__new(annotator: ?SemanticAnnotator = NIL) RETURNS Pipeli
   pipelineRewriter__initialize(&self, annotator);
   RETURN self @multiowned;
 END
-FN castLocatableToBinaryOp(value: Locatable) RETURNS BinaryOp ->
+PRIVATE FN castLocatableToBinaryOp(value: Locatable) RETURNS BinaryOp ->
   IF value IS_A BinaryOp AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to BinaryOp");
 END
-FN castLocatableToLiteral(value: Locatable) RETURNS Literal ->
+PRIVATE FN castLocatableToLiteral(value: Locatable) RETURNS Literal ->
   IF value IS_A Literal AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Literal");
 END
-FN castOptionalFunctionSignatureReturnValueToOptionalStringSymbol(value: ?FunctionSignatureReturnValue) RETURNS ?String@symbol ->
+PRIVATE FN castOptionalFunctionSignatureReturnValueToOptionalStringSymbol(value: ?FunctionSignatureReturnValue) RETURNS ?String@symbol ->
   IF value != NIL THEN
     IF value IS_A String@symbol AS cast_payload THEN
       RETURN cast_payload;
@@ -1388,7 +1388,7 @@ FN castOptionalLocatableToLiteral(value: ?Locatable) RETURNS Literal ->
   END
   RETURN panic("Invalid cast to Literal");
 END
-FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
+PRIVATE FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
   IF value == NIL THEN
     panic("Invalid cast to ?X");
   END
@@ -1399,7 +1399,7 @@ FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
   END
   panic("Invalid cast to ?X");
 END
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+PRIVATE FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };

@@ -3780,7 +3780,7 @@ FN castMIRCheckerRegistryOwnershipNodeToMIRCheckerOwnershipSurfaceNode(value: MI
   END
   panic("Invalid cast to MIRCheckerOwnershipSurfaceNode");
 END
-FN castNameToString(value: Name) RETURNS String ->
+PRIVATE FN castNameToString(value: Name) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -3802,7 +3802,7 @@ FN castOptionalNameToString(value: ?Name) RETURNS String ->
   END
   RETURN "";
 END
-FN rubyToClearVoid() RETURNS Void ->
+PRIVATE FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 FN ruby_array_concat_FnDef(left: []FnDef, right: []FnDef) RETURNS []FnDef ->
@@ -3811,7 +3811,7 @@ FN ruby_array_concat_FnDef(left: []FnDef, right: []FnDef) RETURNS []FnDef ->
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_array_concat_String(left: []String, right: []String) RETURNS []String ->
+PRIVATE FN ruby_array_concat_String(left: []String, right: []String) RETURNS []String ->
   MUTABLE result: []String = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
@@ -3844,7 +3844,7 @@ FN ruby_wrap_optional_String_Name(value: ?String) RETURNS ?Name ->
   END
   NIL;
 END
-FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
+PRIVATE FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
   IF value EXISTS AS value_value THEN
     RETURN symbol(value_value);
   END

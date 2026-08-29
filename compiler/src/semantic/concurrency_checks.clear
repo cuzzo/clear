@@ -186,6 +186,6 @@ FN castOptionalSigLookupReturnToOptionalX(value: ?SigLookupReturn) RETURNS ?X ->
   END
   panic("Invalid cast to ?X");
 END
-FN rubyToClearVoid() RETURNS Void ->
+PRIVATE FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

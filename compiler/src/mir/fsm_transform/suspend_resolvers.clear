@@ -181,7 +181,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
 END
 # End Ruby module FsmTransform::SuspendResolvers
 # End Ruby module FsmTransform
-FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -190,7 +190,7 @@ FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+PRIVATE FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

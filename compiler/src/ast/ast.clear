@@ -7504,7 +7504,7 @@ PUB STRUCT ReassignPlan {
   lifecycle_plan: ?PassStateValue
 }
 # End Ruby module MIR
-FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+PRIVATE FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -7513,7 +7513,7 @@ FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
+PRIVATE FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -7656,7 +7656,7 @@ FN castLambdaBodyToLocatable(value: LambdaBody) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+PRIVATE FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,

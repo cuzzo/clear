@@ -1113,7 +1113,7 @@ FN castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNo
   END
   panic("Invalid cast to AutoConstraintCollectorSlotDeclNode");
 END
-FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
+PRIVATE FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     AutoConstraintCollectorDeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorDeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
@@ -1127,7 +1127,7 @@ FN castAutoConstraintCollectorLocalDeclEntryToAutoSlotIdMultiowned(value: AutoCo
   END
   RETURN panic("Invalid cast to AutoSlotId@multiowned");
 END
-FN castAutoConstraintCollectorObservedTypeToTypeConstructionInput(value: AutoConstraintCollectorObservedType) RETURNS TypeConstructionInput ->
+PRIVATE FN castAutoConstraintCollectorObservedTypeToTypeConstructionInput(value: AutoConstraintCollectorObservedType) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     AutoConstraintCollectorObservedType.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
     AutoConstraintCollectorObservedType.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
@@ -1135,7 +1135,7 @@ FN castAutoConstraintCollectorObservedTypeToTypeConstructionInput(value: AutoCon
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
+PRIVATE FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
   PARTIAL MATCH value START
     AutoConstraintCollectorSlotDeclNode.VarDecl AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorSlotDeclNode.BindExpr AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ BindExpr: COPY cast_payload };,
@@ -1401,7 +1401,7 @@ FN castLocatableToAutoInferenceWalkNode(value: Locatable) RETURNS AutoInferenceW
   END
   panic("Invalid cast to AutoInferenceWalkNode");
 END
-FN castLocatableToNode(value: Locatable) RETURNS Node ->
+PRIVATE FN castLocatableToNode(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
@@ -10926,7 +10926,7 @@ FN rtocChildrenOfAutoInferenceWalkNodeYieldExpr(v: YieldExpr) RETURNS []AutoInfe
   END
   RETURN out;
 END
-FN rubyToClearVoid() RETURNS Void ->
+PRIVATE FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 
@@ -10936,7 +10936,7 @@ PUB FN declNode__set_type(MUTABLE node: AutoConstraintCollectorDeclarationNode, 
     AutoConstraintCollectorDeclarationNode.BindExpr AS MUTABLE item -> item.type = COPY value;
   END
 END
-FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+PRIVATE FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
 PUB FN autoUnifier__type_of_call(self: AutoUnifier, arg0: Locatable) RETURNS ?AutoConstraintCollectorObservedType ->

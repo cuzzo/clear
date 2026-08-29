@@ -403,13 +403,13 @@ PUB FN ownershipTransportFacts__new(parameter_ids: [Set]Int64 = Set[]) RETURNS O
   ownershipTransportFacts__initialize(&self, parameter_ids);
   RETURN self @multiowned;
 END
-FN castLocatableToIfStatement(value: Locatable) RETURNS IfStatement ->
+PRIVATE FN castLocatableToIfStatement(value: Locatable) RETURNS IfStatement ->
   IF value IS_A IfStatement AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to IfStatement");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+PRIVATE FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

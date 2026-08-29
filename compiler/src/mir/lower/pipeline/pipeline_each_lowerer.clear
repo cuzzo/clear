@@ -193,13 +193,13 @@ FN castEmittableToLit(value: Emittable) RETURNS Lit ->
   END
   RETURN panic("Invalid cast to Lit");
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+PRIVATE FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -213,10 +213,10 @@ FN castPipelineEachLowererReturnValueToOptionalPipelineEachResult(value: Pipelin
   END
   panic("Invalid cast to ?PipelineEachResult");
 END
-FN rubyToClearVoid() RETURNS Void ->
+PRIVATE FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+PRIVATE FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

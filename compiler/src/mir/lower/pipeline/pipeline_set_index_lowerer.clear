@@ -265,13 +265,13 @@ PRIVATE FN pipelineSetIndexLowerer__index_item_value(self: PipelineSetIndexLower
     RETURN Emittable{ Ident: COPY Ident{ name: COPY item_var, lowered_node_id: NIL, ownership_consumption: NIL } };
   END
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+PRIVATE FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

@@ -1041,7 +1041,7 @@ PUB FN castClearParserReturnValueToLocatable(value: ClearParserReturnValue) RETU
   END
   panic("Invalid cast to Locatable");
 END
-FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
+PRIVATE FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
   PARTIAL MATCH value START
     Locatable.Identifier AS cast_payload -> RETURN AssignmentName{ Identifier: COPY cast_payload };,
     Locatable.GetField AS cast_payload -> RETURN AssignmentName{ GetField: COPY cast_payload };,
@@ -1050,7 +1050,7 @@ FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
   END
   panic("Invalid cast to AssignmentName");
 END
-PUB FN castLocatableToNode(value: Locatable) RETURNS Node ->
+PRIVATE FN castLocatableToNode(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN Node{ Program: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,

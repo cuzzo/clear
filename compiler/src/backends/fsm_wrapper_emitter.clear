@@ -556,7 +556,7 @@ PRIVATE FN fsmWrapperEmitter__indent_block(text: String, n: Int64) RETURNS Strin
   }).join("\n");
 END
 # End Ruby module FsmWrapperEmitter
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+PRIVATE FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

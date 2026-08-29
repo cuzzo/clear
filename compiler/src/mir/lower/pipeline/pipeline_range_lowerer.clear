@@ -993,13 +993,13 @@ PUB FN pipelineRangeLowerer__new(host: RuntimeHost) RETURNS PipelineRangeLowerer
   pipelineRangeLowerer__initialize(&self, host);
   RETURN self @multiowned;
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+PRIVATE FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

@@ -294,7 +294,7 @@ END
 FN castCallToEmittable(value: Call) RETURNS Emittable ->
   RETURN Emittable{ Call: COPY value };
 END
-FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,

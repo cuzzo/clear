@@ -4625,13 +4625,13 @@ FN castEmittableToOptionalFailureAction(value: Emittable) RETURNS ?FailureAction
   END
   RETURN NIL;
 END
-FN castEmittableToTryCatch(value: Emittable) RETURNS TryCatch ->
+PRIVATE FN castEmittableToTryCatch(value: Emittable) RETURNS TryCatch ->
   IF value IS_A TryCatch AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to TryCatch");
 END
-FN castNameToString(value: Name) RETURNS String ->
+PRIVATE FN castNameToString(value: Name) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -4657,12 +4657,12 @@ FN castPlanToFsmBody(value: MIREmitterPlan) RETURNS FsmBody ->
   END
   panic("Invalid cast to FsmBody");
 END
-FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
+PRIVATE FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
   IF s.startsWith?(affix) THEN
     RETURN s.substr(affix.length(), (s.length() - affix.length()));
   END
   RETURN COPY s;
 END
-FN rubyToClearVoid() RETURNS Void ->
+PRIVATE FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
