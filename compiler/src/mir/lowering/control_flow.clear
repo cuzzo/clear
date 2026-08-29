@@ -68,7 +68,7 @@ PUB FN returnOwnershipPlan__returned_names(self: ReturnOwnershipPlan) RETURNS ![
   END
   RETURN out;
 END
-PUB FN returnOwnershipPlan__transfer_marks_for(self: ReturnOwnershipPlan, value_names: [Set]String, visible_guarded_names: [Set]String) RETURNS ![]Stmt ->
+PUB FN returnOwnershipPlan__transfer_marks_for(self: ReturnOwnershipPlan, value_names: [Set]String, visible_guarded_names: [Set]String) RETURNS ![]Emittable ->
   MUTABLE names: [Set]String = Set[];
   FOR _ IN value_names DO
   &names.insert(COPY _);
