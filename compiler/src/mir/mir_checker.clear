@@ -2666,8 +2666,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE requires_target_alloc = inlineAllocMetadata__requires_target_alloc?(alloc_metadata);
-      IF !(allocs.contains?(target)) THEN
+      MUTABLE requires_target_alloc = inlineAllocMetadata__requires_target_alloc?(UNWRAP (alloc_metadata));
+      IF !(allocs.contains?(UNWRAP (target))) THEN
           IF param_names.contains?((target OR_ELSE "")) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -2676,7 +2676,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${(metadata_nodes[rtoc_idx]?.class()).name()} has allocator metadata ${inlineAllocMetadata__inspect(alloc_metadata)} for '${target}' but no MIR::AllocMark")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${emittable__variant_name(UNWRAP (metadata_nodes[rtoc_idx]))} has allocator metadata ${inlineAllocMetadata__inspect(alloc_metadata)} for '${target}' but no MIR::AllocMark")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -3023,7 +3023,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_FACT_REQUIRED, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, Emittable{ RegistryCall: COPY registry_call }) }, "${registry_call.class().name()} carries allocator or ownership effects through registry metadata. Finalize it into Owned* facts before MIRChecker.")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_FACT_REQUIRED, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, Emittable{ RegistryCall: COPY registry_call }) }, "${"RegistryCall"} carries allocator or ownership effects through registry metadata. Finalize it into Owned* facts before MIRChecker.")));
     ELSE_IF nodes[rtoc_idx]? IS_A IndexedStore AS indexed_store THEN
         IF !(TRY (mIRChecker__registry_ownership_side_channel?(rtoc_self_view, MIRCheckerRegistryOwnershipNode{ IndexedStore: COPY indexed_store }))) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -3037,7 +3037,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_FACT_REQUIRED, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, Emittable{ IndexedStore: COPY indexed_store }) }, "${indexed_store.class().name()} carries allocator or ownership effects through registry metadata. Finalize it into Owned* facts before MIRChecker.")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_FACT_REQUIRED, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, Emittable{ IndexedStore: COPY indexed_store }) }, "${"IndexedStore"} carries allocator or ownership effects through registry metadata. Finalize it into Owned* facts before MIRChecker.")));
     ELSE_IF nodes[rtoc_idx]? IS_A ShardedMapPut AS sharded_map_put THEN
         IF !(mIRChecker__stdlib_takes_ownership?(rtoc_self_view, Emittable{ ShardedMapPut: COPY sharded_map_put })) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -3051,7 +3051,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_FACT_REQUIRED, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, Emittable{ ShardedMapPut: COPY sharded_map_put }) }, "${sharded_map_put.class().name()} consumes or replaces owned data through node-specific fields. Finalize the store/reassign into OwnedStore/OwnedTransfer/OwnedDestroy facts.")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_FACT_REQUIRED, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, Emittable{ ShardedMapPut: COPY sharded_map_put }) }, "${"ShardedMapPut"} consumes or replaces owned data through node-specific fields. Finalize the store/reassign into OwnedStore/OwnedTransfer/OwnedDestroy facts.")));
     ELSE_IF nodes[rtoc_idx]? IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
         IF !(mIRChecker__stdlib_takes_ownership?(rtoc_self_view, Emittable{ ReassignWithCleanup: COPY reassign_with_cleanup })) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -3065,7 +3065,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
         END
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_FACT_REQUIRED, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, Emittable{ ReassignWithCleanup: COPY reassign_with_cleanup }) }, "${reassign_with_cleanup.class().name()} consumes or replaces owned data through node-specific fields. Finalize the store/reassign into OwnedStore/OwnedTransfer/OwnedDestroy facts.")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_FACT_REQUIRED, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, Emittable{ ReassignWithCleanup: COPY reassign_with_cleanup }) }, "${"ReassignWithCleanup"} consumes or replaces owned data through node-specific fields. Finalize the store/reassign into OwnedStore/OwnedTransfer/OwnedDestroy facts.")));
     ELSE_IF nodes[rtoc_idx]? IS_A MIRBgBlock AS mir_bg_block THEN
         IF (facts_seen AND mIRChecker__ownership_fact_covers_node?(rtoc_self_view, fact_sources, Emittable{ MIRBgBlock: COPY mir_bg_block })) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -3697,7 +3697,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF TRY (mIRChecker__allocating_expr?(rtoc_self_view, expr_value_mutable)) THEN
         IF !(owned_position) THEN
-          MUTABLE kind = expr_value_mutable.class().name().split("::").last();
+          MUTABLE kind = emittable__variant_name(expr_value_mutable);
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :UNHOISTED_ALLOC, ruby_wrap_optional_String_Name(rtoc_self_view.fn_name), "${kind} in non-Let-init position (must be hoisted to a named variable)")));
           RETURN;
         END
