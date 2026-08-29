@@ -2535,13 +2535,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE rtoc_label = mIRChecker__allocator_metadata_label(rtoc_self_view, rtoc_source);
-      inlineAllocMetadata__each(metadata, %(alloc_key: String@symbol, alloc: String@symbol) USE(rtoc_label, valid_allocators, rtoc_self_view) -> {
+      FOR rtoc_alloc_key IN (UNWRAP (metadata)).slots.keys() DO
+        MUTABLE alloc: String@symbol = COPY UNWRAP ((UNWRAP (metadata)).slots[rtoc_alloc_key]);
+        MUTABLE alloc_key = symbol(rtoc_alloc_key);
         IF valid_allocators.contains?(alloc) THEN
-            RETURN;
+        CONTINUE;
         END
         &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INVALID_ALLOCATOR_MARK, Name{ StringValue: COPY rtoc_label }, "allocator metadata ${alloc_key} uses ${compilerInspectValue()}; MIR allocator metadata must be :heap or :frame")));
-        rubyToClearVoid()
-      });
+      END
     rtoc_idx = rtoc_idx + 1;
     END
 }
