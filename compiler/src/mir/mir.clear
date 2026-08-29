@@ -9264,6 +9264,23 @@ PUB STRUCT ConcatList {
 FN concatList__child_exprs(self: ConcatList) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (concatList__compact_child_exprs(self, [CAST(self.left AS Any), CAST(self.right AS Any)]));
 END
+FN concatList__compact_child_exprs(self: ConcatList, values: []Any) RETURNS ![]Emittable ->
+  MUTABLE children: []Emittable = List[];
+  FOR _ IN values DO
+  concatList__append_child_expr(self, &children, _);
+  END
+  RETURN children;
+END
+FN concatList__append_child_expr<T>(self: ConcatList, MUTABLE children: []Emittable, value: T) RETURNS Void EFFECTS REENTRANT ->
+  COMPTIME IF T IS_A []@multiowned Any THEN
+    FOR _ IN value DO
+    concatList__append_child_expr(self, &children, _);
+    END
+  ELSE_IF T IS_A Emittable THEN
+    &children.append(COPY value);
+  END
+  RETURN NIL;
+END
 FN concatList__ownership_source_exprs(self: ConcatList) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (concatList__child_exprs(self));
 END
