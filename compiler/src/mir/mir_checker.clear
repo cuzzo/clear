@@ -2509,15 +2509,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < nodes.length() DO
       MUTABLE rtoc_cleanup = UNWRAP (nodes[rtoc_idx]);
-      MUTABLE rtoc_entry = MATCH rtoc_cleanup START
-        MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> item.cleanup_entry,
-        MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> item.cleanup_entry
+      MUTABLE alloc = MATCH rtoc_cleanup START
+        MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> cleanupEntry__alloc(item.cleanup_entry),
+        MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> cleanupEntry__alloc(item.cleanup_entry)
       END;
       MUTABLE rtoc_kind = MATCH rtoc_cleanup START
         MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> "Cleanup",
         MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> "ErrCleanup"
       END;
-      MUTABLE alloc = cleanupEntry__alloc(rtoc_entry);
       IF valid_allocators.contains?(alloc) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
