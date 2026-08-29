@@ -1122,7 +1122,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "control-flow branches rejoin with different ownership state: ${TRY (linearOwnershipState__summary(first))} vs ${TRY (linearOwnershipState__summary(rtoc_each_items_23[rtoc_idx]))}")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "control-flow branches rejoin with different ownership state: ${TRY (linearOwnershipState__summary(first))} vs ${TRY (linearOwnershipState__summary(rtoc_state))}")));
     rtoc_idx = rtoc_idx + 1;
     END
     mIRChecker__copy_linear_state_mut(rtoc_self_view, first, &into);
