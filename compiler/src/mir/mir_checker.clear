@@ -2565,7 +2565,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_TARGET, Name{ StringValue: COPY mIRChecker__allocator_metadata_label(rtoc_self_view, rtoc_source) }, "${emittable__variant_name(rtoc_node)} has allocator metadata ${inlineAllocMetadata__inspect(metadata)} but no target binding; allocator use is not checker-verifiable against binding placement")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_TARGET, Name{ StringValue: COPY mIRChecker__allocator_metadata_label(rtoc_self_view, rtoc_source) }, "${emittable__variant_name(rtoc_node)} has allocator metadata ${inlineAllocMetadata__inspect(UNWRAP (metadata))} but no target binding; allocator use is not checker-verifiable against binding placement")));
     rtoc_idx = rtoc_idx + 1;
     END
 }
