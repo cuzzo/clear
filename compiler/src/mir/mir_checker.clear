@@ -2024,13 +2024,7 @@ PUB FN mIRChecker__stdlib_owned_fixed_return?(self: MIRChecker, node: Emittable)
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-    IF respondsTo?(node, "stdlib_def") THEN
-      sig_branch_value = functionSignature__unwrap(node.stdlib_def());
-    ELSE
-      sig_branch_value = NIL;
-    END
-    MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
+    MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(node);
     IF sig EXISTS AS sig_value THEN
       RETURN (TRY (mIRChecker__stdlib_owned_return?(rtoc_self_view, node)) AND TRY (functionSignature__fixed_return?(sig_value)));
     ELSE
