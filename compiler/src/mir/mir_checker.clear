@@ -3588,16 +3588,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((node != NIL)) THEN
       RETURN;
     END
-    IF node IS_A Let AS let THEN
+    IF node? IS_A Let AS let THEN
       MUTABLE let_mutable = COPY let;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, let_mutable.init, "Let initializer"));
-    ELSE_IF node IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
+    ELSE_IF node? IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
       MUTABLE reassign_with_cleanup_mutable = COPY reassign_with_cleanup;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, reassign_with_cleanup_mutable.value, "ReassignWithCleanup value"));
-    ELSE_IF node IS_A DiscardOwned AS discard_owned THEN
+    ELSE_IF node? IS_A DiscardOwned AS discard_owned THEN
       MUTABLE discard_owned_mutable = COPY discard_owned;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, discardOwned__expr(discard_owned_mutable), "DiscardOwned expression"));
-    ELSE_IF node IS_A IfBindStmt AS if_bind_stmt THEN
+    ELSE_IF node? IS_A IfBindStmt AS if_bind_stmt THEN
       MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
       IF !((if_bind_stmt_mutable.bindings).empty?()) THEN
             MUTABLE rtoc_idx = 0;
@@ -3620,7 +3620,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (mIRChecker__check_stmts_for_unhoisted(&rtoc_self_view, _.body));
       END
       RETURN;
-    ELSE_IF node IS_A WhileStmt AS while_stmt THEN
+    ELSE_IF node? IS_A WhileStmt AS while_stmt THEN
       MUTABLE while_stmt_mutable = COPY while_stmt;
       IF (while_stmt_mutable.capture AND ((mIRChecker__binder_capture_cleanup?(rtoc_self_view, TRY (whileStmt__body(while_stmt_mutable)), CAST(while_stmt_mutable.capture AS String)) OR TRY (mIRChecker__block_expr_transfers_result?(rtoc_self_view, while_stmt_mutable.cond))))) THEN
         TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, while_stmt_mutable.cond, "While capture"));
