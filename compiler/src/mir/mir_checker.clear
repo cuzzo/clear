@@ -3602,13 +3602,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((if_bind_stmt_mutable.bindings).empty?()) THEN
             MUTABLE rtoc_idx = 0;
             WHILE rtoc_idx < if_bind_stmt_mutable.bindings.length() DO
-            IF !(if_bind_stmt_mutable.bindings[rtoc_idx] IS_A {}Any) THEN
-              rtoc_idx = rtoc_idx + 1;
-          CONTINUE;
-            END
-            MUTABLE expr = if_bind_stmt_mutable.bindings[rtoc_idx][:expr];
-            MUTABLE capture = if_bind_stmt_mutable.bindings[rtoc_idx][:capture];
-            IF (capture AND mIRChecker__binder_capture_cleanup?(rtoc_self_view, if_bind_stmt_mutable.then_body, CAST(capture AS String))) THEN
+            MUTABLE rtoc_binding = UNWRAP (if_bind_stmt_mutable.bindings[rtoc_idx]);
+            MUTABLE expr = rtoc_binding.expr;
+            MUTABLE capture = rtoc_binding.capture;
+            IF (mIRChecker__binder_capture_cleanup?(rtoc_self_view, if_bind_stmt_mutable.then_body, CAST(capture AS String))) THEN
                   TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, expr, "IfBind capture"));
             ELSE
                   TRY (mIRChecker__check_expr_for_unhoisted(&rtoc_self_view, expr));
