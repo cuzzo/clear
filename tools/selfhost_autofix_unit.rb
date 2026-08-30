@@ -794,12 +794,14 @@ module SelfhostAutofixUnit
       rel = path[(root.length + 1)..]
       deps = []
       File.foreach(path) do |line|
-        break unless line.start_with?('REQUIRE') || line.strip.empty?
+        next if line.strip.empty? || line.start_with?('#')
+        break unless line.start_with?('REQUIRE')
 
         if (m = line.match(/pkg:rtoc_([0-9a-f]+)/))
           deps << [m[1]].pack('H*')
         elsif (m = line.match(/REQUIRE "([^"]+)"/))
-          deps << File.expand_path(m[1], File.dirname(rel)).delete_prefix('/')
+          # Relative to the requiring file, kept as a tree-relative path.
+          deps << File.expand_path(m[1], "/#{File.dirname(rel)}").delete_prefix('/')
         end
       end
       requires[rel] = deps
