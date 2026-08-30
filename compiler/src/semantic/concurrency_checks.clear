@@ -121,7 +121,7 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalSigLookupReturnToOptionalX(sig_lookup(CAST((emittable__name(UNWRAP (scope[rtoc_idx]))) AS String))));
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(sig_lookup(CAST((emittable__name(UNWRAP (scope[rtoc_idx]))) AS String)));
       IF !((((sig != NIL) AND TRY (functionSignature__requires(sig))) AND !(((TRY (functionSignature__requires(sig))).count == 0)))) THEN
           RETURN;
       END
@@ -174,17 +174,6 @@ FN castLocatableToWithBlock(value: Locatable) RETURNS WithBlock ->
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to WithBlock");
-END
-FN castOptionalSigLookupReturnToOptionalX(value: ?SigLookupReturn) RETURNS ?X ->
-  IF value == NIL THEN
-    panic("Invalid cast to ?X");
-  END
-  PARTIAL MATCH value? START
-    SigLookupReturn.FunctionSignatureMultiowned AS cast_payload -> RETURN X{ FunctionSignatureMultiowned: COPY cast_payload };,
-    SigLookupReturn.Type AS cast_payload -> RETURN X{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?X");
-  END
-  panic("Invalid cast to ?X");
 END
 FN rubyToClearVoid__concurrency_checks() RETURNS Void ->
   RETURN;

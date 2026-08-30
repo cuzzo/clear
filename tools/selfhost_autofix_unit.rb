@@ -734,7 +734,9 @@ module SelfhostAutofixUnit
   # "argument N expects ?U, got T" where U is a union carrying T -- the callee
   # takes the union, so the value needs its variant wrapper.
   def union_arg_wrap_fix(output)
-    return nil unless (m = output.match(/argument (\d+) expects \?(\w+), got (\w+)/))
+    # The callee's parameter may or may not be optional; either way the value
+    # needs its variant wrapper.
+    return nil unless (m = output.match(/argument (\d+) expects \??(\w+), got (\w+)/))
     return nil unless (loc = output.match(/^\s+(\d+) \| (.*)$/))
 
     union, variant = m[2], m[3]

@@ -322,7 +322,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF config? IS_A []FunctionSignature@multiowned AS array THEN
         sig0_branch_value = COPY array.first();
       ELSE
-        sig0_branch_value = functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(config));
+        sig0_branch_value = functionSignature__unwrap(config);
       END
       MUTABLE sig0: ?FunctionSignature@multiowned = sig0_branch_value;
       IF sig0 EXISTS AS sig0_value THEN
@@ -1204,7 +1204,7 @@ PRIVATE FN pipelineRewriter__synthetic_append_call(self: PipelineRewriter, token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(std_lib, RegistryKey{ StringValue: COPY "append" })))));
+    MUTABLE defn = UNWRAP (functionSignature__unwrap(TRY (intrinsicRegistry__lookup(std_lib, RegistryKey{ StringValue: COPY "append" }))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "append", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
     TRY (aST__stamp_synthetic_type_mut(&call, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
     call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(&defn)));
@@ -1216,14 +1216,14 @@ PRIVATE FN pipelineRewriter__synthetic_set_insert_call(self: PipelineRewriter, t
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(CAST({"insert": {:arity: 1, :tag: :set_method, :allocates: TRUE, :zig: "try {0}.insert({alloc}, {1})", :bc: TRUE, :alloc: :receiver_storage, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :takes_args: [0], :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
+    MUTABLE defn = UNWRAP (functionSignature__unwrap(TRY (intrinsicRegistry__lookup(CAST({"insert": {:arity: 1, :tag: :set_method, :allocates: TRUE, :zig: "try {0}.insert({alloc}, {1})", :bc: TRUE, :alloc: :receiver_storage, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :takes_args: [0], :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
     MUTABLE elem = TRY (type__element_type(obj_type));
     MUTABLE arg_type = args[0].resolved_type();
     IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
         runtimeCallSpec__call(error_fn, node, "Set.insert: argument type ${arg_type} does not match set element type ${elem.resolved()}");
     END
     NIL
-    }, :return_type: :Void, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :set_method, :zig: "{0}.contains({1})", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :set_method, :zig: "{0}.remove({alloc}, {1})", :bc: TRUE, :alloc: :heap, :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :set_method, :zig: "CheatLib.len({0})", :bc: TRUE, :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() == 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() > 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}} AS {String}Any@multiowned), RegistryKey{ StringValue: COPY "insert" })))));
+    }, :return_type: :Void, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :set_method, :zig: "{0}.contains({1})", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :set_method, :zig: "{0}.remove({alloc}, {1})", :bc: TRUE, :alloc: :heap, :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :set_method, :zig: "CheatLib.len({0})", :bc: TRUE, :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() == 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() > 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}} AS {String}Any@multiowned), RegistryKey{ StringValue: COPY "insert" }))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "insert", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
     TRY (aST__stamp_synthetic_type_mut(&call, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
     call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(&defn)));
@@ -1387,17 +1387,6 @@ FN castOptionalLocatableToLiteral(value: ?Locatable) RETURNS Literal ->
     END
   END
   RETURN panic("Invalid cast to Literal");
-END
-FN castOptionalLookupResultToOptionalX__pipeline_rewriter(value: ?LookupResult) RETURNS ?X ->
-  IF value == NIL THEN
-    panic("Invalid cast to ?X");
-  END
-  PARTIAL MATCH value? START
-    LookupResult.FunctionSignatureMultiowned AS cast_payload -> RETURN X{ FunctionSignatureMultiowned: COPY cast_payload };,
-    LookupResult.ArrayValue AS cast_payload -> RETURN X{ ArrayValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?X");
-  END
-  panic("Invalid cast to ?X");
 END
 FN ruby_array_concat_Any__pipeline_rewriter(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];

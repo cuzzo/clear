@@ -3395,7 +3395,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE scope_value_mutable = COPY scope_value;
       MUTABLE func_type = TRY (scope__resolve_type(scope_value_mutable, func_name));
       MUTABLE entry: ?SymbolEntry@multiowned = scope__resolve_entry(scope_value_mutable, func_name);
-      MUTABLE fsig: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY func_type });
+      MUTABLE fsig: ?FunctionSignature@multiowned = functionSignature__unwrap(func_type);
       MUTABLE fn_type_branch_value: ?FunctionType = NIL;
       IF TRUE THEN
         fn_type_branch_value = type__function_type(func_type);
@@ -7147,7 +7147,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       MUTABLE outer_scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, name));
       IF outer_scope EXISTS AS outer_scope_value THEN
-        IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
+        IF functionSignature__unwrap(TRY (scope__resolve_type(outer_scope_value, name))) THEN
           RETURN outer_scope_value;
         END
         IF outer_scope_value.equal?(((typeAnalysisSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
@@ -10516,7 +10516,7 @@ PRIVATE FN typeAnalysisSession__resolve_typed_method(MUTABLE self: TypeAnalysisS
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE actual_type = NIL;
-    MUTABLE defn: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX__type_analysis_session(TRY (intrinsicRegistry__lookup(registry, RegistryKey{ StringValue: COPY node.name }))));
+    MUTABLE defn: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (intrinsicRegistry__lookup(registry, RegistryKey{ StringValue: COPY node.name })));
     IF defn EXISTS AS defn_value THEN
       MUTABLE defn_value_mutable = COPY defn_value;
       MUTABLE arity: ?Int64 = functionSignature__arity(defn_value_mutable);
@@ -10631,8 +10631,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(TRY (type__linear_collection?(receiver_type))) THEN
       RETURN;
     END
-    signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(KEEP node.matched_stdlib_def));
-    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_signature)));
+    signature = functionSignature__unwrap(KEEP node.matched_stdlib_def);
+    signature = (signature OR_ELSE functionSignature__unwrap(COPY node.matched_signature));
     IF signature EXISTS AS signature_value THEN
       MUTABLE signature_params: []Param = TRY (functionSignature__params(signature_value));
       MUTABLE takes_count = 0;
@@ -11413,11 +11413,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A FuncCall AS func_call THEN
       MUTABLE entry: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_261 = typeAnalysisSession__semantic_root_scope(rtoc_self_view);
       scope__resolve_entry(rtoc_local_receiver_261, funcCall__name(func_call)) };
-      MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__type_analysis_session((IF entry != NIL THEN
+      MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF entry != NIL THEN
         symbolEntry__type(entry)
       ELSE
         NIL
-      END)));
+      END));
       IF signature EXISTS AS signature_value THEN
         MUTABLE return_type = functionSignature__return_type(signature_value);
         IF typeAnalysisSession__stale_auto_node_type?(rtoc_self_view, CAST(return_type AS Type)) THEN
@@ -11851,7 +11851,7 @@ PRIVATE FN typeAnalysisSession__fn_var_call_error_fallible?(self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_signature));
+    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(COPY node.matched_signature);
     IF type__error_union?((IF sig != NIL THEN
       functionSignature__return_type(sig)
     ELSE
@@ -12485,7 +12485,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_NOT_RESOURCE }, [], {:type: type_name}));
     END
     MUTABLE static_methods = (schema.static_methods OR_ELSE {});
-    MUTABLE method_def: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX__type_analysis_session(TRY (intrinsicRegistry__lookup(static_methods, node.method_name))));
+    MUTABLE method_def: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (intrinsicRegistry__lookup(static_methods, node.method_name)));
     IF method_def EXISTS AS method_def_value THEN
       MUTABLE method_def_value_mutable = COPY method_def_value;
       MUTABLE expected_args = TRY (functionSignature__intrinsic_arg_specs(method_def_value_mutable));
@@ -12671,14 +12671,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF typeAnalysisSession__current_fn_ctx(rtoc_self_view)?.name THEN
       TRY (typeAnalysisSession__record_call_arg_families(rtoc_self_view, node.name, arg_family_sets));
     END
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__type_analysis_session((IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_305 = typeAnalysisSession__semantic_root_scope(rtoc_self_view);
+    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap((IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_305 = typeAnalysisSession__semantic_root_scope(rtoc_self_view);
     scope__resolve_entry(rtoc_local_receiver_305, node.name) } != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_306 = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_305 = typeAnalysisSession__semantic_root_scope(rtoc_self_view);
     scope__resolve_entry(rtoc_local_receiver_305, node.name) });
     symbolEntry__type(rtoc_local_receiver_306) }
     ELSE
       NIL
-    END)));
+    END));
     IF (((sig != NIL) AND TRY (functionSignature__requires(sig))) AND !(((TRY (functionSignature__requires(sig))).count == 0))) THEN
       node.collapsed_errors = TRY (typeAnalysisSession__collapse_errors_for_call(rtoc_self_view, sig, node.args));
     END
@@ -19618,7 +19618,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE func_name = call_node.name();
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, func_name));
     IF scope EXISTS AS scope_value THEN
-      MUTABLE func_type: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(scope_value, func_name)) });
+      MUTABLE func_type: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (scope__resolve_type(scope_value, func_name)));
       IF func_type EXISTS AS func_type_value THEN
         MUTABLE lifetime = TRY (functionSignature__return_lifetime(func_type_value));
         IF ((lifetime.length() == 0) OR (lifetime == [:wildcard])) THEN
@@ -19664,11 +19664,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, call_node.name()));
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__type_analysis_session((IF scope != NIL THEN
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF scope != NIL THEN
       TRY (scope__resolve_type(scope, call_node.name()))
     ELSE
       NIL
-    END)));
+    END));
     RETURN (!(!(signature)) AND !(((TRY (functionSignature__return_lifetime(signature))).length() == 0)));
 }
 END
@@ -21928,17 +21928,6 @@ FN castOptionalLocatableToIfStatement(value: ?Locatable) RETURNS IfStatement ->
   END
   RETURN panic("Invalid cast to IfStatement");
 END
-FN castOptionalLookupResultToOptionalX__type_analysis_session(value: ?LookupResult) RETURNS ?X ->
-  IF value == NIL THEN
-    panic("Invalid cast to ?X");
-  END
-  PARTIAL MATCH value? START
-    LookupResult.FunctionSignatureMultiowned AS cast_payload -> RETURN X{ FunctionSignatureMultiowned: COPY cast_payload };,
-    LookupResult.ArrayValue AS cast_payload -> RETURN X{ ArrayValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?X");
-  END
-  panic("Invalid cast to ?X");
-END
 FN castOptionalMatchSchemaToEnumSchemaMultiowned(value: ?MatchSchema) RETURNS EnumSchema@multiowned ->
   IF value != NIL THEN
     IF value IS_A EnumSchema@multiowned AS cast_payload THEN
@@ -22522,12 +22511,6 @@ FN ruby_wrap_optional_Any_multiowned_ReturnDescriptor(value: ?Any@multiowned) RE
   END
   NIL;
 END
-FN ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(value: ?FunctionSignature@multiowned) RETURNS ?X ->
-  IF value EXISTS AS optional_payload THEN
-    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
-  END
-  NIL;
-END
 FN ruby_wrap_optional_Int64_DiagnosticKwValue__type_analysis_session(value: ?Int64) RETURNS ?DiagnosticKwValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN DiagnosticKwValue{ Int64Value: COPY optional_payload };
@@ -22555,12 +22538,6 @@ END
 FN ruby_wrap_optional_String_symbol_TypeAnalysisSessionReturnValue(value: ?String@symbol) RETURNS ?TypeAnalysisSessionReturnValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN TypeAnalysisSessionReturnValue{ SymbolValue: COPY optional_payload };
-  END
-  NIL;
-END
-FN ruby_wrap_optional_Type_multiowned_X__type_analysis_session(value: ?Type@multiowned) RETURNS ?X ->
-  IF value EXISTS AS optional_payload THEN
-    RETURN X{ Type: Type{ Type: COPY optional_payload } };
   END
   NIL;
 END
