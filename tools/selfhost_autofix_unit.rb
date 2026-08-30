@@ -914,11 +914,16 @@ module SelfhostAutofixUnit
       fix = FIXES.filter_map { |f| f.call(output_for_fix) }.first
       unless fix
         puts "selfhost_autofix_unit: stopped after #{applied} fix(es); needs a human:"
+        puts "  file: #{target_rel} (#{cost[target_rel] || '?'} deps)#{local_line ? " line #{local_line}" : ''}"
         puts output.lines.grep(/Compiler Error|^\s+\d+ \|/).first(3).join
         return 1
       end
       unless fix.apply.call(target)
+        # Every stop costs another full check to learn anything, so say
+        # everything known about the diagnostic here.
         puts "selfhost_autofix_unit: #{fix.label} did not apply; stopping"
+        puts "  file: #{target_rel} (#{cost[target_rel] || '?'} deps)#{local_line ? " line #{local_line}" : ''}"
+        puts output.lines.grep(/Compiler Error|^\s+\d+ \|/).first(3).join
         return 1
       end
       seen[signature] = fix.label
