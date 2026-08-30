@@ -13,11 +13,14 @@ REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
 REQUIRE "pkg:rtoc_6173742f6572726f725f72656769737472792e636c656172" AS error_registry
 
 # Ruby: source_dir ? File.expand_path(source_dir) : Dir.pwd
+# path's expand leaves a relative path alone without a base, so the working
+# directory is the base, which is what File.expand_path resolves against.
 PRIVATE FN rtocResolveSourceDir(source_dir: ?String) RETURNS !String ->
+  MUTABLE here: String = TRY (pwd());
   IF source_dir EXISTS AS rtoc_dir THEN
-    RETURN TRY (expand(rtoc_dir));
+    RETURN expand(rtoc_dir, here);
   END
-  RETURN TRY (pwd());
+  RETURN COPY here;
 END
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";

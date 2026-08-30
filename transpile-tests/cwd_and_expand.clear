@@ -1,14 +1,12 @@
-# Ruby's Dir.pwd and File.expand_path: the working directory, and a path
-# resolved against it.
+# Ruby's Dir.pwd. path's expand already resolves a path against a base, so
+# pwd is what File.expand_path needs to resolve a relative path against.
+REQUIRE "pkg:path"
+
 FN main() RETURNS !Void ->
   here = TRY (pwd());
   ASSERT here.startsWith?("/"), "the working directory is absolute";
+  ASSERT !(here.empty?()), "and is not empty";
 
-  same = TRY (expand(here));
-  ASSERT same == here, "an absolute path resolves to itself";
-
-  child = TRY (expand("./sub/../sub"));
-  ASSERT child.startsWith?("/"), "a relative path is resolved against the cwd";
-  ASSERT child.endsWith?("sub"), "and names the directory asked for";
-  ASSERT !(child.contains?("..")), "with the parent segment collapsed";
+  ASSERT expand("/abs/x", here) == "/abs/x", "an absolute path ignores the base";
+  ASSERT expand("rel", here).startsWith?(here), "a relative path resolves against it";
 END

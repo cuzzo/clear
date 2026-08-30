@@ -930,33 +930,6 @@ STD_LIB = T.let({
     can_fail: true,
   },
 
-  # Ruby's File.expand_path with no base: resolve against the working
-  # directory, collapsing "." and "..".
-  "expand" => [
-    {
-      args: [STRING_TYPE],
-      return: STRING_TYPE, return_alloc: :frame,
-      zig: "try CheatLib.expandPath({alloc}, {0})",
-      bc: true,
-      allocates: true,
-      alloc: :node_storage,
-      borrows: :all,
-      can_fail: true,
-    },
-    # File.expand_path(path, base): resolve against a given directory rather
-    # than the working one.
-    {
-      args: [STRING_TYPE, STRING_TYPE],
-      return: STRING_TYPE, return_alloc: :frame,
-      zig: "try CheatLib.expandPathFrom({alloc}, {0}, {1})",
-      bc: true,
-      allocates: true,
-      alloc: :node_storage,
-      borrows: :all,
-      can_fail: true,
-    },
-  ],
-
   # Read all bytes from an open File resource into a heap-allocated String.
   # Usage: contents = fileReadAll(f)
   "fileReadAll" => {

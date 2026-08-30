@@ -1099,38 +1099,11 @@ test "sliceIndexOf finds the first match and reports absence" {
     try std.testing.expectEqual(@as(?i64, null), CheatLib.sliceIndexOf(list, @as(i64, 4)));
 }
 
-test "cwd and expandPath resolve against the working directory" {
+
+
+test "cwd reports an absolute working directory" {
     const here = try CheatLib.cwd(std.testing.allocator);
     defer std.testing.allocator.free(here);
     try std.testing.expect(std.fs.path.isAbsolute(here));
-
-    // An absolute path resolves to itself.
-    const same = try CheatLib.expandPath(std.testing.allocator, here);
-    defer std.testing.allocator.free(same);
-    try std.testing.expectEqualStrings(here, same);
-
-    // A relative path is resolved against the working directory, and "."
-    // segments collapse.
-    const child = try CheatLib.expandPath(std.testing.allocator, "./sub/../sub");
-    defer std.testing.allocator.free(child);
-    try std.testing.expect(std.fs.path.isAbsolute(child));
-    try std.testing.expect(std.mem.endsWith(u8, child, "sub"));
-    // The ".." collapsed rather than being carried into the result.
-    try std.testing.expect(std.mem.indexOf(u8, child, "..") == null);
-}
-
-test "expandPathFrom resolves against the base it is given" {
-    const from = try CheatLib.expandPathFrom(std.testing.allocator, "b.clear", "/pkg/a");
-    defer std.testing.allocator.free(from);
-    try std.testing.expectEqualStrings("/pkg/a/b.clear", from);
-
-    // An absolute path ignores the base.
-    const abs = try CheatLib.expandPathFrom(std.testing.allocator, "/other/c", "/pkg/a");
-    defer std.testing.allocator.free(abs);
-    try std.testing.expectEqualStrings("/other/c", abs);
-
-    // Parent segments collapse against the base.
-    const up = try CheatLib.expandPathFrom(std.testing.allocator, "../d", "/pkg/a");
-    defer std.testing.allocator.free(up);
-    try std.testing.expectEqualStrings("/pkg/d", up);
+    try std.testing.expect(here.len > 0);
 }
