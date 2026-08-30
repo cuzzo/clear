@@ -745,10 +745,21 @@ module SelfhostAutofixUnit
 
     index = m[1].to_i
     line_no = loc[1].to_i
-    Fix.new(label: "wrap argument #{index} in #{union}.#{variant}", apply: lambda do |path|
+    # The diagnostic names the value it is complaining about. When that name
+    # is a bare argument on the line, it is the one to wrap -- the outermost
+    # call's argument N may be a different, larger expression.
+    named = output[/Function '(\w+)' argument/, 1]
+    Fix.new(label: "wrap #{named || "argument #{index}"} in #{union}.#{variant}", apply: lambda do |path|
       lines = File.readlines(path)
       i = line_no - 1
       line = lines[i].to_s
+      if named && line.scan(/(?<=[(,] |[(])#{Regexp.escape(named)}(?=[),])/).length == 1
+        lines[i] = line.sub(/(?<=[(,] |[(])#{Regexp.escape(named)}(?=[),])/,
+                            "#{union}{ #{variant}: COPY #{named} }")
+        File.write(path, lines.join)
+        return true
+      end
+
       at = line.index('_mut(') || line.index('(') or return false
 
       args = split_arguments(line, line.index('(', at)) or return false
