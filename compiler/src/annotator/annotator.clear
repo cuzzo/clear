@@ -79,7 +79,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN semanticAnnotator__lookup_type_schema(self: SemanticAnnotator, name: String@symbol) RETURNS !Any@multiowned
+PUB FN semanticAnnotator__lookup_type_schema(self: SemanticAnnotator, name: String@symbol) RETURNS !?ScopeScopeTypeSchema
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
