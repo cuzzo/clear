@@ -824,14 +824,26 @@ module SelfhostAutofixUnit
     plain = output.gsub(/\e\[[0-9;]*m/, '')
     m = plain.match(/^\s+(\d+) \| (.*)$/) or return nil
 
-    number = m[1].to_i
-    text = m[2]
-    hits = Dir.glob(File.join(ROOT, 'compiler', 'src', '**', '*.clear')).select do |candidate|
-      line = File.readlines(candidate)[number - 1] or next false
+    text = m[2].rstrip
+    return nil if text.empty?
 
-      line.rstrip == text.rstrip
+    # The number the compiler prints is an offset into the concatenated
+    # package, not into any one file, so the line's own text is what
+    # identifies it.
+    hits = Dir.glob(File.join(ROOT, 'compiler', 'src', '**', '*.clear')).select do |candidate|
+      File.foreach(candidate).any? { |line| line.rstrip == text }
     end
     hits.length == 1 ? hits.first : nil
+  end
+
+  # Line number within its own file, for a diagnostic located by text.
+  def locate_line(path, output)
+    plain = output.gsub(/\e\[[0-9;]*m/, '')
+    m = plain.match(/^\s+\d+ \| (.*)$/) or return nil
+
+    text = m[1].rstrip
+    File.readlines(path).each_with_index { |line, i| return i + 1 if line.rstrip == text }
+    nil
   end
 
   def check(relative)
@@ -888,7 +900,16 @@ module SelfhostAutofixUnit
         focus = target_rel
         next
       end
-      fix = FIXES.filter_map { |f| f.call(output) }.first
+      # Every rule reads the line number out of the diagnostic, and that
+      # number counts lines in the concatenated package. Restate it in the
+      # located file's own numbering before any rule looks at it.
+      local_line = locate_line(target, output)
+      output_for_fix = if local_line
+                         output.sub(/^(\s+)\d+ \| /) { "#{Regexp.last_match(1)}#{local_line} | " }
+                       else
+                         output
+                       end
+      fix = FIXES.filter_map { |f| f.call(output_for_fix) }.first
       unless fix
         puts "selfhost_autofix_unit: stopped after #{applied} fix(es); needs a human:"
         puts output.lines.grep(/Compiler Error|^\s+\d+ \|/).first(3).join
