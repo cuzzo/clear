@@ -919,6 +919,30 @@ STD_LIB = T.let({
     alloc: :node_storage,
   },
 
+  # Ruby's Dir.pwd: the process's current working directory.
+  "pwd" => {
+    args: [],
+    return: STRING_TYPE, return_alloc: :frame,
+    zig: "try CheatLib.cwd({alloc})",
+    bc: true,
+    allocates: true,
+    alloc: :node_storage,
+    can_fail: true,
+  },
+
+  # Ruby's File.expand_path with no base: resolve against the working
+  # directory, collapsing "." and "..".
+  "expand" => {
+    args: [STRING_TYPE],
+    return: STRING_TYPE, return_alloc: :frame,
+    zig: "try CheatLib.expandPath({alloc}, {0})",
+    bc: true,
+    allocates: true,
+    alloc: :node_storage,
+    borrows: :all,
+    can_fail: true,
+  },
+
   # Read all bytes from an open File resource into a heap-allocated String.
   # Usage: contents = fileReadAll(f)
   "fileReadAll" => {

@@ -1098,3 +1098,23 @@ test "sliceIndexOf finds the first match and reports absence" {
     try std.testing.expectEqual(@as(?i64, 1), CheatLib.sliceIndexOf(list, @as(i64, 6)));
     try std.testing.expectEqual(@as(?i64, null), CheatLib.sliceIndexOf(list, @as(i64, 4)));
 }
+
+test "cwd and expandPath resolve against the working directory" {
+    const here = try CheatLib.cwd(std.testing.allocator);
+    defer std.testing.allocator.free(here);
+    try std.testing.expect(std.fs.path.isAbsolute(here));
+
+    // An absolute path resolves to itself.
+    const same = try CheatLib.expandPath(std.testing.allocator, here);
+    defer std.testing.allocator.free(same);
+    try std.testing.expectEqualStrings(here, same);
+
+    // A relative path is resolved against the working directory, and "."
+    // segments collapse.
+    const child = try CheatLib.expandPath(std.testing.allocator, "./sub/../sub");
+    defer std.testing.allocator.free(child);
+    try std.testing.expect(std.fs.path.isAbsolute(child));
+    try std.testing.expect(std.mem.endsWith(u8, child, "sub"));
+    // The ".." collapsed rather than being carried into the result.
+    try std.testing.expect(std.mem.indexOf(u8, child, "..") == null);
+}

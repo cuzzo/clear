@@ -2890,6 +2890,28 @@ pub const CheatLib = struct {
 
     // shell
 
+    // Ruby's Dir.pwd: the process's current working directory, owned by the
+    // caller. Goes through libc, as shell() does, rather than a std API that
+    // has moved between Zig releases.
+    pub fn cwd(allocator: std.mem.Allocator) ![]const u8 {
+        const libc = struct {
+            extern "c" fn getcwd(buf: [*]u8, size: usize) ?[*:0]u8;
+        };
+        var buf: [4096]u8 = undefined;
+        const got = libc.getcwd(&buf, buf.len) orelse return error.CurrentWorkingDirectoryUnlinked;
+        return allocator.dupe(u8, std.mem.span(got));
+    }
+
+    // Ruby's File.expand_path with no base: resolve against the working
+    // directory, collapsing "." and "..".
+    pub fn expandPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+        if (std.fs.path.isAbsolute(path)) return std.fs.path.resolve(allocator, &.{path});
+
+        const here = try cwd(allocator);
+        defer allocator.free(here);
+        return std.fs.path.resolve(allocator, &.{ here, path });
+    }
+
     pub fn shell(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
         const libc = struct {
             extern "c" fn popen(command: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE;
