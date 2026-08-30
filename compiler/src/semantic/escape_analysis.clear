@@ -1450,7 +1450,7 @@ PUB FN escapeAnalysis__expr_has_owned_inline_value?(expr: ?Locatable) RETURNS !B
   IF !(node IS_A Locatable) THEN
       RETURN;
   END
-  MUTABLE is_root = node.equal?(root);
+  MUTABLE is_root = (aST__node_identity(node) == aST__node_identity(root));
   IF !((is_root OR node IS_A Identifier)) THEN
       IF node IS_A Literal THEN
       IF node.value() IS_A String THEN

@@ -1816,7 +1816,7 @@ PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names
       CONTINUE;
     END
     block(node);
-    IF (!(node.equal?(root)) AND loopFrameAnalysis__direct_loop_expression_boundary?(node)) THEN
+    IF (!((aST__node_identity(node) == aST__node_identity(root))) AND loopFrameAnalysis__direct_loop_expression_boundary?(node)) THEN
       CONTINUE;
     END
     IF TRY (loopFrameAnalysis__outer_mutating_receiver_call?(node, local_names)) THEN
