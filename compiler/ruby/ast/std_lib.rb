@@ -1470,6 +1470,17 @@ MAP_METHODS = T.let({
     borrows: :all,
     is_method: true,
   },
+  # Ruby's merge! with a `{ |_k, old, _new| old }` block: existing entries win.
+  "merge_keeping" => {
+    arity: 1, tag: :map_method, allocates: true,
+    mutates_receiver: true,
+    bc: true,
+    zig: "try CheatLib.mapMergeKeeping({val_zig}, {alloc}, {alloc}, &{0}, {1})",
+    alloc: :receiver_storage,
+    return_type: :Void,
+    borrows: :all,
+    is_method: true,
+  },
   "delete" => {
     arity: 1, tag: :map_method,
     bc: true,

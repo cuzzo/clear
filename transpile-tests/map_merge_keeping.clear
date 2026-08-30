@@ -1,0 +1,14 @@
+# Ruby's merge! with a `{ |_k, old, _new| old }` block: the entries the
+# destination already has win, and only new keys are taken.
+FN main() RETURNS !Void ->
+  MUTABLE dst: {String}Int64 = { "a": 1_i64, "b": 2_i64 };
+  src: {String}Int64 = { "b": 99_i64, "c": 3_i64 };
+
+  &dst.merge_keeping(src);
+
+  ASSERT dst["a"]? == 1_i64, "an entry the source lacks is untouched";
+  ASSERT dst["b"]? == 2_i64, "a colliding key keeps the existing value";
+  ASSERT dst["c"]? == 3_i64, "a new key is taken from the source";
+  ASSERT dst.length() == 3, "and nothing else is added";
+  ASSERT src["b"]? == 99_i64, "the source is left intact";
+END

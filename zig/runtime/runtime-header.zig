@@ -1239,6 +1239,7 @@ pub const CheatLib = struct {
     pub const makeHashMap = DataStructures.makeHashMap;
     pub const mapPut = DataStructures.mapPut;
     pub const mapMerge = DataStructures.mapMerge;
+    pub const mapMergeKeeping = DataStructures.mapMergeKeeping;
     pub const StringMap = DataStructures.StringMap;
     pub const mapPromote = DataStructures.mapPromote;
     pub const mapDeinit = DataStructures.mapDeinit;

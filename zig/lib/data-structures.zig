@@ -183,6 +183,27 @@ pub fn bind(comptime deps: type) type {
         }
     }
 
+    // Ruby's merge! with a `{ |_k, old, _new| old }` block: the entries the
+    // destination already has win, so only new keys are taken.
+    pub fn mapMergeKeeping(
+        comptime V: type,
+        key_alloc: std.mem.Allocator,
+        bucket_alloc: std.mem.Allocator,
+        dst: anytype,
+        src: anytype,
+    ) !void {
+        var it = src.inner.iterator();
+        while (it.next()) |entry| {
+            if (dst.inner.contains(entry.key_ptr.*)) continue;
+
+            const value = if (comptime needsCleanup(V))
+                try dupeValue(V, entry.value_ptr.*, bucket_alloc)
+            else
+                entry.value_ptr.*;
+            try dst.put(key_alloc, bucket_alloc, entry.key_ptr.*, value);
+        }
+    }
+
     pub fn mapPut(comptime V: type, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator, map: *std.StringHashMapUnmanaged(V), key: []const u8, value: V) !void {
         if (map.getPtr(key)) |val_ptr| {
             cleanup(V, bucket_alloc, val_ptr);
