@@ -4861,7 +4861,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE inherent_call_value_mutable = COPY inherent_call_value;
       RETURN TRY (mIRLowering__lower_func_call(&rtoc_self_view, inherent_call_value_mutable));
     END
-    MUTABLE stdlib_def: ?FunctionSignature@multiowned = functionSignature__unwrap(KEEP node.matched_stdlib_def);
+    MUTABLE stdlib_def: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(KEEP node.matched_stdlib_def));
     IF stdlib_def EXISTS AS stdlib_def_value THEN
       MUTABLE stdlib_def_value_mutable = COPY stdlib_def_value;
       IF TRY (functionSignature__intrinsic_bc?(&stdlib_def_value_mutable)) THEN
@@ -5298,7 +5298,7 @@ PUB FN mIRLowering__emit_builtin(self: MIRLowering, name: String@symbol, args: [
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE entry: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (intrinsicRegistry__lookup({:eql: {:zig: "CheatLib.eql({0}, {1})", :bc: TRUE, :borrows: :all}, :strcmp: {:zig: "CheatLib.strcmp({0}, {1})", :bc: TRUE, :borrows: :all}, :strEql: {:zig: "CheatLib.strEql({0}, {1})", :bc: TRUE, :borrows: :all}, :symbolEql: {:zig: "CheatLib.eql({0}, {1})", :bc: TRUE, :borrows: :all}, :charAt: {:zig: "CheatLib.charAt({0}, {1})", :bc: TRUE, :borrows: :all}, :getAt: {:zig: "CheatLib.getAt({0}, {1})", :bc: TRUE, :borrows: :all}, :getAtOpt: {:zig: "CheatLib.getAtOpt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :getAtPtrOpt: {:zig: "CheatLib.getAtPtrOpt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :getOptionalPtr: {:zig: "CheatLib.getOptionalPtr({0})", :bc: FALSE, :borrows: :all}, :getNodeAt: {:zig: "CheatLib.getNodeAt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :setAt: {:zig: "CheatLib.setAt({0}, {1}, {2})", :bc: TRUE, :borrows: :all}, :numericMapGet: {:zig: "CheatLib.numericMapGet({0}, {1}, {2}, {3})", :bc: TRUE, :borrows: :all}, :intAdd: {:zig: "CheatLib.intAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :intSub: {:zig: "CheatLib.intSub({0}, {1})", :bc: TRUE, :borrows: :all}, :intMul: {:zig: "CheatLib.intMul({0}, {1})", :bc: TRUE, :borrows: :all}, :intDiv: {:zig: "@divTrunc({0}, {1})", :bc: TRUE, :borrows: :all}, :intMod: {:zig: "@mod({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapAdd: {:zig: "CheatLib.wrapAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapSub: {:zig: "CheatLib.wrapSub({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapMul: {:zig: "CheatLib.wrapMul({0}, {1})", :bc: TRUE, :borrows: :all}, :checkAdd: {:zig: "CheatLib.checkAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :checkSub: {:zig: "CheatLib.checkSub({0}, {1})", :bc: TRUE, :borrows: :all}, :checkMul: {:zig: "CheatLib.checkMul({0}, {1})", :bc: TRUE, :borrows: :all}, :assert: {:zig: "CheatLib.assert({0}, {1})", :bc: TRUE, :borrows: :all}, :dupeUnionValue: {:zig: "try CheatLib.dupeUnionValue({0}, {1}, {2})", :bc: TRUE, :allocates: TRUE}, :cleanupAt: {:zig: "CheatLib.cleanupAt({0}, {1}, {2}, {3})", :bc: TRUE, :allocates: FALSE, :borrows: :all}, :streamDupeBytes: {:zig: "try {0}.dupe(u8, {1})", :bc: TRUE, :allocates: TRUE}, :setMemberGet: {:zig: "if ({0}.contains({1})) @as({2}, {1}) else null", :bc: TRUE, :borrows: :all}, :cleanup: {:zig: "CheatLib.cleanup({0}, {1}, {2})", :bc: TRUE, :allocates: FALSE, :borrows: :all}, :needsCleanup: {:zig: "CheatLib.needsCleanup({0})", :bc: TRUE, :borrows: :all}, :concurrentBoundedSelect: {:zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :allocates: TRUE}, :concurrentBoundedSelectPreservingErrors: {:zig: "try CheatLib.concurrentBoundedSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :bc_op: :concurrentBoundedSelect, :allocates: TRUE}, :concurrentBoundedWhere: {:zig: "try CheatLib.concurrentBoundedWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :bc: TRUE, :allocates: TRUE}, :concurrentBoundedEach: {:zig: "try CheatLib.concurrentBoundedEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})", :bc: TRUE, :borrows: :all}, :concurrentStreamSelect: {:zig: "try CheatLib.concurrentStreamSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12})", :bc: TRUE, :allocates: TRUE}, :concurrentStreamSelectPreservingErrors: {:zig: "try CheatLib.concurrentStreamSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12})", :bc: TRUE, :bc_op: :concurrentStreamSelect, :allocates: TRUE}, :concurrentStreamWhere: {:zig: "try CheatLib.concurrentStreamWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :allocates: TRUE}, :concurrentStreamEach: {:zig: "try CheatLib.concurrentStreamEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :borrows: :all}, :concurrentListSelect: {:zig: "try CheatLib.concurrentListSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :allocates: TRUE}, :concurrentListSelectPreservingErrors: {:zig: "try CheatLib.concurrentListSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :bc: TRUE, :bc_op: :concurrentListSelect, :allocates: TRUE}, :promiseListToStream: {:zig: "try CheatLib.promiseListToStream({0}, {1}, {2}, {3})", :allocates: TRUE}, :concurrentListWhere: {:zig: "try CheatLib.concurrentListWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})", :allocates: TRUE}, :concurrentListEach: {:zig: "try CheatLib.concurrentListEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListEachInPlace: {:zig: "try CheatLib.concurrentListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListCount: {:zig: "try CheatLib.concurrentListCount({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListReduce: {:zig: "try CheatLib.concurrentListReduce({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :borrows: :all}, :concurrentShardedListEachInPlace: {:zig: "try CheatLib.concurrentShardedListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})", :borrows: :all}, :concurrentShardedPoolEachInPlace: {:zig: "try CheatLib.concurrentShardedPoolEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})", :borrows: :all}}, RegistryKey{ SymbolValue: COPY name })));
+    MUTABLE entry: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX__mir_lowering(TRY (intrinsicRegistry__lookup({:eql: {:zig: "CheatLib.eql({0}, {1})", :bc: TRUE, :borrows: :all}, :strcmp: {:zig: "CheatLib.strcmp({0}, {1})", :bc: TRUE, :borrows: :all}, :strEql: {:zig: "CheatLib.strEql({0}, {1})", :bc: TRUE, :borrows: :all}, :symbolEql: {:zig: "CheatLib.eql({0}, {1})", :bc: TRUE, :borrows: :all}, :charAt: {:zig: "CheatLib.charAt({0}, {1})", :bc: TRUE, :borrows: :all}, :getAt: {:zig: "CheatLib.getAt({0}, {1})", :bc: TRUE, :borrows: :all}, :getAtOpt: {:zig: "CheatLib.getAtOpt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :getAtPtrOpt: {:zig: "CheatLib.getAtPtrOpt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :getOptionalPtr: {:zig: "CheatLib.getOptionalPtr({0})", :bc: FALSE, :borrows: :all}, :getNodeAt: {:zig: "CheatLib.getNodeAt({0}, {1})", :bc: TRUE, :bc_op: :getAt, :borrows: :all}, :setAt: {:zig: "CheatLib.setAt({0}, {1}, {2})", :bc: TRUE, :borrows: :all}, :numericMapGet: {:zig: "CheatLib.numericMapGet({0}, {1}, {2}, {3})", :bc: TRUE, :borrows: :all}, :intAdd: {:zig: "CheatLib.intAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :intSub: {:zig: "CheatLib.intSub({0}, {1})", :bc: TRUE, :borrows: :all}, :intMul: {:zig: "CheatLib.intMul({0}, {1})", :bc: TRUE, :borrows: :all}, :intDiv: {:zig: "@divTrunc({0}, {1})", :bc: TRUE, :borrows: :all}, :intMod: {:zig: "@mod({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapAdd: {:zig: "CheatLib.wrapAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapSub: {:zig: "CheatLib.wrapSub({0}, {1})", :bc: TRUE, :borrows: :all}, :wrapMul: {:zig: "CheatLib.wrapMul({0}, {1})", :bc: TRUE, :borrows: :all}, :checkAdd: {:zig: "CheatLib.checkAdd({0}, {1})", :bc: TRUE, :borrows: :all}, :checkSub: {:zig: "CheatLib.checkSub({0}, {1})", :bc: TRUE, :borrows: :all}, :checkMul: {:zig: "CheatLib.checkMul({0}, {1})", :bc: TRUE, :borrows: :all}, :assert: {:zig: "CheatLib.assert({0}, {1})", :bc: TRUE, :borrows: :all}, :dupeUnionValue: {:zig: "try CheatLib.dupeUnionValue({0}, {1}, {2})", :bc: TRUE, :allocates: TRUE}, :cleanupAt: {:zig: "CheatLib.cleanupAt({0}, {1}, {2}, {3})", :bc: TRUE, :allocates: FALSE, :borrows: :all}, :streamDupeBytes: {:zig: "try {0}.dupe(u8, {1})", :bc: TRUE, :allocates: TRUE}, :setMemberGet: {:zig: "if ({0}.contains({1})) @as({2}, {1}) else null", :bc: TRUE, :borrows: :all}, :cleanup: {:zig: "CheatLib.cleanup({0}, {1}, {2})", :bc: TRUE, :allocates: FALSE, :borrows: :all}, :needsCleanup: {:zig: "CheatLib.needsCleanup({0})", :bc: TRUE, :borrows: :all}, :concurrentBoundedSelect: {:zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :allocates: TRUE}, :concurrentBoundedSelectPreservingErrors: {:zig: "try CheatLib.concurrentBoundedSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :bc_op: :concurrentBoundedSelect, :allocates: TRUE}, :concurrentBoundedWhere: {:zig: "try CheatLib.concurrentBoundedWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :bc: TRUE, :allocates: TRUE}, :concurrentBoundedEach: {:zig: "try CheatLib.concurrentBoundedEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})", :bc: TRUE, :borrows: :all}, :concurrentStreamSelect: {:zig: "try CheatLib.concurrentStreamSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12})", :bc: TRUE, :allocates: TRUE}, :concurrentStreamSelectPreservingErrors: {:zig: "try CheatLib.concurrentStreamSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12})", :bc: TRUE, :bc_op: :concurrentStreamSelect, :allocates: TRUE}, :concurrentStreamWhere: {:zig: "try CheatLib.concurrentStreamWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :allocates: TRUE}, :concurrentStreamEach: {:zig: "try CheatLib.concurrentStreamEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :bc: TRUE, :borrows: :all}, :concurrentListSelect: {:zig: "try CheatLib.concurrentListSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :allocates: TRUE}, :concurrentListSelectPreservingErrors: {:zig: "try CheatLib.concurrentListSelectPreservingErrors({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})", :bc: TRUE, :bc_op: :concurrentListSelect, :allocates: TRUE}, :promiseListToStream: {:zig: "try CheatLib.promiseListToStream({0}, {1}, {2}, {3})", :allocates: TRUE}, :concurrentListWhere: {:zig: "try CheatLib.concurrentListWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})", :allocates: TRUE}, :concurrentListEach: {:zig: "try CheatLib.concurrentListEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListEachInPlace: {:zig: "try CheatLib.concurrentListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListCount: {:zig: "try CheatLib.concurrentListCount({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})", :borrows: :all}, :concurrentListReduce: {:zig: "try CheatLib.concurrentListReduce({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})", :borrows: :all}, :concurrentShardedListEachInPlace: {:zig: "try CheatLib.concurrentShardedListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})", :borrows: :all}, :concurrentShardedPoolEachInPlace: {:zig: "try CheatLib.concurrentShardedPoolEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})", :borrows: :all}}, RegistryKey{ SymbolValue: COPY name }))));
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
       IF (mIRLowering__bc_target?(rtoc_self_view) AND TRY (functionSignature__intrinsic_bc?(&entry_value_mutable))) THEN
@@ -9658,7 +9658,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF fallback? IS_A []FunctionSignature@multiowned AS array THEN
       MUTABLE array: ?FunctionSignature@multiowned = COPY array.first();
     END
-    RETURN functionSignature__unwrap(fallback);
+    RETURN functionSignature__unwrap(castOptionalLookupResultToOptionalX__mir_lowering(fallback));
 }
 END
 PRIVATE FN mIRLowering__stdlib_sink_type_for_arg(self: MIRLowering, receiver_type: ?Type, index_value: Int64, takes_value: Bool) RETURNS !?Type
@@ -9712,7 +9712,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       CallNode.MethodCall AS item ->
         raw = COPY item.matched_signature;,
     END
-    MUTABLE unwrapped: ?FunctionSignature@multiowned = functionSignature__unwrap(raw);
+    MUTABLE unwrapped: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(raw));
     IF unwrapped EXISTS AS unwrapped_value THEN
       RETURN KEEP unwrapped_value;
     END
@@ -10012,7 +10012,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF (TRUE AND node.fn_var_call) THEN
       all_args = ([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }] + args_mir);
-      MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(rtoc_self_view, functionSignature__unwrap(COPY node.matched_signature), node.args, args_mir));
+      MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(rtoc_self_view, functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature)), node.args, args_mir));
       RETURN Emittable{ Call: COPY Call{ callee: "try ${node.name}", args: COPY all_args, try_wrap: FALSE, owned_return: TRY (mIRLowering__call_owned_return?(rtoc_self_view, Node{ FuncCall: COPY node })), callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     END
     MUTABLE needs_rt = TRY (mIRLowering__callee_needs_rt?(rtoc_self_view, node.name));
@@ -10928,7 +10928,7 @@ PRIVATE FN mIRLowering__lower_extern_direct_call(MUTABLE self: MIRLowering, node
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE mod_alias = NIL;
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
-    sig = functionSignature__unwrap(COPY node.matched_signature);
+    sig = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature));
     MUTABLE source: ?ExternSource = COPY node.extern_source;
     MUTABLE ast_args = COPY node.args;
     MUTABLE args = {
@@ -10999,7 +10999,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE obj = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.object)));
     MUTABLE ast_args = COPY node.args;
     MUTABLE args = ast_args |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_)));
-    sig = functionSignature__unwrap(COPY node.matched_signature);
+    sig = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature));
     RETURN MIRMethodCall{ receiver: COPY obj, method: COPY node.name, args: COPY args, try_wrap: FALSE, callable_contract: COPY TRY (mIRLowering__callable_contract_for(rtoc_self_view, sig, ([node.object] + ast_args))), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
 }
 END
@@ -11114,7 +11114,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     mIRLoweringCounters__next_extern_id(&rtoc_mutable_receiver_416) };
     MUTABLE obj: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.object))) AS Emittable);
     MUTABLE args = node.args |> SELECT ExternTrampolineArg{ expr: COPY TRY (mIRLowering__lower_extern_arg(&rtoc_self_view, _)), field_type: NIL, field_zig_type: NIL };
-    signature = functionSignature__unwrap(COPY node.matched_signature);
+    signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature));
     MUTABLE return_type = TRY (mIRLowering__extern_trampoline_return_type(rtoc_self_view, &node, signature));
     RETURN ExternTrampoline{ id: id.value, callee_name: COPY node.name, method_name: COPY node.name, receiver: COPY obj, runtime_args: COPY args, alloc_kind: COPY (IF node.extern_effects != NIL THEN
       node.extern_effects[:alloc]
@@ -15523,7 +15523,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
     NIL
       END);
-      MUTABLE op: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (intrinsicRegistry__fs(op_spec, RegistryKey{ SymbolValue: COPY symbol("${kind}_get") })));
+      MUTABLE op: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(TRY (intrinsicRegistry__fs(op_spec, RegistryKey{ SymbolValue: COPY symbol("${kind}_get") }))));
       IF op EXISTS AS op_value THEN
         MUTABLE op_value_mutable = COPY op_value;
         MUTABLE shard_direct = ((shard != NIL) AND (plan.target_name == shard[:map]));
@@ -15564,14 +15564,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         elem_name = COPY type__to_s(elem_t);
       END
-      MUTABLE pool_get_def = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_572 = UNWRAP (functionSignature__unwrap(TRY (intrinsicRegistry__lookup({"insert": {:arity: 1, :tag: :pool_method, :allocates: TRUE, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :bc: TRUE, :takes_args: [0], :zig: "try {0}.insert({alloc}, {1})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
+      MUTABLE pool_get_def = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_572 = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__mir_lowering(TRY (intrinsicRegistry__lookup({"insert": {:arity: 1, :tag: :pool_method, :allocates: TRUE, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :bc: TRUE, :takes_args: [0], :zig: "try {0}.insert({alloc}, {1})", :alloc: :receiver_storage, :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
     MUTABLE elem: ?Type = TRY (type__element_type(obj_type));
     MUTABLE arg_type = args[0].resolved_type;
     IF !((((arg_type == :Any) OR (arg_type == type__resolved(UNWRAP (elem)))) OR TRY (type__accepts?((TRY (type__new(type__resolved(UNWRAP (elem))))), TRY (type__new(arg_type)))))) THEN
           runtimeCallSpec__call(error_fn, node, "Pool.insert: argument type ${arg_type} does not match pool element type ${type__resolved(UNWRAP (elem))}");
     END
     NIL
-      }, :return_type: :r_id_element, :is_method: TRUE}, "get": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.get({1})", :return_type: :r_optional_element, :container_borrow: TRUE, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.remove({1})", :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "{0}.length()", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "({0}.get({1}) != null)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}}, RegistryKey{ StringValue: COPY "get" }))));
+      }, :return_type: :r_id_element, :is_method: TRUE}, "get": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.get({1})", :return_type: :r_optional_element, :container_borrow: TRUE, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "{0}.remove({1})", :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "{0}.length()", :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :pool_method, :bc: TRUE, :zig: "({0}.get({1}) != null)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() == 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :pool_method, :bc: TRUE, :zig: "({0}.length() > 0)", :return_type: :Bool, :borrows: :all, :is_method: TRUE}}, RegistryKey{ StringValue: COPY "get" })))));
       TRY (functionSignature__dup(rtoc_local_receiver_572)) };
       MUTABLE pool_get_emit_branch_value: ?IntrinsicEmit = NIL;
       IF functionSignature__emit(pool_get_def) THEN
@@ -19064,7 +19064,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE val = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
       RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: castMIRLoweringReturnValueToEmittable__mir_lowering(COPY TRY (mIRLowering__emit_builtin(rtoc_self_view, :setAt, [Emittable{ AddressOf: COPY target }, idx, val]))), discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
-    MUTABLE op: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (intrinsicRegistry__fs(op_spec, RegistryKey{ SymbolValue: COPY symbol("${kind}_set") })));
+    MUTABLE op: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(TRY (intrinsicRegistry__fs(op_spec, RegistryKey{ SymbolValue: COPY symbol("${kind}_set") }))));
     IF op EXISTS AS op_value THEN
       MUTABLE op_value_mutable = COPY op_value;
       IF ((kind == :string_map) OR (kind == :numeric_map)) THEN
@@ -22621,6 +22621,17 @@ FN castOptionalLocatableToMIRLoweringLowerableStmt(value: ?Locatable) RETURNS MI
   END
   panic("Invalid cast to MIRLoweringLowerableStmt");
 END
+FN castOptionalLookupResultToOptionalX__mir_lowering(value: ?LookupResult) RETURNS ?X ->
+  IF value == NIL THEN
+    panic("Invalid cast to ?X");
+  END
+  PARTIAL MATCH value? START
+    LookupResult.FunctionSignatureMultiowned AS cast_payload -> RETURN X{ FunctionSignatureMultiowned: COPY cast_payload };,
+    LookupResult.ArrayValue AS cast_payload -> RETURN X{ ArrayValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?X");
+  END
+  panic("Invalid cast to ?X");
+END
 FN castOptionalMIRLoweringUnionVariantPayloadToInlineStructVariantMultiowned(value: ?MIRLoweringUnionVariantPayload) RETURNS InlineStructVariant@multiowned ->
   IF value != NIL THEN
     IF value IS_A InlineStructVariant@multiowned AS cast_payload THEN
@@ -22850,6 +22861,12 @@ END
 FN ruby_wrap_optional_Emittable_MIRLoweringLoweredMir(value: ?Emittable) RETURNS ?MIRLoweringLoweredMir ->
   IF value EXISTS AS optional_payload THEN
     RETURN MIRLoweringLoweredMir{ Emittable: COPY optional_payload };
+  END
+  NIL;
+END
+FN ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+  IF value EXISTS AS optional_payload THEN
+    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END
   NIL;
 END

@@ -222,7 +222,7 @@ PUB FN withMatchCheck__check_call_sites_mut(call_sites: []CallSiteFact, sig_look
     MUTABLE looked_up: ?Type = sig_lookup(COPY call_site.callee_name);
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
     IF looked_up EXISTS AS looked_up_type THEN
-      sig = functionSignature__unwrap(looked_up_type);
+      sig = functionSignature__unwrap(X{ Type: COPY looked_up_type });
     END
     IF sig EXISTS AS sig_value THEN
       MUTABLE sig_mutable = COPY sig_value;

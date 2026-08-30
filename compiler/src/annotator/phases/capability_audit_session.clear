@@ -2147,7 +2147,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       MUTABLE outer_scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name));
       IF outer_scope EXISTS AS outer_scope_value THEN
-        IF functionSignature__unwrap(TRY (scope__resolve_type(outer_scope_value, name))) THEN
+        IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
         END
         IF outer_scope_value.equal?(((capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN
@@ -2437,7 +2437,7 @@ PRIVATE FN capabilityAuditSession__function_needs_runtime_directly?(self: Capabi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fsig: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (aST__full_type_mut(Locatable{ FunctionDef: COPY fn_node })));
+    MUTABLE fsig: ?FunctionSignature@multiowned = functionSignature__unwrap(castTypeToOptionalX(TRY (aST__full_type_mut(Locatable{ FunctionDef: COPY fn_node }))));
     MUTABLE ret_type: ?Type@multiowned = NIL;
     IF fsig != NIL THEN
       ret_type = COPY functionSignature__return_type(fsig);
@@ -2468,12 +2468,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_15 = (scope__resolve_entry(scope, callees[rtoc_idx]));
       symbolEntry__type(rtoc_local_receiver_15) }
         ELSE
           NIL
-        END));
+        END)));
       IF sig EXISTS AS sig_value THEN
         IF functionSignature__needs_rt(sig_value) THEN
           needs_rt[callees[rtoc_idx]] = TRUE;
@@ -2532,12 +2532,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_16 = (scope__resolve_entry(scope, callees[rtoc_idx]));
       symbolEntry__type(rtoc_local_receiver_16) }
         ELSE
           NIL
-        END));
+        END)));
       IF !(sig) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -2600,12 +2600,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_17 = (scope__resolve_entry(scope, callees[rtoc_idx]));
       symbolEntry__type(rtoc_local_receiver_17) }
         ELSE
           NIL
-        END));
+        END)));
       IF sig EXISTS AS sig_value THEN
         IF functionSignature__alloc_fault(sig_value) THEN
           alloc_fault[callees[rtoc_idx]] = TRUE;
@@ -4308,12 +4308,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE root_scope = capabilityAuditSession__whole_program_root_scope(rtoc_self_view);
     FOR rtoc_each_23 IN (TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))).keys() DO
     MUTABLE fn_value: FunctionDef@multiowned = (TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))[rtoc_each_23] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF scope__resolve_entry(root_scope, rtoc_each_23) != NIL THEN
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(root_scope, rtoc_each_23) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_49 = (scope__resolve_entry(root_scope, rtoc_each_23));
     symbolEntry__type(rtoc_local_receiver_49) }
       ELSE
         NIL
-      END));
+      END)));
     IF !(signature) THEN
         CONTINUE;
     END
@@ -4413,6 +4413,13 @@ FN castTypeToAutoConstraintCollectorObservedType__capability_audit_session(value
   END
   panic("Invalid cast to AutoConstraintCollectorObservedType");
 END
+FN castTypeToOptionalX(value: Type) RETURNS ?X ->
+  PARTIAL MATCH value START
+    Type.Type AS cast_payload -> RETURN X{ Type: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to ?X");
+  END
+  panic("Invalid cast to ?X");
+END
 FN castTypeToTypeConstructionInput__capability_audit_session(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
@@ -4500,6 +4507,12 @@ END
 FN ruby_wrap_optional_String_symbol_DiagnosticKwValue(value: ?String@symbol) RETURNS ?DiagnosticKwValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN DiagnosticKwValue{ SymbolValue: COPY optional_payload };
+  END
+  NIL;
+END
+FN ruby_wrap_optional_Type_multiowned_X__capability_audit_session(value: ?Type@multiowned) RETURNS ?X ->
+  IF value EXISTS AS optional_payload THEN
+    RETURN X{ Type: Type{ Type: COPY optional_payload } };
   END
   NIL;
 END

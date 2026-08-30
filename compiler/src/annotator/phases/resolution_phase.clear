@@ -283,7 +283,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     scope__resolve_entry(rtoc_local_receiver_2, requirement.name) };
     END
     IF entry EXISTS AS entry_value THEN
-      MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(symbolEntry__type(entry_value));
+      MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY symbolEntry__type(entry_value) });
       IF signature EXISTS AS signature_value THEN
         TRY (resolutionSession__validate_union_method_visibility_mut(rtoc_self_view, node, requirement, signature_value));
         IF (requirement.params.length() != (TRY (functionSignature__params(signature_value))).length()) THEN
@@ -571,7 +571,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       MUTABLE outer_scope: ?Scope@multiowned = TRY (resolutionSession__lookup_scope_for(rtoc_self_view, name));
       IF outer_scope EXISTS AS outer_scope_value THEN
-        IF functionSignature__unwrap(TRY (scope__resolve_type(outer_scope_value, name))) THEN
+        IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
         END
         IF outer_scope_value.equal?(((resolutionSession__scope_stack_for_helper(rtoc_self_view))).first()) THEN

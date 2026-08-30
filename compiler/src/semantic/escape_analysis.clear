@@ -1651,7 +1651,7 @@ PUB FN escapeAnalysis__params_for_call(call: FuncCall, fn_nodes: {String}Functio
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(COPY call.matched_signature);
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(COPY call.matched_signature));
   ELSE
     sig_branch_value = NIL;
   END
@@ -1665,7 +1665,7 @@ END
 PUB FN escapeAnalysis__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(COPY call.matched_signature);
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(COPY call.matched_signature));
   ELSE
     sig_branch_value = NIL;
   END
@@ -2765,6 +2765,12 @@ FN ruby_set_intersection_String_set__escape_analysis(left: [Set]String, right: [
     END
   };
   RETURN result;
+END
+FN ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+  IF value EXISTS AS optional_payload THEN
+    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
+  END
+  NIL;
 END
 PUB FN escapeContext__schema_lookup_call(self: EscapeContext, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
   MUTABLE fn_value = UNWRAP (self.schema_lookup);
