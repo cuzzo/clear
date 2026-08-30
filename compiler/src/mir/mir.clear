@@ -42,7 +42,7 @@ PUB STRUCT FnDef {
   params: []MIRParam,
   ret_type: String,
   body: []Emittable,
-  visibility: String@symbol,
+  visibility: ?String@symbol,
   can_fail: Bool,
   comptime_params: ?[]String,
   lowered_node_id: ?LoweredNodeId,
@@ -201,7 +201,7 @@ PUB STRUCT MIRStructDef {
   name: ?String,
   fields: []FieldDef,
   methods: ?[]Emittable,
-  visibility: String@symbol,
+  visibility: ?String@symbol,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -300,7 +300,7 @@ PUB STRUCT FieldDef {
   name: String,
   zig_type: String,
   default: ?Emittable@boxed,
-  boxed_capture: Any@multiowned,
+  boxed_capture: ?Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
 }
@@ -528,7 +528,7 @@ END
 PUB STRUCT Import {
   alias_name: String,
   module_path: String,
-  member: String,
+  member: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -1102,7 +1102,7 @@ FN set__stmt?(self: Set) RETURNS Bool ->
 END
 PUB STRUCT MIRDestructureTarget {
   name: String,
-  declaration_kind: String@symbol,
+  declaration_kind: ?String@symbol,
   annotation: ?String,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact
@@ -2168,7 +2168,7 @@ FN breakExpr__expr?(self: BreakExpr) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT ContinueStmt {
-  unused: Any@multiowned,
+  unused: ?Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -2433,7 +2433,7 @@ FN assertRaisesCheck__stmt?(self: AssertRaisesCheck) RETURNS Bool ->
   RETURN TRUE;
 END
 PUB STRUCT TestPreamble {
-  unused: Any@multiowned,
+  unused: ?Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,
   source_column: ?Int64,
@@ -3957,7 +3957,7 @@ FN fsmTailRetryOrError__kind(self: FsmTailRetryOrError) RETURNS String@symbol ->
   RETURN :retry_or_error;
 END
 PUB STRUCT FsmTailDone {
-  _: Any@multiowned
+  _: ?Any@multiowned
 }
 
 FN fsmTailDone__kind(self: FsmTailDone) RETURNS String@symbol ->
@@ -3971,7 +3971,7 @@ FN fsmTailJump__kind(self: FsmTailJump) RETURNS String@symbol ->
   RETURN :jump;
 END
 PUB STRUCT FsmTailYield {
-  next_step: Int64,
+  next_step: ?Int64,
   yield_reason: String
 }
 
@@ -3979,7 +3979,7 @@ FN fsmTailYield__kind(self: FsmTailYield) RETURNS String@symbol ->
   RETURN :yield;
 END
 PUB STRUCT FsmTailRegisterYield {
-  next_step: Int64,
+  next_step: ?Int64,
   register_expr: Emittable,
   yield_reason: String
 }
@@ -11656,8 +11656,8 @@ PUB STRUCT Pipeline {
   ast_node: Any@multiowned,
   inner: Emittable@boxed,
   source_type: Any@multiowned,
-  stages: Any@multiowned,
-  sink: Any@multiowned,
+  stages: ?Any@multiowned,
+  sink: ?Any@multiowned,
   sink_alloc: Any@multiowned,
   lowered_node_id: ?LoweredNodeId,
   ownership_consumption: ?OwnershipConsumptionFact,

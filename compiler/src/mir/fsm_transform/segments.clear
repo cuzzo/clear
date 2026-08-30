@@ -8,7 +8,7 @@ UNION SegmentsCallNode { FuncCall: FuncCall, MethodCall: MethodCall }
 # Ruby module FsmTransform::Segments
 PUB UNION LockCap { CapabilityTransition: CapabilityTransition, SymbolValue: String@symbol }
 PUB STRUCT Done {
-  _: Any@multiowned
+  _: ?Any@multiowned
 }
 
 PUB FN done__kind(self: Done) RETURNS String@symbol ->
