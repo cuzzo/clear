@@ -46,7 +46,7 @@ END
 FN emit_optional_field_safe_nav_finding_mut(node: GetField, target_type: Type) RETURNS !Void ->
   MUTABLE token = COPY node.token;
   MUTABLE fix = TRY (fix__new(TRY (fix_description(:INSERT_SAFE_NAVIGATION)), [edit__new(span__new(NIL, token.line, (token.column - 1), 0), "?")], :auto));
-  fixable_mut(node, {:code: :OPTIONAL_FIELD_REQUIRES_SAFE_NAV, :field: node.field, :type: TRY (type__surface_name(castTypeToTypeTypeInput__fixable_helpers(target_type))), :target: node.target.name(), :category: :type, :level: :error, :fixes: [fix]});
+  fixable_mut(node, {:code: :OPTIONAL_FIELD_REQUIRES_SAFE_NAV, :field: node.field, :type: TRY (type__surface_name(castTypeToTypeTypeInput__fixable_helpers(target_type))), :target: (locatable__name(node.target) OR_ELSE ""), :category: :type, :level: :error, :fixes: [fix]});
 END
 STRUCT CapabilityFixCandidate {
   sigil: String,

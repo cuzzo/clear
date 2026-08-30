@@ -12079,3 +12079,32 @@ PUB FN locatable__matched_signature(value: Locatable) RETURNS ?FunctionSignature
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:name)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__name(value: Locatable) RETURNS ?String ->
+  PARTIAL MATCH value START
+    Locatable.ProtocolRequirement AS item -> RETURN COPY item.name;,
+    Locatable.ProtocolDef AS item -> RETURN COPY item.name;,
+    Locatable.FunctionDef AS item -> RETURN COPY item.name;,
+    Locatable.StructDef AS item -> RETURN COPY item.name;,
+    Locatable.VarDecl AS item -> RETURN COPY item.name;,
+    Locatable.DestructureTarget AS item -> RETURN COPY item.name;,
+    Locatable.BindExpr AS item -> RETURN COPY item.name;,
+    Locatable.Identifier AS item -> RETURN COPY item.name;,
+    Locatable.StructLit AS item -> RETURN COPY item.name;,
+    Locatable.MethodCall AS item -> RETURN COPY item.name;,
+    Locatable.ExternFnDecl AS item -> RETURN COPY item.name;,
+    Locatable.ExternStructDecl AS item -> RETURN COPY item.name;,
+    Locatable.EnumDef AS item -> RETURN COPY item.name;,
+    Locatable.UnionDef AS item -> RETURN COPY item.name;,
+    Locatable.TestBlock AS item -> RETURN COPY item.name;,
+    Locatable.LetBinding AS item -> RETURN COPY item.name;,
+    Locatable.Drop AS item -> RETURN COPY item.name;,
+    Locatable.SuppressCleanup AS item -> RETURN COPY item.name;,
+    Locatable.ReassignCleanup AS item -> RETURN COPY item.name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
