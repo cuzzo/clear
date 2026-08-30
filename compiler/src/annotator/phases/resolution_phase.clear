@@ -613,7 +613,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST((names |> DISTINCT _) AS []Any);
 }
 END
-PRIVATE FN resolutionSession__with_new_scope<Result>(self: ResolutionSession, scope: ?Scope = NIL, blk: FN() -> Result) RETURNS !Result
+PRIVATE FN resolutionSession__with_new_scope<RESULT>(self: ResolutionSession, scope: ?Scope = NIL, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

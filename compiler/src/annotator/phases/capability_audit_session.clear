@@ -2189,7 +2189,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST((names |> DISTINCT _) AS []Any);
 }
 END
-PRIVATE FN capabilityAuditSession__with_new_scope<Result>(self: CapabilityAuditSession, scope: ?Scope = NIL, blk: FN() -> Result) RETURNS !Result
+PRIVATE FN capabilityAuditSession__with_new_scope<RESULT>(self: CapabilityAuditSession, scope: ?Scope = NIL, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

@@ -531,7 +531,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN KEEP UNWRAP (rtoc_self_view.active_lifecycle_registry);
 }
 END
-FN mIRLowering__with_lifecycle_registry<Result>(MUTABLE self: MIRLowering, registry: ?LifecycleRegistry, block: FN() -> Result) RETURNS Result
+FN mIRLowering__with_lifecycle_registry<RESULT>(MUTABLE self: MIRLowering, registry: ?LifecycleRegistry, block: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -6385,7 +6385,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY mIRLowering__capture_state(rtoc_self_view).last_fsm_result_transfer_facts;
 }
 END
-PRIVATE FN mIRLowering__with_fsm_segment_lowering_context<Result>(self: MIRLowering, pointer_captures: [Set]String, inherited_alloc_names: [Set]String, inherited_guard_names: [Set]String, owned_result_guards: {String}String, blk: FN() -> Result) RETURNS Result
+PRIVATE FN mIRLowering__with_fsm_segment_lowering_context<RESULT>(self: MIRLowering, pointer_captures: [Set]String, inherited_alloc_names: [Set]String, inherited_guard_names: [Set]String, owned_result_guards: {String}String, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -11942,7 +11942,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN castMIRLoweringCapabilitiesReturnValueToMIRLoweringReturnValue(TRY (mIRLowering__assemble_with_block(rtoc_self_view, node, materialization, TRY (mIRLowering__with_block_body_stmts(&rtoc_self_view, node, materialization, with_label)), with_label)));
 }
 END
-PRIVATE FN mIRLowering__with_capability_alias_maps<Result>(self: MIRLowering, node: WithBlock, blk: FN() -> Result) RETURNS !Result
+PRIVATE FN mIRLowering__with_capability_alias_maps<RESULT>(self: MIRLowering, node: WithBlock, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12495,7 +12495,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ExecutionBoundaryFact{ kind: COPY kind, dispatch: COPY dispatch, captures: COPY names |> SELECT TRY (mIRLowering__boundary_capture_fact(rtoc_self_view, _, symbols[_], captured[_])) };
 }
 END
-PRIVATE FN mIRLowering__with_bg_fiber_body_context<Result>(self: MIRLowering, pointer_captures: [Set]String, blk: FN() -> Result) RETURNS Result
+PRIVATE FN mIRLowering__with_bg_fiber_body_context<RESULT>(self: MIRLowering, pointer_captures: [Set]String, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12510,7 +12510,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
   RETURN blk();
 }
 END
-PRIVATE FN mIRLowering__with_stream_body_context<Result>(self: MIRLowering, local_stream: String, is_inf: Bool, close_label: ?String = NIL, inherited_alloc_names: ?[Set]String = NIL, blk: FN() -> Result) RETURNS Result
+PRIVATE FN mIRLowering__with_stream_body_context<RESULT>(self: MIRLowering, local_stream: String, is_inf: Bool, close_label: ?String = NIL, inherited_alloc_names: ?[Set]String = NIL, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -19636,7 +19636,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (IF target IS_A Identifier AS identifier THEN ((mIRLowering__current_function_collection_param?(rtoc_self_view, identifier__name(identifier)) OR ((mIRLowering__capability_state(rtoc_self_view).with_alias_owner_map != NIL) AND (((mIRLowering__capability_state(rtoc_self_view).with_alias_owner_map)?).contains?(identifier__name(identifier)) == TRUE)))) ELSE FALSE END);
 }
 END
-PRIVATE FN mIRLowering__with_if_bind_alias_maps<Result>(self: MIRLowering, node: IfBind, blk: FN() -> Result) RETURNS !Result
+PRIVATE FN mIRLowering__with_if_bind_alias_maps<RESULT>(self: MIRLowering, node: IfBind, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

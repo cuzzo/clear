@@ -363,7 +363,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN typeAnalysisSession__with_comptime_type_param_refinement<Result>(MUTABLE self: TypeAnalysisSession, type_param: String@symbol, narrowed_type: Type, blk: FN() -> Result) RETURNS !Result
+PUB FN typeAnalysisSession__with_comptime_type_param_refinement<RESULT>(MUTABLE self: TypeAnalysisSession, type_param: String@symbol, narrowed_type: Type, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -373,7 +373,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN blk();
 }
 END
-PUB FN typeAnalysisSession__with_value_type_refinements<Result>(MUTABLE self: TypeAnalysisSession, refinements: {Int64}Type, blk: FN() -> Result) RETURNS Result
+PUB FN typeAnalysisSession__with_value_type_refinements<RESULT>(MUTABLE self: TypeAnalysisSession, refinements: {Int64}Type, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -433,7 +433,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN !((rtoc_self_view.audit_inputs.snapshot_txn_frames.length() == 0));
 }
 END
-PUB FN typeAnalysisSession__with_conditional_context<Result>(self: TypeAnalysisSession, blk: FN() -> Result) RETURNS Result
+PUB FN typeAnalysisSession__with_conditional_context<RESULT>(self: TypeAnalysisSession, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -467,7 +467,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN typeAnalysisSession__with_loop_context<Result>(self: TypeAnalysisSession, blk: FN() -> Result) RETURNS Result
+PUB FN typeAnalysisSession__with_loop_context<RESULT>(self: TypeAnalysisSession, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -508,7 +508,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN typeAnalysisSession__with_loop_context(rtoc_self_view, %() USE(branches, merge_to_parent, rtoc_self_view) -> TRY (typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branches, merge_to_parent)));
 }
 END
-PUB FN typeAnalysisSession__with_smooth_context<Result>(self: TypeAnalysisSession, blk: FN() -> Result) RETURNS Result
+PUB FN typeAnalysisSession__with_smooth_context<RESULT>(self: TypeAnalysisSession, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -583,7 +583,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.audit_inputs.current_predicate_context;
 }
 END
-PUB FN typeAnalysisSession__with_predicate_context<Result>(MUTABLE self: TypeAnalysisSession, ctx: PredicateContext, blk: FN() -> Result) RETURNS Result
+PUB FN typeAnalysisSession__with_predicate_context<RESULT>(MUTABLE self: TypeAnalysisSession, ctx: PredicateContext, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -616,7 +616,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.traversal_state.stream_yield_frames.last();
 }
 END
-PUB FN typeAnalysisSession__with_stream_yield_frame<Result>(self: TypeAnalysisSession, node: BgStreamBlock, blk: FN() -> Result) RETURNS ![]Type
+PUB FN typeAnalysisSession__with_stream_yield_frame<RESULT>(self: TypeAnalysisSession, node: BgStreamBlock, blk: FN() -> RESULT) RETURNS ![]Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -632,7 +632,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY frame.yield_types;
 }
 END
-PUB FN typeAnalysisSession__with_match_pattern_context<Result>(self: TypeAnalysisSession, blk: FN() -> Result) RETURNS Result
+PUB FN typeAnalysisSession__with_match_pattern_context<RESULT>(self: TypeAnalysisSession, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -654,7 +654,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN typeAnalysisSession__with_held_locks<Result>(MUTABLE self: TypeAnalysisSession, node: WithBlock, lock_capabilities: []CapabilityTransition, blk: FN() -> Result) RETURNS Result
+PUB FN typeAnalysisSession__with_held_locks<RESULT>(MUTABLE self: TypeAnalysisSession, node: WithBlock, lock_capabilities: []CapabilityTransition, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -679,7 +679,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN blk();
 }
 END
-PUB FN typeAnalysisSession__with_snapshot_transaction_body<Result>(self: TypeAnalysisSession, node: WithBlock, blk: FN() -> Result) RETURNS !Result
+PUB FN typeAnalysisSession__with_snapshot_transaction_body<RESULT>(self: TypeAnalysisSession, node: WithBlock, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7181,7 +7181,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST((names |> DISTINCT _) AS []Any);
 }
 END
-PRIVATE FN typeAnalysisSession__with_new_scope<Result>(self: TypeAnalysisSession, scope: ?Scope = NIL, blk: FN() -> Result) RETURNS !Result
+PRIVATE FN typeAnalysisSession__with_new_scope<RESULT>(self: TypeAnalysisSession, scope: ?Scope = NIL, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -10165,7 +10165,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__without_capture_moves<Result>(self: TypeAnalysisSession, blk: FN() -> Result) RETURNS Result
+PRIVATE FN typeAnalysisSession__without_capture_moves<RESULT>(self: TypeAnalysisSession, blk: FN() -> RESULT) RETURNS RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -11522,7 +11522,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN bodyFactFrame__to_summary(frame);
 }
 END
-PRIVATE FN typeAnalysisSession__with_body_fact_nested_body<Result>(self: TypeAnalysisSession, block: FN() -> Result) RETURNS !Result
+PRIVATE FN typeAnalysisSession__with_body_fact_nested_body<RESULT>(self: TypeAnalysisSession, block: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -11544,7 +11544,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN block();
 }
 END
-PRIVATE FN typeAnalysisSession__with_body_fact_scopes_cleared<Result>(self: TypeAnalysisSession, block: FN() -> Result) RETURNS !Result
+PRIVATE FN typeAnalysisSession__with_body_fact_scopes_cleared<RESULT>(self: TypeAnalysisSession, block: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -11565,7 +11565,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN block();
 }
 END
-PRIVATE FN typeAnalysisSession__with_body_fact_lambda_body<Result>(self: TypeAnalysisSession, node: LambdaLit, block: FN() -> Result) RETURNS !Result
+PRIVATE FN typeAnalysisSession__with_body_fact_lambda_body<RESULT>(self: TypeAnalysisSession, node: LambdaLit, block: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -11586,7 +11586,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN block();
 }
 END
-PRIVATE FN typeAnalysisSession__with_body_fact_failure_absorbed<Result>(self: TypeAnalysisSession, absorbed: Bool, block: FN() -> Result) RETURNS !Result
+PRIVATE FN typeAnalysisSession__with_body_fact_failure_absorbed<RESULT>(self: TypeAnalysisSession, absorbed: Bool, block: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -11609,7 +11609,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN block();
 }
 END
-PRIVATE FN typeAnalysisSession__with_body_fact_scope<Result>(self: TypeAnalysisSession, scope: WithBlock, block: FN() -> Result) RETURNS !Result
+PRIVATE FN typeAnalysisSession__with_body_fact_scope<RESULT>(self: TypeAnalysisSession, scope: WithBlock, block: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13196,7 +13196,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (namespace == "AST");
 }
 END
-PRIVATE FN typeAnalysisSession__with_comptime_is_a_then_refinement<Result>(MUTABLE self: TypeAnalysisSession, condition: Locatable, blk: FN() -> Result) RETURNS !Result
+PRIVATE FN typeAnalysisSession__with_comptime_is_a_then_refinement<RESULT>(MUTABLE self: TypeAnalysisSession, condition: Locatable, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
