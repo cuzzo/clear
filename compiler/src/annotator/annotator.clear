@@ -11,6 +11,14 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f616e6e6f746174696f6e5f70726f
 REQUIRE "pkg:rtoc_636f6d70696c65722f6d6f64756c655f696d706f727465722e636c656172" AS module_importer
 REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
 REQUIRE "pkg:rtoc_6173742f6572726f725f72656769737472792e636c656172" AS error_registry
+
+# Ruby: source_dir ? File.expand_path(source_dir) : Dir.pwd
+PRIVATE FN rtocResolveSourceDir(source_dir: ?String) RETURNS !String ->
+  IF source_dir EXISTS AS rtoc_dir THEN
+    RETURN TRY (expand(rtoc_dir));
+  END
+  RETURN TRY (pwd());
+END
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
@@ -30,12 +38,7 @@ PUB FN semanticAnnotator__initialize(MUTABLE self: SemanticAnnotator, importer: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE rtoc_source_dir: String = "";
-    IF source_dir EXISTS AS rtoc_dir THEN
-      rtoc_source_dir = TRY (expand(rtoc_dir));
-    ELSE
-      rtoc_source_dir = TRY (pwd());
-    END
+    MUTABLE rtoc_source_dir: String = TRY (rtocResolveSourceDir(source_dir));
     rtoc_self_view.config = SemanticAnnotatorConfig{ importer: ( { MUTABLE rtoc_optional_or_source_1: ?ModuleImporter@multiowned = importer; MUTABLE rtoc_optional_or_result_2: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_1 != NIL THEN rtoc_optional_or_result_2 = COPY rtoc_optional_or_source_1; ELSE rtoc_optional_or_result_2 = COPY compiler; END rtoc_optional_or_result_2 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code };
     rtoc_self_view.annotation_products = annotationProducts__new();
     rtoc_self_view.semantic_index = NIL;
@@ -92,12 +95,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN semanticAnnotator__new(importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !SemanticAnnotator@multiowned ->
-  MUTABLE rtoc_source_dir: String = "";
-  IF source_dir EXISTS AS rtoc_dir THEN
-    rtoc_source_dir = TRY (expand(rtoc_dir));
-  ELSE
-    rtoc_source_dir = TRY (pwd());
-  END
+  MUTABLE rtoc_source_dir: String = TRY (rtocResolveSourceDir(source_dir));
   MUTABLE self = SemanticAnnotator{ annotation_products: annotationProducts__new(), config: SemanticAnnotatorConfig{ importer: ( { MUTABLE rtoc_optional_or_source_6: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_7: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_6 != NIL THEN rtoc_optional_or_result_7 = COPY rtoc_optional_or_source_6; ELSE rtoc_optional_or_result_7 = COPY compiler; END rtoc_optional_or_result_7 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code }, semantic_index: NIL };
   TRY (semanticAnnotator__initialize(&self, importer, compiler, source_dir, strict_test, source_code));
   RETURN self @multiowned;

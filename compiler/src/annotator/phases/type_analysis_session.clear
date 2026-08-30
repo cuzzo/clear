@@ -87,6 +87,14 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f726567
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572655f72657475726e732e636c656172" AS function_signature_returns
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f72657475726e2e636c656172" AS function_return
 REQUIRE "pkg:rtoc_6173742f6572726f725f72656769737472792e636c656172" AS error_registry
+
+# Ruby: source_dir ? File.expand_path(source_dir) : Dir.pwd
+PRIVATE FN rtocResolveSourceDir(source_dir: ?String) RETURNS !String ->
+  IF source_dir EXISTS AS rtoc_dir THEN
+    RETURN TRY (expand(rtoc_dir));
+  END
+  RETURN TRY (pwd());
+END
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN STRUCT CompilerRegexScanner {} CLOSE "deinit" FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
@@ -719,12 +727,7 @@ PUB FN typeAnalysisSession__initialize(MUTABLE self: TypeAnalysisSession, import
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE rtoc_source_dir: String = "";
-    IF source_dir EXISTS AS rtoc_dir THEN
-      rtoc_source_dir = TRY (expand(rtoc_dir));
-    ELSE
-      rtoc_source_dir = TRY (pwd());
-    END
+    MUTABLE rtoc_source_dir: String = TRY (rtocResolveSourceDir(source_dir));
     rtoc_self_view.config = AnnotatorPhasesTypeAnalysisSessionConfig{ importer: ( { MUTABLE rtoc_optional_or_source_5: ?ModuleImporter@multiowned = importer; MUTABLE rtoc_optional_or_result_6: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_5 != NIL THEN rtoc_optional_or_result_6 = COPY rtoc_optional_or_source_5; ELSE rtoc_optional_or_result_6 = COPY compiler; END rtoc_optional_or_result_6 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code };
     rtoc_self_view.traversal_state = TraversalState{ scopes: [scope__new()], function_contexts: List[], loop_depth: 0, conditional_depth: 0, smooth_depth: 0, body_fact_frames: List[], stream_yield_frames: List[], with_block_depth: 0, match_pattern_depth: 0, current_bg_pinned: FALSE, pipeline_accessed_fields: NIL, auto_locked_assign_name: NIL, struct_literal_call_argument_depth: 0, annotation_ancestors: List[], comptime_type_param_refinements: {}, value_type_refinements: {}, branch_terminated: FALSE, next_synthetic_body_ordinal: -1, deferred_copy_wrapper_bindings: List[] };
     rtoc_self_view.audit_inputs = CapabilityAuditInputs{ held_locks: {}, held_lock_types: List[], current_predicate_context: NIL, deferred_with_validations: List[], deferred_recovery_validations: List[], deferred_give_validations: List[], deferred_copy_retained_validations: List[], predicate_call_sites: List[], async_body_facts: List[], capability_audit: {}, capture_stack: List[], capture_move_suppression_depth: 0, snapshot_txn_frames: List[], effect_state: NIL, lock_analysis: LockAnalysisState{ direct_edges: {}, direct_acquires: {}, held_calls: {}, clause_sites: List[], type_ranks: {} }, ownership_graph: ownershipGraph__new(), ownership_transport_frames: List[] };
@@ -20588,12 +20591,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN typeAnalysisSession__new(importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !TypeAnalysisSession@multiowned ->
-  MUTABLE rtoc_source_dir: String = "";
-  IF source_dir EXISTS AS rtoc_dir THEN
-    rtoc_source_dir = TRY (expand(rtoc_dir));
-  ELSE
-    rtoc_source_dir = TRY (pwd());
-  END
+  MUTABLE rtoc_source_dir: String = TRY (rtocResolveSourceDir(source_dir));
   MUTABLE self = TypeAnalysisSession{ audit_inputs: CapabilityAuditInputs{ held_locks: {}, held_lock_types: List[], current_predicate_context: NIL, deferred_with_validations: List[], deferred_recovery_validations: List[], deferred_give_validations: List[], deferred_copy_retained_validations: List[], predicate_call_sites: List[], async_body_facts: List[], capability_audit: {}, capture_stack: List[], capture_move_suppression_depth: 0, snapshot_txn_frames: List[], effect_state: NIL, lock_analysis: LockAnalysisState{ direct_edges: {}, direct_acquires: {}, held_calls: {}, clause_sites: List[], type_ranks: {} }, ownership_graph: ownershipGraph__new(), ownership_transport_frames: List[] }, config: AnnotatorPhasesTypeAnalysisSessionConfig{ importer: ( { MUTABLE rtoc_optional_or_source_520: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_521: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_520 != NIL THEN rtoc_optional_or_result_521 = COPY rtoc_optional_or_source_520; ELSE rtoc_optional_or_result_521 = COPY compiler; END rtoc_optional_or_result_521 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code }, resolution: NIL, traversal_state: TraversalState{ scopes: [scope__new()], function_contexts: List[], loop_depth: 0, conditional_depth: 0, smooth_depth: 0, body_fact_frames: List[], stream_yield_frames: List[], with_block_depth: 0, match_pattern_depth: 0, current_bg_pinned: FALSE, pipeline_accessed_fields: NIL, auto_locked_assign_name: NIL, struct_literal_call_argument_depth: 0, annotation_ancestors: List[], comptime_type_param_refinements: {}, value_type_refinements: {}, branch_terminated: FALSE, next_synthetic_body_ordinal: -1, deferred_copy_wrapper_bindings: List[] } };
   TRY (typeAnalysisSession__initialize(&self, importer, compiler, source_dir, strict_test, source_code));
   RETURN self @multiowned;
