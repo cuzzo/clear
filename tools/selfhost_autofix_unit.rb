@@ -782,6 +782,42 @@ module SelfhostAutofixUnit
 
   def unit_path(relative) = File.join(ROOT, 'compiler', 'src', relative)
 
+  # How many units a check of this one has to compile. A diagnostic in a
+  # cheap file is worth re-checking there: draining it costs seconds, while
+  # every round against a top-of-graph unit costs tens of minutes.
+  def dependency_cost
+    return @dependency_cost if @dependency_cost
+
+    root = File.join(ROOT, 'compiler', 'src')
+    requires = {}
+    Dir.glob(File.join(root, '**', '*.clear')).each do |path|
+      rel = path[(root.length + 1)..]
+      deps = []
+      File.foreach(path) do |line|
+        break unless line.start_with?('REQUIRE') || line.strip.empty?
+
+        if (m = line.match(/pkg:rtoc_([0-9a-f]+)/))
+          deps << [m[1]].pack('H*')
+        elsif (m = line.match(/REQUIRE "([^"]+)"/))
+          deps << File.expand_path(m[1], File.dirname(rel)).delete_prefix('/')
+        end
+      end
+      requires[rel] = deps
+    end
+    @dependency_cost = requires.keys.to_h do |rel|
+      seen = {}
+      stack = [rel]
+      until stack.empty?
+        node = stack.pop
+        next if seen[node] || !requires.key?(node)
+
+        seen[node] = true
+        stack.concat(requires[node])
+      end
+      [rel, seen.size]
+    end
+  end
+
   # The file holding the reported line, found by matching the line the
   # diagnostic echoed at the line number it gave.
   def locate(output)
@@ -817,8 +853,17 @@ module SelfhostAutofixUnit
     # A diagnostic seen twice means the last fix did not move the file
     # forward: two rules are undoing each other, and looping just burns runs.
     seen = {}
+    cost = dependency_cost
+    focus = relative
     max.times do
-      output, ok = check(relative)
+      output, ok = check(focus)
+      if ok
+        if focus != relative
+          puts "  (#{focus} clean; back to #{relative})"
+          focus = relative
+          next
+        end
+      end
       if ok
         puts "selfhost_autofix_unit: #{relative} type-checks after #{applied} fix(es)"
         return 0
@@ -835,6 +880,14 @@ module SelfhostAutofixUnit
       # dependency as in the unit asked about. Locate it by its own text so a
       # fix never lands in the wrong file.
       target = locate(output) || path
+      # Route the CHECK, not just the edit: drain the error's own file when
+      # checking it is cheaper than checking the unit we were asked about.
+      target_rel = target.sub("#{File.join(ROOT, 'compiler', 'src')}/", '')
+      if cost[target_rel] && cost[focus] && cost[target_rel] < cost[focus]
+        puts "  -> #{target_rel} (#{cost[target_rel]} deps vs #{cost[focus]}); checking there"
+        focus = target_rel
+        next
+      end
       fix = FIXES.filter_map { |f| f.call(output) }.first
       unless fix
         puts "selfhost_autofix_unit: stopped after #{applied} fix(es); needs a human:"
