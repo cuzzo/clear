@@ -55,7 +55,7 @@ PUB FN pipelineLazyRangePrefix__setup_stmts(self: PipelineLazyRangePrefix) RETUR
   IF source_setup EXISTS AS source_setup_value THEN
     &stmts.append(Emittable{ Let: COPY source_setup_value });
   END
-  stmts = ruby_array_concat_Emittable(stmts, self.outer_stmts);
+  stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stmts, self.outer_stmts);
   RETURN stmts;
 END
 PUB FN pipelineLazyRangePrefix__outer_setup_stmts(self: PipelineLazyRangePrefix) RETURNS ![]Emittable ->
@@ -311,7 +311,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE current_owned: Bool = FALSE;
     IF (track_owned AND TRY (type__runtime_stream?(source_ti))) THEN
       MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(rtoc_self_view, initial_capture, elem_t));
-      stage_stmts = ruby_array_concat_Emittable(stage_stmts, owned_stmts);
+      stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, owned_stmts);
       current_owned = !((owned_stmts.length() == 0));
     END
     MUTABLE lower_stages = %() USE(MUTABLE current_owned, MUTABLE current_type, initial_capture, item_counter, MUTABLE item_var, on_skip, MUTABLE outer_stmts, MUTABLE stage_stmts, stages, MUTABLE track_owned, MUTABLE owned_stmts, rtoc_self_view) -> {
@@ -325,7 +325,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           item_counter = (item_counter + 1);
           MUTABLE next_item = "__each_item_${item_counter.toString()}";
           MUTABLE head = runtimeHost__range_lower_head_with_context(rtoc_self_view.host, selectOp__expression(select_op), item_var);
-          stage_stmts = ruby_array_concat_Emittable(stage_stmts, CAST(head.pending AS []Emittable));
+          stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, CAST(head.pending AS []Emittable));
           &stage_stmts.append(Emittable{ Let: COPY Let{ name: COPY next_item, init: COPY head.value(), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           item_var = COPY next_item;
           current_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (selectOp__expression(select_op)))) }));
@@ -333,7 +333,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             current_owned = FALSE;
           ELSE
             MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(rtoc_self_view, next_item, current_type));
-            stage_stmts = ruby_array_concat_Emittable(stage_stmts, owned_stmts);
+            stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, owned_stmts);
             current_owned = !((owned_stmts.length() == 0));
             IF current_owned THEN
               MUTABLE stage_value: Emittable = head.value();
@@ -393,7 +393,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF (item_var == initial_capture) THEN
             item_used = TRUE;
           END
-          stage_stmts = ruby_array_concat_Emittable(stage_stmts, CAST(TRY (runtimeHost__range_visit_pipeline_body_mir(rtoc_self_view.host, tap_op.body, item_var)) AS []Emittable));
+          stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, CAST(TRY (runtimeHost__range_visit_pipeline_body_mir(rtoc_self_view.host, tap_op.body, item_var)) AS []Emittable));
       END
       rtoc_idx = rtoc_idx + 1;
     END
@@ -993,13 +993,13 @@ PUB FN pipelineRangeLowerer__new(host: RuntimeHost) RETURNS PipelineRangeLowerer
   pipelineRangeLowerer__initialize(&self, host);
   RETURN self @multiowned;
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable__pipeline_range_lowerer(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable__pipeline_range_lowerer(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

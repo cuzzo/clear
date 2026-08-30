@@ -129,7 +129,7 @@ PUB FN ownershipTransportFacts__record_alias(MUTABLE self: OwnershipTransportFac
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE source: Locatable = castNodeToLocatable(COPY node);
+    MUTABLE source: Locatable = castNodeToLocatable__ownership_transport(COPY node);
     MUTABLE symbol: ?SymbolEntry@multiowned = NIL;
     IF node IS_A VarDecl AS var_decl THEN
       source = COPY CAST(var_decl.value AS Locatable);
@@ -334,8 +334,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE conditional = COPY left.ancestors[rtoc_idx]?;
-      MUTABLE left_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, left, castLocatableToIfStatement(conditional));
-      MUTABLE right_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, right, castLocatableToIfStatement(conditional));
+      MUTABLE left_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, left, castLocatableToIfStatement__ownership_transport(conditional));
+      MUTABLE right_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, right, castLocatableToIfStatement__ownership_transport(conditional));
       IF (((left_side != NIL) AND (right_side != NIL)) AND (left_side != right_side)) THEN
           RETURN TRUE;
       END
@@ -403,13 +403,13 @@ PUB FN ownershipTransportFacts__new(parameter_ids: [Set]Int64 = Set[]) RETURNS O
   ownershipTransportFacts__initialize(&self, parameter_ids);
   RETURN self @multiowned;
 END
-FN castLocatableToIfStatement(value: Locatable) RETURNS IfStatement ->
+FN castLocatableToIfStatement__ownership_transport(value: Locatable) RETURNS IfStatement ->
   IF value IS_A IfStatement AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to IfStatement");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable__ownership_transport(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

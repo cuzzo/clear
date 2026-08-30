@@ -3,7 +3,7 @@ EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexFirstMatch(subject: String, regex: CompilerRegex) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
-FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
+FN regexFirstMatch__type_expression(subject: String, pattern: String) RETURNS ?String ->
   RETURN COPY compilerRegexFirstMatch(subject, compilerRegexCompile(pattern));
 END
 EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS ?CompilerRegexScanner EFFECTS :safe FROM "compiler_regex";
@@ -143,7 +143,7 @@ END
 # payload comes back out.
 PUB FN typeExpressionDimensions__has_symbol(dimensions: []TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
   FOR dimension IN dimensions DO
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(dimension, expected) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type_expression(dimension, expected) THEN
       RETURN TRUE;
     END
   END
@@ -515,7 +515,7 @@ PRIVATE FN typeExpressionParser__parse_prefixed_source(source: String) RETURNS !
   IF !((["~", "!", "?"]).contains?(prefix)) THEN
     RETURN NIL;
   END
-  MUTABLE order = COPY (regexFirstMatch(source, "\\A[~!?]+") OR_ELSE "");
+  MUTABLE order = COPY (regexFirstMatch__type_expression(source, "\\A[~!?]+") OR_ELSE "");
   IF !(typeExpression__valid_tense_order?(order)) THEN
     IF order.contains?("~~") THEN
       panic("double future type is not allowed");
@@ -851,7 +851,7 @@ PUB FN typeExpressionPrinter__semantic(expression: TypeExpression) RETURNS !Stri
     RETURN "HashMap<${TRY (typeExpressionPrinter__semantic(map_type_expression.key))},${TRY (typeExpressionPrinter__semantic(map_type_expression.value))}>";
   ELSE_IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
     MUTABLE suffix: String = "";
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(stream_type_expression.cardinality, :FINITE) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type_expression(stream_type_expression.cardinality, :FINITE) THEN
       suffix = "[]";
     ELSE
       suffix = "[${typeExpressionPrinter__dimension_text(stream_type_expression.cardinality)}]";
@@ -908,7 +908,7 @@ PUB FN typeExpressionPrinter__legacy(expression: TypeExpression) RETURNS !String
   ELSE_IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
     MUTABLE cardinality = stream_type_expression.cardinality;
     MUTABLE marker: String = "";
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(cardinality, :FINITE) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type_expression(cardinality, :FINITE) THEN
       marker = "";
     ELSE
       marker = COPY typeExpressionPrinter__dimension_text(cardinality);
@@ -959,7 +959,7 @@ PUB FN typeExpressionPrinter__inline(expression: TypeExpression) RETURNS !String
   ELSE_IF kind IS_A StreamTypeExpression AS stream_type_expression THEN
     MUTABLE cardinality = stream_type_expression.cardinality;
     MUTABLE marker: String = "";
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(cardinality, :FINITE) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type_expression(cardinality, :FINITE) THEN
       marker = "";
     ELSE
       marker = COPY typeExpressionPrinter__dimension_text(cardinality);
@@ -1031,9 +1031,9 @@ PRIVATE FN typeExpressionPrinter__capability_suffix(capabilities: TypeCapabiliti
   IF (parts.length() == 0) THEN
     RETURN "";
   END
-  RETURN ((parts.first() OR_ELSE "") $+ (((parts |> SKIP 1) |> SELECT ":${rtoc_delete_prefix(_, "@")}").join("")));
+  RETURN ((parts.first() OR_ELSE "") $+ (((parts |> SKIP 1) |> SELECT ":${rtoc_delete_prefix__type_expression(_, "@")}").join("")));
 END
-FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
+FN rtoc_delete_prefix__type_expression(s: String, affix: String) RETURNS String ->
   IF s.startsWith?(affix) THEN
     RETURN s.substr(affix.length(), (s.length() - affix.length()));
   END
@@ -1049,7 +1049,7 @@ FN ruby_array_concat_TypeExpression(left: []TypeExpression, right: []TypeExpress
   END
   RETURN result;
 END
-FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
+FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type_expression(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END

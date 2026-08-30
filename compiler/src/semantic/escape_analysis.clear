@@ -131,40 +131,40 @@ PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schem
   FOR _ IN facts_by_name.values() DO
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :owning_return, %() USE(schema_lookup, _) -> {
   TRY (escapeAnalysis__mark_heap_return_facts_mut(_, schema_lookup));
-  rubyToClearVoid()
+  rubyToClearVoid__escape_analysis()
   }));
   END
   FOR _ IN facts_by_name.values() DO
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :receiver_backing_storage, %() USE(_) -> {
     TRY (escapeAnalysis__mark_param_receiver_allocations_heap_mut(_.escape_nodes));
-    rubyToClearVoid()
+    rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :recursive_aggregate_owner, %() USE(schema_lookup, _) -> {
     TRY (escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(_, schema_lookup));
-    rubyToClearVoid()
+    rubyToClearVoid__escape_analysis()
   }));
   END
   FOR _ IN facts_by_name.values() DO
   MUTABLE body = COPY _.fn.body;
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :escape_sink, %() USE(bg_heap, facts_by_name, fn_nodes, schema_lookup, _) -> {
     TRY (escapeAnalysis__mark_body_escapes_mut(_, fn_nodes, facts_by_name, bg_heap, schema_lookup));
-    rubyToClearVoid()
+    rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :loop_receiver_backing_storage, %() USE(body) -> {
     TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(body));
-    rubyToClearVoid()
+    rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :assignment_ownership, %() USE(facts_by_name, fn_nodes, schema_lookup, _) -> {
     TRY (escapeAnalysis__propagate_assignment_ownership_mut(_, fn_nodes, facts_by_name, schema_lookup));
-    rubyToClearVoid()
+    rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :hoist_dependency, %() USE(_) -> {
     TRY (escapeAnalysis__propagate_hoist_dependencies_mut(_));
-    rubyToClearVoid()
+    rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :value_block_placement, %() USE(_) -> {
     escapeAnalysis__propagate_value_block_placements_mut(_);
-    rubyToClearVoid()
+    rubyToClearVoid__escape_analysis()
   }));
   END
   RETURN EscapeAnalysisResult{ heap_fns: COPY TRY (escapePlacementFacts__heap_function_names(placements)), bg_heap: COPY bg_heap, placements: COPY placements };
@@ -564,7 +564,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END;
     aST__each_child_node(node, %(child: Locatable) USE(child_depth, MUTABLE rtoc_self_view) -> {
     keptEdgeLiveness__index_node(&rtoc_self_view, child, child_depth);
-    rubyToClearVoid()
+    rubyToClearVoid__escape_analysis()
     });
 }
 END
@@ -593,7 +593,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   END
   aST__each_child_node(node, %(child: Locatable) USE(entry, name) -> {
   TRY (escapeAnalysis__restamp_promoted_uses_in_node_mut(child, name, entry));
-  rubyToClearVoid()
+  rubyToClearVoid__escape_analysis()
   });
 END
 PUB FN escapeAnalysis__unify_caller_attr(sites: []CallSiteFact, idx: Int64, project: FN(SymbolEntry) -> ?String@symbol) RETURNS ?String@symbol ->
@@ -636,7 +636,7 @@ PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {St
 END
 PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, context: EscapeContext) RETURNS !Void ->
   IF (sink.handler == symbol("apply_return_escape_sink!")) THEN
-    TRY (escapeAnalysis__apply_return_escape_sink_mut(castLocatableToReturnNode(node), context));
+    TRY (escapeAnalysis__apply_return_escape_sink_mut(castLocatableToReturnNode__escape_analysis(node), context));
   ELSE_IF (sink.handler == symbol("apply_assignment_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_assignment_escape_sink_mut(castLocatableToAssignment(node), context));
   ELSE_IF (sink.handler == symbol("apply_binding_escape_sink!")) THEN
@@ -648,7 +648,7 @@ PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, 
   ELSE_IF (sink.handler == symbol("apply_lambda_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_lambda_escape_sink_mut(castLocatableToLambdaLit(node), context));
   ELSE_IF (sink.handler == symbol("apply_func_call_escape_sink!")) THEN
-    TRY (escapeAnalysis__apply_func_call_escape_sink_mut(castLocatableToFuncCall(node), context));
+    TRY (escapeAnalysis__apply_func_call_escape_sink_mut(castLocatableToFuncCall__escape_analysis(node), context));
   ELSE_IF (sink.handler == symbol("apply_method_call_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_method_call_escape_sink_mut(CAST(node AS MethodCall), context));
   ELSE
@@ -785,7 +785,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
         END
-        MUTABLE root: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable(assignment.name));
+        MUTABLE root: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable__escape_analysis(assignment.name));
         MUTABLE ti: ?Type@multiowned = NIL;
         IF root?.symbol != NIL THEN
           ti = COPY symbolEntry__type(UNWRAP (UNWRAP (root).symbol));
@@ -858,7 +858,7 @@ PUB FN escapeAnalysis__aggregate_contains_heap_owned_value?(node: ?Locatable) RE
         END
         aST__each_child_node(current_value, %(child: Locatable) USE(MUTABLE pending) -> {
   &pending.append(COPY child);
-  rubyToClearVoid()
+  rubyToClearVoid__escape_analysis()
         });
       ELSE
         CONTINUE;
@@ -890,8 +890,8 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
 END
 PUB FN escapeAnalysis__mark_loop_receiver_allocations_heap_mut(body: []Node) RETURNS !Void EFFECTS REENTRANT ->
   FOR _ IN body DO
-  FOR _ IN (TRY (aST__child_bodies(castNodeToLocatable(_)))) DO
-  IF aST__loop_node?(castNodeToLocatable(_)) THEN
+  FOR _ IN (TRY (aST__child_bodies(castNodeToLocatable__escape_analysis(_)))) DO
+  IF aST__loop_node?(castNodeToLocatable__escape_analysis(_)) THEN
       TRY (escapeAnalysis__mark_receiver_allocations_in_loop_mut(_));
   END
   TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(_));
@@ -1145,7 +1145,7 @@ PUB FN escapeAnalysis__loop_body_has_frame_allocation_candidate?(body: []Node) R
   IF TRY (escapeAnalysis__loop_binding_frame_allocation_candidate?(&node)) THEN
       found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__escape_analysis()
   }));
   RETURN found;
 END
@@ -1200,7 +1200,7 @@ PUB FN escapeAnalysis__each_loop_body_node(body: []Node, block: FN(Locatable) ->
   MUTABLE rtoc_reverse_items_17: []Node = ((rtoc_reverse_items_15[rtoc_reverse_i_16])?);
   MUTABLE rtoc_reverse_i_18 = rtoc_reverse_items_17.length() - 1;
   WHILE rtoc_reverse_i_18 >= 0 DO
-    &stack.append(castNodeToLocatable(COPY (rtoc_reverse_items_17[rtoc_reverse_i_18])?));
+    &stack.append(castNodeToLocatable__escape_analysis(COPY (rtoc_reverse_items_17[rtoc_reverse_i_18])?));
     rtoc_reverse_i_18 = rtoc_reverse_i_18 - 1;
   END
   rtoc_reverse_i_16 = rtoc_reverse_i_16 - 1;
@@ -1439,7 +1439,7 @@ PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool 
         found = TRUE;
       END
   END
-  rubyToClearVoid()
+  rubyToClearVoid__escape_analysis()
   });
   RETURN found;
 END
@@ -1462,7 +1462,7 @@ PUB FN escapeAnalysis__expr_has_owned_inline_value?(expr: ?Locatable) RETURNS !B
         RETURN TRUE;
       END
   END
-  rubyToClearVoid()
+  rubyToClearVoid__escape_analysis()
   });
   RETURN FALSE;
 CATCH Transient, Input, System, NotFound, Permission, Canceled
@@ -1605,7 +1605,7 @@ PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{In
       RETURN;
   END
   refs[node.object_id()] = TRY (escapeAnalysis__collect_lambda_body_identifiers(node));
-  rubyToClearVoid()
+  rubyToClearVoid__escape_analysis()
   });
   RETURN refs;
 END
@@ -1636,7 +1636,7 @@ PUB FN escapeAnalysis__collect_lambda_body_identifiers(node: LambdaLit) RETURNS 
   MUTABLE rtoc_reverse_items_29: []Node = ((rtoc_reverse_items_27[rtoc_reverse_i_28])?);
   MUTABLE rtoc_reverse_i_30 = rtoc_reverse_items_29.length() - 1;
   WHILE rtoc_reverse_i_30 >= 0 DO
-    &stack.append(castNodeToLocatable(COPY (rtoc_reverse_items_29[rtoc_reverse_i_30])?));
+    &stack.append(castNodeToLocatable__escape_analysis(COPY (rtoc_reverse_items_29[rtoc_reverse_i_30])?));
     rtoc_reverse_i_30 = rtoc_reverse_i_30 - 1;
   END
   rtoc_reverse_i_28 = rtoc_reverse_i_28 - 1;
@@ -1651,7 +1651,7 @@ PUB FN escapeAnalysis__params_for_call(call: FuncCall, fn_nodes: {String}Functio
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY call.matched_signature));
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(COPY call.matched_signature));
   ELSE
     sig_branch_value = NIL;
   END
@@ -1665,7 +1665,7 @@ END
 PUB FN escapeAnalysis__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X(COPY call.matched_signature));
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(COPY call.matched_signature));
   ELSE
     sig_branch_value = NIL;
   END
@@ -1687,7 +1687,7 @@ PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) 
     FOR _ IN fn_value.params DO
     &param_names.insert(COPY _.name);
     END
-    RETURN !((ruby_set_intersection_String_set(returned, param_names)).empty?());
+    RETURN !((ruby_set_intersection_String_set__escape_analysis(returned, param_names)).empty?());
   END
   MUTABLE borrowed: [Set]String = Set[];
   FOR _ IN fn_value.return_lifetime DO
@@ -1695,7 +1695,7 @@ PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) 
     &borrowed.insert(COPY CAST(_.name() AS String));
   END
   END
-  RETURN !((ruby_set_intersection_String_set(returned, borrowed)).empty?());
+  RETURN !((ruby_set_intersection_String_set__escape_analysis(returned, borrowed)).empty?());
 END
 PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef, MUTABLE expr: Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF TRY (escapeAnalysis__borrowed_return?(fn_value, expr)) THEN
@@ -2087,7 +2087,7 @@ FN castAssignmentNameToAssignmentTarget(value: AssignmentName) RETURNS Assignmen
   END
   panic("Invalid cast to AssignmentTarget");
 END
-FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+FN castAssignmentNameToLocatable__escape_analysis(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -2108,7 +2108,7 @@ FN castLocatableToDestructuringAssignment(value: Locatable) RETURNS Destructurin
   END
   RETURN panic("Invalid cast to DestructuringAssignment");
 END
-FN castLocatableToFuncCall(value: Locatable) RETURNS FuncCall ->
+FN castLocatableToFuncCall__escape_analysis(value: Locatable) RETURNS FuncCall ->
   IF value IS_A FuncCall AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -2235,13 +2235,13 @@ FN castLocatableToOptionalDynamicValue(value: Locatable) RETURNS ?DynamicValue -
   END
   panic("Invalid cast to ?DynamicValue");
 END
-FN castLocatableToReturnNode(value: Locatable) RETURNS ReturnNode ->
+FN castLocatableToReturnNode__escape_analysis(value: Locatable) RETURNS ReturnNode ->
   IF value IS_A ReturnNode AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to ReturnNode");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable__escape_analysis(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2748,7 +2748,7 @@ FN castOptionalLocatableToOptionalDynamicValue(value: ?Locatable) RETURNS ?Dynam
   END
   panic("Invalid cast to ?DynamicValue");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__escape_analysis() RETURNS Void ->
   RETURN;
 END
 FN ruby_array_concat_Locatable(left: []Locatable, right: []Locatable) RETURNS []Locatable ->
@@ -2757,7 +2757,7 @@ FN ruby_array_concat_Locatable(left: []Locatable, right: []Locatable) RETURNS []
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
+FN ruby_set_intersection_String_set__escape_analysis(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
   MUTABLE result: [Set]String = [];
   left |> EACH {
     IF right.contains?(_) AND !(result.contains?(_)) THEN
@@ -2766,7 +2766,7 @@ FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]String) RETUR
   };
   RETURN result;
 END
-FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(value: ?FunctionSignature@multiowned) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END

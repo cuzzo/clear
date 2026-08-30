@@ -38,7 +38,7 @@ PUB FN localBindingAnalysis__direct_loop_body_facts(body: []Locatable) RETURNS !
       &iteration_frame_decls.append(COPY node);
     END
   END
-  rubyToClearVoid()
+  rubyToClearVoid__local_binding_facts()
   }));
   RETURN LocalBindingFacts{ names: COPY names, entries: entries, frame_decls: COPY frame_decls, iteration_frame_decls: COPY iteration_frame_decls };
 END
@@ -302,6 +302,6 @@ PUB FN localBindingAnalysis__binding_frame_allocates?(node: Locatable, entry: ?C
 END
 # End Ruby module MIR::LocalBindingAnalysis
 # End Ruby module MIR
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__local_binding_facts() RETURNS Void ->
   RETURN;
 END

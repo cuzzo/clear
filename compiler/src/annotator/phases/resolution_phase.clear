@@ -364,7 +364,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         panic("Internal Compiler Error: Unknown error code :{}");
       END
     ELSE
-      message = castCodeOrMessageToOptionalString(COPY code_or_message);
+      message = castCodeOrMessageToOptionalString__resolution_phase(COPY code_or_message);
     END
     MUTABLE source_token: ?Token@multiowned = resolutionSession__source_error_token(rtoc_self_view, token);
     MUTABLE diagnostic_code: ?String@symbol = NIL;
@@ -608,7 +608,7 @@ PRIVATE FN resolutionSession__all_known_type_names(self: ResolutionSession) RETU
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = List[];
     FOR _ IN (resolutionSession__scope_stack_for_helper(rtoc_self_view)) DO
-    ruby_array_concat_Any(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
+    ruby_array_concat_Any__resolution_phase(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
     END
     RETURN CAST((names |> DISTINCT _) AS []Any);
 }
@@ -648,7 +648,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     FOR _ IN builtin_global_bindings DO
     MUTABLE rtoc_mutable_receiver_12 = TRY (resolutionSession__current_scope(rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_12, _.name, NIL, castTypeToOptionalSymbolEntryTypeInput(_.type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, _.storage));
+    TRY (scope__declare(&rtoc_mutable_receiver_12, _.name, NIL, castTypeToOptionalSymbolEntryTypeInput__resolution_phase(_.type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, _.storage));
     END
     FOR _ IN builtin_type_bindings DO
     MUTABLE rtoc_local_receiver_13 = TRY (resolutionSession__current_scope(rtoc_self_view));
@@ -1022,7 +1022,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE copied: {String}StructField = {};
     fields.keys() |> EACH {
     MUTABLE field: StructField = (fields[_] OR_ELSE CAST(panic("missing hash key") AS StructField));
-    copied[_] = StructField{ type: TRY (type__new(castTypeToTypeConstructionInput(structField__type(field)))), default: structField__default(field), borrowed: structField__borrowed(field) };
+    copied[_] = StructField{ type: TRY (type__new(castTypeToTypeConstructionInput__resolution_phase(structField__type(field)))), default: structField__default(field), borrowed: structField__borrowed(field) };
     };
     RETURN copied;
 }
@@ -1077,7 +1077,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (variant == NIL) THEN
       RETURN NIL;
     ELSE_IF variant IS_A Type AS type THEN
-      RETURN castTypeToOptionalSchemasUnionSchemaVariantValue(TRY (type__new(castTypeToTypeConstructionInput(type))));
+      RETURN castTypeToOptionalSchemasUnionSchemaVariantValue(TRY (type__new(castTypeToTypeConstructionInput__resolution_phase(type))));
     ELSE_IF variant IS_A InlineStructVariant@multiowned AS inline_struct_variant_multiowned THEN
       RETURN SchemasUnionSchemaVariantValue{ InlineStructVariantMultiowned: COPY TRY (resolutionSession__clone_inline_struct_variant(rtoc_self_view, inline_struct_variant_multiowned)) };
     ELSE
@@ -1092,7 +1092,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fields: {String@symbol}TypeTypeInput = {};
     variant.fields.keys() |> EACH {
     MUTABLE field_type: TypeTypeInput = (variant.fields[_] OR_ELSE CAST(panic("missing hash key") AS TypeTypeInput));
-    fields[_] = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(field_type))));
+    fields[_] = castTypeToTypeTypeInput__resolution_phase(TRY (type__new(castTypeTypeInputToTypeConstructionInput__resolution_phase(field_type))));
     };
     RETURN TRY (inlineStructVariant__new(fields, COPY variant.deinit_entries));
 }
@@ -1209,7 +1209,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     seen = (COPY seen).insert(key);
     MUTABLE nested: []Type = ( { MUTABLE rtoc_empty_list_31: []Type = List[]; rtoc_empty_list_31 } );
     IF type__generic_instance?(type) THEN
-      nested = ruby_array_concat_Type(nested, TRY (type__generic_args(type)));
+      nested = ruby_array_concat_Type__resolution_phase(nested, TRY (type__generic_args(type)));
     END
     IF (type__array?(type) AND (TRY (type__element_type(type)) != NIL)) THEN
       &nested.append(UNWRAP (TRY (type__element_type(type))));
@@ -1401,7 +1401,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_43 = (TRY (functionSignature__return_lifetime(signature)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_43.length() DO
-      IF ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol(rtoc_each_items_43[rtoc_idx]?, :wildcard) THEN
+      IF ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol__resolution_phase(rtoc_each_items_43[rtoc_idx]?, :wildcard) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -1436,7 +1436,7 @@ PRIVATE FN resolutionSession__validate_c_boundary_type_mut(self: ResolutionSessi
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE reason: ?String = TRY (resolutionSession__c_boundary_rejection(rtoc_self_view, type, return_position));
     IF reason EXISTS AS reason_value THEN
-      TRY (resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :C_EXTERN_UNSUPPORTED_TYPE }, [], {:position: position, :type: TRY (type__surface_name(castTypeToTypeTypeInput(type))), :reason: reason_value}));
+      TRY (resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :C_EXTERN_UNSUPPORTED_TYPE }, [], {:position: position, :type: TRY (type__surface_name(castTypeToTypeTypeInput__resolution_phase(type))), :reason: reason_value}));
     ELSE
       RETURN;
     END
@@ -1516,7 +1516,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF seen.contains?(key) THEN
       TRY (resolutionSession__error_mut(rtoc_self_view, node, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: label, :name: key}));
     END
-    seen[key] = castNodeToLocatable(COPY node);
+    seen[key] = castNodeToLocatable__resolution_phase(COPY node);
 }
 END
 PRIVATE FN resolutionSession__reject_duplicate_function_binding_mut(self: ResolutionSession, node: FunctionDef) RETURNS !Void
@@ -1903,7 +1903,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (resolutionSession__error_mut(rtoc_self_view, (IF COPY _.bounds[rtoc_idx]?.token != NIL THEN COPY _.bounds[rtoc_idx]?.token ELSE COPY _.token END), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_PROTOCOL }, [], {:protocol: TRY (type__surface_name(castTypeToTypeTypeInput(_.bounds[rtoc_idx]?.type)))}));
+      TRY (resolutionSession__error_mut(rtoc_self_view, (IF COPY _.bounds[rtoc_idx]?.token != NIL THEN COPY _.bounds[rtoc_idx]?.token ELSE COPY _.token END), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_PROTOCOL }, [], {:protocol: TRY (type__surface_name(castTypeToTypeTypeInput__resolution_phase(_.bounds[rtoc_idx]?.type)))}));
     rtoc_idx = rtoc_idx + 1;
     END
     END
@@ -1917,7 +1917,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (protocolProjectionResolver__resolve(rtoc_local_receiver_58, type.shape.expression, parameters)) };
     MUTABLE issue: ?ProtocolProjectionIssue = COPY result.issues.first();
     IF issue EXISTS AS issue_value THEN
-      TRY (resolutionSession__emit_protocol_projection_issue_mut(rtoc_self_view, castLocatableToNode(node), issue_value));
+      TRY (resolutionSession__emit_protocol_projection_issue_mut(rtoc_self_view, castLocatableToNode__resolution_phase(node), issue_value));
     END
     MUTABLE rtoc_mutable_alias_arg_59 = COPY TRY (typeShape__with_expression(type.shape, result.expression));
     type__replace_shape_mut(&type, rtoc_mutable_alias_arg_59);
@@ -2077,13 +2077,13 @@ PUB FN resolutionPhase__run(program: Program, importer: ?ModuleImporter, source_
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
-FN castCodeOrMessageToOptionalString(value: ResolutionCodeOrMessage) RETURNS ?String ->
+FN castCodeOrMessageToOptionalString__resolution_phase(value: ResolutionCodeOrMessage) RETURNS ?String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN NIL;
 END
-FN castLocatableToNode(value: Locatable) RETURNS Node ->
+FN castLocatableToNode__resolution_phase(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
@@ -2198,7 +2198,7 @@ FN castLocatableToNode(value: Locatable) RETURNS Node ->
   END
   panic("Invalid cast to Node");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable__resolution_phase(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2348,7 +2348,7 @@ FN castTypeToOptionalSchemasUnionSchemaVariantValue(value: Type) RETURNS ?Schema
   END
   panic("Invalid cast to ?SchemasUnionSchemaVariantValue");
 END
-FN castTypeToOptionalSymbolEntryTypeInput(value: Type) RETURNS ?SymbolEntryTypeInput ->
+FN castTypeToOptionalSymbolEntryTypeInput__resolution_phase(value: Type) RETURNS ?SymbolEntryTypeInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN SymbolEntryTypeInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN SymbolEntryTypeInput{ SymbolValue: COPY cast_payload };,
@@ -2356,7 +2356,7 @@ FN castTypeToOptionalSymbolEntryTypeInput(value: Type) RETURNS ?SymbolEntryTypeI
   END
   panic("Invalid cast to ?SymbolEntryTypeInput");
 END
-FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput__resolution_phase(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -2365,7 +2365,7 @@ FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+FN castTypeToTypeTypeInput__resolution_phase(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
 FN castTypeToValue(value: Type) RETURNS Value ->
@@ -2377,7 +2377,7 @@ FN castTypeToValue(value: Type) RETURNS Value ->
   END
   panic("Invalid cast to Value");
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput__resolution_phase(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
@@ -2396,25 +2396,25 @@ FN castValueToTypeConstructionInput(value: Value) RETURNS TypeConstructionInput 
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+FN ruby_array_concat_Any__resolution_phase(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_array_concat_Type(left: []Type, right: []Type) RETURNS []Type ->
+FN ruby_array_concat_Type__resolution_phase(left: []Type, right: []Type) RETURNS []Type ->
   MUTABLE result: []Type = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol(value: FunctionSignatureLifetimeSource, expected: String@symbol) RETURNS Bool ->
+FN ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol__resolution_phase(value: FunctionSignatureLifetimeSource, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END
   FALSE;
 END
-FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
+FN ruby_wrap_optional_string_to_symbol__resolution_phase(value: ?String) RETURNS ?String@symbol ->
   IF value EXISTS AS value_value THEN
     RETURN symbol(value_value);
   END

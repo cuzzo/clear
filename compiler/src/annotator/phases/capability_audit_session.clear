@@ -318,7 +318,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         panic("Internal Compiler Error: Unknown error code :{}");
       END
     ELSE
-      message = castCodeOrMessageToOptionalString(COPY code_or_message);
+      message = castCodeOrMessageToOptionalString__capability_audit_session(COPY code_or_message);
     END
     MUTABLE source_token: ?Token@multiowned = capabilityAuditSession__source_error_token(rtoc_self_view, token);
     MUTABLE diagnostic_code: ?String@symbol = NIL;
@@ -532,7 +532,7 @@ PRIVATE FN capabilityAuditSession__emit_optional_field_safe_nav_finding_mut(self
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE token = COPY node.token;
     MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :INSERT_SAFE_NAVIGATION)), [edit__new(span__new(NIL, token.line, (token.column - 1), 0), "?")], :auto));
-    TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, node, :type, [fix], NIL, :OPTIONAL_FIELD_REQUIRES_SAFE_NAV, :error, FALSE, {:field: node.field, :type: TRY (type__surface_name(castTypeToTypeTypeInput(target_type))), :target: node.target.name()}));
+    TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, node, :type, [fix], NIL, :OPTIONAL_FIELD_REQUIRES_SAFE_NAV, :error, FALSE, {:field: node.field, :type: TRY (type__surface_name(castTypeToTypeTypeInput__capability_audit_session(target_type))), :target: node.target.name()}));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_mutable_unused_finding_mut(self: CapabilityAuditSession, reg: ?CapabilityAuditReg, name: String) RETURNS !Void
@@ -618,7 +618,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END;
     MUTABLE fixes = List[];
     IF best EXISTS AS best_value THEN
-      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: castNameCandidateToOptionalDiagnosticKwValue(name), :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }})), [edit__new(span__new(NIL, token.line, token.column, (CAST(name AS String)).codepointCount()), best_value)], :auto)));
+      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(name), :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }})), [edit__new(span__new(NIL, token.line, token.column, (CAST(name AS String)).codepointCount()), best_value)], :auto)));
     END
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, token, CapabilityAuditCodeOrMessage{ SymbolValue: :REGISTRY_MISMATCH_REJECTED }, [], {:detail: message}));
@@ -736,7 +736,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
         END
         MUTABLE fixes = List[];
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, consumer_description_code, {:line: ruby_wrap_optional_Int64_DiagnosticKwValue(og_node.move_line)})), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, consumer_description_code, {:line: ruby_wrap_optional_Int64_DiagnosticKwValue__capability_audit_session(og_node.move_line)})), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
         MUTABLE candidate_caps = List[];
         IF !((is_multi OR is_split)) THEN
           &candidate_caps.append("@multiowned");
@@ -748,7 +748,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF (TRUE AND consumed_by_call) THEN
           MUTABLE pt: ?TypeTypeInput = COPY og_node.move_consumer_param_type;
           IF ((pt != NIL) AND !(pt IS_A Type)) THEN
-            pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(pt))));
+            pt = castTypeToTypeTypeInput__capability_audit_session(TRY (type__new(castTypeTypeInputToTypeConstructionInput__capability_audit_session(pt))));
           END
           MUTABLE param_admits_shared = ((pt != NIL) AND (IF (typeTypeInput__shared?(pt) != NIL) THEN
             type__shared?(pt)
@@ -1103,7 +1103,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE edits: []Edit = [edit__new(span__new(NIL, root_value.token.line, root_value.token.column, 0), "&")];
       MUTABLE mutable_fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, root_value.name, scope));
       IF (scope__is_immutable?(scope, root_value.name) AND (mutable_fix != NIL)) THEN
-        edits = ruby_array_concat_Edit(edits, mutable_fix.edits);
+        edits = ruby_array_concat_Edit__capability_audit_session(edits, mutable_fix.edits);
       END
       MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :INSERT_MUTABLE_ARGUMENT_MARKER, {:name: DiagnosticKwValue{ StringValue: COPY root_value.name }, :param: DiagnosticKwValue{ StringValue: COPY facts.param.name }})), edits, :auto));
       TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, root_value, :mutability, [fix], NIL, :MUTABLE_ARGUMENT_REQUIRES_MARKER, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name}));
@@ -1203,7 +1203,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_MATCH_WITH_PARTIAL)), [edit__new(span__new(NIL, tok.line, tok.column, 0), "PARTIAL ")], :auto));
     END
     IF !(fix) THEN
-      RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, match_node, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned(kwargs)));
+      RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, match_node, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned__capability_audit_session(kwargs)));
     END
     IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
       TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, match_node, :type, [fix], NIL, code, :error, FALSE, {:type: kwargs.substr(:type, 1)}));
@@ -1244,10 +1244,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.trimStart();
       IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
-        MUTABLE alias_name = "${castNameCandidateToString(name)}_v";
+        MUTABLE alias_name = "${castNameCandidateToString__capability_audit_session(name)}_v";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(CAST(name AS String))}\\.(?=\\w)"), "${alias_name}.");
-        MUTABLE new_line = "${indent}WITH ${perm} ${castNameCandidateToString(name)} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_CAPABILITY_ACCESS, {:permission: DiagnosticKwValue{ StringValue: COPY perm }, :name: castNameCandidateToOptionalDiagnosticKwValue(name), :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }, :capability: DiagnosticKwValue{ StringValue: COPY cap }})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), new_line)], :interactive)));
+        MUTABLE new_line = "${indent}WITH ${perm} ${castNameCandidateToString__capability_audit_session(name)} AS ${alias_name} { ${rewritten} }";
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_CAPABILITY_ACCESS, {:permission: DiagnosticKwValue{ StringValue: COPY perm }, :name: castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(name), :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }, :capability: DiagnosticKwValue{ StringValue: COPY cap }})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), new_line)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -1592,7 +1592,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(text_length) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, {:type: castTypeTypeInputToOptionalDiagnosticKwValue(target_name)})), [edit__new(span__new(NIL, tok.line, tok.column, 0), "CAST("), edit__new(span__new(NIL, tok.line, (tok.column + text_length), 0), " AS ${castTypeTypeInputToString(target_name)})")], :interactive));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, {:type: castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name)})), [edit__new(span__new(NIL, tok.line, tok.column, 0), "CAST("), edit__new(span__new(NIL, tok.line, (tok.column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
     ELSE
       RETURN NIL;
     END
@@ -1680,7 +1680,7 @@ PRIVATE FN capabilityAuditSession__emit_with_cap_mismatch_mut(self: CapabilityAu
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fixes = candidates |> SELECT:? TRY (capabilityAuditSession__build_decl_cap_insert_fix(rtoc_self_view, name, _.sigil, _.description_code, _.description_params, confidence)) |> WHERE _ != NIL;
     IF (fixes.length() == 0) THEN
-      RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, node, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned(kw)));
+      RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, node, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned__capability_audit_session(kw)));
     END
     IF (code == :WITH_EXCLUSIVE_NEEDS_LOCK) THEN
       TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, node, :capability, fixes, NIL, code, :error, TRUE, {:got: kw.substr(:got, 1)}));
@@ -1810,7 +1810,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
     IF auto_tok EXISTS AS auto_tok_value THEN
       MUTABLE type_str = COPY CAST(type_sym AS String);
-      RETURN TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :PIN_AUTO_SLOT, {:position: DiagnosticKwValue{ Int64Value: position }, :label: ruby_wrap_optional_String_DiagnosticKwValue(capabilityAuditSession__auto_slot_label(rtoc_self_view, slot)), :type: DiagnosticKwValue{ StringValue: COPY type_str }, :note: DiagnosticKwValue{ StringValue: COPY IF note != NIL THEN
+      RETURN TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :PIN_AUTO_SLOT, {:position: DiagnosticKwValue{ Int64Value: position }, :label: ruby_wrap_optional_String_DiagnosticKwValue__capability_audit_session(capabilityAuditSession__auto_slot_label(rtoc_self_view, slot)), :type: DiagnosticKwValue{ StringValue: COPY type_str }, :note: DiagnosticKwValue{ StringValue: COPY IF note != NIL THEN
         " ${note}"
       ELSE
         ""
@@ -1858,7 +1858,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (TRUE AND (slot.shape != NIL)) THEN
       RETURN;
     END
-    MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType(resolution.type));
+    MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__capability_audit_session(resolution.type));
     MUTABLE label: ?String = TRY (capabilityAuditSession__auto_slot_label(rtoc_self_view, slot));
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
     TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, TRY (capabilityAuditSession__build_auto_replace_fixes(rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_TYPE, :info, FALSE, {:label: label, :type: type_str}));
@@ -1877,7 +1877,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF type__auto?(decl.type()) THEN
       RETURN;
     END
-    MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType(decl.type()));
+    MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__capability_audit_session(decl.type()));
     MUTABLE name: String = "";
     IF TRUE THEN
       name = (MATCH decl START AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> item.name, AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> item.name, AutoConstraintCollectorSlotDeclNode.BindExpr AS item -> item.name END);
@@ -1981,7 +1981,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF (kind == :return) THEN
       RETURN autoSlotId__return(UNWRAP (slot.fn_name));
     ELSE_IF (kind == :local) THEN
-      RETURN autoSlotId__local(castAutoConstraintCollectorDeclarationNodeToLocatable(castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node)));
+      RETURN autoSlotId__local(castAutoConstraintCollectorDeclarationNodeToLocatable__capability_audit_session(castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__capability_audit_session(slot.decl_node)));
     ELSE
       RETURN NIL;
     END
@@ -2022,7 +2022,7 @@ PRIVATE FN capabilityAuditSession__auto_shape_slot_label(self: CapabilityAuditSe
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name: Any = NIL;
-    MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node) START
+    MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__capability_audit_session(slot.decl_node) START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
         name = COPY item.name;,
       AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
@@ -2053,7 +2053,7 @@ PRIVATE FN capabilityAuditSession__auto_local_slot_label(self: CapabilityAuditSe
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name: Any = NIL;
-    MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node) START
+    MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__capability_audit_session(slot.decl_node) START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
         name = COPY item.name;,
       AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
@@ -2184,7 +2184,7 @@ PRIVATE FN capabilityAuditSession__all_known_type_names(self: CapabilityAuditSes
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = List[];
     FOR _ IN (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view)) DO
-    ruby_array_concat_Any(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
+    ruby_array_concat_Any__capability_audit_session(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
     END
     RETURN CAST((names |> DISTINCT _) AS []Any);
 }
@@ -2468,7 +2468,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_15 = (scope__resolve_entry(scope, callees[rtoc_idx]));
       symbolEntry__type(rtoc_local_receiver_15) }
         ELSE
@@ -2532,7 +2532,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_16 = (scope__resolve_entry(scope, callees[rtoc_idx]));
       symbolEntry__type(rtoc_local_receiver_16) }
         ELSE
@@ -2600,7 +2600,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_17 = (scope__resolve_entry(scope, callees[rtoc_idx]));
       symbolEntry__type(rtoc_local_receiver_17) }
         ELSE
@@ -2685,7 +2685,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF tok THEN
         MUTABLE edits = [edit__new(span__new(NIL, tok.line, tok.column, 0), "!")];
         IF fixCollector__fallibility_propagation_enabled?() THEN
-          edits = ruby_array_concat_Edit(edits, CAST(TRY (capabilityAuditSession__fallibility_call_site_edits(rtoc_self_view, rtoc_each_14)) AS []Edit));
+          edits = ruby_array_concat_Edit__capability_audit_session(edits, CAST(TRY (capabilityAuditSession__fallibility_call_site_edits(rtoc_self_view, rtoc_each_14)) AS []Edit));
         END
         MUTABLE description_key = IF fixCollector__fallibility_propagation_enabled?() THEN
           :PROPAGATE_ERROR_UNION_TO_CALLERS
@@ -3031,7 +3031,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE return_t: ?Type = functionSignature__return_type(fn_node);
     IF ((return_t != NIL) AND !(TRUE)) THEN
-        return_t = TRY (type__new(castTypeToTypeConstructionInput(return_t)));
+        return_t = TRY (type__new(castTypeToTypeConstructionInput__capability_audit_session(return_t)));
     END
     MUTABLE declared_runtime_return = !(!((((return_t != NIL) AND (((type__heap?(return_t) OR type__indirect?(return_t)) OR TRY (type__needs_escape_promotion?(return_t))))))));
     MUTABLE tier =   IF (((effs.contains?(heap) OR effs.contains?(blocking)) OR effs.contains?(extern_value)) OR functionDef__runtime_stack_required?(fn_node, capabilityAuditSession__recursion_yield_needed?(rtoc_self_view, fn_node), declared_runtime_return)) THEN
@@ -3101,7 +3101,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (n == target) THEN
         RETURN TRUE;
       END
-      queue = ruby_array_concat_String(queue, CAST(TRY (effectSet__to_a((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[n?] OR_ELSE Set[])))) AS []String));
+      queue = ruby_array_concat_String__capability_audit_session(queue, CAST(TRY (effectSet__to_a((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[n?] OR_ELSE Set[])))) AS []String));
     END
     RETURN FALSE;
 }
@@ -3493,7 +3493,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           nl_ok = FALSE;
           BREAK;
       END
-      ruby_array_concat_Any(edits_nl, CAST(eff AS []Any));
+      ruby_array_concat_Any__capability_audit_session(edits_nl, CAST(eff AS []Any));
       MUTABLE rt = cycle_thunk_fns[rtoc_idx].declared_return_type();
       IF rt EXISTS AS rt_value THEN
         IF rt_value.error_union?() THEN
@@ -3522,7 +3522,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           md_ok = FALSE;
           BREAK;
       END
-      ruby_array_concat_Any(edits_md, CAST(eff AS []Any));
+      ruby_array_concat_Any__capability_audit_session(edits_md, CAST(eff AS []Any));
       MUTABLE rt = cycle_thunk_fns[rtoc_idx].declared_return_type();
       IF rt EXISTS AS rt_value THEN
         IF rt_value.error_union?() THEN
@@ -3564,7 +3564,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     };
     MUTABLE backward = TRY (capabilityAuditSession__compute_reachable(rtoc_self_view, reverse_graph, start_s));
-    MUTABLE scc = ruby_set_intersection_String_set(forward, backward);
+    MUTABLE scc = ruby_set_intersection_String_set__capability_audit_session(forward, backward);
     IF forward.contains?(start_s) THEN
       &scc.append(start_s);
     END
@@ -4169,7 +4169,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         TRY (capabilityAuditSession__error_mut(rtoc_self_view, _.node, CapabilityAuditCodeOrMessage{ SymbolValue: :OR_ELSE_NEEDS_RECOVERABLE_LEFT }, [], {:got: TRY (type__surface_name_type(_.value_type))}));
     END
     _.left.can_fail = TRUE;
-    _.left.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput(_.value_type)));
+    _.left.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__capability_audit_session(_.value_type)));
     END
     (TRY (capabilityAuditSession__deferred_recovery_validations(rtoc_self_view))).clear();
 }
@@ -4308,7 +4308,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE root_scope = capabilityAuditSession__whole_program_root_scope(rtoc_self_view);
     FOR rtoc_each_23 IN (TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))).keys() DO
     MUTABLE fn_value: FunctionDef@multiowned = (TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))[rtoc_each_23] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X((IF scope__resolve_entry(root_scope, rtoc_each_23) != NIL THEN
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(root_scope, rtoc_each_23) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_49 = (scope__resolve_entry(root_scope, rtoc_each_23));
     symbolEntry__type(rtoc_local_receiver_49) }
       ELSE
@@ -4364,7 +4364,7 @@ FN castAsyncValidationNodeToLocatable(value: AsyncValidationNode) RETURNS Locata
   END
   panic("Invalid cast to Locatable");
 END
-FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
+FN castAutoConstraintCollectorDeclarationNodeToLocatable__capability_audit_session(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     AutoConstraintCollectorDeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorDeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
@@ -4372,7 +4372,7 @@ FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCo
   END
   panic("Invalid cast to Locatable");
 END
-FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
+FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__capability_audit_session(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
   PARTIAL MATCH value START
     AutoConstraintCollectorSlotDeclNode.VarDecl AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorSlotDeclNode.BindExpr AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ BindExpr: COPY cast_payload };,
@@ -4380,19 +4380,19 @@ FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNo
   END
   panic("Invalid cast to AutoConstraintCollectorDeclarationNode");
 END
-FN castCodeOrMessageToOptionalString(value: CapabilityAuditCodeOrMessage) RETURNS ?String ->
+FN castCodeOrMessageToOptionalString__capability_audit_session(value: CapabilityAuditCodeOrMessage) RETURNS ?String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN NIL;
 END
-FN castDiagnosticKwValueToAnyMultiowned(value: DiagnosticKwValue) RETURNS Any@multiowned ->
+FN castDiagnosticKwValueToAnyMultiowned__capability_audit_session(value: DiagnosticKwValue) RETURNS Any@multiowned ->
   IF value IS_A Any@multiowned AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Any@multiowned");
 END
-FN castNameCandidateToOptionalDiagnosticKwValue(value: NameCandidate) RETURNS ?DiagnosticKwValue ->
+FN castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(value: NameCandidate) RETURNS ?DiagnosticKwValue ->
   PARTIAL MATCH value START
     NameCandidate.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     NameCandidate.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
@@ -4400,13 +4400,13 @@ FN castNameCandidateToOptionalDiagnosticKwValue(value: NameCandidate) RETURNS ?D
   END
   panic("Invalid cast to ?DiagnosticKwValue");
 END
-FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
+FN castNameCandidateToString__capability_audit_session(value: NameCandidate) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-FN castTypeToAutoConstraintCollectorObservedType(value: Type) RETURNS AutoConstraintCollectorObservedType ->
+FN castTypeToAutoConstraintCollectorObservedType__capability_audit_session(value: Type) RETURNS AutoConstraintCollectorObservedType ->
   PARTIAL MATCH value START
     Type.SymbolValue AS cast_payload -> RETURN AutoConstraintCollectorObservedType{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to AutoConstraintCollectorObservedType");
@@ -4420,7 +4420,7 @@ FN castTypeToOptionalX(value: Type) RETURNS ?X ->
   END
   panic("Invalid cast to ?X");
 END
-FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput__capability_audit_session(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -4429,10 +4429,10 @@ FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+FN castTypeToTypeTypeInput__capability_audit_session(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
+FN castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
   PARTIAL MATCH value START
     TypeTypeInput.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     TypeTypeInput.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
@@ -4440,13 +4440,13 @@ FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RETURNS ?D
   END
   panic("Invalid cast to ?DiagnosticKwValue");
 END
-FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
+FN castTypeTypeInputToString__capability_audit_session(value: TypeTypeInput) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput__capability_audit_session(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
@@ -4456,25 +4456,25 @@ FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeCo
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+FN ruby_array_concat_Any__capability_audit_session(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
+FN ruby_array_concat_Edit__capability_audit_session(left: []Edit, right: []Edit) RETURNS []Edit ->
   MUTABLE result: []Edit = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_array_concat_String(left: []String, right: []String) RETURNS []String ->
+FN ruby_array_concat_String__capability_audit_session(left: []String, right: []String) RETURNS []String ->
   MUTABLE result: []String = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
+FN ruby_set_intersection_String_set__capability_audit_session(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
   MUTABLE result: [Set]String = [];
   left |> EACH {
     IF right.contains?(_) AND !(result.contains?(_)) THEN
@@ -4492,13 +4492,13 @@ FN ruby_set_intersection_String_symbol_set(left: [Set]String@symbol, right: [Set
   };
   RETURN result;
 END
-FN ruby_wrap_optional_Int64_DiagnosticKwValue(value: ?Int64) RETURNS ?DiagnosticKwValue ->
+FN ruby_wrap_optional_Int64_DiagnosticKwValue__capability_audit_session(value: ?Int64) RETURNS ?DiagnosticKwValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN DiagnosticKwValue{ Int64Value: COPY optional_payload };
   END
   NIL;
 END
-FN ruby_wrap_optional_String_DiagnosticKwValue(value: ?String) RETURNS ?DiagnosticKwValue ->
+FN ruby_wrap_optional_String_DiagnosticKwValue__capability_audit_session(value: ?String) RETURNS ?DiagnosticKwValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN DiagnosticKwValue{ StringValue: COPY optional_payload };
   END
@@ -4510,13 +4510,13 @@ FN ruby_wrap_optional_String_symbol_DiagnosticKwValue(value: ?String@symbol) RET
   END
   NIL;
 END
-FN ruby_wrap_optional_Type_multiowned_X(value: ?Type@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_Type_multiowned_X__capability_audit_session(value: ?Type@multiowned) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ Type: Type{ Type: COPY optional_payload } };
   END
   NIL;
 END
-FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
+FN ruby_wrap_optional_string_to_symbol__capability_audit_session(value: ?String) RETURNS ?String@symbol ->
   IF value EXISTS AS value_value THEN
     RETURN symbol(value_value);
   END

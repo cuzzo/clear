@@ -169,10 +169,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN resource_captures DO
     frozenCleanupFacts__with_live_entry_for(facts, _, %(entry: CleanupEntry) -> {
       cleanupEntry__mark_moved_guard_mut(&entry);
-      rubyToClearVoid()
+      rubyToClearVoid__mir_pass()
     });
     END
-    rubyToClearVoid()
+    rubyToClearVoid__mir_pass()
     }));
     RETURN COPY fn_value.body;
 }
@@ -221,7 +221,7 @@ PRIVATE FN mIRPass__recurse_branches_mut(self: MIRPass, MUTABLE stmt: Locatable,
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE branch_ctx_branch_value: ?WalkCtx = NIL;
     IF (stmt IS_A BgBlock OR stmt IS_A BgStreamBlock) THEN
-      branch_ctx_branch_value = walkCtx__with(ctx, {:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castLocatableToBgNode(stmt), ctx.cleanup_facts)});
+      branch_ctx_branch_value = walkCtx__with(ctx, {:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castLocatableToBgNode__mir_pass(stmt), ctx.cleanup_facts)});
     ELSE
       branch_ctx_branch_value = COPY ctx;
     END
@@ -376,7 +376,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             frozenCleanupFacts__with_live_entry_for_node(facts, Name{ StringValue: COPY root_value_mutable.name }, Locatable{ Identifier: COPY root_value_mutable }, %(entry: CleanupEntry) USE(MUTABLE names, root_value_mutable) -> {
     cleanupEntry__mark_moved_guard_mut(&entry);
     &names.insert(COPY root_value_mutable.name);
-    rubyToClearVoid()
+    rubyToClearVoid__mir_pass()
             });
           END
         ELSE
@@ -390,7 +390,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           TRY (mIRPass__walk_consumed(rtoc_self_view, move_node_mutable.value, &names, facts));
         END
       ELSE_IF (node_value_mutable IS_A FuncCall) OR (node_value_mutable IS_A MethodCall) THEN
-        TRY (mIRPass__consume_call_args(rtoc_self_view, castLocatableToNode(node_value_mutable), names, facts));
+        TRY (mIRPass__consume_call_args(rtoc_self_view, castLocatableToNode__mir_pass(node_value_mutable), names, facts));
         IF node_value_mutable IS_A MethodCall THEN
           TRY (mIRPass__walk_consumed(rtoc_self_view, node_value_mutable.object, &names, facts));
         END
@@ -586,7 +586,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         drop.cleanup_entry = COPY as_entry;
         &mir_prefix.append(drop);
         match_statement_mutable.cases[rtoc_idx].body = (mir_prefix + match_statement_mutable.cases[rtoc_idx].body());
-        rubyToClearVoid()
+        rubyToClearVoid__mir_pass()
       });
     rtoc_idx = rtoc_idx + 1;
           END
@@ -623,7 +623,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE drop = Drop{ token: while_bind_loop_mutable.token, name: COPY CAST(while_bind_loop_mutable.binding_name AS String), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
     drop.cleanup_entry = COPY entry;
     while_bind_loop_mutable.do_branch = (CAST(Tuple{alloc_node, drop} AS Tuple<AllocMark, Drop>) + (while_bind_loop_mutable.do_branch));
-    rubyToClearVoid()
+    rubyToClearVoid__mir_pass()
       });
     ELSE
       RETURN;
@@ -693,7 +693,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (mIRPass__collect_escaping_ids(rtoc_self_view, node.value()))) DO
     &returned.insert(COPY _.name);
     END
-    rubyToClearVoid()
+    rubyToClearVoid__mir_pass()
     });
     IF (TRUE AND fn_value.heap_carry_return_vars) THEN
       FOR _ IN fn_value.heap_carry_return_vars DO
@@ -703,7 +703,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN returned DO
     frozenCleanupFacts__with_live_entry_for(facts, _, %(entry: CleanupEntry) -> {
     cleanupEntry__mark_moved_guard_mut(&entry);
-    rubyToClearVoid()
+    rubyToClearVoid__mir_pass()
     });
     END
 }
@@ -766,14 +766,14 @@ PUB FN mIRPass__new(fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symb
   mIRPass__initialize(&self, fn_nodes, schema_lookup, lifecycle_registry, body_summaries, hoist_bindings);
   RETURN self @multiowned;
 END
-FN castLocatableToBgNode(value: Locatable) RETURNS BgNode ->
+FN castLocatableToBgNode__mir_pass(value: Locatable) RETURNS BgNode ->
   PARTIAL MATCH value START
     Locatable.BgStreamBlock AS cast_payload -> RETURN BgNode{ BgStreamBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to BgNode");
   END
   panic("Invalid cast to BgNode");
 END
-FN castLocatableToNode(value: Locatable) RETURNS Node ->
+FN castLocatableToNode__mir_pass(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
@@ -993,7 +993,7 @@ FN castOptionalSymbolEntryRegInputToOptionalLocatable(value: ?SymbolEntryRegInpu
   END
   panic("Invalid cast to ?Locatable");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__mir_pass() RETURNS Void ->
   RETURN;
 END
 PUB FN mIRPass__schema_lookup_call(self: MIRPass, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->

@@ -21,7 +21,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
     IF node IS_A Identifier AS identifier THEN
         &body_names.insert(COPY identifier__name(identifier));
     END
-    rubyToClearVoid()
+    rubyToClearVoid__ownership_scanner()
   });
   MUTABLE rtoc_each_items_2 = (((IF selectOp__capture_analysis(bg_value) != NIL THEN
       (selectOp__capture_analysis(bg_value)).move_mark_names()
@@ -40,7 +40,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
       END
     rtoc_idx = rtoc_idx + 1;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__ownership_scanner()
   }));
   RETURN CAST((names |> DISTINCT _) AS []String);
 END
@@ -54,14 +54,14 @@ PUB FN mIRLoweringOwnershipScanner__collect_explicit_move_roots(self: MIRLowerin
   IF moved EXISTS AS moved_value THEN
       &names.append(moved_value);
   END
-  rubyToClearVoid()
+  rubyToClearVoid__ownership_scanner()
   });
   collect(node);
   TRY (aST__each_bg_block_in_stmt(node, %(bg_value: BgNode) USE(collect) -> {
   IF bg_value.body() THEN
       collect(bg_value.body());
   END
-  rubyToClearVoid()
+  rubyToClearVoid__ownership_scanner()
   }));
   RETURN CAST((names |> DISTINCT _) AS []String);
 END
@@ -98,7 +98,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwn
       RETURN;
   END
   &names.append(UNWRAP (root));
-  rubyToClearVoid()
+  rubyToClearVoid__ownership_scanner()
   });
   RETURN CAST((names |> DISTINCT _) AS []String);
 END
@@ -111,7 +111,7 @@ PUB FN mIRLoweringOwnershipScanner__walk_ast_for_moved_args(self: MIRLoweringOwn
   END
   aST__each_child_node(node, %(child: Locatable) USE(blk, self) -> {
   mIRLoweringOwnershipScanner__walk_ast_for_moved_args(self, child, blk);
-  rubyToClearVoid()
+  rubyToClearVoid__ownership_scanner()
   });
 END
 PUB FN mIRLoweringOwnershipScanner__moved_arg_root(self: MIRLoweringOwnershipScanner, arg: Locatable) RETURNS ?String ->
@@ -159,6 +159,6 @@ PRIVATE FN mIRLoweringOwnershipScanner__nested_ownership_scope?(self: MIRLowerin
     DEFAULT -> FALSE
   END;
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__ownership_scanner() RETURNS Void ->
   RETURN;
 END

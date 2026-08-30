@@ -14710,7 +14710,7 @@ FN castDeferBodyToEmittable(value: DeferBody) RETURNS []Emittable ->
   END
   RETURN List[];
 END
-FN castNameToStringSymbol(value: Name) RETURNS String@symbol ->
+FN castNameToStringSymbol__mir(value: Name) RETURNS String@symbol ->
   IF value IS_A String@symbol AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -14732,7 +14732,7 @@ FN castOptionalNamedMirFieldValueToOptionalStringSymbol(value: ?NamedMirFieldVal
   END
   RETURN NIL;
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__mir() RETURNS Void ->
   RETURN;
 END
 FN ruby_array_concat_MIRBodySlot(left: []MIRBodySlot, right: []MIRBodySlot) RETURNS []MIRBodySlot ->

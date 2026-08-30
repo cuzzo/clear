@@ -121,12 +121,12 @@ PRIVATE FN pipelineEachLowerer__lower_pool_each(self: PipelineEachLowerer, list_
 END
 PRIVATE FN pipelineEachLowerer__lower_bc_indexed_each(self: PipelineEachLowerer, list_node: Locatable, body_mir: []Emittable, skip_nil: Bool) RETURNS ForStmt ->
   MUTABLE idx_name = pipelineEachLowerer__next_index_name_call(self);
-  MUTABLE src_ident = Ident{ name: COPY castLocatableToIdentifier(list_node).name, lowered_node_id: NIL, ownership_consumption: NIL };
+  MUTABLE src_ident = Ident{ name: COPY castLocatableToIdentifier__pipeline_each_lowerer(list_node).name, lowered_node_id: NIL, ownership_consumption: NIL };
   MUTABLE body: []Emittable = [Emittable{ Let: COPY Let{ name: COPY "__each_item", init: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ Ident: COPY src_ident }, index: Emittable{ Ident: COPY Ident{ name: COPY idx_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
   IF skip_nil THEN
     &body.append(Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "==", left: Emittable{ Ident: COPY Ident{ name: "__each_item", lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "nil", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ ContinueStmt: COPY ContinueStmt{ unused: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } });
   END
-  body = ruby_array_concat_Emittable(body, body_mir);
+  body = ruby_array_concat_Emittable__pipeline_each_lowerer(body, body_mir);
   &body.append(Emittable{ Set: COPY Set{ target: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ Ident: COPY src_ident }, index: Emittable{ Ident: COPY Ident{ name: COPY idx_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: "__each_item", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
   RETURN ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ ListLength: COPY ListLength{ expr: Emittable{ Ident: COPY src_ident }, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: COPY idx_name, body: body, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
@@ -164,7 +164,7 @@ PRIVATE FN pipelineEachLowerer__body_frame_transients?(self: PipelineEachLowerer
   IF (IF node IS_A AllocMark AS alloc_mark THEN placement__frame?(alloc_mark.alloc) ELSE FALSE END) THEN
       found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__pipeline_each_lowerer()
   }));
   RETURN found;
 END
@@ -193,13 +193,13 @@ FN castEmittableToLit(value: Emittable) RETURNS Lit ->
   END
   RETURN panic("Invalid cast to Lit");
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable__pipeline_each_lowerer(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+FN castLocatableToIdentifier__pipeline_each_lowerer(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -213,10 +213,10 @@ FN castPipelineEachLowererReturnValueToOptionalPipelineEachResult(value: Pipelin
   END
   panic("Invalid cast to ?PipelineEachResult");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__pipeline_each_lowerer() RETURNS Void ->
   RETURN;
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable__pipeline_each_lowerer(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

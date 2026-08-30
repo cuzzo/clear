@@ -558,7 +558,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       curr = UNWRAP (next_curr);
     END
-    &path.append(symbol(castLocatableToIdentifier(curr).name));
+    &path.append(symbol(castLocatableToIdentifier__scope(curr).name));
     MUTABLE reversed: []String@symbol = ( { MUTABLE rtoc_empty_list_7: []String@symbol = List[]; rtoc_empty_list_7 } );
     MUTABLE i = (path.length() - 1);
     WHILE (i >= 0) DO
@@ -588,7 +588,7 @@ PUB FN scope__new() RETURNS Scope@multiowned ->
   RETURN self @multiowned;
 END
 # Ruby module ScopeHelper
-FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+FN castLocatableToIdentifier__scope(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END

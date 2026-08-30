@@ -5,7 +5,7 @@ REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172" AS param
 # Ruby module Annotator
 # Ruby module Annotator::Phases
 PUB FN signatureRegistry__function_signature(node: FunctionDef, return_lifetime: ?String) RETURNS !FunctionSignature@multiowned ->
-  RETURN TRY (functionSignature__new(node.params |> SELECT signatureRegistry__function_param(_), castTypeToTypeTypeInput(TRY (functionDef__annotation_return_type(node))), ruby_wrap_optional_String_FunctionSignatureLifetimeInput(return_lifetime), node.visibility, node.type_params |> SELECT symbol(_), TRY (signatureRegistry__generic_bounds(node.generic_params)), ((node.reentrance_kind == :reentrant) OR (node.effects_decl == :reentrant)), FALSE, NIL, NIL, NIL, node.type_params |> SELECT symbol(_), NIL, ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } ), FALSE, NIL, NIL, NIL, NIL, NIL, NIL, NIL, node.requires));
+  RETURN TRY (functionSignature__new(node.params |> SELECT signatureRegistry__function_param(_), castTypeToTypeTypeInput__signature_registry(TRY (functionDef__annotation_return_type(node))), ruby_wrap_optional_String_FunctionSignatureLifetimeInput(return_lifetime), node.visibility, node.type_params |> SELECT symbol(_), TRY (signatureRegistry__generic_bounds(node.generic_params)), ((node.reentrance_kind == :reentrant) OR (node.effects_decl == :reentrant)), FALSE, NIL, NIL, NIL, node.type_params |> SELECT symbol(_), NIL, ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } ), FALSE, NIL, NIL, NIL, NIL, NIL, NIL, NIL, node.requires));
 END
 PRIVATE FN signatureRegistry__generic_bounds(params: []GenericParamDecl) RETURNS !{String@symbol}[]Type@multiowned ->
   MUTABLE rtoc_tuple_return_2 = params |> REDUCE({}) {
@@ -22,7 +22,7 @@ PUB FN signatureRegistry__extern_function_signature(node: ExternFnDecl) RETURNS 
     rtoc_ternary_value_4 = node.params;
   END
   rtoc_ternary_value_4? };
-  RETURN TRY (functionSignature__new(params |> SELECT signatureRegistry__extern_param(_), castTypeToTypeTypeInput(TRY (externFnDecl__annotation_return_type(node))), FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (signatureRegistry__extern_lifetime_paths(node)) }, :pub, COPY node.fn_type_params, {}, FALSE, TRUE, node.from_module, TRY (signatureRegistry__extern_effects(node)), node.extern_source, COPY node.fn_type_params, node.owner_type, COPY node.owner_type_params));
+  RETURN TRY (functionSignature__new(params |> SELECT signatureRegistry__extern_param(_), castTypeToTypeTypeInput__signature_registry(TRY (externFnDecl__annotation_return_type(node))), FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (signatureRegistry__extern_lifetime_paths(node)) }, :pub, COPY node.fn_type_params, {}, FALSE, TRUE, node.from_module, TRY (signatureRegistry__extern_effects(node)), node.extern_source, COPY node.fn_type_params, node.owner_type, COPY node.owner_type_params));
 END
 PRIVATE FN signatureRegistry__extern_lifetime_paths(node: ExternFnDecl) RETURNS ![]FunctionSignatureLifetimeSource ->
   MUTABLE lifetime_opt: ?ClearParserReturnLifetime = COPY node.return_lifetime;
@@ -72,6 +72,6 @@ FN ruby_wrap_optional_String_FunctionSignatureLifetimeInput(value: ?String) RETU
   END
   NIL;
 END
-FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+FN castTypeToTypeTypeInput__signature_registry(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END

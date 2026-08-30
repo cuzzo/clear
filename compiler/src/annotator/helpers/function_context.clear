@@ -25,7 +25,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (val == NIL) THEN
       rtoc_ternary_value_1 = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
     ELSE
-      rtoc_ternary_value_1 = TRY (type__new(castTypeTypeInputToTypeConstructionInput(val)));
+      rtoc_ternary_value_1 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__function_context(val)));
     END
     rtoc_ternary_value_1? };
 }
@@ -126,7 +126,7 @@ FN castOptionalTypeTypeInputToType(value: ?TypeTypeInput) RETURNS Type ->
   END
   RETURN panic("Invalid cast to Type");
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput__function_context(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,

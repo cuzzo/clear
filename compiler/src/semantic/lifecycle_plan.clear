@@ -740,10 +740,10 @@ FN castSemanticLifecycleRegistryBindingNodeToLocatable(value: SemanticLifecycleR
   END
   panic("Invalid cast to Locatable");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__lifecycle_plan() RETURNS Void ->
   RETURN;
 END
-FN ruby_array_concat_Type(left: []Type, right: []Type) RETURNS []Type ->
+FN ruby_array_concat_Type__lifecycle_plan(left: []Type, right: []Type) RETURNS []Type ->
   MUTABLE result: []Type = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

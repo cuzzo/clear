@@ -476,7 +476,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.move_action = lightweightSnapshot__move_action_for_place(snapshot_value, place);
       rtoc_self_view.nodes[place] = node;
     END
-    rubyToClearVoid()
+    rubyToClearVoid__ownership_graph()
     });
     MUTABLE target_count = snapshot_value.edge_count;
     WHILE (rtoc_self_view.edges.length() > target_count) DO
@@ -700,6 +700,6 @@ PUB FN ownershipGraph__new() RETURNS OwnershipGraph@multiowned ->
   ownershipGraph__initialize(&self);
   RETURN self @multiowned;
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__ownership_graph() RETURNS Void ->
   RETURN;
 END

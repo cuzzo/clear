@@ -427,7 +427,7 @@ PRIVATE FN recursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx
     END
     rtoc_indexed_output_19
   }).reverse()[_] OR_ELSE panic("missing hash key"));
-      ruby_array_concat_Emittable(release_stmts, TRY (recursiveSplitter__lock_release_stmts(ctx_id, UNWRAP (lock_indices[i]), CAST((UNWRAP (_[:lock_field_ref])) AS String), CAST((UNWRAP (_[:unlock_method])) AS String))));
+      ruby_array_concat_Emittable__recursive_splitter(release_stmts, TRY (recursiveSplitter__lock_release_stmts(ctx_id, UNWRAP (lock_indices[i]), CAST((UNWRAP (_[:lock_field_ref])) AS String), CAST((UNWRAP (_[:unlock_method])) AS String))));
       };
       builder__fill(&builder, release_idx, release_stmts, SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
       RETURN UNWRAP (cap_indices.first());
@@ -1132,7 +1132,7 @@ FN castTransformValueToHashMapStringTypeMultiowned(value: TransformValue) RETURN
   END
   RETURN {};
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable__recursive_splitter(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

@@ -568,7 +568,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF (st == :moved) THEN
         summary[place] = CleanupDecision{ needs_cleanup: FALSE, has_moved_guard: FALSE };
     END
-    rubyToClearVoid()
+    rubyToClearVoid__control_flow()
     });
     RETURN summary;
 }
@@ -650,14 +650,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name = COPY CAST(node.name AS String);
     &pairs.append(CleanupEntryPair{ place: COPY ownershipDataflow__place_for_binding_node(name, node), name: COPY name, entry: entry });
     &seen.insert(aST__node_identity(entry));
-    rubyToClearVoid()
+    rubyToClearVoid__control_flow()
     });
     frozenCleanupFacts__each_entry(facts, %(place: PlaceId, entry: CleanupEntry) USE(MUTABLE pairs, seen) -> {
     IF seen.contains?(aST__node_identity(entry)) THEN
         RETURN;
     END
     &pairs.append(CleanupEntryPair{ place: COPY place, name: COPY place.path, entry: entry });
-    rubyToClearVoid()
+    rubyToClearVoid__control_flow()
     });
     RETURN pairs;
 }
@@ -673,7 +673,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE name = COPY CAST(node.name() AS String);
     counts[name] = (UNWRAP (counts[name]) + 1);
-    rubyToClearVoid()
+    rubyToClearVoid__control_flow()
     });
     MUTABLE duplicated: [Set]String = Set[];
     FOR rtoc_name IN counts.keys() DO
@@ -967,7 +967,7 @@ PRIVATE FN ownershipDataflow__apply_transfer(self: OwnershipDataflow, block: Bas
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN block.stmts DO
-    TRY (ownershipDataflow__transfer_stmt(rtoc_self_view, castNodeToLocatable(_), state));
+    TRY (ownershipDataflow__transfer_stmt(rtoc_self_view, castNodeToLocatable__control_flow(_), state));
     END
     RETURN COPY state;
 }
@@ -1105,7 +1105,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           ownershipDataflow__mark_moved_mut(rtoc_self_view, state, capture_place);
     END
       END
-      FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode(stmt)))) DO
+      FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode__control_flow(stmt)))) DO
     MUTABLE give_place = ownershipDataflow__resolve_state_place(state, _);
     IF ownershipDataflow__state_entry(rtoc_self_view, state, give_place) THEN
           ownershipDataflow__mark_moved_mut(rtoc_self_view, state, give_place);
@@ -1246,7 +1246,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             &step.consumed.insert(COPY capture_place);
     END
         END
-        FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode(node_value_mutable)))) DO
+        FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode__control_flow(node_value_mutable)))) DO
     MUTABLE give_place = ownershipDataflow__resolve_state_place(step.state, _);
     IF ownershipDataflow__state_entry(rtoc_self_view, step.state, give_place) THEN
             &step.consumed.insert(COPY give_place);
@@ -1273,11 +1273,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, place)) THEN
         RETURN;
     END
-    IF TRY (ownershipDataflow__copy_type?(rtoc_self_view, castLocatableToIdentifier(n))) THEN
+    IF TRY (ownershipDataflow__copy_type?(rtoc_self_view, castLocatableToIdentifier__control_flow(n))) THEN
         RETURN;
     END
     &step.consumed.insert(COPY place);
-    rubyToClearVoid()
+    rubyToClearVoid__control_flow()
     }));
     TRY (ownershipDataflow__collect_share_transfers_in(rtoc_self_view, node, step));
 }
@@ -1325,7 +1325,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF n IS_A ShareNode AS share_node THEN
         TRY (ownershipDataflow__collect_share_transfer(rtoc_self_view, share_node, step));
     END
-    rubyToClearVoid()
+    rubyToClearVoid__control_flow()
     }));
 }
 END
@@ -1369,13 +1369,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           &consumed.append(place);
       END
     END
-    FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode(expr)))) DO
+    FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode__control_flow(expr)))) DO
       MUTABLE place = ownershipDataflow__resolve_state_place(state, _);
       IF state[place] THEN
           &consumed.append(place);
       END
     END
-    rubyToClearVoid()
+    rubyToClearVoid__control_flow()
     }));
     END
     RETURN consumed;
@@ -1473,8 +1473,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN ((KEEP rtoc_self_view.dataflow.cfg).blocks) DO
     MUTABLE state = TRY (ownershipDataflow__replay_state_for_block(rtoc_self_view.dataflow, _));
     FOR _ IN _.stmts DO
-      TRY (useAfterMoveChecker__check_stmt_reads(&rtoc_self_view, castNodeToLocatable(_), state));
-      TRY (ownershipDataflow__replay_transfer_stmt_mut(rtoc_self_view.dataflow, castNodeToLocatable(_), state));
+      TRY (useAfterMoveChecker__check_stmt_reads(&rtoc_self_view, castNodeToLocatable__control_flow(_), state));
+      TRY (ownershipDataflow__replay_transfer_stmt_mut(rtoc_self_view.dataflow, castNodeToLocatable__control_flow(_), state));
     END
     END
     MUTABLE rtoc_owned_return_19: UseAfterMoveChecker@multiowned = rtoc_self_view;
@@ -1506,7 +1506,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF stmt IS_A Assignment AS assignment THEN
       MUTABLE assignment_mutable = COPY assignment;
       IF (assignment_mutable.name IS_A GetField OR assignment_mutable.name IS_A GetIndex) THEN
-        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, castAssignmentNameToOptionalLocatable(assignment_mutable.name), state));
+        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, castAssignmentNameToOptionalLocatable__control_flow(assignment_mutable.name), state));
       END
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, assignment_mutable.value, state));
     ELSE_IF stmt IS_A MoveNode AS move_node THEN
@@ -1520,7 +1520,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, CallNode{ FuncCall: COPY func_call_mutable }, state));
     ELSE_IF (stmt IS_A MethodCall) THEN
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, stmt.object, state));
-      TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, castLocatableToCallNode(stmt), state));
+      TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, castLocatableToCallNode__control_flow(stmt), state));
     ELSE_IF stmt IS_A IfStatement AS if_statement THEN
       MUTABLE if_statement_mutable = COPY if_statement;
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, if_statement_mutable.condition, state));
@@ -1618,7 +1618,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, CallNode{ FuncCall: COPY func_call_mutable }, state));
       ELSE_IF (node_value_mutable IS_A MethodCall) THEN
         TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, node_value_mutable.object, state));
-        TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, castLocatableToCallNode(node_value_mutable), state));
+        TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, castLocatableToCallNode__control_flow(node_value_mutable), state));
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
         MUTABLE get_field_mutable = COPY get_field;
         TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, get_field_mutable.target, state));
@@ -1801,9 +1801,9 @@ PUB FN loopFrameAnalysis__direct_loop_expression_frame_alloc?(body: []Locatable,
           found = TRUE;
         END
     END
-    rubyToClearVoid()
+    rubyToClearVoid__control_flow()
   }));
-  rubyToClearVoid()
+  rubyToClearVoid__control_flow()
   }));
   RETURN found;
 END
@@ -1950,7 +1950,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !(symbolEntry__heap_storage?(sym)) THEN
       found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__control_flow()
   }));
   RETURN found;
 END
@@ -1972,7 +1972,7 @@ PUB FN loopFrameAnalysis__walk_all_nodes(nodes: ?ControlFlowNodeInput, visited: 
       RETURN;
   END
   block(node);
-  rubyToClearVoid()
+  rubyToClearVoid__control_flow()
   });
 END
 PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {String}FunctionDef) RETURNS !Void ->
@@ -1994,7 +1994,7 @@ PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {Str
       ctx.body_allocates_frame
     END;
   (mIRLowering__set_shard_context(dynamic_node, pipelineShardContext__with_frame_allocations(ctx, key_allocates_frame, body_allocates_frame)));
-  rubyToClearVoid()
+  rubyToClearVoid__control_flow()
   });
 END
 PUB FN loopFrameAnalysis__key_allocates_frame?(expr: Locatable, fn_nodes: {String}FunctionDef) RETURNS !Bool ->
@@ -2017,7 +2017,7 @@ PUB FN loopFrameAnalysis__key_allocates_frame?(expr: Locatable, fn_nodes: {Strin
   IF (ti.needs_cleanup?() AND (TRY (type__cleanup_allocator(ti)) == :frame)) THEN
       found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__control_flow()
   });
   RETURN found;
 END
@@ -2322,7 +2322,7 @@ PUB FN borrowChecker__new(fn_node: FunctionDef, schema_lookup: ?FN(String@symbol
   borrowChecker__initialize(&self, fn_node, schema_lookup);
   RETURN self @multiowned;
 END
-FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
+FN castAssignmentNameToOptionalLocatable__control_flow(value: AssignmentName) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -2331,21 +2331,21 @@ FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatab
   END
   panic("Invalid cast to ?Locatable");
 END
-FN castLocatableToBgNode(value: Locatable) RETURNS BgNode ->
+FN castLocatableToBgNode__control_flow(value: Locatable) RETURNS BgNode ->
   PARTIAL MATCH value START
     Locatable.BgStreamBlock AS cast_payload -> RETURN BgNode{ BgStreamBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to BgNode");
   END
   panic("Invalid cast to BgNode");
 END
-FN castLocatableToCallNode(value: Locatable) RETURNS CallNode ->
+FN castLocatableToCallNode__control_flow(value: Locatable) RETURNS CallNode ->
   PARTIAL MATCH value START
     Locatable.FuncCall AS cast_payload -> RETURN CallNode{ FuncCall: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to CallNode");
   END
   panic("Invalid cast to CallNode");
 END
-FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+FN castLocatableToIdentifier__control_flow(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -2488,7 +2488,7 @@ FN castLoopNodeToLocatable(value: LoopNode) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable__control_flow(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2748,7 +2748,7 @@ FN castPlaceToPath(value: Place) RETURNS Path ->
   END
   panic("Invalid cast to Path");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__control_flow() RETURNS Void ->
   RETURN;
 END
 PUB FN ownershipDataflow__schema_lookup_call(self: OwnershipDataflow, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->

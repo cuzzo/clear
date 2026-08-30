@@ -588,8 +588,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE v = TRY (clearParser__parse_expression(&rtoc_view));
     Tuple{COPY k, v}
     }));
-    MUTABLE target: GetField = COPY castLocatableToGetField(lhs);
-    MUTABLE target_ident: Identifier = COPY castLocatableToIdentifier(target.target);
+    MUTABLE target: GetField = COPY castLocatableToGetField__expressions_and_postfix(lhs);
+    MUTABLE target_ident: Identifier = COPY castLocatableToIdentifier__expressions_and_postfix(target.target);
     RETURN UnionVariantLit{ token: COPY tok, union_name: COPY target_ident.name, variant_name: COPY target.field, fields: ruby_pairs_to_hash_String_Locatable(field_pairs), storage: :stack, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
@@ -798,7 +798,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF pipe_rhs IS_A OptionalUnwrap AS optional_unwrap THEN
         MUTABLE unwrap_rhs = optional_unwrap;
         IF unwrap_rhs.target IS_A Identifier THEN
-          MUTABLE target_ident: Identifier = COPY castLocatableToIdentifier(unwrap_rhs.target);
+          MUTABLE target_ident: Identifier = COPY castLocatableToIdentifier__expressions_and_postfix(unwrap_rhs.target);
           normalized_pipe_rhs = Locatable{ Identifier: COPY Identifier{ token: COPY unwrap_rhs.token, name: "${target_ident.name}?", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL } };
         END
       END
@@ -906,7 +906,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN Locatable{ OrElseBreak: COPY OrElseBreak{ token: COPY clearParser__previous(rtoc_self_view), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
     ELSE
       TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "ELSE"));
-      rhs = castLocatableToReturnNode(TRY (clearParser__parse_primary(&rtoc_self_view)));
+      rhs = castLocatableToReturnNode__expressions_and_postfix(TRY (clearParser__parse_primary(&rtoc_self_view)));
       RETURN TRY (clearParser__parse_primary(&rtoc_self_view));
     END
 }
@@ -1538,19 +1538,19 @@ PUB FN castLocatableToClearParserReturnValue(value: Locatable) RETURNS ClearPars
   END
   panic("Invalid cast to ClearParserReturnValue");
 END
-FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+FN castLocatableToGetField__expressions_and_postfix(value: Locatable) RETURNS GetField ->
   IF value IS_A GetField AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to GetField");
 END
-FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+FN castLocatableToIdentifier__expressions_and_postfix(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Identifier");
 END
-FN castLocatableToReturnNode(value: Locatable) RETURNS ReturnNode ->
+FN castLocatableToReturnNode__expressions_and_postfix(value: Locatable) RETURNS ReturnNode ->
   IF value IS_A ReturnNode AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1562,7 +1562,7 @@ FN castLocatableToTupleLit(value: Locatable) RETURNS TupleLit ->
   END
   RETURN panic("Invalid cast to TupleLit");
 END
-PUB FN rubyToClearVoid() RETURNS Void ->
+PUB FN rubyToClearVoid__expressions_and_postfix() RETURNS Void ->
   RETURN;
 END
 FN ruby_pairs_to_hash_Locatable_Locatable(pairs: []Tuple<Locatable, Locatable>) RETURNS {Locatable}Locatable ->

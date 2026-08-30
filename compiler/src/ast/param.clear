@@ -29,7 +29,7 @@ PUB STRUCT Param {
 
 FN param__initialize(MUTABLE self: Param) RETURNS !Void ->
   MUTABLE t: ?TypeTypeInput = TypeTypeInput{ Type: COPY self.type };
-  self.type = TRY (type__new(castTypeTypeInputToTypeConstructionInput((t OR_ELSE type__type_input_symbol_or_any(NIL)))));
+  self.type = TRY (type__new(castTypeTypeInputToTypeConstructionInput__param((t OR_ELSE type__type_input_symbol_or_any(NIL)))));
   MUTABLE contract: ?String@symbol = COPY self.carrier_contract;
   self.carrier_contract = (contract OR_ELSE :polymorphic);
 END
@@ -40,10 +40,10 @@ PUB FN param__type(self: Param) RETURNS Type ->
   RETURN COPY self.type;
 END
 PUB FN param__set_type(MUTABLE self: Param, val: ?TypeTypeInput) RETURNS !Void ->
-  self.type = TRY (type__new(castTypeTypeInputToTypeConstructionInput((val OR_ELSE type__type_input_symbol_or_any(NIL)))));
+  self.type = TRY (type__new(castTypeTypeInputToTypeConstructionInput__param((val OR_ELSE type__type_input_symbol_or_any(NIL)))));
 END
 # End Ruby module AST
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput__param(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,

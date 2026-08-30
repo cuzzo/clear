@@ -529,7 +529,7 @@ PUB FN pipelineMaterializer__new(host: PipelineMaterializerRuntimeHost) RETURNS 
   pipelineMaterializer__initialize(&self, host);
   RETURN self @multiowned;
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable__pipeline_materializer(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END

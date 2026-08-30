@@ -335,7 +335,7 @@ FN typeShape__tense_type_raw(self: TypeShape) RETURNS !?String@symbol ->
   IF kind IS_A StreamTypeExpression THEN
     MUTABLE stream_kind: StreamTypeExpression = UNWRAP (typeExpressionKind__stream(kind));
     MUTABLE dimension_branch_value: ?TypeExpressionDimension = NIL;
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(stream_kind.cardinality, :FINITE) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type(stream_kind.cardinality, :FINITE) THEN
       dimension_branch_value = TypeExpressionDimension{ SymbolValue: :LIST };
     ELSE
       dimension_branch_value = COPY stream_kind.cardinality;
@@ -444,7 +444,7 @@ PUB FN type__from_variant_input(vt: ?SchemasUnionSchemaVariantValue) RETURNS !Ty
     IF vt_value IS_A InlineStructVariant AS inline_struct_variant THEN
       RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
     END
-    RETURN TRY (type__from_input(castSchemasUnionSchemaVariantValueToTypeTypeInput(vt_value)));
+    RETURN TRY (type__from_input(castSchemasUnionSchemaVariantValueToTypeTypeInput__type(vt_value)));
   ELSE
     RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
   END
@@ -873,7 +873,7 @@ PUB FN type__set_of(element_type: TypeTypeInput, capacity: ?Int64 = NIL) RETURNS
   RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TypeExpression{ kind: COPY TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ kind: :set, dimensions: [TypeExpressionDimension{ SymbolValue: :SET }], item: COPY item_expression, allocation_hint: COPY capacity } }, capabilities: COPY typeCapabilities__new(NIL, FALSE, NIL, NIL, NIL, :set) } }));
 END
 PUB FN type__error_union_of(payload_type: TypeTypeInput) RETURNS !Type ->
-  MUTABLE payload = TRY (type__new(castTypeTypeInputToTypeConstructionInput(payload_type)));
+  MUTABLE payload = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type(payload_type)));
   IF type__error_union?(payload) THEN
     RETURN payload;
   END
@@ -883,7 +883,7 @@ PUB FN type__error_union_of(payload_type: TypeTypeInput) RETURNS !Type ->
   RETURN t;
 END
 PUB FN type__optional_of(wrapped_type: TypeTypeInput) RETURNS !Type EFFECTS REENTRANT ->
-  MUTABLE wrapped = TRY (type__new(castTypeTypeInputToTypeConstructionInput(wrapped_type)));
+  MUTABLE wrapped = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type(wrapped_type)));
   IF type__optional?(wrapped) THEN
     RETURN wrapped;
   END
@@ -894,7 +894,7 @@ PUB FN type__optional_of(wrapped_type: TypeTypeInput) RETURNS !Type EFFECTS REEN
   RETURN t;
 END
 PUB FN type__tense_of(value_type: TypeTypeInput) RETURNS !Type ->
-  MUTABLE value = TRY (type__new(castTypeTypeInputToTypeConstructionInput(value_type)));
+  MUTABLE value = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type(value_type)));
   MUTABLE inner_expr = COPY value.shape.expression;
   MUTABLE t = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: inner_expr } }) }));
   TRY (type__merge_capabilities_from_mut(&t, value, TRUE, TRUE));
@@ -2121,7 +2121,7 @@ PUB FN type__rank(self: Type) RETURNS !Int64 ->
   RETURN (TRY (type__rank_dimensions(self))).length();
 END
 PUB FN type__dynamic_rank?(self: Type) RETURNS !Bool ->
-  RETURN (type__rank?(self) AND ((TRY (type__rank_dimensions(self))) |> ANY ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(_, :LIST)));
+  RETURN (type__rank?(self) AND ((TRY (type__rank_dimensions(self))) |> ANY ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type(_, :LIST)));
 END
 PUB FN type__fixed_rank?(self: Type) RETURNS !Bool ->
   RETURN (type__rank?(self) AND !(TRY (type__dynamic_rank?(self))));
@@ -2832,7 +2832,7 @@ PUB FN type__tense_type(self: Type) RETURNS !Type ->
   IF kind IS_A StreamTypeExpression THEN
     MUTABLE stream_kind: StreamTypeExpression = UNWRAP (typeExpressionKind__stream(kind));
     MUTABLE dimension_branch_value: ?TypeExpressionDimension = NIL;
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(stream_kind.cardinality, :FINITE) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type(stream_kind.cardinality, :FINITE) THEN
       dimension_branch_value = TypeExpressionDimension{ SymbolValue: :LIST };
     ELSE
       dimension_branch_value = COPY stream_kind.cardinality;
@@ -2893,7 +2893,7 @@ END
 PUB FN type__dynamic_stream?(self: Type) RETURNS !Bool ->
   MUTABLE kind = COPY self.shape.expression.kind;
   IF kind IS_A StreamTypeExpression THEN
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol((UNWRAP (typeExpressionKind__stream(kind))).cardinality, :FINITE) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type((UNWRAP (typeExpressionKind__stream(kind))).cardinality, :FINITE) THEN
       RETURN TRUE;
     END
   END
@@ -2969,7 +2969,7 @@ PUB FN type__split_open_stream?(self: Type) RETURNS !Bool ->
     RETURN TRUE;
   END
   MUTABLE kind = COPY self.shape.expression.kind;
-  RETURN (kind IS_A StreamTypeExpression AND ruby_union_scalar_equal_TypeExpressionDimension_String_symbol((UNWRAP (typeExpressionKind__stream(kind))).cardinality, :FINITE));
+  RETURN (kind IS_A StreamTypeExpression AND ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type((UNWRAP (typeExpressionKind__stream(kind))).cardinality, :FINITE));
 END
 PUB FN type__bounded_stream?(self: Type) RETURNS !Bool ->
   MUTABLE kind = COPY self.shape.expression.kind;
@@ -3008,7 +3008,7 @@ END
 PUB FN type__inf_stream?(self: Type) RETURNS !Bool ->
   MUTABLE kind = COPY self.shape.expression.kind;
   IF kind IS_A StreamTypeExpression THEN
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol((UNWRAP (typeExpressionKind__stream(kind))).cardinality, :INF) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type((UNWRAP (typeExpressionKind__stream(kind))).cardinality, :INF) THEN
       RETURN TRUE;
     END
   END
@@ -4274,14 +4274,14 @@ PRIVATE FN type__tense_zig_type(self: Type, is_param: Bool, is_field: Bool) RETU
   IF type__canonical_stream?(self) THEN
     MUTABLE expression: StreamTypeExpression = COPY UNWRAP (typeExpressionKind__stream(self.shape.expression.kind));
     elem_zig = TRY (type__nested_zig_type((TRY (type__from_child_expression(expression.item))), is_param, is_field));
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(expression.cardinality, :FINITE) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type(expression.cardinality, :FINITE) THEN
       IF TRY (type__split_open_stream?(self)) THEN
         RETURN "CheatLib.SplitStream(${elem_zig})";
       ELSE
         RETURN "CheatLib.Stream(${elem_zig})";
       END
     END
-    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(expression.cardinality, :INF) THEN
+    IF ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type(expression.cardinality, :INF) THEN
       RETURN "CheatLib.InfStream(${elem_zig})";
     END
     RETURN "CheatLib.BoundedStream(${elem_zig}, ${typeExpressionPrinter__dimension_text(expression.cardinality)})";
@@ -4742,7 +4742,7 @@ PUB FN schemas__field_bearing?(s: ?SchemaValue) RETURNS Bool ->
   RETURN (((s != NIL) AND (s IS_A StructSchema)) OR ((s != NIL) AND (s IS_A ResourceSchema)));
 END
 # End Ruby module Schemas
-FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+FN castLocatableToLocatable__type(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
@@ -4943,7 +4943,7 @@ FN castOptionalTypePlacementMaybeSymbolToOptionalStringSymbol(value: ?TypePlacem
   END
   RETURN NIL;
 END
-FN castSchemasUnionSchemaVariantValueToTypeTypeInput(value: SchemasUnionSchemaVariantValue) RETURNS TypeTypeInput ->
+FN castSchemasUnionSchemaVariantValueToTypeTypeInput__type(value: SchemasUnionSchemaVariantValue) RETURNS TypeTypeInput ->
   PARTIAL MATCH value START
     SchemasUnionSchemaVariantValue.FunctionType AS cast_payload -> RETURN TypeTypeInput{ FunctionType: COPY cast_payload };,
     SchemasUnionSchemaVariantValue.Type AS cast_payload -> RETURN TypeTypeInput{ Type: COPY cast_payload };,
@@ -4973,7 +4973,7 @@ FN castTypeShapeRawToString(value: TypeShapeRaw) RETURNS String ->
   END
   RETURN "";
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput__type(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
@@ -4983,7 +4983,7 @@ FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeCo
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
+FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol__type(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END

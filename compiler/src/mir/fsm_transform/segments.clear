@@ -264,9 +264,9 @@ PRIVATE FN segments__loop_body_for(node: Locatable) RETURNS !?[]Locatable ->
 END
 PRIVATE FN segments__loop_condition_for(node: Locatable) RETURNS ?Locatable ->
   IF node IS_A WhileLoop AS while_loop THEN
-    RETURN COPY castLocatableToLocatable(while_loop.condition);
+    RETURN COPY castLocatableToLocatable__segments(while_loop.condition);
   ELSE_IF node IS_A WhileBindLoop AS while_bind_loop THEN
-    RETURN COPY castLocatableToLocatable(while_bind_loop.condition);
+    RETURN COPY castLocatableToLocatable__segments(while_bind_loop.condition);
   ELSE
     RETURN NIL;
   END
@@ -371,7 +371,7 @@ PRIVATE FN segments__suspend_for(v: ?Locatable, name: ?String) RETURNS !?Segment
   IF v EXISTS AS v_value THEN
     MUTABLE value = COPY v_value;
     IF (value IS_A FuncCall) OR (value IS_A MethodCall) THEN
-      IF TRY (segments__io_suspending_call?(castLocatableToCallNode(value))) THEN
+      IF TRY (segments__io_suspending_call?(castLocatableToCallNode__segments(value))) THEN
         RETURN SegmentTail{ IoSuspend: COPY IoSuspend{ call_node: COPY value, stdlib_def: aST__node__matched_signature(value), result_var: COPY name, next_index: NIL } };
       END
     ELSE_IF value IS_A NextExpr AS next_expr THEN
@@ -400,7 +400,7 @@ PRIVATE FN segments__io_suspending_call?(call_node: SegmentsCallNode) RETURNS !B
   RETURN FALSE;
 END
 PUB FN segments__suspending_call?(expr: Locatable) RETURNS !Bool ->
-  RETURN ((aST__call?(expr)) AND TRY (segments__io_suspending_call?(castLocatableToCallNode(expr))));
+  RETURN ((aST__call?(expr)) AND TRY (segments__io_suspending_call?(castLocatableToCallNode__segments(expr))));
 END
 PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable ->
   MUTABLE out = List[];
@@ -419,7 +419,7 @@ PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable
   END
   MUTABLE pipe_lhs_suspends: Bool = FALSE;
   IF pipe_lhs EXISTS AS lhs_probe THEN
-    pipe_lhs_suspends = TRY (segments__io_suspending_call?(castLocatableToCallNode(lhs_probe)));
+    pipe_lhs_suspends = TRY (segments__io_suspending_call?(castLocatableToCallNode__segments(lhs_probe)));
   END
   IF pipe_lhs_suspends THEN
     MUTABLE pipe_lhs_value: Locatable = COPY UNWRAP (pipe_lhs);
@@ -444,14 +444,14 @@ PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable
 END
 # End Ruby module FsmTransform::Segments
 # End Ruby module FsmTransform
-FN castLocatableToCallNode(value: Locatable) RETURNS SegmentsCallNode ->
+FN castLocatableToCallNode__segments(value: Locatable) RETURNS SegmentsCallNode ->
   PARTIAL MATCH value START
     Locatable.FuncCall AS cast_payload -> RETURN SegmentsCallNode{ FuncCall: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to SegmentsCallNode");
   END
   panic("Invalid cast to SegmentsCallNode");
 END
-FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+FN castLocatableToLocatable__segments(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

@@ -141,7 +141,7 @@ PRIVATE FN pipelineSetIndexLowerer__distinct_insert_body(self: PipelineSetIndexL
       &stmts.append(Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY temp_name, cleanup_entry: cleanupEntry__with_moved_guard(entry_value), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
     &stmts.append(Emittable{ ExprStmt: COPY TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, Emittable{ Ident: COPY Ident{ name: COPY temp_name, lowered_node_id: NIL, ownership_consumption: NIL } }, uses_allocator, ownershipOperandFact__owned_binding(temp_name, elem_type, "DISTINCT insert transfers the key to the set", alloc))) });
-    ruby_array_concat_Emittable(stmts, CAST(TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY temp_name, target: :owned_sink, target_alloc: COPY alloc, move_guarded: !((entry == NIL)) }))) AS []Emittable));
+    ruby_array_concat_Emittable__pipeline_set_index_lowerer(stmts, CAST(TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY temp_name, target: :owned_sink, target_alloc: COPY alloc, move_guarded: !((entry == NIL)) }))) AS []Emittable));
     RETURN stmts;
   ELSE
     RETURN CAST([Emittable{ Let: COPY key_let }, Emittable{ ExprStmt: COPY TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, owned_value, uses_allocator)) }] AS []Emittable);
@@ -265,13 +265,13 @@ PRIVATE FN pipelineSetIndexLowerer__index_item_value(self: PipelineSetIndexLower
     RETURN Emittable{ Ident: COPY Ident{ name: COPY item_var, lowered_node_id: NIL, ownership_consumption: NIL } };
   END
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable__pipeline_set_index_lowerer(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable__pipeline_set_index_lowerer(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

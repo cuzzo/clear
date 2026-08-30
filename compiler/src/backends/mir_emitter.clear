@@ -726,7 +726,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
     END
     IF node.suppress_try THEN
-      RETURN rtoc_delete_prefix(pattern, "try ");
+      RETURN rtoc_delete_prefix__mir_emitter(pattern, "try ");
     ELSE
       RETURN pattern;
     END
@@ -894,7 +894,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_local_receiver_7 = mIREmitter__sharded_map_resolved_allocs(node);
     inlineAllocMetadata__each(rtoc_local_receiver_7, %(alloc_key: String@symbol, sym: String@symbol) USE(MUTABLE pattern, rtoc_self_view) -> {
     pattern = pattern.replace("{${alloc_key}}", TRY (mIREmitter__alloc_zig(rtoc_self_view, sym)));
-    rubyToClearVoid()
+    rubyToClearVoid__mir_emitter()
     });
     RETURN COPY pattern;
 }
@@ -954,7 +954,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF allocs != NIL THEN
         inlineAllocMetadata__each(allocs, %(key: String@symbol, sym: String@symbol) USE(MUTABLE out, rtoc_self_view) -> {
         out = out.replace("{${key}}", TRY (mIREmitter__alloc_zig(rtoc_self_view, sym)));
-        rubyToClearVoid()
+        rubyToClearVoid__mir_emitter()
         });
     END
     RETURN out;
@@ -1629,7 +1629,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           &used.append(name);
         END
     END
-    rubyToClearVoid()
+    rubyToClearVoid__mir_emitter()
     }));
     RETURN used |> WHERE !(declared.contains?(_));
 }
@@ -1668,7 +1668,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           &moved.append(name);
       END
     END
-    rubyToClearVoid()
+    rubyToClearVoid__mir_emitter()
     }));
     RETURN moved;
 }
@@ -4246,7 +4246,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE name = "__discard_${rtoc_self_view.discard_counter.toString()}";
     MUTABLE discard_expr = COPY node.expr;
     IF mIREmitter__discard_success_only?(rtoc_self_view, discard_expr) THEN
-      MUTABLE success_expr: TryCatch = castEmittableToTryCatch(discard_expr);
+      MUTABLE success_expr: TryCatch = castEmittableToTryCatch__mir_emitter(discard_expr);
       MUTABLE opt = "${name}_opt";
       MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, success_expr.expr));
       MUTABLE body = (["{", "const ${opt}: ?${node.zig_type} = (${expr} catch null);", "if (${opt}) |${name}_val| {", "var ${name} = ${name}_val;", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, name, node.cleanup_entry, FALSE)), 4), "}", "}"]).join("\n");
@@ -4625,13 +4625,13 @@ FN castEmittableToOptionalFailureAction(value: Emittable) RETURNS ?FailureAction
   END
   RETURN NIL;
 END
-FN castEmittableToTryCatch(value: Emittable) RETURNS TryCatch ->
+FN castEmittableToTryCatch__mir_emitter(value: Emittable) RETURNS TryCatch ->
   IF value IS_A TryCatch AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to TryCatch");
 END
-FN castNameToString(value: Name) RETURNS String ->
+FN castNameToString__mir_emitter(value: Name) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -4657,12 +4657,12 @@ FN castPlanToFsmBody(value: MIREmitterPlan) RETURNS FsmBody ->
   END
   panic("Invalid cast to FsmBody");
 END
-FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
+FN rtoc_delete_prefix__mir_emitter(s: String, affix: String) RETURNS String ->
   IF s.startsWith?(affix) THEN
     RETURN s.substr(affix.length(), (s.length() - affix.length()));
   END
   RETURN COPY s;
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__mir_emitter() RETURNS Void ->
   RETURN;
 END

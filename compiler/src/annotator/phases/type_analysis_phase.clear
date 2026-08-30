@@ -66,7 +66,7 @@ PUB FN annotationTypeInventory__scan(program: Program) RETURNS !AnnotationTypeIn
   ELSE
       typed_node_count = (typed_node_count + 1);
   END
-  rubyToClearVoid()
+  rubyToClearVoid__type_analysis_phase()
   });
   RETURN annotationTypeInventory__new(typed_node_count, violations);
 END
@@ -87,7 +87,7 @@ PRIVATE FN annotationTypeInventory__add_lifetime_metadata_node_ids_mut(MUTABLE i
   IF (value IS_A Locatable) THEN
     aST__each_locatable(value, TRUE, %(node: Locatable) USE(MUTABLE ignored) -> {
   &ignored.insert(aST__node_identity(node));
-  rubyToClearVoid()
+  rubyToClearVoid__type_analysis_phase()
     });
   ELSE_IF value IS_A []AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem AS array THEN
     MUTABLE array_mutable = COPY array;
@@ -281,6 +281,6 @@ FN castAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItemToOptional
   END
   panic("Invalid cast to ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__type_analysis_phase() RETURNS Void ->
   RETURN;
 END

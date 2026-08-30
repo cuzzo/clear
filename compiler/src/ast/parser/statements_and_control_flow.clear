@@ -331,7 +331,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         bind.compound_op = op_sym;
         RETURN ParsedVarForm{ node: Locatable{ BindExpr: COPY bind }, assignment: TRUE };
       ELSE
-        MUTABLE compound_name = castLocatableToAssignmentName(COPY target);
+        MUTABLE compound_name = castLocatableToAssignmentName__statements_and_control_flow(COPY target);
         MUTABLE asgn = Assignment{ token: COPY target_token, name: compound_name, value: COPY desugared_value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         asgn.compound_op = op_sym;
         RETURN ParsedVarForm{ node: Locatable{ Assignment: COPY asgn }, assignment: TRUE };
@@ -352,7 +352,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF target IS_A Identifier AS identifier THEN
       node = Locatable{ BindExpr: BindExpr{ token: COPY target_token, name: COPY identifier.name, type: COPY opt_type, value: value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL } };
     ELSE
-      MUTABLE assign_name = castLocatableToAssignmentName(COPY target);
+      MUTABLE assign_name = castLocatableToAssignmentName__statements_and_control_flow(COPY target);
       node = Locatable{ Assignment: Assignment{ token: COPY target_token, name: assign_name, value: COPY value, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL } };
     END
     RETURN ParsedVarForm{ node: COPY UNWRAP (node), assignment: TRUE };
@@ -1041,7 +1041,7 @@ PUB FN castClearParserReturnValueToLocatable(value: ClearParserReturnValue) RETU
   END
   panic("Invalid cast to Locatable");
 END
-FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
+FN castLocatableToAssignmentName__statements_and_control_flow(value: Locatable) RETURNS AssignmentName ->
   PARTIAL MATCH value START
     Locatable.Identifier AS cast_payload -> RETURN AssignmentName{ Identifier: COPY cast_payload };,
     Locatable.GetField AS cast_payload -> RETURN AssignmentName{ GetField: COPY cast_payload };,
@@ -1050,7 +1050,7 @@ FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
   END
   panic("Invalid cast to AssignmentName");
 END
-PUB FN castLocatableToNode(value: Locatable) RETURNS Node ->
+PUB FN castLocatableToNode__statements_and_control_flow(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN Node{ Program: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,

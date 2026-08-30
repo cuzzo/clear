@@ -128,20 +128,20 @@ PRIVATE FN pipelineScalarLowerer__with_iteration_rewind(self: PipelineScalarLowe
   IF (IF node IS_A AllocMark AS alloc_mark THEN placement__frame?(alloc_mark.alloc) ELSE FALSE END) THEN
       found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__pipeline_scalar_lowerer()
   }));
   IF !(found) THEN
     RETURN COPY body;
   END
   RETURN (COPY (TRY (pipelineScalarLowerer__loop_mark_stmts_call(self))) + body);
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable__pipeline_scalar_lowerer(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__pipeline_scalar_lowerer() RETURNS Void ->
   RETURN;
 END
 PUB FN pipelineScalarLowerer__visit_expr_call(self: PipelineScalarLowerer, arg0: Locatable, arg1: Locatable, arg2: String) RETURNS Emittable ->

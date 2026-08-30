@@ -103,7 +103,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY node;
     END
     IF pipelinePlaceholderRewriter__soa_each_field?(rtoc_self_view, node) THEN
-      RETURN Locatable{ Identifier: COPY pipelinePlaceholderRewriter__soa_each_field(&rtoc_self_view, castLocatableToGetField(node)) };
+      RETURN Locatable{ Identifier: COPY pipelinePlaceholderRewriter__soa_each_field(&rtoc_self_view, castLocatableToGetField__pipeline_context(node)) };
     END
     IF node IS_A Identifier AS identifier THEN
       RETURN pipelinePlaceholderRewriter__substitute_identifier(rtoc_self_view, identifier);
@@ -415,12 +415,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A GetField AS get_field THEN
       MUTABLE get_field_mutable = COPY get_field;
       MUTABLE rewritten = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, Locatable{ GetField: COPY get_field_mutable }));
-      RETURN castLocatableToAssignmentName(rewritten);
+      RETURN castLocatableToAssignmentName__pipeline_context(rewritten);
     END
     IF node IS_A GetIndex AS get_index THEN
       MUTABLE get_index_mutable = COPY get_index;
       MUTABLE rewritten = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, Locatable{ GetIndex: COPY get_index_mutable }));
-      RETURN castLocatableToAssignmentName(rewritten);
+      RETURN castLocatableToAssignmentName__pipeline_context(rewritten);
     END
     RETURN COPY node;
 }
@@ -443,7 +443,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE value_value: Locatable = value?;
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY value_value));
     IF FALSE THEN
-      RETURN COPY castNodeToLocatable(node);
+      RETURN COPY castNodeToLocatable__pipeline_context(node);
     END
     MUTABLE new_node: ?PipelineRewriteNode = NIL;
     IF node IS_A CopyNode AS copy_node THEN
@@ -731,7 +731,7 @@ FN castFieldToPipelineSoaFieldSetItem(value: Field) RETURNS PipelineSoaFieldSetI
   END
   panic("Invalid cast to PipelineSoaFieldSetItem");
 END
-FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
+FN castLocatableToAssignmentName__pipeline_context(value: Locatable) RETURNS AssignmentName ->
   PARTIAL MATCH value START
     Locatable.Identifier AS cast_payload -> RETURN AssignmentName{ Identifier: COPY cast_payload };,
     Locatable.GetField AS cast_payload -> RETURN AssignmentName{ GetField: COPY cast_payload };,
@@ -740,13 +740,13 @@ FN castLocatableToAssignmentName(value: Locatable) RETURNS AssignmentName ->
   END
   panic("Invalid cast to AssignmentName");
 END
-FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+FN castLocatableToGetField__pipeline_context(value: Locatable) RETURNS GetField ->
   IF value IS_A GetField AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to GetField");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable__pipeline_context(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

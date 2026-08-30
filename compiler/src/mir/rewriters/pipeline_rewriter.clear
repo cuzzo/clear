@@ -36,7 +36,7 @@ PUB FN pipelineRewriter__rewrite_mut(MUTABLE self: PipelineRewriter, MUTABLE nod
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF node IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) THEN
-      RETURN TRY (pipelineRewriter__rewrite_pipeline(&rtoc_self_view, castLocatableToBinaryOp(node)));
+      RETURN TRY (pipelineRewriter__rewrite_pipeline(&rtoc_self_view, castLocatableToBinaryOp__pipeline_rewriter(node)));
     END
     RETURN TRY (pipelineRewriter__rewrite_children_mut(&rtoc_self_view, &node));
 }
@@ -322,12 +322,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF config? IS_A []FunctionSignature@multiowned AS array THEN
         sig0_branch_value = COPY array.first();
       ELSE
-        sig0_branch_value = functionSignature__unwrap(castOptionalLookupResultToOptionalX(config));
+        sig0_branch_value = functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(config));
       END
       MUTABLE sig0: ?FunctionSignature@multiowned = sig0_branch_value;
       IF sig0 EXISTS AS sig0_value THEN
         MUTABLE sig0_value_mutable = COPY sig0_value;
-        call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol(TRY (functionSignature__intrinsic_pattern(&sig0_value_mutable)));
+        call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(&sig0_value_mutable)));
       END
       RETURN Locatable{ FuncCall: COPY call };
     END
@@ -383,13 +383,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       cursor = COPY node;
     ELSE
       terminal = right;
-      cursor = castLocatableToBinaryOp(COPY node.left);
+      cursor = castLocatableToBinaryOp__pipeline_rewriter(COPY node.left);
     END
     WHILE (TRUE AND binaryOp__smooth?(cursor)) DO
       MUTABLE r = COPY cursor.right;
       IF pipelineRewriter__is_fusible?(rtoc_self_view, r) THEN
         stages = ([r] + stages);
-        cursor = castLocatableToBinaryOp(COPY cursor.left);
+        cursor = castLocatableToBinaryOp__pipeline_rewriter(COPY cursor.left);
       ELSE
         BREAK;
       END
@@ -407,7 +407,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token = COPY smooth_node.token;
     MUTABLE body = List[];
     MUTABLE init_nodes = TRY (pipelineRewriter__build_init(&rtoc_self_view, &terminal, res_var, token, &smooth_node));
-    body = ruby_array_concat_Any(body, CAST(init_nodes AS []Any));
+    body = ruby_array_concat_Any__pipeline_rewriter(body, CAST(init_nodes AS []Any));
     MUTABLE current_it = Identifier{ token: COPY token, name: COPY it_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
     MUTABLE src_t = TRY (type__new(&source.full_type_mut("fused pipeline source")));
     MUTABLE elem_t_branch_value: ?Type = NIL;
@@ -430,7 +430,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE stage_inits = List[];
     MUTABLE res_type = &smooth_node.full_type_mut();
     MUTABLE loop_body = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, stages, terminal, current_it, res_var, token, &stage_inits, CAST(res_type AS ?Type)));
-    body = ruby_array_concat_Any(body, stage_inits);
+    body = ruby_array_concat_Any__pipeline_rewriter(body, stage_inits);
     MUTABLE is_each = ((terminal != NIL) AND (terminal IS_A EachOp));
     MUTABLE foreach = ForEach{ token: COPY token, var_name: it_var, collection: COPY source, body: loop_body, deferred_drops: NIL, is_mutable: is_each, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE };
     MUTABLE rtoc_union_writeback_7: Locatable = Locatable{ ForEach: COPY foreach };
@@ -813,7 +813,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE expr = pipelineRewriter__replace_placeholder(rtoc_self_view, selectOp__expression(select_op_mutable), current_val);
       MUTABLE selected_type = TRY (pipelineRewriter__select_stage_value_type(rtoc_self_view, select_op_mutable));
       MUTABLE sel_var = pipelineRewriter__next_var(&rtoc_self_view, "__sel");
-      MUTABLE sel_decl = VarDecl{ token: COPY select_op_mutable.token, name: COPY sel_var, type: NIL, value: castLocatableToLiteral(COPY expr), mutable: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
+      MUTABLE sel_decl = VarDecl{ token: COPY select_op_mutable.token, name: COPY sel_var, type: NIL, value: castLocatableToLiteral__pipeline_rewriter(COPY expr), mutable: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_44: Locatable = Locatable{ VarDecl: COPY sel_decl };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_44, SyntheticTypeInput{ Type: COPY selected_type }, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_44 START Locatable.VarDecl AS rtoc_union_writeback_44_item -> sel_decl = COPY rtoc_union_writeback_44_item;, END
@@ -1204,10 +1204,10 @@ PRIVATE FN pipelineRewriter__synthetic_append_call(self: PipelineRewriter, token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX(TRY (intrinsicRegistry__lookup(std_lib, RegistryKey{ StringValue: COPY "append" })))));
+    MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(std_lib, RegistryKey{ StringValue: COPY "append" })))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "append", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
     TRY (aST__stamp_synthetic_type_mut(&call, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
-    call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol(TRY (functionSignature__intrinsic_pattern(&defn)));
+    call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(&defn)));
     call.matched_stdlib_def = defn;
     RETURN call;
 }
@@ -1216,7 +1216,7 @@ PRIVATE FN pipelineRewriter__synthetic_set_insert_call(self: PipelineRewriter, t
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX(TRY (intrinsicRegistry__lookup(CAST({"insert": {:arity: 1, :tag: :set_method, :allocates: TRUE, :zig: "try {0}.insert({alloc}, {1})", :bc: TRUE, :alloc: :receiver_storage, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :takes_args: [0], :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
+    MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(CAST({"insert": {:arity: 1, :tag: :set_method, :allocates: TRUE, :zig: "try {0}.insert({alloc}, {1})", :bc: TRUE, :alloc: :receiver_storage, :mutates_receiver: TRUE, :narrows_receiver_collection: TRUE, :takes_args: [0], :args: CAST(Tuple{symbol("Any[]"), {:type: :Any, :takes: TRUE}} AS Tuple<String@symbol, {Any}Any>), :validate: %(node, args: []Any, obj_type, error_fn) -> {
     MUTABLE elem = TRY (type__element_type(obj_type));
     MUTABLE arg_type = args[0].resolved_type();
     IF !((((arg_type == :Any) OR (arg_type == elem.resolved())) OR TRY (type__accepts?((TRY (type__new(elem.resolved()))), TRY (type__new(arg_type)))))) THEN
@@ -1226,7 +1226,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     }, :return_type: :Void, :is_method: TRUE}, "contains?": {:arity: 1, :tag: :set_method, :zig: "{0}.contains({1})", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "remove": {:arity: 1, :tag: :set_method, :zig: "{0}.remove({alloc}, {1})", :bc: TRUE, :alloc: :heap, :mutates_receiver: TRUE, :return_type: :Void, :borrows: :all, :is_method: TRUE}, "length": {:arity: 0, :tag: :set_method, :zig: "CheatLib.len({0})", :bc: TRUE, :return_type: :Int64, :borrows: :all, :is_method: TRUE}, "empty?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() == 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}, "any?": {:arity: 0, :tag: :set_method, :zig: "({0}.length() > 0)", :bc: TRUE, :return_type: :Bool, :borrows: :all, :is_method: TRUE}} AS {String}Any@multiowned), RegistryKey{ StringValue: COPY "insert" })))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "insert", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
     TRY (aST__stamp_synthetic_type_mut(&call, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
-    call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol(TRY (functionSignature__intrinsic_pattern(&defn)));
+    call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(&defn)));
     call.matched_stdlib_def = defn;
     RETURN call;
 }
@@ -1301,7 +1301,7 @@ PRIVATE FN pipelineRewriter__patch_chain_source_mut(self: PipelineRewriter, node
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE cursor: BinaryOp = COPY node;
     WHILE (cursor.left IS_A BinaryOp AND cursor.left.smooth?()) DO
-      cursor = COPY castLocatableToBinaryOp(cursor.left);
+      cursor = COPY castLocatableToBinaryOp__pipeline_rewriter(cursor.left);
     END
     cursor.left = COPY new_source;
     RETURN new_source;
@@ -1360,19 +1360,19 @@ PUB FN pipelineRewriter__new(annotator: ?SemanticAnnotator = NIL) RETURNS Pipeli
   pipelineRewriter__initialize(&self, annotator);
   RETURN self @multiowned;
 END
-FN castLocatableToBinaryOp(value: Locatable) RETURNS BinaryOp ->
+FN castLocatableToBinaryOp__pipeline_rewriter(value: Locatable) RETURNS BinaryOp ->
   IF value IS_A BinaryOp AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to BinaryOp");
 END
-FN castLocatableToLiteral(value: Locatable) RETURNS Literal ->
+FN castLocatableToLiteral__pipeline_rewriter(value: Locatable) RETURNS Literal ->
   IF value IS_A Literal AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Literal");
 END
-FN castOptionalFunctionSignatureReturnValueToOptionalStringSymbol(value: ?FunctionSignatureReturnValue) RETURNS ?String@symbol ->
+FN castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(value: ?FunctionSignatureReturnValue) RETURNS ?String@symbol ->
   IF value != NIL THEN
     IF value IS_A String@symbol AS cast_payload THEN
       RETURN cast_payload;
@@ -1388,7 +1388,7 @@ FN castOptionalLocatableToLiteral(value: ?Locatable) RETURNS Literal ->
   END
   RETURN panic("Invalid cast to Literal");
 END
-FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
+FN castOptionalLookupResultToOptionalX__pipeline_rewriter(value: ?LookupResult) RETURNS ?X ->
   IF value == NIL THEN
     panic("Invalid cast to ?X");
   END
@@ -1399,7 +1399,7 @@ FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
   END
   panic("Invalid cast to ?X");
 END
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+FN ruby_array_concat_Any__pipeline_rewriter(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };

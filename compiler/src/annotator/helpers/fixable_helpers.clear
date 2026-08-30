@@ -20,7 +20,7 @@ EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replace
 EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexFirstMatch(subject: String, regex: CompilerRegex) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
+FN regexFirstMatch__fixable_helpers(subject: String, pattern: String) RETURNS ?String ->
   RETURN COPY compilerRegexFirstMatch(subject, compilerRegexCompile(pattern));
 END
 FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
@@ -29,7 +29,7 @@ END
 FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END
-FN escapeRegex(value: String) RETURNS String ->
+FN escapeRegex__fixable_helpers(value: String) RETURNS String ->
   RETURN compilerRegexEscape(value);
 END
 
@@ -46,7 +46,7 @@ END
 FN emit_optional_field_safe_nav_finding_mut(node: GetField, target_type: Type) RETURNS !Void ->
   MUTABLE token = COPY node.token;
   MUTABLE fix = TRY (fix__new(TRY (fix_description(:INSERT_SAFE_NAVIGATION)), [edit__new(span__new(NIL, token.line, (token.column - 1), 0), "?")], :auto));
-  fixable_mut(node, {:code: :OPTIONAL_FIELD_REQUIRES_SAFE_NAV, :field: node.field, :type: TRY (type__surface_name(castTypeToTypeTypeInput(target_type))), :target: node.target.name(), :category: :type, :level: :error, :fixes: [fix]});
+  fixable_mut(node, {:code: :OPTIONAL_FIELD_REQUIRES_SAFE_NAV, :field: node.field, :type: TRY (type__surface_name(castTypeToTypeTypeInput__fixable_helpers(target_type))), :target: node.target.name(), :category: :type, :level: :error, :fixes: [fix]});
 END
 STRUCT CapabilityFixCandidate {
   sigil: String,
@@ -232,7 +232,7 @@ FN emit_use_of_moved_error_mut(use_node: Identifier, og_node: OwnershipNode) RET
       IF (TRUE AND consumed_by_call) THEN
         MUTABLE pt: ?TypeTypeInput = COPY og_node.move_consumer_param_type;
         IF ((pt != NIL) AND !(pt IS_A Type)) THEN
-          pt = castTypeToTypeTypeInput(TRY (type__new(castTypeTypeInputToTypeConstructionInput(pt))));
+          pt = castTypeToTypeTypeInput__fixable_helpers(TRY (type__new(castTypeTypeInputToTypeConstructionInput__fixable_helpers(pt))));
         END
         MUTABLE param_admits_shared = ((pt != NIL) AND (IF (typeTypeInput__shared?(pt) != NIL) THEN
           type__shared?(pt)
@@ -507,7 +507,7 @@ FN emit_missing_mutable_marker_error_mut(facts: CallArgumentFacts, scope: Scope)
     MUTABLE edits: []Edit = [edit__new(span__new(NIL, root_value.token.line, root_value.token.column, 0), "&")];
     MUTABLE mutable_fix = TRY (build_declare_mutable_fix(root_value.name, scope));
     IF (scope__is_immutable?(scope, root_value.name) AND mutable_fix) THEN
-      edits = ruby_array_concat_Edit(edits, CAST(mutable_fix.edits AS []Edit));
+      edits = ruby_array_concat_Edit__fixable_helpers(edits, CAST(mutable_fix.edits AS []Edit));
     END
     MUTABLE fix = TRY (fix__new(TRY (fix_description(:INSERT_MUTABLE_ARGUMENT_MARKER, {:name: root_value.name, :param: facts.param.name})), edits, :auto));
     fixable_mut(root_value, {:code: :MUTABLE_ARGUMENT_REQUIRES_MARKER, :index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name, :category: :mutability, :level: :error, :fixes: [fix]});
@@ -606,12 +606,12 @@ FN emit_cap_field_needs_with_mut(node: GetField, code: String@symbol, name: Name
     MUTABLE line_num = node.token.line;
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
     MUTABLE body = line_text.trim();
-    MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
+    MUTABLE indent = (regexFirstMatch__fixable_helpers(body, "\\A\\s*") OR_ELSE "");
     MUTABLE inner = body.trimStart();
     IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
-      MUTABLE alias_name = "${castNameCandidateToString(name)}_v";
-      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex(CAST(name AS String))}\\.(?=\\w)", "${alias_name}.");
-      MUTABLE new_line = "${indent}WITH ${perm} ${castNameCandidateToString(name)} AS ${alias_name} { ${rewritten} }";
+      MUTABLE alias_name = "${castNameCandidateToString__fixable_helpers(name)}_v";
+      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex__fixable_helpers(CAST(name AS String))}\\.(?=\\w)", "${alias_name}.");
+      MUTABLE new_line = "${indent}WITH ${perm} ${castNameCandidateToString__fixable_helpers(name)} AS ${alias_name} { ${rewritten} }";
       &fixes.append(TRY (fix__new(TRY (fix_description(:WRAP_CAPABILITY_ACCESS, {:permission: perm, :name: name, :alias_name: alias_name, :capability: cap})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), new_line)], :interactive)));
     END
   END
@@ -637,7 +637,7 @@ FN emit_foreign_index_needs_unsafe_view_mut(node: GetIndex, name: String) RETURN
     MUTABLE line_num = node.source_range.start_line;
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
     MUTABLE body = line_text.trim();
-    MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
+    MUTABLE indent = (regexFirstMatch__fixable_helpers(body, "\\A\\s*") OR_ELSE "");
     MUTABLE inner = body.trimStart();
     MUTABLE index = node.index;
     MUTABLE length: String = "";
@@ -648,7 +648,7 @@ FN emit_foreign_index_needs_unsafe_view_mut(node: GetIndex, name: String) RETURN
     END
     IF !(inner.empty?()) THEN
       MUTABLE alias_name = "${name}_view";
-      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex(name)}\\s*(?=\\[)", alias_name);
+      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex__fixable_helpers(name)}\\s*(?=\\[)", alias_name);
       MUTABLE replacement = "${indent}WITH UNSAFE VIEW ${name} LENGTH ${length} AS ${alias_name} { ${rewritten} }";
       &fixes.append(TRY (fix__new(TRY (fix_description(:WRAP_FOREIGN_INDEX_UNSAFE_VIEW, {:name: name, :length: length, :alias_name: alias_name})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), replacement)], :interactive)));
     END
@@ -665,11 +665,11 @@ FN emit_direct_view_access_finding_mut(node: Locatable, name: String, permission
     MUTABLE line_num = token__start_line(node.source_range);
     MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR "");
     MUTABLE body = line_text.trim();
-    MUTABLE indent = (regexFirstMatch(body, "\\A\\s*") OR_ELSE "");
+    MUTABLE indent = (regexFirstMatch__fixable_helpers(body, "\\A\\s*") OR_ELSE "");
     MUTABLE inner = body.trimStart();
     IF !(inner.empty?()) THEN
       MUTABLE alias_name = "${name}_view";
-      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex(name)}\\b", alias_name);
+      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex__fixable_helpers(name)}\\b", alias_name);
       MUTABLE replacement = "${indent}WITH ${permission} ${name} AS ${alias_name} { ${rewritten} }";
       &fixes.append(TRY (fix__new(TRY (fix_description(:WRAP_DIRECT_VIEW_ACCESS, {:permission: permission, :name: name, :alias_name: alias_name})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), replacement)], :interactive)));
     END
@@ -708,7 +708,7 @@ FN emit_with_guard_mutable_mutated_mut(node: WithBlock, names_input: []String, v
     MUTABLE with_line = node.token.line;
     MUTABLE window_lines = (src.split("\n").substr(((with_line - 1)), ((((with_line + 8)) - ((with_line - 1))) + 1)) OR_ELSE List[]);
     FOR _ IN names DO
-  MUTABLE pat = "\\bMUTABLE\\s+${escapeRegex(_)}\\b";
+  MUTABLE pat = "\\bMUTABLE\\s+${escapeRegex__fixable_helpers(_)}\\b";
   MUTABLE off = 0;
   MUTABLE found: Bool = FALSE;
   WHILE ((off < scopeBindings__length(window_lines)) AND !(found)) DO
@@ -888,7 +888,7 @@ FN build_cast_wrap_fix(value: ?Locatable, target_type: TypeTypeInput) RETURNS !?
     IF !(text_length) THEN
       RETURN NIL;
     END
-    RETURN TRY (fix__new(TRY (fix_description(:WRAP_VALUE_WITH_CAST, {:type: target_name})), [edit__new(span__new(NIL, tok.line, tok.column, 0), "CAST("), edit__new(span__new(NIL, tok.line, (tok.column + text_length), 0), " AS ${castTypeTypeInputToString(target_name)})")], :interactive));
+    RETURN TRY (fix__new(TRY (fix_description(:WRAP_VALUE_WITH_CAST, {:type: target_name})), [edit__new(span__new(NIL, tok.line, tok.column, 0), "CAST("), edit__new(span__new(NIL, tok.line, (tok.column + text_length), 0), " AS ${castTypeTypeInputToString__fixable_helpers(target_name)})")], :interactive));
   ELSE
     RETURN NIL;
   END
@@ -1203,7 +1203,7 @@ FN slot_id_for(slot: Slot) RETURNS ?AutoSlotId@multiowned ->
   ELSE_IF (kind == :return) THEN
     RETURN autoSlotId__return(UNWRAP (slot.fn_name));
   ELSE_IF (kind == :local) THEN
-    RETURN autoSlotId__local(castAutoConstraintCollectorDeclarationNodeToLocatable(castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node)));
+    RETURN autoSlotId__local(castAutoConstraintCollectorDeclarationNodeToLocatable__fixable_helpers(castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__fixable_helpers(slot.decl_node)));
   ELSE
     RETURN NIL;
   END
@@ -1232,7 +1232,7 @@ FN auto_slot_label(slot: Slot) RETURNS !?String ->
 END
 FN auto_shape_slot_label(slot: Slot) RETURNS ?String ->
   MUTABLE name: Any = NIL;
-  MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node) START
+  MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__fixable_helpers(slot.decl_node) START
     AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
       name = COPY item.name;,
     AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
@@ -1255,7 +1255,7 @@ FN auto_param_slot_label(slot: Slot) RETURNS String ->
 END
 FN auto_local_slot_label(slot: Slot) RETURNS String ->
   MUTABLE name: Any = NIL;
-  MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(slot.decl_node) START
+  MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__fixable_helpers(slot.decl_node) START
     AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
       name = COPY item.name;,
     AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
@@ -1301,7 +1301,7 @@ FN build_auto_ambiguity_message(label: String, observed_strs: []String, slot: Sl
   RETURN msg;
 END
 # End Ruby module FixableHelper
-FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
+FN castAutoConstraintCollectorDeclarationNodeToLocatable__fixable_helpers(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     AutoConstraintCollectorDeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorDeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
@@ -1309,7 +1309,7 @@ FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCo
   END
   panic("Invalid cast to Locatable");
 END
-FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
+FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__fixable_helpers(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
   PARTIAL MATCH value START
     AutoConstraintCollectorSlotDeclNode.VarDecl AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorSlotDeclNode.BindExpr AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ BindExpr: COPY cast_payload };,
@@ -1317,22 +1317,22 @@ FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNo
   END
   panic("Invalid cast to AutoConstraintCollectorDeclarationNode");
 END
-FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
+FN castNameCandidateToString__fixable_helpers(value: NameCandidate) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+FN castTypeToTypeTypeInput__fixable_helpers(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
+FN castTypeTypeInputToString__fixable_helpers(value: TypeTypeInput) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput__fixable_helpers(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
@@ -1342,7 +1342,7 @@ FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeCo
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
+FN ruby_array_concat_Edit__fixable_helpers(left: []Edit, right: []Edit) RETURNS []Edit ->
   MUTABLE result: []Edit = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

@@ -129,13 +129,13 @@ PRIVATE FN liveness__collect_tail_uses(seg: Segment, uses_by_seg: {Int64}[Set]St
     IF call_node IS_A MethodCall THEN
       liveness__walk_idents(call_node.object, %(name: String) USE(bucket) -> {
   UNWRAP (bucket).insert(COPY name);
-  rubyToClearVoid()
+  rubyToClearVoid__liveness()
       });
     END
     FOR _ IN call_node.args() DO
     liveness__walk_idents(_, %(name: String) USE(bucket) -> {
   UNWRAP (bucket).insert(COPY name);
-  rubyToClearVoid()
+  rubyToClearVoid__liveness()
     });
     END
   END
@@ -197,7 +197,7 @@ PRIVATE FN liveness__stmt_decl_type(MUTABLE stmt: BindingStmt) RETURNS !?Type ->
 END
 PRIVATE FN liveness__normalize_decl_type(value: ?TypeTypeInput) RETURNS !?Type ->
   IF value EXISTS AS value_value THEN
-    RETURN TRY (type__new(castTypeTypeInputToTypeConstructionInput(value_value)));
+    RETURN TRY (type__new(castTypeTypeInputToTypeConstructionInput__liveness(value_value)));
   ELSE
     RETURN NIL;
   END
@@ -207,7 +207,7 @@ PRIVATE FN liveness__collect_uses(stmt: Any, MUTABLE into: ?[Set]String) RETURNS
     MUTABLE into_value_mutable = COPY into_value;
     liveness__walk_idents(stmt, %(name: String) USE(MUTABLE into_value_mutable) -> {
   &into_value_mutable.insert(COPY name);
-  rubyToClearVoid()
+  rubyToClearVoid__liveness()
     });
   ELSE
     RETURN;
@@ -837,7 +837,7 @@ FN castOptionalTransformValueToHashMapStringTypeMultiowned(value: ?TransformValu
   END
   RETURN {};
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput__liveness(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
@@ -1046,6 +1046,6 @@ FN rtocChildrenOfCollectValueYieldExpr(v: YieldExpr) RETURNS []CollectValue ->
   &out.append(castLocatableToCollectValue(COPY v.expr));
   RETURN out;
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__liveness() RETURNS Void ->
   RETURN;
 END

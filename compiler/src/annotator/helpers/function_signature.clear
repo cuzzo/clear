@@ -676,7 +676,7 @@ PRIVATE FN functionSignature__coerce_return_type(self: FunctionSignature, val: ?
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF val EXISTS AS val_value THEN
-      RETURN TRY (type__new(castTypeTypeInputToTypeConstructionInput(val_value)));
+      RETURN TRY (type__new(castTypeTypeInputToTypeConstructionInput__function_signature(val_value)));
     ELSE
       RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
     END
@@ -767,7 +767,7 @@ FN castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(value
   END
   panic("Invalid cast to ?FunctionSignatureReturnValue");
 END
-FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput__function_signature(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,

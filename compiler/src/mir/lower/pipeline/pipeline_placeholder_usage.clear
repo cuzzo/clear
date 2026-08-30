@@ -27,10 +27,10 @@ END
 PUB FN pipelinePlaceholderUsage__placeholder_projection?(node: ?Locatable) RETURNS Bool EFFECTS REENTRANT ->
   IF node EXISTS AS node_value THEN
     IF node_value IS_A GetField AS get_field THEN
-      MUTABLE target: ?Locatable = castLocatableToOptionalLocatable(get_field.target);
+      MUTABLE target: ?Locatable = castLocatableToOptionalLocatable__pipeline_placeholder_usage(get_field.target);
       RETURN (((IF target? IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END)) OR pipelinePlaceholderUsage__placeholder_projection?(target));
     ELSE_IF node_value IS_A GetIndex AS get_index THEN
-      MUTABLE target: ?Locatable = castLocatableToOptionalLocatable(get_index.target);
+      MUTABLE target: ?Locatable = castLocatableToOptionalLocatable__pipeline_placeholder_usage(get_index.target);
       RETURN (((IF target? IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END)) OR pipelinePlaceholderUsage__placeholder_projection?(target));
     ELSE
       RETURN FALSE;
@@ -52,7 +52,7 @@ PUB FN pipelinePlaceholderUsage__moved_placeholder?(node: ?Locatable) RETURNS Bo
   IF pipelinePlaceholderUsage__moved_placeholder?(child) THEN
         found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__pipeline_placeholder_usage()
     });
     RETURN found;
   ELSE
@@ -72,7 +72,7 @@ PRIVATE FN pipelinePlaceholderUsage__contains_placeholder?(node: ?Locatable, bar
   IF pipelinePlaceholderUsage__contains_placeholder?(child, bare) THEN
         found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__pipeline_placeholder_usage()
     });
     RETURN found;
   ELSE
@@ -82,7 +82,7 @@ END
 PRIVATE FN pipelinePlaceholderUsage__placeholder_identifier?(node: Locatable) RETURNS Bool ->
   RETURN (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END);
 END
-FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
+FN castLocatableToOptionalLocatable__pipeline_placeholder_usage(value: Locatable) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
@@ -216,6 +216,6 @@ FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
   END
   panic("Invalid cast to ?Locatable");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__pipeline_placeholder_usage() RETURNS Void ->
   RETURN;
 END

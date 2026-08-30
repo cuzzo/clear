@@ -418,7 +418,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     IF (context.soa_rewrite_active AND aST__soa_placeholder_field?(node)) THEN
-      MUTABLE target: GetField = COPY castLocatableToGetField(node);
+      MUTABLE target: GetField = COPY castLocatableToGetField__pipeline_host(node);
       &context.soa_needed_fields.insert(COPY target.field);
       RETURN PipelineHostReturnValue{ StringValue: COPY "__soa_${target.field}[__soa_i]" };
     END
@@ -519,7 +519,7 @@ PUB FN pipelineHost__lower_pipeline_body(MUTABLE self: PipelineHost, MUTABLE nod
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.right IS_A SelectOp AND TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })) })))))) THEN
-      RETURN PipelineLoweringResult{ MIRBgBlock: COPY TRY (pipelineHost__lower_stream_select(&rtoc_self_view, PipelineSite{ list: COPY node.left, options: COPY node }, castLocatableToSelectOp(node.right))) };
+      RETURN PipelineLoweringResult{ MIRBgBlock: COPY TRY (pipelineHost__lower_stream_select(&rtoc_self_view, PipelineSite{ list: COPY node.left, options: COPY node }, castLocatableToSelectOp__pipeline_host(node.right))) };
     END
     MUTABLE plan: ?PipelineOperationPlan = TRY (pipelinePlanBuilder__build(rtoc_self_view.plan_builder, node));
     IF plan EXISTS AS plan_value THEN
@@ -611,9 +611,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (execution == PipelineExecutionKind.SetIndex) THEN
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_index(rtoc_self_view, plan.site, castLocatableToIndexOp(plan.rhs).expression)) };
     ELSE_IF (execution == PipelineExecutionKind.Each) THEN
-      RETURN castOptionalPipelineEachResultToOptionalPipelineLoweringResult(TRY (pipelineHost__lower_each(rtoc_self_view, plan.site, castLocatableToEachOp(plan.rhs))));
+      RETURN castOptionalPipelineEachResultToOptionalPipelineLoweringResult(TRY (pipelineHost__lower_each(rtoc_self_view, plan.site, castLocatableToEachOp__pipeline_host(plan.rhs))));
     ELSE_IF (execution == PipelineExecutionKind.Concurrent) THEN
-      RETURN castPipelineConcurrentResultToOptionalPipelineLoweringResult(TRY (pipelineHost__lower_concurrent(rtoc_self_view, plan.site, castLocatableToConcurrentOp(plan.rhs))));
+      RETURN castPipelineConcurrentResultToOptionalPipelineLoweringResult(TRY (pipelineHost__lower_concurrent(rtoc_self_view, plan.site, castLocatableToConcurrentOp__pipeline_host(plan.rhs))));
     ELSE
       RETURN NIL;
     END
@@ -655,7 +655,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE selector_prefix: []Emittable = ( { MUTABLE rtoc_empty_list_27: []Emittable = List[]; rtoc_empty_list_27 } );
     MUTABLE selector_head = pipelineLoweringBridge__lower_head(rtoc_self_view.lowering_bridge, %() USE(caps, op, MUTABLE rtoc_self_view) -> pipelineHost__with_pipeline_context(&rtoc_self_view, "__select_item", %() USE(caps, op, rtoc_self_view) -> pipelineHost__with_fiber_capture_map(rtoc_self_view, caps.capture_map, caps.capture_symbols, "__rt", %() USE(op, rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, op.expression)))));
     MUTABLE selector: Emittable = COPY selector_head.value;
-    selector_prefix = ruby_array_concat_Emittable(selector_prefix, selector_head.pending);
+    selector_prefix = ruby_array_concat_Emittable__pipeline_host(selector_prefix, selector_head.pending);
     MUTABLE tense_plan = TRY (pipelineHost__select_tense_plan(rtoc_self_view, op));
     IF tenseSelectorPlan__asynchronous?(tense_plan) THEN
       MUTABLE promise_name = "__select_promise${id.toString()}";
@@ -685,7 +685,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE next_contract = callableContract__new((TRY (callableContract__no_ownership(0))).signature, TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(promise_name, promise_type, "stream SELECT awaits selector promise", :heap)])), 0);
       MUTABLE next_call = MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY promise_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "next", args: ( { MUTABLE rtoc_empty_list_28: []Any = List[]; rtoc_empty_list_28 } ), try_wrap: !(asyncResultShape__boxes_fallible_payload?(async_shape)), callable_contract: COPY next_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       IF asyncResultShape__boxes_fallible_payload?(async_shape) THEN
-        selector = Emittable{ AsyncPayloadTake: COPY AsyncPayloadTake{ source: Emittable{ TryExpr: COPY TryExpr{ expr: Emittable{ MIRMethodCall: COPY next_call }, lowered_node_id: NIL, ownership_consumption: NIL } }, result_type: COPY TRY (type__new(castTypeToTypeConstructionInput(async_shape.payload_type))) } };
+        selector = Emittable{ AsyncPayloadTake: COPY AsyncPayloadTake{ source: Emittable{ TryExpr: COPY TryExpr{ expr: Emittable{ MIRMethodCall: COPY next_call }, lowered_node_id: NIL, ownership_consumption: NIL } }, result_type: COPY TRY (type__new(castTypeToTypeConstructionInput__pipeline_host(async_shape.payload_type))) } };
       ELSE
         selector = Emittable{ MIRMethodCall: COPY next_call };
       END
@@ -728,7 +728,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       push_contract = callableContract__new((TRY (callableContract__no_ownership(1))).signature, TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(UNWRAP (transfer_name), item_type, "stream SELECT push transfers the item to the consumer", :heap)])), 1);
       &push_stmts.append(Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY local_stream, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "push", args: [CAST(pushed AS Any)], try_wrap: TRUE, callable_contract: COPY push_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
-      push_stmts = ruby_array_concat_Emittable(push_stmts, CAST(TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: UNWRAP (COPY transfer_name), target: :owned_sink, target_alloc: :heap, move_guarded: TRUE }))) AS []Emittable));
+      push_stmts = ruby_array_concat_Emittable__pipeline_host(push_stmts, CAST(TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: UNWRAP (COPY transfer_name), target: :owned_sink, target_alloc: :heap, move_guarded: TRUE }))) AS []Emittable));
     ELSE
       &push_stmts.append(Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY local_stream, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "push", args: [CAST(selector AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
@@ -1311,7 +1311,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF TRUE THEN
       t_branch_value = COPY type;
     ELSE
-      t_branch_value = TRY (type__new(castTypeToTypeConstructionInput(type)));
+      t_branch_value = TRY (type__new(castTypeToTypeConstructionInput__pipeline_host(type)));
     END
     MUTABLE t: Type = t_branch_value?;
     RETURN TRY (type__zig_type(t, is_param, is_field));
@@ -1322,7 +1322,7 @@ PUB FN pipelineHost__new(lowering: MIRLowering, emitter: MIREmitter) RETURNS !Pi
   TRY (pipelineHost__initialize(&self, lowering, emitter));
   RETURN self @multiowned;
 END
-FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable__pipeline_host(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
@@ -1342,7 +1342,7 @@ FN castLocatableToBatchWindowOp(value: Locatable) RETURNS BatchWindowOp ->
   END
   RETURN panic("Invalid cast to BatchWindowOp");
 END
-FN castLocatableToConcurrentOp(value: Locatable) RETURNS ConcurrentOp ->
+FN castLocatableToConcurrentOp__pipeline_host(value: Locatable) RETURNS ConcurrentOp ->
   IF value IS_A ConcurrentOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1354,13 +1354,13 @@ FN castLocatableToDistinctOp(value: Locatable) RETURNS DistinctOp ->
   END
   RETURN panic("Invalid cast to DistinctOp");
 END
-FN castLocatableToEachOp(value: Locatable) RETURNS EachOp ->
+FN castLocatableToEachOp__pipeline_host(value: Locatable) RETURNS EachOp ->
   IF value IS_A EachOp AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to EachOp");
 END
-FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+FN castLocatableToGetField__pipeline_host(value: Locatable) RETURNS GetField ->
   IF value IS_A GetField AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1388,7 +1388,7 @@ FN castLocatableToReduceOp(value: Locatable) RETURNS ReduceOp ->
   END
   RETURN panic("Invalid cast to ReduceOp");
 END
-FN castLocatableToSelectOp(value: Locatable) RETURNS SelectOp ->
+FN castLocatableToSelectOp__pipeline_host(value: Locatable) RETURNS SelectOp ->
   IF value IS_A SelectOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1457,7 +1457,7 @@ FN castPromisesToEmittable(value: Promises) RETURNS Emittable ->
   END
   panic("Invalid cast to Emittable");
 END
-FN castTypeToTypeConstructionInput(value: PipelineHostTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput__pipeline_host(value: PipelineHostTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     PipelineHostTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     PipelineHostTypeInput.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -1466,7 +1466,7 @@ FN castTypeToTypeConstructionInput(value: PipelineHostTypeInput) RETURNS TypeCon
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable__pipeline_host(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

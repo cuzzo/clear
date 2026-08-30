@@ -6328,7 +6328,7 @@ PUB FN aST__borrowed_ownership_view?(node: ?Locatable) RETURNS Bool ->
 END
 PUB FN aST__inline_union_constructor_target?(node: ?Locatable) RETURNS Bool ->
   IF node? IS_A GetField AS get_field THEN
-    MUTABLE target: Locatable = castLocatableToLocatable(get_field.target);
+    MUTABLE target: Locatable = castLocatableToLocatable__ast(get_field.target);
     IF target IS_A Identifier AS identifier THEN
       RETURN !(!((regexMatch?(identifier__name(identifier).substr(0, 1), "[A-Z]"))));
     ELSE
@@ -6340,7 +6340,7 @@ PUB FN aST__inline_union_constructor_target?(node: ?Locatable) RETURNS Bool ->
 END
 PUB FN aST__soa_placeholder_field?(node: ?Locatable) RETURNS Bool ->
   IF node? IS_A GetField AS get_field THEN
-    MUTABLE target: Locatable = castLocatableToLocatable(get_field.target);
+    MUTABLE target: Locatable = castLocatableToLocatable__ast(get_field.target);
     RETURN !(!(((IF target IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END))));
   ELSE
     RETURN FALSE;
@@ -6354,7 +6354,7 @@ PUB FN aST__soa_placeholder_assignment?(node: ?Locatable) RETURNS Bool ->
   END
   IF node? IS_A Assignment AS assignment THEN
     MUTABLE assignment: Assignment = COPY CAST(assignment AS Assignment);
-    RETURN aST__soa_placeholder_field?(castAssignmentNameToOptionalLocatable(assignment.name));
+    RETURN aST__soa_placeholder_field?(castAssignmentNameToOptionalLocatable__ast(assignment.name));
   END
   RETURN FALSE;
 END
@@ -7504,7 +7504,7 @@ PUB STRUCT ReassignPlan {
   lifecycle_plan: ?PassStateValue
 }
 # End Ruby module MIR
-FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+FN castAssignmentNameToLocatable__ast(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -7513,7 +7513,7 @@ FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
+FN castAssignmentNameToOptionalLocatable__ast(value: AssignmentName) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -7656,7 +7656,7 @@ FN castLambdaBodyToLocatable(value: LambdaBody) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+FN castLocatableToLocatable__ast(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
@@ -7823,7 +7823,7 @@ PUB FN rtocChildrenLocatable(node: Locatable) RETURNS []Locatable ->
 END
 FN rtocChildrenOfLocatableAssignment(v: Assignment) RETURNS []Locatable ->
   MUTABLE out: []Locatable = [];
-  &out.append(castAssignmentNameToLocatable(COPY v.name));
+  &out.append(castAssignmentNameToLocatable__ast(COPY v.name));
   &out.append(COPY v.value);
   RETURN out;
 END

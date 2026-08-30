@@ -409,7 +409,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE lambda_expr_mutable = COPY lambda_expr;
         IF lambda_expr_mutable.fn_def THEN
           MUTABLE sub = mIRChecker__new(NIL, rtoc_self_view.schema_lookup);
-          rtoc_self_view.errors = ruby_array_concat_String(rtoc_self_view.errors, TRY (mIRChecker__check_fn_mut(&sub, lambda_expr_mutable.fn_def, strict, (lambda_expr_mutable.captures) |> SELECT _.toString())));
+          rtoc_self_view.errors = ruby_array_concat_String__mir_checker(rtoc_self_view.errors, TRY (mIRChecker__check_fn_mut(&sub, lambda_expr_mutable.fn_def, strict, (lambda_expr_mutable.captures) |> SELECT _.toString())));
         END
     END
     END
@@ -1318,7 +1318,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           &names.insert(COPY CAST(_ AS String));
       END
     END
-    rubyToClearVoid()
+    rubyToClearVoid__mir_checker()
     });
     RETURN names;
 }
@@ -1699,7 +1699,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (mIRPassState__class_require_mut(PassStateProgram{ MIRProgram: COPY program }, :mir_lowered, "MIRChecker"));
     MUTABLE all_errors: []String = TRY (mIRChecker__ownership_registry_errors(rtoc_self_view));
     FOR _ IN (TRY (mIRChecker__program_functions(rtoc_self_view, program.items))) DO
-    ruby_array_concat_String(all_errors, TRY (mIRChecker__check_fn_mut(&rtoc_self_view, _, strict, ( { MUTABLE rtoc_empty_list_31: []String = List[]; rtoc_empty_list_31 } ))));
+    ruby_array_concat_String__mir_checker(all_errors, TRY (mIRChecker__check_fn_mut(&rtoc_self_view, _, strict, ( { MUTABLE rtoc_empty_list_31: []String = List[]; rtoc_empty_list_31 } ))));
     END
     IF (all_errors.length() == 0) THEN
       MUTABLE rtoc_mutable_receiver_32 = mIRPassState__for_mut(PassStateProgram{ MIRProgram: COPY program });
@@ -2618,7 +2618,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             &leaks.append(TRY (mIRChecker__error(rtoc_self_view, :HPT_LEAK, Name{ StringValue: COPY mIRChecker__ownership_effect_label(rtoc_self_view, expr) }, "stdlib call with allocates:true result not bound to variable (leak)")));
           END
     END
-    rubyToClearVoid()
+    rubyToClearVoid__mir_checker()
       });
       NIL;
     ELSE
@@ -3780,7 +3780,7 @@ FN castMIRCheckerRegistryOwnershipNodeToMIRCheckerOwnershipSurfaceNode(value: MI
   END
   panic("Invalid cast to MIRCheckerOwnershipSurfaceNode");
 END
-FN castNameToString(value: Name) RETURNS String ->
+FN castNameToString__mir_checker(value: Name) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -3802,7 +3802,7 @@ FN castOptionalNameToString(value: ?Name) RETURNS String ->
   END
   RETURN "";
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__mir_checker() RETURNS Void ->
   RETURN;
 END
 FN ruby_array_concat_FnDef(left: []FnDef, right: []FnDef) RETURNS []FnDef ->
@@ -3811,7 +3811,7 @@ FN ruby_array_concat_FnDef(left: []FnDef, right: []FnDef) RETURNS []FnDef ->
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-FN ruby_array_concat_String(left: []String, right: []String) RETURNS []String ->
+FN ruby_array_concat_String__mir_checker(left: []String, right: []String) RETURNS []String ->
   MUTABLE result: []String = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
@@ -3844,7 +3844,7 @@ FN ruby_wrap_optional_String_Name(value: ?String) RETURNS ?Name ->
   END
   NIL;
 END
-FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
+FN ruby_wrap_optional_string_to_symbol__mir_checker(value: ?String) RETURNS ?String@symbol ->
   IF value EXISTS AS value_value THEN
     RETURN symbol(value_value);
   END

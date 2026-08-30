@@ -96,7 +96,7 @@ PUB FN pipelineLoweringBridge__lower_node(MUTABLE self: PipelineLoweringBridge, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN CAST(TRY (mIRLowering__lower(&rtoc_self_view.lowering, castLocatableToMIRLoweringLowerableStmt(node))) AS Emittable);
+    RETURN CAST(TRY (mIRLowering__lower(&rtoc_self_view.lowering, castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(node))) AS Emittable);
 }
 END
 PUB FN pipelineLoweringBridge__lower_node_with_decl_alloc(MUTABLE self: PipelineLoweringBridge, node: Locatable, alloc: String@symbol) RETURNS !Emittable
@@ -128,7 +128,7 @@ PUB FN pipelineLoweringBridge__emit_builtin(self: PipelineLoweringBridge, name: 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN castMIRLoweringReturnValueToEmittable(TRY (mIRLowering__emit_builtin(rtoc_self_view.lowering, name, args)));
+    RETURN castMIRLoweringReturnValueToEmittable__pipeline_lowering_bridge(TRY (mIRLowering__emit_builtin(rtoc_self_view.lowering, name, args)));
 }
 END
 PUB FN pipelineLoweringBridge__lower_head(self: PipelineLoweringBridge, blk: FN() -> Emittable) RETURNS PipelineLowerHeadResult
@@ -231,7 +231,7 @@ PUB FN pipelineLoweringBridge__new(lowering: MIRLowering, emitter: MIREmitter) R
   pipelineLoweringBridge__initialize(&self, lowering, emitter);
   RETURN self @multiowned;
 END
-FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
+FN castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ProtocolRequirement: COPY cast_payload };,
@@ -323,7 +323,7 @@ FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLowering
   END
   panic("Invalid cast to MIRLoweringLowerableStmt");
 END
-FN castMIRLoweringReturnValueToEmittable(value: MIRLoweringReturnValue) RETURNS Emittable ->
+FN castMIRLoweringReturnValueToEmittable__pipeline_lowering_bridge(value: MIRLoweringReturnValue) RETURNS Emittable ->
   PARTIAL MATCH value START
     MIRLoweringReturnValue.Cleanup AS cast_payload -> RETURN Emittable{ Cleanup: COPY cast_payload };,
     MIRLoweringReturnValue.ErrCleanup AS cast_payload -> RETURN Emittable{ ErrCleanup: COPY cast_payload };,

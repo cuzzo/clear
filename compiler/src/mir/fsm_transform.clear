@@ -134,7 +134,7 @@ PRIVATE FN fsmTransform__collect_body_locals(stmts: Any) RETURNS ![]PromotedLoca
   END
   seen[name] = TRUE;
   &out.append(UNWRAP (entry));
-  rubyToClearVoid()
+  rubyToClearVoid__fsm_transform()
   });
   RETURN out;
 END
@@ -311,7 +311,7 @@ FN castTransformValueToString(value: TransformValue) RETURNS []String ->
   END
   RETURN List[];
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__fsm_transform() RETURNS Void ->
   RETURN;
 END
 FN ruby_union_scalar_equal_optional_TransformValue_Bool(value: ?TransformValue, expected: Bool) RETURNS Bool ->

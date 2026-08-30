@@ -20,7 +20,7 @@ PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, sche
   TRY (aST__each_capture_analysis(fn_value.body, %(a: CaptureAnalysisValue) USE(MUTABLE analyses, live_param_syms, schema_lookup, fn_value) -> {
     TRY (bgCaptureClassifier__classify_one_mut(&a, live_param_syms, schema_lookup));
     analyses["${fn_value.name}:${aST__node_identity(a)}"] = a;
-    rubyToClearVoid()
+    rubyToClearVoid__bg_capture_classifier()
   }));
   END
   RETURN analyses;
@@ -67,7 +67,7 @@ END
 PUB FN bgCaptureClassifier__resolve_capture_type(type_obj: ?Type, sym: ?SymbolEntry) RETURNS !?Type ->
   IF type_obj EXISTS AS type_obj_value THEN
     MUTABLE type_obj_value_mutable = COPY type_obj_value;
-    MUTABLE base = TRY (type__new(castTypeToTypeConstructionInput(type_obj_value_mutable)));
+    MUTABLE base = TRY (type__new(castTypeToTypeConstructionInput__bg_capture_classifier(type_obj_value_mutable)));
     IF sym EXISTS AS sym_value THEN
       MUTABLE sym_value_mutable = COPY sym_value;
       TRY (type__apply_bg_capture_symbol_mut(&base, symbolEntry__storage(sym_value_mutable), symbolEntry__sync(sym_value_mutable)));
@@ -93,7 +93,7 @@ PUB FN bgCaptureClassifier__apply_capture_storage_provenance_mut(MUTABLE type: T
   END
 END
 # End Ruby module BgCaptureClassifier
-FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput__bg_capture_classifier(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -102,6 +102,6 @@ FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__bg_capture_classifier() RETURNS Void ->
   RETURN;
 END

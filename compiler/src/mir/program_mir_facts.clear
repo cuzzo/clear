@@ -78,7 +78,7 @@ PRIVATE FN programMIRFinalizer__function_needs_runtime?(function: FunctionDef, c
   IF TRY (programMIRFinalizer__ast_node_needs_runtime?(node, fn_nodes, schema_lookup)) THEN
       found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__program_mir_facts()
   });
   RETURN (found OR TRY (programMIRFinalizer__return_path_needs_allocator?(function, schema_lookup)));
 END
@@ -99,7 +99,7 @@ PRIVATE FN programMIRFinalizer__generic_return_needs_runtime?(function: Function
   END
   MUTABLE type = TRY (type__success_type((&argument.full_type_mut({:context: "generic return instantiation"}))));
   needs_runtime = (needs_runtime OR ((TRY (type__string?(type)) OR TRY (type__collection_value?(type))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup))));
-  rubyToClearVoid()
+  rubyToClearVoid__program_mir_facts()
     }); needs_runtime } } END);
   ELSE
     RETURN FALSE;
@@ -118,7 +118,7 @@ PRIVATE FN programMIRFinalizer__generic_projection_return?(function: FunctionDef
   IF node IS_A ReturnNode AS return_node THEN
       &returns.append(return_node);
   END
-  rubyToClearVoid()
+  rubyToClearVoid__program_mir_facts()
   });
   IF !((returns.length() == 1)) THEN
     RETURN FALSE;
@@ -135,7 +135,7 @@ PRIVATE FN programMIRFinalizer__generic_returned_parameter_name(function: Functi
   IF node IS_A ReturnNode AS return_node THEN
       &returns.append(return_node);
   END
-  rubyToClearVoid()
+  rubyToClearVoid__program_mir_facts()
   });
   IF !((returns.length() == 1)) THEN
     RETURN NIL;
@@ -172,7 +172,7 @@ PRIVATE FN programMIRFinalizer__runtime_cleanup_facts?(facts: FrozenCleanupFacts
   IF (cleanupEntry__heap?(entry) OR cleanupEntry__frame?(entry)) THEN
       found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__program_mir_facts()
   });
   RETURN found;
 END
@@ -182,7 +182,7 @@ END
 PRIVATE FN programMIRFinalizer__ast_node_lowers_through_runtime?(node: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN PARTIAL MATCH node START
     Locatable.FuncCall AS func_call -> TRY (programMIRFinalizer__ast_call_needs_runtime?(Node{ FuncCall: COPY func_call }, fn_nodes)),
-    AST.MethodCall -> TRY (programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode(node), fn_nodes)),
+    AST.MethodCall -> TRY (programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode__program_mir_facts(node), fn_nodes)),
     AST.BgBlock -> TRUE,
     Locatable.BgStreamBlock AS bg_stream_block -> TRUE,
     Locatable.Assignment AS assignment -> TRY (programMIRFinalizer__indexed_assignment_lowers_through_runtime?(assignment)),
@@ -269,7 +269,7 @@ PRIVATE FN programMIRFinalizer__return_path_needs_allocator?(function: FunctionD
       RETURN;
   END
   found = (found OR TRY (programMIRFinalizer__return_expr_needs_allocator?(function, node.value(), schema_lookup)));
-  rubyToClearVoid()
+  rubyToClearVoid__program_mir_facts()
   });
   RETURN found;
 END
@@ -340,7 +340,7 @@ END
 PRIVATE FN programMIRFinalizer__function_facts(name: String, needs_runtime: Bool) RETURNS FunctionMIRFacts ->
   RETURN FunctionMIRFacts{ name: COPY name, needs_runtime: COPY needs_runtime };
 END
-FN castLocatableToNode(value: Locatable) RETURNS Node ->
+FN castLocatableToNode__program_mir_facts(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.MIRProgram AS cast_payload -> RETURN Node{ MIRProgram: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
@@ -474,6 +474,6 @@ FN castLocatableToNode(value: Locatable) RETURNS Node ->
   END
   panic("Invalid cast to Node");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__program_mir_facts() RETURNS Void ->
   RETURN;
 END

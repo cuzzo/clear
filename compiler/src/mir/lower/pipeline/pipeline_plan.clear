@@ -50,8 +50,8 @@ PUB STRUCT PipelinePlanBuilder {
 
 PUB FN pipelinePlanBuilder__build(self: PipelinePlanBuilder, node: BinaryOp) RETURNS !?PipelineOperationPlan ->
   MUTABLE range_chain: ?PipelineRangeChain = NIL;
-  MUTABLE lhs: Locatable = COPY castLocatableToLocatable(node.left);
-  MUTABLE rhs: Locatable = COPY castLocatableToLocatable(node.right);
+  MUTABLE lhs: Locatable = COPY castLocatableToLocatable__pipeline_plan(node.left);
+  MUTABLE rhs: Locatable = COPY castLocatableToLocatable__pipeline_plan(node.right);
   MUTABLE site = PipelineSite{ list: COPY lhs, options: COPY node };
   MUTABLE bc_target = (pipelinePlanBuilder__lowering_target_call(self) == :bc);
   IF TRY (pipelinePlanBuilder__soa_scalar_fold?(self, &lhs, rhs)) THEN
@@ -162,7 +162,7 @@ PRIVATE FN pipelinePlanBuilder__execution_for(self: PipelinePlanBuilder, termina
     panic("unsupported pipeline terminal: {}");
   END
 END
-FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+FN castLocatableToLocatable__pipeline_plan(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

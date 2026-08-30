@@ -168,7 +168,7 @@ PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set
       END
       aST__each_child_node(current, %(child: Locatable) USE(MUTABLE stack) -> {
   &stack.append(COPY child);
-  rubyToClearVoid()
+  rubyToClearVoid__recursive_splitter()
       });
     END
     RETURN FALSE;
@@ -508,6 +508,6 @@ FN castThunkScanNodeToLocatable(value: ThunkScanNode) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__recursive_splitter() RETURNS Void ->
   RETURN;
 END

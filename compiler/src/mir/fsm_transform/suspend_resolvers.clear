@@ -61,8 +61,8 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
   MUTABLE finish_value_mir: ?Emittable = finish_value_mir_branch_value;
   MUTABLE finish_value_template_owned = TRY (fsmOps__finish_value_aliases_finalized_state?(finish_value, state_finalize));
   MUTABLE bind_stmts = List[];
-  bind_stmts = ruby_array_concat_Any(bind_stmts, CAST(state_finalize_m AS []Any));
-  bind_stmts = ruby_array_concat_Any(bind_stmts, CAST(finish_block_mir AS []Any));
+  bind_stmts = ruby_array_concat_Any__suspend_resolvers(bind_stmts, CAST(state_finalize_m AS []Any));
+  bind_stmts = ruby_array_concat_Any__suspend_resolvers(bind_stmts, CAST(finish_block_mir AS []Any));
   MUTABLE result_var: ?String = COPY io_tail.result_var;
   MUTABLE result_zig_type = NIL;
   MUTABLE result_needs_cleanup = FALSE;
@@ -70,7 +70,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
   IF (((finish_value_mir != NIL) AND result_var) AND (result_var != "_")) THEN
     MUTABLE ft = TRY (type__from_node_mut(io_tail.call_node, "FSM IO tail result"));
     result_zig_type = IF ft THEN
-      TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput(ft))))))
+      TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers(ft))))))
     ELSE
       NIL
     END;
@@ -108,13 +108,13 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
   MUTABLE tail = FsmTailRegisterYield{ next_step: NIL, register_expr: register_expr, yield_reason: "WaitForLock" };
   MUTABLE result_var: ?String = COPY next_tail.result_var;
   MUTABLE promise_ft = TRY (type__from_node_mut(next_tail.promise_ast, "FSM NEXT tail promise"));
-  MUTABLE sp_zig = TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput(promise_ft))))));
+  MUTABLE sp_zig = TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers(promise_ft))))));
   MUTABLE inner_type_info: ?Type = NIL;
-  MUTABLE promise_type = TRY (type__new(castTypeToTypeConstructionInput(promise_ft)));
+  MUTABLE promise_type = TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers(promise_ft)));
   MUTABLE inner_zig: ?String =   IF (type__future?(promise_type) AND TRY (type__tense_type(promise_type))) THEN
     {
   MUTABLE rtoc_value_block_marker = 0;
-  inner_type_info = TRY (type__new(castTypeToTypeConstructionInput(TRY (type__tense_type(promise_type)))));
+  inner_type_info = TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers(TRY (type__tense_type(promise_type)))));
   TRY (type__zig_type(inner_type_info))
   }
   ELSE
@@ -181,7 +181,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
 END
 # End Ruby module FsmTransform::SuspendResolvers
 # End Ruby module FsmTransform
-FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput__suspend_resolvers(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -190,7 +190,7 @@ FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+FN ruby_array_concat_Any__suspend_resolvers(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

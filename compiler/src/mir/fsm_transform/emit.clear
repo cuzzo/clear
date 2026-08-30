@@ -194,12 +194,12 @@ PRIVATE FN emit__build_fsm_segment_facts(spec: FsmSegmentSpec, id: Int64, cleanu
 END
 PRIVATE FN emit__fsm_segment_fact_roots(spec: FsmSegmentSpec) RETURNS ![]Emittable ->
   MUTABLE roots: []Emittable = ( { MUTABLE rtoc_empty_list_6: []Emittable = List[]; rtoc_empty_list_6 } );
-  roots = ruby_array_concat_Emittable(roots, TRY (emit__fsm_body_mir_nodes(spec.prologue_stmts)));
-  roots = ruby_array_concat_Emittable(roots, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_7: ?[]Emittable = NIL; IF (spec.structure_stmts.length() == 0) THEN rtoc_ternary_value_7 = TRY (emit__fsm_body_mir_nodes(spec.body_stmts)); ELSE rtoc_ternary_value_7 = spec.structure_stmts; END rtoc_ternary_value_7? });
+  roots = ruby_array_concat_Emittable__emit(roots, TRY (emit__fsm_body_mir_nodes(spec.prologue_stmts)));
+  roots = ruby_array_concat_Emittable__emit(roots, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_7: ?[]Emittable = NIL; IF (spec.structure_stmts.length() == 0) THEN rtoc_ternary_value_7 = TRY (emit__fsm_body_mir_nodes(spec.body_stmts)); ELSE rtoc_ternary_value_7 = spec.structure_stmts; END rtoc_ternary_value_7? });
   MUTABLE descriptor: ?SuspendDescriptor = COPY spec.descriptor;
   IF descriptor EXISTS AS descriptor_value THEN
-    roots = ruby_array_concat_Emittable(roots, CAST(descriptor_value.setup_stmts AS []Emittable));
-    roots = ruby_array_concat_Emittable(roots, CAST(descriptor_value.bind_stmts AS []Emittable));
+    roots = ruby_array_concat_Emittable__emit(roots, CAST(descriptor_value.setup_stmts AS []Emittable));
+    roots = ruby_array_concat_Emittable__emit(roots, CAST(descriptor_value.bind_stmts AS []Emittable));
   END
   RETURN roots;
 END
@@ -293,7 +293,7 @@ PRIVATE FN emit__collect_fsm_nodes(roots: []Emittable) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_10: []Emittable = List[]; rtoc_empty_list_10 } );
   TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY roots }, %(node: Emittable) USE(MUTABLE out) -> {
   &out.append(COPY node);
-  rubyToClearVoid()
+  rubyToClearVoid__emit()
   }));
   RETURN out;
 END
@@ -568,9 +568,9 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   END
   MUTABLE prologue_stmts = (prologue OR_ELSE List[]);
   MUTABLE rt_roots: []Emittable = ( { MUTABLE rtoc_empty_list_30: []Emittable = List[]; rtoc_empty_list_30 } );
-  ruby_array_concat_Emittable(rt_roots, TRY (emit__fsm_body_mir_nodes(body_stmts)));
-  ruby_array_concat_Emittable(rt_roots, TRY (emit__fsm_body_mir_nodes(prologue_stmts)));
-  ruby_array_concat_Emittable(rt_roots, CAST((descriptor?.setup_stmts OR_ELSE List[]) AS []Emittable));
+  ruby_array_concat_Emittable__emit(rt_roots, TRY (emit__fsm_body_mir_nodes(body_stmts)));
+  ruby_array_concat_Emittable__emit(rt_roots, TRY (emit__fsm_body_mir_nodes(prologue_stmts)));
+  ruby_array_concat_Emittable__emit(rt_roots, CAST((descriptor?.setup_stmts OR_ELSE List[]) AS []Emittable));
   MUTABLE rt_used = TRY (emit__mir_nodes_reference_ident?(rt_roots, bg_rt));
   MUTABLE suppress_runtime_ref = !(rt_used);
   FsmSegmentSpec{ index: UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf(), prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail, descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()] OR_ELSE List[]), fn_name: "runSeg${UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }
@@ -859,7 +859,7 @@ PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segme
     MUTABLE segment = COPY UNWRAP (segments[rtoc_idx]);
     MUTABLE seg_idx = segment.index;
     panic("{}{}field. The defer would fire when this runSegN returns, before the BG body completes. Lift the cleanup to destroyTask via ctx[:fsm_destroy_actions].");
-    rubyToClearVoid()
+    rubyToClearVoid__emit()
   }));
   rtoc_idx = rtoc_idx + 1;
   END
@@ -1088,7 +1088,7 @@ FN rtoc_delete_suffix(s: String, affix: String) RETURNS String ->
   END
   RETURN COPY s;
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__emit() RETURNS Void ->
   RETURN;
 END
 FN ruby_array_concat_ContextFieldDecl(left: []ContextFieldDecl, right: []ContextFieldDecl) RETURNS []ContextFieldDecl ->
@@ -1101,7 +1101,7 @@ FN ruby_array_concat_ContextFieldDecl(left: []ContextFieldDecl, right: []Context
   END
   RETURN result;
 END
-FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable__emit(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

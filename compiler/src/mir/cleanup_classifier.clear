@@ -197,7 +197,7 @@ PUB FN cleanupClassifier__mark_moved_source_guards_in_node(node: Locatable, bind
   END
   aST__each_child_node(node, %(child: Locatable) USE(bindings) -> {
   cleanupClassifier__mark_moved_source_guards_in_node(child, bindings);
-  rubyToClearVoid()
+  rubyToClearVoid__cleanup_classifier()
   });
 END
 PUB FN cleanupClassifier__stamp_cleanup_scopes_mut(body: []Locatable, bindings: {String}CleanupEntry) RETURNS !Void ->
@@ -273,7 +273,7 @@ PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []Locatable, bindings:
         TRY (cleanupClassifier__promote_entry_to_heap_cleanup_mut(&entry, bind_expr_mutable.value));
       END
   ELSE_IF node IS_A Assignment AS assignment THEN
-      MUTABLE target: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable(assignment.name));
+      MUTABLE target: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable__cleanup_classifier(assignment.name));
       IF target EXISTS AS target_value THEN
         IF local_names.contains?(COPY target_value.name) THEN
           RETURN;
@@ -292,7 +292,7 @@ PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []Locatable, bindings:
       END
       cleanupClassifier__mark_call_lifetime_extensions_mut(COPY method_call.args, TRY (cleanupClassifier__params_for_method_call(method_call)) |> SKIP 1, local_entries, receiver_nonlocal);
   END
-  rubyToClearVoid()
+  rubyToClearVoid__cleanup_classifier()
   }));
 END
 PUB FN cleanupClassifier__value_extends_loop?(value: Locatable) RETURNS !Bool ->
@@ -379,7 +379,7 @@ PUB FN cleanupClassifier__stamp_field_pre_cleanups_mut(MUTABLE body: []Locatable
   PARTIAL MATCH stmt START
     Locatable.Assignment AS MUTABLE assignment -> TRY (cleanupClassifier__stamp_field_pre_cleanup_mut(&assignment, facts, schema_lookup, lifecycle_registry));
   END
-  rubyToClearVoid()
+  rubyToClearVoid__cleanup_classifier()
   });
 END
 PRIVATE FN cleanupClassifier__assignment_get_field(name: AssignmentName) RETURNS ?GetField ->
@@ -808,7 +808,7 @@ PUB FN cleanupClassifier__walk_match_as_bindings(body: []Locatable, schema_looku
       END
     END
   END
-  rubyToClearVoid()
+  rubyToClearVoid__cleanup_classifier()
   });
 END
 PRIVATE FN cleanupClassifier__stamp_match_as_bindings_mut(match_stmt: MatchStatement, subject: Identifier, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
@@ -887,7 +887,7 @@ PUB FN cleanupClassifier__walk_capture_bindings(MUTABLE body: []Locatable, schem
     Locatable.WhileBindLoop AS while_bind -> TRY (cleanupClassifier__capture_binding_mut(COPY while_bind.binding_name, COPY while_bind.condition, COPY while_bind.condition, schema_lookup, lifecycle_registry, &bindings));,
     Locatable.IfBind AS MUTABLE if_bind -> TRY (cleanupClassifier__if_bind_captures_mut(&if_bind, schema_lookup, lifecycle_registry, &bindings));
   END
-  rubyToClearVoid()
+  rubyToClearVoid__cleanup_classifier()
   });
 END
 PRIVATE FN cleanupClassifier__if_bind_captures_mut(MUTABLE if_bind: IfBind, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
@@ -1206,7 +1206,7 @@ PUB FN cleanupClassifier__binding_value(node: Locatable) RETURNS ?Locatable ->
   ELSE_IF node IS_A BindExpr AS bind_expr THEN
     RETURN CAST(bind_expr.value AS ?Locatable);
   ELSE_IF node IS_A WhileBindLoop AS while_bind_loop THEN
-    RETURN COPY castLocatableToOptionalLocatable(while_bind_loop.condition);
+    RETURN COPY castLocatableToOptionalLocatable__cleanup_classifier(while_bind_loop.condition);
   ELSE
     RETURN NIL;
   END
@@ -1322,7 +1322,7 @@ PUB FN cleanupClassifier__contains_call?(node: Locatable) RETURNS Bool ->
   IF aST__call?(cur) THEN
       found = TRUE;
   END
-  rubyToClearVoid()
+  rubyToClearVoid__cleanup_classifier()
   });
   RETURN found;
 END
@@ -1827,7 +1827,7 @@ PUB FN cleanupClassifier__borrowed_field_names(schema: FieldBearingSchema) RETUR
   RETURN empty;
 END
 # End Ruby module CleanupClassifier
-FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+FN castAssignmentNameToLocatable__cleanup_classifier(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -1854,7 +1854,7 @@ FN castFieldToTypeConstructionInput(value: Field) RETURNS TypeConstructionInput 
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
+FN castLocatableToOptionalLocatable__cleanup_classifier(value: Locatable) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -1992,7 +1992,7 @@ FN castNamesItemToPath(value: NamesItem) RETURNS Path ->
   END
   panic("Invalid cast to Path");
 END
-FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable__cleanup_classifier(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2121,7 +2121,7 @@ FN castVariantNameToUnionLookup(value: VariantName) RETURNS UnionLookup ->
   END
   panic("Invalid cast to UnionLookup");
 END
-FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid__cleanup_classifier() RETURNS Void ->
   RETURN;
 END
 FN ruby_wrap_optional_UnionSchema_SchemaValue(value: ?UnionSchema) RETURNS ?SchemaValue ->
