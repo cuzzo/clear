@@ -1118,3 +1118,19 @@ test "cwd and expandPath resolve against the working directory" {
     // The ".." collapsed rather than being carried into the result.
     try std.testing.expect(std.mem.indexOf(u8, child, "..") == null);
 }
+
+test "expandPathFrom resolves against the base it is given" {
+    const from = try CheatLib.expandPathFrom(std.testing.allocator, "b.clear", "/pkg/a");
+    defer std.testing.allocator.free(from);
+    try std.testing.expectEqualStrings("/pkg/a/b.clear", from);
+
+    // An absolute path ignores the base.
+    const abs = try CheatLib.expandPathFrom(std.testing.allocator, "/other/c", "/pkg/a");
+    defer std.testing.allocator.free(abs);
+    try std.testing.expectEqualStrings("/other/c", abs);
+
+    // Parent segments collapse against the base.
+    const up = try CheatLib.expandPathFrom(std.testing.allocator, "../d", "/pkg/a");
+    defer std.testing.allocator.free(up);
+    try std.testing.expectEqualStrings("/pkg/d", up);
+}

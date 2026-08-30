@@ -2912,6 +2912,18 @@ pub const CheatLib = struct {
         return std.fs.path.resolve(allocator, &.{ here, path });
     }
 
+    // Ruby's File.expand_path(path, base): resolve against a given directory.
+    pub fn expandPathFrom(allocator: std.mem.Allocator, path: []const u8, base: []const u8) ![]const u8 {
+        if (std.fs.path.isAbsolute(path)) return std.fs.path.resolve(allocator, &.{path});
+
+        const anchored = if (std.fs.path.isAbsolute(base))
+            try allocator.dupe(u8, base)
+        else
+            try expandPath(allocator, base);
+        defer allocator.free(anchored);
+        return std.fs.path.resolve(allocator, &.{ anchored, path });
+    }
+
     pub fn shell(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
         const libc = struct {
             extern "c" fn popen(command: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE;

@@ -92,11 +92,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN semanticAnnotator__new(importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !SemanticAnnotator@multiowned ->
-  MUTABLE self = SemanticAnnotator{ annotation_products: annotationProducts__new(), config: SemanticAnnotatorConfig{ importer: ( { MUTABLE rtoc_optional_or_source_6: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_7: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_6 != NIL THEN rtoc_optional_or_result_7 = COPY rtoc_optional_or_source_6; ELSE rtoc_optional_or_result_7 = COPY compiler; END rtoc_optional_or_result_7 } ), source_dir: COPY IF COPY source_dir != NIL THEN
-  expand(COPY source_dir)
-ELSE
-  TRY (pwd())
-END, strict_test: strict_test, source_code: COPY source_code }, semantic_index: NIL };
+  MUTABLE rtoc_source_dir: String = "";
+  IF source_dir EXISTS AS rtoc_dir THEN
+    rtoc_source_dir = TRY (expand(rtoc_dir));
+  ELSE
+    rtoc_source_dir = TRY (pwd());
+  END
+  MUTABLE self = SemanticAnnotator{ annotation_products: annotationProducts__new(), config: SemanticAnnotatorConfig{ importer: ( { MUTABLE rtoc_optional_or_source_6: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_7: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_6 != NIL THEN rtoc_optional_or_result_7 = COPY rtoc_optional_or_source_6; ELSE rtoc_optional_or_result_7 = COPY compiler; END rtoc_optional_or_result_7 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code }, semantic_index: NIL };
   TRY (semanticAnnotator__initialize(&self, importer, compiler, source_dir, strict_test, source_code));
   RETURN self @multiowned;
 END
