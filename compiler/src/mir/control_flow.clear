@@ -1009,7 +1009,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE allocator = IF ti THEN
-      ((((ti.provenance_alloc() OR_ELSE NIL)) OR (IF is_heap THEN
+      ((((ti.provenance_alloc())) OR (IF is_heap THEN
       :heap
     ELSE
       :frame
@@ -1912,7 +1912,7 @@ PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_n
     ELSE
       node.args().first()
     END;
-    MUTABLE root = (aST__root_identifier(receiver) OR_ELSE NIL);
+    MUTABLE root = (aST__root_identifier(receiver));
     IF !((IF root != NIL THEN
       root.symbol
     ELSE

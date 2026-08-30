@@ -87,7 +87,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwn
   IF !(root) THEN
       RETURN;
   END
-  MUTABLE ident = (aST__root_identifier(arg) OR_ELSE NIL);
+  MUTABLE ident = (aST__root_identifier(arg));
   MUTABLE entry = (self.bindings[UNWRAP (root)] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
   IF !(((IF ident != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ident.symbol();

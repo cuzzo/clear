@@ -99,7 +99,7 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
   MUTABLE setup_stmts = [Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY promise_expr_mir, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
   MUTABLE captured_promise_guard_name: ?String = NIL;
   MUTABLE captured_names = ctx.captured.keys() |> SELECT _.toString();
-  MUTABLE promise_root = (aST__root_identifier(UNWRAP (next_tail.promise_ast)) OR_ELSE NIL);
+  MUTABLE promise_root = (aST__root_identifier(UNWRAP (next_tail.promise_ast)));
   IF (promise_root AND captured_names.contains?(CAST(promise_root.name() AS String))) THEN
     captured_promise_guard_name = "${promise_root.name()}_moved";
     &setup_stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: UNWRAP (COPY captured_promise_guard_name), lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });

@@ -77,7 +77,7 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
                 rtoc_idx_2 = rtoc_idx_2 + 1;
           CONTINUE;
             END
-            MUTABLE callee_param = ((fn_nodes[summary.call_site_facts[rtoc_idx]?.callee_name])?.params[kept[rtoc_idx_2]] OR_ELSE NIL);
+            MUTABLE callee_param = ((fn_nodes[summary.call_site_facts[rtoc_idx]?.callee_name])?.params[kept[rtoc_idx_2]]);
             MUTABLE inherited: ?KeptIdentityContract = NIL;
             IF (IF callee_param != NIL THEN
                 callee_param.symbol

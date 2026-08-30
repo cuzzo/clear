@@ -161,7 +161,7 @@ PRIVATE FN liveness__collect_defs(MUTABLE stmt: Stmt, into: Any) RETURNS !Void -
     END
   ELSE_IF stmt IS_A Assignment AS assignment THEN
     IF TRUE THEN
-      into[assignment.name] = (into[assignment.name] OR_ELSE NIL);
+      into[assignment.name] = (into[assignment.name]);
     END
   ELSE_IF stmt IS_A DestructuringAssignment AS destructuring_assignment THEN
     MUTABLE destructuring_assignment_mutable = COPY destructuring_assignment;

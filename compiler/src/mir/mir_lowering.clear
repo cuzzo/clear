@@ -3685,7 +3685,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A Identifier THEN
       RETURN COPY CAST(node.name() AS String);
     END
-    MUTABLE root = (aST__root_identifier(node) OR_ELSE NIL);
+    MUTABLE root = (aST__root_identifier(node));
     IF root != NIL THEN
     IF root.name() != NIL THEN
       RETURN COPY CAST(((root.name())?) AS String);
@@ -5853,7 +5853,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((source_node IS_A Identifier OR source_node IS_A GetIndex)) THEN
       RETURN FALSE;
     END
-    MUTABLE root = (aST__root_identifier(ast_node) OR_ELSE NIL);
+    MUTABLE root = (aST__root_identifier(ast_node));
     MUTABLE borrowed = (((IF root != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_186 = root.symbol;
     symbolEntry__borrow_provenance?(rtoc_local_receiver_186) }
@@ -8259,7 +8259,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(((((TRY (type__needs_explicit_cleanup?(ti, alloc, mIRLowering__mir_schema_lookup(rtoc_self_view))) OR TRY (type__recursive_cleanup_shape?(ti, mIRLowering__mir_schema_lookup(rtoc_self_view)))) OR TRY (type__needs_cleanup?(ti, mIRLowering__mir_schema_lookup(rtoc_self_view)))) OR TRY (type__heap_ptr?(ti))) OR TRY (type__collection_value?(ti)))) THEN
         RETURN NIL;
       END
-      MUTABLE zig_t = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ StringValue: CAST(type__resolved(ti) AS String) }))))) OR_ELSE NIL));
+      MUTABLE zig_t = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ StringValue: CAST(type__resolved(ti) AS String) })))))));
       IF !(zig_t) THEN
         RETURN NIL;
       END
@@ -11258,7 +11258,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE pt_obj = IF p_type IS_A Type THEN
         p_type
       ELSE
-        ((TRY (type__new(p_type)) OR_ELSE NIL))
+        ((TRY (type__new(p_type))))
       END;
     MUTABLE pp = !(!(((pt_obj AND (((TRUE AND type__needs_pointer_passing?(pt_obj)) OR (((_.mutable() AND respondsTo?(pt_obj, "list_collection?")) AND pt_obj.list_collection?()))))))));
     pp = (pp OR (_.mutable() == TRUE));
@@ -16733,7 +16733,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             RETURN NIL;
           END
           MUTABLE bare = TRY (type__bare_data_type(expected_ft));
-          MUTABLE default_ti = (TRY (type__from_node_mut(binary_op_mutable.right, "kept orelse default")) OR_ELSE NIL);
+          MUTABLE default_ti = (TRY (type__from_node_mut(binary_op_mutable.right, "kept orelse default")));
           MUTABLE default_rc = ((default_ti != NIL) AND (TRY (type__any_rc?(default_ti)) == TRUE));
           IF (!(default_rc) AND respondsTo?(binary_op_mutable.right, "matched_signature")) THEN
             MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(binary_op_mutable.right.matched_signature);
@@ -18768,7 +18768,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target = COPY node.name;
     IF target IS_A GetField AS get_field THEN
       MUTABLE get_field_mutable = COPY get_field;
-      MUTABLE ft = (TRY (aST__full_type_mut(get_field_mutable)) OR_ELSE NIL);
+      MUTABLE ft = (TRY (aST__full_type_mut(get_field_mutable)));
       IF !((ft IS_A Type AND ft.multiowned?())) THEN
         RETURN NIL;
       END
@@ -20768,7 +20768,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (node IS_A GetField OR node IS_A GetIndex) THEN
       RETURN FALSE;
     END
-    MUTABLE root = (aST__root_identifier(node) OR_ELSE NIL);
+    MUTABLE root = (aST__root_identifier(node));
     MUTABLE entry_branch_value: ?CleanupEntry@multiowned = NIL;
     IF root THEN
       entry_branch_value = COPY (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[root.name()];

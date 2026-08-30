@@ -28,7 +28,7 @@ PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: Annota
   END
   MUTABLE derived: ?DerivedFunctionFacts = NIL;
   IF (KEEP products.capability_audit?.derived_program)?.functions != NIL THEN
-        derived = COPY (((KEEP products.capability_audit?.derived_program)?.functions)?[rtoc_each_key] OR_ELSE NIL);
+        derived = COPY (((KEEP products.capability_audit?.derived_program)?.functions)?[rtoc_each_key]);
       END
   IF !(derived) THEN
         panic("annotation boundary missing derived function facts for {}");
