@@ -14,7 +14,7 @@ PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: Annota
   MUTABLE typed_program: ?TypedProgramFacts = COPY products.typed_program;
   IF typed_program EXISTS AS typed_program_value THEN
     MUTABLE typed_program_value_mutable = COPY typed_program_value;
-    IF !(typedProgramFacts__program(typed_program_value_mutable).equal?(program)) THEN
+    IF (aST__node_identity(Locatable{ Program: COPY typedProgramFacts__program(typed_program_value_mutable) }) != aST__node_identity(Locatable{ Program: COPY program })) THEN
       panic("annotation boundary received a different program");
     END
     TRY (aST__full_type_mut(Locatable{ Program: COPY program }));
