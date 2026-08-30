@@ -10,6 +10,14 @@ REQUIRE "pkg:rtoc_6173742f7061727365722e636c656172"
 REQUIRE "pkg:rtoc_6173742f7061727365722f74797065732e636c656172"
 REQUIRE "pkg:rtoc_6173742f7061727365722f73746174656d656e74735f616e645f636f6e74726f6c5f666c6f772e636c656172"
 REQUIRE "pkg:rtoc_6173742f7061727365722f707265646963617465735f616e645f726566696e656d656e74732e636c656172"
+
+FN regexReplaceFirst__expressions_and_postfix(subject: String, pattern: String, replacement: String) RETURNS String ->
+  RETURN compilerRegexReplaceFirst(subject, compilerRegexCompile(pattern), replacement);
+END
+
+FN regexMatch__expressions_and_postfix?(subject: String, pattern: String) RETURNS Bool ->
+  RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
+END
 EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
@@ -622,7 +630,7 @@ PUB FN clearParser__literal_token_type(self: ClearParser, val: String) RETURNS S
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF regexMatch?(val, "[a-zA-Z]") THEN
+    IF regexMatch__expressions_and_postfix?(val, "[a-zA-Z]") THEN
       RETURN :KEYWORD;
     ELSE
       RETURN :CHAR;
@@ -944,7 +952,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, ")"));
       MUTABLE inner = TRY (clearParser__parse_primary(&rtoc_self_view));
-      RETURN Locatable{ CallSiteOverride: COPY CallSiteOverride{ token: COPY sigil_tok, kind: symbol((regexReplaceFirst((TRY (token__text_mut(sigil_tok))), "@", ""))), n: n, inner: inner, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
+      RETURN Locatable{ CallSiteOverride: COPY CallSiteOverride{ token: COPY sigil_tok, kind: symbol((regexReplaceFirst__expressions_and_postfix((TRY (token__text_mut(sigil_tok))), "@", ""))), n: n, inner: inner, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
     END
     RETURN TRY (clearParser__parse_primary(&rtoc_self_view));
 }

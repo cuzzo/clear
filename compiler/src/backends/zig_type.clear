@@ -1,7 +1,7 @@
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
-FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
+FN regexMatch__zig_type?(subject: String, pattern: String) RETURNS Bool ->
   RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
 END
 
@@ -49,7 +49,7 @@ PUB FN zigType__integer_identifier?(name: String) RETURNS Bool ->
   RETURN zigType__digits_only?(name.substr(1, (name.length() - 1)));
 END
 PRIVATE FN zigType__digits_only?(value: String) RETURNS Bool ->
-  RETURN regexMatch?(value, "\\A[0-9]+\\z");
+  RETURN regexMatch__zig_type?(value, "\\A[0-9]+\\z");
 END
 PUB FN zigType__error_union?(self: ZigType) RETURNS Bool ->
   RETURN ((self.inferred_error_union OR self.anyerror_union) OR self.explicit_error_set_union);
@@ -101,7 +101,7 @@ PRIVATE FN zigType__top_level_error_union?(self: ZigType) RETURNS Bool ->
   RETURN (zigType__inferred_error_union?(self) OR zigType__top_level_concrete_error_union?(self));
 END
 PRIVATE FN zigType__top_level_concrete_error_union?(self: ZigType) RETURNS Bool ->
-  RETURN (self.source.startsWith?("anyerror!") OR regexMatch?(self.source, "\\Aerror\\{[^}]*\\}!"));
+  RETURN (self.source.startsWith?("anyerror!") OR regexMatch__zig_type?(self.source, "\\Aerror\\{[^}]*\\}!"));
 END
 PUB FN zigType__new(source: String) RETURNS ZigType ->
   MUTABLE self = ZigType{ anyerror_union: FALSE, explicit_error_set_union: FALSE, inferred_error_union: FALSE, source: COPY source };

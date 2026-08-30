@@ -8,7 +8,7 @@ FN regexFirstMatch__type_expression(subject: String, pattern: String) RETURNS ?S
 END
 EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS ?CompilerRegexScanner EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
-FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
+FN regexMatch__type_expression?(subject: String, pattern: String) RETURNS Bool ->
   RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
 END
 
@@ -483,7 +483,7 @@ PUB FN typeExpressionParser__parse(raw: Raw) RETURNS !TypeExpression EFFECTS REE
         cardinality_branch_value = TypeExpressionDimension{ SymbolValue: :FINITE };
       ELSE_IF (marker == "INF") THEN
         cardinality_branch_value = TypeExpressionDimension{ SymbolValue: :INF };
-      ELSE_IF regexMatch?(marker, "\\A\\d+\\z") THEN
+      ELSE_IF regexMatch__type_expression?(marker, "\\A\\d+\\z") THEN
         cardinality_branch_value = TypeExpressionDimension{ Int64Value: TRY (marker.toInt()) };
       ELSE
         cardinality_branch_value = NIL;
@@ -701,7 +701,7 @@ PRIVATE FN typeExpressionParser__split_array_suffix(source: String) RETURNS !?Tu
           "*" ->
           dimension_branch_value = TypeExpressionDimension{ SymbolValue: :INFERRED };,
           DEFAULT ->
-          IF !(regexMatch?(dimension_source, "\\A\\d+\\z")) THEN
+          IF !(regexMatch__type_expression?(dimension_source, "\\A\\d+\\z")) THEN
             RETURN NIL;
           END
           dimension_branch_value = TypeExpressionDimension{ Int64Value: TRY (dimension_source.toInt()) };
@@ -721,7 +721,7 @@ PRIVATE FN typeExpressionParser__split_generic(source: String) RETURNS !?Generic
       RETURN NIL;
     ELSE
       MUTABLE base = COPY (source.substr(0, (opening_value - 0)));
-      IF !(regexMatch?(base, "\\A[A-Z]\\w*\\z")) THEN
+      IF !(regexMatch__type_expression?(base, "\\A[A-Z]\\w*\\z")) THEN
         RETURN NIL;
       END
       MUTABLE inner = COPY (source.substr(((opening_value + 1)), ((source.length() - 1) - ((opening_value + 1)))));

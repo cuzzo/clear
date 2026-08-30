@@ -8,7 +8,7 @@ REQUIRE "pkg:rtoc_6173742f66726f6e74656e645f7265736f757263655f6275646765742e636c
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-PUB FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
+PUB FN regexReplaceAll__state(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END
 
@@ -176,7 +176,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     # split() builds a temporary list; the element is a borrow INTO it, so the
     # binding needs its own copy or both free the same bytes.
     MUTABLE line_text = COPY (rtoc_self_view.source_code.split("\n")[(prev_tok.line - 1)] OR_ELSE "");
-    MUTABLE insert_col = (regexReplaceAll(line_text, "\\s+\\z", "").length() + 1);
+    MUTABLE insert_col = (regexReplaceAll__state(line_text, "\\s+\\z", "").length() + 1);
     MUTABLE leader: String = "";
     IF ((expected_value == ";")) THEN
       leader = "";

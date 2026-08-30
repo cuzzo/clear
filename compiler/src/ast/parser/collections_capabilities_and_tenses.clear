@@ -27,7 +27,7 @@ EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_reg
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-PUB FN regexReplaceFirst(subject: String, pattern: String, replacement: String) RETURNS String ->
+PUB FN regexReplaceFirst__collections_capabilities_and_tenses(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceFirst(subject, compilerRegexCompile(pattern), replacement);
 END
 
@@ -639,7 +639,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF has_at THEN
           candidates = (clearParser__cap_sigil_attrs()).keys();
         ELSE
-          candidates = (clearParser__cap_sigil_attrs()).keys() |> SELECT regexReplaceFirst(_, "^@", "");
+          candidates = (clearParser__cap_sigil_attrs()).keys() |> SELECT regexReplaceFirst__collections_capabilities_and_tenses(_, "^@", "");
         END
         TRY (clearParser__emit_typo_suggestion_mut(rtoc_self_view, clearParser__current(rtoc_self_view), token__display_value(clearParser__current(rtoc_self_view)), candidates, "Unknown capability sigil '${token__display_value(clearParser__current(rtoc_self_view))}'", "closest capability sigil", :capability, TRUE));
       END
@@ -765,7 +765,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF has_at THEN
           candidates = sigils.keys();
         ELSE
-          candidates = sigils.keys() |> SELECT regexReplaceFirst(_, "^@", "");
+          candidates = sigils.keys() |> SELECT regexReplaceFirst__collections_capabilities_and_tenses(_, "^@", "");
         END
         TRY (clearParser__emit_typo_suggestion_mut(rtoc_self_view, tok, token_text, candidates, "Unknown ${prefix_label} prefix ${compilerInspectValue()}", suggestion_label, :type, TRUE));
       END

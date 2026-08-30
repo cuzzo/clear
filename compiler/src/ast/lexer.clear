@@ -2,10 +2,10 @@ REQUIRE "pkg:rtoc_6173742f66726f6e74656e645f7265736f757263655f6275646765742e636c
 EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
+FN regexMatch__lexer?(subject: String, pattern: String) RETURNS Bool ->
   RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
 END
-FN regexReplaceFirst(subject: String, pattern: String, replacement: String) RETURNS String ->
+FN regexReplaceFirst__lexer(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceFirst(subject, compilerRegexCompile(pattern), replacement);
 END
 FN escapeRegex__lexer(value: String) RETURNS String ->
@@ -294,7 +294,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE word = rtoc_self_view.s.matched();
         IF (word == "MUTABLE") OR (word == "FN") OR (word == "METHOD") OR (word == "RETURN") OR (word == "RETURNS") OR (word == "USE") OR (word == "CONST") OR (word == "IF") OR (word == "THEN") OR (word == "ELSE") OR (word == "ELSE_IF") OR (word == "END") OR (word == "COMPTIME") OR (word == "IS_A") OR (word == "EXISTS") OR (word == "IS_OK") OR (word == "IS_READY") OR (word == "WHILE") OR (word == "DO") OR (word == "FOR") OR (word == "IN") OR (word == "BG") OR (word == "NEXT") OR (word == "BREAK") OR (word == "CONTINUE") OR (word == "CAST") OR (word == "AS") OR (word == "TRY") OR (word == "UNWRAP") OR (word == "STRUCT") OR (word == "ENUM") OR (word == "UNION") OR (word == "PROTOCOL") OR (word == "IMPLEMENTATION") OR (word == "TRUE") OR (word == "FALSE") OR (word == "NIL") OR (word == "Auto") OR (word == "ASSERT") OR (word == "RAISE") OR (word == "CATCH") OR (word == "EXIT") OR (word == "DIE") OR (word == "PASS") OR (word == "PRUNE") OR (word == "DEFER") OR (word == "MOD") OR (word == "AND") OR (word == "OR") OR (word == "OR_ELSE") OR (word == "XOR") OR (word == "BIT_AND") OR (word == "BIT_OR") OR (word == "REQUIRE") OR (word == "SELECT") OR (word == "WHERE") OR (word == "INDEX") OR (word == "REDUCE") OR (word == "ORDER_BY") OR (word == "LIMIT") OR (word == "SKIP") OR (word == "UNNEST") OR (word == "DISTINCT") OR (word == "EACH") OR (word == "TAP") OR (word == "FIND") OR (word == "ANY") OR (word == "ALL") OR (word == "COUNT") OR (word == "SUM") OR (word == "AVERAGE") OR (word == "MIN") OR (word == "MAX") OR (word == "CONCURRENT") OR (word == "SHARD") OR (word == "TAKE_WHILE") OR (word == "WINDOW") OR (word == "JOIN") OR (word == "RECOVER") OR (word == "COLLECT") OR (word == "GIVE") OR (word == "TAKES") OR (word == "COPY") OR (word == "KEEP") OR (word == "MOVE") OR (word == "SHARE") OR (word == "LINK") OR (word == "RESOLVE") OR (word == "FREEZE") OR (word == "UNIQUE") OR (word == "MONOMORPHIC") OR (word == "OWN") OR (word == "WITH") OR (word == "EXCLUSIVE") OR (word == "RESTRICT") OR (word == "BORROWED") OR (word == "ON") OR (word == "RETRY") OR (word == "POSSIBLE_DEADLOCK") OR (word == "POSSIBLE_LOCK_CYCLE") OR (word == "VIEW") OR (word == "MATERIALIZED") OR (word == "UNSAFE") OR (word == "LENGTH") OR (word == "SNAPSHOT") OR (word == "GUARD") OR (word == "PRE") OR (word == "DEBUG_POST") OR (word == "POLYMORPHIC") OR (word == "SHARED") OR (word == "SYNC") OR (word == "POLICY") OR (word == "REQUIRES") OR (word == "MATCH") OR (word == "PARTIAL") OR (word == "START") OR (word == "DEFAULT") OR (word == "WHEN") OR (word == "PUB") OR (word == "PRIVATE") OR (word == "EXTERN") OR (word == "FROM") OR (word == "EFFECTS") OR (word == "CLOSE") OR (word == "ABI") OR (word == "CALLCONV") OR (word == "HEADER") OR (word == "STREAM") OR (word == "YIELD") OR (word == "YIELDS") OR (word == "TIGHT") OR (word == "TEST") OR (word == "THAT") OR (word == "STUB") OR (word == "BENCHMARK") OR (word == "SMASH") OR (word == "PROFILE") OR (word == "ASSERT_RAISES") OR (word == "CAPTURES") OR (word == "SEQUENCE") OR (word == "PENDING") OR (word == "BEFORE") OR (word == "AFTER") OR (word == "LET") OR (word == "TAGS") THEN
           lexer__add(&rtoc_self_view, :KEYWORD, TokenValue{ StringValue: COPY word }, start_col);
-        ELSE_IF regexMatch?(word, "^[A-Z]") THEN
+        ELSE_IF regexMatch__lexer?(word, "^[A-Z]") THEN
           lexer__add(&rtoc_self_view, :TYPE_ID, TokenValue{ StringValue: COPY word }, start_col);
         ELSE
           lexer__add(&rtoc_self_view, :VAR_ID, TokenValue{ StringValue: COPY word }, start_col);
@@ -584,7 +584,7 @@ PRIVATE FN lexer__strip_digit_separators(self: Lexer, matched: String, suffix: S
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE body = regexReplaceFirst(matched, "_${escapeRegex__lexer(suffix)}\\z", "");
+    MUTABLE body = regexReplaceFirst__lexer(matched, "_${escapeRegex__lexer(suffix)}\\z", "");
     RETURN body.replace("_", "");
 }
 END

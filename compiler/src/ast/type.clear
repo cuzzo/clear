@@ -10,10 +10,10 @@ EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
+FN regexReplaceAll__type(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END
-FN regexReplaceFirst(subject: String, pattern: String, replacement: String) RETURNS String ->
+FN regexReplaceFirst__type(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceFirst(subject, compilerRegexCompile(pattern), replacement);
 END
 
@@ -1898,7 +1898,7 @@ PUB FN type__lifecycle_type_key(self: Type) RETURNS String ->
       DEFAULT -> "owned"
     END;
   END
-  RETURN regexReplaceFirst(type__semantic_type_key(self), "\\|loc=[^|]+", "|loc=${location}");
+  RETURN regexReplaceFirst__type(type__semantic_type_key(self), "\\|loc=[^|]+", "|loc=${location}");
 END
 PUB FN type__base_type(self: Type) RETURNS !String@symbol ->
   MUTABLE element_raw: ?String@symbol = TRY (typeShape__element_type_raw(self.shape));
@@ -4176,7 +4176,7 @@ PRIVATE FN type__parse_raw_string_mut(MUTABLE self: Type, raw_str: String, auto:
   IF (raw_str == "Number") THEN
     normalized_str = "Float64";
   ELSE_IF raw_str.contains?("Number") THEN
-    normalized_str = regexReplaceAll(raw_str, "\\bNumber\\b", "Float64");
+    normalized_str = regexReplaceAll__type(raw_str, "\\bNumber\\b", "Float64");
   END
   MUTABLE suffix: TypeCapabilitySuffix = TypeCapabilitySuffix{ base: COPY normalized_str, ownership: NIL, sync: NIL };
   IF ((!(normalized_str.contains?("<")) AND normalized_str.contains?("@")) AND !(normalized_str.startsWith?("@"))) THEN
@@ -4210,7 +4210,7 @@ PUB FN type__strip_capability_suffix_from(str: String) RETURNS TypeCapabilitySuf
   IF !(str.contains?("@")) THEN
     RETURN TypeCapabilitySuffix{ base: COPY str, ownership: NIL, sync: NIL };
   END
-  MUTABLE parts = regexReplaceAll(str, "\\s+", "").split("@");
+  MUTABLE parts = regexReplaceAll__type(str, "\\s+", "").split("@");
   MUTABLE base = COPY (parts[0] OR_ELSE "");
   MUTABLE caps = parts |> SKIP 1;
   MUTABLE ownership: ?String@symbol = NIL;

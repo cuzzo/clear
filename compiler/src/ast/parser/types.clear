@@ -7,6 +7,10 @@ REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172"
 REQUIRE "pkg:rtoc_6173742f747970655f65787072657373696f6e2e636c656172"
 REQUIRE "pkg:rtoc_6173742f747970655f6361706162696c69746965732e636c656172"
 REQUIRE "pkg:rtoc_6173742f66726f6e74656e645f7265736f757263655f6275646765742e636c656172"
+
+FN regexReplaceAll__types(subject: String, pattern: String, replacement: String) RETURNS String ->
+  RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
+END
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
@@ -269,7 +273,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF line EXISTS AS line_value THEN
         MUTABLE length = ((end_token.column + (token__display_value(end_token)).codepointCount()) - start_token.column);
         MUTABLE original = COPY (line_value.substr(((start_token.column - 1)), length));
-        IF (regexReplaceAll(original, "\\s+", "") == regexReplaceAll(replacement_value, "\\s+", "")) THEN
+        IF (regexReplaceAll__types(original, "\\s+", "") == regexReplaceAll__types(replacement_value, "\\s+", "")) THEN
           RETURN;
         END
         MUTABLE edit = edit__new(span__new(NIL, start_token.line, start_token.column, length), replacement_value);

@@ -11,7 +11,7 @@ REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172"
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
-FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
+FN regexMatch__ast?(subject: String, pattern: String) RETURNS Bool ->
   RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
 END
 
@@ -6330,7 +6330,7 @@ PUB FN aST__inline_union_constructor_target?(node: ?Locatable) RETURNS Bool ->
   IF node? IS_A GetField AS get_field THEN
     MUTABLE target: Locatable = castLocatableToLocatable__ast(get_field.target);
     IF target IS_A Identifier AS identifier THEN
-      RETURN !(!((regexMatch?(identifier__name(identifier).substr(0, 1), "[A-Z]"))));
+      RETURN !(!((regexMatch__ast?(identifier__name(identifier).substr(0, 1), "[A-Z]"))));
     ELSE
       RETURN FALSE;
     END

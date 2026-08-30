@@ -16,7 +16,7 @@ EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_reg
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
+FN regexReplaceAll__mir_emitter(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END
 UNION MIREmitterPlan { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
@@ -1527,7 +1527,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       capture_args = ".{.{${all_capture_args.join(", ")}}}";
     END
-    RETURN regexReplaceAll("try CheatLib.polymorphicMutate(${cell_zig}, ${node.rt}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}${capture_param}) !void {\n        _ = &${node.alias_name};\n        ${capture_suppress}\n        ${body_zig}\n    }\n}.run, ${capture_args});\n", "\\s+\\z", "");
+    RETURN regexReplaceAll__mir_emitter("try CheatLib.polymorphicMutate(${cell_zig}, ${node.rt}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}${capture_param}) !void {\n        _ = &${node.alias_name};\n        ${capture_suppress}\n        ${body_zig}\n    }\n}.run, ${capture_args});\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_polymorphic_mutate_flow(MUTABLE self: MIREmitter, node: PolymorphicMutateFlow) RETURNS !String
@@ -1604,7 +1604,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       fallthrough_arm = "{}";
     END
-    MUTABLE result = regexReplaceAll(("const __PolyFlow = struct {\n    kind: enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit },\n    ret: ${TRY (type__zig_type(CAST(node.return_type AS Type)))} = undefined,\n};\nvar __poly_flow = __PolyFlow{ .kind = .cont_commit };\ntry CheatLib.polymorphicMutateFlow(${cell_zig}, ${node.rt}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}, __flow: *__PolyFlow${capture_param}) !void {\n        _ = &${node.alias_name};\n        ${capture_suppress}\n        ${guard_block}\n        ${body_zig}\n        ${IF TRY (mIREmitter__flow_body_terminates?(rtoc_self_view, node.body)) THEN
+    MUTABLE result = regexReplaceAll__mir_emitter(("const __PolyFlow = struct {\n    kind: enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit },\n    ret: ${TRY (type__zig_type(CAST(node.return_type AS Type)))} = undefined,\n};\nvar __poly_flow = __PolyFlow{ .kind = .cont_commit };\ntry CheatLib.polymorphicMutateFlow(${cell_zig}, ${node.rt}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}, __flow: *__PolyFlow${capture_param}) !void {\n        _ = &${node.alias_name};\n        ${capture_suppress}\n        ${guard_block}\n        ${body_zig}\n        ${IF TRY (mIREmitter__flow_body_terminates?(rtoc_self_view, node.body)) THEN
       ""
     ELSE
       "__flow.* = .{ .kind = .cont_commit };"
@@ -1859,7 +1859,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &padded.append("${pad}${line}");
       END
     END
-    RETURN regexReplaceAll(padded.join("\n"), "\\s+\\z", "");
+    RETURN regexReplaceAll__mir_emitter(padded.join("\n"), "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_snapshot_transaction(MUTABLE self: MIREmitter, node: SnapshotTransaction) RETURNS !String
@@ -1870,7 +1870,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_zig = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
     MUTABLE cell_unwrap = TRY (mIREmitter__emit(&rtoc_self_view, node.cell_unwrap));
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
-    MUTABLE core = regexReplaceAll("${cell_unwrap}.*.update(${node.rt}, ${alloc}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}) void {\n        _ = &${node.alias_name};\n        ${body_zig}\n    }\n}.run, .{})\n", "\\s+\\z", "");
+    MUTABLE core = regexReplaceAll__mir_emitter("${cell_unwrap}.*.update(${node.rt}, ${alloc}, struct {\n    fn run(${node.alias_name}: *${TRY (type__zig_type(CAST(node.bare_type AS Type)))}) void {\n        _ = &${node.alias_name};\n        ${body_zig}\n    }\n}.run, .{})\n", "\\s+\\z", "");
     MUTABLE zig_error_name: String = "";
     IF node.is_atomic_ptr THEN
       zig_error_name = "AtomicConflict";
@@ -1900,7 +1900,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       alias_index = (alias_index + 1);
     END
     MUTABLE alias_decls = alias_parts.join("\n            ");
-    MUTABLE core = regexReplaceAll("CheatLib.versionedUpdateMulti(${cells_tuple}, ${node.rt}, ${alloc}, struct {\n    fn run(views: anytype) anyerror!void {\n        ${alias_decls}\n        ${body_zig}\n    }\n}.run, .{})\n", "\\s+\\z", "");
+    MUTABLE core = regexReplaceAll__mir_emitter("CheatLib.versionedUpdateMulti(${cells_tuple}, ${node.rt}, ${alloc}, struct {\n    fn run(views: anytype) anyerror!void {\n        ${alias_decls}\n        ${body_zig}\n    }\n}.run, .{})\n", "\\s+\\z", "");
     RETURN TRY (mIREmitter__wrap_conflict_handler(&rtoc_self_view, core, castEmittableToOptionalFailureAction(node.conflict_action), node.retries));
 }
 END
@@ -2005,9 +2005,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       action_zig = "return error.${zig_error_name};";
     END
     IF retries EXISTS AS retries_value THEN
-      RETURN regexReplaceAll("{\n    var __retry: usize = 0;\n    __snap_retry: while (true) : (__retry += 1) {\n        if (${core_call}) |_| {\n            break :__snap_retry;\n        } else |__err| switch (__err) {\n            error.${zig_error_name} => {\n                if (__retry + 1 < ${retries_value.toString()}) continue;\n                ${action_zig}\n            },\n            else => return __err,\n        }\n    }\n}\n", "\\s+\\z", "");
+      RETURN regexReplaceAll__mir_emitter("{\n    var __retry: usize = 0;\n    __snap_retry: while (true) : (__retry += 1) {\n        if (${core_call}) |_| {\n            break :__snap_retry;\n        } else |__err| switch (__err) {\n            error.${zig_error_name} => {\n                if (__retry + 1 < ${retries_value.toString()}) continue;\n                ${action_zig}\n            },\n            else => return __err,\n        }\n    }\n}\n", "\\s+\\z", "");
     ELSE
-      RETURN regexReplaceAll("${core_call} catch |__err| switch (__err) {\n    error.${zig_error_name} => { ${action_zig} },\n    else => return __err,\n};\n", "\\s+\\z", "");
+      RETURN regexReplaceAll__mir_emitter("${core_call} catch |__err| switch (__err) {\n    error.${zig_error_name} => { ${action_zig} },\n    else => return __err,\n};\n", "\\s+\\z", "");
     END
 }
 END
@@ -2106,9 +2106,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE handler = TRY (mIREmitter__emit_fallible_lock_error_handler(&rtoc_self_view, castEmittableToFailureAction(node.action), node.retries, node.matched_types, node.bubble_types, node.rt_name, CAST(node.source_line AS String)));
     MUTABLE acquire_call = TRY (mIREmitter__emit(&rtoc_self_view, node.acquire_call));
     IF node.retries THEN
-      RETURN regexReplaceAll("${node.acquire_block}: {\n  var __retry: usize = 0;\n  while (true) : (__retry += 1) {\n    if (${acquire_call}) |__g| {\n      break :${node.acquire_block} __g;\n    } else |__err| {\n      ${handler}\n    }\n  }\n}\n", "\\s+\\z", "");
+      RETURN regexReplaceAll__mir_emitter("${node.acquire_block}: {\n  var __retry: usize = 0;\n  while (true) : (__retry += 1) {\n    if (${acquire_call}) |__g| {\n      break :${node.acquire_block} __g;\n    } else |__err| {\n      ${handler}\n    }\n  }\n}\n", "\\s+\\z", "");
     ELSE
-      RETURN regexReplaceAll("${node.acquire_block}: {\n  if (${acquire_call}) |__g| {\n    break :${node.acquire_block} __g;\n  } else |__err| {\n    ${handler}\n  }\n}\n", "\\s+\\z", "");
+      RETURN regexReplaceAll__mir_emitter("${node.acquire_block}: {\n  if (${acquire_call}) |__g| {\n    break :${node.acquire_block} __g;\n  } else |__err| {\n    ${handler}\n  }\n}\n", "\\s+\\z", "");
     END
 }
 END
@@ -2184,7 +2184,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE switch_arms = switch_parts.join("\n                ");
     MUTABLE defer_releases = release_parts.join("\n");
     MUTABLE alias_decls = alias_parts.join("\n");
-    RETURN regexReplaceAll("${guard_decls}\n{\n    const __ptrs = [_]usize{ ${ptr_init} };\n    var __order = [_]u8{ ${order_init} };\n    var __i: usize = 0;\n    while (__i < ${n.toString()}) : (__i += 1) {\n        var __j: usize = 0;\n        while (__j + 1 < ${n.toString()}) : (__j += 1) {\n            if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {\n                const __tmp = __order[__j];\n                __order[__j] = __order[__j + 1];\n                __order[__j + 1] = __tmp;\n            }\n        }\n    }\n    for (__order) |__idx| {\n        switch (__idx) {\n          ${switch_arms}\n          else => unreachable,\n        }\n    }\n}\n${defer_releases}\n${alias_decls}\n", "\\s+\\z", "");
+    RETURN regexReplaceAll__mir_emitter("${guard_decls}\n{\n    const __ptrs = [_]usize{ ${ptr_init} };\n    var __order = [_]u8{ ${order_init} };\n    var __i: usize = 0;\n    while (__i < ${n.toString()}) : (__i += 1) {\n        var __j: usize = 0;\n        while (__j + 1 < ${n.toString()}) : (__j += 1) {\n            if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {\n                const __tmp = __order[__j];\n                __order[__j] = __order[__j + 1];\n                __order[__j + 1] = __tmp;\n            }\n        }\n    }\n    for (__order) |__idx| {\n        switch (__idx) {\n          ${switch_arms}\n          else => unreachable,\n        }\n    }\n}\n${defer_releases}\n${alias_decls}\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_sorted_lock_acquire_fallible(MUTABLE self: MIREmitter, node: SortedLockAcquire) RETURNS !String
@@ -2207,7 +2207,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &guard_parts.append("var ${entry.guard_var}: @TypeOf(try ${lock_expr}.${entry.method_name}()) = undefined;");
       &held_parts.append("var ${entry.held_var}: bool = false;");
       &ptr_parts.append("@intFromPtr(${TRY (mIREmitter__emit(&rtoc_self_view, entry.address_expr))})");
-      &acquire_parts.append(regexReplaceAll("${entry.index.toString()} => {\n                                if (${lock_expr}.${entry.method_name}()) |__g| {\n                                    ${entry.guard_var} = __g;\n                                    ${entry.held_var} = true;\n                                } else |__err_inner| {\n                                    __err_caught = __err_inner;\n                                    __success = false;\n                                }\n                            },\n", "\\s+\\z", ""));
+      &acquire_parts.append(regexReplaceAll__mir_emitter("${entry.index.toString()} => {\n                                if (${lock_expr}.${entry.method_name}()) |__g| {\n                                    ${entry.guard_var} = __g;\n                                    ${entry.held_var} = true;\n                                } else |__err_inner| {\n                                    __err_caught = __err_inner;\n                                    __success = false;\n                                }\n                            },\n", "\\s+\\z", ""));
       &release_parts.append("${entry.index.toString()} => if (${entry.held_var}) { ${entry.guard_var}.release(); ${entry.held_var} = false; },");
     END
     MUTABLE order_parts: []String = List[];
@@ -2229,7 +2229,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE defer_releases = (entries |> SELECT "defer if (${_.held_var}) ${_.guard_var}.release();").join("\n");
     MUTABLE alias_decls = (entries |> SELECT "const ${_.alias_name} = ${_.guard_var}.get;\n_ = &${_.alias_name};").join("\n");
-    RETURN regexReplaceAll("${guard_decls}\n${held_decls}\n${node.loop_label}: {\n    var __retry: usize = 0;\n    while (true) : (__retry += 1) {\n        const __ptrs = [_]usize{ ${ptr_init} };\n        var __order = [_]u8{ ${order_init} };\n        var __i: usize = 0;\n        while (__i < ${n.toString()}) : (__i += 1) {\n            var __j: usize = 0;\n            while (__j + 1 < ${n.toString()}) : (__j += 1) {\n                if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {\n                    const __tmp = __order[__j];\n                    __order[__j] = __order[__j + 1];\n                    __order[__j + 1] = __tmp;\n                }\n            }\n        }\n        var __success = true;\n        var __err_caught: ?anyerror = null;\n        var __k: usize = 0;\n        while (__k < ${n.toString()}) : (__k += 1) {\n            const __idx = __order[__k];\n            switch (__idx) {\n                ${acquire_arms}\n                else => unreachable,\n            }\n            if (!__success) break;\n        }\n        if (__success) break :${node.loop_label};\n        var __r: usize = __k;\n        while (__r > 0) {\n            __r -= 1;\n            switch (__order[__r]) {\n                ${release_arms}\n                else => unreachable,\n            }\n        }\n        ${retry_branch}\n        ${handler_switch}\n        unreachable;\n    }\n}\n${defer_releases}\n${alias_decls}\n", "\\s+\\z", "");
+    RETURN regexReplaceAll__mir_emitter("${guard_decls}\n${held_decls}\n${node.loop_label}: {\n    var __retry: usize = 0;\n    while (true) : (__retry += 1) {\n        const __ptrs = [_]usize{ ${ptr_init} };\n        var __order = [_]u8{ ${order_init} };\n        var __i: usize = 0;\n        while (__i < ${n.toString()}) : (__i += 1) {\n            var __j: usize = 0;\n            while (__j + 1 < ${n.toString()}) : (__j += 1) {\n                if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {\n                    const __tmp = __order[__j];\n                    __order[__j] = __order[__j + 1];\n                    __order[__j + 1] = __tmp;\n                }\n            }\n        }\n        var __success = true;\n        var __err_caught: ?anyerror = null;\n        var __k: usize = 0;\n        while (__k < ${n.toString()}) : (__k += 1) {\n            const __idx = __order[__k];\n            switch (__idx) {\n                ${acquire_arms}\n                else => unreachable,\n            }\n            if (!__success) break;\n        }\n        if (__success) break :${node.loop_label};\n        var __r: usize = __k;\n        while (__r > 0) {\n            __r -= 1;\n            switch (__order[__r]) {\n                ${release_arms}\n                else => unreachable,\n            }\n        }\n        ${retry_branch}\n        ${handler_switch}\n        unreachable;\n    }\n}\n${defer_releases}\n${alias_decls}\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_sorted_lock_handler_switch(MUTABLE self: MIREmitter, action: FailureAction, matched: []String@symbol, bubble: []String@symbol, rt_name: String, source_line: String) RETURNS !String
@@ -3944,7 +3944,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       error_check = "";
     END
-    RETURN regexReplaceAll("{\n    if (${TRY (mIREmitter__emit(&rtoc_self_view, node.expr))}) |_| {\n        @panic(\"ASSERT_RAISES: expected ${node.kind} error but none raised\");\n    } else |_| {\n        if (!${node.rt_name}.__error.matchesKind(.${node.kind})${error_check}) {\n            @panic(\"ASSERT_RAISES: expected ${node.kind} error, got different kind\");\n        }\n    }\n}\n", "\\s+\\z", "");
+    RETURN regexReplaceAll__mir_emitter("{\n    if (${TRY (mIREmitter__emit(&rtoc_self_view, node.expr))}) |_| {\n        @panic(\"ASSERT_RAISES: expected ${node.kind} error but none raised\");\n    } else |_| {\n        if (!${node.rt_name}.__error.matchesKind(.${node.kind})${error_check}) {\n            @panic(\"ASSERT_RAISES: expected ${node.kind} error, got different kind\");\n        }\n    }\n}\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_test_preamble(self: MIREmitter) RETURNS String
@@ -3961,7 +3961,7 @@ PRIVATE FN mIREmitter__emit_debug_only(MUTABLE self: MIREmitter, node: DebugOnly
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body = TRY (mIREmitter__emit_body(&rtoc_self_view, node.body));
-    RETURN regexReplaceAll("if (@import(\"builtin\").mode == .Debug) {\n${mIREmitter__indent_block(rtoc_self_view, body, 4)}\n}\n", "\\s+\\z", "");
+    RETURN regexReplaceAll__mir_emitter("if (@import(\"builtin\").mode == .Debug) {\n${mIREmitter__indent_block(rtoc_self_view, body, 4)}\n}\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__paren_if_try(self: MIREmitter, expr: String) RETURNS String
@@ -4025,11 +4025,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE alloc = TRY (mIREmitter__alloc_zig(rtoc_self_view, node.alloc));
     MUTABLE resolved_value: String = "";
     IF asyncResultShape__boxes_fallible_payload?(node.async_shape) THEN
-      resolved_value = regexReplaceAll("const __resolved = try __p.next();\n        var __value = __resolved.value catch |__err| {\n            CheatLib.cleanup(@TypeOf(${node.results_var}), ${alloc}, &${node.results_var});\n            break :${node.label} __err;\n        };\n", "\\s+\\z", "");
+      resolved_value = regexReplaceAll__mir_emitter("const __resolved = try __p.next();\n        var __value = __resolved.value catch |__err| {\n            CheatLib.cleanup(@TypeOf(${node.results_var}), ${alloc}, &${node.results_var});\n            break :${node.label} __err;\n        };\n", "\\s+\\z", "");
     ELSE
       resolved_value = "var __value = try __p.next();";
     END
-    RETURN regexReplaceAll("${node.label}: {\n    var ${node.results_var} = std.ArrayListUnmanaged(${TRY (nextPromiseList__elem_zig(node))}).empty;\n    errdefer CheatLib.cleanup(@TypeOf(${node.results_var}), ${alloc}, &${node.results_var});\n    for (${list_expr}.items) |__p| {\n        ${resolved_value}\n        defer if (comptime CheatLib.needsCleanup(@TypeOf(__value)))\n            CheatLib.cleanup(@TypeOf(__value), __p.alloc, &__value);\n        const __placed = if (comptime CheatLib.needsCleanup(@TypeOf(__value)))\n            try CheatLib.dupeValue(@TypeOf(__value), __value, ${alloc})\n        else\n            __value;\n        errdefer CheatLib.cleanup(@TypeOf(__placed), ${alloc}, &__placed);\n        try ${node.results_var}.append(${alloc}, __placed);\n    }\n    break :${node.label} ${node.results_var};\n}\n", "\\s+\\z", "");
+    RETURN regexReplaceAll__mir_emitter("${node.label}: {\n    var ${node.results_var} = std.ArrayListUnmanaged(${TRY (nextPromiseList__elem_zig(node))}).empty;\n    errdefer CheatLib.cleanup(@TypeOf(${node.results_var}), ${alloc}, &${node.results_var});\n    for (${list_expr}.items) |__p| {\n        ${resolved_value}\n        defer if (comptime CheatLib.needsCleanup(@TypeOf(__value)))\n            CheatLib.cleanup(@TypeOf(__value), __p.alloc, &__value);\n        const __placed = if (comptime CheatLib.needsCleanup(@TypeOf(__value)))\n            try CheatLib.dupeValue(@TypeOf(__value), __value, ${alloc})\n        else\n            __value;\n        errdefer CheatLib.cleanup(@TypeOf(__placed), ${alloc}, &__placed);\n        try ${node.results_var}.append(${alloc}, __placed);\n    }\n    break :${node.label} ${node.results_var};\n}\n", "\\s+\\z", "");
 }
 END
 PRIVATE FN mIREmitter__emit_struct_init(MUTABLE self: MIREmitter, node: StructInit) RETURNS !String

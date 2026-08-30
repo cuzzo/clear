@@ -13,7 +13,7 @@ EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, repla
 FN lifecyclePlanRegexMatch?(subject: String, pattern: String) RETURNS Bool ->
   RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
 END
-FN regexReplaceFirst(subject: String, pattern: String, replacement: String) RETURNS String ->
+FN regexReplaceFirst__lifecycle_plan(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceFirst(subject, compilerRegexCompile(pattern), replacement);
 END
 
@@ -115,7 +115,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 FN linearResourceFacts__fact_key(type_info: Type) RETURNS String ->
-  RETURN regexReplaceFirst(type__semantic_type_key(type_info), "\\|loc=[^|]+", "|loc=any");
+  RETURN regexReplaceFirst__lifecycle_plan(type__semantic_type_key(type_info), "\\|loc=[^|]+", "|loc=any");
 END
 PRIVATE FN linearResourceFacts__resource_seed_and_dependencies(type_info: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Tuple<Bool, []Type> ->
   IF type__resource?(type_info) THEN

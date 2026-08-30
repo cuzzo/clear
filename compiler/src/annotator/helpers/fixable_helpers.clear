@@ -23,10 +23,10 @@ EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String E
 FN regexFirstMatch__fixable_helpers(subject: String, pattern: String) RETURNS ?String ->
   RETURN COPY compilerRegexFirstMatch(subject, compilerRegexCompile(pattern));
 END
-FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
+FN regexMatch__fixable_helpers?(subject: String, pattern: String) RETURNS Bool ->
   RETURN compilerRegexMatch(subject, compilerRegexCompile(pattern));
 END
-FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
+FN regexReplaceAll__fixable_helpers(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END
 FN escapeRegex__fixable_helpers(value: String) RETURNS String ->
@@ -118,7 +118,7 @@ FN levenshtein(a: String, b: String) RETURNS !Int64 ->
   RETURN prev.last();
 END
 FN emit_registry_mismatch_mut(token: Token, name: NameCandidate, candidates: []NameCandidate, message: String, fix_label: String) RETURNS !Void ->
-  MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch?((CAST(name AS String)), "\\A[A-Z]")) THEN
+  MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch__fixable_helpers?((CAST(name AS String)), "\\A[A-Z]")) THEN
     NIL
   ELSE
     TRY (closest_name(name, candidates))
@@ -135,7 +135,7 @@ END
 PUB FN emit_typo_suggestion_mut(token: ?TypoToken, name: String, candidates: []String, message: String, fix_label: String, category: String@symbol = :registry, cascade: Bool = TRUE) RETURNS !Void ->
   MUTABLE token_line: Int64 = CAST(token.line AS Int64);
   MUTABLE token_column: Int64 = CAST(token.column AS Int64);
-  MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch?(name, "\\A[A-Z]")) THEN
+  MUTABLE best =   IF ((fix_label == "closest in-scope variable") AND regexMatch__fixable_helpers?(name, "\\A[A-Z]")) THEN
     NIL
   ELSE
     TRY (closest_name(NameCandidate{ StringValue: COPY name }, candidates))
@@ -610,7 +610,7 @@ FN emit_cap_field_needs_with_mut(node: GetField, code: String@symbol, name: Name
     MUTABLE inner = body.trimStart();
     IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
       MUTABLE alias_name = "${castNameCandidateToString__fixable_helpers(name)}_v";
-      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex__fixable_helpers(CAST(name AS String))}\\.(?=\\w)", "${alias_name}.");
+      MUTABLE rewritten = regexReplaceAll__fixable_helpers(inner, "\\b${escapeRegex__fixable_helpers(CAST(name AS String))}\\.(?=\\w)", "${alias_name}.");
       MUTABLE new_line = "${indent}WITH ${perm} ${castNameCandidateToString__fixable_helpers(name)} AS ${alias_name} { ${rewritten} }";
       &fixes.append(TRY (fix__new(TRY (fix_description(:WRAP_CAPABILITY_ACCESS, {:permission: perm, :name: name, :alias_name: alias_name, :capability: cap})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), new_line)], :interactive)));
     END
@@ -648,7 +648,7 @@ FN emit_foreign_index_needs_unsafe_view_mut(node: GetIndex, name: String) RETURN
     END
     IF !(inner.empty?()) THEN
       MUTABLE alias_name = "${name}_view";
-      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex__fixable_helpers(name)}\\s*(?=\\[)", alias_name);
+      MUTABLE rewritten = regexReplaceAll__fixable_helpers(inner, "\\b${escapeRegex__fixable_helpers(name)}\\s*(?=\\[)", alias_name);
       MUTABLE replacement = "${indent}WITH UNSAFE VIEW ${name} LENGTH ${length} AS ${alias_name} { ${rewritten} }";
       &fixes.append(TRY (fix__new(TRY (fix_description(:WRAP_FOREIGN_INDEX_UNSAFE_VIEW, {:name: name, :length: length, :alias_name: alias_name})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), replacement)], :interactive)));
     END
@@ -669,7 +669,7 @@ FN emit_direct_view_access_finding_mut(node: Locatable, name: String, permission
     MUTABLE inner = body.trimStart();
     IF !(inner.empty?()) THEN
       MUTABLE alias_name = "${name}_view";
-      MUTABLE rewritten = regexReplaceAll(inner, "\\b${escapeRegex__fixable_helpers(name)}\\b", alias_name);
+      MUTABLE rewritten = regexReplaceAll__fixable_helpers(inner, "\\b${escapeRegex__fixable_helpers(name)}\\b", alias_name);
       MUTABLE replacement = "${indent}WITH ${permission} ${name} AS ${alias_name} { ${rewritten} }";
       &fixes.append(TRY (fix__new(TRY (fix_description(:WRAP_DIRECT_VIEW_ACCESS, {:permission: permission, :name: name, :alias_name: alias_name})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), replacement)], :interactive)));
     END
@@ -713,7 +713,7 @@ FN emit_with_guard_mutable_mutated_mut(node: WithBlock, names_input: []String, v
   MUTABLE found: Bool = FALSE;
   WHILE ((off < scopeBindings__length(window_lines)) AND !(found)) DO
         MUTABLE line = window_lines[off];
-        MUTABLE idx = regexMatch?(line, pat);
+        MUTABLE idx = regexMatch__fixable_helpers?(line, pat);
         IF idx THEN
           MUTABLE line_no = (with_line + off);
           MUTABLE mut_col = (idx + 1);
