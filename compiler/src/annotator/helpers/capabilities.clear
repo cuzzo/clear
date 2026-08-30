@@ -37,12 +37,14 @@ PUB FN capabilities__validate_mut(node: Locatable, type: Type, error_handler: ?F
   NIL;
 END
 PUB FN capabilities__active_capabilities(type: Type) RETURNS ![Set]String@symbol ->
-  MUTABLE caps = Set[];
-  IF ((type__ownership(type) != NIL) AND (type__ownership(type) != :affine)) THEN
-    &caps.insert(type__ownership(type));
+  MUTABLE caps: [Set]String@symbol = Set[];
+  IF type__ownership(type) EXISTS AS rtoc_ownership THEN
+    IF (rtoc_ownership != :affine) THEN
+      &caps.insert(rtoc_ownership);
+    END
   END
-  IF type__sync(type) THEN
-    &caps.insert(type__sync(type));
+  IF type__sync(type) EXISTS AS rtoc_sync THEN
+    &caps.insert(rtoc_sync);
   END
   IF (TRUE AND type__soa?(type)) THEN
     &caps.insert(:soa);
