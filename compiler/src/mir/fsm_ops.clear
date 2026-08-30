@@ -500,7 +500,7 @@ FN castWaiterToStateField(value: Waiter) RETURNS StateField ->
   END
   RETURN panic("Invalid cast to StateField");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 

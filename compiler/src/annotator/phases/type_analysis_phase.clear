@@ -281,6 +281,6 @@ FN castAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItemToOptional
   END
   panic("Invalid cast to ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

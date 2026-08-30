@@ -82,7 +82,7 @@ END
 PRIVATE FN pipelinePlaceholderUsage__placeholder_identifier?(node: Locatable) RETURNS Bool ->
   RETURN (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END);
 END
-PRIVATE FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
+FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
@@ -216,6 +216,6 @@ PRIVATE FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable
   END
   panic("Invalid cast to ?Locatable");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

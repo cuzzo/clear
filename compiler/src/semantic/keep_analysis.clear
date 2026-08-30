@@ -105,6 +105,6 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
   END
 END
 # End Ruby module KeepAnalysis
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

@@ -1322,7 +1322,7 @@ PUB FN pipelineHost__new(lowering: MIRLowering, emitter: MIREmitter) RETURNS !Pi
   TRY (pipelineHost__initialize(&self, lowering, emitter));
   RETURN self @multiowned;
 END
-PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
@@ -1342,7 +1342,7 @@ FN castLocatableToBatchWindowOp(value: Locatable) RETURNS BatchWindowOp ->
   END
   RETURN panic("Invalid cast to BatchWindowOp");
 END
-PRIVATE FN castLocatableToConcurrentOp(value: Locatable) RETURNS ConcurrentOp ->
+FN castLocatableToConcurrentOp(value: Locatable) RETURNS ConcurrentOp ->
   IF value IS_A ConcurrentOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1354,13 +1354,13 @@ FN castLocatableToDistinctOp(value: Locatable) RETURNS DistinctOp ->
   END
   RETURN panic("Invalid cast to DistinctOp");
 END
-PRIVATE FN castLocatableToEachOp(value: Locatable) RETURNS EachOp ->
+FN castLocatableToEachOp(value: Locatable) RETURNS EachOp ->
   IF value IS_A EachOp AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to EachOp");
 END
-PRIVATE FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
   IF value IS_A GetField AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1388,7 +1388,7 @@ FN castLocatableToReduceOp(value: Locatable) RETURNS ReduceOp ->
   END
   RETURN panic("Invalid cast to ReduceOp");
 END
-PRIVATE FN castLocatableToSelectOp(value: Locatable) RETURNS SelectOp ->
+FN castLocatableToSelectOp(value: Locatable) RETURNS SelectOp ->
   IF value IS_A SelectOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1457,7 +1457,7 @@ FN castPromisesToEmittable(value: Promises) RETURNS Emittable ->
   END
   panic("Invalid cast to Emittable");
 END
-PRIVATE FN castTypeToTypeConstructionInput(value: PipelineHostTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput(value: PipelineHostTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     PipelineHostTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     PipelineHostTypeInput.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -1466,7 +1466,7 @@ PRIVATE FN castTypeToTypeConstructionInput(value: PipelineHostTypeInput) RETURNS
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

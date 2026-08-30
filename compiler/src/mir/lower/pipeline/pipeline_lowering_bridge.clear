@@ -231,7 +231,7 @@ PUB FN pipelineLoweringBridge__new(lowering: MIRLowering, emitter: MIREmitter) R
   pipelineLoweringBridge__initialize(&self, lowering, emitter);
   RETURN self @multiowned;
 END
-PRIVATE FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
+FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ProtocolRequirement: COPY cast_payload };,
@@ -323,7 +323,7 @@ PRIVATE FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIR
   END
   panic("Invalid cast to MIRLoweringLowerableStmt");
 END
-PRIVATE FN castMIRLoweringReturnValueToEmittable(value: MIRLoweringReturnValue) RETURNS Emittable ->
+FN castMIRLoweringReturnValueToEmittable(value: MIRLoweringReturnValue) RETURNS Emittable ->
   PARTIAL MATCH value START
     MIRLoweringReturnValue.Cleanup AS cast_payload -> RETURN Emittable{ Cleanup: COPY cast_payload };,
     MIRLoweringReturnValue.ErrCleanup AS cast_payload -> RETURN Emittable{ ErrCleanup: COPY cast_payload };,

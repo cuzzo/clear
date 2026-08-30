@@ -118,6 +118,6 @@ PUB FN compilerFrontend__synthesize_test_body_wrappers_mut(ast: Program, MUTABLE
   END
   RETURN wrappers;
 END
-PRIVATE FN castProgramToLocatable(value: Program) RETURNS Locatable ->
+FN castProgramToLocatable(value: Program) RETURNS Locatable ->
   RETURN Locatable{ Program: COPY value };
 END

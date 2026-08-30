@@ -2322,7 +2322,7 @@ PUB FN borrowChecker__new(fn_node: FunctionDef, schema_lookup: ?FN(String@symbol
   borrowChecker__initialize(&self, fn_node, schema_lookup);
   RETURN self @multiowned;
 END
-PRIVATE FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
+FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -2331,21 +2331,21 @@ PRIVATE FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS 
   END
   panic("Invalid cast to ?Locatable");
 END
-PRIVATE FN castLocatableToBgNode(value: Locatable) RETURNS BgNode ->
+FN castLocatableToBgNode(value: Locatable) RETURNS BgNode ->
   PARTIAL MATCH value START
     Locatable.BgStreamBlock AS cast_payload -> RETURN BgNode{ BgStreamBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to BgNode");
   END
   panic("Invalid cast to BgNode");
 END
-PRIVATE FN castLocatableToCallNode(value: Locatable) RETURNS CallNode ->
+FN castLocatableToCallNode(value: Locatable) RETURNS CallNode ->
   PARTIAL MATCH value START
     Locatable.FuncCall AS cast_payload -> RETURN CallNode{ FuncCall: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to CallNode");
   END
   panic("Invalid cast to CallNode");
 END
-PRIVATE FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -2488,7 +2488,7 @@ FN castLoopNodeToLocatable(value: LoopNode) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-PRIVATE FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2748,7 +2748,7 @@ FN castPlaceToPath(value: Place) RETURNS Path ->
   END
   panic("Invalid cast to Path");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 PUB FN ownershipDataflow__schema_lookup_call(self: OwnershipDataflow, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->

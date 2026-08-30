@@ -311,7 +311,7 @@ FN castTransformValueToString(value: TransformValue) RETURNS []String ->
   END
   RETURN List[];
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 FN ruby_union_scalar_equal_optional_TransformValue_Bool(value: ?TransformValue, expected: Bool) RETURNS Bool ->

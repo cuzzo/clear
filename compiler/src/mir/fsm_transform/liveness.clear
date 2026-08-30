@@ -837,7 +837,7 @@ FN castOptionalTransformValueToHashMapStringTypeMultiowned(value: ?TransformValu
   END
   RETURN {};
 END
-PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
@@ -1046,6 +1046,6 @@ FN rtocChildrenOfCollectValueYieldExpr(v: YieldExpr) RETURNS []CollectValue ->
   &out.append(castLocatableToCollectValue(COPY v.expr));
   RETURN out;
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

@@ -2087,7 +2087,7 @@ FN castAssignmentNameToAssignmentTarget(value: AssignmentName) RETURNS Assignmen
   END
   panic("Invalid cast to AssignmentTarget");
 END
-PRIVATE FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -2108,7 +2108,7 @@ FN castLocatableToDestructuringAssignment(value: Locatable) RETURNS Destructurin
   END
   RETURN panic("Invalid cast to DestructuringAssignment");
 END
-PRIVATE FN castLocatableToFuncCall(value: Locatable) RETURNS FuncCall ->
+FN castLocatableToFuncCall(value: Locatable) RETURNS FuncCall ->
   IF value IS_A FuncCall AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -2235,13 +2235,13 @@ FN castLocatableToOptionalDynamicValue(value: Locatable) RETURNS ?DynamicValue -
   END
   panic("Invalid cast to ?DynamicValue");
 END
-PRIVATE FN castLocatableToReturnNode(value: Locatable) RETURNS ReturnNode ->
+FN castLocatableToReturnNode(value: Locatable) RETURNS ReturnNode ->
   IF value IS_A ReturnNode AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to ReturnNode");
 END
-PRIVATE FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2748,7 +2748,7 @@ FN castOptionalLocatableToOptionalDynamicValue(value: ?Locatable) RETURNS ?Dynam
   END
   panic("Invalid cast to ?DynamicValue");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 FN ruby_array_concat_Locatable(left: []Locatable, right: []Locatable) RETURNS []Locatable ->
@@ -2757,7 +2757,7 @@ FN ruby_array_concat_Locatable(left: []Locatable, right: []Locatable) RETURNS []
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-PRIVATE FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
+FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
   MUTABLE result: [Set]String = [];
   left |> EACH {
     IF right.contains?(_) AND !(result.contains?(_)) THEN
@@ -2766,7 +2766,7 @@ PRIVATE FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]Strin
   };
   RETURN result;
 END
-PRIVATE FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END

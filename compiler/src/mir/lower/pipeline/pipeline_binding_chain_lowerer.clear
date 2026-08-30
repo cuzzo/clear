@@ -305,7 +305,7 @@ END
 PRIVATE FN pipelineBindingChainLowerer__visit_placeholder_expr(self: PipelineBindingChainLowerer, expr: Locatable, placeholder: String) RETURNS Emittable ->
   RETURN pipelineBindingChainLowerer__visit_mir_with_placeholder_call(self, expr, placeholder);
 END
-PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END

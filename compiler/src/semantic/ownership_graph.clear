@@ -700,6 +700,6 @@ PUB FN ownershipGraph__new() RETURNS OwnershipGraph@multiowned ->
   ownershipGraph__initialize(&self);
   RETURN self @multiowned;
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

@@ -214,13 +214,13 @@ END
 PRIVATE FN pipelineBatchWindowLowerer__batch_window_flush_stmt(self: PipelineBatchWindowLowerer, plan: PipelineBatchWindowPlan) RETURNS BatchWindowFlush ->
   RETURN BatchWindowFlush{ window: "__bw", batch_var: plan.placeholder_var, elem_zig: plan.element_zig, result_var: "res_list", value_expr: COPY pipelineBatchWindowPlan__make_expr_call(plan), alloc: COPY plan.alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
-PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 PUB FN pipelineBatchWindowPlan__make_expr_call(self: PipelineBatchWindowPlan) RETURNS Emittable ->

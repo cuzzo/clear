@@ -3,7 +3,7 @@ EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexFirstMatch(subject: String, regex: CompilerRegex) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
-PRIVATE FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
+FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
   RETURN COPY compilerRegexFirstMatch(subject, compilerRegexCompile(pattern));
 END
 EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS ?CompilerRegexScanner EFFECTS :safe FROM "compiler_regex";
@@ -1033,7 +1033,7 @@ PRIVATE FN typeExpressionPrinter__capability_suffix(capabilities: TypeCapabiliti
   END
   RETURN ((parts.first() OR_ELSE "") $+ (((parts |> SKIP 1) |> SELECT ":${rtoc_delete_prefix(_, "@")}").join("")));
 END
-PRIVATE FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
+FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
   IF s.startsWith?(affix) THEN
     RETURN s.substr(affix.length(), (s.length() - affix.length()));
   END
@@ -1049,7 +1049,7 @@ FN ruby_array_concat_TypeExpression(left: []TypeExpression, right: []TypeExpress
   END
   RETURN result;
 END
-PRIVATE FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
+FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END

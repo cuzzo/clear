@@ -93,7 +93,7 @@ PUB FN bgCaptureClassifier__apply_capture_storage_provenance_mut(MUTABLE type: T
   END
 END
 # End Ruby module BgCaptureClassifier
-PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -102,6 +102,6 @@ PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstruction
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

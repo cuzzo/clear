@@ -508,6 +508,6 @@ FN castThunkScanNodeToLocatable(value: ThunkScanNode) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

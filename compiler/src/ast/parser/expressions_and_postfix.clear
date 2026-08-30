@@ -1538,19 +1538,19 @@ PUB FN castLocatableToClearParserReturnValue(value: Locatable) RETURNS ClearPars
   END
   panic("Invalid cast to ClearParserReturnValue");
 END
-PRIVATE FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
   IF value IS_A GetField AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to GetField");
 END
-PRIVATE FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Identifier");
 END
-PRIVATE FN castLocatableToReturnNode(value: Locatable) RETURNS ReturnNode ->
+FN castLocatableToReturnNode(value: Locatable) RETURNS ReturnNode ->
   IF value IS_A ReturnNode AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1562,7 +1562,7 @@ FN castLocatableToTupleLit(value: Locatable) RETURNS TupleLit ->
   END
   RETURN panic("Invalid cast to TupleLit");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+PUB FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 FN ruby_pairs_to_hash_Locatable_Locatable(pairs: []Tuple<Locatable, Locatable>) RETURNS {Locatable}Locatable ->

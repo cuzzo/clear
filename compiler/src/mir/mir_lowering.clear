@@ -21127,7 +21127,7 @@ FN castAssignmentNameToGetField(value: AssignmentName) RETURNS GetField ->
   END
   RETURN panic("Invalid cast to GetField");
 END
-PRIVATE FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -21155,7 +21155,7 @@ FN castAssignmentNameToName(value: AssignmentName) RETURNS MIRLoweringName ->
   END
   panic("Invalid cast to MIRLoweringName");
 END
-PRIVATE FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
+FN castAssignmentNameToOptionalLocatable(value: AssignmentName) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -21208,7 +21208,7 @@ FN castEmittableToBatchWindowPush(value: Emittable) RETURNS BatchWindowPush ->
   END
   RETURN panic("Invalid cast to BatchWindowPush");
 END
-PRIVATE FN castEmittableToBreakStmt(value: Emittable) RETURNS BreakStmt ->
+FN castEmittableToBreakStmt(value: Emittable) RETURNS BreakStmt ->
   IF value IS_A BreakStmt AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21268,7 +21268,7 @@ FN castEmittableToLet(value: Emittable) RETURNS Let ->
   END
   RETURN panic("Invalid cast to Let");
 END
-PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
@@ -21371,7 +21371,7 @@ FN castEmittableToStructInit(value: Emittable) RETURNS StructInit ->
   END
   RETURN panic("Invalid cast to StructInit");
 END
-PRIVATE FN castEmittableToTryCatch(value: Emittable) RETURNS TryCatch ->
+FN castEmittableToTryCatch(value: Emittable) RETURNS TryCatch ->
   IF value IS_A TryCatch AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21402,7 +21402,7 @@ FN castExprToAlloc(value: Expr) RETURNS Alloc ->
   END
   panic("Invalid cast to Alloc");
 END
-PRIVATE FN castExprToEmittable(value: Expr) RETURNS Emittable ->
+FN castExprToEmittable(value: Expr) RETURNS Emittable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Emittable");
   END
@@ -21431,7 +21431,7 @@ FN castFsmBodyToBgBlockPlan(value: FsmBody) RETURNS BgBlockPlan ->
   END
   panic("Invalid cast to BgBlockPlan");
 END
-PRIVATE FN castLocatableToBinaryOp(value: Locatable) RETURNS BinaryOp ->
+FN castLocatableToBinaryOp(value: Locatable) RETURNS BinaryOp ->
   IF value IS_A BinaryOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21460,7 +21460,7 @@ FN castLocatableToFieldPathNode(value: Locatable) RETURNS FieldPathNode ->
   END
   panic("Invalid cast to FieldPathNode");
 END
-PRIVATE FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
+FN castLocatableToGetField(value: Locatable) RETURNS GetField ->
   IF value IS_A GetField AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21472,25 +21472,25 @@ FN castLocatableToGetIndex(value: Locatable) RETURNS GetIndex ->
   END
   RETURN panic("Invalid cast to GetIndex");
 END
-PRIVATE FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Identifier");
 END
-PRIVATE FN castLocatableToIsA(value: Locatable) RETURNS IsA ->
+FN castLocatableToIsA(value: Locatable) RETURNS IsA ->
   IF value IS_A IsA AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to IsA");
 END
-PRIVATE FN castLocatableToLiteral(value: Locatable) RETURNS Literal ->
+FN castLocatableToLiteral(value: Locatable) RETURNS Literal ->
   IF value IS_A Literal AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Literal");
 END
-PRIVATE FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
+FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ProtocolRequirement: COPY cast_payload };,
@@ -21611,7 +21611,7 @@ FN castLocatableToMoveNode(value: Locatable) RETURNS MoveNode ->
   END
   RETURN panic("Invalid cast to MoveNode");
 END
-PRIVATE FN castLocatableToNode(value: Locatable) RETURNS Node ->
+FN castLocatableToNode(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
@@ -21908,13 +21908,13 @@ FN castLocatableToOptionalFsmAstResultNode(value: Locatable) RETURNS ?FsmAstResu
   END
   panic("Invalid cast to ?FsmAstResultNode");
 END
-PRIVATE FN castLocatableToOptionalIdentifier(value: Locatable) RETURNS ?Identifier ->
+FN castLocatableToOptionalIdentifier(value: Locatable) RETURNS ?Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN NIL;
 END
-PRIVATE FN castLocatableToTenseNavigation(value: Locatable) RETURNS TenseNavigation ->
+FN castLocatableToTenseNavigation(value: Locatable) RETURNS TenseNavigation ->
   IF value IS_A TenseNavigation AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -21952,7 +21952,7 @@ FN castMIRLoweringExpressionsReturnValueToEmittable(value: MIRLoweringExpression
   END
   panic("Invalid cast to Emittable");
 END
-PRIVATE FN castMIRLoweringReturnValueToEmittable(value: MIRLoweringReturnValue) RETURNS Emittable ->
+FN castMIRLoweringReturnValueToEmittable(value: MIRLoweringReturnValue) RETURNS Emittable ->
   PARTIAL MATCH value START
     MIRLoweringReturnValue.Cleanup AS cast_payload -> RETURN Emittable{ Cleanup: COPY cast_payload };,
     MIRLoweringReturnValue.ErrCleanup AS cast_payload -> RETURN Emittable{ ErrCleanup: COPY cast_payload };,
@@ -21988,7 +21988,7 @@ FN castMIRLoweringTypeToTypeConstructionInput(value: MIRLoweringType) RETURNS Ty
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN castNameToStringSymbol(value: MIRLoweringName) RETURNS String@symbol ->
+FN castNameToStringSymbol(value: MIRLoweringName) RETURNS String@symbol ->
   IF value IS_A String@symbol AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -22016,7 +22016,7 @@ FN castNodeToCallNode(value: Node) RETURNS CallNode ->
   END
   panic("Invalid cast to CallNode");
 END
-PRIVATE FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -22246,7 +22246,7 @@ FN castNodeToMIRLoweringLowerableStmt(value: Node) RETURNS MIRLoweringLowerableS
   END
   panic("Invalid cast to MIRLoweringLowerableStmt");
 END
-PRIVATE FN castNodeToOptionalLocatable(value: Node) RETURNS ?Locatable ->
+FN castNodeToOptionalLocatable(value: Node) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -22621,7 +22621,7 @@ FN castOptionalLocatableToMIRLoweringLowerableStmt(value: ?Locatable) RETURNS MI
   END
   panic("Invalid cast to MIRLoweringLowerableStmt");
 END
-PRIVATE FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
+FN castOptionalLookupResultToOptionalX(value: ?LookupResult) RETURNS ?X ->
   IF value == NIL THEN
     panic("Invalid cast to ?X");
   END
@@ -22719,7 +22719,7 @@ FN castRootToNodeRoot(value: Root) RETURNS NodeRoot ->
   END
   panic("Invalid cast to NodeRoot");
 END
-PRIVATE FN castSchemasUnionSchemaVariantValueToTypeTypeInput(value: SchemasUnionSchemaVariantValue) RETURNS TypeTypeInput ->
+FN castSchemasUnionSchemaVariantValueToTypeTypeInput(value: SchemasUnionSchemaVariantValue) RETURNS TypeTypeInput ->
   PARTIAL MATCH value START
     SchemasUnionSchemaVariantValue.FunctionType AS cast_payload -> RETURN TypeTypeInput{ FunctionType: COPY cast_payload };,
     SchemasUnionSchemaVariantValue.Type AS cast_payload -> RETURN TypeTypeInput{ Type: COPY cast_payload };,
@@ -22768,7 +22768,7 @@ FN castTypeTypeInputToType(value: TypeTypeInput) RETURNS Type ->
   END
   RETURN panic("Invalid cast to Type");
 END
-PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
@@ -22793,16 +22793,16 @@ FN castValueToInt64(value: MIRLoweringValue) RETURNS Int64 ->
   END
   RETURN 0_i64;
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
-PRIVATE FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-PRIVATE FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
@@ -22832,13 +22832,13 @@ FN ruby_array_concat_Stmt(left: []Emittable, right: []Emittable) RETURNS []Emitt
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-PRIVATE FN ruby_array_concat_String(left: []String, right: []String) RETURNS []String ->
+FN ruby_array_concat_String(left: []String, right: []String) RETURNS []String ->
   MUTABLE result: []String = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-PRIVATE FN ruby_union_scalar_equal_TypeTypeInput_String_symbol(value: TypeTypeInput, expected: String@symbol) RETURNS Bool ->
+FN ruby_union_scalar_equal_TypeTypeInput_String_symbol(value: TypeTypeInput, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END
@@ -22864,7 +22864,7 @@ FN ruby_wrap_optional_Emittable_MIRLoweringLoweredMir(value: ?Emittable) RETURNS
   END
   NIL;
 END
-PRIVATE FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_FunctionSignature_multiowned_X(value: ?FunctionSignature@multiowned) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END
@@ -22876,7 +22876,7 @@ FN ruby_wrap_optional_Set_Emittable(value: ?Set) RETURNS ?Emittable ->
   END
   NIL;
 END
-PRIVATE FN ruby_wrap_optional_Type_TypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
+FN ruby_wrap_optional_Type_TypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
   IF value EXISTS AS optional_payload THEN
     RETURN TypeTypeInput{ Type: COPY optional_payload };
   END
@@ -22888,7 +22888,7 @@ FN ruby_wrap_optional_Type_multiowned_TypeTypeInput(value: ?Type@multiowned) RET
   END
   NIL;
 END
-PRIVATE FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
+FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
   IF value EXISTS AS value_value THEN
     RETURN symbol(value_value);
   END

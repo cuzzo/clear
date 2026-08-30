@@ -4364,7 +4364,7 @@ FN castAsyncValidationNodeToLocatable(value: AsyncValidationNode) RETURNS Locata
   END
   panic("Invalid cast to Locatable");
 END
-PRIVATE FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
+FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     AutoConstraintCollectorDeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorDeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
@@ -4372,7 +4372,7 @@ PRIVATE FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoCons
   END
   panic("Invalid cast to Locatable");
 END
-PRIVATE FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
+FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
   PARTIAL MATCH value START
     AutoConstraintCollectorSlotDeclNode.VarDecl AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorSlotDeclNode.BindExpr AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ BindExpr: COPY cast_payload };,
@@ -4380,19 +4380,19 @@ PRIVATE FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDecla
   END
   panic("Invalid cast to AutoConstraintCollectorDeclarationNode");
 END
-PRIVATE FN castCodeOrMessageToOptionalString(value: CapabilityAuditCodeOrMessage) RETURNS ?String ->
+FN castCodeOrMessageToOptionalString(value: CapabilityAuditCodeOrMessage) RETURNS ?String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN NIL;
 END
-PRIVATE FN castDiagnosticKwValueToAnyMultiowned(value: DiagnosticKwValue) RETURNS Any@multiowned ->
+FN castDiagnosticKwValueToAnyMultiowned(value: DiagnosticKwValue) RETURNS Any@multiowned ->
   IF value IS_A Any@multiowned AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Any@multiowned");
 END
-PRIVATE FN castNameCandidateToOptionalDiagnosticKwValue(value: NameCandidate) RETURNS ?DiagnosticKwValue ->
+FN castNameCandidateToOptionalDiagnosticKwValue(value: NameCandidate) RETURNS ?DiagnosticKwValue ->
   PARTIAL MATCH value START
     NameCandidate.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     NameCandidate.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
@@ -4400,13 +4400,13 @@ PRIVATE FN castNameCandidateToOptionalDiagnosticKwValue(value: NameCandidate) RE
   END
   panic("Invalid cast to ?DiagnosticKwValue");
 END
-PRIVATE FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
+FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-PRIVATE FN castTypeToAutoConstraintCollectorObservedType(value: Type) RETURNS AutoConstraintCollectorObservedType ->
+FN castTypeToAutoConstraintCollectorObservedType(value: Type) RETURNS AutoConstraintCollectorObservedType ->
   PARTIAL MATCH value START
     Type.SymbolValue AS cast_payload -> RETURN AutoConstraintCollectorObservedType{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to AutoConstraintCollectorObservedType");
@@ -4420,7 +4420,7 @@ FN castTypeToOptionalX(value: Type) RETURNS ?X ->
   END
   panic("Invalid cast to ?X");
 END
-PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -4429,10 +4429,10 @@ PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstruction
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-PRIVATE FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
+FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
   PARTIAL MATCH value START
     TypeTypeInput.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     TypeTypeInput.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
@@ -4440,13 +4440,13 @@ PRIVATE FN castTypeTypeInputToOptionalDiagnosticKwValue(value: TypeTypeInput) RE
   END
   panic("Invalid cast to ?DiagnosticKwValue");
 END
-PRIVATE FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
+FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
@@ -4456,25 +4456,25 @@ PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURN
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
+FN ruby_array_concat_Any(left: []Any, right: []Any) RETURNS []Any ->
   MUTABLE result: []Any = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-PRIVATE FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
+FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
   MUTABLE result: []Edit = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-PRIVATE FN ruby_array_concat_String(left: []String, right: []String) RETURNS []String ->
+FN ruby_array_concat_String(left: []String, right: []String) RETURNS []String ->
   MUTABLE result: []String = [];
   left |> EACH { &result.append(COPY _); };
   right |> EACH { &result.append(COPY _); };
   RETURN result;
 END
-PRIVATE FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
+FN ruby_set_intersection_String_set(left: [Set]String, right: [Set]String) RETURNS [Set]String ->
   MUTABLE result: [Set]String = [];
   left |> EACH {
     IF right.contains?(_) AND !(result.contains?(_)) THEN
@@ -4492,13 +4492,13 @@ FN ruby_set_intersection_String_symbol_set(left: [Set]String@symbol, right: [Set
   };
   RETURN result;
 END
-PRIVATE FN ruby_wrap_optional_Int64_DiagnosticKwValue(value: ?Int64) RETURNS ?DiagnosticKwValue ->
+FN ruby_wrap_optional_Int64_DiagnosticKwValue(value: ?Int64) RETURNS ?DiagnosticKwValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN DiagnosticKwValue{ Int64Value: COPY optional_payload };
   END
   NIL;
 END
-PRIVATE FN ruby_wrap_optional_String_DiagnosticKwValue(value: ?String) RETURNS ?DiagnosticKwValue ->
+FN ruby_wrap_optional_String_DiagnosticKwValue(value: ?String) RETURNS ?DiagnosticKwValue ->
   IF value EXISTS AS optional_payload THEN
     RETURN DiagnosticKwValue{ StringValue: COPY optional_payload };
   END
@@ -4510,13 +4510,13 @@ FN ruby_wrap_optional_String_symbol_DiagnosticKwValue(value: ?String@symbol) RET
   END
   NIL;
 END
-PRIVATE FN ruby_wrap_optional_Type_multiowned_X(value: ?Type@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_Type_multiowned_X(value: ?Type@multiowned) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ Type: Type{ Type: COPY optional_payload } };
   END
   NIL;
 END
-PRIVATE FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
+FN ruby_wrap_optional_string_to_symbol(value: ?String) RETURNS ?String@symbol ->
   IF value EXISTS AS value_value THEN
     RETURN symbol(value_value);
   END

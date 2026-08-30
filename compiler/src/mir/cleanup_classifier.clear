@@ -1827,7 +1827,7 @@ PUB FN cleanupClassifier__borrowed_field_names(schema: FieldBearingSchema) RETUR
   RETURN empty;
 END
 # End Ruby module CleanupClassifier
-PRIVATE FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -1854,7 +1854,7 @@ FN castFieldToTypeConstructionInput(value: Field) RETURNS TypeConstructionInput 
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
+FN castLocatableToOptionalLocatable(value: Locatable) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -1992,7 +1992,7 @@ FN castNamesItemToPath(value: NamesItem) RETURNS Path ->
   END
   panic("Invalid cast to Path");
 END
-PRIVATE FN castNodeToLocatable(value: Node) RETURNS Locatable ->
+FN castNodeToLocatable(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2121,7 +2121,7 @@ FN castVariantNameToUnionLookup(value: VariantName) RETURNS UnionLookup ->
   END
   panic("Invalid cast to UnionLookup");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 FN ruby_wrap_optional_UnionSchema_SchemaValue(value: ?UnionSchema) RETURNS ?SchemaValue ->

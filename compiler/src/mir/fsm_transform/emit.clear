@@ -1088,7 +1088,7 @@ FN rtoc_delete_suffix(s: String, affix: String) RETURNS String ->
   END
   RETURN COPY s;
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 FN ruby_array_concat_ContextFieldDecl(left: []ContextFieldDecl, right: []ContextFieldDecl) RETURNS []ContextFieldDecl ->
@@ -1101,7 +1101,7 @@ FN ruby_array_concat_ContextFieldDecl(left: []ContextFieldDecl, right: []Context
   END
   RETURN result;
 END
-PRIVATE FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

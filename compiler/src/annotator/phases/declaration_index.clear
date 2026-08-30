@@ -86,6 +86,6 @@ PRIVATE FN declarationIndexer__collect_error_type_registrations(program: Program
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

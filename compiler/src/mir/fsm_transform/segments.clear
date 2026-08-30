@@ -444,14 +444,14 @@ PRIVATE FN segments__rewrite_pipeline_io(body: []Locatable) RETURNS ![]Locatable
 END
 # End Ruby module FsmTransform::Segments
 # End Ruby module FsmTransform
-PRIVATE FN castLocatableToCallNode(value: Locatable) RETURNS SegmentsCallNode ->
+FN castLocatableToCallNode(value: Locatable) RETURNS SegmentsCallNode ->
   PARTIAL MATCH value START
     Locatable.FuncCall AS cast_payload -> RETURN SegmentsCallNode{ FuncCall: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to SegmentsCallNode");
   END
   panic("Invalid cast to SegmentsCallNode");
 END
-PRIVATE FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

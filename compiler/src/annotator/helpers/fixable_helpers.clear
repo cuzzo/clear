@@ -20,7 +20,7 @@ EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replace
 EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexFirstMatch(subject: String, regex: CompilerRegex) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-PRIVATE FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
+FN regexFirstMatch(subject: String, pattern: String) RETURNS ?String ->
   RETURN COPY compilerRegexFirstMatch(subject, compilerRegexCompile(pattern));
 END
 FN regexMatch?(subject: String, pattern: String) RETURNS Bool ->
@@ -29,7 +29,7 @@ END
 FN regexReplaceAll(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END
-PRIVATE FN escapeRegex(value: String) RETURNS String ->
+FN escapeRegex(value: String) RETURNS String ->
   RETURN compilerRegexEscape(value);
 END
 
@@ -1301,7 +1301,7 @@ FN build_auto_ambiguity_message(label: String, observed_strs: []String, slot: Sl
   RETURN msg;
 END
 # End Ruby module FixableHelper
-PRIVATE FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
+FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoConstraintCollectorDeclarationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     AutoConstraintCollectorDeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorDeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
@@ -1309,7 +1309,7 @@ PRIVATE FN castAutoConstraintCollectorDeclarationNodeToLocatable(value: AutoCons
   END
   panic("Invalid cast to Locatable");
 END
-PRIVATE FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
+FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode(value: AutoConstraintCollectorSlotDeclNode) RETURNS AutoConstraintCollectorDeclarationNode ->
   PARTIAL MATCH value START
     AutoConstraintCollectorSlotDeclNode.VarDecl AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ VarDecl: COPY cast_payload };,
     AutoConstraintCollectorSlotDeclNode.BindExpr AS cast_payload -> RETURN AutoConstraintCollectorDeclarationNode{ BindExpr: COPY cast_payload };,
@@ -1317,22 +1317,22 @@ PRIVATE FN castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDecla
   END
   panic("Invalid cast to AutoConstraintCollectorDeclarationNode");
 END
-PRIVATE FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
+FN castNameCandidateToString(value: NameCandidate) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-PRIVATE FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
+FN castTypeToTypeTypeInput(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-PRIVATE FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
+FN castTypeTypeInputToString(value: TypeTypeInput) RETURNS String ->
   IF value IS_A String AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN "";
 END
-PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
@@ -1342,7 +1342,7 @@ PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURN
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
+FN ruby_array_concat_Edit(left: []Edit, right: []Edit) RETURNS []Edit ->
   MUTABLE result: []Edit = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

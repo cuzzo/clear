@@ -159,6 +159,6 @@ PRIVATE FN mIRLoweringOwnershipScanner__nested_ownership_scope?(self: MIRLowerin
     DEFAULT -> FALSE
   END;
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

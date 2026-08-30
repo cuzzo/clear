@@ -551,7 +551,7 @@ FN castLocatableToCallLike(value: Locatable) RETURNS CallLike ->
   END
   panic("Invalid cast to CallLike");
 END
-PRIVATE FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -672,7 +672,7 @@ PRIVATE FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 FN ruby_array_concat_VarDecl(left: []VarDecl, right: []VarDecl) RETURNS []VarDecl ->
@@ -685,13 +685,13 @@ FN ruby_array_concat_VarDecl(left: []VarDecl, right: []VarDecl) RETURNS []VarDec
   END
   RETURN result;
 END
-PRIVATE FN ruby_wrap_optional_Type_TypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
+FN ruby_wrap_optional_Type_TypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
   IF value EXISTS AS optional_payload THEN
     RETURN TypeTypeInput{ Type: COPY optional_payload };
   END
   NIL;
 END
-PRIVATE FN castTypeToOptionalTypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
+FN castTypeToOptionalTypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
   IF value EXISTS AS type_value THEN
     RETURN TypeTypeInput{ Type: COPY type_value };
   END

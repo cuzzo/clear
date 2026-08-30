@@ -930,7 +930,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__target_rooted_at_placeholder?(self: PipelineConcurrentLowerer, target: Locatable) RETURNS Bool ->
   RETURN ((aST__root_identifier(target) != NIL) AND (((aST__root_identifier(target))?).name == "_"));
 END
-PRIVATE FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
+FN castAssignmentNameToLocatable(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -942,13 +942,13 @@ END
 FN castCleanupToEmittable(value: Cleanup) RETURNS Emittable ->
   RETURN Emittable{ Cleanup: COPY value };
 END
-PRIVATE FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
+FN castEmittableToLocatable(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
 END
-PRIVATE FN castExprToEmittable(value: Expr) RETURNS Emittable ->
+FN castExprToEmittable(value: Expr) RETURNS Emittable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Emittable");
   END
@@ -960,7 +960,7 @@ FN castLocatableToAverageOp(value: Locatable) RETURNS AverageOp ->
   END
   RETURN panic("Invalid cast to AverageOp");
 END
-PRIVATE FN castLocatableToBinaryOp(value: Locatable) RETURNS BinaryOp ->
+FN castLocatableToBinaryOp(value: Locatable) RETURNS BinaryOp ->
   IF value IS_A BinaryOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -972,19 +972,19 @@ FN castLocatableToCountOp(value: Locatable) RETURNS CountOp ->
   END
   RETURN panic("Invalid cast to CountOp");
 END
-PRIVATE FN castLocatableToEachOp(value: Locatable) RETURNS EachOp ->
+FN castLocatableToEachOp(value: Locatable) RETURNS EachOp ->
   IF value IS_A EachOp AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to EachOp");
 END
-PRIVATE FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
+FN castLocatableToIdentifier(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Identifier");
 END
-PRIVATE FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -1202,7 +1202,7 @@ FN castLocatableToPipelineConcurrentLowererAssignmentTargetScanNode(value: Locat
   END
   panic("Invalid cast to PipelineConcurrentLowererAssignmentTargetScanNode");
 END
-PRIVATE FN castLocatableToSelectOp(value: Locatable) RETURNS SelectOp ->
+FN castLocatableToSelectOp(value: Locatable) RETURNS SelectOp ->
   IF value IS_A SelectOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1214,7 +1214,7 @@ FN castLocatableToSumOp(value: Locatable) RETURNS SumOp ->
   END
   RETURN panic("Invalid cast to SumOp");
 END
-PRIVATE FN castLocatableToWhereOp(value: Locatable) RETURNS WhereOp ->
+FN castLocatableToWhereOp(value: Locatable) RETURNS WhereOp ->
   IF value IS_A WhereOp AS cast_payload THEN
     RETURN cast_payload;
   END
@@ -1238,7 +1238,7 @@ FN castTypeToReturnType(value: Type) RETURNS ReturnType ->
   END
   panic("Invalid cast to ReturnType");
 END
-PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
+FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
@@ -1247,7 +1247,7 @@ PRIVATE FN castTypeToTypeConstructionInput(value: Type) RETURNS TypeConstruction
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
+FN ruby_array_concat_Emittable(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

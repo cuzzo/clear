@@ -302,6 +302,6 @@ PUB FN localBindingAnalysis__binding_frame_allocates?(node: Locatable, entry: ?C
 END
 # End Ruby module MIR::LocalBindingAnalysis
 # End Ruby module MIR
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END

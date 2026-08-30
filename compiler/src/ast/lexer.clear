@@ -8,7 +8,7 @@ END
 FN regexReplaceFirst(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceFirst(subject, compilerRegexCompile(pattern), replacement);
 END
-PRIVATE FN escapeRegex(value: String) RETURNS String ->
+FN escapeRegex(value: String) RETURNS String ->
   RETURN compilerRegexEscape(value);
 END
 
@@ -694,7 +694,7 @@ PUB FN lexer__new(source: String, interpolation_depth: Int64 = 0, file: ?String 
   TRY (lexer__initialize(&self, source, interpolation_depth, file, start_line, start_column, start_offset, budget));
   RETURN self @multiowned;
 END
-PRIVATE FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
+FN rtoc_delete_prefix(s: String, affix: String) RETURNS String ->
   IF s.startsWith?(affix) THEN
     RETURN s.substr(affix.length(), (s.length() - affix.length()));
   END

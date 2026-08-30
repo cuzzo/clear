@@ -4742,7 +4742,7 @@ PUB FN schemas__field_bearing?(s: ?SchemaValue) RETURNS Bool ->
   RETURN (((s != NIL) AND (s IS_A StructSchema)) OR ((s != NIL) AND (s IS_A ResourceSchema)));
 END
 # End Ruby module Schemas
-PRIVATE FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
+FN castLocatableToLocatable(value: Locatable) RETURNS Locatable ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
@@ -4943,7 +4943,7 @@ FN castOptionalTypePlacementMaybeSymbolToOptionalStringSymbol(value: ?TypePlacem
   END
   RETURN NIL;
 END
-PRIVATE FN castSchemasUnionSchemaVariantValueToTypeTypeInput(value: SchemasUnionSchemaVariantValue) RETURNS TypeTypeInput ->
+FN castSchemasUnionSchemaVariantValueToTypeTypeInput(value: SchemasUnionSchemaVariantValue) RETURNS TypeTypeInput ->
   PARTIAL MATCH value START
     SchemasUnionSchemaVariantValue.FunctionType AS cast_payload -> RETURN TypeTypeInput{ FunctionType: COPY cast_payload };,
     SchemasUnionSchemaVariantValue.Type AS cast_payload -> RETURN TypeTypeInput{ Type: COPY cast_payload };,
@@ -4973,7 +4973,7 @@ FN castTypeShapeRawToString(value: TypeShapeRaw) RETURNS String ->
   END
   RETURN "";
 END
-PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,
     TypeTypeInput.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
@@ -4983,7 +4983,7 @@ PRIVATE FN castTypeTypeInputToTypeConstructionInput(value: TypeTypeInput) RETURN
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-PRIVATE FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
+FN ruby_union_scalar_equal_TypeExpressionDimension_String_symbol(value: TypeExpressionDimension, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END

@@ -766,14 +766,14 @@ PUB FN mIRPass__new(fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symb
   mIRPass__initialize(&self, fn_nodes, schema_lookup, lifecycle_registry, body_summaries, hoist_bindings);
   RETURN self @multiowned;
 END
-PRIVATE FN castLocatableToBgNode(value: Locatable) RETURNS BgNode ->
+FN castLocatableToBgNode(value: Locatable) RETURNS BgNode ->
   PARTIAL MATCH value START
     Locatable.BgStreamBlock AS cast_payload -> RETURN BgNode{ BgStreamBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to BgNode");
   END
   panic("Invalid cast to BgNode");
 END
-PRIVATE FN castLocatableToNode(value: Locatable) RETURNS Node ->
+FN castLocatableToNode(value: Locatable) RETURNS Node ->
   PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Node{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Node{ ProtocolRequirement: COPY cast_payload };,
@@ -993,7 +993,7 @@ FN castOptionalSymbolEntryRegInputToOptionalLocatable(value: ?SymbolEntryRegInpu
   END
   panic("Invalid cast to ?Locatable");
 END
-PRIVATE FN rubyToClearVoid() RETURNS Void ->
+FN rubyToClearVoid() RETURNS Void ->
   RETURN;
 END
 PUB FN mIRPass__schema_lookup_call(self: MIRPass, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
