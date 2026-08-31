@@ -635,7 +635,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     &rtoc_self_view.traversal_state.stream_yield_frames.append(COPY frame);
     DEFER {
     MUTABLE popped: ?StreamYieldFrame = &rtoc_self_view.traversal_state.stream_yield_frames.pop();
-    IF !(popped.equal?(frame)) THEN
+    IF (popped == NIL) THEN
       panic("BUG: stream yield frame mismatch");
     END
     }
@@ -697,7 +697,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
   MUTABLE frame = SnapshotTxnFrame{ violations: List[] };
   DEFER {
   MUTABLE popped: ?SnapshotTxnFrame = &rtoc_self_view.audit_inputs.snapshot_txn_frames.pop();
-  IF ((popped != NIL) AND !(popped.equal?(frame))) THEN
+  IF (popped == NIL) THEN
       panic("BUG: snapshot transaction frame mismatch");
   END
   }
@@ -1170,7 +1170,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_self_view.traversal_state.annotation_ancestors.append(COPY node_value_mutable);
       DEFER {
       MUTABLE popped: ?Locatable = &rtoc_self_view.traversal_state.annotation_ancestors.pop();
-      IF !(popped.equal?(node_value_mutable)) THEN
+      IF (popped == NIL) THEN
         panic("BUG: annotation ancestor stack mismatch");
       END
       }
@@ -3132,7 +3132,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       DEFER IF !((typeAnalysisSession__language_mode(rtoc_self_view) == :strict)) THEN
           MUTABLE popped: ?OwnershipTransportFacts@multiowned = typeAnalysisSession__phase_audit_inputs(rtoc_self_view).ownership_transport_frames.pop();
-          IF !(popped.equal?(transport_facts)) THEN
+          IF (popped == NIL) THEN
             panic("BUG: ownership transport fact frame mismatch");
           END
       END
@@ -10004,7 +10004,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
   ctx = CaptureContext{ analysis: COPY typeAnalysisSession__new_capture_analysis(rtoc_self_view), outer_scope: TRY (typeAnalysisSession__current_scope(rtoc_self_view)), locals: COPY Set[], is_parallel: !(!(is_parallel)), mark_moves: mark_moves };
   DEFER {
   MUTABLE popped: ?CaptureContext = &state.capture_stack.pop();
-  IF ((popped != NIL) AND !(popped.equal?(ctx))) THEN
+  IF (popped == NIL) THEN
       panic("BUG: capture context mismatch");
   END
   }
@@ -11522,7 +11522,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     (TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view))).append(frame);
     DEFER {
     MUTABLE popped: ?BodyFactFrame = (TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view))).pop();
-    IF !(popped.equal?(frame)) THEN
+    IF (popped == NIL) THEN
       panic("BUG: body fact frame mismatch");
     END
     }

@@ -102,7 +102,7 @@ PRIVATE FN capabilityAuditSession__function_node_for(self: CapabilityAuditSessio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN CAST(COPY UNWRAP (TRY (functionRegistry__fetch(capabilityAuditSession__semantic_function_registry(rtoc_self_view), name))) AS ?FunctionDef);
+    RETURN CAST(COPY TRY (functionRegistry__fetch(capabilityAuditSession__semantic_function_registry(rtoc_self_view), name)) AS ?FunctionDef);
 }
 END
 PRIVATE FN capabilityAuditSession__semantic_root_scope(self: CapabilityAuditSession) RETURNS Scope@multiowned
@@ -160,10 +160,10 @@ PRIVATE FN capabilityAuditSession__derived_call_view(MUTABLE self: CapabilityAud
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE facts = TRY (capabilityAuditSession__local_function_facts(rtoc_self_view));
-    IF !(rtoc_self_view.derived_call_views_source.equal?(facts)) THEN
-      rtoc_self_view.derived_call_views_source = facts;
-      &rtoc_self_view.derived_call_views.clear();
-    END
+    # Ruby drops these cached views when the facts table is a different
+    # object. CLEAR copies values, so that question cannot be asked --
+    # recomputing builds the same views from the same facts.
+    &rtoc_self_view.derived_call_views.clear();
     MUTABLE cached: ?{String}[Set]String = COPY rtoc_self_view.derived_call_views[kind];
     IF cached EXISTS AS cached_value THEN
       RETURN COPY cached_value;
