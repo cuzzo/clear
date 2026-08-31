@@ -195,7 +195,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END;
   MUTABLE replaced = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, argument));
-  IF ((moved AND !(replaced.equal?(argument))) AND respondsTo?(replaced, "was_moved=")) THEN
+  IF (moved AND respondsTo?(replaced, "was_moved=")) THEN
       replaced.was_moved = TRUE;
       RETURN TRUE;
   END
@@ -230,39 +230,29 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     real_source = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, real_source));
     IF (pipelineRewriter__needs_transpiler_pipeline?(rtoc_self_view, &real_source) OR ((IF real_source IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END))) THEN
-      IF !(real_source.equal?(chain.source)) THEN
         pipelineRewriter__patch_chain_source_mut(rtoc_self_view, node, real_source);
-      END
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
     MUTABLE is_range_fold_terminal = (((terminal != NIL) AND (terminal IS_A EachOp)) OR aST__pipeline_terminal_fold?(terminal));
     MUTABLE source_type = &real_source.full_type_mut();
     MUTABLE has_limit = stages |> ANY _ IS_A LimitOp;
     IF (TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY &node.full_type_mut() }))))) AND (stages |> ANY _ IS_A SelectOp)) THEN
-      IF !(real_source.equal?(chain.source)) THEN
         pipelineRewriter__patch_chain_source_mut(rtoc_self_view, node, real_source);
-      END
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
     IF (is_range_fold_terminal AND (stages |> ALL aST__pipeline_fusible_stage?(_))) THEN
       IF (real_source IS_A RangeLit OR TRY (type__bounded_pipeline_stream_source?(source_type, has_limit))) THEN
-        IF !(real_source.equal?(chain.source)) THEN
           pipelineRewriter__patch_chain_source_mut(rtoc_self_view, node, real_source);
-        END
         RETURN COPY Locatable{ BinaryOp: COPY node };
       END
     END
     IF (IF terminal? IS_A DistinctOp AS distinct_op THEN (stages |> ALL aST__pipeline_fusible_stage?(_)) ELSE FALSE END) THEN
-      IF !(real_source.equal?(chain.source)) THEN
         pipelineRewriter__patch_chain_source_mut(rtoc_self_view, node, real_source);
-      END
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
     MUTABLE is_stream_index = ((IF terminal? IS_A IndexOp AS index_op THEN TRY (type__bounded_pipeline_stream_source?(source_type, has_limit)) ELSE FALSE END) AND (stages |> ALL aST__pipeline_fusible_stage?(_)));
     IF is_stream_index THEN
-      IF !(real_source.equal?(chain.source)) THEN
         pipelineRewriter__patch_chain_source_mut(rtoc_self_view, node, real_source);
-      END
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
     MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal?) IS_A EachOp))) OR aST__pipeline_terminal_fold?(terminal)) OR aST__pipeline_list_terminal?(terminal));
