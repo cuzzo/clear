@@ -160,7 +160,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         NIL
       END);
     IF !((IF resource_captures != NIL THEN
-        type__any?(resource_captures)
+        (resource_captures).any?()
       ELSE
         NIL
       END)) THEN
@@ -280,7 +280,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END);
     IF !((IF captures != NIL THEN
-      type__any?(captures)
+      (captures).any?()
     ELSE
       NIL
     END)) THEN

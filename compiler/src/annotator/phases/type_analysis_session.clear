@@ -1087,21 +1087,21 @@ PRIVATE FN typeAnalysisSession__function_has_pre_clauses?(self: TypeAnalysisSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (node.pre_clauses IS_A []Any AND type__any?(node.pre_clauses));
+    RETURN ((node.pre_clauses).any?());
 }
 END
 PRIVATE FN typeAnalysisSession__function_has_catch_clauses?(self: TypeAnalysisSession, node: FunctionDef) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (node.catch_clauses IS_A []Any AND type__any?(node.catch_clauses));
+    RETURN ((node.catch_clauses).any?());
 }
 END
 PRIVATE FN typeAnalysisSession__function_has_default_catch?(self: TypeAnalysisSession, node: FunctionDef) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (node.default_catch IS_A []Any AND type__any?(node.default_catch));
+    RETURN ((node.default_catch).any?());
 }
 END
 PRIVATE FN typeAnalysisSession__runtime_error_clause?(self: TypeAnalysisSession, node: FunctionDef) RETURNS Bool
@@ -3275,7 +3275,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__push_function_context_mut(rtoc_self_view, fn_ctx);
     DEFER typeAnalysisSession__pop_function_context_mut(rtoc_self_view);
     TRY (typeAnalysisSession__verify_lifetime_mut(rtoc_self_view, node));
-    IF type__any?(fn_type_params) THEN
+    IF (fn_type_params).any?() THEN
       TRY (typeAnalysisSession__validate_type_param_list_mut(rtoc_self_view, GenericDeclarationNode{ FunctionDefMultiowned: COPY node }, node.type_params, "function"));
     END
     FOR _ IN node.params DO
@@ -4590,7 +4590,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE field_defaults = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_86 = CAST(schema AS StructSchema);
             TRY (structSchema__field_defaults(rtoc_local_receiver_86)) } OR_ELSE {});
             MUTABLE missing = field_names |> WHERE !(field_defaults.key?(_));
-            IF type__any?(missing) THEN
+            IF (missing).any?() THEN
               TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_STRUCT_MISSING_DEFAULTS }, [], {:name: _.name(), :type: _.type(), :missing: missing.join(", ")}));
             END
           END
@@ -13554,7 +13554,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE arg: Any = (type_params.zip(node.type_args)[_] OR_ELSE panic("missing hash key"));
       subst[_] = castTypeToGenericBinding(TRY (type__new(arg)));
       };
-    ELSE_IF type__any?(type_params) THEN
+    ELSE_IF (type_params).any?() THEN
       MUTABLE params_hint = (type_params |> SELECT _.toString()).join(", ");
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MISSING_TYPE_ARGS }, [], {:type: node.name, :type2: node.name, :hint: params_hint}));
     END
@@ -16319,7 +16319,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE field_defaults = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_405 = CAST(schema AS StructSchema);
         TRY (structSchema__field_defaults(rtoc_local_receiver_405)) } OR_ELSE {});
         MUTABLE missing = field_names |> WHERE !(field_defaults.key?(_));
-        IF type__any?(missing) THEN
+        IF (missing).any?() THEN
           TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STRUCT_LITERAL_MISSING_FIELDS }, [], {:name: node.name, :fields: missing.join(", ")}));
         END
       END
@@ -17803,7 +17803,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__visit(&rtoc_self_view, value));
     MUTABLE inline_bg_sources = CAST((TRY (typeAnalysisSession__collect_bg_sources_in_expr(rtoc_self_view, value)) |> DISTINCT _) AS []SymbolEntry@multiowned);
-    IF type__any?(inline_bg_sources) THEN
+    IF (inline_bg_sources).any?() THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_BORROWED_NO_COPY_OR_LIFETIME }, [], {:type: CAST((TRY (aST__full_type_mut(value))) AS String)}));
     END
     IF typeAnalysisSession__inside_with_block?(rtoc_self_view) THEN
@@ -20151,7 +20151,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_ternary_value_509 = List[];
         END
         rtoc_ternary_value_509? }));
-        RETURN (type__any?(tails) AND (tails |> ALL typeAnalysisSession__init_value_contents_heap?(rtoc_self_view, _)));
+        RETURN ((tails).any?() AND (tails |> ALL typeAnalysisSession__init_value_contents_heap?(rtoc_self_view, _)));
       ELSE
         RETURN FALSE;
       END

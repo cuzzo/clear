@@ -134,7 +134,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     rtoc_indexed_output_3
     };
-    IF type__any?(unfilled) THEN
+    IF (unfilled).any?() THEN
       panic("RecursiveSplitter: unfilled segments at indices {}");
     END
     RETURN Finalized{ segments: COPY CAST(rtoc_self_view.segments AS []Segment), alias_overrides_by_index: COPY rtoc_self_view.alias_overrides_for };

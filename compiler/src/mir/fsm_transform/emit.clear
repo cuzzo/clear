@@ -497,7 +497,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   END
     lowered_mir = (mir_stmts + lowered_mir);
     MUTABLE all_promoted = (fsm_promoted_names + (captured.keys() |> SELECT _.toString()));
-    IF type__any?(all_promoted) THEN
+    IF (all_promoted).any?() THEN
       MUTABLE promoted_names = all_promoted |> DISTINCT _ |> SELECT COPY _;
       lowered_mir = TRY (emit__promote_fsm_mir_to_ctx_fields(lowered_mir, promoted_names, id));
       lowered_mir = TRY (emit__lift_ctx_cleanups_to_destroy_mut(lowered_mir, promoted_names, "__ctx_${id.toString()}", &ctx));

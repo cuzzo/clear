@@ -203,21 +203,21 @@ PRIVATE FN capabilityAuditSession__function_has_pre_clauses?(self: CapabilityAud
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (node.pre_clauses IS_A []Any AND type__any?(node.pre_clauses));
+    RETURN ((node.pre_clauses).any?());
 }
 END
 PRIVATE FN capabilityAuditSession__function_has_catch_clauses?(self: CapabilityAuditSession, node: FunctionDef) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (node.catch_clauses IS_A []Any AND type__any?(node.catch_clauses));
+    RETURN ((node.catch_clauses).any?());
 }
 END
 PRIVATE FN capabilityAuditSession__function_has_default_catch?(self: CapabilityAuditSession, node: FunctionDef) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (node.default_catch IS_A []Any AND type__any?(node.default_catch));
+    RETURN ((node.default_catch).any?());
 }
 END
 PRIVATE FN capabilityAuditSession__deferred_with_validations(self: CapabilityAuditSession) RETURNS ![]DeferredWithValidation

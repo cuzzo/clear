@@ -6075,7 +6075,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           mIRLowering__capture_state(rtoc_self_view).last_fsm_result_transfer_facts = ruby_array_concat_FsmResultTransferFact(mIRLowering__capture_state(rtoc_self_view).last_fsm_result_transfer_facts, transfer_facts);
           TRY (mIRLowering__guard_fsm_result_cleanup_mut(rtoc_self_view, result_mir, transfer_facts));
           MUTABLE transfer_names = (transfer_facts |> SELECT _.name) |> DISTINCT _ |> SELECT COPY _;
-          IF type__any?(transfer_names) THEN
+          IF (transfer_names).any?() THEN
             result_set = TRY (mIRLowering__with_ownership_consumption(rtoc_self_view, Emittable{ Set: COPY result_set }, transfer_names, "fsm_result", :owned_sink, mIRLowering__uniform_fsm_result_target_alloc(rtoc_self_view, transfer_facts)));
           END
           &result_mir.append(Emittable{ Set: COPY result_set });
@@ -8567,7 +8567,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       node.can_fail = TRUE;
     END
-    MUTABLE has_post = ((TRUE AND node.post_clauses) AND type__any?(node.post_clauses));
+    MUTABLE has_post = ((TRUE AND node.post_clauses) AND (node.post_clauses).any?());
     IF has_post THEN
       RETURN MIRLoweringReturnValue{ ArrayValue: COPY [mIRLowering__build_post_inner_fn(rtoc_self_view, UNWRAP (node), params_mir, return_type_str, prologue, body_mir, comptime_params), TRY (mIRLowering__build_post_outer_fn(&rtoc_self_view, UNWRAP (node), params_mir, return_type_str, fn_needs_rt, vis, comptime_params))] };
     ELSE_IF has_catch THEN
@@ -17610,7 +17610,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     rtoc_lambda_result_652
     });
-    IF ((facts.has_mir_drop OR TRY (mIRLowering__mir_allocates?(rtoc_self_view, heap_value))) OR type__any?(const_pending)) THEN
+    IF ((facts.has_mir_drop OR TRY (mIRLowering__mir_allocates?(rtoc_self_view, heap_value))) OR (const_pending).any?()) THEN
       RETURN TRY (mIRLowering__lower_runtime_init_const(rtoc_self_view, node, facts, safe_name, heap_value, const_pending));
     END
     mIRLowering__function_state(rtoc_self_view).pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(rtoc_self_view).pending_stmts, CAST(const_pending AS []Emittable));
@@ -17636,7 +17636,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     rtoc_lambda_result_655
     });
-    IF ((facts.has_mir_drop OR TRY (mIRLowering__mir_allocates?(rtoc_self_view, heap_value))) OR type__any?(pending)) THEN
+    IF ((facts.has_mir_drop OR TRY (mIRLowering__mir_allocates?(rtoc_self_view, heap_value))) OR (pending).any?()) THEN
       RETURN TRY (mIRLowering__lower_runtime_init_const(rtoc_self_view, node, facts, safe_name, heap_value, pending));
     END
     mIRLowering__function_state(rtoc_self_view).pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(rtoc_self_view).pending_stmts, CAST(pending AS []Emittable));
