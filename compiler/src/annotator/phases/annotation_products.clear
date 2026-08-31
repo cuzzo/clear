@@ -164,7 +164,7 @@ PUB FN annotationProducts__publish_typed_program(self: AnnotationProducts, facts
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE resolution: ?ResolutionFacts@multiowned = COPY rtoc_self_view.resolution;
     IF resolution EXISTS AS resolution_value THEN
-      IF !((KEEP facts.resolution).equal?(resolution_value)) THEN
+      IF (aST__node_identity(Locatable{ Program: COPY facts.resolution.program }) != aST__node_identity(Locatable{ Program: COPY resolution_value.program })) THEN
         panic("type analysis used different resolution facts");
       END
       IF rtoc_self_view.typed_program EXISTS AS typed_program_value THEN
@@ -182,7 +182,7 @@ PUB FN annotationProducts__publish_capability_audit(self: AnnotationProducts, re
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE typed_program: ?TypedProgramFacts@multiowned = COPY rtoc_self_view.typed_program;
     IF typed_program EXISTS AS typed_program_value THEN
-      IF !((KEEP report.typed_program).equal?(typed_program_value)) THEN
+      IF (aST__node_identity(Locatable{ Program: COPY report.typed_program.resolution.program }) != aST__node_identity(Locatable{ Program: COPY typed_program_value.resolution.program })) THEN
         panic("capability audit used different typed program facts");
       END
       IF rtoc_self_view.capability_audit EXISTS AS capability_audit_value THEN
