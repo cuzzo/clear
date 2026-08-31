@@ -18606,7 +18606,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names[name_value]) THEN
         RETURN CAST(( { MUTABLE rtoc_empty_list_680: []Emittable = List[]; rtoc_empty_list_680 } ) AS []Emittable);
       END
-      MUTABLE reassigns_owner = node.targets |> ANY (IF (_.name == "_") THEN FALSE ELSE (IF _.symbol?.reg.equal?(_) THEN FALSE ELSE (IF mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names[mIRLowering__zig_safe_name(rtoc_self_view, _.name)] != NIL THEN mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names[mIRLowering__zig_safe_name(rtoc_self_view, _.name)] ELSE (IF (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[_.name] != NIL THEN
+      MUTABLE reassigns_owner = node.targets |> ANY (IF (_.name == "_") THEN FALSE ELSE (IF (aST__node_identity(UNWRAP (castOptionalSymbolEntryRegInputToOptionalLocatable((UNWRAP (_.symbol)).reg))) == aST__node_identity(Locatable{ DestructureTarget: COPY _ })) THEN FALSE ELSE (IF mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names[mIRLowering__zig_safe_name(rtoc_self_view, _.name)] != NIL THEN mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names[mIRLowering__zig_safe_name(rtoc_self_view, _.name)] ELSE (IF (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[_.name] != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_681 = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[_.name]);
       cleanupEntry__needs_cleanup?(rtoc_local_receiver_681) }
       ELSE
@@ -18629,7 +18629,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN MIRDestructureTarget{ name: "_", declaration_kind: NIL, annotation: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
     END
     MUTABLE symbol: ?SymbolEntry = COPY target.symbol;
-    MUTABLE declared = symbol?.reg.equal?(target);
+    MUTABLE declared = FALSE;
+    IF symbol EXISTS AS rtoc_symbol THEN
+      IF castOptionalSymbolEntryRegInputToOptionalLocatable(rtoc_symbol.reg) EXISTS AS rtoc_reg THEN
+        declared = (aST__node_identity(rtoc_reg) == aST__node_identity(Locatable{ DestructureTarget: COPY target }));
+      END
+    END
     MUTABLE safe_name = mIRLowering__zig_safe_name(rtoc_self_view, target.name);
     IF declared THEN
       MUTABLE rtoc_index_receiver_684 = TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view)));
