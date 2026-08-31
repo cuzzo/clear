@@ -33,7 +33,11 @@ PUB FN derivedProgramFacts__initialize(MUTABLE self: DerivedProgramFacts, functi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.functions = (functions |> ORDER_BY _).to_h();
+    MUTABLE rtoc_sorted_functions: {String}DerivedFunctionFacts = {};
+    FOR rtoc_function_key IN (functions.keys() |> ORDER_BY _) DO
+      rtoc_sorted_functions[rtoc_function_key] = COPY UNWRAP (functions[rtoc_function_key]);
+    END
+    rtoc_self_view.functions = rtoc_sorted_functions;
 }
 END
 PUB FN derivedProgramFacts__empty() RETURNS DerivedProgramFacts@multiowned ->
