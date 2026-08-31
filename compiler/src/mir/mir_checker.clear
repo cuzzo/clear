@@ -1100,7 +1100,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN projected;
 }
 END
-PUB FN mIRChecker__linear_merge_branch_states_mut(MUTABLE self: MIRChecker, states: []LinearOwnershipState@multiowned, MUTABLE into: LinearOwnershipState, label: String) RETURNS !Void
+PUB FN mIRChecker__linear_merge_branch_states_mut(MUTABLE self: MIRChecker, states: []LinearOwnershipState, MUTABLE into: LinearOwnershipState, label: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

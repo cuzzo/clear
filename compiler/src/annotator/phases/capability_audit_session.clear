@@ -359,7 +359,7 @@ PRIVATE FN capabilityAuditSession__note_mut(self: CapabilityAuditSession, node_o
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token: ?Token@multiowned = capabilityAuditSession__source_error_token(rtoc_self_view, capabilityAuditSession__diagnostic_token(rtoc_self_view, node_or_token));
+    MUTABLE token: ?Token@multiowned = capabilityAuditSession__source_error_token(rtoc_self_view, capabilityAuditSession__diagnostic_token(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node_or_token }));
     MUTABLE loc: String = "";
     IF token EXISTS AS token_value THEN
       loc = " (line ${token_value.line.toString()})";
@@ -374,7 +374,7 @@ PRIVATE FN capabilityAuditSession__warning_mut(self: CapabilityAuditSession, nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token: ?Token@multiowned = capabilityAuditSession__source_error_token(rtoc_self_view, capabilityAuditSession__diagnostic_token(rtoc_self_view, node_or_token));
+    MUTABLE token: ?Token@multiowned = capabilityAuditSession__source_error_token(rtoc_self_view, capabilityAuditSession__diagnostic_token(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node_or_token }));
     MUTABLE loc: String = "";
     IF token EXISTS AS token_value THEN
       loc = " (line ${token_value.line.toString()})";
@@ -453,18 +453,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN diagnosticAnchor__token(node_or_token);
 }
 END
-PRIVATE FN capabilityAuditSession__source_error_token(self: CapabilityAuditSession, token: ?Any@multiowned) RETURNS ?Token
+PRIVATE FN capabilityAuditSession__source_error_token(self: CapabilityAuditSession, token: ?Token) RETURNS ?Token
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF ((token != NIL) AND (token IS_A Token)) THEN
-      RETURN COPY token;
-    END
-    IF !((token != NIL)) THEN
-      RETURN NIL;
-    END
-    RETURN Token{ type: :ANCHOR, value: NIL, line: token.line, column: token.column, file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
-}
+  RETURN COPY token;
 END
 PRIVATE FN capabilityAuditSession__diagnostic_output(self: CapabilityAuditSession, message: String) RETURNS Void
   REQUIRES self: LOCAL

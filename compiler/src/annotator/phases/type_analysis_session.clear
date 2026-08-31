@@ -4937,7 +4937,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__find_matching_intrinsic(self: TypeAnalysisSession, definitions: []FunctionSignature@multiowned, args: []Locatable) RETURNS !?FunctionSignature@multiowned
+PRIVATE FN typeAnalysisSession__find_matching_intrinsic(self: TypeAnalysisSession, definitions: []FunctionSignature, args: []Locatable) RETURNS !?FunctionSignature@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7398,18 +7398,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN diagnosticAnchor__token(node_or_token);
 }
 END
-PRIVATE FN typeAnalysisSession__source_error_token(self: TypeAnalysisSession, token: ?Any@multiowned) RETURNS ?Token
+PRIVATE FN typeAnalysisSession__source_error_token(self: TypeAnalysisSession, token: ?Token) RETURNS ?Token
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF ((token != NIL) AND (token IS_A Token)) THEN
-      RETURN COPY token;
-    END
-    IF !((token != NIL)) THEN
-      RETURN NIL;
-    END
-    RETURN Token{ type: :ANCHOR, value: NIL, line: token.line, column: token.column, file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
-}
+  RETURN COPY token;
 END
 PRIVATE FN typeAnalysisSession__diagnostic_output(self: TypeAnalysisSession, message: String) RETURNS Void
   REQUIRES self: LOCAL
@@ -22411,7 +22403,7 @@ FN ruby_array_concat_Edit__type_analysis_session(left: []Edit, right: []Edit) RE
   END
   RETURN result;
 END
-FN ruby_array_concat_SymbolEntry_multiowned(left: []SymbolEntry@multiowned, right: []SymbolEntry@multiowned) RETURNS []SymbolEntry@multiowned ->
+FN ruby_array_concat_SymbolEntry_multiowned(left: []SymbolEntry, right: []SymbolEntry@multiowned) RETURNS []SymbolEntry@multiowned ->
   MUTABLE result: []SymbolEntry@multiowned = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);
