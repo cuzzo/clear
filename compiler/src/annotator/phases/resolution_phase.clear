@@ -488,7 +488,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         tag = "\x1B[36m[${(CAST(level AS String)).capitalize()}]\x1B[0m";
       END
-      RETURN resolutionSession__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
+      resolutionSession__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
+      RETURN NIL;
     ELSE_IF (level == :error) THEN
       RETURN TRY (resolutionSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message));
     ELSE

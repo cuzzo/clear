@@ -5367,7 +5367,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     selector_effect = TRY (typeAnalysisSession__selector_effect_fact(rtoc_self_view, node.right.expression()));
     IF node.right IS_A WhereOp THEN
-      RETURN TRY (typeAnalysisSession__validate_where_effect_contract_mut(rtoc_self_view, castLocatableToWhereOp__type_analysis_session(node.right), UNWRAP (selector_effect)));
+      TRY (typeAnalysisSession__validate_where_effect_contract_mut(rtoc_self_view, castLocatableToWhereOp__type_analysis_session(node.right), UNWRAP (selector_effect)));
+      RETURN NIL;
     ELSE_IF node.right IS_A SelectOp THEN
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(rtoc_self_view, castLocatableToSelectOp__type_analysis_session(node.right), UNWRAP (selector_effect)));
       IF (pipelineSourceFact__inf_stream?(source) AND pipelinePlaceholderUsage__moved_placeholder?(node.right.expression())) THEN
@@ -7357,7 +7358,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         tag = "\x1B[36m[${(CAST(level AS String)).capitalize()}]\x1B[0m";
       END
-      RETURN typeAnalysisSession__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
+      typeAnalysisSession__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
+      RETURN NIL;
     ELSE_IF (level == :error) THEN
       RETURN TRY (typeAnalysisSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message));
     ELSE
