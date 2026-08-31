@@ -132,9 +132,16 @@ module SelfhostSccProbe
     return (warn 'usage: selfhost_scc_probe.rb [--all] [file...]') || 1 if targets.empty?
 
     results = {}
+    warn "probing #{targets.length} file(s) with #{jobs} job(s)"
     targets.each_slice([targets.length.fdiv(jobs).ceil, 1].max).to_a.then do |batches|
       threads = batches.map do |batch|
-        Thread.new { batch.each { |rel| results[rel] = check(rel, members) } }
+        Thread.new do
+          batch.each do |rel|
+            results[rel] = check(rel, members)
+            # A sweep this long has to say what it has found so far.
+            warn format('  %-52s %s', rel, results[rel].first ? 'OK' : results[rel].last)
+          end
+        end
       end
       threads.each(&:join)
     end
