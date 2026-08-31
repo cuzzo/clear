@@ -44,7 +44,7 @@ PUB STRUCT CapabilityAuditInputs {
   deferred_copy_retained_validations: []DeferredCopyRetainedValidation,
   predicate_call_sites: []PredicateCallSite,
   async_body_facts: []AsyncBodyFact,
-  capability_audit: BindingAuditStore,
+  capability_audit: {String}BindingAuditRecord,
   capture_stack: []CaptureContext,
   capture_move_suppression_depth: Int64,
   snapshot_txn_frames: []SnapshotTxnFrame,

@@ -3756,7 +3756,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "has effects ${((effects |> SELECT effectTracker__display(_)) |> ORDER_BY _).join(", ")}";
 }
 END
-PRIVATE FN capabilityAuditSession__finalize_capability_audit_mut(self: CapabilityAuditSession) RETURNS !?BindingAuditStore
+PRIVATE FN capabilityAuditSession__finalize_capability_audit_mut(self: CapabilityAuditSession) RETURNS !?{String}BindingAuditRecord
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

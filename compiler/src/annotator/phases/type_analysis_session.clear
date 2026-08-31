@@ -10200,7 +10200,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__capability_audit_init_mut(self: TypeAnalysisSession) RETURNS !BindingAuditStore
+PRIVATE FN typeAnalysisSession__capability_audit_init_mut(self: TypeAnalysisSession) RETURNS !{String}BindingAuditRecord
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -10293,7 +10293,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__capability_audit_store(self: TypeAnalysisSession) RETURNS !BindingAuditStore
+PRIVATE FN typeAnalysisSession__capability_audit_store(self: TypeAnalysisSession) RETURNS !{String}BindingAuditRecord
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
