@@ -46,14 +46,14 @@ PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?Tran
     RETURN NIL;
   END
   MUTABLE segments = rec_segs.segments;
-  MUTABLE expected = scopeBindings__length(suspend_points);
+  MUTABLE expected = (suspend_points).length();
   MUTABLE io_next_count = segments |> COUNT (_.tail IS_A IoSuspend OR _.tail IS_A NextSuspend);
   MUTABLE lock_with_nodes = (segments |> SELECT:? (IF _.tail IS_A LockSuspend THEN
     _.tail.with_node
   ELSE
     NIL
   END) |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
-  MUTABLE actual = (io_next_count + scopeBindings__length(lock_with_nodes));
+  MUTABLE actual = (io_next_count + (lock_with_nodes).length());
   IF (expected != actual) THEN
     RETURN NIL;
   END

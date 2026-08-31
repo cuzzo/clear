@@ -2246,7 +2246,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE alias_name = "${castNameCandidateToString__type_analysis_session(name)}_v";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(CAST(name AS String))}\\.(?=\\w)"), "${alias_name}.");
         MUTABLE new_line = "${indent}WITH ${perm} ${castNameCandidateToString__type_analysis_session(name)} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_CAPABILITY_ACCESS, {:permission: DiagnosticKwValue{ StringValue: COPY perm }, :name: castNameCandidateToOptionalDiagnosticKwValue__type_analysis_session(name), :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }, :capability: DiagnosticKwValue{ StringValue: COPY cap }})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), new_line)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_CAPABILITY_ACCESS, {:permission: DiagnosticKwValue{ StringValue: COPY perm }, :name: castNameCandidateToOptionalDiagnosticKwValue__type_analysis_session(name), :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }, :capability: DiagnosticKwValue{ StringValue: COPY cap }})), [edit__new(span__new(NIL, line_num, 1, (body).length()), new_line)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -2297,7 +2297,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE alias_name = "${name}_view";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(name)}\\s*(?=\\[)"), alias_name);
         MUTABLE replacement = "${indent}WITH UNSAFE VIEW ${name} LENGTH ${length} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, {:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), replacement)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, {:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }})), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -2322,7 +2322,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE alias_name = "${name}_view";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(name)}\\b"), alias_name);
         MUTABLE replacement = "${indent}WITH ${permission} ${name} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_DIRECT_VIEW_ACCESS, {:permission: DiagnosticKwValue{ StringValue: COPY permission }, :name: DiagnosticKwValue{ StringValue: COPY name }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }})), [edit__new(span__new(NIL, line_num, 1, scopeBindings__length(body)), replacement)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_DIRECT_VIEW_ACCESS, {:permission: DiagnosticKwValue{ StringValue: COPY permission }, :name: DiagnosticKwValue{ StringValue: COPY name }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }})), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -4435,7 +4435,7 @@ PRIVATE FN typeAnalysisSession__warn_multi_atomic_bare_value_call_mut(self: Type
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE unique_args = atomic_args |> WHERE _ != NIL;
-    IF (scopeBindings__length(unique_args) < 2) THEN
+    IF ((unique_args).length() < 2) THEN
       RETURN;
     END
     MUTABLE names = unique_args |> SELECT (IF _ IS_A Identifier THEN
@@ -6328,7 +6328,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END)
     }) |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
     MUTABLE names_str = (sharded_names |> SELECT COPY _).join(", ");
-    IF (scopeBindings__length(shard_counts) == 1) THEN
+    IF ((shard_counts).length() == 1) THEN
       typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH accesses ${sharded_names.length()} @sharded maps (${names_str}). Co-located (same shard count ${shard_counts.first()}), but auto-sharding requires a single map. Use explicit SHARD() or @sharded(N):locked.");
     ELSE
       typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH accesses @sharded maps with different shard counts (${names_str}). Cross-shard routing is likely \u{2014} consider @sharded(N):locked.");
@@ -6418,8 +6418,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
     ((key_expr.class().name() + ":") + key_name)
         }) |> DISTINCT _ |> SELECT COPY _;
-        IF (scopeBindings__length(key_sources) > 1) THEN
-          typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH uses ${scopeBindings__length(key_sources)} different key expressions on @sharded map '${map_name}'. Routing is based on the first key; other accesses with different keys may trigger cross-shard remote calls.");
+        IF ((key_sources).length() > 1) THEN
+          typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH uses ${(key_sources).length()} different key expressions on @sharded map '${map_name}'. Routing is based on the first key; other accesses with different keys may trigger cross-shard remote calls.");
         END
         MUTABLE key_expr = (UNWRAP (this_map_accesses.first())).key_expr;
         MUTABLE map_ident = Identifier{ token: CAST(COPY COPY first_access_value_mutable.map_token AS Token), name: COPY map_name, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
@@ -9612,7 +9612,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE is_or_are: String = "";
-    IF (scopeBindings__length(mutated) == 1) THEN
+    IF ((mutated).length() == 1) THEN
       is_or_are = "is";
     ELSE
       is_or_are = "are";
@@ -12489,8 +12489,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF method_def EXISTS AS method_def_value THEN
       MUTABLE method_def_value_mutable = COPY method_def_value;
       MUTABLE expected_args = TRY (functionSignature__intrinsic_arg_specs(method_def_value_mutable));
-      IF (scopeBindings__length(node.args) != expected_args.length()) THEN
-        TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_ARITY }, [], {:type: type_name, :method: node.method_name, :expected: expected_args.length(), :got: scopeBindings__length(node.args)}));
+      IF ((node.args).length() != expected_args.length()) THEN
+        TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_ARITY }, [], {:type: type_name, :method: node.method_name, :expected: expected_args.length(), :got: (node.args).length()}));
       END
       MUTABLE rtoc_each_items_300 = node.args.zip(expected_args);
       MUTABLE rtoc_idx = 0;
@@ -13547,8 +13547,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF type_params.empty?() THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_NOT_GENERIC }, [], {:type: node.name}));
       END
-      IF (node.type_args.length() != scopeBindings__length(type_params)) THEN
-        TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], {:type: node.name, :expected: scopeBindings__length(type_params), :got: node.type_args.length()}));
+      IF (node.type_args.length() != (type_params).length()) THEN
+        TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], {:type: node.name, :expected: (type_params).length(), :got: node.type_args.length()}));
       END
       type_params.zip(node.type_args).keys() |> EACH {
     MUTABLE arg: Any = (type_params.zip(node.type_args)[_] OR_ELSE panic("missing hash key"));
@@ -14671,7 +14671,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         "stream"
       ELSE
         "future"
-      END }}), [edit__new(span__new(NIL, bind_expr.token.line, (bind_expr.token.column + scopeBindings__length(bind_expr.name)), 0), ":${wrapper}")], :auto)));
+      END }}), [edit__new(span__new(NIL, bind_expr.token.line, (bind_expr.token.column + (bind_expr.name).length()), 0), ":${wrapper}")], :auto)));
     END
     TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, node, :type, fixes, NIL, :INFERRED_ASYNC_BINDING, :error, TRUE, {:name: (MATCH node START DeclarationNode.VarDecl AS item -> item.name, DeclarationNode.BindExpr AS item -> item.name END), :expected_action: action}));
 }
@@ -14698,7 +14698,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         "fallible"
       ELSE
         "optional"
-      END }}), [edit__new(span__new(NIL, bind_expr.token.line, (bind_expr.token.column + scopeBindings__length(bind_expr.name)), 0), ":${wrapper}")], :auto)));
+      END }}), [edit__new(span__new(NIL, bind_expr.token.line, (bind_expr.token.column + (bind_expr.name).length()), 0), ":${wrapper}")], :auto)));
     END
     TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, node, :type, fixes, NIL, code, :error, TRUE, {:name: (MATCH node START DeclarationNode.VarDecl AS item -> item.name, DeclarationNode.BindExpr AS item -> item.name END)}));
 }
@@ -14713,7 +14713,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A ListLit, DeclarationNode.BindExpr AS item -> item.value IS_A ListLit END)) THEN
       RETURN;
     END
-    MUTABLE item_count = scopeBindings__length((MATCH node START DeclarationNode.VarDecl AS item -> item.value.items, DeclarationNode.BindExpr AS item -> item.value.items END));
+    MUTABLE item_count = ((MATCH node START DeclarationNode.VarDecl AS item -> item.value.items, DeclarationNode.BindExpr AS item -> item.value.items END)).length();
     IF (TRY (type__fixed_rank?(declared_type)) AND (item_count != UNWRAP (type__capacity(declared_type)))) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_LITERAL_SIZE }, [], {:expected: UNWRAP (type__capacity(declared_type)), :got: item_count}));
     END
@@ -16493,7 +16493,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       {
     MUTABLE rtoc_value_block_marker = 0;
     syncs = (string_item_types |> SELECT _.sync()) |> DISTINCT _ |> SELECT COPY _;
-    (IF (scopeBindings__length(syncs) == 1) THEN
+    (IF ((syncs).length() == 1) THEN
       syncs.first()
     ELSE
       NIL
@@ -18924,7 +18924,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE compare_types = CAST(((payloads |> SELECT TRY (typeAnalysisSession__expression_branch_compare_type(rtoc_self_view, _))) |> DISTINCT _) AS []String@symbol);
-    IF !((scopeBindings__length(compare_types) == 1)) THEN
+    IF !(((compare_types).length() == 1)) THEN
       RETURN NIL;
     END
     RETURN TRY (type__optional_of(payloads.first()));

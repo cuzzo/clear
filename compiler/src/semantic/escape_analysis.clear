@@ -602,7 +602,7 @@ PUB FN escapeAnalysis__unify_caller_attr(sites: []CallSiteFact, idx: Int64, proj
     RETURN NIL;
   END
   MUTABLE unique = CAST((observed |> DISTINCT _) AS []?String@symbol);
-  IF (((scopeBindings__length(unique) == 1) AND unique.first())) THEN
+  IF ((((unique).length() == 1) AND unique.first())) THEN
     RETURN unique.first();
   ELSE
     RETURN NIL;

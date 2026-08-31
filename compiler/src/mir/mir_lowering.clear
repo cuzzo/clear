@@ -3961,7 +3961,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE conformances = program.statements.grep(AST.ConformanceDef).group_by(%(declaration) USE(rtoc_self_view) -> mIRLowering__protocol_base_name_for_lowering(rtoc_self_view, declaration.protocol_type));
     RETURN (TRY (inlineAllocMetadata__values(protocols))) |> SELECT {
     MUTABLE cases = (((conformances[_.name()] OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_protocol_conformance_case(rtoc_self_view, _, _));
-    MUTABLE requirements = _.requirements |> SELECT ProtocolRequirementAdapter{ name: COPY _.name(), argument_count: scopeBindings__length(_.params()), return_type: COPY TRY (mIRLowering__protocol_requirement_return_type(rtoc_self_view, _, _)) };
+    MUTABLE requirements = _.requirements |> SELECT ProtocolRequirementAdapter{ name: COPY _.name(), argument_count: (_.params()).length(), return_type: COPY TRY (mIRLowering__protocol_requirement_return_type(rtoc_self_view, _, _)) };
     ProtocolAdapterDef{ protocol: COPY _.name(), associated_types: COPY _.associated_types() |> SELECT _.name(), requirements: COPY requirements, conformances: COPY cases }
     };
 }
@@ -6105,7 +6105,7 @@ PRIVATE FN mIRLowering__uniform_fsm_result_target_alloc(self: MIRLowering, facts
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE allocs = (facts |> SELECT _.target_alloc) |> DISTINCT _ |> SELECT COPY _;
-    IF (scopeBindings__length(allocs) == 1) THEN
+    IF ((allocs).length() == 1) THEN
       RETURN allocs.first();
     ELSE
       RETURN NIL;
@@ -8586,7 +8586,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         node.params |> SELECT _.name
       END;
-      MUTABLE inner_call = Call{ callee: COPY inner_name, args: COPY call_args |> SELECT Ident{ name: COPY _, lowered_node_id: NIL, ownership_consumption: NIL }, try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership(scopeBindings__length(call_args))), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
+      MUTABLE inner_call = Call{ callee: COPY inner_name, args: COPY call_args |> SELECT Ident{ name: COPY _, lowered_node_id: NIL, ownership_consumption: NIL }, try_wrap: FALSE, owned_return: FALSE, callable_contract: COPY TRY (callableContract__no_ownership((call_args).length())), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
       MUTABLE catch_plan = TRY (mIRLowering__build_catch_clauses(&rtoc_self_view, UNWRAP (node), fn_can_fail));
       MUTABLE error_reassigns = TRY (mIRLowering__collect_catch_reassigns(rtoc_self_view, UNWRAP (node)));
       MUTABLE outer_body = [Emittable{ CatchWrapper: COPY CatchWrapper{ inner_call: Emittable{ Call: COPY inner_call }, error_reassigns: error_reassigns, clauses: COPY catch_plan.clauses, default_body: catch_plan.default_body, default_action: catch_plan.default_action, snapshot_type: catch_plan.snapshot_type, rt_name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
@@ -9593,7 +9593,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         node.args()
       END;
-      IF (functionSignature__intrinsic_fixed_arg_list?(sig_value) AND ((TRY (functionSignature__params(sig_value))).length() != scopeBindings__length(ast_args))) THEN
+      IF (functionSignature__intrinsic_fixed_arg_list?(sig_value) AND ((TRY (functionSignature__params(sig_value))).length() != (ast_args).length())) THEN
         panic("stdlib call {}: signature has {} params for {} args");
       END
       MUTABLE ownership = TRY (mIRLowering__call_ownership_facts_for_signature(rtoc_self_view, sig_value, ast_args));
@@ -10563,7 +10563,7 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, node: Node) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF ((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == "symbol") ELSE FALSE END) AND (scopeBindings__length(node.args()) == 1)) THEN
+    IF ((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == "symbol") ELSE FALSE END) AND ((node.args()).length() == 1)) THEN
       MUTABLE literal = node.args().first();
       IF (literal IS_A Literal AND (literal.type() == :STRING)) THEN
         RETURN Emittable{ SymbolLit: COPY SymbolLit{ value: CAST(literal.value() AS String), lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -10851,7 +10851,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         NIL
       END) END)
     } |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
-    IF (scopeBindings__length(allocs) == 1) THEN
+    IF ((allocs).length() == 1) THEN
       RETURN allocs.first();
     ELSE
       RETURN NIL;
@@ -12859,7 +12859,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE id = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_499 = mIRLowering__lowering_counters(rtoc_self_view);
     mIRLoweringCounters__next_do_block_id(&rtoc_mutable_receiver_499) };
     MUTABLE branches = node.branches;
-    MUTABLE n = scopeBindings__length(branches);
+    MUTABLE n = (branches).length();
     MUTABLE wg_var = "__do${id}_wg";
     MUTABLE all_branch_bodies: [][]Emittable = List[];
     MUTABLE boundary_facts: []ExecutionBoundaryFact = ( { MUTABLE rtoc_empty_list_500: []ExecutionBoundaryFact = List[]; rtoc_empty_list_500 } );
@@ -16208,7 +16208,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL
         });
       ELSE
-      IF (scopeBindings__length(node.fields) == 1) THEN
+      IF ((node.fields).length() == 1) THEN
           MUTABLE key = COPY CAST(node.fields.keys().first() AS String);
           RETURN CAST({key: TypeTypeInput{ Type: COPY UNWRAP (TRY (type__from_node(castSchemasUnionSchemaVariantValueToTypeTypeInput__mir_lowering(variant_data_value)))) }} AS {String}TypeTypeInput);
       ELSE

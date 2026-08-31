@@ -798,8 +798,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           NIL
         END)
       } |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
-      IF (scopeBindings__length(names) != owner_params.length()) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, declaration, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_BINDERS_CANNOT_INFER }, [], {:owner: owner_name, :expected: owner_params.length(), :got: scopeBindings__length(names)}));
+      IF ((names).length() != owner_params.length()) THEN
+        TRY (resolutionSession__error_mut(rtoc_self_view, declaration, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_BINDERS_CANNOT_INFER }, [], {:owner: owner_name, :expected: owner_params.length(), :got: (names).length()}));
       END
       binders = names |> SELECT GenericParamDecl{ token: declaration.token, name: COPY _, bounds: List[] };
       declaration.binders = binders;
