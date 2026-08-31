@@ -213,7 +213,7 @@ PUB FN typeAnalysisSession__function_node_for(self: TypeAnalysisSession, name: ?
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN CAST(COPY UNWRAP (typeAnalysisSession__semantic_function_registry(rtoc_self_view)[name]) AS ?FunctionDef);
+    RETURN CAST(COPY UNWRAP (TRY (functionRegistry__fetch(typeAnalysisSession__semantic_function_registry(rtoc_self_view), name))) AS ?FunctionDef);
 }
 END
 PUB FN typeAnalysisSession__register_function_node_mut(self: TypeAnalysisSession, node: FunctionDef) RETURNS !FunctionDef
