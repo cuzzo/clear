@@ -36,7 +36,29 @@ EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "
 EXTERN FN compilerCountOccurrences(text: String, needle: String) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerLastIndex(text: String, needle: String) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 UNION ResolutionCodeOrMessage { StringValue: String, SymbolValue: String@symbol }
-UNION DiagnosticKwValue { StringValue: String, SymbolValue: String@symbol, AnyMultiowned: Any@multiowned }
+PUB UNION DiagnosticKwValue { StringValue: String, SymbolValue: String@symbol, AnyMultiowned: Any@multiowned }
+
+# Ruby interpolates kwargs with `%`, which renders each value with to_s.
+PUB FN diagnosticKwValue__to_s(value: ?DiagnosticKwValue) RETURNS String ->
+  IF value EXISTS AS rtoc_value THEN
+    PARTIAL MATCH rtoc_value START
+      DiagnosticKwValue.StringValue AS item -> RETURN COPY item;,
+      DiagnosticKwValue.SymbolValue AS item -> RETURN CAST(item AS String);,
+      DEFAULT -> RETURN "";
+    END
+  END
+  RETURN "";
+END
+
+# The registry formats a map of rendered strings; Ruby hands it the values
+# themselves and lets the format render them.
+PUB FN diagnosticKwargs__rendered(kwargs: {String@symbol}?DiagnosticKwValue) RETURNS {String@symbol}String ->
+  MUTABLE out: {String@symbol}String = {};
+  FOR rtoc_key IN kwargs.keys() DO
+    out[rtoc_key] = diagnosticKwValue__to_s(kwargs[rtoc_key] OR_ELSE NIL);
+  END
+  RETURN out;
+END
 PUB UNION ResolutionSessionReturnValue { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, TokenMultiowned: Token@multiowned, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, Token: Token }
 # Ruby module Annotator
 # Ruby module Annotator::Phases
@@ -374,11 +396,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (resolutionSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), UNWRAP (message), diagnostic_code));
 }
 END
-PRIVATE FN resolutionSession__format_diagnostic_template(self: ResolutionSession, template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String
+PRIVATE FN resolutionSession__format_diagnostic_template(self: ResolutionSession, template: String, args: []?DiagnosticKwValue, kwargs: {String@symbol}?DiagnosticKwValue) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN diagnosticRegistry__format_template(template, args, kwargs);
+    RETURN diagnosticRegistry__format_template(template, args, diagnosticKwargs__rendered(kwargs));
 }
 END
 PRIVATE FN resolutionSession__diagnostic_message(self: ResolutionSession, code: String@symbol, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !String
@@ -397,7 +419,7 @@ PRIVATE FN resolutionSession__fix_description(self: ResolutionSession, code: Str
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, diagnosticKwargs__rendered(kwargs)));
 }
 END
 PRIVATE FN resolutionSession__fix_description_from_hash(self: ResolutionSession, code: String@symbol, kwargs: {String@symbol}?DiagnosticKwValue) RETURNS !String
@@ -405,7 +427,7 @@ PRIVATE FN resolutionSession__fix_description_from_hash(self: ResolutionSession,
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, diagnosticKwargs__rendered(kwargs)));
 }
 END
 PRIVATE FN resolutionSession__note_mut(self: ResolutionSession, node_or_token: Locatable, message: String) RETURNS Void

@@ -7265,11 +7265,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (typeAnalysisSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), UNWRAP (message), diagnostic_code));
 }
 END
-PRIVATE FN typeAnalysisSession__format_diagnostic_template(self: TypeAnalysisSession, template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String
+PRIVATE FN typeAnalysisSession__format_diagnostic_template(self: TypeAnalysisSession, template: String, args: []?DiagnosticKwValue, kwargs: {String@symbol}?DiagnosticKwValue) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN diagnosticRegistry__format_template(template, args, kwargs);
+    RETURN diagnosticRegistry__format_template(template, args, diagnosticKwargs__rendered(kwargs));
 }
 END
 PRIVATE FN typeAnalysisSession__diagnostic_message(self: TypeAnalysisSession, code: String@symbol, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !String
@@ -7288,7 +7288,7 @@ PRIVATE FN typeAnalysisSession__fix_description(self: TypeAnalysisSession, code:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, diagnosticKwargs__rendered(kwargs)));
 }
 END
 PRIVATE FN typeAnalysisSession__fix_description_from_hash(self: TypeAnalysisSession, code: String@symbol, kwargs: {String@symbol}?DiagnosticKwValue) RETURNS !String
@@ -7296,7 +7296,7 @@ PRIVATE FN typeAnalysisSession__fix_description_from_hash(self: TypeAnalysisSess
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
+    RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, diagnosticKwargs__rendered(kwargs)));
 }
 END
 PRIVATE FN typeAnalysisSession__note_mut(self: TypeAnalysisSession, node_or_token: Locatable, message: String) RETURNS Void
@@ -9122,7 +9122,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE requires_insert = (candidates |> SELECT "REQUIRES ${_}: NON_REENTRANT ").join("");
     MUTABLE requires_desc = (candidates |> SELECT "REQUIRES ${_}: NON_REENTRANT").join(" + ");
     MUTABLE constrain_fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :ADD_NON_REENTRANT_REQUIRES, {:requires: requires_desc})), [edit__new(span__new(NIL, arrow.line, arrow.column, 2), "${requires_insert}->")], :auto));
-    MUTABLE propagate_fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DECLARE_FN_REENTRANT, {:fn: DiagnosticKwValue{ AnyMultiowned: COPY fn_node.name }})), [edit__new(span__new(NIL, arrow.line, arrow.column, 2), "EFFECTS REENTRANT ->")], :interactive));
+    MUTABLE propagate_fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DECLARE_FN_REENTRANT, {:fn: DiagnosticKwValue{ StringValue: CAST(fn_node.name AS String) }})), [edit__new(span__new(NIL, arrow.line, arrow.column, 2), "EFFECTS REENTRANT ->")], :interactive));
     MUTABLE msg_subject: String = "";
     IF (candidates.length() == 1) THEN
       msg_subject = "an unconstrained FN-typed parameter";
