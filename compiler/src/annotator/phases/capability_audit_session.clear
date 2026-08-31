@@ -396,7 +396,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF fixCollector__enabled?() THEN
       TRY (fixCollector__push(finding, (level == :error)));
       IF !(raise_in_collector) THEN
-        RETURN;
+        RETURN NIL;
       END
       TRY (capabilityAuditSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message));
     END

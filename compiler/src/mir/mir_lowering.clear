@@ -4691,7 +4691,7 @@ PRIVATE FN mIRLowering__lower_inline_union_helper_struct(self: MIRLowering, fact
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(fact.inline_struct) THEN
-      RETURN;
+      RETURN NIL;
     END
     MUTABLE data: InlineStructVariant@multiowned = COPY castOptionalMIRLoweringUnionVariantPayloadToInlineStructVariantMultiowned(fact.data);
     MUTABLE fields = data.fields.keys() |> SELECT {
@@ -14551,13 +14551,13 @@ PRIVATE FN mIRLowering__complex_pipeline_sink_alloc(self: MIRLowering, mir_resul
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF ownershipEffect__borrowed_view_result?(castOptionalPipelineLoweringResultToOptionalEmittable(mir_result)) THEN
-      RETURN;
+      RETURN NIL;
     END
     IF type__observable?(result_type) THEN
       RETURN :heap;
     END
     IF !(mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type)) THEN
-      RETURN;
+      RETURN NIL;
     END
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_550 = (TRY (mIRLowering__pipeline_host(rtoc_self_view)));
     pipelineHost__pipeline_result_heap?(rtoc_local_receiver_550, node) } THEN
@@ -16052,13 +16052,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF TRUE THEN
           RETURN CAST(symbolEntry__type(symbol_value) AS ?Type);
         ELSE
-          RETURN;
+          RETURN NIL;
         END
       ELSE
-        RETURN;
+        RETURN NIL;
       END
     ELSE
-      RETURN;
+      RETURN NIL;
     END
 }
 END
@@ -18445,11 +18445,11 @@ PRIVATE FN mIRLowering__cleanup_entry_for_ast_binding(self: MIRLowering, node: L
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((aST__node__symbol(node) EXISTS)) THEN
-      RETURN;
+      RETURN NIL;
     END
     MUTABLE symbol = node.symbol;
     IF !(symbol) THEN
-      RETURN;
+      RETURN NIL;
     END
     MUTABLE decl = symbol.reg;
     IF (decl AND (aST__node_mir_binding_entry(decl) EXISTS)) THEN

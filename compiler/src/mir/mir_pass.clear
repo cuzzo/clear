@@ -294,7 +294,7 @@ PRIVATE FN mIRPass__mark_consumed_cleanup_guards_mut(self: MIRPass, stmt: Locata
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF stmt IS_A ReturnNode AS return_node THEN
-      RETURN;
+      RETURN NIL;
     END
     RETURN TRY (mIRPass__collect_consumed_names(rtoc_self_view, stmt, facts));
 }
@@ -455,24 +455,24 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name = COPY ident.name;
     MUTABLE entry = frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY name }, Locatable{ Identifier: COPY ident });
     IF !(cleanupEntry__present?(entry)) THEN
-      RETURN;
+      RETURN NIL;
     END
     MUTABLE ti = TRY (aST__full_type_mut(Locatable{ Identifier: COPY ident }));
     MUTABLE owns_transferable_value = (TRUE AND TRY (type__needs_cleanup?(ti, rtoc_self_view.schema_lookup)));
     IF !((cleanupEntry__needs_cleanup?(entry) OR owns_transferable_value)) THEN
-      RETURN;
+      RETURN NIL;
     END
     IF is_move THEN
       cleanupEntry__mark_moved_guard_mut(&entry);
     ELSE_IF !(cleanupEntry__has_moved_guard?(entry)) THEN
-      RETURN;
+      RETURN NIL;
     END
     MUTABLE is_atomic_ptr = type__atomic_ptr?(ti);
     IF ((TRUE AND ((TRY (type__any_rc?(ti)) OR_ELSE FALSE))) AND !(is_atomic_ptr)) THEN
       IF is_move THEN
         &names.insert(name);
       END
-      RETURN;
+      RETURN NIL;
     END
     RETURN &names.insert(name);
 }
