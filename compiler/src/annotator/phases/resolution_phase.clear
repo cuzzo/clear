@@ -374,7 +374,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (resolutionSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), UNWRAP (message), diagnostic_code));
 }
 END
-PRIVATE FN resolutionSession__format_diagnostic_template(self: ResolutionSession, template: String, args: []?DiagnosticKwValue, kwargs: {String@symbol}?DiagnosticKwValue) RETURNS String
+PRIVATE FN resolutionSession__format_diagnostic_template(self: ResolutionSession, template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
