@@ -993,7 +993,7 @@ PUB FN typeAnalysisSession__kept_identity_declaration_anchor(self: TypeAnalysisS
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR rtoc_each_item_14 IN body_summaries.values() DO
-    MUTABLE decl = rtoc_each_item_14.binding_nodes |> FIND (TRUE AND aST__node__symbol(_).equal?(entry));
+    MUTABLE decl = rtoc_each_item_14.binding_nodes |> FIND (TRUE AND ((UNWRAP (aST__node__symbol(_))).binding_id == entry.binding_id));
     IF decl THEN
         RETURN decl;
     END
@@ -20003,7 +20003,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF sc EXISTS AS sc_value THEN
       FOR rtoc_key IN (TRY (scope__visible_entries(sc_value))).keys() DO
     MUTABLE entry: SymbolEntry@multiowned = ((TRY (scope__visible_entries(sc_value)))[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS SymbolEntry@multiowned));
-      IF entry.equal?(sym) THEN
+      IF (entry.binding_id == sym.binding_id) THEN
         RETURN COPY rtoc_key;
       END
       END
@@ -20014,7 +20014,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < _.params.length() DO
-      IF _.params[rtoc_idx].symbol.equal?(sym) THEN
+      IF ((UNWRAP (_.params[rtoc_idx].symbol)).binding_id == sym.binding_id) THEN
           RETURN COPY CAST(_.params[rtoc_idx].name AS String);
       END
       rtoc_idx = rtoc_idx + 1;

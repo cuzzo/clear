@@ -491,7 +491,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND _.symbol.equal?(entry));
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol(_))).binding_id == entry.binding_id));
   IF decl EXISTS AS decl_value THEN
     MUTABLE decl_value_mutable = COPY decl_value;
     MUTABLE stamped = (decl_value_mutable.full_type());
@@ -584,7 +584,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   END
   IF (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == name) ELSE FALSE END) THEN
     MUTABLE sym = node.symbol;
-    IF (!(sym IS_A SymbolEntry@multiowned) OR sym.equal?(entry)) THEN
+    IF (!(sym IS_A SymbolEntry@multiowned) OR ((UNWRAP (sym)).binding_id == entry.binding_id)) THEN
       MUTABLE stamp = (node.full_type());
       IF ((stamp IS_A Type AND !(stamp.equal?(symbolEntry__type(entry)))) AND !(TRY (type__any_rc?(stamp)))) THEN
         TRY (type__set_ownership(&stamp, :multiowned));
