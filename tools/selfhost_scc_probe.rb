@@ -112,12 +112,16 @@ module SelfhostSccProbe
      "\nFN main() RETURNS !Void ->\n  RETURN;\nEND\n"].join
   end
 
-  def check(relative, members)
+  # Three stages, because "compiles" means three different things: the CLEAR
+  # front end accepting it, Zig accepting the code it emits, and a binary
+  # actually linking.
+  def check(relative, members, stage = :clear)
     Dir.mktmpdir('scc-probe') do |dir|
       source = File.join(dir, 'probe.clear')
       File.write(source, probe_source(relative, members))
-      env = { 'CLEAR_TRANSPILE_ONLY' => '1', 'CLEAR_DISABLE_BUILD_ZIG' => '1',
-              'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8', 'CLEAR_EXTRA_NATIVE_DIRS' => SRC }
+      env = { 'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8', 'CLEAR_EXTRA_NATIVE_DIRS' => SRC }
+      env['CLEAR_TRANSPILE_ONLY'] = '1' if stage == :clear
+      env['CLEAR_DISABLE_BUILD_ZIG'] = '1' if stage == :clear
       cmd = [File.join(ROOT, 'clear'), 'build', source, '-o', File.join(dir, 'probe'),
              '--no-stack-check', '--main-tier', 'service', *ParserCompat.package_flags(SRC)]
       out, err, status = Open3.capture3(env, *cmd, chdir: ROOT)
@@ -131,10 +135,12 @@ module SelfhostSccProbe
     jobs = 4
     all = false
     list = false
+    stage = :clear
     OptionParser.new do |p|
       p.on('--all') { all = true }
       p.on('--list') { list = true }
       p.on('--jobs N', Integer) { |v| jobs = v }
+      p.on('--stage NAME', 'clear (default) or binary') { |v| stage = v.to_sym }
     end.parse!(argv)
 
     members = group
