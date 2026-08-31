@@ -75,7 +75,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE summary: FunctionBodySummary = (body_summaries[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS FunctionBodySummary));
     localFunctionFacts__from_summary(summary)
     }; END rtoc_transform_values_result_3 } ));
-    rtoc_self_view.local_function_facts = (facts |> ORDER_BY _).to_h();
+    MUTABLE rtoc_sorted_facts: {String}LocalFunctionFacts = {};
+    FOR rtoc_fact_key IN (facts.keys() |> ORDER_BY _) DO
+      rtoc_sorted_facts[rtoc_fact_key] = COPY UNWRAP (facts[rtoc_fact_key]);
+    END
+    rtoc_self_view.local_function_facts = rtoc_sorted_facts;
     rtoc_self_view.typed_node_count = COPY typed_node_count;
     rtoc_self_view.unresolved_node_count = COPY unresolved_node_count;
     rtoc_self_view.ownership_graph = COPY ownership_graph;
