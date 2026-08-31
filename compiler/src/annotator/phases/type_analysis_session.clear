@@ -7244,7 +7244,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__error_mut(self: TypeAnalysisSession, node_or_token: Any, code_or_message: TypeAnalysisCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
+PRIVATE FN typeAnalysisSession__error_mut(self: TypeAnalysisSession, node_or_token: ?DiagnosticAnchor, code_or_message: TypeAnalysisCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7391,16 +7391,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RAISE Input, CompilerError, message;
 }
 END
-PRIVATE FN typeAnalysisSession__diagnostic_token(self: TypeAnalysisSession, node_or_token: Any) RETURNS ?Any@multiowned
+PRIVATE FN typeAnalysisSession__diagnostic_token(self: TypeAnalysisSession, node_or_token: ?DiagnosticAnchor) RETURNS ?Token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token = IF TRUE THEN
-      aST__node__token(node_or_token)
-    ELSE
-      node_or_token
-    END;
-    RETURN CAST(token AS ?Any@multiowned);
+    RETURN diagnosticAnchor__token(node_or_token);
 }
 END
 PRIVATE FN typeAnalysisSession__source_error_token(self: TypeAnalysisSession, token: ?Any@multiowned) RETURNS ?Token

@@ -103,3 +103,18 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "Compiler Error";
 }
 END
+
+PUB UNION DiagnosticAnchor { TokenValue: Token, Locatable: Locatable }
+
+# The token a diagnostic points at: a node contributes its own.
+PUB FN diagnosticAnchor__token(value: ?DiagnosticAnchor) RETURNS ?Token ->
+  IF value EXISTS AS rtoc_anchor THEN
+    PARTIAL MATCH rtoc_anchor START
+      DiagnosticAnchor.TokenValue AS item -> RETURN COPY item;,
+      DiagnosticAnchor.Locatable AS item -> RETURN aST__node__token(item);,
+      DEFAULT -> RETURN NIL;
+    END
+  END
+  RETURN NIL;
+END
+

@@ -374,7 +374,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 
 }
 END
-PRIVATE FN resolutionSession__error_mut(self: ResolutionSession, node_or_token: Any, code_or_message: ResolutionCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
+PRIVATE FN resolutionSession__error_mut(self: ResolutionSession, node_or_token: ?DiagnosticAnchor, code_or_message: ResolutionCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -521,16 +521,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RAISE Input, CompilerError, message;
 }
 END
-PRIVATE FN resolutionSession__diagnostic_token(self: ResolutionSession, node_or_token: Any) RETURNS ?Any@multiowned
+PRIVATE FN resolutionSession__diagnostic_token(self: ResolutionSession, node_or_token: ?DiagnosticAnchor) RETURNS ?Token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token = IF TRUE THEN
-      aST__node__token(node_or_token)
-    ELSE
-      node_or_token
-    END;
-    RETURN CAST(token AS ?Any@multiowned);
+    RETURN diagnosticAnchor__token(node_or_token);
 }
 END
 PRIVATE FN resolutionSession__source_error_token(self: ResolutionSession, token: ?Any@multiowned) RETURNS ?Token
