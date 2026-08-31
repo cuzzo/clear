@@ -87,12 +87,24 @@ module SelfhostSccProbe
     text = File.read(File.join(SRC, relative))
     requires, types, rest = dissect(text)
     dropped = []
-    kept = requires.reject do |line|
-      hex = line[/pkg:rtoc_([0-9a-f]+)/, 1]
-      next false unless hex
+    kept = requires.filter_map do |line|
+      # A require is either the hex package name or a path relative to the
+      # requiring file; the probe lives elsewhere, so everything it keeps is
+      # restated in the location-independent form.
+      target =
+        if (hex = line[/pkg:rtoc_([0-9a-f]+)/, 1])
+          [hex].pack('H*')
+        elsif (path = line[/REQUIRE "([^"]+)"/, 1]) && !path.start_with?('pkg:')
+          File.expand_path(path, "/#{File.dirname(relative)}").delete_prefix('/')
+        end
+      next line unless target
 
-      target = [hex].pack('H*')
-      members.include?(target) && target != relative ? (dropped << target) : false
+      if members.include?(target) && target != relative
+        dropped << target
+        next nil
+      end
+      alias_part = line[/\sAS\s+\w+/]
+      %(REQUIRE "pkg:rtoc_#{target.unpack1('H*')}"#{alias_part}\n)
     end
     stubs = dropped.uniq.flat_map { |d| stubs_for(d) }
     [kept.join, "\n# --- stand-ins for the group members this file imports ---\n",
