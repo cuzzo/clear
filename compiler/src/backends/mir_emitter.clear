@@ -2452,7 +2452,7 @@ PRIVATE FN mIREmitter__emit_import(self: MIREmitter, node: Import) RETURNS Strin
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE base = "@import(\"${node.module_path}\")";
     IF node.member THEN
-      base = "${base}.${node.member}";
+      base = "${base}.${UNWRAP (node.member)}";
     END
     RETURN "const ${node.alias_name} = ${base};";
 }
@@ -2653,7 +2653,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       annotation = "";
     END
     IF (node.declaration_kind == :const) OR (node.declaration_kind == :var) THEN
-      RETURN COPY "${node.declaration_kind} ${node.name}${annotation}";
+      RETURN COPY "${UNWRAP (node.declaration_kind)} ${node.name}${annotation}";
     ELSE
       RETURN COPY CAST(node.name AS String);
     END

@@ -546,6 +546,35 @@ module SelfhostAutofixUnit
     end)
   end
 
+  # "No overload for 'f' matches arguments (?T)" -- the receiver went optional
+  # somewhere upstream and Ruby read straight through it. Unwrap the receiver,
+  # not the call.
+  def optional_receiver_call_fix(output)
+    m = output.match(/No overload for '([\w?!]+)' matches arguments \(\?[\w@]+/)
+    return nil unless m
+    return nil unless (loc = output.gsub(/\e\[[0-9;]*m/, '').match(/^\s+(\d+) \| (.*)$/))
+
+    method = m[1]
+    line_no = loc[1].to_i
+    Fix.new(label: "unwrap the receiver of .#{method}()", apply: lambda do |path|
+      lines = File.readlines(path)
+      i = line_no - 1
+      text = lines[i].to_s
+      needle = ".#{method}("
+      return false unless text.scan(Regexp.escape(needle)).length == 1
+
+      at = text.index(needle)
+      start = at
+      start -= 1 while start.positive? && text[start - 1] =~ /[\w.\[\]]/
+      receiver = text[start...at]
+      return false if receiver.strip.empty? || receiver.include?('UNWRAP')
+
+      lines[i] = text[0...start] + "(UNWRAP (#{receiver}))" + text[at..]
+      File.write(path, lines.join)
+      true
+    end)
+  end
+
   # Balanced close for the paren at `open`, ignoring string contents.
   def matching_paren(text, open)
     depth = 0
@@ -784,7 +813,7 @@ module SelfhostAutofixUnit
   end
 
   FIXES = [method(:redundant_unwrap_fix), method(:redundant_cast_fix),
-           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix), method(:is_a_optional_struct_fix), method(:no_overload_dispatch_fix), method(:local_bound_argument_fix),
+           method(:optional_argument_unwrap_fix), method(:interpolated_optional_fix), method(:field_on_optional_fix), method(:infer_from_optional_fix), method(:is_a_optional_struct_fix), method(:no_overload_dispatch_fix), method(:optional_receiver_call_fix), method(:local_bound_argument_fix),
            method(:union_arg_wrap_fix),
            method(:union_payload_unwrap_fix), method(:optional_key_fix),
            method(:set_difference_fix), method(:optional_insert_fix),
