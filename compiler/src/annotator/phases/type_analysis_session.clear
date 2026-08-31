@@ -7407,7 +7407,7 @@ PRIVATE FN typeAnalysisSession__diagnostic_output(self: TypeAnalysisSession, mes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    Kernel.warn(message);
+    print(message);
     NIL;
 }
 END

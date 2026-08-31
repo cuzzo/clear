@@ -537,7 +537,7 @@ PRIVATE FN resolutionSession__diagnostic_output(self: ResolutionSession, message
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    Kernel.warn(message);
+    print(message);
     NIL;
 }
 END
