@@ -1568,14 +1568,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE best: ?NameCandidate = NIL;
     MUTABLE best_d: Int64 = (max_distance + 1);
     FOR _ IN candidates DO
-    MUTABLE d = TRY (typeAnalysisSession__levenshtein(rtoc_self_view, CAST(input AS String), CAST(_ AS String)));
+    MUTABLE d = TRY (typeAnalysisSession__levenshtein(rtoc_self_view, nameCandidate__text(input), nameCandidate__text(_)));
     IF (d < best_d) THEN
         best = COPY _;
         best_d = d;
     END
     END
     IF (best_d <= max_distance) THEN
-      RETURN COPY CAST(best AS String);
+      RETURN nameCandidate__text(UNWRAP (best));
     ELSE
       RETURN NIL;
     END
