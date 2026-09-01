@@ -14273,3 +14273,58 @@ PUB FN aST__recursion_yield_needed?(fn_node: FunctionDef) RETURNS Bool ->
   END
   RETURN (((fn_node.reentrance_kind == :reentrant) OR (fn_node.reentrance_kind == :reentrant_tail_call)) OR (fn_node.reentrance_kind == :reentrant_max_depth));
 END
+
+PUB FN aST__pipeline_fusible_stage?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.WhereOp AS item -> RETURN TRUE;,
+    Locatable.SelectOp AS item -> RETURN TRUE;,
+    Locatable.TapOp AS item -> RETURN TRUE;,
+    Locatable.TakeWhileOp AS item -> RETURN TRUE;,
+    Locatable.LimitOp AS item -> RETURN TRUE;,
+    Locatable.SkipOp AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+PUB FN aST__pipeline_complex_op?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.SelectOp AS item -> RETURN TRUE;,
+    Locatable.WhereOp AS item -> RETURN TRUE;,
+    Locatable.IndexOp AS item -> RETURN TRUE;,
+    Locatable.ReduceOp AS item -> RETURN TRUE;,
+    Locatable.OrderByOp AS item -> RETURN TRUE;,
+    Locatable.LimitOp AS item -> RETURN TRUE;,
+    Locatable.UnnestOp AS item -> RETURN TRUE;,
+    Locatable.DistinctOp AS item -> RETURN TRUE;,
+    Locatable.EachOp AS item -> RETURN TRUE;,
+    Locatable.FindOp AS item -> RETURN TRUE;,
+    Locatable.AnyOp AS item -> RETURN TRUE;,
+    Locatable.AllOp AS item -> RETURN TRUE;,
+    Locatable.CountOp AS item -> RETURN TRUE;,
+    Locatable.SumOp AS item -> RETURN TRUE;,
+    Locatable.AverageOp AS item -> RETURN TRUE;,
+    Locatable.MinOp AS item -> RETURN TRUE;,
+    Locatable.MaxOp AS item -> RETURN TRUE;,
+    Locatable.TakeWhileOp AS item -> RETURN TRUE;,
+    Locatable.WindowOp AS item -> RETURN TRUE;,
+    Locatable.BatchWindowOp AS item -> RETURN TRUE;,
+    Locatable.JoinOp AS item -> RETURN TRUE;,
+    Locatable.TapOp AS item -> RETURN TRUE;,
+    Locatable.SkipOp AS item -> RETURN TRUE;,
+    Locatable.ShardOp AS item -> RETURN TRUE;,
+    Locatable.ConcurrentOp AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+PUB FN aST__pipeline_list_terminal?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.UnnestOp AS item -> RETURN TRUE;,
+    Locatable.DistinctOp AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+PUB FN aST__pipeline_stream_value_op?(node: Locatable) RETURNS Bool ->
+  RETURN (aST__pipeline_select_filter_op?(node) OR (node IS_A EachOp));
+END
