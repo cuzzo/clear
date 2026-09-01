@@ -938,7 +938,7 @@ PRIVATE FN pipelineRewriter__select_stage_value_type(self: PipelineRewriter, sta
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE expression = COPY stage.expression;
-    IF (((((stage.effect_mode == :fallible) OR (stage.effect_mode == :fallible_optional))) AND respondsTo?(expression, "error_union_type")) AND expression.error_union_type()) THEN
+    IF (((((stage.effect_mode == :fallible) OR (stage.effect_mode == :fallible_optional))) AND TRUE) AND expression.error_union_type()) THEN
       RETURN TRY (type__new(expression.error_union_type()));
     END
     RETURN &expression.full_type_mut("SELECT stage value");

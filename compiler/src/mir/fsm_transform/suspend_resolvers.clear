@@ -167,7 +167,7 @@ PRIVATE FN suspendResolvers__state_field_decl(decl: StateFieldDecl) RETURNS Cont
 END
 PUB FN suspendResolvers__ownership_bearing_result_type?(type_info: ?Type, lowering: MIRLowering) RETURNS !Bool ->
   IF type_info EXISTS AS type_info_value THEN
-    MUTABLE schema_lookup = IF respondsTo?(lowering, "mir_schema_lookup") THEN
+    MUTABLE schema_lookup = IF TRUE THEN
       mIRLowering__mir_schema_lookup(lowering)
     ELSE
       NIL

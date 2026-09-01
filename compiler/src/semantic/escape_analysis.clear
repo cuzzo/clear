@@ -465,7 +465,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
   END
 END
 PUB FN escapeAnalysis__kept_edge_arg_type(arg: Locatable) RETURNS !Type ->
-  IF !((respondsTo?(arg, "typed?") AND arg.typed?())) THEN
+  IF !((TRUE AND arg.typed?())) THEN
     panic("{}placement cannot plan an ownership edge for it");
   END
   RETURN TRY (type__from_node_mut(arg, "kept edge argument"));

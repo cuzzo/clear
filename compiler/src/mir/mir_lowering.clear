@@ -850,7 +850,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE value_name = "__shared_node_value_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_13 = mIRLowering__lowering_counters(rtoc_self_view);
         mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_13) }}";
         MUTABLE value_type_branch_value: ?Type = NIL;
-        IF (respondsTo?(original_init, "result_type") AND original_init.result_type()) THEN
+        IF (TRUE AND original_init.result_type()) THEN
           value_type_branch_value = TRY (type__new(original_init.result_type()));
         ELSE
           value_type_branch_value = (binding.annotation OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })));
@@ -865,7 +865,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &body.append(Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY original_init, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
       END
       MUTABLE block = MIRBlockExpr{ label: COPY label, body: body, lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
-      IF respondsTo?(original_init, "result_type") THEN
+      IF TRUE THEN
         block.result_type = original_init.result_type();
       END
       binding.init = Emittable{ MIRBlockExpr: COPY block };
@@ -913,7 +913,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF dest_alloc EXISTS AS dest_alloc_value THEN
       MUTABLE dest_alloc_value_mutable = COPY dest_alloc_value;
       MUTABLE ti = TRY (mIRLowering__destination_type(rtoc_self_view, ast_node, dest_type));
-      IF (type__symbol?(ti) OR (((respondsTo?(ast_node, "typed?") AND ast_node.typed?()) AND ((type__symbol?((TRY (type__from_node_mut(ast_node, "placement symbol probe")))) OR_ELSE FALSE))))) THEN
+      IF (type__symbol?(ti) OR (((TRUE AND ast_node.typed?()) AND ((type__symbol?((TRY (type__from_node_mut(ast_node, "placement symbol probe")))) OR_ELSE FALSE))))) THEN
         RETURN mIRLowering__destination_keep_plan(rtoc_self_view, dest_alloc_value_mutable);
       END
       IF (placement__heap?(dest_alloc_value_mutable) AND TRY (mIRLowering__heap_indirect_destination?(rtoc_self_view, mir, ast_node, CAST(ti AS Type)))) THEN
@@ -1718,7 +1718,7 @@ FN mIRLowering__apply_lowered_coercion(self: MIRLowering, mir: ?MIRLoweringLower
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((((mir != NIL) AND respondsTo?(node, "coerced_type")) AND node.coerced_type())) THEN
+    IF !((((mir != NIL) AND TRUE) AND node.coerced_type())) THEN
       RETURN COPY mir;
     END
     MUTABLE coerced_type = TRY (type__new((node.coerced_type_info() OR node.coerced_type())));
@@ -5399,7 +5399,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out = TryCatch{ expr: COPY stripped, catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     IF ((emittable__result_type(stripped) != NIL) AND stripped.result_type()) THEN
       out.result_type = TRY (type__new(stripped.result_type()));
-    ELSE_IF ((fallback != NIL) AND respondsTo?(fallback, "full_type!")) THEN
+    ELSE_IF ((fallback != NIL) AND mIRLoweringFallback__responds_to_full_type?(fallback)) THEN
       out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(fallback)) }));
     END
     RETURN out;
@@ -5409,7 +5409,7 @@ PRIVATE FN mIRLowering__strip_try(self: MIRLowering, mir_node: Emittable) RETURN
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF respondsTo?(mir_node, "without_try") THEN
+    IF emittable__responds_to_without_try?(mir_node) THEN
       RETURN mir_node.without_try();
     ELSE
       RETURN COPY mir_node;
@@ -7261,7 +7261,7 @@ PRIVATE FN mIRLowering__mir_explicit_result_type(self: MIRLowering, mir: Emittab
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE raw_type =   IF ((emittable__result_type(mir) != NIL) AND mir.result_type()) THEN
       mir.result_type()
-    ELSE_IF (respondsTo?(mir, "return_type") AND mir.return_type()) THEN
+    ELSE_IF (emittable__responds_to_return_type?(mir) AND mir.return_type()) THEN
       mir.return_type()
     ELSE_IF (emittable__callable_contract(mir) != NIL) THEN
       (IF mir.callable_contract() != NIL THEN
@@ -9432,7 +9432,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE arg_type = TRY (type__new(TypeConstructionInput{ Type: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_335: ?Type = NIL;
-          IF (respondsTo?(ast_args[rtoc_idx]?, "coerced_type_info") AND ast_args[rtoc_idx]?.coerced_type_info()) THEN
+          IF (TRUE AND ast_args[rtoc_idx]?.coerced_type_info()) THEN
             rtoc_ternary_value_335 = ast_args[rtoc_idx]?.coerced_type_info();
           ELSE
             rtoc_ternary_value_335 = TRY (type__from_node_mut(ast_args[rtoc_idx]?, "lowered call ownership argument"));
@@ -9531,7 +9531,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE arg_type = TRY (type__new(TypeConstructionInput{ Type: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_340: ?Type = NIL;
-        IF (respondsTo?(ast_args[rtoc_idx]?, "coerced_type_info") AND ast_args[rtoc_idx]?.coerced_type_info()) THEN
+        IF (TRUE AND ast_args[rtoc_idx]?.coerced_type_info()) THEN
           rtoc_ternary_value_340 = ast_args[rtoc_idx]?.coerced_type_info();
         ELSE
           rtoc_ternary_value_340 = TRY (type__from_node_mut(ast_args[rtoc_idx]?, "call ownership argument"));
@@ -16610,7 +16610,7 @@ PRIVATE FN mIRLowering__copy_source_type_info(self: MIRLowering, MUTABLE source:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (respondsTo?(source, "typed?") AND source.typed?()) THEN
+    IF (TRUE AND source.typed?()) THEN
       RETURN TRY (aST__full_type_mut(source));
     END
     IF source IS_A GetIndex AS get_index THEN
@@ -22895,4 +22895,123 @@ FN ruby_wrap_optional_string_to_symbol__mir_lowering(value: ?String) RETURNS ?St
     RETURN symbol(value_value);
   END
   NIL;
+END
+
+# Ruby asks `respond_to?(:full_type!)`: a question about the variant, not
+# about whether the value is set.
+PUB FN mIRLoweringFallback__responds_to_full_type?(value: MIRLoweringFallback) RETURNS Bool ->
+  PARTIAL MATCH value START
+    MIRLoweringFallback.ASTProgram AS item -> RETURN TRUE;,
+    MIRLoweringFallback.RequireNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ProtocolRequirement AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ProtocolDef AS item -> RETURN TRUE;,
+    MIRLoweringFallback.FunctionDef AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ImplementationDef AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ConformanceDef AS item -> RETURN TRUE;,
+    MIRLoweringFallback.VarDecl AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Assignment AS item -> RETURN TRUE;,
+    MIRLoweringFallback.DestructuringAssignment AS item -> RETURN TRUE;,
+    MIRLoweringFallback.BindExpr AS item -> RETURN TRUE;,
+    MIRLoweringFallback.BinaryOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.IsA AS item -> RETURN TRUE;,
+    MIRLoweringFallback.CallSiteOverride AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Identifier AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Literal AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ListLit AS item -> RETURN TRUE;,
+    MIRLoweringFallback.TupleLit AS item -> RETURN TRUE;,
+    MIRLoweringFallback.DefaultArrayLit AS item -> RETURN TRUE;,
+    MIRLoweringFallback.HashLit AS item -> RETURN TRUE;,
+    MIRLoweringFallback.DefaultLit AS item -> RETURN TRUE;,
+    MIRLoweringFallback.StructLit AS item -> RETURN TRUE;,
+    MIRLoweringFallback.LambdaLit AS item -> RETURN TRUE;,
+    MIRLoweringFallback.IfStatement AS item -> RETURN TRUE;,
+    MIRLoweringFallback.IfBind AS item -> RETURN TRUE;,
+    MIRLoweringFallback.WhileLoop AS item -> RETURN TRUE;,
+    MIRLoweringFallback.WhileBindLoop AS item -> RETURN TRUE;,
+    MIRLoweringFallback.BreakNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ContinueNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.FuncCall AS item -> RETURN TRUE;,
+    MIRLoweringFallback.GetField AS item -> RETURN TRUE;,
+    MIRLoweringFallback.GetIndex AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ReturnNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Assert AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ThrowNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.DieNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Slice AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Require AS item -> RETURN TRUE;,
+    MIRLoweringFallback.WithBlock AS item -> RETURN TRUE;,
+    MIRLoweringFallback.SyncPolicyDecl AS item -> RETURN TRUE;,
+    MIRLoweringFallback.SelectOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.WhereOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.IndexOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ReduceOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.OrderByOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.LimitOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.UnnestOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.DistinctOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.EachOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.TapOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.SkipOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.CollectOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.TakeWhileOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.WindowOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.BatchWindowOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.JoinOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.FindOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.AnyOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.AllOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.CountOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.SumOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.AverageOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.MinOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.MaxOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ShardOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ConcurrentOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Placeholder AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Copy AS item -> RETURN TRUE;,
+    MIRLoweringFallback.TenseNavigation AS item -> RETURN TRUE;,
+    MIRLoweringFallback.MutableBorrow AS item -> RETURN TRUE;,
+    MIRLoweringFallback.CatchBlock AS item -> RETURN TRUE;,
+    MIRLoweringFallback.RecoverOp AS item -> RETURN TRUE;,
+    MIRLoweringFallback.StringConcat AS item -> RETURN TRUE;,
+    MIRLoweringFallback.CapabilityWrap AS item -> RETURN TRUE;,
+    MIRLoweringFallback.MoveNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.CopyNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.KeepNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ShareNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.LinkNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ResolveNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.FreezeNode AS item -> RETURN TRUE;,
+    MIRLoweringFallback.PassStmt AS item -> RETURN TRUE;,
+    MIRLoweringFallback.StructPattern AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ExternFnDecl AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ExternStructDecl AS item -> RETURN TRUE;,
+    MIRLoweringFallback.UnionDef AS item -> RETURN TRUE;,
+    MIRLoweringFallback.UnionVariantLit AS item -> RETURN TRUE;,
+    MIRLoweringFallback.StaticCall AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ThenChain AS item -> RETURN TRUE;,
+    MIRLoweringFallback.BgStreamBlock AS item -> RETURN TRUE;,
+    MIRLoweringFallback.YieldExpr AS item -> RETURN TRUE;,
+    MIRLoweringFallback.CloseStream AS item -> RETURN TRUE;,
+    MIRLoweringFallback.NextExpr AS item -> RETURN TRUE;,
+    MIRLoweringFallback.MatchStatement AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ForRange AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ForEach AS item -> RETURN TRUE;,
+    MIRLoweringFallback.TestBlock AS item -> RETURN TRUE;,
+    MIRLoweringFallback.WhenBlock AS item -> RETURN TRUE;,
+    MIRLoweringFallback.LetBinding AS item -> RETURN TRUE;,
+    MIRLoweringFallback.TestThat AS item -> RETURN TRUE;,
+    MIRLoweringFallback.AssertRaises AS item -> RETURN TRUE;,
+    MIRLoweringFallback.BenchmarkStmt AS item -> RETURN TRUE;,
+    MIRLoweringFallback.SmashStmt AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ProfileStmt AS item -> RETURN TRUE;,
+    MIRLoweringFallback.StubDecl AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Drop AS item -> RETURN TRUE;,
+    MIRLoweringFallback.SuppressCleanup AS item -> RETURN TRUE;,
+    MIRLoweringFallback.Return AS item -> RETURN TRUE;,
+    MIRLoweringFallback.ReassignCleanup AS item -> RETURN TRUE;,
+    MIRLoweringFallback.FieldCleanup AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
 END

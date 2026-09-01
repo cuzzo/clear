@@ -73,12 +73,22 @@ module SelfhostRespondsTo
       base = receiver_type(lines, index, m[1], fields) or return nil
       return element_of(bare(base))
     end
-    if (m = expr.match(/\A([A-Za-z_]\w*)\.(\w+)\z/))
-      base = receiver_type(lines, index, m[1], fields) or return nil
-      owner = fields[bare(base)] or return nil
-      return bare(owner[m[2]]) if owner[m[2]]
-
-      return nil
+    # `x.f()` is a call, and the callee declares its return type. Ruby writes
+    # the reader and the field the same way, so both spellings resolve here.
+    if (m = expr.match(/\A([A-Za-z_][\w.]*)\.([\w?!]+)\(\)\z/))
+      base = resolve(m[1], lines, index, fields, variants) or return nil
+      ret = @returns_table["#{base[0].downcase}#{base[1..]}__#{m[2]}"] ||
+            @returns_table[m[2]]
+      return ret && bare(ret.delete_prefix('!'))
+    end
+    # A field chain: resolve the head, then walk one field at a time.
+    if (m = expr.match(/\A([A-Za-z_]\w*)((?:\.\w+)+)\z/))
+      type = receiver_type(lines, index, m[1], fields) or return nil
+      m[2].split('.').reject(&:empty?).each do |step|
+        owner = fields[bare(type)] or return nil
+        type = owner[step] or return nil
+      end
+      return bare(type)
     end
     return nil unless expr =~ /\A[A-Za-z_]\w*\z/
 
@@ -86,7 +96,27 @@ module SelfhostRespondsTo
     return bare(t) if t
 
     inferred = inferred_from_call(lines, index, expr, @returns_table.to_h)
-    inferred && bare(inferred)
+    return bare(inferred) if inferred
+
+    # An unannotated local still has a type: whatever its initializer is.
+    rhs = initializer_of(lines, index, expr) or return nil
+    resolve(rhs, lines, index, fields, variants)
+  end
+
+  # The right-hand side a local was declared with, stripped of the wrappers
+  # that do not change its type.
+  def initializer_of(lines, index, name)
+    index.downto(0) do |i|
+      line = lines[i]
+      break if line.start_with?('PUB FN', 'FN ', 'PRIVATE FN') && i < index
+
+      m = line.match(/\b(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*=\s*(.+?);?\s*$/) or next
+
+      rhs = m[1].strip
+      rhs = rhs.sub(/\A(?:COPY|KEEP|OWN|MOVE|UNWRAP)\s+/, '') while rhs =~ /\A(?:COPY|KEEP|OWN|MOVE|UNWRAP)\s/
+      return rhs
+    end
+    nil
   end
 
   def main(argv)
@@ -155,9 +185,60 @@ module SelfhostRespondsTo
       fn
     end
 
+    # Every union a given variant type appears in, so a variant can answer
+    # through a mixin method that translated to a union-level function.
+    enclosing = Hash.new { |h, k| h[k] = [] }
+    variants.each { |u, vs| vs.each { |_, ty| enclosing[bare(ty)] << u } }
+
+    # Ruby's respond_to? asks whether the receiver's CLASS defines the name; it
+    # is true for a field that happens to be nil. A union answers per variant,
+    # so when the variants disagree the question needs a predicate, not the
+    # accessor's non-NIL test -- that would silently read "responds" as "set".
+    responds_per_variant = lambda do |union, field|
+      name = field.delete_suffix('=')
+      # Ruby spells a bang method `x!`; it translates with a `_mut` suffix. The
+      # AST module form (`aST__x`) answers for Locatable just as `locatable__x`
+      # would.
+      spellings = [name, name.sub(/!\z/, '_mut'), "#{name}_mut"].uniq
+      owner_answers = lambda do |owner|
+        forms = ["#{owner[0].downcase}#{owner[1..]}"]
+        forms << 'aST' if owner == 'Locatable'
+        forms.product(spellings).any? { |f, s| methods.include?("#{f}__#{s}") }
+      end
+      # A mixin method is defined for every variant at once, so finding it at
+      # the union level answers for all of them.
+      return variants[union].map { |n, _| [n, true] } if owner_answers.call(union)
+
+      aliases = [name, name.sub(/_info\z/, '_object'), "#{name}_object"]
+      variants[union].map do |n, ty|
+        b = bare(ty)
+        carries = aliases.any? { |a| fields[b]&.key?(a) }
+        # A variant also answers through any union it belongs to: that is where
+        # a Ruby mixin method lands after translation.
+        [n, carries || owner_answers.call(b) || enclosing[b].any? { |u| owner_answers.call(u) }]
+      end
+    end
+
+    predicate = lambda do |union, field|
+      fn = "#{union[0].downcase}#{union[1..]}__responds_to_#{field.delete_suffix('=').delete_suffix('!').delete_suffix('?')}?"
+      return fn if methods.include?(fn)
+
+      path = declared[union] or return nil
+      per = responds_per_variant.call(union, field)
+      body = +"\n# Ruby asks `respond_to?(:#{field})`: a question about the variant, not\n"
+      body << "# about whether the value is set.\n"
+      body << "PUB FN #{fn}(value: #{union}) RETURNS Bool ->\n  PARTIAL MATCH value START\n"
+      per.select { |_, ok| ok }.each { |n, _| body << "    #{union}.#{n} AS item -> RETURN TRUE;,\n" }
+      body << "    DEFAULT -> RETURN FALSE;\n  END\n  RETURN FALSE;\nEND\n"
+      pending[path] << body
+      methods << fn
+      fn
+    end
+
     @returns_table = returns
     counts = Hash.new(0)
     unresolved = Hash.new(0)
+    decided = []
     Dir.glob(File.join(ROOT, '**', '*.clear')).sort.each do |path|
       lines = File.readlines(path)
       changed = false
@@ -165,23 +246,46 @@ module SelfhostRespondsTo
         next unless line.include?('respondsTo?(')
 
         new = line.gsub(/respondsTo\?\(([^,]+),\s*"([a-zA-Z_?!]+)"\)/) do
+          # Hold the match: deciding the answer runs regexes of its own, and
+          # `Regexp.last_match` would then no longer name this call site --
+          # leaving it would replace the call with an empty string.
+          whole = Regexp.last_match(0)
           recv = Regexp.last_match(1)
           field = Regexp.last_match(2)
           type = resolve(recv, lines, i, fields, variants)
           if type.nil?
             unresolved["#{field} <- #{recv.strip}"] += 1
-            next Regexp.last_match(0)
+            next whole
           end
 
           if variants.key?(type)
-            fn = "#{type[0].downcase}#{type[1..]}__#{field}"
-            unless methods.include?(fn) || generate.call(type, field)
-              unresolved["#{field} <- #{recv.strip} (no #{fn})"] += 1
-              next Regexp.last_match(0)
+            per = responds_per_variant.call(type, field)
+            if per.all? { |_, ok| ok }
+              counts[:true] += 1
+              decided << "TRUE   #{field} on #{type}  (#{path.sub(%r{.*/compiler/src/}, '')}:#{i + 1})"
+              next 'TRUE'
+            end
+            if per.none? { |_, ok| ok }
+              # Not one variant answers. That is far more often a receiver this
+              # tool typed too broadly than a branch Ruby never takes, and
+              # writing FALSE would silently delete the behaviour -- so leave it
+              # for a human.
+              unresolved["#{field} <- #{recv.strip} (no variant of #{type} responds)"] += 1
+              next whole
+            end
+
+            # The guard is only half the site: whatever Ruby reads next needs
+            # an accessor that answers NIL for the variants that do not carry
+            # it, so build that at the same time.
+            generate.call(type, field)
+            fn = predicate.call(type, field)
+            unless fn
+              unresolved["#{field} <- #{recv.strip} (no predicate for #{type})"] += 1
+              next whole
             end
 
             counts[:union] += 1
-            "(#{fn}(#{recv}) != NIL)"
+            "#{fn}(#{recv})"
           elsif fields.key?(type)
             answer = fields[type].key?(field) ||
                      methods.include?("#{type[0].downcase}#{type[1..]}__#{field}")
@@ -189,7 +293,7 @@ module SelfhostRespondsTo
             answer ? 'TRUE' : 'FALSE'
           else
             unresolved["#{field} <- #{recv.strip} (unknown type #{type})"] += 1
-            Regexp.last_match(0)
+            whole
           end
         end
         next if new == line
@@ -201,6 +305,7 @@ module SelfhostRespondsTo
     end
 
     pending.each { |path, bodies| File.write(path, File.read(path) + bodies.join) } if apply
+    decided.each { |d| puts "  #{d}" }
     puts "generated #{pending.values.sum(&:length)} accessor(s)"
     puts "resolved: #{counts[:union]} union dispatch, #{counts[:true]} TRUE, #{counts[:false]} FALSE"
     puts "unresolved: #{unresolved.values.sum} site(s)"
