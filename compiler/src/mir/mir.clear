@@ -36,7 +36,7 @@ PUB UNION FsmBody { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: 
 PUB UNION BgBlockPlan { BgStackfulPlan: BgStackfulPlan, BgStreamPlan: BgStreamPlan, FutureMapPlan: FutureMapPlan, FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
 PUB UNION NamedMirFieldValue { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
 PUB UNION StructInitFieldValue { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
-PUB UNION StructInitFieldInput { StructInitField: StructInitField, HashMapValue: {String@symbol}NamedMirFieldValue }
+PUB UNION StructInitFieldInput { StructInitField: StructInitField, HashMapValue: {String@symbol }NamedMirFieldValue }
 PUB STRUCT FnDef {
   name: String,
   params: []MIRParam,

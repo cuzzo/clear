@@ -11,7 +11,7 @@ REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f636f756e746572732e636c656172" AS cou
 REQUIRE "pkg:rtoc_6d69722f6d69725f6c6f776572696e672e636c656172" AS mir_lowering
 REQUIRE "pkg:rtoc_73656d616e7469632f74656e73655f6f7065726174696f6e5f706c616e2e636c656172" AS tense_operation_plan
 # Ruby module MIRLoweringConcurrency
-PUB UNION BgTransformValue { BgBlock: BgBlock, StringValue: String, Int64Value: Int64, SymbolValue: String@symbol, BoolValue: Bool, AsyncResultShape: AsyncResultShape, HashMapValue: {String}Type@multiowned, HashMapValue2: {String}ResourceClosePlan, ArrayValue: [Set]String, ArrayValue2: []ContextFieldDecl, ArrayValue3: []StructInitField, ArrayValue4: []String, ArrayValue5: []CaptureCleanupAction, ArrayValue6: []Emittable, HashMapValue3: {String}Type }
+PUB UNION BgTransformValue { BgBlock: BgBlock, StringValue: String, Int64Value: Int64, SymbolValue: String@symbol, BoolValue: Bool, AsyncResultShape: AsyncResultShape, HashMapValue: {String }Type@multiowned, HashMapValue2: {String}ResourceClosePlan, ArrayValue: [Set]String, ArrayValue2: []ContextFieldDecl, ArrayValue3: []StructInitField, ArrayValue4: []String, ArrayValue5: []CaptureCleanupAction, ArrayValue6: []Emittable, HashMapValue3: {String}Type }
 PUB STRUCT NextExprPlan {
   source_kind: String@symbol,
   promise_type: Type,

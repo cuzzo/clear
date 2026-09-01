@@ -144,7 +144,7 @@ PUB STRUCT ResourceSchema {
 }
 
 PUB UNION SchemasResourceSchemaFieldMetadataValue { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Locatable: Locatable, BoolValue: Bool, Type: Type }
-PUB UNION SchemasResourceSchemaFieldInput { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, StructFieldMultiowned: StructField@multiowned, HashMapValue: {String@symbol}SchemasResourceSchemaFieldMetadataValue, Type: Type, StructField: StructField }
+PUB UNION SchemasResourceSchemaFieldInput { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, StructFieldMultiowned: StructField@multiowned, HashMapValue: {String@symbol }SchemasResourceSchemaFieldMetadataValue, Type: Type, StructField: StructField }
 PUB UNION SchemasResourceSchemaStaticMethodValue { ArrayValue: []String@symbol, SymbolValue: String@symbol, StringValue: String, BoolValue: Bool }
 FN resourceSchema__initialize(MUTABLE self: ResourceSchema, close_plan: ResourceClosePlan, static_methods: {String}{String@symbol}SchemasResourceSchemaStaticMethodValue, fields: {String@symbol}SchemasResourceSchemaFieldInput, type_params: []String@symbol, extern_module: ?String = NIL, as_type: ?String = NIL, visibility: String@symbol = :package, methods: {String@symbol}FunctionSignature@multiowned) RETURNS !Void
   REQUIRES self: LOCAL
@@ -457,7 +457,7 @@ PUB STRUCT StructSchema {
 }
 
 PUB UNION SchemasStructSchemaFieldMetadataValue { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Locatable: Locatable, BoolValue: Bool, Type: Type }
-PUB UNION SchemasStructSchemaFieldInput { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, StructFieldMultiowned: StructField@multiowned, HashMapValue: {String@symbol}SchemasStructSchemaFieldMetadataValue, Type: Type, StructField: StructField }
+PUB UNION SchemasStructSchemaFieldInput { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, StructFieldMultiowned: StructField@multiowned, HashMapValue: {String@symbol }SchemasStructSchemaFieldMetadataValue, Type: Type, StructField: StructField }
 FN structSchema__initialize(MUTABLE self: StructSchema, fields: {String@symbol}SchemasStructSchemaFieldInput, type_params: []String@symbol, generic_params: []GenericParamDecl, methods: {String@symbol}FunctionSignature@multiowned, static_methods: {String@symbol}FunctionSignature@multiowned, visibility: String@symbol = :package, extern_module: ?String = NIL, as_type: ?String = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->

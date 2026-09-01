@@ -535,7 +535,7 @@ PRIVATE FN hoist__ast_access_path?(ast_node: Locatable) RETURNS Bool ->
 END
 # End Ruby module Hoist
 # Ruby module MIRHoistLowering
-PUB UNION MirAggregate { ArrayValue: []Any@multiowned, HashMapValue: {Any@multiowned}Any@multiowned }
+PUB UNION MirAggregate { ArrayValue: []Any@multiowned, HashMapValue: {Any@multiowned }Any@multiowned }
 # End Ruby module MIRHoistLowering
 FN castCallLikeToLocatable(value: CallLike) RETURNS Locatable ->
   PARTIAL MATCH value START

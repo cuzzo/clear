@@ -5,7 +5,7 @@ REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
 REQUIRE "pkg:rtoc_6173742f6173796e635f726573756c745f73686170652e636c656172" AS async_result_shape
 REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2e636c656172" AS fsm_transform
 # Ruby module FsmTransform
-PUB UNION TransformValue { BgBlock: BgBlock, StringValue: String, Int64Value: Int64, SymbolValue: String@symbol, BoolValue: Bool, AsyncResultShape: AsyncResultShape, HashMapValue: {String}Type@multiowned, HashMapValue2: {String}ResourceClosePlan, ArrayValue: [Set]String, ArrayValue2: []ContextFieldDecl, ArrayValue3: []StructInitField, ArrayValue4: []String, ArrayValue5: []CaptureCleanupAction, ArrayValue6: []Emittable, HashMapValue3: {String}Type }
+PUB UNION TransformValue { BgBlock: BgBlock, StringValue: String, Int64Value: Int64, SymbolValue: String@symbol, BoolValue: Bool, AsyncResultShape: AsyncResultShape, HashMapValue: {String }Type@multiowned, HashMapValue2: {String}ResourceClosePlan, ArrayValue: [Set]String, ArrayValue2: []ContextFieldDecl, ArrayValue3: []StructInitField, ArrayValue4: []String, ArrayValue5: []CaptureCleanupAction, ArrayValue6: []Emittable, HashMapValue3: {String}Type }
 PUB UNION BgBlockInput { BgBlock: BgBlock, Struct: Struct }
 # Ruby module FsmTransform::Emit
 PUB STRUCT FsmEmitContext {
