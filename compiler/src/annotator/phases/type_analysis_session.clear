@@ -1651,9 +1651,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: DiagnosticKwValue{ StringValue: COPY name }, :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }})), [edit__new(span__new(NIL, token_line, token_column, name.codepointCount()), best_value)], :auto)));
     END
     IF (fixes.length() == 0) THEN
-      RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, token, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], {:detail: message}));
+      RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, typoToken__anchor(token), TypeAnalysisCodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], {:detail: message}));
     END
-    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, token, category, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: message}));
+    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, typoToken__anchor(token), category, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: message}));
 }
 END
 PRIVATE FN typeAnalysisSession__anchor_at(self: TypeAnalysisSession, line: Int64, col: Int64) RETURNS AnchorToken
