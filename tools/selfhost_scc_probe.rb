@@ -75,10 +75,26 @@ module SelfhostSccProbe
     text = File.read(File.join(SRC, relative))
     _reqs, types, _rest = dissect(text)
     out = types.dup
-    text.scan(/^PUB FN ([\w?!]+)(<[^>]*>)?\(([^\n]*?)\)\s*(RETURNS\s+([\w@?!\[\]{}]+))?/) do |name, generics, params, _r, ret|
-      ret ||= 'Void'
-      body = ret.delete_prefix('!') == 'Void' ? '  RETURN;' : "  panic(\"stub: #{name}\");"
-      out << "PUB FN #{name}#{generics}(#{params})#{" RETURNS #{ret}" if ret} ->\n#{body}\nEND\n"
+    offset = 0
+    while (m = text.match(/^PUB FN ([\w?!]+)(<[^>]*>)?\(/, offset))
+      name = m[1]
+      generics = m[2]
+      # A parameter can carry a default value that calls something, so the
+      # closing parenthesis is matched rather than searched for.
+      depth = 1
+      i = m.end(0)
+      while i < text.length
+        depth += 1 if text[i] == '('
+        depth -= 1 if text[i] == ')'
+        break if depth.zero?
+
+        i += 1
+      end
+      params = text[m.end(0)...i]
+      ret = text[(i + 1)..(i + 200)].to_s[/\A\s*RETURNS\s+([\w@?!\[\]{}]+)/, 1] || 'Void'
+      body = ret.delete_prefix('!') == 'Void' ? '  RETURN;' : %(  panic("stub: #{name}");)
+      out << "PUB FN #{name}#{generics}(#{params}) RETURNS #{ret} ->\n#{body}\nEND\n"
+      offset = i + 1
     end
     out
   end
