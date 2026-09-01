@@ -940,7 +940,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END);
     IF kept_param THEN
       map[name] = kept_param;
-      RETURN NIL;
+      RETURN;
     END
     NIL
     });
@@ -7333,7 +7333,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF fixCollector__enabled?() THEN
       TRY (fixCollector__push(finding, (level == :error)));
       IF !(raise_in_collector) THEN
-        RETURN NIL;
+        RETURN;
       END
       TRY (typeAnalysisSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message));
     END
@@ -7351,11 +7351,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         tag = "\x1B[36m[${(CAST(level AS String)).capitalize()}]\x1B[0m";
       END
       typeAnalysisSession__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
-      RETURN NIL;
+      RETURN;
     ELSE_IF (level == :error) THEN
       RETURN TRY (typeAnalysisSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message));
     ELSE
-      RETURN NIL;
+      RETURN;
     END
 }
 END
@@ -19248,10 +19248,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF root IS_A Identifier AS identifier THEN
       MUTABLE entry: ?SymbolEntry = identifier.symbol;
       IF !((entry != NIL)) THEN
-        RETURN NIL;
+        RETURN;
       END
       IF symbolEntry__non_escaping(entry) THEN
-        RETURN NIL;
+        RETURN;
       END
       MUTABLE ty = TRY (aST__full_type_mut(node.value));
       MUTABLE retained = (ty IS_A Type AND ((((TRY (type__any_rc?(ty)) OR TRY (type__split_open_stream?(ty))) OR ty.shared_promise?()) OR type__split?(ty))));
@@ -19265,7 +19265,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :KEEP_ON_KNOWN_CARRIER }, [], {:name: identifier__name(identifier), :carrier: carrier}));
     ELSE
-      RETURN NIL;
+      RETURN;
     END
 }
 END

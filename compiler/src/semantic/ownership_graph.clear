@@ -48,14 +48,14 @@ PUB FN lightweightSnapshot__each_state(self: LightweightSnapshot, block: FN(Stri
   MUTABLE state: String@symbol = COPY UNWRAP (self.states[rtoc_each_key]);
   block(rtoc_each_key.path, state);
   END
-  RETURN NIL;
+  RETURN;
 END
 FN lightweightSnapshot__each_place_state(self: LightweightSnapshot, block: FN(PlaceId, String@symbol) -> Void) RETURNS Void ->
   FOR rtoc_inner_key IN self.states.keys() DO
   MUTABLE state: String@symbol = COPY UNWRAP (self.states[rtoc_inner_key]);
   block(rtoc_inner_key, state);
   END
-  RETURN NIL;
+  RETURN;
 END
 PUB STRUCT OwnershipNode {
   path: String,

@@ -471,7 +471,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF fixCollector__enabled?() THEN
       TRY (fixCollector__push(finding, (level == :error)));
       IF !(raise_in_collector) THEN
-        RETURN NIL;
+        RETURN;
       END
       TRY (resolutionSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message));
     END
@@ -489,11 +489,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         tag = "\x1B[36m[${(CAST(level AS String)).capitalize()}]\x1B[0m";
       END
       resolutionSession__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
-      RETURN NIL;
+      RETURN;
     ELSE_IF (level == :error) THEN
       RETURN TRY (resolutionSession__raise_source_error_mut(rtoc_self_view, CAST(source_token AS ?Token), rendered_message));
     ELSE
-      RETURN NIL;
+      RETURN;
     END
 }
 END

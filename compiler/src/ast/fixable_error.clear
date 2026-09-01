@@ -9,7 +9,7 @@ FN anchorToken__type(self: AnchorToken) RETURNS String@symbol ->
   RETURN :ANCHOR;
 END
 FN anchorToken__value(self: AnchorToken) RETURNS Void ->
-  RETURN NIL;
+  RETURN;
 END
 PUB UNION TypoToken { TokenMultiowned: Token@multiowned, AnchorToken: AnchorToken, Token: Token }
 PUB STRUCT Span {

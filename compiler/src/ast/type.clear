@@ -1437,7 +1437,7 @@ PUB FN type__apply_capabilities_mut(MUTABLE self: Type, ownership: ?TypeCapabili
   RETURN COPY self.capabilities;
 END
 PUB FN type__clear_zig_type_cache_mut(self: Type) RETURNS Void ->
-  RETURN NIL;
+  RETURN;
 END
 PUB FN type__apply_placement_mut(MUTABLE self: Type, provenance: ?TypePlacementMaybeSymbol = TypePlacementMaybeSymbol{ TypePlacementUnset: COPY TypePlacementUnset{} }) RETURNS TypePlacement ->
   self.placement = typePlacement__with(self.placement, provenance);
@@ -1817,7 +1817,7 @@ PUB FN type__raw(self: Type) RETURNS TypeShapeRaw EFFECTS REENTRANT ->
   RETURN typeShape__raw(self.shape);
 END
 PUB FN type__name(self: Type) RETURNS Void ->
-  RETURN NIL;
+  RETURN;
 END
 PUB FN type__capacity(self: Type) RETURNS ?TypeArrayCapacity EFFECTS REENTRANT ->
   RETURN typeShape__capacity(self.shape);

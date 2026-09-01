@@ -313,7 +313,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
     MUTABLE sym = aST__node__symbol(node);
     IF sym IS_A SymbolEntry THEN
       map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
-      RETURN NIL;
+      RETURN;
     END
     NIL
   });
@@ -712,7 +712,7 @@ PUB FN escapeAnalysis__propagate_value_block_placements_mut(facts: FunctionFacts
   MUTABLE body = COPY facts.fn.body;
   escapeAnalysis__walk_body(body, %(node) -> {
   IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
-      RETURN NIL;
+      RETURN;
   END
   IF !((IF node.symbol != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (node.symbol);
@@ -720,7 +720,7 @@ PUB FN escapeAnalysis__propagate_value_block_placements_mut(facts: FunctionFacts
     ELSE
       NIL
     END)) THEN
-      RETURN NIL;
+      RETURN;
   END
   escapeAnalysis__mark_value_position_heap_mut(node.value())
   });
@@ -909,16 +909,16 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
       IF sig EXISTS AS sig_value THEN
         MUTABLE sig_value_mutable = COPY sig_value;
         IF !((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(&sig_value_mutable)))) THEN
-          RETURN NIL;
+          RETURN;
         END
         MUTABLE root: ?Identifier = aST__root_identifier(node.object);
         MUTABLE value_params = (TRY (functionSignature__params(sig_value_mutable))) |> SKIP 1;
       ELSE
-        RETURN NIL;
+        RETURN;
       END
   ELSE_IF (node IS_A Assignment) THEN
       IF !(node.name() IS_A GetIndex) THEN
-        RETURN NIL;
+        RETURN;
       END
       MUTABLE root: ?Identifier = aST__root_identifier(node.name());
       MUTABLE ti: ?Type@multiowned = NIL;
@@ -926,17 +926,17 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
         ti = COPY symbolEntry__type(UNWRAP (UNWRAP (root).symbol));
       END
       IF !(((ti != NIL) AND type__collection?(ti))) THEN
-        RETURN NIL;
+        RETURN;
       END
       MUTABLE value_params = List[];
   ELSE
-      RETURN NIL;
+      RETURN;
   END
   IF !(root?.symbol) THEN
-      RETURN NIL;
+      RETURN;
   END
   IF declared_names.contains?(CAST(root.name AS String)) THEN
-      RETURN NIL;
+      RETURN;
   END
   escapeAnalysis__mark_symbol_heap_mut(root.symbol);
   IF node IS_A MethodCall AS node_narrowed THEN
@@ -1057,7 +1057,7 @@ PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup
   END
   escapeAnalysis__walk_body(node.body, %(child) USE(schema_lookup) -> {
   IF !((child IS_A VarDecl OR ((child IS_A BindExpr AND (child.mode == :decl))))) THEN
-      RETURN NIL;
+      RETURN;
   END
   MUTABLE ti = TRY (type__success_type((TRY (aST__full_type_mut(child)))));
   IF !(((IF ti != NIL THEN
@@ -1069,7 +1069,7 @@ PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup
     ELSE
       NIL
     END))) THEN
-      RETURN NIL;
+      RETURN;
   END
   escapeAnalysis__mark_symbol_heap_mut(child.symbol)
   });
