@@ -14507,3 +14507,10 @@ PUB FN aST__each_bg_block_in_stmt(stmt: Locatable, blk: FN(BgNode) -> Void) RETU
     RETURN;
   END
 END
+
+PUB FN capabilityWrap__capability?(self: CapabilityWrap) RETURNS Bool ->
+  RETURN (((self.ownership != NIL) OR (self.sync != NIL)) OR (self.layout != NIL));
+END
+PUB FN pipelineShardContext__with_frame_allocations(self: PipelineShardContext, key_allocates_frame: Bool, body_allocates_frame: Bool) RETURNS PipelineShardContext ->
+  RETURN PipelineShardContext{ map_var: COPY self.map_var, key_expr: COPY self.key_expr, shard_count: self.shard_count, auto_detected: self.auto_detected, key_allocates_frame: key_allocates_frame, body_allocates_frame: body_allocates_frame };
+END
