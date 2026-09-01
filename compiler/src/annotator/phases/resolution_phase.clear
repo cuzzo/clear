@@ -135,7 +135,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (resolutionSession__register_type_declaration(rtoc_self_view, TypeDeclaration{ EnumDef: COPY enum_def }));
     ELSE_IF node IS_A UnionDef AS union_def THEN
       TRY (resolutionSession__register_type_declaration(rtoc_self_view, TypeDeclaration{ UnionDef: COPY union_def }));
-    ELSE_IF node IS_A ExternFnDecl AS extern_fn_decl THEN
+    ELSE_IF node IS_A ExternFnDecl AS MUTABLE extern_fn_decl THEN
       TRY (resolutionSession__register_extern_function_signature(rtoc_self_view, &extern_fn_decl));
     END
 }
@@ -1830,7 +1830,7 @@ PRIVATE FN resolutionSession__register_type_declaration(self: ResolutionSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF node IS_A StructDef AS struct_def THEN
+    IF node IS_A StructDef AS MUTABLE struct_def THEN
       TRY (resolutionSession__register_struct_declaration(rtoc_self_view, &struct_def));
     ELSE_IF node IS_A ExternStructDecl AS extern_struct_decl THEN
       TRY (resolutionSession__register_extern_struct_declaration(rtoc_self_view, &extern_struct_decl));

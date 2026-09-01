@@ -1221,7 +1221,7 @@ PRIVATE FN typeAnalysisSession__dispatch_visit(MUTABLE self: TypeAnalysisSession
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN PARTIAL MATCH node START
       Locatable.FunctionDef AS MUTABLE function_def -> TRY (typeAnalysisSession__visit_FunctionDef(&rtoc_self_view, &function_def)),
-      Locatable.LambdaLit AS lambda_lit -> TRY (typeAnalysisSession__visit_LambdaLit(&rtoc_self_view, &lambda_lit)),
+      Locatable.LambdaLit AS MUTABLE lambda_lit -> TRY (typeAnalysisSession__visit_LambdaLit(&rtoc_self_view, &lambda_lit)),
       blockexpr -> TRY (typeAnalysisSession__visit_BlockExpr(&rtoc_self_view, &node)),
       Locatable.IfStatement AS if_statement -> TRY (typeAnalysisSession__visit_IfStatement(&rtoc_self_view, &if_statement)),
       Locatable.IsA AS is_a -> TRY (typeAnalysisSession__visit_IsA(&rtoc_self_view, &is_a)),
@@ -13670,7 +13670,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__analyze_when_match_case_mut(&rtoc_self_view, node, match_case));
     ELSE_IF (match_case.kind == :struct_pattern) THEN
       MUTABLE pattern = COPY match_case.value;
-      IF pattern IS_A StructPattern AS pattern_narrowed THEN
+      IF pattern IS_A StructPattern AS MUTABLE pattern_narrowed THEN
         TRY (typeAnalysisSession__annotate_struct_pattern_mut(&rtoc_self_view, node, &pattern_narrowed));
       END
     ELSE
