@@ -12245,3 +12245,529 @@ PUB FN locatable__variant_name(value: Locatable) RETURNS String ->
   END
   RETURN "";
 END
+
+# Ruby walks the node's struct members and collects every AST node among
+# them, from list and map fields as well as direct ones. CLEAR answers the
+# same question by narrowing to each variant that has children.
+PUB FN locatable__child_nodes(value: Locatable) RETURNS []Locatable EFFECTS REENTRANT ->
+  MUTABLE out: []Locatable = List[];
+  IF value IS_A Program AS item THEN
+    FOR rtoc_child IN item.statements DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A FunctionDef AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+    IF item.default_catch EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+  END
+  IF value IS_A VarDecl AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A Assignment AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A DestructuringAssignment AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A BindExpr AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A BinaryOp AS item THEN
+    &out.append(COPY item.left);
+    &out.append(COPY item.right);
+  END
+  IF value IS_A IsA AS item THEN
+    &out.append(COPY item.left);
+  END
+  IF value IS_A UnaryOp AS item THEN
+    &out.append(COPY item.right);
+  END
+  IF value IS_A CallSiteOverride AS item THEN
+    &out.append(COPY item.inner);
+  END
+  IF value IS_A ListLit AS item THEN
+    FOR rtoc_child IN item.items DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A TupleLit AS item THEN
+    FOR rtoc_child IN item.items DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A StructLit AS item THEN
+    FOR rtoc_key IN item.fields.keys() DO
+      &out.append(COPY UNWRAP (item.fields[rtoc_key]));
+    END
+  END
+  IF value IS_A LambdaLit AS item THEN
+    IF item.deferred_drops EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+  END
+  IF value IS_A IfStatement AS item THEN
+    &out.append(COPY item.condition);
+    IF item.else_branch EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+    FOR rtoc_child IN item.then_branch DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A IfBind AS item THEN
+    FOR rtoc_child IN item.else_branch DO
+      &out.append(COPY rtoc_child);
+    END
+    FOR rtoc_child IN item.then_branch DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A WhileLoop AS item THEN
+    &out.append(COPY item.condition);
+    FOR rtoc_child IN item.do_branch DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A WhileBindLoop AS item THEN
+    &out.append(COPY item.condition);
+    FOR rtoc_child IN item.do_branch DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A FuncCall AS item THEN
+    FOR rtoc_child IN item.args DO
+      &out.append(COPY rtoc_child);
+    END
+    IF item.pipe_lhs EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A MethodCall AS item THEN
+    FOR rtoc_child IN item.args DO
+      &out.append(COPY rtoc_child);
+    END
+    &out.append(COPY item.object);
+  END
+  IF value IS_A GetField AS item THEN
+    &out.append(COPY item.target);
+  END
+  IF value IS_A GetIndex AS item THEN
+    &out.append(COPY item.index);
+    &out.append(COPY item.target);
+  END
+  IF value IS_A Cast AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A ReturnNode AS item THEN
+    IF item.value EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A Assert AS item THEN
+    &out.append(COPY item.condition);
+  END
+  IF value IS_A Raise AS item THEN
+    IF item.message_expr EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A ThrowNode AS item THEN
+    IF item.value EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A DieNode AS item THEN
+    IF item.status EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A Slice AS item THEN
+    IF item.end EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+    IF item.start EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+    &out.append(COPY item.target);
+  END
+  IF value IS_A DeferStmt AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A WithBlock AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A SelectOp AS item THEN
+    &out.append(COPY item.expression);
+  END
+  IF value IS_A WhereOp AS item THEN
+    &out.append(COPY item.expression);
+  END
+  IF value IS_A IndexOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A ReduceOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+    IF item.initial_value EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A OrderByOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A LimitOp AS item THEN
+    IF item.count EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A UnnestOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A DistinctOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A EachOp AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A TapOp AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A SkipOp AS item THEN
+    IF item.count EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A TakeWhileOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A WindowOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+    IF item.size EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A BatchWindowOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+    FOR rtoc_key IN item.options.keys() DO
+      &out.append(COPY UNWRAP (item.options[rtoc_key]));
+    END
+  END
+  IF value IS_A JoinOp AS item THEN
+    IF item.key_expr EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+    IF item.right_source EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A FindOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A AnyOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A AllOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A CountOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A SumOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A AverageOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A MinOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A MaxOp AS item THEN
+    IF item.expression EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A ShardOp AS item THEN
+    IF item.key_expr EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+    IF item.target_map EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A ConcurrentOp AS item THEN
+    FOR rtoc_key IN item.options.keys() DO
+      &out.append(COPY UNWRAP (item.options[rtoc_key]));
+    END
+  END
+  IF value IS_A Copy AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A OptionalUnwrap AS item THEN
+    &out.append(COPY item.target);
+  END
+  IF value IS_A TenseNavigation AS item THEN
+    &out.append(COPY item.target);
+  END
+  IF value IS_A MutableBorrow AS item THEN
+    &out.append(COPY item.target);
+  END
+  IF value IS_A OrElseExit AS item THEN
+    IF item.message EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A CatchBlock AS item THEN
+    IF item.default_body EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+  END
+  IF value IS_A RecoverOp AS item THEN
+    IF item.default_expr EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A BlockExpr AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+    IF item.result EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A StringConcat AS item THEN
+    FOR rtoc_child IN item.parts DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A CapabilityWrap AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A MoveNode AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A CopyNode AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A KeepNode AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A ShareNode AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A LinkNode AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A ResolveNode AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A FreezeNode AS item THEN
+    &out.append(COPY item.value);
+  END
+  IF value IS_A RangeLit AS item THEN
+    &out.append(COPY item.finish);
+    &out.append(COPY item.start);
+  END
+  IF value IS_A UnionVariantLit AS item THEN
+    FOR rtoc_key IN item.fields.keys() DO
+      &out.append(COPY UNWRAP (item.fields[rtoc_key]));
+    END
+  END
+  IF value IS_A StaticCall AS item THEN
+    FOR rtoc_child IN item.args DO
+      &out.append(COPY rtoc_child);
+    END
+    &out.append(COPY item.type_name);
+  END
+  IF value IS_A BgBlock AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A BgStreamBlock AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A YieldExpr AS item THEN
+    &out.append(COPY item.expr);
+  END
+  IF value IS_A NextExpr AS item THEN
+    &out.append(COPY item.expr);
+  END
+  IF value IS_A MatchStatement AS item THEN
+    IF item.default_case EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+    &out.append(COPY item.expr);
+  END
+  IF value IS_A ForRange AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+    IF item.deferred_drops EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+    &out.append(COPY item.end_expr);
+    &out.append(COPY item.start_expr);
+  END
+  IF value IS_A ForEach AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+    &out.append(COPY item.collection);
+    IF item.deferred_drops EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+  END
+  IF value IS_A TestBlock AS item THEN
+    IF item.after_all EXISTS AS rtoc_lists THEN
+      FOR rtoc_inner IN rtoc_lists DO
+        FOR rtoc_child IN rtoc_inner DO
+          &out.append(COPY rtoc_child);
+        END
+      END
+    END
+    IF item.after_each EXISTS AS rtoc_lists THEN
+      FOR rtoc_inner IN rtoc_lists DO
+        FOR rtoc_child IN rtoc_inner DO
+          &out.append(COPY rtoc_child);
+        END
+      END
+    END
+    IF item.before_all EXISTS AS rtoc_lists THEN
+      FOR rtoc_inner IN rtoc_lists DO
+        FOR rtoc_child IN rtoc_inner DO
+          &out.append(COPY rtoc_child);
+        END
+      END
+    END
+    IF item.before_each EXISTS AS rtoc_lists THEN
+      FOR rtoc_inner IN rtoc_lists DO
+        FOR rtoc_child IN rtoc_inner DO
+          &out.append(COPY rtoc_child);
+        END
+      END
+    END
+    IF item.setup EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+  END
+  IF value IS_A WhenBlock AS item THEN
+    IF item.after_all EXISTS AS rtoc_lists THEN
+      FOR rtoc_inner IN rtoc_lists DO
+        FOR rtoc_child IN rtoc_inner DO
+          &out.append(COPY rtoc_child);
+        END
+      END
+    END
+    IF item.after_each EXISTS AS rtoc_lists THEN
+      FOR rtoc_inner IN rtoc_lists DO
+        FOR rtoc_child IN rtoc_inner DO
+          &out.append(COPY rtoc_child);
+        END
+      END
+    END
+    IF item.before_all EXISTS AS rtoc_lists THEN
+      FOR rtoc_inner IN rtoc_lists DO
+        FOR rtoc_child IN rtoc_inner DO
+          &out.append(COPY rtoc_child);
+        END
+      END
+    END
+    IF item.before_each EXISTS AS rtoc_lists THEN
+      FOR rtoc_inner IN rtoc_lists DO
+        FOR rtoc_child IN rtoc_inner DO
+          &out.append(COPY rtoc_child);
+        END
+      END
+    END
+    IF item.setup EXISTS AS rtoc_list THEN
+      FOR rtoc_child IN rtoc_list DO
+        &out.append(COPY rtoc_child);
+      END
+    END
+  END
+  IF value IS_A LetBinding AS item THEN
+    &out.append(COPY item.expr);
+  END
+  IF value IS_A TestThat AS item THEN
+    FOR rtoc_child IN item.body DO
+      &out.append(COPY rtoc_child);
+    END
+  END
+  IF value IS_A AssertRaises AS item THEN
+    &out.append(COPY item.expression);
+  END
+  IF value IS_A BenchmarkStmt AS item THEN
+    &out.append(COPY item.expression);
+  END
+  IF value IS_A SmashStmt AS item THEN
+    &out.append(COPY item.expression);
+  END
+  IF value IS_A ProfileStmt AS item THEN
+    &out.append(COPY item.expression);
+  END
+  IF value IS_A FieldCleanup AS item THEN
+    IF item.field EXISTS AS rtoc_child THEN
+      &out.append(COPY rtoc_child);
+    END
+  END
+  RETURN out;
+END

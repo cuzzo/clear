@@ -1833,24 +1833,7 @@ PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names
 END
 PUB FN loopFrameAnalysis__loop_local_children(node: Locatable) RETURNS ![]Locatable ->
   MUTABLE children: []Locatable = ( { MUTABLE rtoc_empty_list_27: []Locatable = List[]; rtoc_empty_list_27 } );
-  FOR _ IN node.class().members DO
-  MUTABLE value = COPY node.substr(_, 1);
-  IF (value == Array) THEN
-      FOR _ IN value DO
-      IF _ IS_A Locatable THEN
-        &children.append(COPY _);
-      END
-      END
-  ELSE_IF (value == Hash) THEN
-      FOR _ IN value.values() DO
-      IF _ IS_A Locatable THEN
-        &children.append(COPY _);
-      END
-      END
-  ELSE_IF (value IS_A Locatable) THEN
-      &children.append(COPY value);
-  END
-  END
+  children = locatable__child_nodes(node);
   RETURN children;
 END
 PUB FN loopFrameAnalysis__direct_loop_expression_boundary?(node: Locatable) RETURNS Bool ->
