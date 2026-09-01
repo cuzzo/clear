@@ -226,13 +226,19 @@ module SelfhostFnProbe
       when :clear
         env['CLEAR_TRANSPILE_ONLY'] = '1'
         env['CLEAR_DISABLE_BUILD_ZIG'] = '1'
-      when :zig, :binary
+      when :zig, :binary, :run
         # no flags: emit Zig, compile it, and link an executable
       end
       cmd = [File.join(ROOT, 'clear'), 'build', source, '-o', File.join(dir, 'probe'),
              '--no-stack-check', '--main-tier', 'service',
              *ParserCompat.package_flags(SRC), *Array(extra_pkg)]
       out, err, status = Open3.capture3(env, *cmd, chdir: ROOT)
+      if stage == :run && status.success?
+        # Stage 3 needs what the function actually produced, not just that it
+        # linked.
+        rout, rerr, rstatus = Open3.capture3(File.join(dir, 'probe'))
+        return [rstatus.success?, rout.to_s.strip, rerr.to_s[0, 120]]
+      end
       text = "#{out}\n#{err}"
       msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
       # Not every failure announces itself with one of those banners -- a Ruby
@@ -250,12 +256,15 @@ module SelfhostFnProbe
     jobs = [Etc.nprocessors - 4, 1].max
     stage = :clear
     limit = nil
+    passing = nil
     OptionParser.new do |p|
       p.on('--file REL') { |v| only_file = v }
       p.on('--all') { only_file = nil }
       p.on('--jobs N', Integer) { |v| jobs = v }
       p.on('--stage S') { |v| stage = v.to_sym }
       p.on('--limit N', Integer) { |v| limit = v }
+      # Stage 2 only makes sense for what already passed stage 1.
+      p.on('--passing FILE') { |v| passing = v }
     end.parse!(argv)
 
     group = members
@@ -264,6 +273,11 @@ module SelfhostFnProbe
     group.each { |m| cache[File.join(SRC, m)] = dissect(File.join(SRC, m)) }
 
     targets = files.flat_map { |f| cache[File.join(SRC, f)][2] }
+    if passing
+      allow = JSON.parse(File.read(passing)).select { |r| r['ok'] }
+                  .map { |r| [r['file'], r['fn']] }.to_set
+      targets = targets.select { |t| allow.include?([rel(t.file), t.name]) }
+    end
     targets = targets.first(limit) if limit
     warn "#{targets.length} functions across #{files.length} file(s); #{jobs} jobs; stage=#{stage}"
 
@@ -294,7 +308,7 @@ module SelfhostFnProbe
             done += 1
             # Each build leaves Zig cache entries behind; 3405 of them fill the
             # disk and every probe after that fails for the wrong reason.
-            if (done % 300).zero?
+            if (done % (stage == :clear ? 300 : 15)).zero?
               FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-cache'))
             end
             if (done % 20).zero?

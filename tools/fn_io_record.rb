@@ -114,6 +114,51 @@ module FnIoRecord
     "UNENCODABLE:#{e.class}"
   end
 
+  # The same value as CLEAR source, so a probe can reconstruct the argument
+  # Ruby was given. Anything that cannot be written as a literal -- a cycle, a
+  # closure, a depth cutoff -- becomes NIL and the caller skips that call.
+  def clear_literal(value, depth = 0, seen = {})
+    return nil if depth > 6
+
+    case value
+    when nil then 'NIL'
+    when true then 'TRUE'
+    when false then 'FALSE'
+    when Integer then value.to_s
+    when Float then format('%f', value)
+    when Symbol then ":#{value}"
+    when String then value.inspect
+    when Array
+      items = value.map { |v| clear_literal(v, depth + 1, seen) }
+      items.any?(&:nil?) ? nil : "[#{items.join(', ')}]"
+    when Hash
+      pairs = value.map do |k, v|
+        kk = clear_literal(k, depth + 1, seen)
+        vv = clear_literal(v, depth + 1, seen)
+        kk && vv ? "#{kk}: #{vv}" : nil
+      end
+      pairs.any?(&:nil?) ? nil : "{#{pairs.join(', ')}}"
+    else
+      return nil if seen.key?(value.object_id)
+
+      seen = seen.merge(value.object_id => true)
+      fields =
+        if value.is_a?(Struct) then value.members.to_h { |m| [m.to_s, value[m]] }
+        elsif value.class.respond_to?(:props) then value.class.props.keys.to_h { |n| [n.to_s, safe_send(value, n)] }
+        else return nil
+        end
+      parts = fields.map do |f, v|
+        lit = clear_literal(v, depth + 1, seen)
+        lit ? "#{f}: #{lit}" : nil
+      end
+      return nil if parts.any?(&:nil?)
+
+      "#{value.class.name.to_s.split('::').last}{ #{parts.join(', ')} }"
+    end
+  rescue StandardError, SystemStackError
+    nil
+  end
+
   def safe_send(value, name)
     value.public_send(name)
   rescue StandardError
@@ -134,14 +179,21 @@ module FnIoRecord
       next unless target
       next unless target.method_defined?(method) || target.private_method_defined?(method)
 
+      # An instance method's receiver is implicit in Ruby and explicit in CLEAR:
+      # `annotationProducts__complete?(self: AnnotationProducts)`. Record it as
+      # the first argument or every replay is an arity mismatch.
+      instance_method = target != owner.singleton_class
       recorder = Module.new do
         define_method(method) do |*args, **kwargs, &blk|
           result = super(*args, **kwargs, &blk)
           bucket = FnIoRecord::RECORDED[clear_name]
           if bucket.length < FnIoRecord::LIMIT_PER_FN
+            args = [self] + args if instance_method
             bucket << { args: args.map { |a| FnIoRecord.encode(a) },
+                        args_clear: args.map { |a| FnIoRecord.clear_literal(a) },
                         kwargs: kwargs.transform_values { |v| FnIoRecord.encode(v) },
-                        result: FnIoRecord.encode(result) }
+                        result: FnIoRecord.encode(result),
+                        result_class: result.class.name.to_s.split('::').last }
           end
           result
         end
