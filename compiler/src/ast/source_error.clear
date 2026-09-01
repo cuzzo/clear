@@ -107,6 +107,14 @@ END
 PUB UNION DiagnosticAnchor { TokenValue: Token, Locatable: Locatable }
 
 # The token a diagnostic points at: a node contributes its own.
+# A node reaches a diagnostic through whichever materialized union its caller
+# holds; casting to Locatable first keeps every call site to one expression.
+PUB FN diagnosticAnchor__of(node: ?Locatable) RETURNS ?DiagnosticAnchor ->
+  IF node EXISTS AS rtoc_node THEN
+    RETURN DiagnosticAnchor{ Locatable: COPY rtoc_node };
+  END
+  RETURN NIL;
+END
 PUB FN diagnosticAnchor__token(value: ?DiagnosticAnchor) RETURNS ?Token ->
   IF value EXISTS AS rtoc_anchor THEN
     PARTIAL MATCH rtoc_anchor START

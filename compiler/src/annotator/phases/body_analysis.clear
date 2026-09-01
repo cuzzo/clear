@@ -119,3 +119,12 @@ PUB FN asyncValidationNode__can_smash_token(value: AsyncValidationNode) RETURNS 
   END
   RETURN NIL;
 END
+FN castAsyncValidationNodeToLocatable(value: AsyncValidationNode) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    AsyncValidationNode.BgBlock AS item -> RETURN Locatable{ BgBlock: COPY item };,
+    AsyncValidationNode.BgStreamBlock AS item -> RETURN Locatable{ BgStreamBlock: COPY item };,
+    AsyncValidationNode.DoBlock AS item -> RETURN Locatable{ DoBlock: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

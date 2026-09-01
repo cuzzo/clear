@@ -35,3 +35,11 @@ END
 # Ruby module EffectAudit
 # Ruby module EffectTracker
 # Ruby module EffectAudit
+FN castTightLoopNodeToLocatable(value: TightLoopNode) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    TightLoopNode.WhileLoop AS item -> RETURN Locatable{ WhileLoop: COPY item };,
+    TightLoopNode.ForRange AS item -> RETURN Locatable{ ForRange: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

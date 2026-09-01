@@ -143,3 +143,20 @@ FN castFunctionCallNodeToOptionalMethodCall(value: FunctionCallNode) RETURNS ?Me
   END
   RETURN NIL;
 END
+FN castFunctionCallNodeToLocatable(value: FunctionCallNode) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    FunctionCallNode.FuncCall AS item -> RETURN Locatable{ FuncCall: COPY item };,
+    FunctionCallNode.MethodCall AS item -> RETURN Locatable{ MethodCall: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+FN castRoutineNodeToLocatable(value: RoutineNode) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    RoutineNode.FunctionDefMultiowned AS item -> RETURN Locatable{ FunctionDef: COPY item };,
+    RoutineNode.LambdaLit AS item -> RETURN Locatable{ LambdaLit: COPY item };,
+    RoutineNode.FunctionDef AS item -> RETURN Locatable{ FunctionDef: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

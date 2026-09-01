@@ -89,3 +89,14 @@ END
 FN rubyToClearVoid__declaration_index() RETURNS Void ->
   RETURN;
 END
+FN castTypeDeclarationToLocatable(value: TypeDeclaration) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    TypeDeclaration.StructDef AS item -> RETURN Locatable{ StructDef: COPY item };,
+    TypeDeclaration.ExternStructDecl AS item -> RETURN Locatable{ ExternStructDecl: COPY item };,
+    TypeDeclaration.EnumDef AS item -> RETURN Locatable{ EnumDef: COPY item };,
+    TypeDeclaration.UnionDef AS item -> RETURN Locatable{ UnionDef: COPY item };,
+    TypeDeclaration.ProtocolDef AS item -> RETURN Locatable{ ProtocolDef: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
