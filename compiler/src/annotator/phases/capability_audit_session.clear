@@ -98,7 +98,7 @@ END
 FN capabilityAuditSession__function_node_map(self: CapabilityAuditSession) RETURNS !{String}FunctionDef@multiowned ->
   TRY (capabilityAuditSession__semantic_function_nodes(self));
 END
-PRIVATE FN capabilityAuditSession__function_node_for(self: CapabilityAuditSession, name: ?String) RETURNS ?FunctionDef
+PRIVATE FN capabilityAuditSession__function_node_for(self: CapabilityAuditSession, name: ?String) RETURNS !?FunctionDef
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3248,7 +3248,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
       END
       &visited.insert(name);
-      MUTABLE fn: ?FunctionDef@multiowned = capabilityAuditSession__function_node_for(rtoc_self_view, name);
+      MUTABLE fn: ?FunctionDef@multiowned = TRY (capabilityAuditSession__function_node_for(rtoc_self_view, name));
       IF ((fn != NIL) AND (fn.reentrance_kind == :reentrant)) THEN
         RETURN name;
       END
@@ -3271,7 +3271,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
       END
       &visited.insert(name);
-      MUTABLE fn: ?FunctionDef@multiowned = capabilityAuditSession__function_node_for(rtoc_self_view, name);
+      MUTABLE fn: ?FunctionDef@multiowned = TRY (capabilityAuditSession__function_node_for(rtoc_self_view, name));
       IF (((fn != NIL) AND (fn.reentrance_kind == :reentrant_max_depth)) AND TRY (capabilityAuditSession__mutually_recursive_in_call_graph?(&rtoc_self_view, name))) THEN
         RETURN name;
       END
@@ -4111,7 +4111,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_39 = (TRY (capabilityAuditSession__deferred_give_validations(rtoc_self_view)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_39.length() DO
-      MUTABLE param = (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_39[rtoc_idx]?.callee_name)?.params[rtoc_each_items_39[rtoc_idx]?.param_index]);
+      MUTABLE param = (TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_39[rtoc_idx]?.callee_name))?.params[rtoc_each_items_39[rtoc_idx]?.param_index]);
       IF (IF param != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40 = param.symbol;
       symbolEntry__kept_identity(rtoc_local_receiver_40) }
@@ -4134,7 +4134,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_each_items_42 = (TRY (capabilityAuditSession__deferred_copy_retained_validations(rtoc_self_view)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_42.length() DO
-      MUTABLE param = (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.callee_name)?.params[rtoc_each_items_42[rtoc_idx]?.param_index]);
+      MUTABLE param = (TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.callee_name))?.params[rtoc_each_items_42[rtoc_idx]?.param_index]);
       IF (IF param != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_43 = param.symbol;
       symbolEntry__kept_identity(rtoc_local_receiver_43) }
@@ -4155,7 +4155,7 @@ PRIVATE FN capabilityAuditSession__flush_deferred_recovery_validations_mut(self:
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (capabilityAuditSession__deferred_recovery_validations(rtoc_self_view))) DO
-    MUTABLE callee: ?FunctionDef@multiowned = capabilityAuditSession__function_node_for(rtoc_self_view, _.callee_name);
+    MUTABLE callee: ?FunctionDef@multiowned = TRY (capabilityAuditSession__function_node_for(rtoc_self_view, _.callee_name));
     IF !(((callee != NIL) AND (callee.can_fail == TRUE))) THEN
         TRY (capabilityAuditSession__error_mut(rtoc_self_view, _.node, CapabilityAuditCodeOrMessage{ SymbolValue: :OR_ELSE_NEEDS_RECOVERABLE_LEFT }, [], {:got: TRY (type__surface_name_type(_.value_type))}));
     END

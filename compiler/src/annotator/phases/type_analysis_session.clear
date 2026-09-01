@@ -209,7 +209,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN KEEP rtoc_self_view.audit_inputs.ownership_graph;
 }
 END
-PUB FN typeAnalysisSession__function_node_for(self: TypeAnalysisSession, name: ?String) RETURNS ?FunctionDef
+PUB FN typeAnalysisSession__function_node_for(self: TypeAnalysisSession, name: ?String) RETURNS !?FunctionDef
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -3851,7 +3851,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(facts.param.takes) THEN
       RETURN;
     END
-    MUTABLE callee_fn: ?FunctionDef@multiowned = typeAnalysisSession__function_node_for(rtoc_self_view, facts.site.node.name());
+    MUTABLE callee_fn: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(rtoc_self_view, facts.site.node.name()));
     IF callee_fn EXISTS AS callee_fn_value THEN
       MUTABLE callee_param: ?Param = NIL;
       IF callee_fn_value.params != NIL THEN
@@ -3907,7 +3907,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF arg IS_A CopyNode AS copy_node THEN
       RETURN;
     END
-    MUTABLE callee_param = ((typeAnalysisSession__function_node_for(rtoc_self_view, facts.site.node.name()))?.params[facts.index]);
+    MUTABLE callee_param = ((TRY (typeAnalysisSession__function_node_for(rtoc_self_view, facts.site.node.name())))?.params[facts.index]);
     MUTABLE contract: String@symbol = facts.param.carrier_contract;
     IF callee_param != NIL THEN
       contract = symbolEntry__carrier_contract(callee_param);
@@ -4168,7 +4168,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF actual_sig EXISTS AS actual_sig_value THEN
       IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_78 = CAST(actual_sig_value AS FunctionSignature);
       functionSignature__reentrant(rtoc_local_receiver_78) } THEN
-        MUTABLE callee: ?FunctionDef@multiowned = typeAnalysisSession__function_node_for(rtoc_self_view, facts.site.name);
+        MUTABLE callee: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(rtoc_self_view, facts.site.name));
         IF !((IF callee != NIL THEN
           functionDef__declared_plain_reentrant?(callee)
         ELSE
@@ -4196,7 +4196,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF actual_sig EXISTS AS actual_sig_value THEN
       IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_79 = CAST(actual_sig_value AS FunctionSignature);
       functionSignature__reentrant(rtoc_local_receiver_79) } THEN
-        MUTABLE callee: ?FunctionDef@multiowned = typeAnalysisSession__function_node_for(rtoc_self_view, facts.site.name);
+        MUTABLE callee: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(rtoc_self_view, facts.site.name));
         MUTABLE constraint = (IF callee != NIL THEN
           callee.requires_clauses[facts.param.name]
         ELSE
@@ -6336,7 +6336,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__collect_sharded_names(self: TypeAnalysisSession, node: ?ShardScanNode, MUTABLE names: [Set]String) RETURNS Void
+PRIVATE FN typeAnalysisSession__collect_sharded_names(self: TypeAnalysisSession, node: ?ShardScanNode, MUTABLE names: [Set]String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -6660,7 +6660,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         MUTABLE sharded_names = Set[];
         FOR _ IN conc.op().body() DO
-        typeAnalysisSession__collect_sharded_names(rtoc_self_view, _, &sharded_names);
+        TRY (typeAnalysisSession__collect_sharded_names(rtoc_self_view, _, &sharded_names));
         END
         conc.capture_analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, %() USE(conc, MUTABLE node, MUTABLE proxy, sharded_names, MUTABLE rtoc_self_view) -> {
     IF (sharded_names.length() > 1) THEN
@@ -16583,7 +16583,7 @@ PRIVATE FN typeAnalysisSession__visit_WithBlock(MUTABLE self: TypeAnalysisSessio
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_ctx: ?FunctionContext@multiowned = typeAnalysisSession__current_fn_ctx(rtoc_self_view);
     IF fn_ctx EXISTS AS fn_ctx_value THEN
-      MUTABLE fn_node: ?FunctionDef@multiowned = typeAnalysisSession__function_node_for(rtoc_self_view, fn_ctx_value.name);
+      MUTABLE fn_node: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(rtoc_self_view, fn_ctx_value.name));
       IF fn_node EXISTS AS fn_node_value THEN
         &fn_node_value.semantic_with_blocks.append(COPY node);
       END
@@ -16779,7 +16779,7 @@ PRIVATE FN typeAnalysisSession__mark_unrequired_polymorphic_with_runtime_mut(sel
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE bound_name: ?String = TRY (typeAnalysisSession__unrequired_polymorphic_runtime_bound_name(rtoc_self_view, node));
     IF bound_name EXISTS AS bound_name_value THEN
-      MUTABLE fn_node: ?FunctionDef@multiowned = typeAnalysisSession__function_node_for(rtoc_self_view, fn_ctx.name);
+      MUTABLE fn_node: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(rtoc_self_view, fn_ctx.name));
       IF fn_node EXISTS AS fn_node_value THEN
         MUTABLE fn_node_value_mutable = COPY fn_node_value;
         IF !(typeAnalysisSession__with_requires_binding?(rtoc_self_view, CAST(fn_node_value_mutable AS FunctionDef), bound_name_value)) THEN
@@ -16878,7 +16878,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE bound_name = COPY bound_fact.var_name;
     MUTABLE bound_sym = aST__node__symbol(bound_var);
     MUTABLE is_param = ((TRUE AND TRUE) AND bound_sym.is_param());
-    MUTABLE fn_node: ?FunctionDef@multiowned = typeAnalysisSession__function_node_for(rtoc_self_view, typeAnalysisSession__current_fn_ctx(rtoc_self_view)?.name);
+    MUTABLE fn_node: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(rtoc_self_view, typeAnalysisSession__current_fn_ctx(rtoc_self_view)?.name));
     MUTABLE has_req = ((((fn_node != NIL) AND TRUE) AND fn_node.requires) AND fn_node.requires.contains?(bound_name));
     RETURN (is_param AND !(has_req));
 }
@@ -19927,7 +19927,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (sources == [sym]) THEN
       RETURN;
     END
-    MUTABLE fn_node: ?FunctionDef@multiowned = typeAnalysisSession__function_node_for(rtoc_self_view, typeAnalysisSession__current_fn_ctx(rtoc_self_view)?.name);
+    MUTABLE fn_node: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(rtoc_self_view, typeAnalysisSession__current_fn_ctx(rtoc_self_view)?.name));
     MUTABLE rl: ?Any = COPY fn_node?.return_lifetime;
     IF (rl == :wildcard) THEN
       RETURN;
