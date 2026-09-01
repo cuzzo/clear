@@ -15001,3 +15001,54 @@ PUB FN aST__empty_auto_collection_literal_decl?(node: Locatable) RETURNS Bool ->
   END
   RETURN FALSE;
 END
+PUB FN aST__ownership_wrapper?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.MoveNode AS item -> RETURN TRUE;,
+    Locatable.CopyNode AS item -> RETURN TRUE;,
+    Locatable.KeepNode AS item -> RETURN TRUE;,
+    Locatable.ShareNode AS item -> RETURN TRUE;,
+    Locatable.FreezeNode AS item -> RETURN TRUE;,
+    Locatable.CapabilityWrap AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+PUB FN aST__ownership_transfer_stmt?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.WhileLoop AS item -> RETURN TRUE;,
+    Locatable.WhileBindLoop AS item -> RETURN TRUE;,
+    Locatable.ForRange AS item -> RETURN TRUE;,
+    Locatable.ForEach AS item -> RETURN TRUE;,
+    Locatable.IfStatement AS item -> RETURN TRUE;,
+    Locatable.MatchStatement AS item -> RETURN TRUE;,
+    Locatable.WithBlock AS item -> RETURN TRUE;,
+    Locatable.DoBlock AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+PUB FN aST__declaration_with_identifier_value?(node: Locatable) RETURNS Bool ->
+  IF node IS_A VarDecl AS rtoc_var_decl THEN
+    RETURN (rtoc_var_decl.value IS_A Identifier);
+  END
+  IF node IS_A BindExpr AS rtoc_bind THEN
+    IF (rtoc_bind.mode != :decl) THEN
+      RETURN FALSE;
+    END
+    RETURN (rtoc_bind.value IS_A Identifier);
+  END
+  RETURN FALSE;
+END
+# Ruby: only AND / OR / OR_ELSE defer their right operand.
+PUB FN binaryOp__lazy_fields(self: BinaryOp) RETURNS []String@symbol ->
+  IF (((self.op == symbol("AND")) OR (self.op == symbol("OR"))) OR (self.op == symbol("OR_ELSE"))) THEN
+    RETURN [:right];
+  END
+  RETURN List[];
+END
+PUB FN capabilityWrap__local_storage_wrap?(self: CapabilityWrap) RETURNS Bool ->
+  IF (self.ownership == :local) THEN
+    RETURN TRUE;
+  END
+  RETURN (((self.layout == :indirect) AND (self.sync == NIL)) AND (self.ownership == NIL));
+END

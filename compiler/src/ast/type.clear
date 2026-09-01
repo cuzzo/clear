@@ -5060,3 +5060,7 @@ END
 PUB FN type__byte_string?(self: Type) RETURNS !Bool ->
   RETURN (TRY (type__string?(self)) AND !(type__symbol?(self)));
 END
+
+PUB FN type__slice_shaped_field_array?(self: Type) RETURNS Bool ->
+  RETURN ((type__array?(self) AND type__dynamic?(self)) AND !(type__list_collection?(self)));
+END
