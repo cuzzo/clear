@@ -279,7 +279,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE stages: []Locatable = ( { MUTABLE rtoc_empty_list_5: []Locatable = List[]; rtoc_empty_list_5 } );
     MUTABLE cursor: Locatable = COPY node;
     WHILE (IF cursor IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) DO
-      MUTABLE rhs = cursor.right();
+      MUTABLE rhs = aST__node_right(cursor);
       IF aST__pipeline_fusible_stage?(rhs) THEN
         stages = ([rhs] + stages);
         cursor = cursor.left();

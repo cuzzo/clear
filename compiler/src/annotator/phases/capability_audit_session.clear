@@ -1512,7 +1512,7 @@ PRIVATE FN capabilityAuditSession__emit_type_mismatch_assign_error_mut(self: Cap
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE kw = {:got: value_type, :expected: target_type};
-    MUTABLE value = node.value();
+    MUTABLE value = aST__node_value(UNWRAP (castNodeToLocatable(node)));
     MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_cast_wrap_fix(rtoc_self_view, value, target_type));
     IF fix EXISTS AS fix_value THEN
       TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), :type, [fix_value], NIL, :TYPE_MISMATCH_ASSIGN, :error, FALSE, kw));
@@ -1737,13 +1737,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE reg: ?SymbolEntryRegInput = reg_branch_value;
       IF reg EXISTS AS reg_value THEN
-        IF reg_value.token() THEN
-          MUTABLE line_num = reg_value.token().line;
+        IF symbolEntryRegInput__token(reg_value) THEN
+          MUTABLE line_num = symbolEntryRegInput__token(reg_value).line;
           IF !(line_num) THEN
             RETURN NIL;
           END
           MUTABLE src_line = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
-          MUTABLE search_offset = (reg_value.token().column - 1);
+          MUTABLE search_offset = (symbolEntryRegInput__token(reg_value).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
           IF src_line.substr(search_offset, (src_line.length() - search_offset)) != NIL THEN
             match = COPY compilerRegexMatchData(((src_line.substr(search_offset, (src_line.length() - search_offset)))?), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));

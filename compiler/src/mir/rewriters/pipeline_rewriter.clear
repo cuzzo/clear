@@ -149,7 +149,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       binary_op_mutable.left = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, binary_op_mutable.left));
       binary_op_mutable.right = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, binary_op_mutable.right));
     ELSE_IF (node IS_A UnaryOp) THEN
-      node.right = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, node.right()));
+      node.right = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, aST__node_right(node)));
     ELSE_IF (node IS_A FuncCall) OR (node IS_A MethodCall) THEN
       node.args = locatable__args(node) |> SELECT TRY (pipelineRewriter__rewrite_call_argument(&rtoc_self_view, _));
     ELSE_IF node IS_A StructLit AS struct_lit THEN
@@ -1312,7 +1312,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (IF node IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) THEN
       MUTABLE new_node = COPY node;
       new_node.left = pipelineRewriter__replace_placeholder(rtoc_self_view, node.left(), replacement);
-      new_node.right = pipelineRewriter__clone_ast_node(rtoc_self_view, node.right());
+      new_node.right = pipelineRewriter__clone_ast_node(rtoc_self_view, aST__node_right(node));
       RETURN new_node;
     END
     RETURN locatable__map_children(node, %(rtoc_child: Locatable) USE(rtoc_self_view, replacement) -> pipelineRewriter__replace_placeholder(rtoc_self_view, rtoc_child, replacement));

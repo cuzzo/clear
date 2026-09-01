@@ -62,6 +62,16 @@ texts.each do |path, _|
       b = bare(type)
       next whole unless variants.key?(b)
 
+      # A field with different types across variants has no single accessor;
+      # the AST module already provides the reader those callers want.
+      alias_fn = { %w[Locatable value] => 'aST__node_value', %w[Node value] => 'aST__node_value',
+                   %w[Locatable name] => 'aST__node_name', %w[Node name] => 'aST__node_name',
+                   %w[Locatable right] => 'aST__node_right' }[[b, meth]]
+      if alias_fn && defined.include?(alias_fn)
+        rewrites += 1
+        next b == 'Node' ? "#{alias_fn}(UNWRAP (castNodeToLocatable(#{recv})))" : "#{alias_fn}(#{recv})"
+      end
+
       fn = "#{b[0].downcase}#{b[1..]}__#{meth}"
       unless defined.include?(fn)
         unresolved["#{b}##{meth}"] += 1

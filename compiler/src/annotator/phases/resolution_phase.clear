@@ -202,7 +202,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN type_params DO
     MUTABLE name = symbol(_);
     IF seen.contains?(name) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], {:param: _, :kind: kind, :name: node.name()}));
+        TRY (resolutionSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], {:param: _, :kind: kind, :name: aST__node_name(UNWRAP (castNodeToLocatable(node)))}));
     END
     IF builtin_type_parameter_names.contains?(name) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS }, [], {:param: _}));
@@ -1519,9 +1519,9 @@ PRIVATE FN resolutionSession__reject_duplicate_seen_signature_mut(self: Resoluti
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE key: String = "";
     IF (IF node IS_A ExternFnDecl AS extern_fn_decl THEN (extern_fn_decl.owner_type != NIL) ELSE FALSE END) THEN
-      key = "${node.owner_type()}.${node.name()}";
+      key = "${node.owner_type()}.${aST__node_name(UNWRAP (castNodeToLocatable(node)))}";
     ELSE
-      key = node.name();
+      key = aST__node_name(UNWRAP (castNodeToLocatable(node)));
     END
     IF seen.contains?(key) THEN
       TRY (resolutionSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], {:label: label, :name: key}));

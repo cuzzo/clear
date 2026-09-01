@@ -15146,3 +15146,16 @@ END
 PUB FN unionMethodParamRequirement__to_param(self: UnionMethodParamRequirement) RETURNS Param ->
   RETURN Param{ name: COPY self.name, type: COPY self.type, default: NIL, mutable: FALSE, takes: FALSE, comptime: NIL, name_token: NIL, required: TRUE, sync: NIL, symbol: NIL, carrier_contract: NIL };
 END
+
+# Ruby asks `respond_to?(:args)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN node__args(value: Node) RETURNS ?[]Locatable ->
+  PARTIAL MATCH value START
+    Node.FuncCall AS item -> RETURN COPY item.args;,
+    Node.MethodCall AS item -> RETURN COPY item.args;,
+    Node.StaticCall AS item -> RETURN COPY item.args;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

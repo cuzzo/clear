@@ -683,9 +683,9 @@ PUB FN escapeAnalysis__apply_assignment_escape_sink_mut(node: Assignment, contex
   END
 END
 PUB FN escapeAnalysis__apply_binding_escape_sink_mut(node: Node, context: EscapeContext) RETURNS !Void ->
-  IF TRY (escapeAnalysis__borrow_return_expr?(node.value())) THEN
+  IF TRY (escapeAnalysis__borrow_return_expr?(aST__node_value(UNWRAP (castNodeToLocatable(node))))) THEN
     escapeAnalysis__mark_symbol_borrow_mut(node.symbol);
-  ELSE_IF TRY (escapeAnalysis__call_result_is_heap?(node.value(), context.fn_nodes, COPY context.schema_lookup, context.facts_by_name)) THEN
+  ELSE_IF TRY (escapeAnalysis__call_result_is_heap?(aST__node_value(UNWRAP (castNodeToLocatable(node))), context.fn_nodes, COPY context.schema_lookup, context.facts_by_name)) THEN
     escapeAnalysis__mark_symbol_heap_mut(node.symbol);
   END
 END

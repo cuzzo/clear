@@ -214,7 +214,7 @@ PRIVATE FN programMIRFinalizer__owned_or_else_lowers_through_runtime?(node: Bina
   RETURN (((((TRY (type__string?(type)) OR TRY (type__heap_ptr?(type))) OR TRY (type__collection_value?(type))) OR type__collection?(type)) OR TRY (type__needs_cleanup?(type, schema_lookup))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup)));
 END
 PRIVATE FN programMIRFinalizer__ast_call_needs_runtime?(node: Node, fn_nodes: {String}FunctionDef) RETURNS !Bool ->
-  IF fn_nodes.contains?(CAST(node.name() AS String)) THEN
+  IF fn_nodes.contains?(CAST(aST__node_name(UNWRAP (castNodeToLocatable(node))) AS String)) THEN
     RETURN FALSE;
   END
   MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature());
@@ -272,7 +272,7 @@ PRIVATE FN programMIRFinalizer__return_path_needs_allocator?(function: FunctionD
   IF !((IF node IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END)) THEN
       RETURN;
   END
-  found = (found OR TRY (programMIRFinalizer__return_expr_needs_allocator?(function, node.value(), schema_lookup)));
+  found = (found OR TRY (programMIRFinalizer__return_expr_needs_allocator?(function, aST__node_value(node), schema_lookup)));
   rubyToClearVoid__program_mir_facts()
   });
   RETURN found;
@@ -310,7 +310,7 @@ PRIVATE FN programMIRFinalizer__return_expr_needs_allocator?(function: FunctionD
 END
 PRIVATE FN programMIRFinalizer__unwrap_return_expr(expression: Locatable) RETURNS Locatable EFFECTS REENTRANT ->
   IF (expression IS_A MoveNode) OR (expression IS_A Cast) OR (expression IS_A FreezeNode) THEN
-    RETURN programMIRFinalizer__unwrap_return_expr(expression.value());
+    RETURN programMIRFinalizer__unwrap_return_expr(aST__node_value(expression));
   ELSE_IF expression IS_A BinaryOp AS binary_op THEN
     IF (binary_op.op == symbol("OR_ELSE")) THEN
       RETURN programMIRFinalizer__unwrap_return_expr(binary_op.left);

@@ -434,7 +434,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       0
     END;
-    MUTABLE rtoc_each_items_7 = node.args();
+    MUTABLE rtoc_each_items_7 = node__args(node);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_7.length() DO
       MUTABLE param: ?Any = COPY params[(rtoc_idx + param_offset)];
@@ -690,7 +690,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((IF node IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END)) THEN
         RETURN;
     END
-    FOR _ IN (TRY (mIRPass__collect_escaping_ids(rtoc_self_view, node.value()))) DO
+    FOR _ IN (TRY (mIRPass__collect_escaping_ids(rtoc_self_view, aST__node_value(node)))) DO
     &returned.insert(COPY _.name);
     END
     rubyToClearVoid__mir_pass()
