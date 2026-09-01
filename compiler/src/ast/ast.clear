@@ -14965,3 +14965,39 @@ PUB FN locatable__was_moved(value: Locatable) RETURNS ?Bool ->
   END
   RETURN NIL;
 END
+PUB FN listLit__collection_constructor?(self: ListLit) RETURNS Bool ->
+  RETURN (self.constructor_options != NIL);
+END
+# Ruby: an AUTO-typed declaration whose value is an empty, non-constructor
+# collection literal -- the shape inference has nothing to work from.
+PUB FN aST__empty_auto_collection_literal_decl?(node: Locatable) RETURNS Bool ->
+  MUTABLE declared: ?Type = NIL;
+  MUTABLE value: ?Locatable = NIL;
+  IF node IS_A VarDecl AS rtoc_var_decl THEN
+    declared = COPY rtoc_var_decl.type;
+    value = COPY rtoc_var_decl.value;
+  END
+  IF node IS_A BindExpr AS rtoc_bind THEN
+    declared = COPY rtoc_bind.type;
+    value = COPY rtoc_bind.value;
+  END
+  MUTABLE is_auto: Bool = FALSE;
+  IF declared EXISTS AS rtoc_declared THEN
+    is_auto = type__auto?(rtoc_declared);
+  END
+  IF !(is_auto) THEN
+    RETURN FALSE;
+  END
+  IF value EXISTS AS rtoc_value THEN
+    IF (locatable__type_object(rtoc_value) == NIL) THEN
+      RETURN FALSE;
+    END
+    IF rtoc_value IS_A ListLit AS rtoc_list THEN
+      RETURN ((rtoc_list.items.length() == 0) AND !(listLit__collection_constructor?(rtoc_list)));
+    END
+    IF rtoc_value IS_A HashLit AS rtoc_hash THEN
+      RETURN (rtoc_hash.pairs.length() == 0);
+    END
+  END
+  RETURN FALSE;
+END
