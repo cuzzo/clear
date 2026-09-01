@@ -172,7 +172,7 @@ PRIVATE FN programMIRFinalizer__params_need_runtime_cleanup?(params: []Param) RE
 END
 PRIVATE FN programMIRFinalizer__runtime_cleanup_facts?(facts: FrozenCleanupFacts) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
-  frozenCleanupFacts__each_entry(facts, %(ignored_place: OwnershipIdentityPlaceId, entry: CleanupEntry) -> {
+  frozenCleanupFacts__each_entry(facts, %(ignored_place: PlaceId, entry: CleanupEntry) -> {
   IF (cleanupEntry__heap?(entry) OR cleanupEntry__frame?(entry)) THEN
       found = TRUE;
   END
