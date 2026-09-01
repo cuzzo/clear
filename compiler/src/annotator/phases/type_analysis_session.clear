@@ -12476,7 +12476,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_NOT_RESOURCE }, [], {:type: type_name}));
     END
     MUTABLE static_methods = (schema.static_methods OR_ELSE {});
-    MUTABLE method_def: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX__type_analysis_session(TRY (intrinsicRegistry__lookup(static_methods, node.method_name))));
+    MUTABLE method_def: ?FunctionSignature@multiowned = COPY static_methods[node.method_name];
     IF method_def EXISTS AS method_def_value THEN
       MUTABLE method_def_value_mutable = COPY method_def_value;
       MUTABLE expected_args = TRY (functionSignature__intrinsic_arg_specs(method_def_value_mutable));

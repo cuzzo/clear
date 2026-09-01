@@ -118,3 +118,30 @@ PUB FN intrinsicRegistry__collection_value_store_method?(name: Name, arity: Int6
   END
   RETURN FALSE;
 END
+
+PUB UNION RegistryKey { StringValue: String, SymbolValue: String@symbol }
+PUB UNION LookupResult { FunctionSignatureMultiowned: FunctionSignature@multiowned, ArrayValue: []FunctionSignature@multiowned }
+
+PUB FN intrinsicRegistry__registry_key_string(name: RegistryKey) RETURNS String ->
+  PARTIAL MATCH name START
+    RegistryKey.StringValue AS rtoc_text -> RETURN COPY rtoc_text;,
+    RegistryKey.SymbolValue AS rtoc_symbol -> RETURN CAST(rtoc_symbol AS String);,
+    DEFAULT -> RETURN "";
+  END
+  RETURN "";
+END
+
+# Ruby stores a bare FunctionSignature for a name with one definition and an
+# Array for overloads; `stdLibRegistry__table` normalizes both to a list, so the
+# count is what tells them apart. `functionSignature__unwrap` relies on that
+# distinction -- it answers NIL for overloads.
+PUB FN intrinsicRegistry__lookup(registry: String@symbol, name: RegistryKey) RETURNS !?LookupResult ->
+  MUTABLE all = TRY (intrinsicRegistry__overloads(registry, intrinsicRegistry__registry_key_string(name)));
+  IF (all.length() == 0) THEN
+    RETURN NIL;
+  END
+  IF (all.length() == 1) THEN
+    RETURN LookupResult{ FunctionSignatureMultiowned: COPY UNWRAP (all[0]) };
+  END
+  RETURN LookupResult{ ArrayValue: COPY all };
+END
