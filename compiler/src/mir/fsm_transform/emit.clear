@@ -950,8 +950,7 @@ PRIVATE FN emit__build_segment_descriptor(seg: Segment, ctx: FsmEmitContext, low
   MUTABLE result = mIRLowering__with_bg_fiber_body_context(lowering_api, pointer_captures, %() USE(bg_rt, capture_map, ctx, lowering_api, seg, sp_idx) -> {
   rtoc_lambda_result_48 = mIRLowering__with_fiber_capture_map(lowering_api, capture_map, {:rt_override: bg_rt}, %() USE(ctx, lowering_api, seg, sp_idx) -> {
   MUTABLE eff_sp = (sp_idx OR_ELSE ((seg.index + 1)));
-  { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_47 = SuspendResolvers;
-  TRY (functionReturn__resolve(rtoc_local_receiver_47, seg, ctx, lowering_api, {:susp_idx: eff_sp})) }
+  TRY (suspendResolvers__resolve(seg, ctx, lowering_api, eff_sp))
   });
   rtoc_lambda_result_48
   });

@@ -541,7 +541,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (aST__node_name(node) EXISTS) THEN
       RETURN frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY CAST(node.name() AS String) }, node);
     END
-    RETURN mIRPass__new();
+    RETURN cleanupEntry__none();
 }
 END
 PRIVATE FN mIRPass__stamp_match_as_cleanup_mut(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !Void

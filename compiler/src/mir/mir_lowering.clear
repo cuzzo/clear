@@ -9390,7 +9390,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__callable_contract_for_lowered_args(self: MIRLowering, sig: ?FunctionSignature, ast_args: []Locatable, mir_args: []Emittable, edge_plans: {Int64}CallEdgeOwnershipPlan) RETURNS !?CallableContract@multiowned
+PRIVATE FN mIRLowering__callable_contract_for_lowered_args(self: MIRLowering, sig: ?FunctionSignature, ast_args: []Locatable, mir_args: []Emittable, edge_plans: {Int64}CallEdgeOwnershipPlan = {}) RETURNS !?CallableContract@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
