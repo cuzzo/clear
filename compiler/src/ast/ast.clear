@@ -1875,7 +1875,7 @@ PUB STRUCT SelectOp {
   effect_mode: ?String@symbol,
   stream_mode: Bool,
   modifier_order: ?String,
-  capture_analysis: ?PassStateValue,
+  capture_analysis: ?CaptureAnalysis,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,
@@ -2657,7 +2657,7 @@ PUB STRUCT ConcurrentOp {
   op: ?ClearParserConcurrentPipelineOp@boxed,
   options: {String}Locatable,
   can_fail: ?Bool,
-  capture_analysis: ?PassStateValue,
+  capture_analysis: ?CaptureAnalysis,
   coerced_type_object: ?Type,
   collection_return: ?Type,
   container_borrow: ?Bool,
@@ -3761,7 +3761,7 @@ PUB STRUCT BgBlock {
   async_result_shape: ?String@symbol,
   can_fail: ?Bool,
   can_smash_token: ?Token,
-  capture_analysis: ?PassStateValue,
+  capture_analysis: ?CaptureAnalysis,
   captures_resource: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,
@@ -3834,7 +3834,7 @@ PUB STRUCT BgStreamBlock {
   deferred_drops: ?[]DeferredDrop,
   stack_size: ?String@symbol,
   can_fail: ?Bool,
-  capture_analysis: ?PassStateValue,
+  capture_analysis: ?CaptureAnalysis,
   coerced_type_object: ?Type,
   collection_return: ?Type,
   computed_stack_tier: ?String@symbol,
@@ -7325,7 +7325,7 @@ PUB STRUCT DoBranch {
   stack_size: ?String@symbol,
   can_smash: Bool,
   computed_stack_tier: ?String@symbol,
-  capture_analysis: ?PassStateValue
+  capture_analysis: ?CaptureAnalysis
 }
 PUB STRUCT ThenStep {
   expr: Locatable@boxed,
@@ -11083,7 +11083,7 @@ END
 PUB FN minOp__expression(self: MinOp) RETURNS ?Locatable ->
   RETURN COPY self.expression;
 END
-PUB FN selectOp__capture_analysis(self: SelectOp) RETURNS ?PassStateValue ->
+PUB FN selectOp__capture_analysis(self: SelectOp) RETURNS ?CaptureAnalysis ->
   RETURN COPY self.capture_analysis;
 END
 PUB FN sumOp__expression(self: SumOp) RETURNS ?Locatable ->
@@ -14549,7 +14549,7 @@ PUB FN aST__collection_method_call?(node: Locatable) RETURNS Bool ->
   END
   RETURN FALSE;
 END
-PUB FN selectOp__set_capture_analysis(MUTABLE self: SelectOp, value: ?PassStateValue) RETURNS Void ->
+PUB FN selectOp__set_capture_analysis(MUTABLE self: SelectOp, value: ?CaptureAnalysis) RETURNS Void ->
   self.capture_analysis = value;
   RETURN;
 END
@@ -15056,4 +15056,88 @@ END
 PUB FN aST__walk_body(body: []Locatable, visitor: FN(Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   MUTABLE descend: Bool = FALSE;
   aST__each_locatable_list(body, &descend, visitor);
+END
+
+# Ruby yields every CaptureAnalysis reachable from a body: BG blocks, DO-block
+# branches, and CONCURRENT pipeline ops. One pass per function, replacing the
+# per-source-type iteration the lowerings used to each do themselves.
+PUB FN aST__expr_each_concurrent_capture(node: ?Locatable, blk: FN(CaptureAnalysis) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF node EXISTS AS rtoc_node THEN
+    IF rtoc_node IS_A ConcurrentOp AS rtoc_conc THEN
+      IF rtoc_conc.capture_analysis EXISTS AS rtoc_analysis THEN
+        blk(rtoc_analysis);
+      END
+      RETURN;
+    END
+    IF rtoc_node IS_A BinaryOp AS rtoc_binary THEN
+      aST__expr_each_concurrent_capture(rtoc_binary.left, blk);
+      aST__expr_each_concurrent_capture(rtoc_binary.right, blk);
+      RETURN;
+    END
+    IF rtoc_node IS_A VarDecl AS rtoc_var_decl THEN
+      aST__expr_each_concurrent_capture(rtoc_var_decl.value, blk);
+      RETURN;
+    END
+    IF rtoc_node IS_A BindExpr AS rtoc_bind THEN
+      aST__expr_each_concurrent_capture(rtoc_bind.value, blk);
+      RETURN;
+    END
+    IF rtoc_node IS_A Assignment AS rtoc_assign THEN
+      aST__expr_each_concurrent_capture(rtoc_assign.value, blk);
+      RETURN;
+    END
+    IF rtoc_node IS_A DestructuringAssignment AS rtoc_destructure THEN
+      aST__expr_each_concurrent_capture(rtoc_destructure.value, blk);
+      RETURN;
+    END
+    IF rtoc_node IS_A ReturnNode AS rtoc_return THEN
+      aST__expr_each_concurrent_capture(rtoc_return.value, blk);
+      RETURN;
+    END
+    IF rtoc_node IS_A FuncCall AS rtoc_call THEN
+      FOR rtoc_arg IN rtoc_call.args DO
+        aST__expr_each_concurrent_capture(rtoc_arg, blk);
+      END
+      RETURN;
+    END
+    IF rtoc_node IS_A MethodCall AS rtoc_method THEN
+      aST__expr_each_concurrent_capture(rtoc_method.object, blk);
+      FOR rtoc_arg IN rtoc_method.args DO
+        aST__expr_each_concurrent_capture(rtoc_arg, blk);
+      END
+      RETURN;
+    END
+  END
+END
+PUB FN aST__each_capture_analysis(body: []Locatable, blk: FN(CaptureAnalysis) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  FOR rtoc_stmt IN body DO
+    aST__each_bg_block_in_stmt(rtoc_stmt, %(bg: BgNode) USE(blk) -> {
+      IF bg IS_A BgBlock AS rtoc_bg THEN
+        IF rtoc_bg.capture_analysis EXISTS AS rtoc_bg_analysis THEN
+          blk(rtoc_bg_analysis);
+        END
+      END
+      IF bg IS_A BgStreamBlock AS rtoc_bg_stream THEN
+        IF rtoc_bg_stream.capture_analysis EXISTS AS rtoc_stream_analysis THEN
+          blk(rtoc_stream_analysis);
+        END
+      END
+      rubyToClearVoid__ast()
+    });
+  END
+  MUTABLE descend: Bool = FALSE;
+  aST__each_locatable_list(body, &descend, %(node: Locatable) USE(blk) -> {
+    IF node IS_A DoBlock AS rtoc_do THEN
+      FOR rtoc_branch IN rtoc_do.branches DO
+        IF rtoc_branch.capture_analysis EXISTS AS rtoc_branch_analysis THEN
+          blk(rtoc_branch_analysis);
+        END
+      END
+    END
+    aST__expr_each_concurrent_capture(node, blk);
+    rubyToClearVoid__ast()
+  });
+END
+FN rubyToClearVoid__ast() RETURNS Void ->
+  RETURN;
 END

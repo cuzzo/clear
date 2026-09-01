@@ -86,26 +86,6 @@ PUB STRUCT PredicateCallSite {
 # End Ruby module CapabilityHelper
 # Ruby module PredicateAudit
 # Ruby module CapabilityHelper
-PUB STRUCT CaptureAnalysis {
-  has_local: Bool,
-  has_rc: Bool,
-  has_shared: Bool,
-  has_sharded: Bool,
-  has_affine_locked: Bool,
-  has_outer_ref: Bool,
-  has_non_escaping_capture: Bool,
-  captures: {String}Type,
-  capture_symbols: {String}SymbolEntry@multiowned,
-  close_plans: {String}ResourceClosePlan,
-  pointer_captures: [Set]String,
-  string_captures: [Set]String,
-  resource_captures: [Set]String,
-  site_moved: [Set]String,
-  site_copied: [Set]String,
-  strategies: {String}Strategy,
-  move_mark_names: [Set]String,
-  alloc_mark_entries: {String}String@symbol
-}
 
 PUB FN captureAnalysis__pin_reason(self: CaptureAnalysis) RETURNS String@symbol ->
   IF self.has_sharded THEN

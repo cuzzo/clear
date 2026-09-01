@@ -1,3 +1,5 @@
+REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172"
+REQUIRE "pkg:rtoc_73656d616e7469632f636170747572655f73747261746567792e636c656172"
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
 REQUIRE "pkg:rtoc_6173742f7374727563745f6669656c642e636c656172" AS struct_field
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
@@ -86,6 +88,27 @@ PUB STRUCT ResourceCloseAction {
 FN resourceCloseAction__for_field(self: ResourceCloseAction, field: String) RETURNS ResourceCloseAction ->
   RETURN ResourceCloseAction{ call_kind: COPY self.call_kind, name: COPY self.name, field_path: COPY ([field] + self.field_path), runtime_heap_alloc_args: self.runtime_heap_alloc_args };
 END
+PUB STRUCT CaptureAnalysis {
+  has_local: Bool,
+  has_rc: Bool,
+  has_shared: Bool,
+  has_sharded: Bool,
+  has_affine_locked: Bool,
+  has_outer_ref: Bool,
+  has_non_escaping_capture: Bool,
+  captures: {String}Type,
+  capture_symbols: {String}SymbolEntry@multiowned,
+  close_plans: {String}ResourceClosePlan,
+  pointer_captures: [Set]String,
+  string_captures: [Set]String,
+  resource_captures: [Set]String,
+  site_moved: [Set]String,
+  site_copied: [Set]String,
+  strategies: {String}Strategy,
+  move_mark_names: [Set]String,
+  alloc_mark_entries: {String}String@symbol
+}
+
 PUB STRUCT ResourceClosePlan {
   actions: []ResourceCloseAction
 }
