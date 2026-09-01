@@ -2188,7 +2188,7 @@ FN mIRLowering__dedupe_transfer_marks(self: MIRLowering, marks: []Emittable) RET
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN marks |> DISTINCT [_.class(), aST__node_name(_), aST__node_target(_)];
+    RETURN marks |> DISTINCT [emittable__variant_name(_), aST__node_name(_), aST__node_target(_)];
 }
 END
 FN mIRLowering__lowered_stmt_packet(MUTABLE self: MIRLowering, state: OwnershipFinalizationContext, stmt: MIRLoweringLowerableStmt) RETURNS !?LoweredStmtPacket
@@ -7927,7 +7927,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         (IF (IF TRY (ownershipEffect__alloc_of(old_child)) != NIL THEN TRY (ownershipEffect__alloc_of(old_child)) ELSE TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, new_child)) END) != NIL THEN (IF TRY (ownershipEffect__alloc_of(old_child)) != NIL THEN TRY (ownershipEffect__alloc_of(old_child)) ELSE TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, new_child)) END) ELSE mIRLowering__function_state(rtoc_self_view).current_decl_alloc END)
       END;
-      parent.ownership_consumption = OwnershipConsumptionFact{ operands: COPY visible_names |> SELECT ownershipOperandFact__owned_binding(CAST(_ AS String), TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "hoist replacement", target_alloc), target: :owned_sink, target_alloc: COPY target_alloc, source: COPY parent.class().name(), covers_consuming_params: TRUE };
+      parent.ownership_consumption = OwnershipConsumptionFact{ operands: COPY visible_names |> SELECT ownershipOperandFact__owned_binding(CAST(_ AS String), TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "hoist replacement", target_alloc), target: :owned_sink, target_alloc: COPY target_alloc, source: COPY emittable__variant_name(parent), covers_consuming_params: TRUE };
       RETURN;
     END
     MUTABLE operands = (TRY (callOwnershipFacts__operands(fact))) |> WHERE !((_.name AND old_names.contains?(CAST(((_.name)?) AS String))));

@@ -374,7 +374,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 
 }
 END
-PRIVATE FN resolutionSession__error_mut(self: ResolutionSession, node_or_token: ?DiagnosticAnchor, code_or_message: ResolutionCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
+PRIVATE FN resolutionSession__error_mut(self: ResolutionSession, node_or_token: ?DiagnosticAnchor, code_or_message: ResolutionCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -511,7 +511,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN resolutionSession__raise_source_error_mut(self: ResolutionSession, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS !Any@multiowned
+PRIVATE FN resolutionSession__raise_source_error_mut(self: ResolutionSession, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

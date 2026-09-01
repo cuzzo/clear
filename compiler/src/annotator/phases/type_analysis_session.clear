@@ -6417,7 +6417,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           ELSE
             key_name = COPY CAST(key_expr AS String);
           END
-    ((key_expr.class().name() + ":") + key_name)
+    ((locatable__variant_name(key_expr) + ":") + key_name)
         }) |> DISTINCT _ |> SELECT COPY _;
         IF ((key_sources).length() > 1) THEN
           typeAnalysisSession__note_mut(rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH uses ${(key_sources).length()} different key expressions on @sharded map '${map_name}'. Routing is based on the first key; other accesses with different keys may trigger cross-shard remote calls.");
@@ -6685,7 +6685,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (conc.op() IS_A AverageOp) THEN
       TRY (typeAnalysisSession__analyze_average_op(&rtoc_self_view, &proxy));
     ELSE
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, conc, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_BAD_FOLLOWING_OP }, [], {:got: conc.op().class().name().split("::").last()}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, conc, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_BAD_FOLLOWING_OP }, [], {:got: DiagnosticKwValue{ StringValue: locatable__variant_name(conc.op()) }}));
     END
     MUTABLE inner_expr = PARTIAL MATCH conc.op() START
       AST.SelectOp -> conc.op().expression(),
@@ -6811,12 +6811,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF value IS_A Identifier AS identifier THEN
       RETURN COPY identifier__name(identifier);
     END
-    MUTABLE class_name = value.class().name();
-    IF class_name THEN
-      RETURN class_name.split("::").last();
-    ELSE
-      RETURN COPY CAST(value.class() AS String);
-    END
+    RETURN locatable__variant_name(value);
 }
 END
 PRIVATE FN typeAnalysisSession__validate_known_concurrent_options_mut(self: TypeAnalysisSession, conc: ConcurrentOp, options: {String}Locatable) RETURNS !Void
@@ -7241,7 +7236,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__error_mut(self: TypeAnalysisSession, node_or_token: ?DiagnosticAnchor, code_or_message: TypeAnalysisCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Any@multiowned
+PRIVATE FN typeAnalysisSession__error_mut(self: TypeAnalysisSession, node_or_token: ?DiagnosticAnchor, code_or_message: TypeAnalysisCodeOrMessage, args: []?DiagnosticKwValue = [], kwargs: {String@symbol}Any = {}) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -7378,7 +7373,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN typeAnalysisSession__raise_source_error_mut(self: TypeAnalysisSession, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS !Any@multiowned
+PRIVATE FN typeAnalysisSession__raise_source_error_mut(self: TypeAnalysisSession, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -9239,7 +9234,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE var_node = COPY fact.var_node;
     MUTABLE var_type = COPY fact.resolved_type;
     IF !(typeAnalysisSession__valid_capability_target?(rtoc_self_view, fact.capability, var_node)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, var_node, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_CAP_BAD_TARGET }, [], {:capability: fact.capability, :got: var_node.class()}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, var_node, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_CAP_BAD_TARGET }, [], {:capability: fact.capability, :got: DiagnosticKwValue{ StringValue: locatable__variant_name(var_node) }}));
     END
     IF (fact.capability == symbol("EXCLUSIVE")) THEN
       IF (capabilityTransition__exclusive_validation_action(fact) == :valid) OR (capabilityTransition__exclusive_validation_action(fact) == :declared_contract) THEN
@@ -15490,7 +15485,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE get_field_mutable = COPY get_field;
       TRY (typeAnalysisSession__visit_assignment_field(&rtoc_self_view, &get_field_mutable, &node));
     ELSE
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :INVALID_ASSIGNMENT_TARGET }, [], {:got: target.class()}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :INVALID_ASSIGNMENT_TARGET }, [], {:got: DiagnosticKwValue{ StringValue: locatable__variant_name(target) }}));
     END
     TRY (typeAnalysisSession__handle_assign_move(rtoc_self_view, Node{ Assignment: COPY node }));
     TRY (typeAnalysisSession__handle_assign_borrow(rtoc_self_view, Node{ Assignment: COPY node }));
@@ -20153,7 +20148,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (((expr != NIL) AND (expr IS_A BgBlock)) OR ((expr != NIL) AND (expr IS_A BgStreamBlock))) THEN
       RETURN TRY (typeAnalysisSession__bg_sources_for_block(rtoc_self_view, expr));
     END
-    IF ([AST.Identifier, AST.Literal, AST.FuncCall, AST.MethodCall, AST.GetField, AST.GetIndex, AST.BinaryOp, AST.UnaryOp] |> DISTINCT _).contains?(expr.class()) THEN
+    IF (["Identifier", "Literal", "FuncCall", "MethodCall", "GetField", "GetIndex", "BinaryOp", "UnaryOp"] |> DISTINCT _).contains?(locatable__variant_name(expr)) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_510: []SymbolEntry@multiowned = List[]; rtoc_empty_list_510 } ) AS []SymbolEntry@multiowned);
     END
     IF expr? IS_A Struct AS struct THEN

@@ -211,7 +211,7 @@ PRIVATE FN pipelineConcurrentLowerer__list_each_mutates_placeholder?(self: Pipel
   END
   RETURN pipelineConcurrentLowerer__each_body_mutates_placeholder?(self, castLocatableToEachOp__pipeline_concurrent_lowerer(inner).body);
 END
-PRIVATE FN pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self: PipelineConcurrentLowerer, lhs: Locatable, lhs_type: Type, inner: Locatable) RETURNS !Any@multiowned ->
+PRIVATE FN pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self: PipelineConcurrentLowerer, lhs: Locatable, lhs_type: Type, inner: Locatable) RETURNS !Void ->
   panic("lower_concurrent: unsupported non-legacy CONCURRENT shape lhs={} lhs_type={} op={}");
 END
 PUB FN pipelineConcurrentLowerer__lower_sharded_each(self: PipelineConcurrentLowerer, MUTABLE list_node: Locatable, MUTABLE each_op: EachOp) RETURNS !ScopeBlock ->
