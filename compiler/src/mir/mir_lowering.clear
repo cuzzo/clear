@@ -1000,7 +1000,7 @@ FN mIRLowering__destination_source_node(self: MIRLowering, node: Locatable) RETU
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (IF node IS_A BinaryOp AS binary_op THEN mIRLowering__or_binary?(rtoc_self_view, Locatable{ BinaryOp: COPY binary_op }) ELSE FALSE END) THEN
-      RETURN COPY node.left();
+      RETURN COPY locatable__left(node);
     ELSE
       RETURN COPY node;
     END
@@ -2180,7 +2180,7 @@ FN mIRLowering__emitted_guarded_cleanup_for_name?(self: MIRLowering, nodes: []Em
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN nodes |> ANY (IF !((_ IS_A Cleanup OR _ IS_A ErrCleanup)) THEN FALSE ELSE ((_.name() == name) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_37 = _.cleanup_entry();
+    RETURN nodes |> ANY (IF !((_ IS_A Cleanup OR _ IS_A ErrCleanup)) THEN FALSE ELSE ((emittable__name(_) == name) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_37 = _.cleanup_entry();
     cleanupEntry__has_moved_guard?(rtoc_local_receiver_37) }) END);
 }
 END
@@ -4045,7 +4045,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE function_def_mutable = COPY function_def;
       mIRLowering__append_lowered_items_mut(rtoc_self_view, LoweredItemTarget{ items: COPY fn_items, line: function_def_mutable.token.line }, UNWRAP (TRY (mIRLowering__lower_top_level(&rtoc_self_view, Locatable{ FunctionDef: COPY function_def_mutable }))));
     ELSE_IF (_ IS_A StructDef) OR (_ IS_A EnumDef) OR (_ IS_A UnionDef) THEN
-      mIRLowering__append_lowered_items_mut(rtoc_self_view, LoweredItemTarget{ items: COPY type_items, line: _.token().line }, UNWRAP (TRY (mIRLowering__lower_top_level(&rtoc_self_view, _))));
+      mIRLowering__append_lowered_items_mut(rtoc_self_view, LoweredItemTarget{ items: COPY type_items, line: locatable__token(_).line }, UNWRAP (TRY (mIRLowering__lower_top_level(&rtoc_self_view, _))));
     ELSE_IF _ IS_A RequireNode AS require_node THEN
       MUTABLE require_node_mutable = COPY require_node;
       mIRLowering__append_lowered_items_mut(rtoc_self_view, LoweredItemTarget{ items: COPY fn_items, line: NIL }, UNWRAP (TRY (mIRLowering__lower_top_level(&rtoc_self_view, Locatable{ RequireNode: COPY require_node_mutable }))));
@@ -10216,7 +10216,7 @@ PRIVATE FN mIRLowering__protocol_map_signature_param?(self: MIRLowering, signatu
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE bounds: ?[]Type = COPY signature.generic_bounds[type__resolved(param.type)];
-    RETURN !(!((((bounds != NIL) AND (bounds |> ANY (_.resolved() == :Map))))));
+    RETURN !(!((((bounds != NIL) AND (bounds |> ANY (type__resolved(_) == :Map))))));
 }
 END
 PRIVATE FN mIRLowering__protocol_map_allocator_for(self: MIRLowering, node: Locatable) RETURNS !Emittable
@@ -10478,7 +10478,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE move_node = move_node.value;
     END
     IF (IF node IS_A BinaryOp AS binary_op THEN (binary_op.op == symbol("OR_ELSE")) ELSE FALSE END) THEN
-      node = node.left();
+      node = locatable__left(node);
     END
     IF ((aST__node_storage(node) EXISTS) AND ([:rodata, :borrow]).contains?(node.storage())) THEN
       RETURN FALSE;
@@ -17548,7 +17548,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE nodes = TRY (materializationPacket__statements(TRY (mIRLowering__var_decl_materialization_plan(rtoc_self_view, &node, facts, safe_name, init, let_node))));
     FOR _ IN nodes DO
     IF _ IS_A AllocMark THEN
-      mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.insert(COPY CAST(_.name() AS String));
+      mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.insert(COPY CAST(emittable__name(_) AS String));
     END
     END
     IF (TRY (type__node_reference?(facts.ft)) AND (!(nodes |> ANY _ IS_A AllocMark))) THEN

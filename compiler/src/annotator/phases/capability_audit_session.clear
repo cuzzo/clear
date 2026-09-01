@@ -661,7 +661,7 @@ PRIVATE FN capabilityAuditSession__variant_anchor_from_getfield(self: Capability
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE tgt = COPY getfield_node.target;
-    IF !(tgt.token()) THEN
+    IF !(locatable__token(tgt)) THEN
       RETURN NIL;
     END
     RETURN capabilityAuditSession__anchor_at(rtoc_self_view, tgt.token().line, ((tgt.token().column + (CAST(tgt.name() AS String)).codepointCount()) + 1));
@@ -1123,7 +1123,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_ARGUMENT_MARKER, {:param: DiagnosticKwValue{ StringValue: COPY facts.param.name }})), [edit__new(span__new(NIL, token_value.line, token_value.column, 1), "")], :auto));
       TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY token_value }, :mutability, [fix], NIL, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name}));
     ELSE
-      RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, facts.arg_node, CapabilityAuditCodeOrMessage{ SymbolValue: :MUTABLE_MARKER_ON_IMMUTABLE_PARAM }, [], {:index: (facts.index + 1), :param: facts.param.name}));
+      RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, CapabilityAuditCodeOrMessage{ SymbolValue: :MUTABLE_MARKER_ON_IMMUTABLE_PARAM }, [], {:index: (facts.index + 1), :param: facts.param.name}));
     END
 }
 END
@@ -4176,7 +4176,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (capabilityAuditSession__deferred_recovery_validations(rtoc_self_view))) DO
     MUTABLE callee: ?FunctionDef@multiowned = TRY (capabilityAuditSession__function_node_for(rtoc_self_view, _.callee_name));
     IF !(((callee != NIL) AND (callee.can_fail == TRUE))) THEN
-        TRY (capabilityAuditSession__error_mut(rtoc_self_view, _.node, CapabilityAuditCodeOrMessage{ SymbolValue: :OR_ELSE_NEEDS_RECOVERABLE_LEFT }, [], {:got: TRY (type__surface_name_type(_.value_type))}));
+        TRY (capabilityAuditSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BinaryOp: COPY _.node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :OR_ELSE_NEEDS_RECOVERABLE_LEFT }, [], {:got: TRY (type__surface_name_type(_.value_type))}));
     END
     _.left.can_fail = TRUE;
     _.left.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__capability_audit_session(_.value_type)));

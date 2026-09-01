@@ -163,7 +163,7 @@ PRIVATE FN emit__ordered_fsm_destroy_actions(ctx: FsmEmitContext) RETURNS ![]Fsm
   }) |> SELECT _.first();
 END
 PUB FN emit__fsm_destroy_cleanup_names(actions: []FsmDestroyAction) RETURNS ![]String ->
-  RETURN CAST(((actions |> SELECT:? _.cleanup_name() |> WHERE _ != NIL) |> DISTINCT _) AS []String);
+  RETURN CAST(((actions |> SELECT:? fsmDestroyAction__cleanup_name(_) |> WHERE _ != NIL) |> DISTINCT _) AS []String);
 END
 PRIVATE FN emit__tail_resume_target(tail: SegmentTail) RETURNS ?Int64 ->
   IF tail IS_A IoSuspend AS io_suspend THEN
@@ -786,7 +786,7 @@ END
 PRIVATE FN emit__lift_ctx_cleanups_to_destroy_mut(body: []Emittable, promoted_names: []String, ctx_ref: String, MUTABLE ctx: FsmEmitContext) RETURNS ![]Emittable ->
   RETURN body |> SELECT:? {
   IF (_ IS_A Cleanup OR _ IS_A ErrCleanup) THEN
-      MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(_.name() AS String), promoted_names);
+      MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(emittable__name(_) AS String), promoted_names);
       IF promoted_name EXISTS AS promoted_name_value THEN
         &ctx.destroy_actions.append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :body, name: COPY promoted_name_value, target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY ctx_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY promoted_name_value, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: _.cleanup_entry(), guard: NIL, allocator: NIL } });
         CONTINUE;

@@ -272,7 +272,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE seen: [Set]String = Set[];
     FOR _ IN requirements DO
     IF seen.contains?(_.name) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, COPY _.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_DUPLICATE }, [], {:union: node.name, :method: _.name}));
+        TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY COPY _.token }, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_DUPLICATE }, [], {:union: node.name, :method: _.name}));
     END
     &seen.insert(COPY _.name);
     END
@@ -309,7 +309,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF signature EXISTS AS signature_value THEN
         TRY (resolutionSession__validate_union_method_visibility_mut(rtoc_self_view, node, requirement, signature_value));
         IF (requirement.params.length() != (TRY (functionSignature__params(signature_value))).length()) THEN
-          TRY (resolutionSession__error_mut(rtoc_self_view, COPY requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_WRONG_ARITY }, [], {:union: node.name, :method: requirement.name, :expected_arity: requirement.params.length(), :fn: requirement.name, :got_arity: (TRY (functionSignature__params(signature_value))).length()}));
+          TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY COPY requirement.token }, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_WRONG_ARITY }, [], {:union: node.name, :method: requirement.name, :expected_arity: requirement.params.length(), :fn: requirement.name, :got_arity: (TRY (functionSignature__params(signature_value))).length()}));
         END
         MUTABLE rtoc_idx = 0;
         WHILE rtoc_idx < requirement.params.length() DO
@@ -364,7 +364,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE labels = {:pub: "PUB", :private: "PRIVATE", :package: "package"};
-    TRY (resolutionSession__error_mut(rtoc_self_view, COPY requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_WRONG_VISIBILITY }, [], {:union: node.name, :method: requirement.name, :declared_vis: UNWRAP (labels[requirement.visibility]), :fn: requirement.name, :fn_vis: UNWRAP (labels[actual])}));
+    TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY COPY requirement.token }, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_WRONG_VISIBILITY }, [], {:union: node.name, :method: requirement.name, :declared_vis: UNWRAP (labels[requirement.visibility]), :fn: requirement.name, :fn_vis: UNWRAP (labels[actual])}));
 }
 END
 PRIVATE FN resolutionSession__source_code(self: ResolutionSession) RETURNS ?String
@@ -434,7 +434,7 @@ PRIVATE FN resolutionSession__note_mut(self: ResolutionSession, node_or_token: L
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token: ?Token@multiowned = resolutionSession__source_error_token(rtoc_self_view, resolutionSession__diagnostic_token(rtoc_self_view, node_or_token));
+    MUTABLE token: ?Token@multiowned = resolutionSession__source_error_token(rtoc_self_view, resolutionSession__diagnostic_token(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node_or_token }));
     MUTABLE loc: String = "";
     IF token EXISTS AS token_value THEN
       loc = " (line ${token_value.line.toString()})";
@@ -449,7 +449,7 @@ PRIVATE FN resolutionSession__warning_mut(self: ResolutionSession, node_or_token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token: ?Token@multiowned = resolutionSession__source_error_token(rtoc_self_view, resolutionSession__diagnostic_token(rtoc_self_view, node_or_token));
+    MUTABLE token: ?Token@multiowned = resolutionSession__source_error_token(rtoc_self_view, resolutionSession__diagnostic_token(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node_or_token }));
     MUTABLE loc: String = "";
     IF token EXISTS AS token_value THEN
       loc = " (line ${token_value.line.toString()})";
@@ -888,7 +888,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE members: {String}FunctionDef = {};
     FOR _ IN declaration.members DO
     IF members.contains?(_.name) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, _, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: "${protocol.name} FOR ${owner_name}", :name: _.name}));
+        TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY _ } }, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], {:owner: "${protocol.name} FOR ${owner_name}", :name: _.name}));
     END
     members[_.name] = COPY _;
     END
