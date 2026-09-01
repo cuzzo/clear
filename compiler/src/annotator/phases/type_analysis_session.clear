@@ -15680,9 +15680,12 @@ PRIVATE FN typeAnalysisSession__assignment_value_type(self: TypeAnalysisSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE value = node.value();
-    IF (respondsTo?(value, "typed?") AND value.typed?()) THEN
-      RETURN TRY (aST__full_type_mut(value));
+    IF castNodeToLocatable(node) EXISTS AS rtoc_node THEN
+      IF aST__node_value(rtoc_node) EXISTS AS rtoc_value THEN
+        IF TRY (locatable__typed?(rtoc_value)) THEN
+          RETURN TRY (aST__full_type_mut(rtoc_value));
+        END
+      END
     END
     IF fallback EXISTS AS fallback_value THEN
       RETURN TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(fallback_value)));
