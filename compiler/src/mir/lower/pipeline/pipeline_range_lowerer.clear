@@ -1075,3 +1075,15 @@ PUB FN pipelineDefaultObservableFoldOp__expression(value: PipelineDefaultObserva
   END
   RETURN NIL;
 END
+PUB FN runtimeHost__visit_mir_call(self: RuntimeHost, arg0: Locatable) RETURNS Emittable ->
+  MUTABLE fn_value = self.visit_mir;
+  RETURN fn_value(arg0);
+END
+PUB FN runtimeHost__bc_target_call(self: RuntimeHost) RETURNS Bool ->
+  MUTABLE fn_value = self.bc_target;
+  RETURN fn_value();
+END
+PUB FN runtimeHost__next_label_call(self: RuntimeHost) RETURNS String ->
+  MUTABLE fn_value = self.next_label;
+  RETURN fn_value();
+END
