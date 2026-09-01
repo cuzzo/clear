@@ -7170,7 +7170,7 @@ PUB FN aST__wrapped_children(expr: Locatable) RETURNS []Locatable ->
   END
   RETURN children;
 END
-PUB FN aST__expression_children(node: Locatable) RETURNS []Locatable ->
+PUB FN aST__expression_children(node: Locatable, skip_copy: Bool = FALSE) RETURNS []Locatable ->
   MUTABLE children: []Locatable = List[];
   IF node IS_A CopyNode AS copy_node THEN
     &children.append(COPY copy_node.value);

@@ -89,7 +89,7 @@ PUB FN stdlibCallFacts__takes?(self: StdlibCallFacts, index_value: Int64) RETURN
   RETURN !(!((((fact != NIL) AND fact.takes))));
 END
 PUB FN stdlibCallFacts__ast_arg(self: StdlibCallFacts, index_value: Int64) RETURNS Locatable EFFECTS REENTRANT ->
-  RETURN COPY stdlibCallFacts__ast_arg((UNWRAP (self.args[index_value])));
+  RETURN COPY (UNWRAP (self.args[index_value])).ast_arg;
 END
 PUB FN stdlibCallFacts__coerce_zig(self: StdlibCallFacts, arg_zig: String, index_value: Int64) RETURNS !String EFFECTS REENTRANT ->
   MUTABLE fact: ?StdlibCallArgFact = COPY self.args[index_value];

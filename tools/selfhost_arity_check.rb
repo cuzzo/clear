@@ -74,6 +74,10 @@ bad = []
 texts.each do |path, t|
   t.to_enum(:scan, /(?<![\w.])([a-z]\w*__[\w?!]+)\(/).each do
     m = Regexp.last_match
+    # a comment mentioning a call is not a call
+    line_start = t.rindex("\n", m.begin(0)).to_i + 1
+    next if t[line_start...m.begin(0)] =~ /(?<!")#/
+
     name = m[1]
     lo, hi = sigs[name]
     next unless lo
