@@ -12775,6 +12775,127 @@ END
 # Ruby rebuilds a node with each AST child passed through a function, walking
 # the struct members to find them. CLEAR narrows to the variant instead, and
 # every tree rewrite that Ruby writes as reflection is this one operation.
+PUB FN locatable__child_bodies(value: Locatable) RETURNS [][]Locatable EFFECTS REENTRANT ->
+  MUTABLE out: [][]Locatable = List[];
+  IF value IS_A FunctionDef AS item THEN
+    &out.append(COPY item.body);
+    RETURN out;
+  END
+  IF value IS_A BgBlock AS item THEN
+    &out.append(COPY item.body);
+    RETURN out;
+  END
+  IF value IS_A BgStreamBlock AS item THEN
+    &out.append(COPY item.body);
+    RETURN out;
+  END
+  IF value IS_A ForRange AS item THEN
+    &out.append(COPY item.body);
+    RETURN out;
+  END
+  IF value IS_A ForEach AS item THEN
+    &out.append(COPY item.body);
+    RETURN out;
+  END
+  IF value IS_A TestThat AS item THEN
+    &out.append(COPY item.body);
+    RETURN out;
+  END
+  IF value IS_A WhileLoop AS item THEN
+    &out.append(COPY item.do_branch);
+    RETURN out;
+  END
+  IF value IS_A WhileBindLoop AS item THEN
+    &out.append(COPY item.do_branch);
+    RETURN out;
+  END
+  IF value IS_A IfStatement AS item THEN
+    &out.append(COPY item.then_branch);
+    IF item.else_branch EXISTS AS rtoc_else THEN
+      &out.append(COPY rtoc_else);
+    END
+    RETURN out;
+  END
+  IF value IS_A IfBind AS item THEN
+    &out.append(COPY item.then_branch);
+    &out.append(COPY item.else_branch);
+    RETURN out;
+  END
+  IF value IS_A ImplementationDef AS item THEN
+    FOR rtoc_member IN item.members DO
+      &out.append(COPY rtoc_member.body);
+    END
+    RETURN out;
+  END
+  IF value IS_A ConformanceDef AS item THEN
+    FOR rtoc_member IN item.members DO
+      &out.append(COPY rtoc_member.body);
+    END
+    RETURN out;
+  END
+  IF value IS_A DoBlock AS item THEN
+    FOR rtoc_branch IN item.branches DO
+      &out.append(COPY rtoc_branch.body);
+    END
+    RETURN out;
+  END
+  IF value IS_A WithBlock AS item THEN
+    &out.append(COPY item.body);
+    IF item.arms EXISTS AS rtoc_arms THEN
+      FOR rtoc_arm IN rtoc_arms DO
+        &out.append(COPY rtoc_arm.body);
+      END
+    END
+    RETURN out;
+  END
+  IF value IS_A MatchStatement AS item THEN
+    FOR rtoc_case IN item.cases DO
+      &out.append(COPY rtoc_case.body);
+    END
+    IF item.default_case EXISTS AS rtoc_default THEN
+      &out.append(COPY rtoc_default);
+    END
+    RETURN out;
+  END
+  IF value IS_A TestBlock AS item THEN
+    IF item.setup EXISTS AS rtoc_setup THEN
+      &out.append(COPY rtoc_setup);
+    END
+    IF item.before_each EXISTS AS rtoc_before_each THEN
+      FOR rtoc_hook IN rtoc_before_each DO
+        &out.append(COPY rtoc_hook);
+      END
+    END
+    IF item.after_each EXISTS AS rtoc_after_each THEN
+      FOR rtoc_hook IN rtoc_after_each DO
+        &out.append(COPY rtoc_hook);
+      END
+    END
+    IF item.before_all EXISTS AS rtoc_before_all THEN
+      FOR rtoc_hook IN rtoc_before_all DO
+        &out.append(COPY rtoc_hook);
+      END
+    END
+    IF item.after_all EXISTS AS rtoc_after_all THEN
+      FOR rtoc_hook IN rtoc_after_all DO
+        &out.append(COPY rtoc_hook);
+      END
+    END
+    FOR rtoc_when IN item.whens DO
+      IF rtoc_when.setup EXISTS AS rtoc_when_setup THEN
+        &out.append(COPY rtoc_when_setup);
+      END
+      FOR rtoc_test IN rtoc_when.tests DO
+        &out.append(COPY rtoc_test.body);
+      END
+    END
+    RETURN out;
+  END
+  RETURN out;
+END
+PUB FN aST__child_bodies(node: Locatable) RETURNS [][]Locatable EFFECTS REENTRANT ->
+  RETURN locatable__child_bodies(node);
+END
 PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable) RETURNS Locatable EFFECTS REENTRANT ->
   IF value IS_A Program AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
