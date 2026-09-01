@@ -863,7 +863,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END)?.sink))) OR "an @multiowned destination");
     MUTABLE anchor = (typeAnalysisSession__kept_identity_declaration_anchor(rtoc_self_view, body_summaries, entry) OR_ELSE arg);
     TRY (typeAnalysisSession__error_mut(rtoc_self_view, anchor, TypeAnalysisCodeOrMessage{ SymbolValue: :KEPT_IDENTITY_NEEDS_MODEL }, [], {:name: arg.name(), :keeper: callee_name, :sink: sink}))
-    }, %(arg, source_family, dest_family, callee_name) USE(fn_nodes, rtoc_self_view) -> {
+    }, %(arg: Locatable, source_family: ?String@symbol, dest_family: ?String@symbol, callee_name: String) USE(fn_nodes, rtoc_self_view) -> {
     MUTABLE sink: String = "an @${dest_family} destination";
     IF (IF (IF fn_nodes[callee_name] != NIL THEN
         ((fn_nodes[callee_name]).params) |> FIND (IF aST__node__symbol(_) != NIL THEN
@@ -920,7 +920,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         name = "the argument";
       END
-    TRY (typeAnalysisSession__error_mut(rtoc_self_view, arg, TypeAnalysisCodeOrMessage{ SymbolValue: :KEPT_IDENTITY_FAMILY_MISMATCH }, [], {:name: name, :keeper: callee_name, :sink: sink, :source_family: source_family, :dest_family: dest_family}))
+    TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY arg }, TypeAnalysisCodeOrMessage{ SymbolValue: :KEPT_IDENTITY_FAMILY_MISMATCH }, [], {:name: name, :keeper: callee_name, :sink: sink, :source_family: source_family, :dest_family: dest_family}))
     }, TRY (typeAnalysisSession__imported_kept_params(rtoc_self_view, fn_nodes))));
     TRY (typeAnalysisSession__reject_kept_function_values_mut(rtoc_self_view, resolution, fn_nodes));
 }
