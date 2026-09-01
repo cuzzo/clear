@@ -20,6 +20,8 @@ require 'optparse'
 require 'tmpdir'
 require 'json'
 require 'etc'
+require 'fileutils'
+require 'set'
 
 saved = $PROGRAM_NAME
 $PROGRAM_NAME = 'selfhost_fn_probe_support'
@@ -105,37 +107,88 @@ module SelfhostFnProbe
     [target, %(REQUIRE "pkg:rtoc_#{target.unpack1('H*')}"#{alias_part}\n)]
   end
 
-  # One probe: the group's types, everything stubbed, the target verbatim.
-  def probe_source(target, group, cache)
-    own_requires, own_types, own_fns, own_loose = cache[target.file]
-    kept = []
-    dropped = []
-    own_requires.each do |line|
-      r = rewrite_require(line, rel(target.file))
-      if r.is_a?(Array)
-        group.include?(r[0]) && r[0] != rel(target.file) ? dropped << r[0] : kept << r[1]
-      else
-        kept << r
+  # The stub package: every type in the group and a stub for every function,
+  # written ONCE. `transpile_cached` is content-addressed, so all 3405 probes
+  # share one compile of it instead of each paying for the whole group.
+  def stub_package(group, cache)
+    @stub_package ||= begin
+      types = []
+      stubs = []
+      externals = Set.new
+      seen = Set.new
+      group.each do |rel|
+        rq, ts, fns, = cache[File.join(SRC, rel)]
+        # The group's own imports are stubbed here; everything BELOW it is real
+        # and has to be required, or the target cannot see it.
+        rq.each do |line|
+          r = rewrite_require(line, rel)
+          next unless r.is_a?(Array)
+          next if group.include?(r[0])
+
+          externals << %(REQUIRE "pkg:rtoc_#{r[0].unpack1('H*')}"\n)
+        end
+        ts.each do |d|
+          name = d[/\A(?:PUB )?(?:STRUCT|UNION|ENUM) (\w+)/, 1]
+          next if name && !seen.add?("T:#{name}")
+
+          types << (d.start_with?('PUB ') ? d : "PUB #{d}")
+        end
+        fns.each do |f|
+          next unless seen.add?("F:#{f.name}")
+          s = stub(f) or next
+
+          stubs << (s.start_with?('PUB ') ? s : "PUB #{s.sub(/\APRIVATE /, '')}")
+        end
       end
+      externals.to_a.join + "\n" + types.join + "\n" + stubs.join("\n")
     end
+  end
 
-    sibling = dropped.uniq.flat_map do |d|
-      _rq, types, fns, = cache[File.join(SRC, d)]
-      types + fns.filter_map { |f| stub(f) }
-    end
-
-    here = own_fns.map { |f| f.name == target.name ? f.text : stub(f) }.compact
-
-    [kept.join,
-     "\n# --- stand-ins for imported group members ---\n", sibling.join("\n"),
-     "\n# --- #{rel(target.file)} : #{target.name} ---\n",
-     own_types.join, own_loose.join, here.join,
+  # A probe is then tiny: require the stubs, restate the target under a name
+  # that cannot collide with its own stub, and call it.
+  def probe_source(target, _group, _cache, pkg_name)
+    body = target.text.sub(/\A(PUB |PRIVATE )?FN #{Regexp.escape(target.name)}/,
+                           "FN probe__#{target.name.delete('?').delete('!')}")
+    [%(REQUIRE "pkg:#{pkg_name}"\n),
+     "\n# --- #{rel(target.file)} : #{target.name} ---\n", body,
      "\nFN main() RETURNS !Void ->\n  RETURN;\nEND\n"].join
   end
 
   def rel(path) = path.sub("#{SRC}/", '')
 
-  def compile(source_text, stage)
+  # Every type declaration in the group, by the name it declares.
+  def type_index(cache)
+    @type_index ||= begin
+      idx = {}
+      cache.each_value do |(_rq, types, _fns, _loose)|
+        types.each do |decl|
+          name = decl[/\A(?:PUB )?(?:STRUCT|UNION|ENUM) (\w+)/, 1] or next
+          idx[name] ||= decl
+        end
+      end
+      idx
+    end
+  end
+
+  # The declarations a probe needs: what the target names, plus what those
+  # declarations name, to a fixed point. Including all of them instead makes a
+  # mir_lowering probe 287 KB and ten minutes; this keeps it to what is used.
+  def needed_types(seed_text, cache)
+    idx = type_index(cache)
+    want = Set.new
+    queue = seed_text.scan(/\b([A-Z]\w*)\b/).flatten.uniq
+    until queue.empty?
+      name = queue.pop
+      next if want.include?(name)
+      decl = idx[name] or next
+
+      want << name
+      queue.concat(decl.scan(/\b([A-Z]\w*)\b/).flatten)
+    end
+    idx.select { |n, _| want.include?(n) }
+  end
+
+  def compile(source_text, stage, extra_pkg = nil)
     Dir.mktmpdir('fn-probe') do |dir|
       source = File.join(dir, 'probe.clear')
       File.write(source, source_text)
@@ -146,7 +199,7 @@ module SelfhostFnProbe
       end
       cmd = [File.join(ROOT, 'clear'), 'build', source, '-o', File.join(dir, 'probe'),
              '--no-stack-check', '--main-tier', 'service',
-             *ParserCompat.package_flags(SRC)]
+             *ParserCompat.package_flags(SRC), *Array(extra_pkg)]
       out, err, status = Open3.capture3(env, *cmd, chdir: ROOT)
       msg = "#{out}\n#{err}"[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
       [status.success?, msg.to_s[0, 160]]
@@ -175,6 +228,14 @@ module SelfhostFnProbe
     targets = targets.first(limit) if limit
     warn "#{targets.length} functions across #{files.length} file(s); #{jobs} jobs; stage=#{stage}"
 
+    stub_dir = File.join(ROOT, 'tmp', 'fnprobe')
+    FileUtils.mkdir_p(stub_dir)
+    stub_path = File.join(stub_dir, 'stubs.clear')
+    File.write(stub_path, stub_package(group, cache))
+    pkg_name = 'fnprobe_stubs'
+    pkg_flag = ["--pkg", "#{pkg_name}=#{stub_path}"]
+    warn "stub package: #{File.read(stub_path).lines.length} lines"
+
     queue = Queue.new
     targets.each_with_index { |t, i| queue << [i, t] }
     results = Array.new(targets.length)
@@ -188,11 +249,16 @@ module SelfhostFnProbe
           rescue ThreadError
             break
           end
-          ok, msg = compile(probe_source(target, group, cache), stage)
+          ok, msg = compile(probe_source(target, group, cache, pkg_name), stage, pkg_flag)
           results[idx] = [rel(target.file), target.name, ok, msg]
           mutex.synchronize do
             done += 1
-            warn "  #{done}/#{targets.length}" if (done % 25).zero?
+            if (done % 20).zero?
+              good = results.count { |r| r && r[2] }
+              warn "  #{done}/#{targets.length}  compiling: #{good} (#{(100.0 * good / done).round(1)}%)"
+              File.write(File.join(ROOT, '.fn_probe.json'), JSON.pretty_generate(
+                           results.compact.map { |f, n, o, m| { file: f, fn: n, ok: o, error: m } }))
+            end
           end
         end
       end
