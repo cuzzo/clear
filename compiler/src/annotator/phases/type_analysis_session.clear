@@ -1675,7 +1675,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(locatable__token(tgt)) THEN
       RETURN NIL;
     END
-    RETURN typeAnalysisSession__anchor_at(rtoc_self_view, tgt.token().line, ((tgt.token().column + (CAST(tgt.name() AS String)).codepointCount()) + 1));
+    RETURN typeAnalysisSession__anchor_at(rtoc_self_view, locatable__token(tgt).line, ((locatable__token(tgt).column + (CAST(tgt.name() AS String)).codepointCount()) + 1));
 }
 END
 PRIVATE FN typeAnalysisSession__variant_anchor_from_unionlit(self: TypeAnalysisSession, node: Node, variant_name: String) RETURNS ?AnchorToken
@@ -2175,7 +2175,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(fix) THEN
       RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], {:name: fn_node.name}));
     END
-    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :reentrance, [fix], NIL, code, :error, FALSE, {:name: fn_node.name}));
+    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :reentrance, [UNWRAP (fix)], NIL, code, :error, FALSE, {:name: fn_node.name}));
 }
 END
 PRIVATE FN typeAnalysisSession__emit_capture_immutable_as_mutable_error_mut(self: TypeAnalysisSession, node: FunctionDef, cap_name: String, owner_scope: Scope) RETURNS !Void
@@ -2203,7 +2203,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(fix) THEN
       RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :AMBIGUOUS_RETURN }, [], {:types: return_types}));
     END
-    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :type, [fix], NIL, :AMBIGUOUS_RETURN, :error, FALSE, {:types: return_types}));
+    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :type, [UNWRAP (fix)], NIL, :AMBIGUOUS_RETURN, :error, FALSE, {:types: return_types}));
 }
 END
 PRIVATE FN typeAnalysisSession__emit_match_partial_fix_mut(self: TypeAnalysisSession, match_node: MatchStatement, code: String@symbol, kwargs: {String@symbol}DiagnosticKwValue = {}) RETURNS !Void
@@ -2353,7 +2353,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < missing_caps.length() DO
       MUTABLE vn = COPY missing_caps[rtoc_idx]?.var_node;
-      IF !(((IF vn IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) AND vn.token())) THEN
+      IF !(((IF UNWRAP (vn) IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) AND vn.token())) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -3786,7 +3786,7 @@ PRIVATE FN typeAnalysisSession__default_argument_for(self: TypeAnalysisSession, 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE default: ?Locatable = COPY param.default;
-    IF default IS_A DefaultLit THEN
+    IF UNWRAP (default) IS_A DefaultLit THEN
       RETURN Locatable{ StructLit: COPY StructLit{ token: COPY locatable__token( UNWRAP (default)), name: COPY type__to_s(param.type), fields: COPY {}, storage: NIL, type_args: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, borrowed_field_names: NIL, field_tokens: {} } };
     END
     RETURN CAST(COPY default AS Locatable);
@@ -6397,7 +6397,7 @@ PRIVATE FN typeAnalysisSession__auto_detect_sharded_access(self: TypeAnalysisSes
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE each_op: ?ClearParserConcurrentPipelineOp@boxed = COPY conc.op;
-    IF !(each_op IS_A EachOp) THEN
+    IF !(UNWRAP (each_op) IS_A EachOp) THEN
       RETURN;
     END
     MUTABLE sharded_accesses: []PipelineShardedAccess = ( { MUTABLE rtoc_empty_list_152: []PipelineShardedAccess = List[]; rtoc_empty_list_152 } );
@@ -6647,7 +6647,7 @@ PRIVATE FN typeAnalysisSession__shard_concurrent_source?(self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((IF lhs IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND aST__node_right(lhs) IS_A ShardOp);
+    RETURN ((IF UNWRAP (lhs) IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND aST__node_right(lhs) IS_A ShardOp);
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_concurrent_op(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?String@symbol
@@ -13128,7 +13128,7 @@ PRIVATE FN typeAnalysisSession__runtime_is_a_payload_matches?(self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF payload IS_A Type@multiowned AS type_multiowned THEN
+    IF UNWRAP (payload) IS_A Type@multiowned AS type_multiowned THEN
       MUTABLE payload_name = TRY (type__coercion_surface_name(TypeTypeInput{ Type: COPY type_multiowned }));
       MUTABLE payload_names = (CAST(Tuple{payload_name, payload_name.split(".").last()} AS Tuple<String, ?String>)) |> DISTINCT _ |> SELECT COPY _;
       RETURN type__any?((ruby_set_intersection_String(payload_names, target_names)));
@@ -19944,7 +19944,7 @@ PRIVATE FN typeAnalysisSession__verify_tied_return_mut(self: TypeAnalysisSession
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE val: ?Locatable@boxed = COPY return_node.value;
-    IF !(val IS_A Identifier) THEN
+    IF !(UNWRAP (val) IS_A Identifier) THEN
       RETURN;
     END
     MUTABLE sym = aST__node__symbol(val);

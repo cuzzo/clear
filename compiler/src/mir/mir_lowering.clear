@@ -6245,7 +6245,7 @@ PRIVATE FN mIRLowering__fsm_ast_result_consumed_roots(self: MIRLowering, MUTABLE
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_200: []String = List[]; rtoc_empty_list_200 } );
-    IF node IS_A MoveNode AS move_node THEN
+    IF UNWRAP (node) IS_A MoveNode AS move_node THEN
       IF move_node.value IS_A Identifier THEN
         &names.append(COPY CAST(move_node.value.name() AS String));
       ELSE
@@ -8320,7 +8320,7 @@ PRIVATE FN mIRLowering__mir_ident_names(self: MIRLowering, node: ?Emittable) RET
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF node IS_A Ident AS ident THEN
+    IF UNWRAP (node) IS_A Ident AS ident THEN
       RETURN CAST([CAST(ident.name AS String)] AS []String);
     ELSE_IF node IS_A MIRBlockExpr AS mir_block_expr THEN
       MUTABLE local_names = (TRY (blockExpr__body(mir_block_expr))).each_with_object(Set[], %(stmt, names: [Set]Any) -> {
@@ -9456,7 +9456,7 @@ PRIVATE FN mIRLowering__ownership_consumed_arg_names(self: MIRLowering, arg: ?Em
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF arg IS_A Ident AS ident THEN
+    IF UNWRAP (arg) IS_A Ident AS ident THEN
       RETURN CAST([CAST(ident.name AS String)] AS []String);
     ELSE_IF arg IS_A OwnedSlice AS owned_slice THEN
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, ownedSlice__expr(owned_slice));
@@ -17825,7 +17825,7 @@ PRIVATE FN mIRLowering__var_decl_source_transfer_required?(self: MIRLowering, no
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE plan: ?PassStateValue = node.ownership_transport_plan;
-    IF (plan IS_A OwnershipTransportPlan AND (plan.action != :move)) THEN
+    IF (UNWRAP (plan) IS_A OwnershipTransportPlan AND (plan.action != :move)) THEN
       RETURN FALSE;
     END
     IF mIRLowering__var_decl_source_borrowed?(rtoc_self_view, node) THEN

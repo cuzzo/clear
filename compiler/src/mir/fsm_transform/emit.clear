@@ -800,7 +800,7 @@ PRIVATE FN emit__fsm_owned_result_guards(segments: []Segment, lowering: MIRLower
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segments.length() DO
     MUTABLE tail = segments[rtoc_idx]?.tail;
-    IF !((tail IS_A IoSuspend OR tail IS_A NextSuspend)) THEN
+    IF !((UNWRAP (tail) IS_A IoSuspend OR UNWRAP (tail) IS_A NextSuspend)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END

@@ -84,7 +84,7 @@ PRIVATE FN annotationTypeInventory__ignored_node_ids(program: Program) RETURNS !
   RETURN ignored;
 END
 PRIVATE FN annotationTypeInventory__add_lifetime_metadata_node_ids_mut(MUTABLE ignored: [Set]Int64, value: ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata) RETURNS Void EFFECTS REENTRANT ->
-  IF (value IS_A Locatable) THEN
+  IF (UNWRAP (value) IS_A Locatable) THEN
     aST__each_locatable(value, TRUE, %(node: Locatable) USE(MUTABLE ignored) -> {
   &ignored.insert(aST__node_identity(node));
   rubyToClearVoid__type_analysis_phase()

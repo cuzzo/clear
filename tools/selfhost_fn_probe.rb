@@ -118,6 +118,28 @@ module SelfhostFnProbe
     [target, %(REQUIRE "pkg:rtoc_#{target.unpack1('H*')}"#{alias_part}\n)]
   end
 
+  # EXTERN declarations name what the Zig side provides. A package does not
+  # re-export them, so the probe restates them itself.
+  def extern_decls(cache)
+    @extern_decls ||= begin
+      seen = Set.new
+      out = []
+      all_files.each do |rel|
+        path = File.join(SRC, rel)
+        cache[path] ||= dissect(path)
+        cache[path][1].each do |d|
+          next unless d.start_with?('EXTERN')
+
+          name = d[/\AEXTERN (?:STRUCT|UNION|ENUM|FN) ([\w?!]+)/, 1]
+          next if name && !seen.add?(name)
+
+          out << d
+        end
+      end
+      out.join
+    end
+  end
+
   def stdlib_requires
     @stdlib_requires ||= begin
       seen = Set.new
@@ -154,7 +176,9 @@ module SelfhostFnProbe
           name = d[/\A(?:PUB |EXTERN )*(?:STRUCT|UNION|ENUM|FN) ([\w?!]+)/, 1]
           next if name && !seen.add?(name)
 
-          out << (d.start_with?('PUB ', 'EXTERN') ? d : "PUB #{d}")
+          next if d.start_with?('EXTERN')
+
+          out << (d.start_with?('PUB ') ? d : "PUB #{d}")
         end
       end
       # Non-rtoc requires name real external packages (stdlib path, fs, regex).
@@ -206,7 +230,7 @@ module SelfhostFnProbe
     stubs = emitted.values
     body = target.text.sub(/\A(PUB |PRIVATE )?FN #{Regexp.escape(target.name)}/, "FN #{safe}")
 
-    head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n),
+    head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n", extern_decls(cache),
             "\n# --- stand-ins for what it calls ---\n", stubs.join,
             "\n# --- #{rel(target.file)} : #{target.name} ---\n"].join
     @probe_offset = head.lines.length
@@ -343,8 +367,13 @@ module SelfhostFnProbe
             done += 1
             # Each build leaves Zig cache entries behind; 3405 of them fill the
             # disk and every probe after that fails for the wrong reason.
-            if (done % (stage == :clear ? 300 : 15)).zero?
+            if (done % (stage == :clear ? 200 : 15)).zero?
               FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-cache'))
+              # The transpile cache is content-addressed and grows without
+              # bound across thousands of distinct probe sources; the types
+              # package is the only entry worth keeping warm.
+              free = `df -P #{ROOT} | tail -1`.split[3].to_i
+              FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-transpile-cache')) if free < 2_000_000
             end
             if (done % 20).zero?
               good = results.count { |r| r && r[2] }
