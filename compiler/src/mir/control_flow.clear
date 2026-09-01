@@ -258,7 +258,7 @@ PRIVATE FN functionCFG__stmt_can_fail?(node: Locatable, can_fail_fns: [Set]Strin
     IF node.can_fail() THEN
       RETURN TRUE;
     END
-    IF can_fail_fns.contains?(node.name()) THEN
+    IF can_fail_fns.contains?(locatable__name(node)) THEN
       RETURN TRUE;
     END
   END
@@ -671,7 +671,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((node IS_A VarDecl OR ((IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :assign) ELSE FALSE END)))) THEN
         RETURN;
     END
-    MUTABLE name = COPY CAST(node.name() AS String);
+    MUTABLE name = COPY CAST(locatable__name(node) AS String);
     counts[name] = (UNWRAP (counts[name]) + 1);
     rubyToClearVoid__control_flow()
     });
@@ -1269,7 +1269,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((IF n IS_A Identifier AS identifier THEN (identifier.was_moved != NIL) ELSE FALSE END)) THEN
         RETURN;
     END
-    MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(n.name() AS String), n);
+    MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(n) AS String), n);
     IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, place)) THEN
         RETURN;
     END
@@ -1549,7 +1549,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF resource_captures.contains?(_) THEN
       CONTINUE;
     END
-    useAfterMoveChecker__check_identifier_read(&rtoc_self_view, CAST(_ AS String), state, stmt.token());
+    useAfterMoveChecker__check_identifier_read(&rtoc_self_view, CAST(_ AS String), state, locatable__token(stmt));
       END
     END
 }
@@ -1893,7 +1893,7 @@ PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_n
     MUTABLE receiver =     IF node IS_A MethodCall THEN
       node.object
     ELSE
-      node.args().first()
+      locatable__args(node).first()
     END;
     MUTABLE root = (aST__root_identifier(receiver));
     IF !((IF root != NIL THEN
@@ -2164,7 +2164,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF borrowState__empty?(state) THEN
         RETURN;
       END
-      TRY (borrowChecker__check_explicit_moves(&rtoc_self_view, stmt, stmt.token(), state));
+      TRY (borrowChecker__check_explicit_moves(&rtoc_self_view, stmt, locatable__token(stmt), state));
     ELSE_IF (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
       IF !(borrowState__empty?(state)) THEN
         FOR _ IN (IF stmt.capture_analysis() != NIL THEN
@@ -2173,7 +2173,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           NIL
         END) DO
-        borrowChecker__check_borrowed_move(&rtoc_self_view, _, stmt.token(), state);
+        borrowChecker__check_borrowed_move(&rtoc_self_view, _, locatable__token(stmt), state);
         END
       END
       FOR _ IN (TRY (aST__child_bodies(stmt))) DO

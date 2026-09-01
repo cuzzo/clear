@@ -140,7 +140,7 @@ PRIVATE FN mIRLoweringOwnershipScanner__arg_is_call_argument?(self: MIRLoweringO
   IF !((aST__call?(stmt) AND (locatable__args(stmt) != NIL))) THEN
     RETURN FALSE;
   END
-  RETURN stmt.args().contains?(arg);
+  RETURN locatable__args(stmt).contains?(arg);
 END
 PRIVATE FN mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self: MIRLoweringOwnershipScanner, ti: Type) RETURNS !Bool ->
   IF (((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) OR type__id_handle?(ti)) THEN

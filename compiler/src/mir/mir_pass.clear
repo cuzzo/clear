@@ -251,7 +251,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE return_node_mutable = COPY return_node;
       TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &return_node_mutable.value, ctx));
     ELSE_IF (stmt IS_A MethodCall) OR (stmt IS_A FuncCall) THEN
-      FOR _ IN stmt.args() DO
+      FOR _ IN locatable__args(stmt) DO
     MUTABLE rtoc_mutable_block_param_5 = COPY _;
       TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &rtoc_mutable_block_param_5, ctx));
       END
@@ -539,7 +539,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN KEEP entry_value;
     END
     IF (aST__node_name(node) EXISTS) THEN
-      RETURN frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY CAST(node.name() AS String) }, node);
+      RETURN frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY CAST(locatable__name(node) AS String) }, node);
     END
     RETURN cleanupEntry__none();
 }
@@ -752,7 +752,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = CAST(union_variant_lit.fields AS InlineAllocMetadata);
         TRY (inlineAllocMetadata__values(rtoc_local_receiver_9)) }) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
       ELSE_IF (node_value IS_A FuncCall) OR (node_value IS_A MethodCall) THEN
-        RETURN (node_value.args() |> WHERE _.was_moved) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
+        RETURN (locatable__args(node_value) |> WHERE _.was_moved) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
       ELSE
         RETURN CAST(( { MUTABLE rtoc_empty_list_10: []Identifier = List[]; rtoc_empty_list_10 } ) AS []Identifier);
       END

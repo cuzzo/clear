@@ -246,10 +246,10 @@ PUB FN liveness__walk_idents(node: ?AstIdentWalkRoot, block: FN(String) -> Void)
         CONTINUE;
       END
       IF current IS_A Emittable AS emittable THEN
-        FOR _ IN emittable.child_exprs().reverse() DO
+        FOR _ IN emittable__child_exprs(emittable).reverse() DO
         &stack.append(COPY _);
         END
-        FOR _ IN emittable.body_slots().reverse() DO
+        FOR _ IN emittable__body_slots(emittable).reverse() DO
         FOR _ IN _.body().reverse() DO
         &stack.append(COPY _);
         END

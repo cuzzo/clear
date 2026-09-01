@@ -97,7 +97,7 @@ PRIVATE FN programMIRFinalizer__generic_return_needs_runtime?(function: Function
   IF !((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == CAST(function.name AS String)) ELSE FALSE END)) THEN
         RETURN;
   END
-  MUTABLE argument = node.args()[index];
+  MUTABLE argument = locatable__args(node)[index];
   IF !(argument) THEN
         RETURN;
   END

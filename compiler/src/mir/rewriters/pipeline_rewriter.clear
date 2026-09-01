@@ -151,7 +151,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A UnaryOp) THEN
       node.right = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, node.right()));
     ELSE_IF (node IS_A FuncCall) OR (node IS_A MethodCall) THEN
-      node.args = node.args() |> SELECT TRY (pipelineRewriter__rewrite_call_argument(&rtoc_self_view, _));
+      node.args = locatable__args(node) |> SELECT TRY (pipelineRewriter__rewrite_call_argument(&rtoc_self_view, _));
     ELSE_IF node IS_A StructLit AS struct_lit THEN
       MUTABLE struct_lit_mutable = COPY struct_lit;
       FOR rtoc_key IN struct_lit_mutable.fields.keys() DO
@@ -265,7 +265,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_1, &real_source.full_type_mut(), "synthetic AST type"));
         PARTIAL MATCH rtoc_union_writeback_1 START Locatable.BinaryOp AS rtoc_union_writeback_1_item -> list_proxy = COPY rtoc_union_writeback_1_item;, END
         NIL;
-        list_proxy.storage = real_source.storage();
+        list_proxy.storage = locatable__storage(real_source);
         MUTABLE fused_loop = TRY (pipelineRewriter__fuse_pipeline(&rtoc_self_view, &list_proxy, &real_source, stages, NIL));
         MUTABLE outer_smooth = BinaryOp{ token: COPY node.token, left: COPY fused_loop, op: :SMOOTH, right: UNWRAP (COPY terminal), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
         MUTABLE rtoc_union_writeback_2: Locatable = Locatable{ BinaryOp: COPY outer_smooth };

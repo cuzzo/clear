@@ -852,7 +852,7 @@ PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segme
     IF !((node IS_A Cleanup OR node IS_A ErrCleanup)) THEN
         RETURN;
     END
-    MUTABLE name = COPY CAST(node.name() AS String);
+    MUTABLE name = COPY CAST(emittable__name(node) AS String);
     IF !(forbidden_set.contains?(name)) THEN
         RETURN;
     END

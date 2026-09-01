@@ -409,9 +409,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF is_var_stream THEN
       MUTABLE resolved = runtimeHost__range_visit_mir(rtoc_self_view.host, source_node);
       IF resolved IS_A Ident THEN
-        source_name = COPY CAST(resolved.name() AS String);
+        source_name = COPY CAST(emittable__name(resolved) AS String);
       ELSE
-        source_name = COPY CAST(source_node.name() AS String);
+        source_name = COPY CAST(locatable__name(source_node) AS String);
       END
     ELSE
       source_name = "__range_src";

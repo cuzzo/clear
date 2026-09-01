@@ -97,7 +97,7 @@ PRIVATE FN annotationTypeInventory__add_lifetime_metadata_node_ids_mut(MUTABLE i
   END
 END
 PRIVATE FN annotationTypeInventory__node_type(MUTABLE node: Locatable) RETURNS !Type ->
-  IF !(node.typed?()) THEN
+  IF !(locatable__typed?(node)) THEN
     RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped }));
   END
   RETURN TRY (aST__full_type_mut(node));
@@ -106,7 +106,7 @@ PRIVATE FN annotationTypeInventory__class_name(node: Locatable) RETURNS String -
   RETURN locatable__variant_name(node);
 END
 PRIVATE FN annotationTypeInventory__location(node: Locatable) RETURNS String ->
-  MUTABLE token = node.token();
+  MUTABLE token = locatable__token(node);
   IF !(token) THEN
     RETURN "?";
   END

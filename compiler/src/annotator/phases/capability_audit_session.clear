@@ -758,7 +758,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             FALSE
           END));
           MUTABLE param_admits_multi = ((pt != NIL) AND (IF (typeTypeInput__multiowned?(pt) != NIL) THEN
-            pt.multiowned?()
+            typeTypeInput__multiowned?(pt)
           ELSE
             FALSE
           END));
@@ -1221,8 +1221,8 @@ PRIVATE FN capabilityAuditSession__emit_return_borrowed_no_copy_error_mut(self: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fix = NIL;
-    IF node.token() THEN
-      MUTABLE tok = node.token();
+    IF locatable__token(node) THEN
+      MUTABLE tok = locatable__token(node);
       fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_RETURN_WITH_COPY)), [edit__new(span__new(NIL, tok.line, tok.column, 0), "COPY ")], :auto));
     END
     MUTABLE kw = {:type: TRY (aST__full_type_mut(node))};
@@ -1574,10 +1574,10 @@ PRIVATE FN capabilityAuditSession__build_cast_wrap_fix(self: CapabilityAuditSess
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF value EXISTS AS value_value THEN
-      IF !(value_value.token()) THEN
+      IF !(locatable__token(value_value)) THEN
         RETURN NIL;
       END
-      MUTABLE tok = value_value.token();
+      MUTABLE tok = locatable__token(value_value);
       MUTABLE target_name_branch_value: ?TypeTypeInput = NIL;
       IF target_type IS_A Type AS type THEN
         target_name_branch_value = TypeTypeInput{ SymbolValue: COPY type__resolved(type) };

@@ -668,7 +668,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE expression_type: Type = expression_type_branch_value?;
       MUTABLE outer_fallible = tenseEnvelope__split_future(tense_plan.envelope).outer |> ANY (_.kind == TenseLayerKind.Fallible);
       MUTABLE promise_source =     IF selector IS_A TryExpr THEN
-        selector.expr().without_try()
+        emittable__expr(selector).without_try()
       ELSE
         selector.without_try()
       END;
