@@ -806,3 +806,19 @@ PUB FN functionSignature__sync_from_function_def_mut(MUTABLE self: FunctionSigna
   END
   RETURN self;
 END
+
+# Ruby: reuse the signature the annotator already memoized on the node when
+# there is one, otherwise build one from the declaration -- then sync the facts
+# either way. `function_def_lifetime_paths` is `ruby-to-clear: skip`, so the
+# lifetime is left unset here as it is at every other construction site.
+PUB FN functionSignature__from_function_def(fn: FunctionDef) RETURNS !FunctionSignature@multiowned ->
+  MUTABLE memoized: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY TRY (aST__full_type_mut(Locatable{ FunctionDef: COPY fn })) });
+  MUTABLE sig: ?FunctionSignature@multiowned = NIL;
+  IF memoized EXISTS AS rtoc_memoized THEN
+    sig = COPY rtoc_memoized;
+  ELSE
+    sig = TRY (functionSignature__new(COPY fn.params, castTypeToTypeTypeInput__function_signature(TRY (functionDef__annotation_return_type(fn))), NIL, fn.visibility, fn.type_params |> SELECT symbol(COPY _), {}, functionDef__declared_plain_reentrant?(fn)));
+  END
+  MUTABLE resolved: FunctionSignature@multiowned = UNWRAP (sig);
+  RETURN TRY (functionSignature__sync_from_function_def_mut(&resolved, FunctionSignatureSyncSource{ FunctionDef: COPY fn }));
+END
