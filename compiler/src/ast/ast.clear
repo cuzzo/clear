@@ -8693,7 +8693,7 @@ PUB FN aST__node_alloc(node: Locatable) RETURNS ?String@symbol ->
   END
   RETURN NIL;
 END
-PUB FN aST__node_capture_analysis(node: Locatable) RETURNS ?PassStateValue ->
+PUB FN aST__node_capture_analysis(node: Locatable) RETURNS ?CaptureAnalysis ->
   PARTIAL MATCH node START
     Locatable.SelectOp AS item -> RETURN COPY item.capture_analysis;,
     Locatable.ConcurrentOp AS item -> RETURN COPY item.capture_analysis;,

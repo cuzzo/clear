@@ -12854,7 +12854,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE branch: DoBranch = COPY UNWRAP (branches[branch_index]);
       MUTABLE ctx_type = "__DoBranchCtx${id.toString()}_${branch_index.toString()}";
       MUTABLE ctx_var = "__do${id.toString()}_ctx${branch_index.toString()}";
-      MUTABLE branch_analysis: ?PassStateValue = COPY branch.capture_analysis;
+      MUTABLE branch_analysis: ?CaptureAnalysis = COPY branch.capture_analysis;
       MUTABLE pinned: Bool = COPY branch.pinned;
       &boundary_facts.append(TRY (mIRLowering__execution_boundary_fact(rtoc_self_view, :do_branch, mIRLowering__execution_boundary_dispatch(rtoc_self_view, branch.parallel, Pinned{ BoolValue: COPY pinned }), branch_analysis)));
       MUTABLE caps = TRY (fiberCtxBuilder__build(branch_analysis, "ctx", {}, NIL, ((id * 1000) + branch_index), TRY (mIRLowering__fiber_capture_source_overrides(rtoc_self_view, branch_analysis, {})), mIRLowering__mir_schema_lookup(rtoc_self_view)));
@@ -12938,7 +12938,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     mIRLoweringCounters__next_background_block_id(&rtoc_mutable_receiver_504) };
     MUTABLE names = mIRLowering__bg_lowering_names(rtoc_self_view, id);
     MUTABLE types = TRY (mIRLowering__bg_type_plan(rtoc_self_view, &node));
-    MUTABLE analysis: ?PassStateValue = COPY node.capture_analysis;
+    MUTABLE analysis: ?CaptureAnalysis = COPY node.capture_analysis;
     MUTABLE captured: {String}Type = {};
     IF analysis THEN
       captured = analysis.captures();
@@ -13410,7 +13410,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN MIRLoweringReturnValue{ MIRBlockExpr: COPY block };
     END
-    MUTABLE analysis: ?PassStateValue = COPY node.capture_analysis;
+    MUTABLE analysis: ?CaptureAnalysis = COPY node.capture_analysis;
     MUTABLE rt_name = mIRLowering__runtime_binding_name(rtoc_self_view);
     TRY (mIRLowering__enforce_bg_capture_strategies_mut(rtoc_self_view, Node{ BgStreamBlock: COPY node }, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_520: ?{Any}Any = NIL;
     IF analysis THEN
