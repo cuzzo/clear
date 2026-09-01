@@ -4,3 +4,59 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotat
 # Ruby module TestAnnotation
 PUB UNION TestContainerNode { TestBlock: TestBlock, WhenBlock: WhenBlock }
 # End Ruby module TestAnnotation
+
+# Ruby asks `respond_to?(:after_all)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN testContainerNode__after_all(value: TestContainerNode) RETURNS ?[][]Locatable ->
+  PARTIAL MATCH value START
+    TestContainerNode.TestBlock AS item -> RETURN COPY item.after_all;,
+    TestContainerNode.WhenBlock AS item -> RETURN COPY item.after_all;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:after_each)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN testContainerNode__after_each(value: TestContainerNode) RETURNS ?[][]Locatable ->
+  PARTIAL MATCH value START
+    TestContainerNode.TestBlock AS item -> RETURN COPY item.after_each;,
+    TestContainerNode.WhenBlock AS item -> RETURN COPY item.after_each;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:before_all)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN testContainerNode__before_all(value: TestContainerNode) RETURNS ?[][]Locatable ->
+  PARTIAL MATCH value START
+    TestContainerNode.TestBlock AS item -> RETURN COPY item.before_all;,
+    TestContainerNode.WhenBlock AS item -> RETURN COPY item.before_all;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:before_each)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN testContainerNode__before_each(value: TestContainerNode) RETURNS ?[][]Locatable ->
+  PARTIAL MATCH value START
+    TestContainerNode.TestBlock AS item -> RETURN COPY item.before_each;,
+    TestContainerNode.WhenBlock AS item -> RETURN COPY item.before_each;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:lets)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN testContainerNode__lets(value: TestContainerNode) RETURNS ?[]LetBinding ->
+  PARTIAL MATCH value START
+    TestContainerNode.TestBlock AS item -> RETURN COPY item.lets;,
+    TestContainerNode.WhenBlock AS item -> RETURN COPY item.lets;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

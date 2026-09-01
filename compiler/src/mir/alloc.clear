@@ -3,3 +3,15 @@ REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
 # Ruby module AllocHelper
 UNION AllocDeclarationNode { VarDecl: VarDecl, BindExpr: BindExpr }
 # End Ruby module AllocHelper
+
+# Ruby asks `respond_to?(:value)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN allocDeclarationNode__value(value: AllocDeclarationNode) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    AllocDeclarationNode.VarDecl AS item -> RETURN COPY item.value;,
+    AllocDeclarationNode.BindExpr AS item -> RETURN COPY item.value;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

@@ -632,8 +632,8 @@ PRIVATE FN capabilityAuditSession__emit_typo_suggestion_mut(self: CapabilityAudi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token_line: Int64 = CAST((MATCH token START TypoToken.Token AS item -> item.line, TypoToken.AnchorToken AS item -> item.line END) AS Int64);
-    MUTABLE token_column: Int64 = CAST((MATCH token START TypoToken.Token AS item -> item.column, TypoToken.AnchorToken AS item -> item.column END) AS Int64);
+    MUTABLE token_line: Int64 = CAST(UNWRAP (typoToken__line(token)) AS Int64);
+    MUTABLE token_column: Int64 = CAST(UNWRAP (typoToken__column(token)) AS Int64);
     MUTABLE best: ?String =   IF ((fix_label == "closest in-scope variable") AND compilerRegexMatch(name, compilerRegexCompile("\\A[A-Z]"))) THEN
       NIL
     ELSE
@@ -2880,7 +2880,7 @@ PRIVATE FN capabilityAuditSession__assign_bg_spawn_shape_mut(MUTABLE self: Capab
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF (TRUE AND (MATCH node START AsyncSpawnNode.BgBlock AS item -> item.stack_size, AsyncSpawnNode.BgStreamBlock AS item -> item.stack_size END)) THEN
+    IF (TRUE AND asyncSpawnNode__stack_size(node)) THEN
       MATCH node START
         AsyncSpawnNode.BgBlock AS item ->
           MUTABLE item_mutable = COPY item;
@@ -3201,8 +3201,8 @@ PRIVATE FN capabilityAuditSession__func_call_suspends?(self: CapabilityAuditSess
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
-    IF (IF (MATCH node START CallLikeNode.FuncCall AS item -> item.matched_stdlib_def, CallLikeNode.MethodCall AS item -> item.matched_stdlib_def END) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_23 = ((MATCH node START CallLikeNode.FuncCall AS item -> item.matched_stdlib_def, CallLikeNode.MethodCall AS item -> item.matched_stdlib_def END));
+    IF (IF callLikeNode__matched_stdlib_def(node) != NIL THEN
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_23 = (callLikeNode__matched_stdlib_def(node));
     TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_23)) }
     ELSE
       NIL
@@ -3639,7 +3639,7 @@ PRIVATE FN capabilityAuditSession__thunk_all_self_calls_in_tail_position?(self: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE all = (MATCH body_facts START CapabilityAuditBodyFacts.BodyScanSummary AS item -> item.call_site_facts, CapabilityAuditBodyFacts.FunctionBodySummary AS item -> item.call_site_facts END) |> SELECT:? (  IF (_.callee_name == fn_node.name) THEN
+    MUTABLE all = UNWRAP (capabilityAuditBodyFacts__call_site_facts(body_facts)) |> SELECT:? (  IF (_.callee_name == fn_node.name) THEN
       COPY _.node
     ELSE
       NIL
@@ -3647,7 +3647,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (all.length() == 0) THEN
       RETURN FALSE;
     END
-    MUTABLE blessed = (MATCH body_facts START CapabilityAuditBodyFacts.BodyScanSummary AS item -> item.return_nodes, CapabilityAuditBodyFacts.FunctionBodySummary AS item -> item.return_nodes END) |> SELECT:? (  IF (_.value IS_A FuncCall AND (_.value.name() == fn_node.name)) THEN
+    MUTABLE blessed = UNWRAP (capabilityAuditBodyFacts__return_nodes(body_facts)) |> SELECT:? (  IF (_.value IS_A FuncCall AND (_.value.name() == fn_node.name)) THEN
       _.value
     ELSE
       NIL
@@ -3705,7 +3705,7 @@ PRIVATE FN capabilityAuditSession__call_declared_impurity_reason(self: Capabilit
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (MATCH call START CapabilityAuditCall.FuncCall AS item -> item.extern_call, CapabilityAuditCall.MethodCall AS item -> item.extern_call END) THEN
+    IF capabilityAuditCall__extern_call(call) THEN
       RETURN "is an extern call";
     END
     MUTABLE extern_effects: Any = NIL;
@@ -3718,7 +3718,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (extern_effects AND !(extern_effects.empty?())) THEN
       RETURN "has extern effects";
     END
-    IF (MATCH call START CapabilityAuditCall.FuncCall AS item -> item.can_fail, CapabilityAuditCall.MethodCall AS item -> item.can_fail END) THEN
+    IF capabilityAuditCall__can_fail(call) THEN
       RETURN "can fail";
     END
     RETURN NIL;
@@ -3728,10 +3728,10 @@ PRIVATE FN capabilityAuditSession__matched_stdlib_impurity_reason(self: Capabili
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((MATCH call START CapabilityAuditCall.FuncCall AS item -> item.matched_stdlib_def, CapabilityAuditCall.MethodCall AS item -> item.matched_stdlib_def END)) THEN
+    IF !(capabilityAuditCall__matched_stdlib_def(call)) THEN
       RETURN NIL;
     END
-    MUTABLE md = UNWRAP ((MATCH call START CapabilityAuditCall.FuncCall AS item -> item.matched_stdlib_def, CapabilityAuditCall.MethodCall AS item -> item.matched_stdlib_def END));
+    MUTABLE md = UNWRAP (capabilityAuditCall__matched_stdlib_def(call));
     IF TRY (functionSignature__emits_allocating?(&md)) THEN
       RETURN "allocates";
     END
@@ -4536,6 +4536,62 @@ FN castCapabilityAuditRegToLocatable(value: CapabilityAuditReg) RETURNS ?Locatab
   PARTIAL MATCH value START
     CapabilityAuditReg.VarDecl AS item -> RETURN Locatable{ VarDecl: COPY item };,
     CapabilityAuditReg.DestructureTarget AS item -> RETURN Locatable{ DestructureTarget: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:call_site_facts)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN capabilityAuditBodyFacts__call_site_facts(value: CapabilityAuditBodyFacts) RETURNS ?[]CallSiteFact ->
+  PARTIAL MATCH value START
+    CapabilityAuditBodyFacts.BodyScanSummary AS item -> RETURN COPY item.call_site_facts;,
+    CapabilityAuditBodyFacts.FunctionBodySummary AS item -> RETURN COPY item.call_site_facts;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:return_nodes)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN capabilityAuditBodyFacts__return_nodes(value: CapabilityAuditBodyFacts) RETURNS ?[]ReturnNode ->
+  PARTIAL MATCH value START
+    CapabilityAuditBodyFacts.BodyScanSummary AS item -> RETURN COPY item.return_nodes;,
+    CapabilityAuditBodyFacts.FunctionBodySummary AS item -> RETURN COPY item.return_nodes;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:can_fail)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN capabilityAuditCall__can_fail(value: CapabilityAuditCall) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    CapabilityAuditCall.FuncCall AS item -> RETURN COPY item.can_fail;,
+    CapabilityAuditCall.MethodCall AS item -> RETURN COPY item.can_fail;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:extern_call)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN capabilityAuditCall__extern_call(value: CapabilityAuditCall) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    CapabilityAuditCall.FuncCall AS item -> RETURN COPY item.extern_call;,
+    CapabilityAuditCall.MethodCall AS item -> RETURN COPY item.extern_call;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:matched_stdlib_def)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN capabilityAuditCall__matched_stdlib_def(value: CapabilityAuditCall) RETURNS ?FunctionSignature@multiowned ->
+  PARTIAL MATCH value START
+    CapabilityAuditCall.FuncCall AS item -> RETURN COPY item.matched_stdlib_def;,
+    CapabilityAuditCall.MethodCall AS item -> RETURN COPY item.matched_stdlib_def;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;

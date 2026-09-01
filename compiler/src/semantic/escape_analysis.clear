@@ -1889,7 +1889,7 @@ PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}
   END
 END
 PUB FN escapeAnalysis__call_result_is_heap_for_callee?(call: EscapeAnalysisCall, callee: FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, facts: ?FunctionFacts = NIL) RETURNS !Bool ->
-  MUTABLE dep = TRY (escapeAnalysis__heap_return_from_args?((MATCH call START EscapeAnalysisCall.FuncCall AS item -> item.args, EscapeAnalysisCall.MethodCall AS item -> item.args END), callee.params, callee.heap_carry_return_vars, callee.return_type, schema_lookup));
+  MUTABLE dep = TRY (escapeAnalysis__heap_return_from_args?(UNWRAP (escapeAnalysisCall__args(call)), callee.params, callee.heap_carry_return_vars, callee.return_type, schema_lookup));
   IF !((dep == NIL)) THEN
     RETURN dep;
   END
@@ -1897,7 +1897,7 @@ PUB FN escapeAnalysis__call_result_is_heap_for_callee?(call: EscapeAnalysisCall,
   RETURN (((callee.heap_carry_return == TRUE) OR TRY (escapeAnalysis__function_facts_have_owned_return_value?(callee_facts, schema_lookup))) OR escapeAnalysis__function_facts_have_heap_return_binding?(callee_facts));
 END
 PUB FN escapeAnalysis__signature_heap_return_from_args?(call: EscapeAnalysisCall, sig_obj: FunctionSignature) RETURNS !?Bool ->
-  RETURN TRY (escapeAnalysis__heap_return_from_args?((MATCH call START EscapeAnalysisCall.FuncCall AS item -> item.args, EscapeAnalysisCall.MethodCall AS item -> item.args END), TRY (functionSignature__params(sig_obj)), TRY (functionSignature__heap_carry_return_vars(sig_obj)), functionSignature__return_type(sig_obj), NIL));
+  RETURN TRY (escapeAnalysis__heap_return_from_args?(UNWRAP (escapeAnalysisCall__args(call)), TRY (functionSignature__params(sig_obj)), TRY (functionSignature__heap_carry_return_vars(sig_obj)), functionSignature__return_type(sig_obj), NIL));
 END
 PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param, returned_names: ?[Set]String, return_type: ?TypeTypeInput = NIL, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !?Bool ->
   IF returned_names EXISTS AS returned_names_value THEN
@@ -2775,4 +2775,16 @@ END
 PUB FN escapeContext__schema_lookup_call(self: EscapeContext, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
   MUTABLE fn_value = UNWRAP (self.schema_lookup);
   RETURN fn_value(arg0);
+END
+
+# Ruby asks `respond_to?(:args)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN escapeAnalysisCall__args(value: EscapeAnalysisCall) RETURNS ?[]Locatable ->
+  PARTIAL MATCH value START
+    EscapeAnalysisCall.FuncCall AS item -> RETURN COPY item.args;,
+    EscapeAnalysisCall.MethodCall AS item -> RETURN COPY item.args;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

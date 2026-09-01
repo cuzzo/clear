@@ -880,8 +880,8 @@ FN mIREmitter__sharded_map_substitute_common(MUTABLE self: MIREmitter, pattern_i
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE pattern = COPY pattern_input;
-    IF (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END) THEN
-      pattern = (pattern.replace("{shard_idx}", TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_idx, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_idx END))))).replace("{shard_key}", TRY (mIREmitter__emit(&rtoc_self_view, (MATCH node START MIREmitterShardedMapNode.ShardedMapPut AS item -> item.shard_key, MIREmitterShardedMapNode.ShardedMapGet AS item -> item.shard_key END))));
+    IF mIREmitterShardedMapNode__shard_idx(node) THEN
+      pattern = (pattern.replace("{shard_idx}", TRY (mIREmitter__emit(&rtoc_self_view, mIREmitterShardedMapNode__shard_idx(node))))).replace("{shard_key}", TRY (mIREmitter__emit(&rtoc_self_view, mIREmitterShardedMapNode__shard_key(node))));
     END
     MUTABLE key_type: ?Type = mIREmitter__sharded_map_key_type(node);
     IF key_type EXISTS AS key_type_value THEN
@@ -4665,4 +4665,27 @@ FN rtoc_delete_prefix__mir_emitter(s: String, affix: String) RETURNS String ->
 END
 FN rubyToClearVoid__mir_emitter() RETURNS Void ->
   RETURN;
+END
+
+# Ruby asks `respond_to?(:shard_idx)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN mIREmitterShardedMapNode__shard_idx(value: MIREmitterShardedMapNode) RETURNS ?Emittable@boxed ->
+  PARTIAL MATCH value START
+    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN COPY item.shard_idx;,
+    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN COPY item.shard_idx;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:shard_key)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN mIREmitterShardedMapNode__shard_key(value: MIREmitterShardedMapNode) RETURNS ?Emittable@boxed ->
+  PARTIAL MATCH value START
+    MIREmitterShardedMapNode.ShardedMapPut AS item -> RETURN COPY item.shard_key;,
+    MIREmitterShardedMapNode.ShardedMapGet AS item -> RETURN COPY item.shard_key;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

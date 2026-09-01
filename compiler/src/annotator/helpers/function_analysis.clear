@@ -160,3 +160,26 @@ FN castRoutineNodeToLocatable(value: RoutineNode) RETURNS ?Locatable ->
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:args)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN functionCallNode__args(value: FunctionCallNode) RETURNS ?[]Locatable ->
+  PARTIAL MATCH value START
+    FunctionCallNode.FuncCall AS item -> RETURN COPY item.args;,
+    FunctionCallNode.MethodCall AS item -> RETURN COPY item.args;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:token)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN functionCallNode__token(value: FunctionCallNode) RETURNS ?Token ->
+  PARTIAL MATCH value START
+    FunctionCallNode.FuncCall AS item -> RETURN COPY item.token;,
+    FunctionCallNode.MethodCall AS item -> RETURN COPY item.token;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

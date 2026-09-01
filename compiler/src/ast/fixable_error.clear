@@ -243,3 +243,28 @@ FN fixCollector__findings() RETURNS ![]FixableFinding ->
   END
 END
 # End Ruby module FixCollector
+
+# Ruby asks `respond_to?(:column)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN typoToken__column(value: TypoToken) RETURNS ?Int64 ->
+  PARTIAL MATCH value START
+    TypoToken.TokenMultiowned AS item -> RETURN COPY item.column;,
+    TypoToken.AnchorToken AS item -> RETURN COPY item.column;,
+    TypoToken.Token AS item -> RETURN COPY item.column;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:line)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN typoToken__line(value: TypoToken) RETURNS ?Int64 ->
+  PARTIAL MATCH value START
+    TypoToken.TokenMultiowned AS item -> RETURN COPY item.line;,
+    TypoToken.AnchorToken AS item -> RETURN COPY item.line;,
+    TypoToken.Token AS item -> RETURN COPY item.line;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

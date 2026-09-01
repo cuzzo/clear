@@ -11343,7 +11343,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       MUTABLE decl_branch_value: ?SymbolEntryRegInput = NIL;
       IF TRUE THEN
-        decl_branch_value = COPY (MATCH var_node START CapabilityVarNode.Identifier AS item -> item.symbol, CapabilityVarNode.GetField AS item -> item.symbol, CapabilityVarNode.GetIndex AS item -> item.symbol END)?.reg;
+        decl_branch_value = COPY capabilityVarNode__symbol(var_node)?.reg;
       ELSE
         decl_branch_value = NIL;
       END

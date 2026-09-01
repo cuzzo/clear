@@ -186,7 +186,7 @@ END
 PRIVATE FN liveness__stmt_decl_type(MUTABLE stmt: BindingStmt) RETURNS !?Type ->
   MUTABLE candidates: []?TypeTypeInput = List[];
   &candidates.append(TRY (aST__full_type_mut(stmt)));
-  &candidates.append(UNWRAP (CAST((MATCH stmt START BindingStmt.VarDecl AS item -> item.type, BindingStmt.BindExpr AS item -> item.type, BindingStmt.DestructureTarget AS item -> item.type END) AS ?TypeTypeInput)));
+  &candidates.append(UNWRAP (CAST(bindingStmt__type(stmt) AS ?TypeTypeInput)));
   IF respondsTo?(stmt, "declared_type") THEN
     &candidates.append(UNWRAP (CAST(stmt.declared_type() AS ?TypeTypeInput)));
   END
@@ -1053,4 +1053,17 @@ FN rtocChildrenOfCollectValueYieldExpr(v: YieldExpr) RETURNS []CollectValue ->
 END
 FN rubyToClearVoid__liveness() RETURNS Void ->
   RETURN;
+END
+
+# Ruby asks `respond_to?(:type)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN bindingStmt__type(value: BindingStmt) RETURNS ?Type ->
+  PARTIAL MATCH value START
+    BindingStmt.VarDecl AS item -> RETURN COPY item.type;,
+    BindingStmt.BindExpr AS item -> RETURN COPY item.type;,
+    BindingStmt.DestructureTarget AS item -> RETURN COPY item.type;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

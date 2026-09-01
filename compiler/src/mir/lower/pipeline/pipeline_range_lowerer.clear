@@ -750,11 +750,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE arg = runtimeHost__range_with_fiber_rt(rtoc_self_view.host, "__rt_obs_${fid}", %() USE(fold_op, item, MUTABLE smooth_node, spec, rtoc_self_view) -> {
     IF (spec.expr == :typed) THEN
         MUTABLE inner_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node }))))) });
-        [TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, (MATCH fold_op START PipelineDefaultObservableFoldOp.AllOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AnyOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AverageOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.CountOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.FindOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.MaxOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.MinOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.SumOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AllOp AS item -> item.expression, PipelineDefaultObservableFoldOp.AnyOp AS item -> item.expression, PipelineDefaultObservableFoldOp.AverageOp AS item -> item.expression, PipelineDefaultObservableFoldOp.CountOp AS item -> item.expression, PipelineDefaultObservableFoldOp.FindOp AS item -> item.expression, PipelineDefaultObservableFoldOp.MaxOp AS item -> item.expression, PipelineDefaultObservableFoldOp.MinOp AS item -> item.expression, PipelineDefaultObservableFoldOp.SumOp AS item -> item.expression END), item, inner_zig))];
+        [TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, pipelineDefaultObservableFoldOp__expression(fold_op), item, inner_zig))];
     ELSE_IF (spec.expr == :f64) THEN
-        [TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, (MATCH fold_op START PipelineDefaultObservableFoldOp.AllOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AnyOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AverageOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.CountOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.FindOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.MaxOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.MinOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.SumOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AllOp AS item -> item.expression, PipelineDefaultObservableFoldOp.AnyOp AS item -> item.expression, PipelineDefaultObservableFoldOp.AverageOp AS item -> item.expression, PipelineDefaultObservableFoldOp.CountOp AS item -> item.expression, PipelineDefaultObservableFoldOp.FindOp AS item -> item.expression, PipelineDefaultObservableFoldOp.MaxOp AS item -> item.expression, PipelineDefaultObservableFoldOp.MinOp AS item -> item.expression, PipelineDefaultObservableFoldOp.SumOp AS item -> item.expression END), item, "f64"))];
+        [TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, pipelineDefaultObservableFoldOp__expression(fold_op), item, "f64"))];
     ELSE_IF (spec.expr == :pred) THEN
-        [runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, (MATCH fold_op START PipelineDefaultObservableFoldOp.AllOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AnyOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AverageOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.CountOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.FindOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.MaxOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.MinOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.SumOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AllOp AS item -> item.expression, PipelineDefaultObservableFoldOp.AnyOp AS item -> item.expression, PipelineDefaultObservableFoldOp.AverageOp AS item -> item.expression, PipelineDefaultObservableFoldOp.CountOp AS item -> item.expression, PipelineDefaultObservableFoldOp.FindOp AS item -> item.expression, PipelineDefaultObservableFoldOp.MaxOp AS item -> item.expression, PipelineDefaultObservableFoldOp.MinOp AS item -> item.expression, PipelineDefaultObservableFoldOp.SumOp AS item -> item.expression END), item)];
+        [runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, pipelineDefaultObservableFoldOp__expression(fold_op), item)];
     ELSE_IF (spec.expr == :item) THEN
         [Emittable{ Ident: COPY Ident{ name: COPY item, lowered_node_id: NIL, ownership_consumption: NIL } }];
     ELSE_IF (spec.expr == :none) THEN
@@ -783,7 +783,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       :always -> [call],
       :pred -> {
         MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE pred_mir = runtimeHost__range_with_fiber_rt(rtoc_self_view.host, "__rt_obs_${fid}", %() USE(fold_op, item, rtoc_self_view) -> runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, (MATCH fold_op START PipelineDefaultObservableFoldOp.AllOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AnyOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AverageOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.CountOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.FindOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.MaxOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.MinOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.SumOpMultiowned AS item -> item.expression, PipelineDefaultObservableFoldOp.AllOp AS item -> item.expression, PipelineDefaultObservableFoldOp.AnyOp AS item -> item.expression, PipelineDefaultObservableFoldOp.AverageOp AS item -> item.expression, PipelineDefaultObservableFoldOp.CountOp AS item -> item.expression, PipelineDefaultObservableFoldOp.FindOp AS item -> item.expression, PipelineDefaultObservableFoldOp.MaxOp AS item -> item.expression, PipelineDefaultObservableFoldOp.MinOp AS item -> item.expression, PipelineDefaultObservableFoldOp.SumOp AS item -> item.expression END), item));
+        MUTABLE pred_mir = runtimeHost__range_with_fiber_rt(rtoc_self_view.host, "__rt_obs_${fid}", %() USE(fold_op, item, rtoc_self_view) -> runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, pipelineDefaultObservableFoldOp__expression(fold_op), item));
         (IF (spec.transfers_item_on_success AND (published_item_type != NIL)) THEN
           [Emittable{ IfStmt: COPY IfStmt{ cond: COPY pred_mir, then_body: (TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY item, target: :call, target_alloc: :heap, move_guarded: TRUE }))) + [Emittable{ ExprStmt: COPY call }]), else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }]
         ELSE
@@ -1048,4 +1048,30 @@ END
 PUB FN runtimeHost__with_fiber_rt_call(self: RuntimeHost, arg0: String, arg1: FN() -> Any@multiowned) RETURNS Any@multiowned ->
   MUTABLE fn_value = self.with_fiber_rt;
   RETURN fn_value(arg0, arg1);
+END
+
+# Ruby asks `respond_to?(:expression)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN pipelineDefaultObservableFoldOp__expression(value: PipelineDefaultObservableFoldOp) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    PipelineDefaultObservableFoldOp.AllOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.AnyOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.AverageOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.CountOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.FindOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.MaxOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.MinOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.SumOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.AllOp AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.AnyOp AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.AverageOp AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.CountOp AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.FindOp AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.MaxOp AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.MinOp AS item -> RETURN COPY item.expression;,
+    PipelineDefaultObservableFoldOp.SumOp AS item -> RETURN COPY item.expression;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

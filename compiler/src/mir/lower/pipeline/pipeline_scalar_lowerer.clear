@@ -160,3 +160,29 @@ PUB FN pipelineScalarLowerer__pipeline_block_call(self: PipelineScalarLowerer, a
   MUTABLE fn_value = self.pipeline_block;
   RETURN fn_value(arg0, arg1);
 END
+
+# Ruby asks `respond_to?(:expression)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN pipelineMaterializedScalarOp__expression(value: PipelineMaterializedScalarOp) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    PipelineMaterializedScalarOp.CountOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.SumOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.AverageOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.MinOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.MaxOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.AnyOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.AllOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.FindOpMultiowned AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.CountOp AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.SumOp AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.AverageOp AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.MinOp AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.MaxOp AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.AnyOp AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.AllOp AS item -> RETURN COPY item.expression;,
+    PipelineMaterializedScalarOp.FindOp AS item -> RETURN COPY item.expression;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

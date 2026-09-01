@@ -210,3 +210,59 @@ FN castGenericDeclarationNodeToLocatable(value: GenericDeclarationNode) RETURNS 
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:name)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN declarationNode__name(value: DeclarationNode) RETURNS ?String ->
+  PARTIAL MATCH value START
+    DeclarationNode.VarDecl AS item -> RETURN COPY item.name;,
+    DeclarationNode.BindExpr AS item -> RETURN COPY item.name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:slot_size)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN declarationNode__slot_size(value: DeclarationNode) RETURNS ?Int64 ->
+  PARTIAL MATCH value START
+    DeclarationNode.VarDecl AS item -> RETURN COPY item.slot_size;,
+    DeclarationNode.BindExpr AS item -> RETURN COPY item.slot_size;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:symbol)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN declarationNode__symbol(value: DeclarationNode) RETURNS ?SymbolEntry@multiowned ->
+  PARTIAL MATCH value START
+    DeclarationNode.VarDecl AS item -> RETURN COPY item.symbol;,
+    DeclarationNode.BindExpr AS item -> RETURN COPY item.symbol;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:type)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN declarationNode__type(value: DeclarationNode) RETURNS ?Type ->
+  PARTIAL MATCH value START
+    DeclarationNode.VarDecl AS item -> RETURN COPY item.type;,
+    DeclarationNode.BindExpr AS item -> RETURN COPY item.type;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:value)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN declarationNode__value(value: DeclarationNode) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    DeclarationNode.VarDecl AS item -> RETURN COPY item.value;,
+    DeclarationNode.BindExpr AS item -> RETURN COPY item.value;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

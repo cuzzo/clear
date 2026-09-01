@@ -1758,7 +1758,7 @@ PUB FN loopFrameAnalysis__walk_stmt_mut(stmt: ?Stmt, schema_lookup: ?FN(String@s
   NIL;
 END
 PUB FN loopFrameAnalysis__process_loop_mut(MUTABLE loop_node: LoopNode, body: []Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, fn_nodes: {String}FunctionDef) RETURNS !Void ->
-  IF (MATCH loop_node START LoopNode.WhileLoop AS item -> item.tight, LoopNode.WhileBindLoop AS item -> item.tight, LoopNode.ForRange AS item -> item.tight, LoopNode.ForEach AS item -> item.tight END) THEN
+  IF UNWRAP (loopNode__tight(loop_node)) THEN
     RETURN;
   END
   MUTABLE local_facts = TRY (localBindingAnalysis__direct_loop_body_facts(body));
@@ -2741,4 +2741,18 @@ END
 PUB FN borrowChecker__schema_lookup_call(self: BorrowChecker, arg0: String@symbol) RETURNS ?TypeSchemaLookupResult ->
   MUTABLE fn_value = UNWRAP (self.schema_lookup);
   RETURN fn_value(arg0);
+END
+
+# Ruby asks `respond_to?(:tight)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN loopNode__tight(value: LoopNode) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    LoopNode.WhileLoop AS item -> RETURN COPY item.tight;,
+    LoopNode.WhileBindLoop AS item -> RETURN COPY item.tight;,
+    LoopNode.ForRange AS item -> RETURN COPY item.tight;,
+    LoopNode.ForEach AS item -> RETURN COPY item.tight;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

@@ -10943,3 +10943,15 @@ PUB FN autoUnifier__type_of_call(self: AutoUnifier, arg0: Locatable) RETURNS ?Au
   MUTABLE fn_value = self.type_of;
   RETURN fn_value(arg0);
 END
+
+# Ruby asks `respond_to?(:type)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN autoConstraintCollectorDeclarationNode__type(value: AutoConstraintCollectorDeclarationNode) RETURNS ?Type ->
+  PARTIAL MATCH value START
+    AutoConstraintCollectorDeclarationNode.VarDecl AS item -> RETURN COPY item.type;,
+    AutoConstraintCollectorDeclarationNode.BindExpr AS item -> RETURN COPY item.type;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

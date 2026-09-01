@@ -1894,7 +1894,7 @@ PUB FN mIRChecker__cleanup_source_owns_value?(MUTABLE self: MIRChecker, node: Le
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE init = mIRChecker__ownership_source_expr(rtoc_self_view, node.init);
-    IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40 = CAST((MATCH cleanup START MIRCheckerCleanup.Cleanup AS item -> item.cleanup_entry, MIRCheckerCleanup.ErrCleanup AS item -> item.cleanup_entry END) AS CleanupEntry);
+    IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40 = CAST(UNWRAP (mIRCheckerCleanup__cleanup_entry(cleanup)) AS CleanupEntry);
     cleanupEntry__match_as?(rtoc_local_receiver_40) } THEN
       RETURN TRUE;
     END
@@ -3908,6 +3908,18 @@ PUB FN emittable__tight(value: Emittable) RETURNS ?Bool ->
   PARTIAL MATCH value START
     Emittable.WhileStmt AS item -> RETURN COPY item.tight;,
     Emittable.ForStmt AS item -> RETURN COPY item.tight;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:cleanup_entry)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN mIRCheckerCleanup__cleanup_entry(value: MIRCheckerCleanup) RETURNS ?CleanupEntry@multiowned ->
+  PARTIAL MATCH value START
+    MIRCheckerCleanup.Cleanup AS item -> RETURN COPY item.cleanup_entry;,
+    MIRCheckerCleanup.ErrCleanup AS item -> RETURN COPY item.cleanup_entry;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
