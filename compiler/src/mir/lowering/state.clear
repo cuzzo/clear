@@ -18,9 +18,9 @@ PUB STRUCT StubInfo {
 
 STRUCT MIRLoweringInput {
   struct_schemas: {String@symbol}StructSchema@multiowned,
-  enum_schemas: {String@symbol}[]MIRLoweringSchemasEnumVariantsItem,
+  enum_schemas: {String@symbol}[]TypeEnumVariantsItem,
   union_schemas: {String@symbol}UnionSchema@multiowned,
-  schema_lookup: ?FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult,
+  schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult,
   lifecycle_registry: LifecycleRegistry@multiowned,
   fn_sigs: {String@symbol}FunctionSignature@multiowned,
   moved_guard_info: {String}{String}Bool,

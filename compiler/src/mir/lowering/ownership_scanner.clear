@@ -5,7 +5,7 @@ REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f66756e6374696f6e732e636c656172" AS f
 REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f736368656d615f72656769737472792e636c656172" AS schema_registry
 REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
 PUB STRUCT MIRLoweringOwnershipScanner {
-  schema_lookup: FN(MIRLoweringSchemasSchemaName) -> ?MIRLoweringSchemasSchemaLookupResult,
+  schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult,
   bindings: {String}CleanupEntry@multiowned,
   capture_map: {String}String,
   rename_map: {String}String,

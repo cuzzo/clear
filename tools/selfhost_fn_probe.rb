@@ -53,6 +53,17 @@ module SelfhostFnProbe
       if line.start_with?('REQUIRE')
         requires << line
         i += 1
+      elsif line =~ /^EXTERN /
+        # An EXTERN declaration is a type or symbol the Zig side provides; the
+        # probe needs it or codegen fails on an undeclared identifier.
+        start = i
+        if line.rstrip.end_with?(';') || line.include?('}')
+          i += 1
+        else
+          i += 1 until i >= lines.length || lines[i].strip == '}' || lines[i].rstrip.end_with?(';')
+          i += 1
+        end
+        types << lines[start...i].join
       elsif line =~ /^(?:PUB |PRIVATE )?(?:STRUCT|UNION|ENUM) /
         start = i
         if line.rstrip.end_with?('}')
@@ -124,10 +135,12 @@ module SelfhostFnProbe
         path = File.join(SRC, rel)
         cache[path] ||= dissect(path)
         cache[path][1].each do |d|
-          name = d[/\A(?:PUB )?(?:STRUCT|UNION|ENUM) (\w+)/, 1]
+          # EXTERN FN declarations repeat across files too, so dedupe on
+          # whatever a declaration names, not just on struct/union/enum.
+          name = d[/\A(?:PUB |EXTERN )*(?:STRUCT|UNION|ENUM|FN) ([\w?!]+)/, 1]
           next if name && !seen.add?(name)
 
-          out << (d.start_with?('PUB ') ? d : "PUB #{d}")
+          out << (d.start_with?('PUB ', 'EXTERN') ? d : "PUB #{d}")
         end
       end
       out.join
@@ -209,16 +222,26 @@ module SelfhostFnProbe
       source = File.join(dir, 'probe.clear')
       File.write(source, source_text)
       env = { 'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8', 'CLEAR_EXTRA_NATIVE_DIRS' => SRC }
-      if stage == :clear
+      case stage
+      when :clear
         env['CLEAR_TRANSPILE_ONLY'] = '1'
         env['CLEAR_DISABLE_BUILD_ZIG'] = '1'
+      when :zig, :binary
+        # no flags: emit Zig, compile it, and link an executable
       end
       cmd = [File.join(ROOT, 'clear'), 'build', source, '-o', File.join(dir, 'probe'),
              '--no-stack-check', '--main-tier', 'service',
              *ParserCompat.package_flags(SRC), *Array(extra_pkg)]
       out, err, status = Open3.capture3(env, *cmd, chdir: ROOT)
-      msg = "#{out}\n#{err}"[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
-      [status.success?, msg.to_s[0, 160]]
+      text = "#{out}\n#{err}"
+      msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
+      # Not every failure announces itself with one of those banners -- a Ruby
+      # backtrace out of the compiler, a Zig error, an ENOSPC. Fall back to the
+      # last lines that are not warnings, so no failure lands without a reason.
+      msg ||= text.lines.grep(/Error|error/).reject { |l| l.include?('[Warning]') }
+                  .reject { |l| l =~ /\A\s*(from|\t)/ }.last.to_s.strip
+      msg = text.lines.reject { |l| l.include?('[Warning]') || l.strip.empty? }.last(2).join(' ').strip if msg.empty?
+      [status.success?, msg.to_s.gsub(/\e\[[0-9;]*m/, '')[0, 200]]
     end
   end
 
