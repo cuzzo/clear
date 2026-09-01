@@ -8322,7 +8322,7 @@ PRIVATE FN mIRLowering__mir_ident_names(self: MIRLowering, node: ?Emittable) RET
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF UNWRAP (node) IS_A Ident AS ident THEN
       RETURN CAST([CAST(ident.name AS String)] AS []String);
-    ELSE_IF node IS_A MIRBlockExpr AS mir_block_expr THEN
+    ELSE_IF UNWRAP (node) IS_A MIRBlockExpr AS mir_block_expr THEN
       MUTABLE local_names = (TRY (blockExpr__body(mir_block_expr))).each_with_object(Set[], %(stmt, names: [Set]Any) -> {
     IF stmt IS_A AllocMark THEN
           &names.insert(COPY CAST(stmt.name() AS String));
@@ -9458,7 +9458,7 @@ PRIVATE FN mIRLowering__ownership_consumed_arg_names(self: MIRLowering, arg: ?Em
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF UNWRAP (arg) IS_A Ident AS ident THEN
       RETURN CAST([CAST(ident.name AS String)] AS []String);
-    ELSE_IF arg IS_A OwnedSlice AS owned_slice THEN
+    ELSE_IF UNWRAP (arg) IS_A OwnedSlice AS owned_slice THEN
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, ownedSlice__expr(owned_slice));
     ELSE_IF arg IS_A MIRCast AS mir_cast THEN
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, cast__expr(mir_cast));
