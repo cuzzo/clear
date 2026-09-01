@@ -14514,3 +14514,9 @@ END
 PUB FN pipelineShardContext__with_frame_allocations(self: PipelineShardContext, key_allocates_frame: Bool, body_allocates_frame: Bool) RETURNS PipelineShardContext ->
   RETURN PipelineShardContext{ map_var: COPY self.map_var, key_expr: COPY self.key_expr, shard_count: self.shard_count, auto_detected: self.auto_detected, key_allocates_frame: key_allocates_frame, body_allocates_frame: body_allocates_frame };
 END
+PUB FN capabilityWrap__multiowned?(self: CapabilityWrap) RETURNS Bool ->
+  RETURN (self.ownership == :multiowned);
+END
+PUB FN capabilityWrap__locked_sync?(self: CapabilityWrap) RETURNS Bool ->
+  RETURN ((self.sync == :locked) OR (self.sync == :write_locked));
+END

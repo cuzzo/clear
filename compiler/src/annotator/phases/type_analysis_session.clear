@@ -19295,7 +19295,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       node.storage = node.value.storage();
     END
     IF type EXISTS AS type_value THEN
-      IF TRY (type_value__any_rc?(type_value)) THEN
+      IF TRY (type__any_rc?(type_value)) THEN
       IF typeAnalysisSession__current_fn_ctx(rtoc_self_view) != NIL THEN
             MUTABLE rtoc_mutable_receiver_473 = (typeAnalysisSession__current_fn_ctx(rtoc_self_view));
             functionContext__mark_runtime_used_mut(&rtoc_mutable_receiver_473);

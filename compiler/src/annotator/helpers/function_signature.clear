@@ -811,6 +811,9 @@ END
 # there is one, otherwise build one from the declaration -- then sync the facts
 # either way. `function_def_lifetime_paths` is `ruby-to-clear: skip`, so the
 # lifetime is left unset here as it is at every other construction site.
+FN castTypeToTypeTypeInput__function_signature(value: Type) RETURNS TypeTypeInput ->
+  RETURN TypeTypeInput{ Type: COPY value };
+END
 PUB FN functionSignature__from_function_def(fn: FunctionDef) RETURNS !FunctionSignature@multiowned ->
   MUTABLE memoized: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY TRY (aST__full_type_mut(Locatable{ FunctionDef: COPY fn })) });
   MUTABLE sig: ?FunctionSignature@multiowned = NIL;
