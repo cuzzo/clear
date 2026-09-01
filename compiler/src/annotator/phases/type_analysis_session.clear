@@ -10739,18 +10739,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__resolve_index_op(self: TypeAnalysisSession, type_info: Type, op: String@symbol) RETURNS !?{Any@multiowned}Any@multiowned
+PRIVATE FN typeAnalysisSession__resolve_index_op(self: TypeAnalysisSession, type_info: Type, op: String@symbol) RETURNS !?FunctionSignature@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF type__promise_list?(type_info) THEN
       RETURN NIL;
     END
-    RETURN (IF (CAST({:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}} AS {Any@multiowned}Any@multiowned))[TRY (type__dispatch_key(type_info))] != NIL THEN
-    (((CAST({:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}} AS {Any@multiowned}Any@multiowned))[TRY (type__dispatch_key(type_info))])?)[op]
-    ELSE
-    NIL
-    END);
+    IF TRY (type__dispatch_key(type_info)) EXISTS AS rtoc_kind THEN
+      RETURN TRY (intrinsicRegistry__lookup_single(:index_ops, "${CAST(rtoc_kind AS String)}_${CAST(op AS String)}"));
+    END
+    RETURN NIL;
 }
 END
 PRIVATE FN typeAnalysisSession__resolve_variant_access(self: TypeAnalysisSession, MUTABLE node: GetField) RETURNS !?Bool
@@ -15941,11 +15940,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.container_borrow = TRUE;
       RETURN NIL;
     END
-    MUTABLE op: ?{Any@multiowned}Any@multiowned = TRY (typeAnalysisSession__resolve_index_op(rtoc_self_view, target_type_info, :get));
+    MUTABLE op: ?FunctionSignature@multiowned = TRY (typeAnalysisSession__resolve_index_op(rtoc_self_view, target_type_info, :get));
     IF op EXISTS AS op_value THEN
       MUTABLE op_value_mutable = COPY op_value;
-      MUTABLE result_type = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_399 = (TRY (intrinsicRegistry__to_return_def(ruby_wrap_optional_Any_multiowned_ReturnDescriptor(op_value_mutable[:return_type]))));
-      TRY (functionReturn__resolve(rtoc_local_receiver_399, target_type_info, ( { MUTABLE rtoc_empty_list_398: []Locatable = List[]; rtoc_empty_list_398 } ))) };
+      MUTABLE result_type = TRY (functionReturn__resolve(UNWRAP (op_value_mutable.facts.return_def), target_type_info, ( { MUTABLE rtoc_empty_list_398: []Locatable = List[]; rtoc_empty_list_398 } )));
       MUTABLE navigation = ((node.target IS_A OptionalUnwrap AND node.target.safe_navigation?()) OR implicit_safe_nav);
       IF (navigation AND !(type__optional?(result_type))) THEN
         result_type = TRY (type__optional_of(TypeTypeInput{ Type: COPY result_type }));
