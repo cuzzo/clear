@@ -6619,7 +6619,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (" " $+ ((tags_value |> SELECT "#${_}").join(" ")));
 }
 END
-PRIVATE FN mIRLowering__build_let_ast_map(self: MIRLowering, lets: []LetBinding, base: {String}LetBinding) RETURNS !{String}LetBinding
+PRIVATE FN mIRLowering__build_let_ast_map(self: MIRLowering, lets: []LetBinding, base: {String}LetBinding = {}) RETURNS !{String}LetBinding
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12515,7 +12515,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
   RETURN blk();
 }
 END
-PRIVATE FN mIRLowering__capture_ownership_mirror_nodes(self: MIRLowering, caps: FiberCtxBuilderResult, analysis: ?CaptureAnalysis, receiver: String, close_plans: {String}ResourceClosePlan) RETURNS ![]Emittable
+PRIVATE FN mIRLowering__capture_ownership_mirror_nodes(self: MIRLowering, caps: FiberCtxBuilderResult, analysis: ?CaptureAnalysis, receiver: String, close_plans: {String}ResourceClosePlan = {}) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12569,7 +12569,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN specs |> SELECT:? TRY (captureSpec__cleanup_mir_for(_, receiver)) |> WHERE _ != NIL;
 }
 END
-PRIVATE FN mIRLowering__fiber_capture_source_overrides(self: MIRLowering, analysis: ?CaptureAnalysis, base: {String}String) RETURNS !{String}String
+PRIVATE FN mIRLowering__fiber_capture_source_overrides(self: MIRLowering, analysis: ?CaptureAnalysis, base: {String}String = {}) RETURNS !{String}String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

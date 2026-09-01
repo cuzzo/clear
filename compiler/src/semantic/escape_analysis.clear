@@ -1471,7 +1471,7 @@ END
 PUB FN escapeAnalysis__symbol_for_name(facts: FunctionFacts, name: String) RETURNS ?SymbolEntry@multiowned ->
   RETURN KEEP facts.symbols[name];
 END
-PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionBodySummary = NIL, hoist_bindings: []VarDecl) RETURNS !FunctionFacts ->
+PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionBodySummary = NIL, hoist_bindings: []VarDecl = []) RETURNS !FunctionFacts ->
   MUTABLE symbols: {String}SymbolEntry@multiowned = {};
   MUTABLE binding_values: {String}[]Locatable = {};
   MUTABLE return_values: []Locatable = ( { MUTABLE rtoc_empty_list_20: []Locatable = List[]; rtoc_empty_list_20 } );
