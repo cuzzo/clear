@@ -487,7 +487,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (right.length() == 0) THEN
       RETURN left.codepointCount();
     END
-    MUTABLE previous = TRY (effectSet__to_a((0 ..= right.codepointCount())));
+    MUTABLE previous: []Int64 = List[];
+    MUTABLE rtoc_previous_seed = 0;
+    WHILE rtoc_previous_seed <= right.codepointCount() DO
+      &previous.append(rtoc_previous_seed);
+      rtoc_previous_seed = rtoc_previous_seed + 1;
+    END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < left.length() DO
       MUTABLE current = [(rtoc_idx + 1)];
@@ -575,7 +580,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (b.length() == 0) THEN
       RETURN a.codepointCount();
     END
-    MUTABLE prev = TRY (effectSet__to_a((0 ..= b.codepointCount())));
+    MUTABLE prev: []Int64 = List[];
+    MUTABLE rtoc_prev_seed = 0;
+    WHILE rtoc_prev_seed <= b.codepointCount() DO
+      &prev.append(rtoc_prev_seed);
+      rtoc_prev_seed = rtoc_prev_seed + 1;
+    END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < a.length() DO
       MUTABLE curr = [(rtoc_idx + 1)];
@@ -3092,7 +3102,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (n == target) THEN
         RETURN TRUE;
       END
-      queue = ruby_array_concat_String__capability_audit_session(queue, CAST(TRY (effectSet__to_a((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[n?] OR_ELSE Set[])))) AS []String));
+      queue = ruby_array_concat_String__capability_audit_session(queue, CAST(((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[n?] OR_ELSE Set[])) |> SELECT COPY _) AS []String));
     END
     RETURN FALSE;
 }
@@ -3141,7 +3151,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
     END
     MUTABLE visited = Set[];
-    MUTABLE queue = TRY (effectSet__to_a((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[_] OR_ELSE Set[]))));
+    MUTABLE queue = ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[_] OR_ELSE Set[])) |> SELECT COPY _);
     WHILE !(queue.empty?()) DO
         MUTABLE callee = &queue.shift();
         IF visited.contains?(callee) THEN
@@ -3559,7 +3569,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF forward.contains?(start_s) THEN
       &scc.append(start_s);
     END
-    RETURN TRY (effectSet__to_a(scc));
+    RETURN (scc |> SELECT COPY _);
 }
 END
 PRIVATE FN capabilityAuditSession__compute_reachable(self: CapabilityAuditSession, graph: {String}[Set]String, start_value: String) RETURNS ![Set]String
@@ -3567,14 +3577,14 @@ PRIVATE FN capabilityAuditSession__compute_reachable(self: CapabilityAuditSessio
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen = Set[];
-    MUTABLE queue = TRY (effectSet__to_a(((graph[start_value] OR_ELSE Set[]))));
+    MUTABLE queue = (((graph[start_value] OR_ELSE Set[])) |> SELECT COPY _);
     WHILE !(queue.empty?()) DO
       MUTABLE n = COPY CAST((&queue.shift()) AS String);
       IF seen.contains?(n) THEN
         CONTINUE;
       END
       &seen.insert(n);
-      &queue.concat(TRY (effectSet__to_a(((graph[n] OR_ELSE Set[])))));
+      &queue.concat((((graph[n] OR_ELSE Set[])) |> SELECT COPY _));
     END
     RETURN seen;
 }
@@ -3584,7 +3594,7 @@ PRIVATE FN capabilityAuditSession__reachable_from_self?(MUTABLE self: Capability
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE visited = Set[];
-    MUTABLE queue = TRY (effectSet__to_a((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[start_value] OR_ELSE Set[]))));
+    MUTABLE queue = ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[start_value] OR_ELSE Set[])) |> SELECT COPY _);
     WHILE !(queue.empty?()) DO
       MUTABLE callee = &queue.shift();
       IF visited.contains?(callee) THEN
@@ -3594,7 +3604,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (callee == start_value) THEN
         RETURN TRUE;
       END
-      &queue.concat(TRY (effectSet__to_a((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[callee] OR_ELSE Set[])))));
+      &queue.concat(((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[callee] OR_ELSE Set[])) |> SELECT COPY _));
     END
     RETURN FALSE;
 }

@@ -1505,7 +1505,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (right.length() == 0) THEN
       RETURN left.codepointCount();
     END
-    MUTABLE previous = TRY (effectSet__to_a((0 ..= right.codepointCount())));
+    MUTABLE previous: []Int64 = List[];
+    MUTABLE rtoc_previous_seed = 0;
+    WHILE rtoc_previous_seed <= right.codepointCount() DO
+      &previous.append(rtoc_previous_seed);
+      rtoc_previous_seed = rtoc_previous_seed + 1;
+    END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < left.length() DO
       MUTABLE current = [(rtoc_idx + 1)];
@@ -1586,7 +1591,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (b.length() == 0) THEN
       RETURN a.codepointCount();
     END
-    MUTABLE prev = TRY (effectSet__to_a((0 ..= b.codepointCount())));
+    MUTABLE prev: []Int64 = List[];
+    MUTABLE rtoc_prev_seed = 0;
+    WHILE rtoc_prev_seed <= b.codepointCount() DO
+      &prev.append(rtoc_prev_seed);
+      rtoc_prev_seed = rtoc_prev_seed + 1;
+    END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < a.length() DO
       MUTABLE curr = [(rtoc_idx + 1)];
@@ -4529,7 +4539,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE others = (families - ([:ATOMIC] |> DISTINCT _));
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :LIFETIME_RETURNS_REQUIRES_FAMILY_CONFLICT }, [], {:fn: node.name, :name: root_name, :others: (TRY (effectSet__to_a(others))).join(" | "), :others_label: (TRY (effectSet__to_a(others))).join(" / ")}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node, TypeAnalysisCodeOrMessage{ SymbolValue: :LIFETIME_RETURNS_REQUIRES_FAMILY_CONFLICT }, [], {:fn: node.name, :name: root_name, :others: ((others |> SELECT COPY _)).join(" | "), :others_label: ((others |> SELECT COPY _)).join(" / ")}));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -11179,7 +11189,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF fn?.effects THEN
         MUTABLE has_io = (fn.effects.contains?(:BLOCKING) OR fn.effects.contains?(symbol("EXTERN")));
         IF has_io THEN
-          TRY (typeAnalysisSession__error_mut(rtoc_self_view, test_that, TypeAnalysisCodeOrMessage{ SymbolValue: :STRICT_TEST_HAS_IO_EFFECTS }, [], {:name: name, :effects: (TRY (effectSet__to_a(fn.effects))).join(", ")}));
+          TRY (typeAnalysisSession__error_mut(rtoc_self_view, test_that, TypeAnalysisCodeOrMessage{ SymbolValue: :STRICT_TEST_HAS_IO_EFFECTS }, [], {:name: name, :effects: ((fn.effects |> SELECT COPY _)).join(", ")}));
         END
       END
       FOR _ IN ((TRY (typeAnalysisSession__function_call_graph(rtoc_self_view))[name] OR_ELSE List[])) DO

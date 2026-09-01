@@ -1385,11 +1385,11 @@ PRIVATE FN ownershipDataflow__collect_bg_body_gives(self: OwnershipDataflow, bg_
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (effectSet__to_a((IF bg_node.capture_analysis() != NIL THEN
+    RETURN (((IF bg_node.capture_analysis() != NIL THEN
       (bg_node.capture_analysis()).move_mark_names
     ELSE
       NIL
-    END))) OR_ELSE List[]);
+    END) |> SELECT COPY _) OR_ELSE List[]);
 }
 END
 PRIVATE FN ownershipDataflow__copy_type?(self: OwnershipDataflow, MUTABLE ident: Identifier) RETURNS !Bool

@@ -86,8 +86,8 @@ PRIVATE FN concurrencyChecks__check_naked_nested_with_mut(with_blocks: []WithBlo
       IF names.empty?() THEN
           RETURN;
       END
-      MUTABLE suggested_names = TRY (effectSet__to_a(((outer_lock_names + names))));
-      error_handler(inner, "Naked nested WITH on a different binding (${(TRY (effectSet__to_a(names))).join(", ")}) while ${(outer_lock_names |> SELECT COPY _).join(", ")} is held \u{2014} symmetric callers may deadlock. Use the multi-resource form for safe ordering:\n    WITH EXCLUSIVE ${suggested_names.join(", ")} AS (${(suggested_names |> SELECT ("i_" $+ _)).join(", ")}) { ... }");
+      MUTABLE suggested_names = (((outer_lock_names + names)) |> SELECT COPY _);
+      error_handler(inner, "Naked nested WITH on a different binding (${((names |> SELECT COPY _)).join(", ")}) while ${(outer_lock_names |> SELECT COPY _).join(", ")} is held \u{2014} symmetric callers may deadlock. Use the multi-resource form for safe ordering:\n    WITH EXCLUSIVE ${suggested_names.join(", ")} AS (${(suggested_names |> SELECT ("i_" $+ _)).join(", ")}) { ... }");
     rtoc_idx = rtoc_idx + 1;
   END
   rubyToClearVoid__concurrency_checks()
