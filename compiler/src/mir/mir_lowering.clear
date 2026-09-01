@@ -3568,12 +3568,12 @@ FN mIRLowering__bg_stream_boundary_stmt?(self: MIRLowering, stmt: ?Locatable) RE
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE found: Bool = FALSE;
-    TRY (aST__each_bg_block_in_stmt(stmt, %(bg_value: BgNode) -> {
+    aST__each_bg_block_in_stmt(stmt, %(bg_value: BgNode) -> {
     IF bg_value IS_A BgStreamBlock AS bg_stream_block THEN
         found = TRUE;
     END
     rubyToClearVoid__mir_lowering()
-    }));
+    });
     RETURN found;
 }
 END

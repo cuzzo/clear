@@ -15,7 +15,7 @@ PUB STRUCT MIRLoweringOwnershipScanner {
 PUB UNION MIRLoweringOwnershipScannerScanRoot { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, ArrayValue: []Locatable, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
 PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRLoweringOwnershipScanner, stmt: Locatable) RETURNS ![]String ->
   MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
-  TRY (aST__each_bg_block_in_stmt(stmt, %(bg_value: BgNode) USE(MUTABLE names, self) -> {
+  aST__each_bg_block_in_stmt(stmt, %(bg_value: BgNode) USE(MUTABLE names, self) -> {
   MUTABLE body_names: [Set]String = Set[];
   aST__each_locatable(bg_value.body(), %(node: Locatable) USE(MUTABLE body_names) -> {
     IF node IS_A Identifier AS identifier THEN
@@ -41,7 +41,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
     rtoc_idx = rtoc_idx + 1;
   END
   rubyToClearVoid__ownership_scanner()
-  }));
+  });
   RETURN CAST((names |> DISTINCT _) AS []String);
 END
 PUB FN mIRLoweringOwnershipScanner__collect_explicit_move_roots(self: MIRLoweringOwnershipScanner, node: Locatable) RETURNS ![]String ->
@@ -57,12 +57,12 @@ PUB FN mIRLoweringOwnershipScanner__collect_explicit_move_roots(self: MIRLowerin
   rubyToClearVoid__ownership_scanner()
   });
   collect(node);
-  TRY (aST__each_bg_block_in_stmt(node, %(bg_value: BgNode) USE(collect) -> {
+  aST__each_bg_block_in_stmt(node, %(bg_value: BgNode) USE(collect) -> {
   IF bg_value.body() THEN
       collect(bg_value.body());
   END
   rubyToClearVoid__ownership_scanner()
-  }));
+  });
   RETURN CAST((names |> DISTINCT _) AS []String);
 END
 PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwnershipScanner, stmt: Locatable) RETURNS ![]String ->

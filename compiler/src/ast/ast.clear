@@ -14406,3 +14406,104 @@ END
 PUB FN getField__name(self: GetField) RETURNS String ->
   RETURN (locatable__name(self.target) OR_ELSE "");
 END
+
+# Ruby yields every BG block reachable through an expression WITHOUT descending
+# into a BG body -- the boundary is the point of the walk.
+PUB FN aST__expr_each_bg_block_shallow(expr: ?Locatable, blk: FN(BgNode) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF expr EXISTS AS rtoc_expr THEN
+    IF rtoc_expr IS_A BgBlock AS rtoc_bg THEN
+      blk(BgNode{ BgBlock: COPY rtoc_bg });
+      RETURN;
+    END
+    IF rtoc_expr IS_A BgStreamBlock AS rtoc_bg_stream THEN
+      blk(BgNode{ BgStreamBlock: COPY rtoc_bg_stream });
+      RETURN;
+    END
+    IF rtoc_expr IS_A FuncCall AS rtoc_call THEN
+      FOR rtoc_arg IN rtoc_call.args DO
+        aST__expr_each_bg_block_shallow(rtoc_arg, blk);
+      END
+      RETURN;
+    END
+    IF rtoc_expr IS_A MethodCall AS rtoc_method THEN
+      aST__expr_each_bg_block_shallow(rtoc_method.object, blk);
+      FOR rtoc_arg IN rtoc_method.args DO
+        aST__expr_each_bg_block_shallow(rtoc_arg, blk);
+      END
+      RETURN;
+    END
+    IF rtoc_expr IS_A StructLit AS rtoc_struct THEN
+      FOR rtoc_key IN rtoc_struct.fields.keys() DO
+        aST__expr_each_bg_block_shallow(rtoc_struct.fields[rtoc_key], blk);
+      END
+      RETURN;
+    END
+    IF rtoc_expr IS_A UnionVariantLit AS rtoc_variant THEN
+      FOR rtoc_key IN rtoc_variant.fields.keys() DO
+        aST__expr_each_bg_block_shallow(rtoc_variant.fields[rtoc_key], blk);
+      END
+      RETURN;
+    END
+    IF rtoc_expr IS_A ListLit AS rtoc_list THEN
+      FOR rtoc_item IN rtoc_list.items DO
+        aST__expr_each_bg_block_shallow(rtoc_item, blk);
+      END
+      RETURN;
+    END
+    IF rtoc_expr IS_A HashLit AS rtoc_hash THEN
+      FOR rtoc_pair IN rtoc_hash.pairs DO
+        aST__expr_each_bg_block_shallow(rtoc_pair._1, blk);
+        aST__expr_each_bg_block_shallow(rtoc_pair._2, blk);
+      END
+      RETURN;
+    END
+    IF rtoc_expr IS_A BinaryOp AS rtoc_binary THEN
+      aST__expr_each_bg_block_shallow(rtoc_binary.left, blk);
+      aST__expr_each_bg_block_shallow(rtoc_binary.right, blk);
+      RETURN;
+    END
+  END
+END
+PUB FN aST__each_bg_block_in_stmt(stmt: Locatable, blk: FN(BgNode) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  IF stmt IS_A BgBlock AS rtoc_bg THEN
+    blk(BgNode{ BgBlock: COPY rtoc_bg });
+    RETURN;
+  END
+  IF stmt IS_A BgStreamBlock AS rtoc_bg_stream THEN
+    blk(BgNode{ BgStreamBlock: COPY rtoc_bg_stream });
+    RETURN;
+  END
+  IF stmt IS_A VarDecl AS rtoc_var_decl THEN
+    aST__expr_each_bg_block_shallow(rtoc_var_decl.value, blk);
+    RETURN;
+  END
+  IF stmt IS_A BindExpr AS rtoc_bind THEN
+    aST__expr_each_bg_block_shallow(rtoc_bind.value, blk);
+    RETURN;
+  END
+  IF stmt IS_A Assignment AS rtoc_assign THEN
+    aST__expr_each_bg_block_shallow(rtoc_assign.value, blk);
+    RETURN;
+  END
+  IF stmt IS_A DestructuringAssignment AS rtoc_destructure THEN
+    aST__expr_each_bg_block_shallow(rtoc_destructure.value, blk);
+    RETURN;
+  END
+  IF stmt IS_A ReturnNode AS rtoc_return THEN
+    aST__expr_each_bg_block_shallow(rtoc_return.value, blk);
+    RETURN;
+  END
+  IF stmt IS_A FuncCall AS rtoc_call THEN
+    FOR rtoc_arg IN rtoc_call.args DO
+      aST__expr_each_bg_block_shallow(rtoc_arg, blk);
+    END
+    RETURN;
+  END
+  IF stmt IS_A MethodCall AS rtoc_method THEN
+    aST__expr_each_bg_block_shallow(rtoc_method.object, blk);
+    FOR rtoc_arg IN rtoc_method.args DO
+      aST__expr_each_bg_block_shallow(rtoc_arg, blk);
+    END
+    RETURN;
+  END
+END
