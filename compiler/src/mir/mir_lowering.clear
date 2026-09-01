@@ -3045,10 +3045,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &rtoc_mutable_block_param_65.clear();
       &rtoc_mutable_block_param_65.merge(TRY (mIRLowering__append_nested_ownership_transfers_for_mir_body(rtoc_self_view, rtoc_mutable_block_param_65.body(), inherited_alloc_names, inherited_guarded_names, parent_state)));
       END
-      mIRLowering__each_mir_expr_child(rtoc_self_view, expr_value, %(child: Emittable) USE(inherited_alloc_names, inherited_guarded_names, parent_state, rtoc_self_view) -> {
+      TRY (mIRLowering__each_mir_expr_child(rtoc_self_view, expr_value, %(child: Emittable) USE(inherited_alloc_names, inherited_guarded_names, parent_state, rtoc_self_view) -> {
     TRY (mIRLowering__finalize_nested_mir_expr_bodies_mut(rtoc_self_view, child, inherited_alloc_names, inherited_guarded_names, parent_state));
     rubyToClearVoid__mir_lowering()
-      });
+      }));
       NIL;
     ELSE
       RETURN;
@@ -7028,21 +7028,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__each_mir_expr_child(self: MIRLowering, node: Emittable, blk: FN(Emittable) -> Void) RETURNS Void
+PRIVATE FN mIRLowering__each_mir_expr_child(self: MIRLowering, node: Emittable, blk: FN(Emittable) -> Void) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(respondsTo?(node.class(), "members")) THEN
-      IF mIRLowering__replaceable_t_struct?(rtoc_self_view, node) THEN
-        FOR rtoc_each_val IN node.child_exprs() DO
-    blk(rtoc_each_val);
-        END
-      END
-      RETURN;
-    END
-    FOR _ IN node.class().members DO
-    MUTABLE value = node[_];
-    mIRLowering__each_mir_expr_in_value(rtoc_self_view, value, blk);
+    FOR rtoc_child IN TRY (emittable__expr_children(node)) DO
+    mIRLowering__each_mir_expr_in_value(rtoc_self_view, rtoc_child, blk);
     END
     NIL;
 }
@@ -7729,7 +7720,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ruby_array_concat_Emittable__mir_lowering(prefix, child_prefix);
     rtoc_idx = rtoc_idx + 1;
     END
-    mIRLowering__each_mir_expr_child(rtoc_self_view, expr, %(child: Emittable) USE(expr, MUTABLE prefix, result_children, rtoc_self_view) -> {
+    TRY (mIRLowering__each_mir_expr_child(rtoc_self_view, expr, %(child: Emittable) USE(expr, MUTABLE prefix, result_children, rtoc_self_view) -> {
     IF result_children |> ANY _.equal?(child) THEN
         RETURN;
     END
@@ -7737,7 +7728,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (mIRLowering__replace_mir_expr_child_mut(rtoc_self_view, expr, child, other_normalized));
     ruby_array_concat_Emittable__mir_lowering(prefix, other_prefix);
     rubyToClearVoid__mir_lowering()
-    });
+    }));
     RETURN prefix;
 }
 END
@@ -7784,12 +7775,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, CAST(hoisted AS []Emittable));
       RETURN CAST(Tuple{prefix, ident} AS Tuple<[]Emittable, Emittable>);
     END
-    mIRLowering__each_mir_expr_child(rtoc_self_view, expr, %(child: Emittable) USE(expr, MUTABLE prefix, rtoc_self_view) -> {
+    TRY (mIRLowering__each_mir_expr_child(rtoc_self_view, expr, %(child: Emittable) USE(expr, MUTABLE prefix, rtoc_self_view) -> {
     MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(rtoc_self_view, child, mIRLowering__consumes_owned_children?(rtoc_self_view, expr)));
     TRY (mIRLowering__replace_mir_expr_child_mut(rtoc_self_view, expr, child, normalized));
     ruby_array_concat_Emittable__mir_lowering(prefix, child_prefix);
     rubyToClearVoid__mir_lowering()
-    });
+    }));
     RETURN CAST(Tuple{prefix, expr} AS Tuple<[]Emittable, Emittable>);
 }
 END

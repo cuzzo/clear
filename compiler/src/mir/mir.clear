@@ -16112,7 +16112,555 @@ PUB FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EF
   END
   RETURN ownershipEffect__none();
 END
-
+# Ruby walks a MIR node's Struct members and yields each value that answers
+# `expr?`, descending arrays. A T::Struct node has props, not members, so
+# Ruby yields nothing there -- except RegistryCall, the one node whose
+# children can actually be replaced. Both decisions are per node type, so
+# they resolve here rather than at every walk.
+PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS REENTRANT ->
+  MUTABLE out: []Emittable = List[];
+  IF value IS_A FnDef AS item THEN
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A MIRStructDef AS item THEN
+    IF item.methods EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A FieldDef AS item THEN
+    IF item.default EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A UnionTypeDef AS item THEN
+    IF item.methods EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A ModuleNamespace AS item THEN
+    FOR rtoc_c IN item.items DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A TestDef AS item THEN
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A Let AS item THEN
+    &out.append(COPY item.init);
+    RETURN out;
+  END
+  IF value IS_A Set AS item THEN
+    &out.append(COPY item.target);
+    &out.append(COPY item.value);
+    RETURN out;
+  END
+  IF value IS_A DestructureSet AS item THEN
+    FOR rtoc_c IN item.targets DO &out.append(COPY rtoc_c); END
+    &out.append(COPY item.value);
+    RETURN out;
+  END
+  IF value IS_A ReassignWithCleanup AS item THEN
+    &out.append(COPY item.value);
+    RETURN out;
+  END
+  IF value IS_A ResourceClose AS item THEN
+    &out.append(COPY item.target);
+    RETURN out;
+  END
+  IF value IS_A IfStmt AS item THEN
+    &out.append(COPY item.cond);
+    FOR rtoc_c IN item.then_body DO &out.append(COPY rtoc_c); END
+    IF item.else_body EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A IfBindStmt AS item THEN
+    FOR rtoc_c IN item.then_body DO &out.append(COPY rtoc_c); END
+    IF item.else_body EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A WhileStmt AS item THEN
+    &out.append(COPY item.cond);
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    IF item.update EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A ForStmt AS item THEN
+    &out.append(COPY item.iter);
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A ScopeBlock AS item THEN
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A SwitchStmt AS item THEN
+    &out.append(COPY item.subject);
+    IF item.default_body EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A UnionMatchStmt AS item THEN
+    &out.append(COPY item.subject);
+    IF item.default_body EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A IfChain AS item THEN
+    IF item.default_body EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A ReturnStmt AS item THEN
+    IF item.value EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A BreakStmt AS item THEN
+    IF item.value EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A BreakExpr AS item THEN
+    IF item.value EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A AssertStmt AS item THEN
+    &out.append(COPY item.cond);
+    RETURN out;
+  END
+  IF value IS_A AssertRaisesCheck AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A DebugOnly AS item THEN
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A Sort AS item THEN
+    &out.append(COPY item.items_expr);
+    &out.append(COPY item.key_a);
+    &out.append(COPY item.key_b);
+    RETURN out;
+  END
+  IF value IS_A SoaFieldAccess AS item THEN
+    &out.append(COPY item.soa_expr);
+    RETURN out;
+  END
+  IF value IS_A TryOrPanic AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A IndexInsert AS item THEN
+    &out.append(COPY item.map);
+    &out.append(COPY item.key_expr);
+    &out.append(COPY item.value_expr);
+    RETURN out;
+  END
+  IF value IS_A BatchWindowPush AS item THEN
+    &out.append(COPY item.item_expr);
+    &out.append(COPY item.value_expr);
+    RETURN out;
+  END
+  IF value IS_A BatchWindowFlush AS item THEN
+    &out.append(COPY item.value_expr);
+    RETURN out;
+  END
+  IF value IS_A ExprStmt AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A DiscardOwned AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A MIRBgBlock AS item THEN
+    FOR rtoc_c IN item.run_body DO &out.append(COPY rtoc_c); END
+    IF item.fsm_structure EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A StreamSpawn AS item THEN
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A StreamYield AS item THEN
+    &out.append(COPY item.value);
+    RETURN out;
+  END
+  IF value IS_A CapabilityLockTarget AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A CapabilityLockAddress AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A SortedLockAcquire AS item THEN
+    &out.append(COPY item.action);
+    RETURN out;
+  END
+  IF value IS_A FallibleLockBinding AS item THEN
+    &out.append(COPY item.acquire_call);
+    &out.append(COPY item.action);
+    RETURN out;
+  END
+  IF value IS_A CatchWrapper AS item THEN
+    &out.append(COPY item.inner_call);
+    IF item.default_body EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A HeapCreate AS item THEN
+    &out.append(COPY item.init);
+    RETURN out;
+  END
+  IF value IS_A DupeSlice AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A AllocSlice AS item THEN
+    &out.append(COPY item.len);
+    RETURN out;
+  END
+  IF value IS_A FreeSlice AS item THEN
+    &out.append(COPY item.slice);
+    RETURN out;
+  END
+  IF value IS_A DestroyPtr AS item THEN
+    &out.append(COPY item.ptr);
+    RETURN out;
+  END
+  IF value IS_A DeepCopy AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A ContainerInit AS item THEN
+    IF item.capacity EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A CapWrap AS item THEN
+    &out.append(COPY item.inner);
+    RETURN out;
+  END
+  IF value IS_A SharePromote AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A RcRetain AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A ComptimeCarrierPayload AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A MonomorphicKeep AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A RcRelease AS item THEN
+    &out.append(COPY item.source);
+    &out.append(COPY item.alloc);
+    RETURN out;
+  END
+  IF value IS_A RcDowngrade AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A WeakUpgrade AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A FreezeExpr AS item THEN
+    &out.append(COPY item.inner);
+    RETURN out;
+  END
+  IF value IS_A MakeList AS item THEN
+    FOR rtoc_c IN item.items DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A MakeSet AS item THEN
+    FOR rtoc_c IN item.items DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A CapabilityUnwrap AS item THEN
+    &out.append(COPY item.source);
+    RETURN out;
+  END
+  IF value IS_A SnapshotRead AS item THEN
+    &out.append(COPY item.cell_unwrap);
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A SnapshotTransaction AS item THEN
+    &out.append(COPY item.cell_unwrap);
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    &out.append(COPY item.conflict_action);
+    RETURN out;
+  END
+  IF value IS_A SnapshotMultiTxn AS item THEN
+    FOR rtoc_c IN item.cells DO &out.append(COPY rtoc_c); END
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    &out.append(COPY item.conflict_action);
+    RETURN out;
+  END
+  IF value IS_A PolymorphicMutate AS item THEN
+    &out.append(COPY item.cell);
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A PolymorphicMutateFlow AS item THEN
+    &out.append(COPY item.cell);
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    &out.append(COPY item.guard_cond);
+    IF item.guard_fail_body EXISTS AS rtoc_l THEN
+      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
+    END
+    RETURN out;
+  END
+  IF value IS_A PolymorphicFlowSignal AS item THEN
+    IF item.ret EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A WithMatchDispatch AS item THEN
+    &out.append(COPY item.cell);
+    RETURN out;
+  END
+  IF value IS_A Call AS item THEN
+    FOR rtoc_c IN item.args DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A RuntimeCall AS item THEN
+    FOR rtoc_c IN item.args DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A MIRMethodCall AS item THEN
+    &out.append(COPY item.receiver);
+    RETURN out;
+  END
+  IF value IS_A FieldGet AS item THEN
+    &out.append(COPY item.object);
+    RETURN out;
+  END
+  IF value IS_A UnionPayloadGet AS item THEN
+    &out.append(COPY item.subject);
+    RETURN out;
+  END
+  IF value IS_A IndexGet AS item THEN
+    &out.append(COPY item.object);
+    &out.append(COPY item.index);
+    RETURN out;
+  END
+  IF value IS_A ProtocolCall AS item THEN
+    &out.append(COPY item.receiver);
+    FOR rtoc_c IN item.args DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A MIRBinOp AS item THEN
+    &out.append(COPY item.left);
+    &out.append(COPY item.right);
+    RETURN out;
+  END
+  IF value IS_A MIRUnaryOp AS item THEN
+    &out.append(COPY item.operand);
+    RETURN out;
+  END
+  IF value IS_A FallibleOk AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A FutureReady AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A EnumOrdinal AS item THEN
+    &out.append(COPY item.value);
+    RETURN out;
+  END
+  IF value IS_A TupleLiteral AS item THEN
+    FOR rtoc_c IN item.items DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A LockAcquire AS item THEN
+    &out.append(COPY item.lock_expr);
+    RETURN out;
+  END
+  IF value IS_A TypeOf AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A TypeEq AS item THEN
+    &out.append(COPY item.left);
+    &out.append(COPY item.right);
+    RETURN out;
+  END
+  IF value IS_A ArrayInit AS item THEN
+    FOR rtoc_c IN item.items DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A ArrayDefaultInit AS item THEN
+    &out.append(COPY item.default_value);
+    RETURN out;
+  END
+  IF value IS_A SliceExpr AS item THEN
+    &out.append(COPY item.target);
+    &out.append(COPY item.start);
+    IF item.end_expr EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A MIRBlockExpr AS item THEN
+    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A ConcatList AS item THEN
+    &out.append(COPY item.left);
+    &out.append(COPY item.right);
+    RETURN out;
+  END
+  IF value IS_A MIRCast AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A TryExpr AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A TryCatch AS item THEN
+    &out.append(COPY item.expr);
+    &out.append(COPY item.catch_body);
+    RETURN out;
+  END
+  IF value IS_A Orelse AS item THEN
+    &out.append(COPY item.expr);
+    &out.append(COPY item.fallback);
+    RETURN out;
+  END
+  IF value IS_A Conditional AS item THEN
+    &out.append(COPY item.cond);
+    &out.append(COPY item.then_val);
+    &out.append(COPY item.else_val);
+    RETURN out;
+  END
+  IF value IS_A IfOptional AS item THEN
+    &out.append(COPY item.optional);
+    &out.append(COPY item.then_expr);
+    &out.append(COPY item.else_expr);
+    RETURN out;
+  END
+  IF value IS_A Comptime AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A UnionVariantGet AS item THEN
+    &out.append(COPY item.object);
+    RETURN out;
+  END
+  IF value IS_A ListItems AS item THEN
+    &out.append(COPY item.list);
+    RETURN out;
+  END
+  IF value IS_A ListLength AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A AddressOf AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A Deref AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A PointerCast AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A ConstCast AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A DefaultStreamCapacity AS item THEN
+    &out.append(COPY item.worker_count);
+    RETURN out;
+  END
+  IF value IS_A IterRange AS item THEN
+    &out.append(COPY item.start);
+    &out.append(COPY item.end_val);
+    RETURN out;
+  END
+  IF value IS_A MIROptionalUnwrap AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A TryOptional AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A ForeignOwnedUnwrap AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A ForeignSliceView AS item THEN
+    &out.append(COPY item.pointer);
+    &out.append(COPY item.count);
+    RETURN out;
+  END
+  IF value IS_A MIRRangeLit AS item THEN
+    &out.append(COPY item.start);
+    &out.append(COPY item.end_val);
+    RETURN out;
+  END
+  IF value IS_A HasField AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A ItemsAccess AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A OwnedSlice AS item THEN
+    &out.append(COPY item.expr);
+    RETURN out;
+  END
+  IF value IS_A Pipeline AS item THEN
+    &out.append(COPY item.inner);
+    RETURN out;
+  END
+  IF value IS_A RegistryCall AS item THEN
+    RETURN TRY (emittable__child_exprs(value));
+  END
+  IF value IS_A InlineBc AS item THEN
+    FOR rtoc_c IN item.args DO &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A OrElseExitBcRewrite AS item THEN
+    IF item.message EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A ShardedMapPut AS item THEN
+    &out.append(COPY item.target);
+    &out.append(COPY item.key);
+    &out.append(COPY item.value);
+    IF item.shard_idx EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    IF item.shard_key EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  IF value IS_A ShardedMapGet AS item THEN
+    &out.append(COPY item.target);
+    &out.append(COPY item.key);
+    IF item.shard_idx EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    IF item.shard_key EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
+    RETURN out;
+  END
+  RETURN out;
+END
 PUB FN emittable__child_exprs(value: Emittable) RETURNS ![]Emittable EFFECTS REENTRANT ->
   IF value IS_A FnDef AS payload THEN
     RETURN TRY (fnDef__child_exprs(payload));
