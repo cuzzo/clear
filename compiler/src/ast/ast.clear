@@ -14520,3 +14520,32 @@ END
 PUB FN capabilityWrap__locked_sync?(self: CapabilityWrap) RETURNS Bool ->
   RETURN ((self.sync == :locked) OR (self.sync == :write_locked));
 END
+PUB FN aST__statement_result_void?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.ReturnNode AS item -> RETURN TRUE;,
+    Locatable.VarDecl AS item -> RETURN TRUE;,
+    Locatable.BindExpr AS item -> RETURN TRUE;,
+    Locatable.Assignment AS item -> RETURN TRUE;,
+    Locatable.DestructuringAssignment AS item -> RETURN TRUE;,
+    Locatable.WhileLoop AS item -> RETURN TRUE;,
+    Locatable.ForRange AS item -> RETURN TRUE;,
+    Locatable.ForEach AS item -> RETURN TRUE;,
+    Locatable.MatchStatement AS item -> RETURN TRUE;,
+    Locatable.Assert AS item -> RETURN TRUE;,
+    Locatable.Raise AS item -> RETURN TRUE;,
+    Locatable.WithBlock AS item -> RETURN TRUE;,
+    Locatable.BgBlock AS item -> RETURN TRUE;,
+    Locatable.DoBlock AS item -> RETURN TRUE;,
+    Locatable.PassStmt AS item -> RETURN TRUE;,
+    Locatable.DieNode AS item -> RETURN TRUE;,
+    Locatable.ThrowNode AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+PUB FN aST__collection_method_call?(node: Locatable) RETURNS Bool ->
+  IF node IS_A MethodCall AS rtoc_call THEN
+    RETURN (((rtoc_call.pool_method != NIL) OR (rtoc_call.set_method != NIL)) OR (rtoc_call.map_method != NIL));
+  END
+  RETURN FALSE;
+END
