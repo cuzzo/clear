@@ -12915,6 +12915,12 @@ END
 PUB FN locatable__typed?(value: Locatable) RETURNS !Bool ->
   RETURN !(type__untyped?(TRY (aST__full_type_mut(value))));
 END
+PUB FN locatable__resolved_type(value: Locatable) RETURNS ?String@symbol EFFECTS REENTRANT ->
+  IF locatable__type_object(value) EXISTS AS rtoc_stored THEN
+    RETURN type__resolved(rtoc_stored);
+  END
+  RETURN NIL;
+END
 PUB FN locatable__coerced_type(value: Locatable) RETURNS ?TypeShapeRaw EFFECTS REENTRANT ->
   IF locatable__coerced_type_object(value) EXISTS AS rtoc_coerced THEN
     RETURN type__raw(rtoc_coerced);
