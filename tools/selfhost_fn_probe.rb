@@ -166,15 +166,23 @@ module SelfhostFnProbe
   # own stub.
   def probe_source(target, _group, cache, pkg_name)
     idx = fn_index(cache)
-    called = target.text.scan(/(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).flatten.uniq
     safe = "probe__#{target.name.delete('?').delete('!')}"
-    stubs = called.filter_map do |name|
-      next if name == target.name
+    # A stub keeps its signature, and a parameter's DEFAULT value can call
+    # something -- so the call set has to close over the stubs themselves or
+    # the probe reports an undefined function the target never mentions.
+    want = target.text.scan(/(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).flatten.uniq
+    emitted = {}
+    until want.empty?
+      name = want.shift
+      next if name == target.name || emitted.key?(name)
 
       f = idx[name] or next
       s = stub(f) or next
-      s.sub(/\A(PUB |PRIVATE )?FN /, 'FN ')
+
+      emitted[name] = s.sub(/\A(PUB |PRIVATE )?FN /, 'FN ')
+      want.concat(s.scan(/(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).flatten)
     end
+    stubs = emitted.values
     body = target.text.sub(/\A(PUB |PRIVATE )?FN #{Regexp.escape(target.name)}/, "FN #{safe}")
 
     [%(REQUIRE "pkg:#{pkg_name}"\n),
