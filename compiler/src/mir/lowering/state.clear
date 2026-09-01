@@ -36,7 +36,7 @@ STRUCT MIRLoweringRuntimeState {
 }
 
 PUB FN mIRLoweringRuntimeState__emitter_mut(MUTABLE self: MIRLoweringRuntimeState) RETURNS MIREmitter@multiowned ->
-  MUTABLE current: ?MIREmitter@multiowned = COPY KEEP self.emitter;
+  MUTABLE current: ?MIREmitter@multiowned = COPY COPY self.emitter;
   IF current EXISTS AS current_value THEN
     RETURN KEEP current_value;
   END

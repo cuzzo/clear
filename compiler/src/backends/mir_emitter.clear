@@ -904,8 +904,8 @@ PRIVATE FN mIREmitter__emit_registry_call(MUTABLE self: MIREmitter, node: Regist
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE code = TRY (mIREmitter__registry_template(rtoc_self_view, KEEP node.entry, IntrinsicTemplateKind.Zig));
-    code = TRY (mIREmitter__substitute_registry_common(rtoc_self_view, code, KEEP node.entry, KEEP node.allocs, node.key_type, node.value_type));
+    MUTABLE code = TRY (mIREmitter__registry_template(rtoc_self_view, COPY node.entry, IntrinsicTemplateKind.Zig));
+    code = TRY (mIREmitter__substitute_registry_common(rtoc_self_view, code, COPY node.entry, COPY node.allocs, node.key_type, node.value_type));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
       MUTABLE rendered = TRY (mIREmitter__coerce_registry_arg(rtoc_self_view, TRY (mIREmitter__emit(&rtoc_self_view, node.args[rtoc_idx]?.expr)), node.args[rtoc_idx]?.coerce_type));
@@ -925,8 +925,8 @@ PRIVATE FN mIREmitter__emit_indexed_store(MUTABLE self: MIREmitter, node: Indexe
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE code = TRY (mIREmitter__registry_template(rtoc_self_view, KEEP node.entry, node.template_kind));
-    code = TRY (mIREmitter__substitute_registry_common(rtoc_self_view, code, KEEP node.entry, KEEP node.allocs, node.key_type, node.value_type));
+    MUTABLE code = TRY (mIREmitter__registry_template(rtoc_self_view, COPY node.entry, node.template_kind));
+    code = TRY (mIREmitter__substitute_registry_common(rtoc_self_view, code, COPY node.entry, COPY node.allocs, node.key_type, node.value_type));
     MUTABLE target = TRY (mIREmitter__emit(&rtoc_self_view, node.target));
     MUTABLE index = TRY (mIREmitter__emit(&rtoc_self_view, node.index));
     MUTABLE value = TRY (mIREmitter__emit(&rtoc_self_view, node.value));

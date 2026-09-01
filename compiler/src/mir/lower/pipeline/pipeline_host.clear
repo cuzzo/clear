@@ -192,7 +192,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_self_view.pipe_temp_counter = (rtoc_self_view.pipe_temp_counter + 1);
     END
     IF fact THEN
-      RETURN PipelineIndexAllocationFact{ alloc: COPY fact.alloc, mark: COPY fact.mark, cleanup_entry: KEEP fact.cleanup_entry };
+      RETURN PipelineIndexAllocationFact{ alloc: COPY fact.alloc, mark: COPY fact.mark, cleanup_entry: COPY fact.cleanup_entry };
     ELSE
       RETURN NIL;
     END
@@ -255,7 +255,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     }, pipeline_alloc_mark_fact: %(value, name, fallback_alloc, type_info, ast_node, accept_owned_call, include_cleanup) USE(MUTABLE fact, rtoc_self_view) -> {
     MUTABLE fact: ?PipelineBridgeAllocationFact = TRY (pipelineLoweringBridge__pipeline_alloc_mark_fact(rtoc_self_view.lowering_bridge, value, name, fallback_alloc, type_info, ast_node, "pipeline allocation", FALSE, accept_owned_call, include_cleanup));
     IF fact THEN
-      RETURN PipelineConcurrentAllocationFact{ alloc: COPY fact.alloc, mark: COPY fact.mark, cleanup_entry: KEEP fact.cleanup_entry };
+      RETURN PipelineConcurrentAllocationFact{ alloc: COPY fact.alloc, mark: COPY fact.mark, cleanup_entry: COPY fact.cleanup_entry };
     ELSE
       RETURN NIL;
     END

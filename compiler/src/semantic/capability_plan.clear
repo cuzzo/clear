@@ -49,7 +49,7 @@ FN capabilityTargetFact__lock_identity(self: CapabilityTargetFact) RETURNS !?Str
 END
 FN capabilityTargetFact__with_source_entry(self: CapabilityTargetFact, live_symbols: {String}SymbolEntry@multiowned, key: String) RETURNS !CapabilityTargetFact ->
   IF live_symbols[key] EXISTS AS source_entry_value THEN
-    RETURN CapabilityTargetFact{ var_node: COPY self.var_node, var_name: COPY self.var_name, target_label: COPY self.target_label, field_target: self.field_target, index_target: self.index_target, resolved_type: COPY self.resolved_type, old_scope: KEEP self.old_scope, source_entry: KEEP source_entry_value, source_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY symbolEntry__type(source_entry_value) })), sync: ( { MUTABLE rtoc_optional_or_source_1: ?String@symbol = symbolEntry__sync(source_entry_value); MUTABLE rtoc_optional_or_result_2: ?String@symbol = NIL; IF rtoc_optional_or_source_1 != NIL THEN rtoc_optional_or_result_2 = COPY rtoc_optional_or_source_1; ELSE rtoc_optional_or_result_2 = type__sync(self.resolved_type); END rtoc_optional_or_result_2 } ), storage: COPY symbolEntry__storage(source_entry_value), layout: ( { MUTABLE rtoc_optional_or_source_3: ?String@symbol = symbolEntry__layout(source_entry_value); MUTABLE rtoc_optional_or_result_4: ?String@symbol = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = type__layout(self.resolved_type); END rtoc_optional_or_result_4 } ), live_symbol_refreshed: TRUE };
+    RETURN CapabilityTargetFact{ var_node: COPY self.var_node, var_name: COPY self.var_name, target_label: COPY self.target_label, field_target: self.field_target, index_target: self.index_target, resolved_type: COPY self.resolved_type, old_scope: COPY self.old_scope, source_entry: KEEP source_entry_value, source_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY symbolEntry__type(source_entry_value) })), sync: ( { MUTABLE rtoc_optional_or_source_1: ?String@symbol = symbolEntry__sync(source_entry_value); MUTABLE rtoc_optional_or_result_2: ?String@symbol = NIL; IF rtoc_optional_or_source_1 != NIL THEN rtoc_optional_or_result_2 = COPY rtoc_optional_or_source_1; ELSE rtoc_optional_or_result_2 = type__sync(self.resolved_type); END rtoc_optional_or_result_2 } ), storage: COPY symbolEntry__storage(source_entry_value), layout: ( { MUTABLE rtoc_optional_or_source_3: ?String@symbol = symbolEntry__layout(source_entry_value); MUTABLE rtoc_optional_or_result_4: ?String@symbol = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = type__layout(self.resolved_type); END rtoc_optional_or_result_4 } ), live_symbol_refreshed: TRUE };
   ELSE
     RETURN COPY self;
   END
@@ -101,11 +101,11 @@ PUB FN capabilityTransition__deferred_sync_param?(self: CapabilityTransition) RE
   RETURN ((((capabilityTransition__parameter_target?(self) AND (self.sync == NIL)) AND !(capabilityTransition__declared_sync_contract?(self)))) == TRUE);
 END
 FN capabilityTransition__parameter_target?(self: CapabilityTransition) RETURNS Bool ->
-  RETURN ((KEEP self.source_entry != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ((KEEP self.source_entry)?);
+  RETURN ((COPY self.source_entry != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ((COPY self.source_entry)?);
   symbolEntry__is_param(rtoc_local_receiver_5) } == TRUE));
 END
 FN capabilityTransition__declared_sync_contract?(self: CapabilityTransition) RETURNS Bool EFFECTS REENTRANT ->
-  MUTABLE entry: ?SymbolEntry@multiowned = COPY KEEP self.source_entry;
+  MUTABLE entry: ?SymbolEntry@multiowned = COPY COPY self.source_entry;
   IF entry EXISTS AS entry_value THEN
     RETURN symbolEntry__declared_sync_contract?(entry_value);
   ELSE
@@ -152,7 +152,7 @@ FN capabilityTransition__sync_constrained?(self: CapabilityTransition) RETURNS B
   IF (self.capability == symbol("EXCLUSIVE")) OR (self.capability == :write_locked_read) OR (self.capability == symbol("SNAPSHOT")) OR (self.capability == :ATOMIC) THEN
     RETURN TRUE;
   ELSE_IF (self.capability == :infer) THEN
-    MUTABLE entry: ?SymbolEntry@multiowned = COPY KEEP self.source_entry;
+    MUTABLE entry: ?SymbolEntry@multiowned = COPY COPY self.source_entry;
     IF entry EXISTS AS entry_value THEN
       MUTABLE families: ?[Set]String@symbol = COPY entry_value.sync_families;
       RETURN (!((symbolEntry__sync(entry_value) == NIL)) OR (IF families != NIL THEN
@@ -168,7 +168,7 @@ FN capabilityTransition__sync_constrained?(self: CapabilityTransition) RETURNS B
   END
 END
 FN capabilityTransition__admits_atomic?(self: CapabilityTransition) RETURNS Bool ->
-  MUTABLE sym: ?SymbolEntry@multiowned = COPY KEEP self.source_entry;
+  MUTABLE sym: ?SymbolEntry@multiowned = COPY COPY self.source_entry;
   IF sym EXISTS AS sym_value THEN
     IF symbolEntry__atomic?(sym_value) THEN
       RETURN TRUE;
@@ -240,7 +240,7 @@ PUB FN capabilityPlan__var_name_for(var_node: Locatable) RETURNS String ->
 END
 PUB FN capabilityPlan__transition_from(request: CapabilityRequest, target: CapabilityTargetFact, borrowed_qualifier: ?String) RETURNS !CapabilityTransition ->
   MUTABLE capability = (request.source.capability OR_ELSE request.capability);
-  RETURN CapabilityTransition{ request: COPY request, target: COPY target, source: COPY request.source, capability: COPY capability, var_node: COPY request.var_node, var_name: COPY target.var_name, target_label: COPY target.target_label, alias_name: COPY (request.alias_name OR_ELSE target.var_name), alias_explicit: request.alias_explicit, alias_mutable: request.alias_mutable, guard_expr: COPY request.guard_expr, view_length: COPY request.view_length, resolved_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY target.resolved_type })), old_scope: KEEP target.old_scope, source_entry: KEEP target.source_entry, field_target: target.field_target, sync: COPY target.sync, storage: COPY target.storage, layout: COPY target.layout, source_type: COPY target.source_type, lock_identity_value: COPY TRY (capabilityTargetFact__lock_identity(target)), borrowed_qualifier: COPY borrowed_qualifier };
+  RETURN CapabilityTransition{ request: COPY request, target: COPY target, source: COPY request.source, capability: COPY capability, var_node: COPY request.var_node, var_name: COPY target.var_name, target_label: COPY target.target_label, alias_name: COPY (request.alias_name OR_ELSE target.var_name), alias_explicit: request.alias_explicit, alias_mutable: request.alias_mutable, guard_expr: COPY request.guard_expr, view_length: COPY request.view_length, resolved_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY target.resolved_type })), old_scope: COPY target.old_scope, source_entry: COPY target.source_entry, field_target: target.field_target, sync: COPY target.sync, storage: COPY target.storage, layout: COPY target.layout, source_type: COPY target.source_type, lock_identity_value: COPY TRY (capabilityTargetFact__lock_identity(target)), borrowed_qualifier: COPY borrowed_qualifier };
 END
 PUB FN capabilityPlan__refresh_function_plans_mut(fn_value: FunctionDef, with_blocks: []WithBlock) RETURNS !Void ->
   MUTABLE live_symbols = TRY (scope__live_param_syms(fn_value));

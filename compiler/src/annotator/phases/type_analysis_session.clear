@@ -1058,7 +1058,7 @@ PRIVATE FN typeAnalysisSession__adopt_resolution_facts_mut(MUTABLE self: TypeAna
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.resolution = COPY resolution;
-    rtoc_self_view.traversal_state.scopes = [KEEP resolution.root_scope];
+    rtoc_self_view.traversal_state.scopes = [COPY resolution.root_scope];
 }
 END
 PRIVATE FN typeAnalysisSession__active_importer(self: TypeAnalysisSession) RETURNS ?ModuleImporter@multiowned
@@ -5012,7 +5012,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      matched = KEEP definitions[rtoc_idx]?;
+      matched = COPY definitions[rtoc_idx]?;
       matched_score = score;
     rtoc_idx = rtoc_idx + 1;
     END
@@ -10165,7 +10165,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((ctx.mark_moves AND typeAnalysisSession__phase_audit_inputs(rtoc_self_view).capture_move_suppression_depth.zero?())) THEN
       RETURN;
     END
-    IF !(((KEEP ctx.outer_scope).owned_names).contains?(name)) THEN
+    IF !(((COPY ctx.outer_scope).owned_names).contains?(name)) THEN
       RETURN;
     END
     IF !(symbolEntry__ownership_kind(info)) THEN
@@ -10635,7 +10635,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(TRY (type__linear_collection?(receiver_type))) THEN
       RETURN;
     END
-    signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(KEEP node.matched_stdlib_def));
+    signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_stdlib_def));
     signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_signature)));
     IF signature EXISTS AS signature_value THEN
       MUTABLE signature_params: []Param = TRY (functionSignature__params(signature_value));
@@ -13426,7 +13426,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF schema THEN
           IF !(schema.fields().key?(pat.fields[rtoc_idx]?.name)) THEN
-            MUTABLE name_tok: ?Token@multiowned = COPY KEEP pat.fields[rtoc_idx]?.name_token;
+            MUTABLE name_tok: ?Token@multiowned = COPY COPY pat.fields[rtoc_idx]?.name_token;
             IF name_tok EXISTS AS name_tok_value THEN
               MUTABLE valid_fields = schema.fields().keys() |> WHERE !((CAST(_ AS String)).startsWith?("_"));
               TRY (typeAnalysisSession__emit_typo_suggestion_mut(rtoc_self_view, TypoToken{ TokenMultiowned: COPY name_tok_value }, pat.fields[rtoc_idx]?.name, valid_fields, "MATCH struct pattern: field '${pat.fields[rtoc_idx]?.name}' does not exist on type ${expr_type}", "field of ${expr_type}", :type, TRUE));
@@ -17030,7 +17030,7 @@ PRIVATE FN typeAnalysisSession__cap_admits_atomic?(self: TypeAnalysisSession, ca
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sym: ?SymbolEntry@multiowned = COPY KEEP cap.source_entry;
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY COPY cap.source_entry;
     IF sym EXISTS AS sym_value THEN
       IF symbolEntry__atomic?(sym_value) THEN
         RETURN TRUE;

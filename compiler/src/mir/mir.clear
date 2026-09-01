@@ -7934,7 +7934,7 @@ FN runtimeCall__child_exprs(self: RuntimeCall) RETURNS ![]Emittable EFFECTS REEN
   RETURN TRY (runtimeCall__compact_child_exprs(self, [CAST(self.args AS Any)]));
 END
 FN runtimeCall__explicit_ownership_contract(self: RuntimeCall) RETURNS ?OwnershipContract@multiowned EFFECTS REENTRANT ->
-  MUTABLE rtoc_contract_123: CallableContract@multiowned = KEEP self.spec.callable_contract;
+  MUTABLE rtoc_contract_123: CallableContract@multiowned = COPY self.spec.callable_contract;
   MUTABLE rtoc_owned_return_123: ?OwnershipContract@multiowned = COPY rtoc_contract_123.ownership_contract;
   RETURN rtoc_owned_return_123;
 END
@@ -8096,7 +8096,7 @@ PUB FN mIRMethodCall__try_wrap(self: MIRMethodCall) RETURNS Bool ->
   self.try_wrap;
 END
 PUB FN mIRMethodCall__callable_contract(self: MIRMethodCall) RETURNS ?CallableContract@multiowned ->
-  RETURN KEEP self.callable_contract;
+  RETURN COPY self.callable_contract;
 END
 PUB FN mIRMethodCall__owned_result_alloc(self: MIRMethodCall) RETURNS ?String@symbol ->
   self.owned_result_alloc;
@@ -13945,7 +13945,7 @@ PUB STRUCT RuntimeCallSpec {
 }
 
 PUB FN runtimeCallSpec__call(self: RuntimeCallSpec, args: []Emittable) RETURNS Call ->
-  RETURN Call{ callee: COPY self.callee, args: COPY args, try_wrap: self.try_wrap, owned_return: self.owned_return, callable_contract: COPY KEEP self.callable_contract, lowered_node_id: NIL, never_success: FALSE, ownership_consumption: NIL, result_type: NIL };
+  RETURN Call{ callee: COPY self.callee, args: COPY args, try_wrap: self.try_wrap, owned_return: self.owned_return, callable_contract: COPY COPY self.callable_contract, lowered_node_id: NIL, never_success: FALSE, ownership_consumption: NIL, result_type: NIL };
 END
 # Ruby module MIR::RuntimeCalls
 PUB FN runtimeCalls__eql_spec() RETURNS !RuntimeCallSpec ->
@@ -14187,7 +14187,7 @@ PUB STRUCT RegistryCall {
 }
 
 PUB FN registryCall__stdlib_def(self: RegistryCall) RETURNS FunctionSignature@multiowned ->
-  RETURN KEEP self.entry;
+  RETURN COPY self.entry;
 END
 FN registryCall__child_exprs(self: RegistryCall) RETURNS ![]Emittable EFFECTS REENTRANT ->
   MUTABLE children: []Emittable = [];
@@ -14197,29 +14197,29 @@ FN registryCall__child_exprs(self: RegistryCall) RETURNS ![]Emittable EFFECTS RE
   RETURN TRY (registryCall__compact_child_exprs(self, children));
 END
 PUB FN registryCall__has_alloc_metadata?(self: RegistryCall) RETURNS Bool ->
-  MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY KEEP self.allocs;
+  MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY COPY self.allocs;
   RETURN ((metadata != NIL) AND !(inlineAllocMetadata__empty?(metadata)));
 END
 PUB FN registryCall__mutating_receiver_allocator_op?(self: RegistryCall) RETURNS !Bool ->
-  RETURN (registryCall__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_212 = (KEEP self.entry);
+  RETURN (registryCall__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_212 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_212)) });
 END
 FN registryCall__assignable_allocating_result?(self: RegistryCall) RETURNS !Bool ->
-  RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_213 = (KEEP self.entry);
-  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_213)) } AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_214 = (KEEP self.entry);
+  RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_213 = (COPY self.entry);
+  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_213)) } AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_214 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_214)) }));
 END
 FN registryCall__explicit_ownership_contract(self: RegistryCall) RETURNS OwnershipContract@multiowned EFFECTS REENTRANT ->
-  RETURN KEEP self.ownership_contract;
+  RETURN COPY self.ownership_contract;
 END
 FN registryCall__ownership_effect(self: RegistryCall) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  MUTABLE result_alloc: ?String@symbol = (IF self.owned_result_alloc != NIL THEN self.owned_result_alloc ELSE (IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_215 = (KEEP self.entry);
+  MUTABLE result_alloc: ?String@symbol = (IF self.owned_result_alloc != NIL THEN self.owned_result_alloc ELSE (IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_215 = (COPY self.entry);
   TRY (functionSignature__heap_return_alloc?(&rtoc_mutable_receiver_215)) } THEN
     :heap
   ELSE
     NIL
   END) END);
-  MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY KEEP self.allocs;
+  MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY COPY self.allocs;
   MUTABLE alloc: ?String@symbol =   IF result_alloc THEN
     result_alloc
   ELSE_IF (metadata != NIL) THEN
@@ -14227,15 +14227,15 @@ FN registryCall__ownership_effect(self: RegistryCall) RETURNS !OwnershipEffect E
   ELSE
     NIL
   END;
-  MUTABLE fixed_void = !(!((((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_216 = (KEEP self.entry);
-  TRY (functionSignature__fixed_return?(rtoc_local_receiver_216)) } == TRUE) AND type__void?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = (KEEP self.entry);
+  MUTABLE fixed_void = !(!((((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_216 = (COPY self.entry);
+  TRY (functionSignature__fixed_return?(rtoc_local_receiver_216)) } == TRUE) AND type__void?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = (COPY self.entry);
   functionSignature__return_type(rtoc_local_receiver_217) }))) AND !(registryCall__has_alloc_metadata?(self))))));
-  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_218 = (KEEP self.entry);
-  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_218)) } == TRUE), !((result_alloc == NIL)), fixed_void, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_219 = (KEEP self.entry);
+  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_218 = (COPY self.entry);
+  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_218)) } == TRUE), !((result_alloc == NIL)), fixed_void, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_219 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_219)) } AND (result_alloc == NIL)), self.result_ownership_bearing, self.result_type, alloc, self.target_var));
 END
 FN registryCall__without_try(self: RegistryCall) RETURNS RegistryCall ->
-  RETURN RegistryCall{ entry: KEEP self.entry, args: COPY self.args, reason: COPY self.reason, ownership_contract: KEEP self.ownership_contract, allocs: KEEP self.allocs, owned_result_alloc: COPY self.owned_result_alloc, target_var: COPY self.target_var, result_type: COPY self.result_type, result_ownership_bearing: self.result_ownership_bearing, key_type: COPY self.key_type, value_type: COPY self.value_type, suppress_try: TRUE };
+  RETURN RegistryCall{ entry: COPY self.entry, args: COPY self.args, reason: COPY self.reason, ownership_contract: COPY self.ownership_contract, allocs: COPY self.allocs, owned_result_alloc: COPY self.owned_result_alloc, target_var: COPY self.target_var, result_type: COPY self.result_type, result_ownership_bearing: self.result_ownership_bearing, key_type: COPY self.key_type, value_type: COPY self.value_type, suppress_try: TRUE };
 END
 FN registryCall__mir?(self: RegistryCall) RETURNS Bool ->
   RETURN TRUE;
@@ -14298,7 +14298,7 @@ PUB STRUCT IndexedStore {
 }
 
 PUB FN indexedStore__stdlib_def(self: IndexedStore) RETURNS FunctionSignature@multiowned ->
-  RETURN KEEP self.entry;
+  RETURN COPY self.entry;
 END
 FN indexedStore__child_exprs(self: IndexedStore) RETURNS ![]Emittable EFFECTS REENTRANT ->
   MUTABLE children: []Emittable = [];
@@ -14308,29 +14308,29 @@ FN indexedStore__child_exprs(self: IndexedStore) RETURNS ![]Emittable EFFECTS RE
   RETURN TRY (indexedStore__compact_child_exprs(self, children));
 END
 FN indexedStore__has_alloc_metadata?(self: IndexedStore) RETURNS Bool ->
-  RETURN !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_222 = (KEEP self.allocs);
+  RETURN !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_222 = (COPY self.allocs);
   inlineAllocMetadata__empty?(rtoc_local_receiver_222) });
 END
 PUB FN indexedStore__mutating_receiver_allocator_op?(self: IndexedStore) RETURNS !Bool ->
-  RETURN (indexedStore__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_223 = (KEEP self.entry);
+  RETURN (indexedStore__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_223 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_223)) });
 END
 FN indexedStore__explicit_ownership_contract(self: IndexedStore) RETURNS OwnershipContract@multiowned EFFECTS REENTRANT ->
-  RETURN KEEP self.ownership_contract;
+  RETURN COPY self.ownership_contract;
 END
 FN indexedStore__ownership_effect(self: IndexedStore) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  MUTABLE heap_return = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_224 = (KEEP self.entry);
+  MUTABLE heap_return = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_224 = (COPY self.entry);
   TRY (functionSignature__heap_return_alloc?(&rtoc_mutable_receiver_224)) } == TRUE);
-  MUTABLE fixed_void = !(!((((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_225 = (KEEP self.entry);
-  TRY (functionSignature__fixed_return?(rtoc_local_receiver_225)) } == TRUE) AND type__void?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_226 = (KEEP self.entry);
+  MUTABLE fixed_void = !(!((((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_225 = (COPY self.entry);
+  TRY (functionSignature__fixed_return?(rtoc_local_receiver_225)) } == TRUE) AND type__void?(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_226 = (COPY self.entry);
   functionSignature__return_type(rtoc_local_receiver_226) }))) AND !(indexedStore__has_alloc_metadata?(self))))));
-  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_227 = (KEEP self.entry);
-  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_227)) } == TRUE), heap_return, fixed_void, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_228 = (KEEP self.entry);
-  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_228)) } AND !(heap_return)), NIL, CAST({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_229 = (KEEP self.entry);
+  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_227 = (COPY self.entry);
+  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_227)) } == TRUE), heap_return, fixed_void, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_228 = (COPY self.entry);
+  TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_228)) } AND !(heap_return)), NIL, CAST({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_229 = (COPY self.entry);
   functionSignature__return_type(rtoc_local_receiver_229) } AS ?Type), IF heap_return THEN
     :heap
   ELSE
-    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_230 = (KEEP self.allocs);
+    { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_230 = (COPY self.allocs);
   TRY (inlineAllocMetadata__single_alloc(rtoc_local_receiver_230)) }
   END, self.target_var));
 END
@@ -14479,15 +14479,15 @@ FN externTrampoline__child_exprs(self: ExternTrampoline) RETURNS ![]Emittable EF
   RETURN TRY (externTrampoline__compact_child_exprs(self, children));
 END
 FN externTrampoline__ownership_effect(self: ExternTrampoline) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  MUTABLE heap_return = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_234 = (KEEP self.stdlib_def);
+  MUTABLE heap_return = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_234 = (COPY self.stdlib_def);
   TRY (functionSignature__heap_return_alloc?(&rtoc_mutable_receiver_234)) } == TRUE);
   MUTABLE actual_return = TRY (type__success_type(self.return_type));
   IF type__resource?(actual_return) THEN
     RETURN ownershipEffect__owned(self.alloc_kind, :resource, FALSE);
   END
-  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_235 = (KEEP self.stdlib_def);
-  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_235)) } == TRUE), heap_return, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_236 = (KEEP self.stdlib_def);
-  TRY (functionSignature__fixed_return?(rtoc_local_receiver_236)) } AND type__void?(actual_return)), ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_237 = (KEEP self.stdlib_def);
+  RETURN TRY (ownershipEffect__from_callable_facts(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_235 = (COPY self.stdlib_def);
+  TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_235)) } == TRUE), heap_return, ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_236 = (COPY self.stdlib_def);
+  TRY (functionSignature__fixed_return?(rtoc_local_receiver_236)) } AND type__void?(actual_return)), ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_237 = (COPY self.stdlib_def);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_237)) } AND !(heap_return)), NIL, self.return_type, self.alloc_kind, NIL));
 END
 FN externTrampoline__mir?(self: ExternTrampoline) RETURNS Bool ->
@@ -14555,7 +14555,7 @@ PUB STRUCT ObservableConsumerSpawn {
 }
 
 FN observableConsumerSpawn__explicit_ownership_contract(self: ObservableConsumerSpawn) RETURNS OwnershipContract@multiowned EFFECTS REENTRANT ->
-  RETURN KEEP self.ownership_contract;
+  RETURN COPY self.ownership_contract;
 END
 FN observableConsumerSpawn__body_slots(MUTABLE self: ObservableConsumerSpawn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([observableConsumerSpawn__body_slot(self, :body, self.body)] AS []MIRBodySlot);

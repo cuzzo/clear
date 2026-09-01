@@ -889,7 +889,7 @@ PRIVATE FN pipelineConcurrentLowerer__list_reduce_initial(self: PipelineConcurre
   ELSE_IF (kind == PipelineConcurrentReduceKind.Min) THEN
     RETURN Emittable{ TypeSentinel: COPY pipelineConcurrentLowerer__agg_min_sentinel_mir_call(self, result_zig) };
   ELSE_IF (kind == PipelineConcurrentReduceKind.Max) THEN
-    RETURN (KEEP self.agg_max_sentinel_mir)(result_zig, result_type);
+    RETURN (COPY self.agg_max_sentinel_mir)(result_zig, result_type);
   ELSE
     RETURN panic("unreachable: exhaustive union match");
   END

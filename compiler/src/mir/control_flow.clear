@@ -97,7 +97,7 @@ PUB FN functionCFG__new_block(MUTABLE self: FunctionCFG) RETURNS BasicBlock@mult
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE block = basicBlock__new(rtoc_self_view.block_counter);
     rtoc_self_view.block_counter = (rtoc_self_view.block_counter + 1);
-    &rtoc_self_view.blocks.append(KEEP block);
+    &rtoc_self_view.blocks.append(COPY block);
     RETURN block;
 }
 END
@@ -221,7 +221,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       current_block = after_block;
   ELSE_IF (stmts[rtoc_idx]? IS_A ReturnNode) OR (stmts[rtoc_idx]? IS_A Raise) THEN
       &current_block.stmts.append(COPY stmts[rtoc_idx]?);
-      basicBlock__add_successor(&current_block, KEEP cfg.exit_block);
+      basicBlock__add_successor(&current_block, COPY cfg.exit_block);
       RETURN NIL;
   ELSE_IF (stmts[rtoc_idx]? IS_A BreakNode) THEN
       &current_block.stmts.append(COPY stmts[rtoc_idx]?);
@@ -239,7 +239,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       RETURN NIL;
   ELSE
       IF ((cfg.can_fail_fns != NIL) AND TRY (functionCFG__stmt_can_fail?(stmts[rtoc_idx]?, (cfg.can_fail_fns)?))) THEN
-        basicBlock__add_successor(&current_block, KEEP cfg.exit_block);
+        basicBlock__add_successor(&current_block, COPY cfg.exit_block);
         MUTABLE next_block = functionCFG__new_block(&cfg);
         basicBlock__add_successor(&current_block, next_block);
         &next_block.stmts.append(COPY stmts[rtoc_idx]?);

@@ -1469,7 +1469,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN escapeAnalysis__symbol_for_name(facts: FunctionFacts, name: String) RETURNS ?SymbolEntry@multiowned ->
-  RETURN KEEP facts.symbols[name];
+  RETURN COPY facts.symbols[name];
 END
 PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionBodySummary = NIL, hoist_bindings: []VarDecl = []) RETURNS !FunctionFacts ->
   MUTABLE symbols: {String}SymbolEntry@multiowned = {};

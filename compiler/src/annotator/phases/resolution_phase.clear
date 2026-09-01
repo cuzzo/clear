@@ -2044,7 +2044,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     RETURN left |> ALL {
     MUTABLE right_field: ?StructField = COPY right[_._0];
-    ((((right_field != NIL) AND (CAST(structField__type(_._1) AS String) == CAST(right_field.type AS String))) AND (structField__borrowed(_._1) == right_field.borrowed)) AND ((structField__default(_._1) == NIL) == ((KEEP right_field.default) == NIL)))
+    ((((right_field != NIL) AND (CAST(structField__type(_._1) AS String) == CAST(right_field.type AS String))) AND (structField__borrowed(_._1) == right_field.borrowed)) AND ((structField__default(_._1) == NIL) == ((COPY right_field.default) == NIL)))
     };
 }
 END

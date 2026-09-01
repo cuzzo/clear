@@ -359,7 +359,7 @@ PUB FN cleanupClassifier__mark_iteration_values_function_mut(expr: Locatable, lo
   END
 END
 PUB FN cleanupClassifier__params_for_call(call: FuncCall) RETURNS ![]Param ->
-  MUTABLE sig: ?FunctionSignature@multiowned = KEEP call.matched_signature;
+  MUTABLE sig: ?FunctionSignature@multiowned = COPY call.matched_signature;
   IF sig EXISTS AS sig_value THEN
     RETURN TRY (functionSignature__params(sig_value));
   ELSE
@@ -367,7 +367,7 @@ PUB FN cleanupClassifier__params_for_call(call: FuncCall) RETURNS ![]Param ->
   END
 END
 PUB FN cleanupClassifier__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
-  MUTABLE sig: ?FunctionSignature@multiowned = KEEP call.matched_signature;
+  MUTABLE sig: ?FunctionSignature@multiowned = COPY call.matched_signature;
   IF sig EXISTS AS sig_value THEN
     RETURN TRY (functionSignature__params(sig_value));
   ELSE

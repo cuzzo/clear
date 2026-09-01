@@ -121,7 +121,7 @@ PRIVATE FN pipelineSetIndexLowerer__distinct_insert_body(self: PipelineSetIndexL
   IF !(pipelineSetIndexLowerer__cleanup_bearing_type_call(self, elem_type)) THEN
     RETURN CAST([Emittable{ Let: COPY key_let }, Emittable{ ExprStmt: COPY TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, Emittable{ Ident: COPY Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL } }, uses_allocator)) }] AS []Emittable);
   END
-  MUTABLE key_owned = !(((KEEP self.pipeline_owned_cleanup_entry)(expr_mir, expr_node) == NIL));
+  MUTABLE key_owned = !(((COPY self.pipeline_owned_cleanup_entry)(expr_mir, expr_node) == NIL));
   MUTABLE owned_value =   IF key_owned THEN
     Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL }
   ELSE
@@ -223,7 +223,7 @@ PRIVATE FN pipelineSetIndexLowerer__build_index_gop_body(self: PipelineSetIndexL
   MUTABLE insert = IndexInsert{ map: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, key_expr: Emittable{ Ident: COPY Ident{ name: "idx_key", lowered_node_id: NIL, ownership_consumption: NIL } }, value_expr: COPY prepared.value, key_zig_type: "u8", elem_zig_type: elem_zig_type, alloc: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
   MUTABLE owned_insert = pipelineSetIndexLowerer__pipeline_index_insert_with_ownership_call(self, insert, prepared.value, prepared.owns_heap, alloc);
   MUTABLE body: []Emittable = (CAST([Emittable{ Let: COPY Let{ name: COPY "idx_key", init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable) + COPY prepared.setup_stmts + CAST([Emittable{ IndexInsert: COPY owned_insert }] AS []Emittable));
-  MUTABLE entry: ?CleanupEntry@multiowned = (KEEP self.pipeline_owned_cleanup_entry)(expr_mir, expr_node);
+  MUTABLE entry: ?CleanupEntry@multiowned = (COPY self.pipeline_owned_cleanup_entry)(expr_mir, expr_node);
   IF entry EXISTS AS entry_value THEN
     &body.append(Emittable{ Cleanup: COPY Cleanup{ name: "idx_key", cleanup_entry: entry_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
   END
