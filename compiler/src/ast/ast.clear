@@ -14264,10 +14264,7 @@ PUB FN aST__lambda_body_nodes(body: LambdaBody) RETURNS ![]Locatable EFFECTS REE
     END
     RETURN out;
   END
-  IF castLambdaBodyToLocatable(body) EXISTS AS rtoc_single THEN
-    RETURN [COPY rtoc_single];
-  END
-  RETURN List[];
+  RETURN [COPY castLambdaBodyToLocatable(body)];
 END
 PUB FN aST__recursion_yield_needed?(fn_node: FunctionDef) RETURNS Bool ->
   IF fn_node.tight_reentrance THEN

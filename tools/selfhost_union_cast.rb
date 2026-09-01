@@ -65,7 +65,9 @@ if apply
   # cannot see.
   path = [src[0], dst[0]].reject { |f| f.end_with?('ast/ast.clear') }.first || src[0]
   text = File.read(path)
-  abort "#{fn} already defined" if text.include?("FN #{fn}(")
+  if text.include?("FN #{fn}(")
+    abort "#{fn} already defined in #{path.sub("#{ROOT}/", '')} -- check its return type before using it"
+  end
   File.write(path, "#{text}#{body}")
   puts "appended #{fn} to #{path.sub("#{ROOT}/", '')}"
 else
