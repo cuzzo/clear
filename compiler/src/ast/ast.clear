@@ -14246,3 +14246,30 @@ END
 PUB FN capability__view_token(self: Capability) RETURNS ?Token ->
   RETURN COPY self.view_token;
 END
+
+# Ruby: `body.is_a?(Array) ? body : [body]` -- a lambda body is either a list of
+# statements or a single expression, and callers want a list either way.
+PUB FN aST__lambda_body_nodes(body: LambdaBody) RETURNS ![]Locatable EFFECTS REENTRANT ->
+  IF body IS_A []Locatable AS rtoc_stmts THEN
+    RETURN COPY rtoc_stmts;
+  END
+  IF body IS_A []Node AS rtoc_nodes THEN
+    MUTABLE out: []Locatable = List[];
+    FOR rtoc_node IN rtoc_nodes DO
+      IF castNodeToLocatable(rtoc_node) EXISTS AS rtoc_one THEN
+        &out.append(COPY rtoc_one);
+      END
+    END
+    RETURN out;
+  END
+  IF castLambdaBodyToLocatable(body) EXISTS AS rtoc_single THEN
+    RETURN [COPY rtoc_single];
+  END
+  RETURN List[];
+END
+PUB FN aST__recursion_yield_needed?(fn_node: FunctionDef) RETURNS Bool ->
+  IF fn_node.tight_reentrance THEN
+    RETURN FALSE;
+  END
+  RETURN (((fn_node.reentrance_kind == :reentrant) OR (fn_node.reentrance_kind == :reentrant_tail_call)) OR (fn_node.reentrance_kind == :reentrant_max_depth));
+END
