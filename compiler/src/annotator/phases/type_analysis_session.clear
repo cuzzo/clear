@@ -1685,7 +1685,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(aST__node__token( UNWRAP (castNodeToLocatable(node)))) THEN
       RETURN NIL;
     END
-    RETURN typeAnalysisSession__anchor_at(rtoc_self_view, aST__node__token(node).line, (aST__node__token( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable(node))))))))))))))))))))))))))))))).column - variant_name.codepointCount()));
+    RETURN typeAnalysisSession__anchor_at(rtoc_self_view, aST__node__token(node).line, (aST__node__token( UNWRAP (castNodeToLocatable(node))).column - variant_name.codepointCount()));
 }
 END
 PRIVATE FN typeAnalysisSession__emit_variant_typo_mut(self: TypeAnalysisSession, anchor: AnchorToken, name: String, candidates: []NameCandidate, message: String, fix_label: String, cascade: Bool = FALSE) RETURNS !Void
@@ -10028,7 +10028,7 @@ PRIVATE FN typeAnalysisSession__record_capture_local_mut(self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF name EXISTS AS name_value THEN
-      (typeAnalysisSession__current_capture_context( UNWRAP (rtoc_self_view))?.locals).insert(COPY name_value);
+      (typeAnalysisSession__current_capture_context( rtoc_self_view)?.locals).insert(COPY name_value);
     END
 }
 END

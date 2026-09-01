@@ -133,18 +133,23 @@ by.each do |f, rs|
       sp = locate_arg(text, offsets, r['line'], argno) or next
       expr = text[sp[0]...sp[1]].strip
       next if expr.empty? || expr.start_with?('UNWRAP')
+      # A view or a receiver the compiler reported as optional once can be
+      # reported again after an unrelated edit; wrapping twice is never right.
+      next if expr.include?('UNWRAP (')
 
       edits << [sp[0], sp[1], " UNWRAP (#{expr})", :unwrap_arg]
     elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && VARIANT_OF[m[1]]&.key?(m[2])
       sp = locate_arg(text, offsets, r['line'], argno) or next
       expr = text[sp[0]...sp[1]].strip
-      next if expr.empty? || expr.start_with?("#{m[1]}{")
+      next if expr.empty? || expr.include?("#{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}:")
 
       edits << [sp[0], sp[1], " #{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}: COPY #{expr} }", :wrap_variant]
     elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && CASTS.include?("cast#{m[2]}To#{m[1]}")
       sp = locate_arg(text, offsets, r['line'], argno) or next
       expr = text[sp[0]...sp[1]].strip
-      next if expr.empty? || expr.start_with?('cast')
+      # The rewrite wraps the argument, so a later round sees its own output.
+      # Without this the cast nests on every round.
+      next if expr.empty? || expr.include?("cast#{m[2]}To#{m[1]}(")
 
       edits << [sp[0], sp[1], " UNWRAP (cast#{m[2]}To#{m[1]}(#{expr}))", :cast_arg]
     elsif (m = e.match(/Pass '(\w+)' as '&\w+'/))
