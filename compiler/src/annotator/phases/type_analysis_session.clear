@@ -5128,7 +5128,7 @@ PRIVATE FN typeAnalysisSession__select_element_forces_heap_result?(self: TypeAna
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE found: Bool = FALSE;
-    aST__each_locatable(expr, %(node: Locatable) -> {
+    aST__each_locatable_list(expr, FALSE, %(node: Locatable) -> {
     IF node IS_A BinaryOp AS binary_op THEN
         IF binaryOp__smooth?(binary_op) THEN
           found = TRUE;
@@ -19393,7 +19393,7 @@ PRIVATE FN typeAnalysisSession__collect_body_identifier_names(self: TypeAnalysis
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = Set[];
-    aST__each_locatable(nodes, %(node: Locatable) USE(MUTABLE names) -> {
+    aST__each_locatable_list(nodes, FALSE, %(node: Locatable) USE(MUTABLE names) -> {
     IF node IS_A Identifier AS identifier THEN
         &names.insert(identifier__name(identifier));
     END

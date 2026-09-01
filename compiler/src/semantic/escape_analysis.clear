@@ -960,7 +960,7 @@ PUB FN escapeAnalysis__mark_loop_method_value_params_heap_mut(node: MethodCall, 
   END
 END
 PUB FN escapeAnalysis__walk_body(body: []Node, blk: FN(Locatable) -> Void) RETURNS Void ->
-  aST__each_locatable(body, blk);
+  aST__each_locatable_list(body, FALSE, blk);
 END
 PUB FN escapeAnalysis__mark_expr_roots_heap_mut(expr: ?Locatable) RETURNS Void ->
   MUTABLE unwrapped = escapeAnalysis__unwrap_value(expr);
@@ -1432,7 +1432,7 @@ PUB FN escapeAnalysis__borrow_return_expr?(expr: ?Locatable) RETURNS !Bool ->
 END
 PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
-  aST__each_locatable(expr, %(raw: Locatable) -> {
+  aST__each_locatable_list(expr, FALSE, %(raw: Locatable) -> {
   MUTABLE node = escapeAnalysis__unwrap_value(raw);
   IF node IS_A Identifier THEN
       IF escapeAnalysis__symbol_heap?(node.symbol) THEN
@@ -1445,7 +1445,7 @@ PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool 
 END
 PUB FN escapeAnalysis__expr_has_owned_inline_value?(expr: ?Locatable) RETURNS !Bool ->
   MUTABLE root = escapeAnalysis__unwrap_value(expr);
-  aST__each_locatable(expr, %(raw: Locatable) USE(root) -> {
+  aST__each_locatable_list(expr, FALSE, %(raw: Locatable) USE(root) -> {
   MUTABLE node = escapeAnalysis__unwrap_value(raw);
   IF !(node IS_A Locatable) THEN
       RETURN;

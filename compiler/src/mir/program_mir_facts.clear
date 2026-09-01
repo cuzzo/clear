@@ -78,7 +78,7 @@ PRIVATE FN programMIRFinalizer__function_needs_runtime?(function: FunctionDef, c
     RETURN TRUE;
   END
   MUTABLE found: Bool = FALSE;
-  aST__each_locatable(function.body, %(node: Locatable) USE(fn_nodes, schema_lookup) -> {
+  aST__each_locatable_list(function.body, FALSE, %(node: Locatable) USE(fn_nodes, schema_lookup) -> {
   IF TRY (programMIRFinalizer__ast_node_needs_runtime?(node, fn_nodes, schema_lookup)) THEN
       found = TRUE;
   END
@@ -93,7 +93,7 @@ PRIVATE FN programMIRFinalizer__generic_return_needs_runtime?(function: Function
     IF !(index) THEN
       RETURN FALSE;
     END
-    RETURN fn_nodes.values() |> ANY (IF !(_.body()) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE needs_runtime: Bool = FALSE; { MUTABLE rtoc_value_block_marker = 0; aST__each_locatable(_.body(), %(node: Locatable) USE(function, index, schema_lookup) -> {
+    RETURN fn_nodes.values() |> ANY (IF !(_.body()) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE needs_runtime: Bool = FALSE; { MUTABLE rtoc_value_block_marker = 0; aST__each_locatable_list(_.body(), FALSE, %(node: Locatable) USE(function, index, schema_lookup) -> {
   IF !((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == CAST(function.name AS String)) ELSE FALSE END)) THEN
         RETURN;
   END
@@ -118,7 +118,7 @@ PRIVATE FN programMIRFinalizer__generic_projection_return?(function: FunctionDef
     RETURN FALSE;
   END
   MUTABLE returns: []ReturnNode = ( { MUTABLE rtoc_empty_list_1: []ReturnNode = List[]; rtoc_empty_list_1 } );
-  aST__each_locatable(function.body, %(node: Locatable) USE(MUTABLE returns) -> {
+  aST__each_locatable_list(function.body, FALSE, %(node: Locatable) USE(MUTABLE returns) -> {
   IF node IS_A ReturnNode AS return_node THEN
       &returns.append(return_node);
   END
@@ -135,7 +135,7 @@ PRIVATE FN programMIRFinalizer__generic_returned_parameter_name(function: Functi
     RETURN NIL;
   END
   MUTABLE returns: []ReturnNode = ( { MUTABLE rtoc_empty_list_2: []ReturnNode = List[]; rtoc_empty_list_2 } );
-  aST__each_locatable(function.body, %(node: Locatable) USE(MUTABLE returns) -> {
+  aST__each_locatable_list(function.body, FALSE, %(node: Locatable) USE(MUTABLE returns) -> {
   IF node IS_A ReturnNode AS return_node THEN
       &returns.append(return_node);
   END
@@ -268,7 +268,7 @@ PRIVATE FN programMIRFinalizer__return_path_needs_allocator?(function: FunctionD
     RETURN FALSE;
   END
   MUTABLE found: Bool = FALSE;
-  aST__each_locatable(function.body, %(node: Locatable) USE(function, schema_lookup) -> {
+  aST__each_locatable_list(function.body, FALSE, %(node: Locatable) USE(function, schema_lookup) -> {
   IF !((IF node IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END)) THEN
       RETURN;
   END

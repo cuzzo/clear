@@ -17,7 +17,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
   MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
   aST__each_bg_block_in_stmt(stmt, %(bg_value: BgNode) USE(MUTABLE names, self) -> {
   MUTABLE body_names: [Set]String = Set[];
-  aST__each_locatable(bg_value.body(), %(node: Locatable) USE(MUTABLE body_names) -> {
+  aST__each_locatable_list(bg_value.body(), FALSE, %(node: Locatable) USE(MUTABLE body_names) -> {
     IF node IS_A Identifier AS identifier THEN
         &body_names.insert(COPY identifier__name(identifier));
     END
@@ -46,7 +46,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
 END
 PUB FN mIRLoweringOwnershipScanner__collect_explicit_move_roots(self: MIRLoweringOwnershipScanner, node: Locatable) RETURNS ![]String ->
   MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_3: []String = List[]; rtoc_empty_list_3 } );
-  MUTABLE collect: FN(MIRLoweringOwnershipScannerScanRoot) -> Void = %(root) USE(MUTABLE names, self) -> aST__each_locatable(root, %(child: Locatable) USE(MUTABLE names, self) -> {
+  MUTABLE collect: FN(MIRLoweringOwnershipScannerScanRoot) -> Void = %(root) USE(MUTABLE names, self) -> aST__each_locatable_list(root, FALSE, %(child: Locatable) USE(MUTABLE names, self) -> {
   IF !(child IS_A MoveNode) THEN
       RETURN;
   END

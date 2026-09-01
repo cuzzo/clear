@@ -686,7 +686,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE returned: [Set]String = Set[];
-    aST__each_locatable(fn_value.body, %(node: Locatable) USE(MUTABLE returned, rtoc_self_view) -> {
+    aST__each_locatable_list(fn_value.body, FALSE, %(node: Locatable) USE(MUTABLE returned, rtoc_self_view) -> {
     IF !((IF node IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END)) THEN
         RETURN;
     END

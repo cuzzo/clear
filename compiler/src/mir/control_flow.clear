@@ -636,7 +636,7 @@ PUB FN ownershipDataflow__cleanup_entry_pairs(self: OwnershipDataflow, fn_node: 
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE pairs: []CleanupEntryPair = ( { MUTABLE rtoc_empty_list_12: []CleanupEntryPair = List[]; rtoc_empty_list_12 } );
     MUTABLE seen: [Set]Int64 = Set[];
-    aST__each_locatable(fn_node.body, %(node: Locatable) USE(MUTABLE pairs, MUTABLE seen, rtoc_self_view) -> {
+    aST__each_locatable_list(fn_node.body, FALSE, %(node: Locatable) USE(MUTABLE pairs, MUTABLE seen, rtoc_self_view) -> {
     IF !((node IS_A VarDecl OR ((IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :assign) ELSE FALSE END)))) THEN
         RETURN;
     END
@@ -667,7 +667,7 @@ PUB FN ownershipDataflow__duplicate_binding_names(self: OwnershipDataflow, body:
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE counts: {String}Int64 = {};
-    aST__each_locatable(body, %(node: Locatable) USE(MUTABLE counts) -> {
+    aST__each_locatable_list(body, FALSE, %(node: Locatable) USE(MUTABLE counts) -> {
     IF !((node IS_A VarDecl OR ((IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :assign) ELSE FALSE END)))) THEN
         RETURN;
     END

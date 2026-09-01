@@ -2280,7 +2280,7 @@ PRIVATE FN capabilityAuditSession__compute_effects_mut(MUTABLE self: CapabilityA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE direct_effects = capabilityAuditSession__effect_direct_effects(rtoc_self_view);
     MUTABLE resolved = {};
     direct_effects.keys() |> EACH {
@@ -2425,7 +2425,7 @@ PRIVATE FN capabilityAuditSession__compute_needs_rt_mut(MUTABLE self: Capability
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE needs_rt = TRY (capabilityAuditSession__initial_needs_rt_map(rtoc_self_view, fn_nodes));
     TRY (capabilityAuditSession__seed_imported_needs_rt_mut(&rtoc_self_view, &needs_rt));
     TRY (capabilityAuditSession__propagate_needs_rt_mut(&rtoc_self_view, &needs_rt));
@@ -2518,7 +2518,7 @@ PRIVATE FN capabilityAuditSession__compute_can_fail_mut(MUTABLE self: Capability
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE error_fallible = {};
     fn_nodes.keys() |> EACH {
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
@@ -2654,7 +2654,7 @@ PRIVATE FN capabilityAuditSession__enforce_fallible_returns_mut(MUTABLE self: Ca
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     IF !(fallible_returns_enforce) THEN
       RETURN;
     END
@@ -2766,7 +2766,7 @@ PRIVATE FN capabilityAuditSession__fallibility_hint_for(MUTABLE self: Capability
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     IF TRY (capabilityAuditSession__function_raises_directly?(rtoc_self_view, name)) THEN
       RETURN "raises directly via RAISE";
     END
@@ -2787,7 +2787,7 @@ PRIVATE FN capabilityAuditSession__mark_fn_value_references_mut(self: Capability
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     FOR _ IN (TRY (capabilityAuditSession__function_body_summaries(rtoc_self_view))).values() DO
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < _.escape_nodes.length() DO
@@ -2822,7 +2822,7 @@ PRIVATE FN capabilityAuditSession__compute_fsm_eligibility_mut(self: CapabilityA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     fn_nodes.keys() |> EACH {
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
     MUTABLE effs = (fn_node.effects() OR_ELSE Set[]);
@@ -2844,7 +2844,7 @@ PRIVATE FN capabilityAuditSession__enumerate_fsm_suspend_points_mut(self: Capabi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE summaries = TRY (capabilityAuditSession__function_body_summaries(rtoc_self_view));
     FOR rtoc_each_15 IN fn_nodes.keys() DO
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_15] OR_ELSE panic("missing hash key"));
@@ -2965,7 +2965,7 @@ PRIVATE FN capabilityAuditSession__bg_spawn_form_for(MUTABLE self: CapabilityAud
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     IF has_fnptr THEN
       RETURN BgSpawnDecision{ spawn_form: :stackful, reason: :fn_pointer };
     END
@@ -3010,7 +3010,7 @@ PRIVATE FN capabilityAuditSession__compute_stack_tiers_mut(MUTABLE self: Capabil
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     TRY (capabilityAuditSession__assign_base_stack_tiers_mut(&rtoc_self_view, fn_nodes));
     TRY (capabilityAuditSession__propagate_unbounded_stack_tiers_mut(&rtoc_self_view, fn_nodes));
     NIL;
@@ -3120,7 +3120,7 @@ PRIVATE FN capabilityAuditSession__max_tier_for_calls(MUTABLE self: CapabilityAu
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE visited = Set[];
     MUTABLE max: String@symbol = :micro;
     MUTABLE queue = COPY (fn_names |> SELECT COPY _);
@@ -3149,7 +3149,7 @@ PRIVATE FN capabilityAuditSession__check_indirect_reentrancy_mut(MUTABLE self: C
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE direct_effects = capabilityAuditSession__effect_direct_effects(rtoc_self_view);
     FOR _ IN (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() DO
     MUTABLE node = fn_nodes[_];
@@ -3200,7 +3200,7 @@ PRIVATE FN capabilityAuditSession__func_call_suspends?(self: CapabilityAuditSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     IF (IF callLikeNode__matched_stdlib_def(node) != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_23 = (callLikeNode__matched_stdlib_def(node));
     TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_23)) }
@@ -3350,7 +3350,7 @@ PRIVATE FN capabilityAuditSession__validate_not_logical_recursion_mut(MUTABLE se
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     FOR rtoc_each_18 IN fn_nodes.keys() DO
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_18] OR_ELSE panic("missing hash key"));
     IF !((fn_node.reentrance_kind == :reentrant_not_logical)) THEN
@@ -3375,7 +3375,7 @@ PRIVATE FN capabilityAuditSession__validate_max_depth_mutual_cycle_mut(MUTABLE s
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     FOR rtoc_each_19 IN fn_nodes.keys() DO
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_19] OR_ELSE panic("missing hash key"));
     IF !((fn_node.reentrance_kind == :reentrant_max_depth)) THEN
@@ -3405,7 +3405,7 @@ PRIVATE FN capabilityAuditSession__validate_thunk_recursion_mut(MUTABLE self: Ca
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     FOR rtoc_each_20 IN fn_nodes.keys() DO
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_20] OR_ELSE panic("missing hash key"));
     IF !((fn_node.reentrance_kind == :reentrant_thunk)) THEN
@@ -3439,7 +3439,7 @@ PRIVATE FN capabilityAuditSession__try_stamp_mutual_thunk_plan_mut(MUTABLE self:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE cycle_names = TRY (capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, fn_node.name));
     IF (cycle_names.length() < 2) THEN
       RETURN FALSE;
@@ -3485,7 +3485,7 @@ PRIVATE FN capabilityAuditSession__emit_mutual_thunk_unsupported_mut(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE name = fn_node.name;
     MUTABLE cycle_names = TRY (capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, name));
     MUTABLE cycle_thunk_fns = (cycle_names |> SELECT:? fn_nodes[_] |> WHERE _ != NIL) |> WHERE (_.reentrance_kind == :reentrant_thunk);
@@ -3751,7 +3751,7 @@ PRIVATE FN capabilityAuditSession__semantic_function_impurity_reason(self: Capab
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map());
+    MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE fn = fn_nodes[callee];
     IF !(fn) THEN
       RETURN NIL;

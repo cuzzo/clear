@@ -5275,7 +5275,7 @@ PRIVATE FN mIRLowering__collect_identifier_names(self: MIRLowering, nodes: []Nod
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = Set[];
-    aST__each_locatable(nodes, %(node: Locatable) USE(MUTABLE names) -> {
+    aST__each_locatable_list(nodes, FALSE, %(node: Locatable) USE(MUTABLE names) -> {
     IF node IS_A Identifier AS identifier THEN
         &names.insert(identifier__name(identifier));
     END
@@ -8590,7 +8590,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     END
     MUTABLE found: Bool = FALSE;
-    aST__each_locatable(node.body, %(candidate: Locatable) -> {
+    aST__each_locatable_list(node.body, FALSE, %(candidate: Locatable) -> {
     MUTABLE type = TRY (aST__full_type_mut(candidate));
     MUTABLE coerced: ?Type = locatable__coerced_type_object(candidate);
     IF (TRY (type__node_reference?(type)) OR coerced.node_reference?()) THEN
@@ -8686,7 +8686,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE found: Bool = FALSE;
-    aST__each_locatable(node.body, %(child: Locatable) USE(rtoc_self_view) -> {
+    aST__each_locatable_list(node.body, FALSE, %(child: Locatable) USE(rtoc_self_view) -> {
     IF !((IF child IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END)) THEN
         RETURN;
     END
@@ -12068,7 +12068,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE root: ?AstReturnSearchNode = root_branch_value;
     MUTABLE found: Bool = FALSE;
-    aST__each_locatable(castOptionalAstReturnSearchNodeToAnyMultiowned(root), %(candidate: Locatable) -> {
+    aST__each_locatable_list(castOptionalAstReturnSearchNodeToAnyMultiowned(root), FALSE, %(candidate: Locatable) -> {
     IF candidate IS_A ReturnNode AS return_node THEN
         found = TRUE;
     END
