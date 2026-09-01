@@ -640,14 +640,14 @@ PUB FN pipelineRangeLowerer__min_fold_plan(self: PipelineRangeLowerer, prefix: P
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (pipelineRangeLowerer__min_max_fold_plan(rtoc_self_view, prefix, fold_op.expression, &smooth_node, names, :max, "<", "MIN applied to empty sequence"));
+    RETURN TRY (pipelineRangeLowerer__min_max_fold_plan(rtoc_self_view, prefix, &fold_op.expression, &smooth_node, names, :max, "<", "MIN applied to empty sequence"));
 }
 END
 PUB FN pipelineRangeLowerer__max_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: MaxOp, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (pipelineRangeLowerer__min_max_fold_plan(rtoc_self_view, prefix, fold_op.expression, &smooth_node, names, :min, ">", "MAX applied to empty sequence"));
+    RETURN TRY (pipelineRangeLowerer__min_max_fold_plan(rtoc_self_view, prefix, &fold_op.expression, &smooth_node, names, :min, ">", "MAX applied to empty sequence"));
 }
 END
 PUB FN pipelineRangeLowerer__min_max_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE expr_ast: Locatable, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames, sentinel: String@symbol, compare_op: String, empty_message: String) RETURNS !PipelineRangeFoldPlan

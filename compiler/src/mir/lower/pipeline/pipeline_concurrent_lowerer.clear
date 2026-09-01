@@ -545,7 +545,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_list_plan(self: PipelineConcurrentLo
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_list_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   IF (terminal_kind == PipelineConcurrentTerminalKind.Select) THEN
-    RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_select(self, plan.real_lhs, plan.conc_op, castLocatableToSelectOp__pipeline_concurrent_lowerer(plan.inner))) };
+    RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_select(self, &plan.real_lhs, plan.conc_op, castLocatableToSelectOp__pipeline_concurrent_lowerer(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Where) THEN
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_where(self, plan.real_lhs, plan.conc_op, castLocatableToWhereOp__pipeline_concurrent_lowerer(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Count) THEN

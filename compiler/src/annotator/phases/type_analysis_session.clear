@@ -397,7 +397,7 @@ END
 PUB FN typeAnalysisSession__push_function_context_mut(self: TypeAnalysisSession, ctx: FunctionContext) RETURNS FunctionContext@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &rtoc_self_view.traversal_state.function_contexts.append(ctx);
     MUTABLE rtoc_owned_return_3: FunctionContext@multiowned = ctx;
     RETURN rtoc_owned_return_3;
@@ -406,7 +406,7 @@ END
 PUB FN typeAnalysisSession__pop_function_context_mut(self: TypeAnalysisSession) RETURNS ?FunctionContext@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN &rtoc_self_view.traversal_state.function_contexts.pop();
 }
 END
@@ -630,7 +630,7 @@ END
 PUB FN typeAnalysisSession__with_stream_yield_frame<RESULT>(self: TypeAnalysisSession, node: BgStreamBlock, blk: FN() -> RESULT) RETURNS ![]Type
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE frame = StreamYieldFrame{ node: COPY node, expected_type: COPY node.declared_yield_type, yield_types: List[], closed: FALSE };
     &rtoc_self_view.traversal_state.stream_yield_frames.append(COPY frame);
     DEFER {
@@ -693,7 +693,7 @@ END
 PUB FN typeAnalysisSession__with_snapshot_transaction_body<RESULT>(self: TypeAnalysisSession, node: WithBlock, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE frame = SnapshotTxnFrame{ violations: List[] };
   DEFER {
   MUTABLE popped: ?SnapshotTxnFrame = &rtoc_self_view.audit_inputs.snapshot_txn_frames.pop();
@@ -1220,7 +1220,7 @@ PRIVATE FN typeAnalysisSession__dispatch_visit(MUTABLE self: TypeAnalysisSession
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN PARTIAL MATCH node START
-      Locatable.FunctionDef AS function_def -> TRY (typeAnalysisSession__visit_FunctionDef(&rtoc_self_view, &function_def)),
+      Locatable.FunctionDef AS MUTABLE function_def -> TRY (typeAnalysisSession__visit_FunctionDef(&rtoc_self_view, &function_def)),
       Locatable.LambdaLit AS lambda_lit -> TRY (typeAnalysisSession__visit_LambdaLit(&rtoc_self_view, &lambda_lit)),
       blockexpr -> TRY (typeAnalysisSession__visit_BlockExpr(&rtoc_self_view, &node)),
       Locatable.IfStatement AS if_statement -> TRY (typeAnalysisSession__visit_IfStatement(&rtoc_self_view, &if_statement)),
@@ -3777,7 +3777,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN (TRY (callArityPlan__injectable_defaults(plan))) DO
     MUTABLE injected = typeAnalysisSession__default_argument_for(rtoc_self_view, _);
     TRY (typeAnalysisSession__visit(&rtoc_self_view, injected));
-    callSignatureSite__append_arg_mut(plan.site, injected);
+    callSignatureSite__append_arg_mut( &plan.site, injected);
     END
 }
 END
@@ -13036,7 +13036,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE subst = TRY (typeAnalysisSession__match_union_substitution(rtoc_self_view, subject_type, MatchSchema{ UnionSchemaMultiowned: COPY union_schema }, TRUE));
     MUTABLE variant_name = TRY (typeAnalysisSession__resolve_runtime_is_a_variant_mut(rtoc_self_view, node, union_schema, type_name, subst));
     node.runtime_variant_name = variant_name;
-    TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, node.right, type_name));
+    TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, &node.right, type_name));
     MUTABLE binding: ?String = COPY node.binding;
     IF !(binding) THEN
       RETURN;
@@ -15072,7 +15072,7 @@ PRIVATE FN typeAnalysisSession__finalize_var_declaration_mut(self: TypeAnalysisS
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__promote_declaration_value_mut(rtoc_self_view, DeclarationNode{ VarDecl: COPY node }));
-    TRY (typeAnalysisSession__finalize_decl_node_mut(rtoc_self_view, DeclarationNode{ VarDecl: COPY node }, node.mutable));
+    TRY (typeAnalysisSession__finalize_decl_node_mut(rtoc_self_view, DeclarationNode{ VarDecl: COPY node }, &node.mutable));
     TRY (typeAnalysisSession__stamp_init_contents_heap_mut(rtoc_self_view, DeclNode{ VarDecl: COPY node }));
     TRY (typeAnalysisSession__stamp_bg_handle_lifetime_mut(rtoc_self_view, DeclNode{ VarDecl: COPY node }));
     TRY (typeAnalysisSession__propagate_carrier_polymorphic_mut(rtoc_self_view, DeclarationNode{ VarDecl: COPY node }));
