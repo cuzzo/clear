@@ -107,49 +107,65 @@ module SelfhostFnProbe
     [target, %(REQUIRE "pkg:rtoc_#{target.unpack1('H*')}"#{alias_part}\n)]
   end
 
-  # The stub package: every type in the group and a stub for every function,
-  # written ONCE. `transpile_cached` is content-addressed, so all 3405 probes
-  # share one compile of it instead of each paying for the whole group.
-  def stub_package(group, cache)
-    @stub_package ||= begin
-      types = []
-      stubs = []
-      externals = Set.new
+  def all_files
+    @all_files ||= Dir.glob(File.join(SRC, '**', '*.clear')).sort.map { |p| p.sub("#{SRC}/", '') }
+  end
+
+  # A shared package of every TYPE in the tree, requiring nothing. Compiled
+  # once -- `transpile_cached` is content-addressed -- and required by all
+  # 3405 probes. Function stubs are NOT in here: a probe only needs stand-ins
+  # for what its own target calls, which is a few dozen names, so putting all
+  # 10228 of them in the shared package would make every probe pay for them.
+  def types_package(cache)
+    @types_package ||= begin
+      out = []
       seen = Set.new
-      group.each do |rel|
-        rq, ts, fns, = cache[File.join(SRC, rel)]
-        # The group's own imports are stubbed here; everything BELOW it is real
-        # and has to be required, or the target cannot see it.
-        rq.each do |line|
-          r = rewrite_require(line, rel)
-          next unless r.is_a?(Array)
-          next if group.include?(r[0])
-
-          externals << %(REQUIRE "pkg:rtoc_#{r[0].unpack1('H*')}"\n)
-        end
-        ts.each do |d|
+      all_files.each do |rel|
+        path = File.join(SRC, rel)
+        cache[path] ||= dissect(path)
+        cache[path][1].each do |d|
           name = d[/\A(?:PUB )?(?:STRUCT|UNION|ENUM) (\w+)/, 1]
-          next if name && !seen.add?("T:#{name}")
+          next if name && !seen.add?(name)
 
-          types << (d.start_with?('PUB ') ? d : "PUB #{d}")
-        end
-        fns.each do |f|
-          next unless seen.add?("F:#{f.name}")
-          s = stub(f) or next
-
-          stubs << (s.start_with?('PUB ') ? s : "PUB #{s.sub(/\APRIVATE /, '')}")
+          out << (d.start_with?('PUB ') ? d : "PUB #{d}")
         end
       end
-      externals.to_a.join + "\n" + types.join + "\n" + stubs.join("\n")
+      out.join
     end
   end
 
-  # A probe is then tiny: require the stubs, restate the target under a name
-  # that cannot collide with its own stub, and call it.
-  def probe_source(target, _group, _cache, pkg_name)
-    body = target.text.sub(/\A(PUB |PRIVATE )?FN #{Regexp.escape(target.name)}/,
-                           "FN probe__#{target.name.delete('?').delete('!')}")
+  # Every function in the tree, by name, so a probe can stand in for whatever
+  # its target calls.
+  def fn_index(cache)
+    @fn_index ||= begin
+      idx = {}
+      all_files.each do |rel|
+        path = File.join(SRC, rel)
+        cache[path] ||= dissect(path)
+        cache[path][2].each { |f| idx[f.name] ||= f }
+      end
+      idx
+    end
+  end
+
+  # A probe is then tiny: require the types, stub exactly what the target
+  # calls, and restate the target under a name that cannot collide with its
+  # own stub.
+  def probe_source(target, _group, cache, pkg_name)
+    idx = fn_index(cache)
+    called = target.text.scan(/(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).flatten.uniq
+    safe = "probe__#{target.name.delete('?').delete('!')}"
+    stubs = called.filter_map do |name|
+      next if name == target.name
+
+      f = idx[name] or next
+      s = stub(f) or next
+      s.sub(/\A(PUB |PRIVATE )?FN /, 'FN ')
+    end
+    body = target.text.sub(/\A(PUB |PRIVATE )?FN #{Regexp.escape(target.name)}/, "FN #{safe}")
+
     [%(REQUIRE "pkg:#{pkg_name}"\n),
+     "\n# --- stand-ins for what it calls ---\n", stubs.join,
      "\n# --- #{rel(target.file)} : #{target.name} ---\n", body,
      "\nFN main() RETURNS !Void ->\n  RETURN;\nEND\n"].join
   end
@@ -230,11 +246,11 @@ module SelfhostFnProbe
 
     stub_dir = File.join(ROOT, 'tmp', 'fnprobe')
     FileUtils.mkdir_p(stub_dir)
-    stub_path = File.join(stub_dir, 'stubs.clear')
-    File.write(stub_path, stub_package(group, cache))
-    pkg_name = 'fnprobe_stubs'
+    stub_path = File.join(stub_dir, 'types.clear')
+    File.write(stub_path, types_package(cache))
+    pkg_name = 'fnprobe_types'
     pkg_flag = ["--pkg", "#{pkg_name}=#{stub_path}"]
-    warn "stub package: #{File.read(stub_path).lines.length} lines"
+    warn "types package: #{File.read(stub_path).lines.length} lines"
 
     queue = Queue.new
     targets.each_with_index { |t, i| queue << [i, t] }
