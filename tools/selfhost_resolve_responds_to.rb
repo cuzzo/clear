@@ -57,6 +57,12 @@ module SelfhostRespondsTo
       if (m = line.match(/(\w+)\.(\w+)\s+AS\s+(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*->/))
         return @variant_types&.dig(m[1], m[2]) || m[2]
       end
+      # `x EXISTS AS name` binds the narrowed, non-optional form of x.
+      if (m = line.match(/([\w.?]+(?:\([^()]*\))?)\s+EXISTS\s+AS\s+(?:MUTABLE\s+)?#{Regexp.escape(name)}\b/))
+        inner = receiver_type(lines, i, m[1], fields) if m[1] =~ /\A\w+\z/
+        inner ||= @resolve_hook&.call(m[1], lines, i)
+        return inner.to_s.delete_prefix('?') if inner
+      end
     end
     nil
   end
@@ -75,6 +81,7 @@ module SelfhostRespondsTo
   # The receiver expression, reduced to a declared type where that is certain.
   attr_accessor :returns_table
   attr_accessor :variant_types
+  attr_accessor :resolve_hook
 
   def resolve(expr, lines, index, fields, variants)
     expr = expr.strip
@@ -250,6 +257,7 @@ module SelfhostRespondsTo
 
     @returns_table = returns
     @variant_types = variants.transform_values { |vs| vs.to_h }
+    @resolve_hook = ->(e, ls, ix) { resolve(e, ls, ix, fields, variants) }
     counts = Hash.new(0)
     unresolved = Hash.new(0)
     decided = []
