@@ -3405,7 +3405,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       cleanupEntry__present?(rtoc_local_receiver_79) }))) THEN
         RETURN CAST([ownershipOperandFact__owned_binding(mapped, ti, source, target_alloc)] AS []OwnershipOperandFact);
       END
-      IF mIRLowering__visible_owned_operand_value?(rtoc_self_view, ast_value, value_mir, mapped) THEN
+      IF TRY (mIRLowering__visible_owned_operand_value?(rtoc_self_view, ast_value, value_mir, mapped)) THEN
         RETURN CAST([ownershipOperandFact__owned_binding(mapped, ti, source, target_alloc)] AS []OwnershipOperandFact);
       END
     END
@@ -3415,7 +3415,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST([ownershipOperandFact__borrowed_access(mIRLowering__ownership_root_name(rtoc_self_view, ast_value), ti, "${source} missing owned binding", target_alloc)] AS []OwnershipOperandFact);
 }
 END
-FN mIRLowering__visible_owned_operand_value?(self: MIRLowering, ast_value_input: Locatable, value_mir: Emittable, mapped: String) RETURNS Bool
+FN mIRLowering__visible_owned_operand_value?(self: MIRLowering, ast_value_input: Locatable, value_mir: Emittable, mapped: String) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17551,7 +17551,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (mIRLowering__stamp_var_decl_init_target_mut(rtoc_self_view, init, safe_name, facts.decl_alloc));
     MUTABLE let_node = Let{ name: COPY safe_name, init: COPY init, mutable: facts.keyword_mutable, annotation: COPY facts.annotation, suppression: COPY TRY (mIRLowering__var_decl_suppression(rtoc_self_view, safe_name, node, facts, init)), alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
     MUTABLE init_effect = TRY (ownershipEffect__of(init));
-    IF mIRLowering__var_decl_source_transfer_required?(rtoc_self_view, node, facts, init_effect) THEN
+    IF TRY (mIRLowering__var_decl_source_transfer_required?(rtoc_self_view, node, facts, init_effect)) THEN
       let_node = castEmittableToLet(TRY (mIRLowering__with_ownership_consumption_for_value(rtoc_self_view, Emittable{ Let: COPY let_node }, init, node.value, "var init", :owned_sink, facts.decl_alloc)));
     END
     MUTABLE nodes = TRY (materializationPacket__statements(TRY (mIRLowering__var_decl_materialization_plan(rtoc_self_view, node, facts, safe_name, init, let_node))));
@@ -17829,7 +17829,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN cleanupEntry__alloc(entry);
 }
 END
-PRIVATE FN mIRLowering__var_decl_source_transfer_required?(self: MIRLowering, node: VarDecl, facts: VarDeclFacts, init_effect: OwnershipEffect) RETURNS Bool
+PRIVATE FN mIRLowering__var_decl_source_transfer_required?(self: MIRLowering, node: VarDecl, facts: VarDeclFacts, init_effect: OwnershipEffect) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

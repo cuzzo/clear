@@ -4148,16 +4148,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF TRY (type__accepts?(facts.expected_type, actual_type)) THEN
       RETURN TRUE;
     END
-    IF typeAnalysisSession__reentrant_fn_argument_allowed_by_callee?(rtoc_self_view, facts) THEN
+    IF TRY (typeAnalysisSession__reentrant_fn_argument_allowed_by_callee?(rtoc_self_view, facts)) THEN
       RETURN TRUE;
     END
-    IF !(typeAnalysisSession__reentrant_fn_argument_rejected?(rtoc_self_view, facts)) THEN
+    IF !(TRY (typeAnalysisSession__reentrant_fn_argument_rejected?(rtoc_self_view, facts))) THEN
       RETURN FALSE;
     END
     RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.arg_node, TypeAnalysisCodeOrMessage{ SymbolValue: :REENTRANT_FN_TO_NON_REENTRANT_PARAM }, [], {:name: typeAnalysisSession__argument_name(rtoc_self_view, facts.arg_node, "Expression"), :param: facts.param.name}));
 }
 END
-PRIVATE FN typeAnalysisSession__reentrant_fn_argument_allowed_by_callee?(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS Bool
+PRIVATE FN typeAnalysisSession__reentrant_fn_argument_allowed_by_callee?(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4185,7 +4185,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__reentrant_fn_argument_rejected?(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS Bool
+PRIVATE FN typeAnalysisSession__reentrant_fn_argument_rejected?(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
