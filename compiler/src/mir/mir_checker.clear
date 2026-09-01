@@ -605,7 +605,7 @@ PUB FN mIRChecker__verify_linear_ownership_mut(MUTABLE self: MIRChecker, body: [
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE final_state = TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, body, linearOwnershipState__new()));
     FOR _ IN final_state.pending_return_transfers DO
-    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY _ } "TransferMark(:return) was emitted but no ReturnStmt consumed that ownership transfer")));
+    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY _ }, "TransferMark(:return) was emitted but no ReturnStmt consumed that ownership transfer")));
     END
     NIL;
 }
@@ -696,7 +696,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY UNWRAP (state.pending_return_transfers[rtoc_idx]) } "TransferMark(:return) does not match the returned expression")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY UNWRAP (state.pending_return_transfers[rtoc_idx]) }, "TransferMark(:return) does not match the returned expression")));
     rtoc_idx = rtoc_idx + 1;
         END
         &state.pending_return_transfers.clear();
@@ -719,7 +719,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY UNWRAP (state.pending_block_transfers[rtoc_idx]) } "TransferMark(:block_result) does not match the block break expression")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY UNWRAP (state.pending_block_transfers[rtoc_idx]) }, "TransferMark(:block_result) does not match the block break expression")));
     rtoc_idx = rtoc_idx + 1;
         END
         &state.pending_block_transfers.clear();
@@ -1039,7 +1039,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_IMPLICIT_MOVE, Name{ StringValue: COPY UNWRAP (names[rtoc_idx]) } "TransferMark(:${target}) moves a guarded cleanup binding without MIR::MoveMark")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_IMPLICIT_MOVE, Name{ StringValue: COPY UNWRAP (names[rtoc_idx]) }, "TransferMark(:${target}) moves a guarded cleanup binding without MIR::MoveMark")));
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;
@@ -1268,7 +1268,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_USE_AFTER_TRANSFER, Name{ StringValue: COPY UNWRAP (rtoc_each_items_25[rtoc_idx]) } "binding read after ownership was transferred")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_USE_AFTER_TRANSFER, Name{ StringValue: COPY UNWRAP (rtoc_each_items_25[rtoc_idx]) }, "binding read after ownership was transferred")));
     rtoc_idx = rtoc_idx + 1;
     END
     TRY (mIRChecker__check_nested_linear_expr_bodies_mut(&rtoc_self_view, expr, &state));
@@ -1372,7 +1372,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     ELSE_IF _ IS_A MoveMark AS move_mark THEN
       IF !(visible.contains?(CAST(move_mark.name AS String))) THEN
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MOVEMARK_WITHOUT_GUARD, Name{ StringValue: COPY move_mark.name } "MIR::MoveMark has no visible guarded Cleanup/ErrCleanup; ownership marker escaped its lexical owner")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MOVEMARK_WITHOUT_GUARD, Name{ StringValue: COPY move_mark.name }, "MIR::MoveMark has no visible guarded Cleanup/ErrCleanup; ownership marker escaped its lexical owner")));
       END
     ELSE_IF _ IS_A IfStmt AS if_stmt THEN
       MUTABLE if_stmt_mutable = COPY if_stmt;
@@ -1463,7 +1463,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF transfers.contains?(_) THEN
       CONTINUE;
     END
-    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ERRCLEANUP_WITHOUT_TRANSFER, Name{ StringValue: COPY _ } "MIR::ErrCleanup requires a matching MIR::TransferMark; success-path owner is implicit")));
+    &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ERRCLEANUP_WITHOUT_TRANSFER, Name{ StringValue: COPY _ }, "MIR::ErrCleanup requires a matching MIR::TransferMark; success-path owner is implicit")));
     END
 }
 END
@@ -1489,7 +1489,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ALLOCATING_LET_WITHOUT_ALLOC, Name{ StringValue: COPY UNWRAP (emittable__name(UNWRAP (nodes[rtoc_idx]))) } "heap-allocating Let init has no MIR::AllocMark; ownership is implicit")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :ALLOCATING_LET_WITHOUT_ALLOC, Name{ StringValue: COPY UNWRAP (emittable__name(UNWRAP (nodes[rtoc_idx]))) }, "heap-allocating Let init has no MIR::AllocMark; ownership is implicit")));
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;
@@ -1645,7 +1645,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             IF (child_alloc_value == owner_alloc) THEN
               RETURN;
             END
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY UNWRAP (emittable__name(rtoc_expr_node)) } "owned child is :${child_alloc_value} but aggregate owner is :${UNWRAP (owner_alloc)}; nested ownership placement is implicit/incoherent")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY UNWRAP (emittable__name(rtoc_expr_node)) }, "owned child is :${child_alloc_value} but aggregate owner is :${UNWRAP (owner_alloc)}; nested ownership placement is implicit/incoherent")));
           ELSE
             RETURN;
           END
@@ -1821,7 +1821,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (rtoc_node IS_A Cleanup OR rtoc_node IS_A ErrCleanup) THEN
           MUTABLE let: ?Let = COPY lets[CAST((emittable__name(rtoc_node)) AS String)];
           IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(rtoc_node)) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, let, castEmittableToMIRCheckerCleanup(rtoc_node))))) THEN
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, Name{ StringValue: COPY UNWRAP (emittable__name(rtoc_node)) } "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, Name{ StringValue: COPY UNWRAP (emittable__name(rtoc_node)) }, "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
           END
       END
       FOR _ IN (TRY (emittable__body_slots(rtoc_node))) DO
@@ -1882,7 +1882,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_STRUCTURAL_RC_COPY, Name{ StringValue: COPY UNWRAP (rtoc_node.zig_type) } "reference-counted handles must be retained, upgraded, or downgraded; MIR::DeepCopy may not structurally duplicate an Rc/Arc handle")));
+        &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_STRUCTURAL_RC_COPY, Name{ StringValue: COPY UNWRAP (rtoc_node.zig_type) }, "reference-counted handles must be retained, upgraded, or downgraded; MIR::DeepCopy may not structurally duplicate an Rc/Arc handle")));
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -2787,7 +2787,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :TRANSFER_WITHOUT_ALLOC, Name{ StringValue: COPY UNWRAP (transfers[rtoc_idx]) } "MIR::TransferMark present but no MIR::AllocMark (transfer event missing allocation source)")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :TRANSFER_WITHOUT_ALLOC, Name{ StringValue: COPY UNWRAP (transfers[rtoc_idx]) }, "MIR::TransferMark present but no MIR::AllocMark (transfer event missing allocation source)")));
     rtoc_idx = rtoc_idx + 1;
     END
     FOR rtoc_key IN allocs.keys() DO
