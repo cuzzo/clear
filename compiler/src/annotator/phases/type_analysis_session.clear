@@ -1555,7 +1555,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (tok.value == "MUTABLE") THEN
         &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_UNUSED)), [edit__new(span__new(NIL, tok.line, tok.column, "MUTABLE ".codepointCount()), "")], :auto)));
       END
-      TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, reg_value, :lint, fixes, NIL, :MUTABLE_UNUSED, :warning, FALSE, {:name: name}));
+      TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, diagnosticAnchor__of(castTypeAnalysisRegToLocatable(reg_value)), :lint, fixes, NIL, :MUTABLE_UNUSED, :warning, FALSE, {:name: name}));
     ELSE
       RETURN;
     END
@@ -2115,7 +2115,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         edits = ruby_array_concat_Edit__type_analysis_session(edits, mutable_fix.edits);
       END
       MUTABLE fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :INSERT_MUTABLE_ARGUMENT_MARKER, {:name: DiagnosticKwValue{ StringValue: COPY root_value.name }, :param: DiagnosticKwValue{ StringValue: COPY facts.param.name }})), edits, :auto));
-      TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, root_value, :mutability, [fix], NIL, :MUTABLE_ARGUMENT_REQUIRES_MARKER, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name}));
+      TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY root_value } }, :mutability, [fix], NIL, :MUTABLE_ARGUMENT_REQUIRES_MARKER, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name}));
     ELSE
       RETURN;
     END
@@ -2128,7 +2128,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE token: ?Token@multiowned = COPY COPY facts.mutable_marker_token;
     IF token EXISTS AS token_value THEN
       MUTABLE fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_ARGUMENT_MARKER, {:param: DiagnosticKwValue{ StringValue: COPY facts.param.name }})), [edit__new(span__new(NIL, token_value.line, token_value.column, 1), "")], :auto));
-      TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, token_value, :mutability, [fix], NIL, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name}));
+      TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY token_value }, :mutability, [fix], NIL, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name}));
     ELSE
       RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.arg_node, TypeAnalysisCodeOrMessage{ SymbolValue: :MUTABLE_MARKER_ON_IMMUTABLE_PARAM }, [], {:index: (facts.index + 1), :param: facts.param.name}));
     END
@@ -6769,7 +6769,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF cap EXISTS AS cap_value THEN
       MUTABLE cap_value_mutable = COPY cap_value;
       IF !(TRY (typeAnalysisSession__queue_backed_concurrent_source?(rtoc_self_view, node))) THEN
-        TRY (typeAnalysisSession__error_mut(rtoc_self_view, cap_value_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_CAPACITY_BAD_INPUT }));
+        TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY cap_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_CAPACITY_BAD_INPUT }));
       END
       TRY (typeAnalysisSession__validate_positive_numeric_concurrent_option_mut(&rtoc_self_view, "capacity", cap_value_mutable));
     ELSE
@@ -6786,7 +6786,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF typeAnalysisSession__concurrent_bool_option?(rtoc_self_view, par_val_value) THEN
         RETURN;
       END
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, par_val_value, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_PARALLEL_NEEDS_BOOL }, [], {:got: typeAnalysisSession__concurrent_option_label(rtoc_self_view, par_val_value)}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY par_val_value }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_PARALLEL_NEEDS_BOOL }, [], {:got: typeAnalysisSession__concurrent_option_label(rtoc_self_view, par_val_value)}));
     ELSE
       RETURN;
     END
@@ -6808,7 +6808,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (IF size_value IS_A Identifier AS identifier THEN valid_concurrent_sizes.contains?(identifier__name(identifier)) ELSE FALSE END) THEN
         RETURN;
       END
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, size_value, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_SIZE_BAD_VALUE }, [], {:valid: valid_concurrent_sizes.join(", "), :got: typeAnalysisSession__concurrent_option_label(rtoc_self_view, size_value)}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY size_value }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_SIZE_BAD_VALUE }, [], {:valid: valid_concurrent_sizes.join(", "), :got: typeAnalysisSession__concurrent_option_label(rtoc_self_view, size_value)}));
     ELSE
       RETURN;
     END
@@ -9320,7 +9320,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__visit(&rtoc_self_view, length_value_mutable));
         MUTABLE length_type = TRY (aST__full_type_mut(length_value_mutable));
         IF !(type__integer?(length_type)) THEN
-          TRY (typeAnalysisSession__error_mut(rtoc_self_view, length_value_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_INDEX_INTEGER }, [], {:got: length_type.resolved()}));
+          TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY length_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_INDEX_INTEGER }, [], {:got: length_type.resolved()}));
         END
       ELSE
         panic("Internal: WITH UNSAFE VIEW missing LENGTH expression");
@@ -10652,7 +10652,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         IF (element_type.indirect?() AND !(actual_type.indirect?())) THEN
           IF ((TRY (type__any_rc?(actual_type)) OR TRY (type__node_reference?(actual_type))) OR type__link?(actual_type)) THEN
-            TRY (typeAnalysisSession__error_mut(rtoc_self_view, value_arg_value_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], {:type: type__resolved(UNWRAP (element_type)), :actual: TRY (typeAnalysisSession__indirect_identity_display(rtoc_self_view, actual_type))}));
+            TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value_arg_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], {:type: type__resolved(UNWRAP (element_type)), :actual: TRY (typeAnalysisSession__indirect_identity_display(rtoc_self_view, actual_type))}));
           ELSE_IF (typeAnalysisSession__language_mode(rtoc_self_view) != :easy) THEN
             TRY (typeAnalysisSession__emit_indirect_element_explicit_error_mut(rtoc_self_view, value_arg_value_mutable, element_type));
           ELSE
@@ -10662,7 +10662,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ELSE_IF (!(element_type.indirect?()) AND actual_type.indirect?()) THEN
           value_arg_value_mutable.layout_transport = :unbox;
         ELSE_IF ((element_type.indirect?() != actual_type.indirect?()) AND (((TRY (type__any_rc?(actual_type)) OR TRY (type__node_reference?(actual_type))) OR type__link?(actual_type)))) THEN
-          TRY (typeAnalysisSession__error_mut(rtoc_self_view, value_arg_value_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], {:type: type__resolved(UNWRAP (element_type)), :actual: TRY (typeAnalysisSession__indirect_identity_display(rtoc_self_view, actual_type))}));
+          TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value_arg_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], {:type: type__resolved(UNWRAP (element_type)), :actual: TRY (typeAnalysisSession__indirect_identity_display(rtoc_self_view, actual_type))}));
         END
       ELSE
         RETURN;
@@ -11436,7 +11436,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE result = TRY (type__binary_op(binary_op_mutable.op, CAST(left_type AS Type), CAST(right_type AS Type)));
       IF result.error EXISTS AS error_value THEN
-        TRY (typeAnalysisSession__error_mut(rtoc_self_view, binary_op_mutable, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_ERROR_GENERIC }, [], {:detail: error_value}));
+        TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BinaryOp: COPY binary_op_mutable } }, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_ERROR_GENERIC }, [], {:detail: error_value}));
       END
       MUTABLE result_type: Type = COPY castTypeToType(result.type);
       IF typeAnalysisSession__stale_auto_node_type?(rtoc_self_view, result_type) THEN
@@ -22665,6 +22665,14 @@ FN castSiteToLocatable(value: Site) RETURNS ?Locatable ->
     Site.Return AS item -> RETURN Locatable{ Return: COPY item };,
     Site.ReassignCleanup AS item -> RETURN Locatable{ ReassignCleanup: COPY item };,
     Site.FieldCleanup AS item -> RETURN Locatable{ FieldCleanup: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+FN castTypeAnalysisRegToLocatable(value: TypeAnalysisReg) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    TypeAnalysisReg.VarDecl AS item -> RETURN Locatable{ VarDecl: COPY item };,
+    TypeAnalysisReg.DestructureTarget AS item -> RETURN Locatable{ DestructureTarget: COPY item };,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;

@@ -544,7 +544,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (tok.value == "MUTABLE") THEN
         &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_UNUSED)), [edit__new(span__new(NIL, tok.line, tok.column, "MUTABLE ".codepointCount()), "")], :auto)));
       END
-      TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, reg_value, :lint, fixes, NIL, :MUTABLE_UNUSED, :warning, FALSE, {:name: name}));
+      TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, diagnosticAnchor__of(castCapabilityAuditRegToLocatable(reg_value)), :lint, fixes, NIL, :MUTABLE_UNUSED, :warning, FALSE, {:name: name}));
     ELSE
       RETURN;
     END
@@ -1104,7 +1104,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         edits = ruby_array_concat_Edit__capability_audit_session(edits, mutable_fix.edits);
       END
       MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :INSERT_MUTABLE_ARGUMENT_MARKER, {:name: DiagnosticKwValue{ StringValue: COPY root_value.name }, :param: DiagnosticKwValue{ StringValue: COPY facts.param.name }})), edits, :auto));
-      TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, root_value, :mutability, [fix], NIL, :MUTABLE_ARGUMENT_REQUIRES_MARKER, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name}));
+      TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY root_value } }, :mutability, [fix], NIL, :MUTABLE_ARGUMENT_REQUIRES_MARKER, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name}));
     ELSE
       RETURN;
     END
@@ -1117,7 +1117,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE token: ?Token@multiowned = COPY COPY facts.mutable_marker_token;
     IF token EXISTS AS token_value THEN
       MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_ARGUMENT_MARKER, {:param: DiagnosticKwValue{ StringValue: COPY facts.param.name }})), [edit__new(span__new(NIL, token_value.line, token_value.column, 1), "")], :auto));
-      TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, token_value, :mutability, [fix], NIL, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name}));
+      TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY token_value }, :mutability, [fix], NIL, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :error, FALSE, {:index: (facts.index + 1), :param: facts.param.name}));
     ELSE
       RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, facts.arg_node, CapabilityAuditCodeOrMessage{ SymbolValue: :MUTABLE_MARKER_ON_IMMUTABLE_PARAM }, [], {:index: (facts.index + 1), :param: facts.param.name}));
     END
@@ -4522,4 +4522,12 @@ FN ruby_wrap_optional_string_to_symbol__capability_audit_session(value: ?String)
     RETURN symbol(value_value);
   END
   NIL;
+END
+FN castCapabilityAuditRegToLocatable(value: CapabilityAuditReg) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    CapabilityAuditReg.VarDecl AS item -> RETURN Locatable{ VarDecl: COPY item };,
+    CapabilityAuditReg.DestructureTarget AS item -> RETURN Locatable{ DestructureTarget: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

@@ -19,6 +19,7 @@ apply = ARGV.include?('--apply')
 
 variants, fields = SelfhostUnionAccessor.load_types(ROOT)
 locatable = variants['Locatable'].to_h { |name, type| [type.sub(/@\w+\z/, ''), name] }
+$VARIANT_TYPES = variants.transform_values(&:to_h)
 
 returns = {}
 Dir.glob(File.join(ROOT, '**', '*.clear')).each do |p|
@@ -36,6 +37,19 @@ def type_of(lines, index, name, returns)
     if l =~ /\b(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*=\s*(?:TRY \()?\s*([\w?!]+)\(/
       r = returns[Regexp.last_match(1)]
       return r.delete_prefix('!') if r
+    end
+    # `x EXISTS AS name` narrows x; `Union.Variant AS name ->` binds the variant.
+    if l =~ /(\w+)\s+EXISTS\s+AS\s+(?:MUTABLE\s+)?#{Regexp.escape(name)}\b/
+      inner = type_of(lines, i, Regexp.last_match(1), returns)
+      return inner.delete_prefix('?') if inner
+    end
+    if l =~ /(\w+)\.(\w+)\s+AS\s+(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*->/
+      return $VARIANT_TYPES&.dig(Regexp.last_match(1), Regexp.last_match(2)) || Regexp.last_match(2)
+    end
+    # An unannotated local takes the type of a simple initializer.
+    if l =~ /\b(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*=\s*(?:COPY |KEEP |OWN )?(\w+);?\s*$/
+      other = Regexp.last_match(1)
+      return type_of(lines, i, other, returns) unless other == name
     end
     break if l.start_with?('PUB FN', 'FN ', 'PRIVATE FN') && i < index && !l.include?("#{name}:")
   end
