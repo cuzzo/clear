@@ -16812,7 +16812,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE bound_fact = withCapabilityPlan__first_transition(capability_plan);
     MUTABLE bound_var = COPY bound_fact.var_node;
     MUTABLE bound_sym = aST__node__symbol(bound_var);
-    IF !(((TRUE AND respondsTo?(bound_sym, "is_param")) AND bound_sym.is_param())) THEN
+    IF !(((TRUE AND TRUE) AND bound_sym.is_param())) THEN
       RETURN NIL;
     END
     RETURN COPY bound_fact.var_name;
@@ -16882,7 +16882,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE bound_var = COPY bound_fact.var_node;
     MUTABLE bound_name = COPY bound_fact.var_name;
     MUTABLE bound_sym = aST__node__symbol(bound_var);
-    MUTABLE is_param = ((TRUE AND respondsTo?(bound_sym, "is_param")) AND bound_sym.is_param());
+    MUTABLE is_param = ((TRUE AND TRUE) AND bound_sym.is_param());
     MUTABLE fn_node: ?FunctionDef@multiowned = typeAnalysisSession__function_node_for(rtoc_self_view, typeAnalysisSession__current_fn_ctx(rtoc_self_view)?.name);
     MUTABLE has_req = ((((fn_node != NIL) AND TRUE) AND fn_node.requires) AND fn_node.requires.contains?(bound_name));
     RETURN (is_param AND !(has_req));

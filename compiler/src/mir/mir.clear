@@ -18417,3 +18417,26 @@ PUB FN emittable__owned_position_source_exprs(value: Emittable) RETURNS !?[]Emit
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:target_var)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here.
+PUB FN emittable__target_var(value: Emittable) RETURNS ?String ->
+  PARTIAL MATCH value START
+    Emittable.RegistryCall AS item -> RETURN COPY item.target_var;,
+    Emittable.IndexedStore AS item -> RETURN COPY item.target_var;,
+    Emittable.ShardedMapPut AS item -> RETURN COPY item.target_var;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:reason)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here.
+PUB FN emittable__reason(value: Emittable) RETURNS ?String ->
+  PARTIAL MATCH value START
+    Emittable.Noop AS item -> RETURN COPY item.reason;,
+    Emittable.RegistryCall AS item -> RETURN COPY item.reason;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

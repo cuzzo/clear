@@ -2785,7 +2785,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-    IF respondsTo?(source_expr, "stdlib_def") THEN
+    IF (emittable__stdlib_def(source_expr) != NIL) THEN
       sig_branch_value = functionSignature__unwrap(source_expr.stdlib_def());
     ELSE
       sig_branch_value = NIL;
@@ -2892,7 +2892,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE effect = TRY (ownershipEffect__of(source_expr));
     IF !(effect.produces_owned) THEN
       MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-      IF respondsTo?(source_expr, "stdlib_def") THEN
+      IF (emittable__stdlib_def(source_expr) != NIL) THEN
         sig_branch_value = functionSignature__unwrap(source_expr.stdlib_def());
       ELSE
         sig_branch_value = NIL;
@@ -2943,7 +2943,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (source_node IS_A ReassignWithCleanup OR source_node IS_A ShardedMapPut) THEN
       RETURN COPY emittable__variant_name(source_node);
     END
-    IF (respondsTo?(source_node, "target_var") AND source_node.target_var) THEN
+    IF ((emittable__target_var(source_node) != NIL) AND source_node.target_var) THEN
       RETURN COPY CAST(source_node.target_var AS String);
     END
     IF (source_node IS_A Call OR source_node IS_A TailCall) THEN
@@ -2958,7 +2958,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF source_node IS_A StreamSpawn AS stream_spawn THEN
       RETURN COPY "MIR::StreamSpawn";
     END
-    IF (respondsTo?(source_node, "reason") AND source_node.reason) THEN
+    IF ((emittable__reason(source_node) != NIL) AND source_node.reason) THEN
       RETURN COPY CAST(source_node.reason AS String);
     END
     IF (aST__node_name(source_node) EXISTS) THEN
@@ -4216,7 +4216,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(sym) THEN
         RETURN NIL;
       END
-      MUTABLE decl = IF respondsTo?(sym, "reg") THEN
+      MUTABLE decl = IF TRUE THEN
         sym.reg
       ELSE
         NIL
@@ -5398,7 +5398,7 @@ PRIVATE FN mIRLowering__try_catch_with_provenance(self: MIRLowering, left: Emitt
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE stripped = mIRLowering__strip_try(rtoc_self_view, left);
     MUTABLE out = TryCatch{ expr: COPY stripped, catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-    IF (respondsTo?(stripped, "result_type") AND stripped.result_type()) THEN
+    IF ((emittable__result_type(stripped) != NIL) AND stripped.result_type()) THEN
       out.result_type = TRY (type__new(stripped.result_type()));
     ELSE_IF ((fallback != NIL) AND respondsTo?(fallback, "full_type!")) THEN
       out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(fallback)) }));

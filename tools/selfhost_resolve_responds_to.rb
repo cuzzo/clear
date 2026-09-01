@@ -22,6 +22,22 @@ module SelfhostRespondsTo
 
   ROOT = File.expand_path('../compiler/src', __dir__)
 
+  # A local with no annotation still has a type when it is assigned the
+  # result of a call: the callee declares one.
+  def inferred_from_call(lines, index, name, returns)
+    (index).downto(0) do |i|
+      line = lines[i]
+      break if line.start_with?('PUB FN', 'FN ', 'PRIVATE FN') && i < index
+
+      m = line.match(/\b(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*=\s*(?:TRY \()?\s*([\w?!]+)\(/)
+      next unless m
+
+      declared = returns[m[1]] or next
+      return declared.delete_prefix('!')
+    end
+    nil
+  end
+
   # Declared type of a local, parameter, or field, searched from the site
   # upwards within the enclosing function.
   def receiver_type(lines, index, name, fields)
@@ -49,6 +65,8 @@ module SelfhostRespondsTo
   end
 
   # The receiver expression, reduced to a declared type where that is certain.
+  attr_accessor :returns_table
+
   def resolve(expr, lines, index, fields, variants)
     expr = expr.strip
     if (m = expr.match(/\A([A-Za-z_]\w*)\[[^\]]+\]\??\z/))
@@ -64,8 +82,11 @@ module SelfhostRespondsTo
     end
     return nil unless expr =~ /\A[A-Za-z_]\w*\z/
 
-    t = receiver_type(lines, index, expr, fields) or return nil
-    bare(t)
+    t = receiver_type(lines, index, expr, fields)
+    return bare(t) if t
+
+    inferred = inferred_from_call(lines, index, expr, @returns_table.to_h)
+    inferred && bare(inferred)
   end
 
   def main(argv)
@@ -134,6 +155,7 @@ module SelfhostRespondsTo
       fn
     end
 
+    @returns_table = returns
     counts = Hash.new(0)
     unresolved = Hash.new(0)
     Dir.glob(File.join(ROOT, '**', '*.clear')).sort.each do |path|

@@ -2503,7 +2503,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE declared_fallible = ({
       MUTABLE rtoc_value_block_marker = 0;
       MUTABLE rt = functionSignature__return_type(fn_node);
-      ((rt IS_A Type AND respondsTo?(rt, "error_union?")) AND rt.error_union?())
+      ((rt IS_A Type AND TRUE) AND rt.error_union?())
     } OR_ELSE FALSE);
     error_fallible[_] = ((TRY (capabilityAuditSession__function_raises_directly?(rtoc_self_view, _)) OR declared_fallible) OR (_ == name));
     };
