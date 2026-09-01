@@ -2445,7 +2445,7 @@ module AST
     # pipeline lowering switches to fiber-spawn-with-accumulator codegen.
     attr_accessor :observable_dest
   end
-  IsA          = Struct.new(:token, :left, :right, :binding) do
+  IsA          = Struct.new(:token, :left, :right, :binding, :binding_mutable) do
     extend T::Sig
     include Locatable
     attr_accessor :runtime_variant_name

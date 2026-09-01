@@ -234,7 +234,9 @@ module Annotator
           return
         end
 
-        match_case = AST::MatchCase.new(kind: :eq, value: node.right, binding: binding, body: [])
+        match_case = AST::MatchCase.new(kind: :eq, value: node.right, binding: binding,
+                                        binding_mutable: node.binding_mutable == true, body: [])
+        verify_mutable_is_a_subject!(node) if node.binding_mutable == true
         node.runtime_payload_type = match_payload_binding_type(
           MatchSubjectPlan.new(
             expr_type: subject_type,
@@ -490,7 +492,7 @@ module Annotator
           # The IS_A node is the binding's declaration site. Recording it gives
           # lowering a stable identity to key a rename on when a nested MATCH
           # binds the same name.
-          scope.declare(binding, condition, payload_type, false, false, nil, :stack)
+          scope.declare(binding, condition, payload_type, condition.binding_mutable == true, false, nil, :stack)
           og_declare(binding, condition, payload_type)
           classify_ownership!(scope.local_entry!(binding))
           borrow_match_payload_binding!(binding)
@@ -960,6 +962,18 @@ module Annotator
       def verify_mutable_match_subject!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
         subject = node.expr
+        return unless subject.is_a?(AST::Identifier)
+        entry = current_scope.resolve_entry(subject.name)
+        return if entry.nil? || entry.mutable
+        error!(node, :ASSIGN_VAR_IMMUTABLE, name: subject.name)
+      end
+
+      # `IS_A T AS MUTABLE x` writes through to the subject, exactly as a
+      # mutable MATCH arm does, so the subject has to be mutable too.
+      sig { params(node: AST::IsA).void }
+      def verify_mutable_is_a_subject!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        subject = node.left
         return unless subject.is_a?(AST::Identifier)
         entry = current_scope.resolve_entry(subject.name)
         return if entry.nil? || entry.mutable

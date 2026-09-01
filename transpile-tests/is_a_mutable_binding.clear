@@ -1,0 +1,41 @@
+# `IS_A T AS MUTABLE x` binds the union payload by pointer, so writes through
+# the binding land on the matched union -- the same contract a mutable MATCH
+# arm binding has.
+STRUCT Counter { n: Int64 }
+
+UNION Item {
+  CounterValue: Counter,
+  Tag: String
+}
+
+FN bump(MUTABLE c: Counter) RETURNS Void ->
+  c.n = c.n + 1;
+END
+
+FN read(item: Item) RETURNS Int64 ->
+  IF item IS_A Counter AS c THEN
+    RETURN c.n;
+  END
+  RETURN 0;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE item: Item = Item{ CounterValue: Counter{ n: 1 } };
+
+  IF item IS_A Counter AS MUTABLE c THEN
+    bump(&c);
+  END
+  ASSERT read(item) == 2, "IS_A AS MUTABLE must write through to the union";
+
+  IF item IS_A Counter AS MUTABLE c2 THEN
+    c2.n = c2.n + 10;
+  END
+  ASSERT read(item) == 12, "direct field write through an IS_A binding must persist";
+
+  # An immutable binding still reads a copy: the union is untouched.
+  IF item IS_A Counter AS c3 THEN
+    ASSERT c3.n == 12, "immutable IS_A binding reads the current payload";
+  END
+
+  RETURN;
+END

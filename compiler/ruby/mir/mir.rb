@@ -4226,7 +4226,7 @@ module MIR
   # Safe tagged-union payload extraction. This exists only for non-switchable
   # union MATCH shapes; pure union MATCH lowers to UnionMatchStmt payload
   # capture so the payload is structurally tied to its active arm.
-  UnionPayloadGet = Struct.new(:subject, :variant) do
+  UnionPayloadGet = Struct.new(:subject, :variant, :pointer) do
     extend T::Sig
     include Expr
     sig { returns(T::Array[Emittable]) }

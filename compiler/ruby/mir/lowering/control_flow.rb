@@ -207,9 +207,11 @@ module MIRLoweringControlFlow
     binding = condition.binding
     return [] unless binding
 
-    payload = T.let(MIR::UnionPayloadGet.new(subject, variant), MIR::Emittable)
+    mutable_binding = condition.binding_mutable == true
+    payload = T.let(MIR::UnionPayloadGet.new(subject, variant, mutable_binding), MIR::Emittable)
     payload = MIR::Deref.new(payload) if condition.runtime_indirect_payload_as
-    is_mutable = condition.left.is_a?(AST::Identifier) && condition.left.was_moved == true
+    is_mutable = mutable_binding ||
+                 (condition.left.is_a?(AST::Identifier) && condition.left.was_moved == true)
     safe_binding = payload_binding_name(binding.to_s, condition, condition.line)
     [MIR::Let.new(safe_binding, payload, is_mutable, nil, "_ = &#{safe_binding};")]
   end

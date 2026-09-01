@@ -650,11 +650,13 @@ class ClearParser
     when 'IS_A'
       is_a_rhs = parse_is_a_rhs
       binding = nil
+      binding_mutable = false
       if match?(:KEYWORD, 'AS')
         consume(:KEYWORD, 'AS')
+        binding_mutable = match!(:KEYWORD, 'MUTABLE') ? true : false
         binding = consume(:VAR_ID).text!
       end
-      return AST::IsA.new(op_token, lhs, is_a_rhs, binding)
+      return AST::IsA.new(op_token, lhs, is_a_rhs, binding, binding_mutable)
 
     when '|>'
       # SMOOTH binds Level 1, but its RHS allows chained pipe operators

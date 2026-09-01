@@ -3206,7 +3206,8 @@ class MIREmitter
   def emit_union_payload_get(node)
     subject = T.must(emit(node.subject))
     variant = node.variant.to_s
-    "(switch (#{subject}) { .#{variant} => |__union_payload| __union_payload, else => unreachable })"
+    capture = node.pointer ? "*__union_payload" : "__union_payload"
+    "(switch (#{subject}) { .#{variant} => |#{capture}| __union_payload, else => unreachable })"
   end
 
   sig { params(node: MIR::AssertStmt).returns(String) }
