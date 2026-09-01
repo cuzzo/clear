@@ -10091,7 +10091,8 @@ PRIVATE FN typeAnalysisSession__non_escaping_fiber_capture?(self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((((symbol != NIL) AND symbolEntry__borrowed_alias(UNWRAP (symbol))) AND symbolEntry__non_escaping(symbol))) THEN
+    MUTABLE rtoc_alias_symbol = UNWRAP (symbol);
+    IF !((((symbol != NIL) AND symbolEntry__borrowed_alias(rtoc_alias_symbol)) AND symbolEntry__non_escaping(symbol))) THEN
       RETURN FALSE;
     END
     RETURN (((!(symbolEntry__locked?(symbol)) AND !(symbolEntry__write_locked?(symbol))) AND !(symbolEntry__local?(symbol))) AND !(symbolEntry__atomic?(symbol)));
@@ -15943,7 +15944,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE op: ?FunctionSignature@multiowned = TRY (typeAnalysisSession__resolve_index_op(rtoc_self_view, target_type_info, :get));
     IF op EXISTS AS op_value THEN
       MUTABLE op_value_mutable = COPY op_value;
-      MUTABLE result_type = TRY (functionReturn__resolve(UNWRAP (op_value_mutable.facts.return_def), target_type_info, ( { MUTABLE rtoc_empty_list_398: []Locatable = List[]; rtoc_empty_list_398 } )));
+      MUTABLE rtoc_return_def = UNWRAP (op_value_mutable.facts.return_def);
+      MUTABLE result_type = TRY (functionReturn__resolve(rtoc_return_def, target_type_info, ( { MUTABLE rtoc_empty_list_398: []Locatable = List[]; rtoc_empty_list_398 } )));
       MUTABLE navigation = ((node.target IS_A OptionalUnwrap AND node.target.safe_navigation?()) OR implicit_safe_nav);
       IF (navigation AND !(type__optional?(result_type))) THEN
         result_type = TRY (type__optional_of(TypeTypeInput{ Type: COPY result_type }));

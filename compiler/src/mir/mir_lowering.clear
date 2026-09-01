@@ -5053,7 +5053,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_155.length() DO
     IF (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A StructDef) OR (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A EnumDef) OR (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A UnionDef) THEN
-        MUTABLE vis = (functionSignature__visibility(UNWRAP (rtoc_each_items_155[rtoc_idx])) OR :package);
+        MUTABLE rtoc_vis_sig = UNWRAP (rtoc_each_items_155[rtoc_idx]);
+        MUTABLE vis = (functionSignature__visibility(rtoc_vis_sig) OR :package);
         IF (vis == :private) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -5772,7 +5773,8 @@ PRIVATE FN mIRLowering__owned_parameter_source_node?(self: MIRLowering, source_n
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF source_node IS_A Identifier AS identifier THEN
       MUTABLE symbol: ?SymbolEntry = identifier.symbol;
-      RETURN !(!(((((symbol != NIL) AND symbolEntry__is_param(UNWRAP (symbol))) AND symbolEntry__takes(symbol)))));
+      MUTABLE rtoc_param_symbol = UNWRAP (symbol);
+      RETURN !(!(((((symbol != NIL) AND symbolEntry__is_param(rtoc_param_symbol)) AND symbolEntry__takes(symbol)))));
     ELSE
       RETURN FALSE;
     END

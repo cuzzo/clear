@@ -73,7 +73,8 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
           CONTINUE;
             END
             MUTABLE entry: ?SymbolEntry@multiowned = COPY params[arg.name()];
-            IF ((entry == NIL) OR symbolEntry__kept_identity(UNWRAP (entry))) THEN
+            MUTABLE rtoc_kept_entry = UNWRAP (entry);
+            IF ((entry == NIL) OR symbolEntry__kept_identity(rtoc_kept_entry)) THEN
                 rtoc_idx_2 = rtoc_idx_2 + 1;
           CONTINUE;
             END
