@@ -820,7 +820,7 @@ PUB FN functionSignature__from_function_def(fn: FunctionDef) RETURNS !FunctionSi
   IF memoized EXISTS AS rtoc_memoized THEN
     sig = COPY rtoc_memoized;
   ELSE
-    sig = TRY (functionSignature__new(COPY fn.params, castTypeToTypeTypeInput__function_signature(TRY (functionDef__annotation_return_type(fn))), NIL, fn.visibility, fn.type_params |> SELECT symbol(COPY _), {}, functionDef__declared_plain_reentrant?(fn)));
+    sig = TRY (functionSignature__new(COPY fn.params, castTypeToTypeTypeInput__function_signature(TRY (functionDef__annotation_return_type(fn))), NIL, fn.visibility, fn.type_params |> SELECT symbol(COPY _), {}, functionDef__declared_plain_reentrant?(fn), FALSE, NIL, NIL, NIL, List[], NIL, List[]));
   END
   MUTABLE resolved: FunctionSignature@multiowned = UNWRAP (sig);
   TRY (functionSignature__sync_from_function_def_mut(&resolved, FunctionSignatureSyncSource{ FunctionDef: COPY fn }));
