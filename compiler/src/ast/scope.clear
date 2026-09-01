@@ -607,3 +607,15 @@ PUB FN scopeScopeTypeSchema__variant_name(value: ScopeScopeTypeSchema) RETURNS S
   END
   RETURN "";
 END
+
+# Ruby asks `respond_to?(:extern_module)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN scopeScopeTypeSchema__extern_module(value: ScopeScopeTypeSchema) RETURNS ?String ->
+  PARTIAL MATCH value START
+    ScopeScopeTypeSchema.ResourceSchemaMultiowned AS item -> RETURN COPY item.extern_module;,
+    ScopeScopeTypeSchema.StructSchemaMultiowned AS item -> RETURN COPY item.extern_module;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

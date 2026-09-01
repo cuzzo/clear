@@ -15159,3 +15159,711 @@ PUB FN node__args(value: Node) RETURNS ?[]Locatable ->
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:source_range)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__source_range(value: Locatable) RETURNS ?SourceRange ->
+  PARTIAL MATCH value START
+    Locatable.Program AS item -> RETURN COPY item.source_range;,
+    Locatable.RequireNode AS item -> RETURN COPY item.source_range;,
+    Locatable.ProtocolRequirement AS item -> RETURN COPY item.source_range;,
+    Locatable.ProtocolDef AS item -> RETURN COPY item.source_range;,
+    Locatable.FunctionDef AS item -> RETURN COPY item.source_range;,
+    Locatable.ImplementationDef AS item -> RETURN COPY item.source_range;,
+    Locatable.ConformanceDef AS item -> RETURN COPY item.source_range;,
+    Locatable.StructDef AS item -> RETURN COPY item.source_range;,
+    Locatable.VarDecl AS item -> RETURN COPY item.source_range;,
+    Locatable.Assignment AS item -> RETURN COPY item.source_range;,
+    Locatable.DestructureTarget AS item -> RETURN COPY item.source_range;,
+    Locatable.DestructuringAssignment AS item -> RETURN COPY item.source_range;,
+    Locatable.BindExpr AS item -> RETURN COPY item.source_range;,
+    Locatable.BinaryOp AS item -> RETURN COPY item.source_range;,
+    Locatable.IsA AS item -> RETURN COPY item.source_range;,
+    Locatable.UnaryOp AS item -> RETURN COPY item.source_range;,
+    Locatable.CallSiteOverride AS item -> RETURN COPY item.source_range;,
+    Locatable.Identifier AS item -> RETURN COPY item.source_range;,
+    Locatable.Literal AS item -> RETURN COPY item.source_range;,
+    Locatable.ListLit AS item -> RETURN COPY item.source_range;,
+    Locatable.TupleLit AS item -> RETURN COPY item.source_range;,
+    Locatable.DefaultArrayLit AS item -> RETURN COPY item.source_range;,
+    Locatable.HashLit AS item -> RETURN COPY item.source_range;,
+    Locatable.DefaultLit AS item -> RETURN COPY item.source_range;,
+    Locatable.StructLit AS item -> RETURN COPY item.source_range;,
+    Locatable.LambdaLit AS item -> RETURN COPY item.source_range;,
+    Locatable.IfStatement AS item -> RETURN COPY item.source_range;,
+    Locatable.IfBind AS item -> RETURN COPY item.source_range;,
+    Locatable.WhileLoop AS item -> RETURN COPY item.source_range;,
+    Locatable.WhileBindLoop AS item -> RETURN COPY item.source_range;,
+    Locatable.BreakNode AS item -> RETURN COPY item.source_range;,
+    Locatable.ContinueNode AS item -> RETURN COPY item.source_range;,
+    Locatable.FuncCall AS item -> RETURN COPY item.source_range;,
+    Locatable.MethodCall AS item -> RETURN COPY item.source_range;,
+    Locatable.GetField AS item -> RETURN COPY item.source_range;,
+    Locatable.GetIndex AS item -> RETURN COPY item.source_range;,
+    Locatable.Cast AS item -> RETURN COPY item.source_range;,
+    Locatable.ReturnNode AS item -> RETURN COPY item.source_range;,
+    Locatable.Assert AS item -> RETURN COPY item.source_range;,
+    Locatable.Raise AS item -> RETURN COPY item.source_range;,
+    Locatable.ThrowNode AS item -> RETURN COPY item.source_range;,
+    Locatable.DieNode AS item -> RETURN COPY item.source_range;,
+    Locatable.Slice AS item -> RETURN COPY item.source_range;,
+    Locatable.Require AS item -> RETURN COPY item.source_range;,
+    Locatable.DeferStmt AS item -> RETURN COPY item.source_range;,
+    Locatable.WithBlock AS item -> RETURN COPY item.source_range;,
+    Locatable.SyncPolicyDecl AS item -> RETURN COPY item.source_range;,
+    Locatable.SelectOp AS item -> RETURN COPY item.source_range;,
+    Locatable.WhereOp AS item -> RETURN COPY item.source_range;,
+    Locatable.IndexOp AS item -> RETURN COPY item.source_range;,
+    Locatable.ReduceOp AS item -> RETURN COPY item.source_range;,
+    Locatable.OrderByOp AS item -> RETURN COPY item.source_range;,
+    Locatable.LimitOp AS item -> RETURN COPY item.source_range;,
+    Locatable.UnnestOp AS item -> RETURN COPY item.source_range;,
+    Locatable.DistinctOp AS item -> RETURN COPY item.source_range;,
+    Locatable.EachOp AS item -> RETURN COPY item.source_range;,
+    Locatable.TapOp AS item -> RETURN COPY item.source_range;,
+    Locatable.SkipOp AS item -> RETURN COPY item.source_range;,
+    Locatable.CollectOp AS item -> RETURN COPY item.source_range;,
+    Locatable.TakeWhileOp AS item -> RETURN COPY item.source_range;,
+    Locatable.WindowOp AS item -> RETURN COPY item.source_range;,
+    Locatable.BatchWindowOp AS item -> RETURN COPY item.source_range;,
+    Locatable.JoinOp AS item -> RETURN COPY item.source_range;,
+    Locatable.FindOp AS item -> RETURN COPY item.source_range;,
+    Locatable.AnyOp AS item -> RETURN COPY item.source_range;,
+    Locatable.AllOp AS item -> RETURN COPY item.source_range;,
+    Locatable.CountOp AS item -> RETURN COPY item.source_range;,
+    Locatable.SumOp AS item -> RETURN COPY item.source_range;,
+    Locatable.AverageOp AS item -> RETURN COPY item.source_range;,
+    Locatable.MinOp AS item -> RETURN COPY item.source_range;,
+    Locatable.MaxOp AS item -> RETURN COPY item.source_range;,
+    Locatable.ShardOp AS item -> RETURN COPY item.source_range;,
+    Locatable.ConcurrentOp AS item -> RETURN COPY item.source_range;,
+    Locatable.Placeholder AS item -> RETURN COPY item.source_range;,
+    Locatable.Copy AS item -> RETURN COPY item.source_range;,
+    Locatable.OptionalUnwrap AS item -> RETURN COPY item.source_range;,
+    Locatable.TenseNavigation AS item -> RETURN COPY item.source_range;,
+    Locatable.MutableBorrow AS item -> RETURN COPY item.source_range;,
+    Locatable.OrElseRaise AS item -> RETURN COPY item.source_range;,
+    Locatable.OrElseExit AS item -> RETURN COPY item.source_range;,
+    Locatable.OrElsePass AS item -> RETURN COPY item.source_range;,
+    Locatable.OrElsePrune AS item -> RETURN COPY item.source_range;,
+    Locatable.OrElseBreak AS item -> RETURN COPY item.source_range;,
+    Locatable.CatchBlock AS item -> RETURN COPY item.source_range;,
+    Locatable.RecoverOp AS item -> RETURN COPY item.source_range;,
+    Locatable.BlockExpr AS item -> RETURN COPY item.source_range;,
+    Locatable.StringConcat AS item -> RETURN COPY item.source_range;,
+    Locatable.CapabilityWrap AS item -> RETURN COPY item.source_range;,
+    Locatable.MoveNode AS item -> RETURN COPY item.source_range;,
+    Locatable.CopyNode AS item -> RETURN COPY item.source_range;,
+    Locatable.KeepNode AS item -> RETURN COPY item.source_range;,
+    Locatable.ShareNode AS item -> RETURN COPY item.source_range;,
+    Locatable.LinkNode AS item -> RETURN COPY item.source_range;,
+    Locatable.ResolveNode AS item -> RETURN COPY item.source_range;,
+    Locatable.FreezeNode AS item -> RETURN COPY item.source_range;,
+    Locatable.PassStmt AS item -> RETURN COPY item.source_range;,
+    Locatable.StructPattern AS item -> RETURN COPY item.source_range;,
+    Locatable.RangeLit AS item -> RETURN COPY item.source_range;,
+    Locatable.ExternFnDecl AS item -> RETURN COPY item.source_range;,
+    Locatable.ExternStructDecl AS item -> RETURN COPY item.source_range;,
+    Locatable.EnumDef AS item -> RETURN COPY item.source_range;,
+    Locatable.UnionDef AS item -> RETURN COPY item.source_range;,
+    Locatable.UnionVariantLit AS item -> RETURN COPY item.source_range;,
+    Locatable.StaticCall AS item -> RETURN COPY item.source_range;,
+    Locatable.DoBlock AS item -> RETURN COPY item.source_range;,
+    Locatable.BgBlock AS item -> RETURN COPY item.source_range;,
+    Locatable.ThenChain AS item -> RETURN COPY item.source_range;,
+    Locatable.BgStreamBlock AS item -> RETURN COPY item.source_range;,
+    Locatable.YieldExpr AS item -> RETURN COPY item.source_range;,
+    Locatable.CloseStream AS item -> RETURN COPY item.source_range;,
+    Locatable.NextExpr AS item -> RETURN COPY item.source_range;,
+    Locatable.MatchStatement AS item -> RETURN COPY item.source_range;,
+    Locatable.ForRange AS item -> RETURN COPY item.source_range;,
+    Locatable.ForEach AS item -> RETURN COPY item.source_range;,
+    Locatable.TestBlock AS item -> RETURN COPY item.source_range;,
+    Locatable.WhenBlock AS item -> RETURN COPY item.source_range;,
+    Locatable.LetBinding AS item -> RETURN COPY item.source_range;,
+    Locatable.TestThat AS item -> RETURN COPY item.source_range;,
+    Locatable.AssertRaises AS item -> RETURN COPY item.source_range;,
+    Locatable.BenchmarkStmt AS item -> RETURN COPY item.source_range;,
+    Locatable.SmashStmt AS item -> RETURN COPY item.source_range;,
+    Locatable.ProfileStmt AS item -> RETURN COPY item.source_range;,
+    Locatable.StubDecl AS item -> RETURN COPY item.source_range;,
+    Locatable.Drop AS item -> RETURN COPY item.source_range;,
+    Locatable.SuppressCleanup AS item -> RETURN COPY item.source_range;,
+    Locatable.Return AS item -> RETURN COPY item.source_range;,
+    Locatable.ReassignCleanup AS item -> RETURN COPY item.source_range;,
+    Locatable.FieldCleanup AS item -> RETURN COPY item.source_range;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:tense_plan)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__tense_plan(value: Locatable) RETURNS ?TensePlanValue ->
+  PARTIAL MATCH value START
+    Locatable.Program AS item -> RETURN COPY item.tense_plan;,
+    Locatable.RequireNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ProtocolRequirement AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ProtocolDef AS item -> RETURN COPY item.tense_plan;,
+    Locatable.FunctionDef AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ImplementationDef AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ConformanceDef AS item -> RETURN COPY item.tense_plan;,
+    Locatable.StructDef AS item -> RETURN COPY item.tense_plan;,
+    Locatable.VarDecl AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Assignment AS item -> RETURN COPY item.tense_plan;,
+    Locatable.DestructureTarget AS item -> RETURN COPY item.tense_plan;,
+    Locatable.DestructuringAssignment AS item -> RETURN COPY item.tense_plan;,
+    Locatable.BindExpr AS item -> RETURN COPY item.tense_plan;,
+    Locatable.BinaryOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.IsA AS item -> RETURN COPY item.tense_plan;,
+    Locatable.UnaryOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.CallSiteOverride AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Identifier AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Literal AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ListLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.TupleLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.DefaultArrayLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.HashLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.DefaultLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.StructLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.LambdaLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.IfStatement AS item -> RETURN COPY item.tense_plan;,
+    Locatable.IfBind AS item -> RETURN COPY item.tense_plan;,
+    Locatable.WhileLoop AS item -> RETURN COPY item.tense_plan;,
+    Locatable.WhileBindLoop AS item -> RETURN COPY item.tense_plan;,
+    Locatable.BreakNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ContinueNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.FuncCall AS item -> RETURN COPY item.tense_plan;,
+    Locatable.MethodCall AS item -> RETURN COPY item.tense_plan;,
+    Locatable.GetField AS item -> RETURN COPY item.tense_plan;,
+    Locatable.GetIndex AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Cast AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ReturnNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Assert AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Raise AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ThrowNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.DieNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Slice AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Require AS item -> RETURN COPY item.tense_plan;,
+    Locatable.DeferStmt AS item -> RETURN COPY item.tense_plan;,
+    Locatable.WithBlock AS item -> RETURN COPY item.tense_plan;,
+    Locatable.SyncPolicyDecl AS item -> RETURN COPY item.tense_plan;,
+    Locatable.SelectOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.WhereOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.IndexOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ReduceOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.OrderByOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.LimitOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.UnnestOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.DistinctOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.EachOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.TapOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.SkipOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.CollectOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.TakeWhileOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.WindowOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.BatchWindowOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.JoinOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.FindOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.AnyOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.AllOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.CountOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.SumOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.AverageOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.MinOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.MaxOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ShardOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ConcurrentOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Placeholder AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Copy AS item -> RETURN COPY item.tense_plan;,
+    Locatable.OptionalUnwrap AS item -> RETURN COPY item.tense_plan;,
+    Locatable.TenseNavigation AS item -> RETURN COPY item.tense_plan;,
+    Locatable.MutableBorrow AS item -> RETURN COPY item.tense_plan;,
+    Locatable.OrElseRaise AS item -> RETURN COPY item.tense_plan;,
+    Locatable.OrElseExit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.OrElsePass AS item -> RETURN COPY item.tense_plan;,
+    Locatable.OrElsePrune AS item -> RETURN COPY item.tense_plan;,
+    Locatable.OrElseBreak AS item -> RETURN COPY item.tense_plan;,
+    Locatable.CatchBlock AS item -> RETURN COPY item.tense_plan;,
+    Locatable.RecoverOp AS item -> RETURN COPY item.tense_plan;,
+    Locatable.BlockExpr AS item -> RETURN COPY item.tense_plan;,
+    Locatable.StringConcat AS item -> RETURN COPY item.tense_plan;,
+    Locatable.CapabilityWrap AS item -> RETURN COPY item.tense_plan;,
+    Locatable.MoveNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.CopyNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.KeepNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ShareNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.LinkNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ResolveNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.FreezeNode AS item -> RETURN COPY item.tense_plan;,
+    Locatable.PassStmt AS item -> RETURN COPY item.tense_plan;,
+    Locatable.StructPattern AS item -> RETURN COPY item.tense_plan;,
+    Locatable.RangeLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ExternFnDecl AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ExternStructDecl AS item -> RETURN COPY item.tense_plan;,
+    Locatable.EnumDef AS item -> RETURN COPY item.tense_plan;,
+    Locatable.UnionDef AS item -> RETURN COPY item.tense_plan;,
+    Locatable.UnionVariantLit AS item -> RETURN COPY item.tense_plan;,
+    Locatable.StaticCall AS item -> RETURN COPY item.tense_plan;,
+    Locatable.DoBlock AS item -> RETURN COPY item.tense_plan;,
+    Locatable.BgBlock AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ThenChain AS item -> RETURN COPY item.tense_plan;,
+    Locatable.BgStreamBlock AS item -> RETURN COPY item.tense_plan;,
+    Locatable.YieldExpr AS item -> RETURN COPY item.tense_plan;,
+    Locatable.CloseStream AS item -> RETURN COPY item.tense_plan;,
+    Locatable.NextExpr AS item -> RETURN COPY item.tense_plan;,
+    Locatable.MatchStatement AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ForRange AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ForEach AS item -> RETURN COPY item.tense_plan;,
+    Locatable.TestBlock AS item -> RETURN COPY item.tense_plan;,
+    Locatable.WhenBlock AS item -> RETURN COPY item.tense_plan;,
+    Locatable.LetBinding AS item -> RETURN COPY item.tense_plan;,
+    Locatable.TestThat AS item -> RETURN COPY item.tense_plan;,
+    Locatable.AssertRaises AS item -> RETURN COPY item.tense_plan;,
+    Locatable.BenchmarkStmt AS item -> RETURN COPY item.tense_plan;,
+    Locatable.SmashStmt AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ProfileStmt AS item -> RETURN COPY item.tense_plan;,
+    Locatable.StubDecl AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Drop AS item -> RETURN COPY item.tense_plan;,
+    Locatable.SuppressCleanup AS item -> RETURN COPY item.tense_plan;,
+    Locatable.Return AS item -> RETURN COPY item.tense_plan;,
+    Locatable.ReassignCleanup AS item -> RETURN COPY item.tense_plan;,
+    Locatable.FieldCleanup AS item -> RETURN COPY item.tense_plan;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:left)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__left(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.BinaryOp AS item -> RETURN COPY item.left;,
+    Locatable.IsA AS item -> RETURN COPY item.left;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:options)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__options(value: Locatable) RETURNS ?{String}Locatable ->
+  PARTIAL MATCH value START
+    Locatable.BatchWindowOp AS item -> RETURN COPY item.options;,
+    Locatable.ConcurrentOp AS item -> RETURN COPY item.options;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:matched_stdlib_def)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__matched_stdlib_def(value: Locatable) RETURNS ?FunctionSignature@multiowned ->
+  PARTIAL MATCH value START
+    Locatable.Program AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.RequireNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ProtocolRequirement AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ProtocolDef AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.FunctionDef AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ImplementationDef AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ConformanceDef AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.StructDef AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.VarDecl AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Assignment AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.DestructureTarget AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.DestructuringAssignment AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.BindExpr AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.BinaryOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.IsA AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.UnaryOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.CallSiteOverride AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Identifier AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Literal AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ListLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.TupleLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.DefaultArrayLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.HashLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.DefaultLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.StructLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.LambdaLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.IfStatement AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.IfBind AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.WhileLoop AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.WhileBindLoop AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.BreakNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ContinueNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.FuncCall AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.MethodCall AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.GetField AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.GetIndex AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Cast AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ReturnNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Assert AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Raise AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ThrowNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.DieNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Slice AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Require AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.DeferStmt AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.WithBlock AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.SyncPolicyDecl AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.SelectOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.WhereOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.IndexOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ReduceOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.OrderByOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.LimitOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.UnnestOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.DistinctOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.EachOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.TapOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.SkipOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.CollectOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.TakeWhileOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.WindowOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.BatchWindowOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.JoinOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.FindOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.AnyOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.AllOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.CountOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.SumOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.AverageOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.MinOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.MaxOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ShardOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ConcurrentOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Placeholder AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Copy AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.OptionalUnwrap AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.TenseNavigation AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.MutableBorrow AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.OrElseRaise AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.OrElseExit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.OrElsePass AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.OrElsePrune AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.OrElseBreak AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.CatchBlock AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.RecoverOp AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.BlockExpr AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.StringConcat AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.CapabilityWrap AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.MoveNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.CopyNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.KeepNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ShareNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.LinkNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ResolveNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.FreezeNode AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.PassStmt AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.StructPattern AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.RangeLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ExternFnDecl AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ExternStructDecl AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.EnumDef AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.UnionDef AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.UnionVariantLit AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.StaticCall AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.DoBlock AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.BgBlock AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ThenChain AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.BgStreamBlock AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.YieldExpr AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.CloseStream AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.NextExpr AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.MatchStatement AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ForRange AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ForEach AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.TestBlock AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.WhenBlock AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.LetBinding AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.TestThat AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.AssertRaises AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.BenchmarkStmt AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.SmashStmt AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ProfileStmt AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.StubDecl AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Drop AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.SuppressCleanup AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.Return AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.ReassignCleanup AS item -> RETURN COPY item.matched_stdlib_def;,
+    Locatable.FieldCleanup AS item -> RETURN COPY item.matched_stdlib_def;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:expr)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__expr(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.YieldExpr AS item -> RETURN COPY item.expr;,
+    Locatable.NextExpr AS item -> RETURN COPY item.expr;,
+    Locatable.MatchStatement AS item -> RETURN COPY item.expr;,
+    Locatable.LetBinding AS item -> RETURN COPY item.expr;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:start_expr)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__start_expr(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.ForRange AS item -> RETURN COPY item.start_expr;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:condition)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__condition(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.IfStatement AS item -> RETURN COPY item.condition;,
+    Locatable.WhileLoop AS item -> RETURN COPY item.condition;,
+    Locatable.WhileBindLoop AS item -> RETURN COPY item.condition;,
+    Locatable.Assert AS item -> RETURN COPY item.condition;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:items)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__items(value: Locatable) RETURNS ?[]Locatable ->
+  PARTIAL MATCH value START
+    Locatable.ListLit AS item -> RETURN COPY item.items;,
+    Locatable.TupleLit AS item -> RETURN COPY item.items;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:effect_mode)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__effect_mode(value: Locatable) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    Locatable.SelectOp AS item -> RETURN COPY item.effect_mode;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:result)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__result(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.BlockExpr AS item -> RETURN COPY item.result;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:steps)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__steps(value: Locatable) RETURNS ?[]ThenStep ->
+  PARTIAL MATCH value START
+    Locatable.ThenChain AS item -> RETURN COPY item.steps;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:generic_params)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN node__generic_params(value: Node) RETURNS ?[]GenericParamDecl ->
+  PARTIAL MATCH value START
+    Node.FunctionDef AS item -> RETURN COPY item.generic_params;,
+    Node.StructDef AS item -> RETURN COPY item.generic_params;,
+    Node.UnionDef AS item -> RETURN COPY item.generic_params;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:object)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN node__object(value: Node) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Node.MethodCall AS item -> RETURN COPY item.object;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:symbol)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN node__symbol(value: Node) RETURNS ?SymbolEntry@multiowned ->
+  PARTIAL MATCH value START
+    Node.Program AS item -> RETURN COPY item.symbol;,
+    Node.RequireNode AS item -> RETURN COPY item.symbol;,
+    Node.ProtocolRequirement AS item -> RETURN COPY item.symbol;,
+    Node.ProtocolDef AS item -> RETURN COPY item.symbol;,
+    Node.FunctionDef AS item -> RETURN COPY item.symbol;,
+    Node.ImplementationDef AS item -> RETURN COPY item.symbol;,
+    Node.ConformanceDef AS item -> RETURN COPY item.symbol;,
+    Node.StructDef AS item -> RETURN COPY item.symbol;,
+    Node.VarDecl AS item -> RETURN COPY item.symbol;,
+    Node.Assignment AS item -> RETURN COPY item.symbol;,
+    Node.DestructureTarget AS item -> RETURN COPY item.symbol;,
+    Node.DestructuringAssignment AS item -> RETURN COPY item.symbol;,
+    Node.BindExpr AS item -> RETURN COPY item.symbol;,
+    Node.BinaryOp AS item -> RETURN COPY item.symbol;,
+    Node.IsA AS item -> RETURN COPY item.symbol;,
+    Node.UnaryOp AS item -> RETURN COPY item.symbol;,
+    Node.CallSiteOverride AS item -> RETURN COPY item.symbol;,
+    Node.Identifier AS item -> RETURN COPY item.symbol;,
+    Node.Literal AS item -> RETURN COPY item.symbol;,
+    Node.ListLit AS item -> RETURN COPY item.symbol;,
+    Node.TupleLit AS item -> RETURN COPY item.symbol;,
+    Node.DefaultArrayLit AS item -> RETURN COPY item.symbol;,
+    Node.HashLit AS item -> RETURN COPY item.symbol;,
+    Node.DefaultLit AS item -> RETURN COPY item.symbol;,
+    Node.StructLit AS item -> RETURN COPY item.symbol;,
+    Node.LambdaLit AS item -> RETURN COPY item.symbol;,
+    Node.IfStatement AS item -> RETURN COPY item.symbol;,
+    Node.IfBind AS item -> RETURN COPY item.symbol;,
+    Node.WhileLoop AS item -> RETURN COPY item.symbol;,
+    Node.WhileBindLoop AS item -> RETURN COPY item.symbol;,
+    Node.BreakNode AS item -> RETURN COPY item.symbol;,
+    Node.ContinueNode AS item -> RETURN COPY item.symbol;,
+    Node.FuncCall AS item -> RETURN COPY item.symbol;,
+    Node.MethodCall AS item -> RETURN COPY item.symbol;,
+    Node.GetField AS item -> RETURN COPY item.symbol;,
+    Node.GetIndex AS item -> RETURN COPY item.symbol;,
+    Node.Cast AS item -> RETURN COPY item.symbol;,
+    Node.ReturnNode AS item -> RETURN COPY item.symbol;,
+    Node.Assert AS item -> RETURN COPY item.symbol;,
+    Node.Raise AS item -> RETURN COPY item.symbol;,
+    Node.ThrowNode AS item -> RETURN COPY item.symbol;,
+    Node.DieNode AS item -> RETURN COPY item.symbol;,
+    Node.Slice AS item -> RETURN COPY item.symbol;,
+    Node.Require AS item -> RETURN COPY item.symbol;,
+    Node.DeferStmt AS item -> RETURN COPY item.symbol;,
+    Node.WithBlock AS item -> RETURN COPY item.symbol;,
+    Node.SyncPolicyDecl AS item -> RETURN COPY item.symbol;,
+    Node.SelectOp AS item -> RETURN COPY item.symbol;,
+    Node.WhereOp AS item -> RETURN COPY item.symbol;,
+    Node.IndexOp AS item -> RETURN COPY item.symbol;,
+    Node.ReduceOp AS item -> RETURN COPY item.symbol;,
+    Node.OrderByOp AS item -> RETURN COPY item.symbol;,
+    Node.LimitOp AS item -> RETURN COPY item.symbol;,
+    Node.UnnestOp AS item -> RETURN COPY item.symbol;,
+    Node.DistinctOp AS item -> RETURN COPY item.symbol;,
+    Node.EachOp AS item -> RETURN COPY item.symbol;,
+    Node.TapOp AS item -> RETURN COPY item.symbol;,
+    Node.SkipOp AS item -> RETURN COPY item.symbol;,
+    Node.CollectOp AS item -> RETURN COPY item.symbol;,
+    Node.TakeWhileOp AS item -> RETURN COPY item.symbol;,
+    Node.WindowOp AS item -> RETURN COPY item.symbol;,
+    Node.BatchWindowOp AS item -> RETURN COPY item.symbol;,
+    Node.JoinOp AS item -> RETURN COPY item.symbol;,
+    Node.FindOp AS item -> RETURN COPY item.symbol;,
+    Node.AnyOp AS item -> RETURN COPY item.symbol;,
+    Node.AllOp AS item -> RETURN COPY item.symbol;,
+    Node.CountOp AS item -> RETURN COPY item.symbol;,
+    Node.SumOp AS item -> RETURN COPY item.symbol;,
+    Node.AverageOp AS item -> RETURN COPY item.symbol;,
+    Node.MinOp AS item -> RETURN COPY item.symbol;,
+    Node.MaxOp AS item -> RETURN COPY item.symbol;,
+    Node.ShardOp AS item -> RETURN COPY item.symbol;,
+    Node.ConcurrentOp AS item -> RETURN COPY item.symbol;,
+    Node.Placeholder AS item -> RETURN COPY item.symbol;,
+    Node.Copy AS item -> RETURN COPY item.symbol;,
+    Node.OptionalUnwrap AS item -> RETURN COPY item.symbol;,
+    Node.TenseNavigation AS item -> RETURN COPY item.symbol;,
+    Node.MutableBorrow AS item -> RETURN COPY item.symbol;,
+    Node.OrElseRaise AS item -> RETURN COPY item.symbol;,
+    Node.OrElseExit AS item -> RETURN COPY item.symbol;,
+    Node.OrElsePass AS item -> RETURN COPY item.symbol;,
+    Node.OrElsePrune AS item -> RETURN COPY item.symbol;,
+    Node.OrElseBreak AS item -> RETURN COPY item.symbol;,
+    Node.CatchBlock AS item -> RETURN COPY item.symbol;,
+    Node.RecoverOp AS item -> RETURN COPY item.symbol;,
+    Node.BlockExpr AS item -> RETURN COPY item.symbol;,
+    Node.StringConcat AS item -> RETURN COPY item.symbol;,
+    Node.CapabilityWrap AS item -> RETURN COPY item.symbol;,
+    Node.MoveNode AS item -> RETURN COPY item.symbol;,
+    Node.CopyNode AS item -> RETURN COPY item.symbol;,
+    Node.KeepNode AS item -> RETURN COPY item.symbol;,
+    Node.ShareNode AS item -> RETURN COPY item.symbol;,
+    Node.LinkNode AS item -> RETURN COPY item.symbol;,
+    Node.ResolveNode AS item -> RETURN COPY item.symbol;,
+    Node.FreezeNode AS item -> RETURN COPY item.symbol;,
+    Node.PassStmt AS item -> RETURN COPY item.symbol;,
+    Node.StructPattern AS item -> RETURN COPY item.symbol;,
+    Node.RangeLit AS item -> RETURN COPY item.symbol;,
+    Node.ExternFnDecl AS item -> RETURN COPY item.symbol;,
+    Node.ExternStructDecl AS item -> RETURN COPY item.symbol;,
+    Node.EnumDef AS item -> RETURN COPY item.symbol;,
+    Node.UnionDef AS item -> RETURN COPY item.symbol;,
+    Node.UnionVariantLit AS item -> RETURN COPY item.symbol;,
+    Node.StaticCall AS item -> RETURN COPY item.symbol;,
+    Node.DoBlock AS item -> RETURN COPY item.symbol;,
+    Node.BgBlock AS item -> RETURN COPY item.symbol;,
+    Node.ThenChain AS item -> RETURN COPY item.symbol;,
+    Node.BgStreamBlock AS item -> RETURN COPY item.symbol;,
+    Node.YieldExpr AS item -> RETURN COPY item.symbol;,
+    Node.CloseStream AS item -> RETURN COPY item.symbol;,
+    Node.NextExpr AS item -> RETURN COPY item.symbol;,
+    Node.MatchStatement AS item -> RETURN COPY item.symbol;,
+    Node.ForRange AS item -> RETURN COPY item.symbol;,
+    Node.ForEach AS item -> RETURN COPY item.symbol;,
+    Node.TestBlock AS item -> RETURN COPY item.symbol;,
+    Node.WhenBlock AS item -> RETURN COPY item.symbol;,
+    Node.LetBinding AS item -> RETURN COPY item.symbol;,
+    Node.TestThat AS item -> RETURN COPY item.symbol;,
+    Node.AssertRaises AS item -> RETURN COPY item.symbol;,
+    Node.BenchmarkStmt AS item -> RETURN COPY item.symbol;,
+    Node.SmashStmt AS item -> RETURN COPY item.symbol;,
+    Node.ProfileStmt AS item -> RETURN COPY item.symbol;,
+    Node.StubDecl AS item -> RETURN COPY item.symbol;,
+    Node.Drop AS item -> RETURN COPY item.symbol;,
+    Node.SuppressCleanup AS item -> RETURN COPY item.symbol;,
+    Node.Return AS item -> RETURN COPY item.symbol;,
+    Node.ReassignCleanup AS item -> RETURN COPY item.symbol;,
+    Node.FieldCleanup AS item -> RETURN COPY item.symbol;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:name)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN assignmentName__name(value: AssignmentName) RETURNS ?String ->
+  PARTIAL MATCH value START
+    AssignmentName.Identifier AS item -> RETURN COPY item.name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:symbol)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN bindingNode__symbol(value: BindingNode) RETURNS ?SymbolEntry@multiowned ->
+  PARTIAL MATCH value START
+    BindingNode.VarDecl AS item -> RETURN COPY item.symbol;,
+    BindingNode.BindExpr AS item -> RETURN COPY item.symbol;,
+    BindingNode.DestructureTarget AS item -> RETURN COPY item.symbol;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

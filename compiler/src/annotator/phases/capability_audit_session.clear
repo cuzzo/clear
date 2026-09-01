@@ -1316,7 +1316,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
     MUTABLE fixes = List[];
     IF src EXISTS AS src_value THEN
-      MUTABLE line_num = token__start_line(node.source_range);
+      MUTABLE line_num = token__start_line(locatable__source_range(node));
       MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
       MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
@@ -1494,7 +1494,7 @@ PRIVATE FN capabilityAuditSession__emit_can_smash_unsupported_error_mut(self: Ca
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fix = NIL;
     MUTABLE tok = IF (asyncValidationNode__can_smash_token(node) != NIL) THEN
-      node.can_smash_token
+      asyncValidationNode__can_smash_token(node)
     ELSE
       NIL
     END;

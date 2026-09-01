@@ -19549,3 +19549,15 @@ PUB FN emittable__responds_to_ownership_source_exprs?(value: Emittable) RETURNS 
   END
   RETURN FALSE;
 END
+
+# Ruby asks `respond_to?(:callee)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN emittable__callee(value: Emittable) RETURNS ?String ->
+  PARTIAL MATCH value START
+    Emittable.Call AS item -> RETURN COPY item.callee;,
+    Emittable.TailCall AS item -> RETURN COPY item.callee;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

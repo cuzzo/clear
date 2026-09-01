@@ -44,3 +44,14 @@ PUB FN fsmEmitContext__with_extra_ctx_fields(self: FsmEmitContext, fields: []Con
 END
 # End Ruby module FsmTransform::Emit
 # End Ruby module FsmTransform
+
+# Ruby asks `respond_to?(:fsm_suspend_points)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN bgBlockInput__fsm_suspend_points(value: BgBlockInput) RETURNS ?PassStateValue ->
+  PARTIAL MATCH value START
+    BgBlockInput.BgBlock AS item -> RETURN COPY item.fsm_suspend_points;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

@@ -219,7 +219,7 @@ PUB FN resolutionSession__generic_param_token(self: ResolutionSession, node: Nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE param = node.generic_params |> FIND (_.name() == name);
+    MUTABLE param = node__generic_params(node) |> FIND (_.name() == name);
     RETURN ((IF param != NIL THEN
       param.token()
     ELSE
@@ -802,7 +802,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (binders.length() == 0) THEN
       MUTABLE names = ((TRY (type__generic_args(declaration.protocol_type))) |> SELECT:? {
     MUTABLE kind = COPY _.shape.expression.kind;
-    (    IF ((kind IS_A NamedTypeExpression AND kind.arguments.empty?()) AND !(builtin_type_parameter_names.contains?(kind.name()))) THEN
+    (    IF ((kind IS_A NamedTypeExpression AND typeExpressionKind__arguments(kind).empty?()) AND !(builtin_type_parameter_names.contains?(kind.name()))) THEN
           CAST(kind.name() AS String)
         ELSE
           NIL
@@ -2008,7 +2008,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((resolutionSession__extern_type_schema?(rtoc_self_view, existing) AND resolutionSession__extern_type_schema?(rtoc_self_view, incoming))) THEN
       RETURN FALSE;
     END
-    IF !((existing.extern_module == incoming.extern_module)) THEN
+    IF !((scopeScopeTypeSchema__extern_module(existing) == scopeScopeTypeSchema__extern_module(incoming))) THEN
       RETURN FALSE;
     END
     IF !((existing.as_type == incoming.as_type)) THEN
@@ -2032,7 +2032,7 @@ PRIVATE FN resolutionSession__extern_type_schema?(self: ResolutionSession, schem
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((schema IS_A StructSchema OR schema IS_A ResourceSchema)) AND !((schema.extern_module == NIL)));
+    RETURN (((schema IS_A StructSchema OR schema IS_A ResourceSchema)) AND !((scopeScopeTypeSchema__extern_module(schema) == NIL)));
 }
 END
 PRIVATE FN resolutionSession__equivalent_struct_fields?(self: ResolutionSession, left: {String}StructField, right: {String}StructField) RETURNS Bool

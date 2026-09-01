@@ -612,7 +612,7 @@ FN mIRLowering__stable_node_suffix(self: MIRLowering, node: Locatable) RETURNS S
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE range = node.source_range;
+    MUTABLE range = locatable__source_range(node);
     RETURN "${(mIRLowering__function_relative_line(rtoc_self_view, token__start_line(range))).toString()}_${token__start_column(range)}_${(mIRLowering__function_relative_line(rtoc_self_view, span__end_line(range))).toString()}_${range.end_column}";
 }
 END
@@ -2942,7 +2942,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (source_node IS_A ReassignWithCleanup OR source_node IS_A ShardedMapPut) THEN
       RETURN COPY emittable__variant_name(source_node);
     END
-    IF ((emittable__target_var(source_node) != NIL) AND source_node.target_var) THEN
+    IF ((emittable__target_var(source_node) != NIL) AND emittable__target_var(source_node)) THEN
       RETURN COPY CAST(source_node.target_var AS String);
     END
     IF (source_node IS_A Call OR source_node IS_A TailCall) THEN
@@ -4300,7 +4300,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF (alloc_sym == :receiver_storage) THEN
       MUTABLE receiver: ?Locatable = COPY target_node;
       IF ((node != NIL) AND (node IS_A MethodCall)) THEN
-        receiver = (receiver OR_ELSE node.object);
+        receiver = (receiver OR_ELSE locatable__object(node));
       END
       IF (IF node? IS_A FuncCall AS func_call THEN (func_call.mutates_receiver != NIL) ELSE FALSE END) THEN
         receiver = (receiver OR_ELSE locatable__args(node).first());
@@ -5340,7 +5340,7 @@ PRIVATE FN mIRLowering__lower_direct_length(MUTABLE self: MIRLowering, node: Nod
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE recv_ast = IF node IS_A MethodCall THEN
-      node.object
+      node__object(node)
     ELSE
       node__args(node).first()
     END;
@@ -9227,7 +9227,7 @@ PRIVATE FN mIRLowering__infer_catch_value_allocator(self: MIRLowering, expr: ?Lo
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF expr EXISTS AS expr_value THEN
-      IF ((aST__node__symbol(expr_value) EXISTS) AND ((expr_value.symbol != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_331 = ((expr_value.symbol)?);
+      IF ((aST__node__symbol(expr_value) EXISTS) AND ((expr_value.symbol != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_331 = ((locatable__symbol(expr_value))?);
       symbolEntry__heap_storage?(rtoc_local_receiver_331) } == TRUE))) THEN
         RETURN :heap;
       END
@@ -11210,7 +11210,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node: Any = COPY expr;
     WHILE (node IS_A BlockExpr OR node IS_A Cast) DO
       node = IF node IS_A BlockExpr THEN
-        node.result
+        locatable__result(node)
       ELSE
         node.value()
       END;
@@ -13195,7 +13195,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE steps: []BgBodyStep = ( { MUTABLE rtoc_empty_list_511: []BgBodyStep = List[]; rtoc_empty_list_511 } );
     FOR _ IN node.body DO
     IF _ IS_A ThenChain THEN
-      FOR _ IN _.steps DO
+      FOR _ IN locatable__steps(_) DO
       &steps.append(BgBodyStep{ expr: COPY _.expr(), binding: COPY _.binding });
       END
     ELSE
@@ -13545,7 +13545,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE promise_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.expr)) }));
     MUTABLE result_type = TRY (aST__full_type_mut(Locatable{ NextExpr: COPY node }));
     MUTABLE async_shape = IF node.expr IS_A Identifier THEN
-      (IF node.expr.symbol != NIL THEN
+      (IF locatable__expr(node).symbol != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_526 = (node.expr.symbol);
     symbolEntry__async_result_shape(rtoc_local_receiver_526) }
     ELSE
@@ -13871,7 +13871,7 @@ PRIVATE FN mIRLowering__require_tense_operation_plan_mut(self: MIRLowering, node
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE plan: ?TenseOperationPlan = CAST(node.tense_plan AS ?TenseOperationPlan);
+    MUTABLE plan: ?TenseOperationPlan = CAST(locatable__tense_plan(node) AS ?TenseOperationPlan);
     IF !((((plan != NIL) AND (plan.operation == operation)) AND (plan.backend_form == backend))) THEN
       panic("{} lowering requires its annotation-produced TenseOperationPlan");
     END
@@ -14922,7 +14922,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (mIRLowering__lower_tense_navigation_field(&rtoc_self_view, &node, castLocatableToTenseNavigation__mir_lowering(node.target)));
     END
     MUTABLE target_node = COPY node.target;
-    MUTABLE implicit_safe_nav = ((aST__node_safe_nav_chain(target_node) EXISTS) AND (target_node.safe_nav_chain == TRUE));
+    MUTABLE implicit_safe_nav = ((aST__node_safe_nav_chain(target_node) EXISTS) AND (locatable__safe_nav_chain(target_node) == TRUE));
     MUTABLE explicit_safe_nav = (target_node IS_A OptionalUnwrap AND target_node.safe_navigation?());
     IF (explicit_safe_nav OR implicit_safe_nav) THEN
       MUTABLE inner_ast_branch_value: ?Locatable = NIL;
@@ -14984,7 +14984,7 @@ PRIVATE FN mIRLowering__lower_tense_navigation(MUTABLE self: MIRLowering, node: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE plan: ?TenseOperationPlan = CAST(node.tense_plan AS ?TenseOperationPlan);
+    MUTABLE plan: ?TenseOperationPlan = CAST(locatable__tense_plan(node) AS ?TenseOperationPlan);
     IF !((plan?.operation == TenseOperationKind.Navigate)) THEN
       panic("tense navigation lowering requires its annotation-produced TenseOperationPlan");
     END
@@ -15421,7 +15421,7 @@ PRIVATE FN mIRLowering__index_access_plan(MUTABLE self: MIRLowering, node: GetIn
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target_node = COPY node.target;
     MUTABLE target_ast: Locatable = target_node;
-    MUTABLE implicit_safe_nav = ((aST__node_safe_nav_chain(target_node) EXISTS) AND (target_node.safe_nav_chain == TRUE));
+    MUTABLE implicit_safe_nav = ((aST__node_safe_nav_chain(target_node) EXISTS) AND (locatable__safe_nav_chain(target_node) == TRUE));
     MUTABLE explicit_safe_nav = (target_node IS_A OptionalUnwrap AND target_node.safe_navigation?());
     MUTABLE optional = (explicit_safe_nav OR implicit_safe_nav);
     MUTABLE source_ast_branch_value: ?Locatable = NIL;
@@ -16620,7 +16620,7 @@ PRIVATE FN mIRLowering__copy_source_zig_type(self: MIRLowering, source: Locatabl
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF ((TRY (type__non_string_array?(source_type)) AND source IS_A Identifier) AND ((source.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_610 = ((source.symbol)?);
+    IF ((TRY (type__non_string_array?(source_type)) AND source IS_A Identifier) AND ((source.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_610 = ((locatable__symbol(source))?);
     symbolEntry__is_param(rtoc_local_receiver_610) })) THEN
       RETURN TRY (type__zig_type(source_type, TRUE));
     END
@@ -18418,7 +18418,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((aST__node__symbol(node) EXISTS)) THEN
       RETURN NIL;
     END
-    MUTABLE symbol = node.symbol;
+    MUTABLE symbol = locatable__symbol(node);
     IF !(symbol) THEN
       RETURN NIL;
     END
@@ -19001,7 +19001,7 @@ PRIVATE FN mIRLowering__lower_indexed_assignment(MUTABLE self: MIRLowering, node
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE call = NIL;
-    IF (node.name.protocol_operation == :map_put) THEN
+    IF (assignmentName__name(node).protocol_operation == :map_put) THEN
       call = TRY (mIRLowering__lower_protocol_map_put_call(&rtoc_self_view, node.name.target, node.name.indexOf(), node.value));
       RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY call, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
@@ -19054,7 +19054,7 @@ PRIVATE FN mIRLowering__lower_direct_indexed_set(MUTABLE self: MIRLowering, node
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE target = TRY (mIRLowering__lower(&rtoc_self_view, node.name.target));
+    MUTABLE target = TRY (mIRLowering__lower(&rtoc_self_view, assignmentName__name(node).target));
     MUTABLE idx = TRY (mIRLowering__lower(&rtoc_self_view, node.name.indexOf()));
     IF cast_index THEN
       idx = MIRCast{ expr: Emittable{ MIRCast: COPY idx }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL };
@@ -19394,7 +19394,7 @@ PRIVATE FN mIRLowering__lower_if(MUTABLE self: MIRLowering, node: IfStatement) R
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE else_body = NIL;
     MUTABLE then_body: []Emittable = List[];
-    IF (node.condition IS_A IsA AND node.condition.runtime_variant_name) THEN
+    IF (locatable__condition(node) IS_A IsA AND locatable__condition(node).runtime_variant_name) THEN
       RETURN TRY (mIRLowering__lower_runtime_is_a_if(&rtoc_self_view, node, castLocatableToIsA__mir_lowering(node.condition)));
     END
     MUTABLE cond, cond_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(node, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition(rtoc_self_view, node.condition)));
@@ -20116,7 +20116,7 @@ PRIVATE FN mIRLowering__union_if_chain_match_case(self: MIRLowering, node: Match
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE variants = TRY (mIRLowering__union_match_case_variants(rtoc_self_view, match_case));
-    MUTABLE is_mutable = (node.expr IS_A Identifier AND (node.expr.was_moved == TRUE));
+    MUTABLE is_mutable = (locatable__expr(node) IS_A Identifier AND (locatable__expr(node).was_moved == TRUE));
     MUTABLE has_payload_binding = !(!(((IF match_case.binding != NIL THEN match_case.binding ELSE match_case.destructure END))));
     IF (has_payload_binding AND (variants.length() > 1)) THEN
       RETURN variants |> SELECT mIRLowering__if_chain_branch(rtoc_self_view, Emittable{ MIRBinOp: COPY TRY (mIRLowering__union_tag_condition(rtoc_self_view, subject, _)) }, (TRY (mIRLowering__union_if_chain_payload_bindings(rtoc_self_view, match_case, subject, _, is_mutable)) + COPY body));
@@ -20268,7 +20268,7 @@ PRIVATE FN mIRLowering__match_union_lookup(self: MIRLowering, expression: Locata
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE type = TRY (type__new((expression.resolved_type OR_ELSE :Any)));
+    MUTABLE type = TRY (type__new((locatable__resolved_type(expression) OR_ELSE :Any)));
     IF type__generic_instance?(type) THEN
       RETURN type__generic_base(type);
     END
@@ -20367,7 +20367,7 @@ PRIVATE FN mIRLowering__union_match_payload_bindings(self: MIRLowering, c: Match
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE is_mutable = (((node.expr IS_A Identifier AND (node.expr.was_moved == TRUE))) OR (c.binding_mutable == TRUE));
+    MUTABLE is_mutable = (((locatable__expr(node) IS_A Identifier AND (locatable__expr(node).was_moved == TRUE))) OR (c.binding_mutable == TRUE));
     MUTABLE payload = Ident{ name: COPY payload_name, lowered_node_id: NIL, ownership_consumption: NIL };
     IF c.indirect_payload_as THEN
       payload = Deref{ expr: Emittable{ Ident: COPY payload }, lowered_node_id: NIL, ownership_consumption: NIL };
@@ -20639,7 +20639,7 @@ PRIVATE FN mIRLowering__tail_call_return?(self: MIRLowering, value: ?Emittable) 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN !(!(((((mIRLowering__current_function_tail_call?(rtoc_self_view) AND !(mIRLowering__program_state(rtoc_self_view).debug_mode)) AND ((value != NIL) AND (value IS_A Call))) AND (value.callee == mIRLowering__current_function_zig_name(rtoc_self_view))))));
+    RETURN !(!(((((mIRLowering__current_function_tail_call?(rtoc_self_view) AND !(mIRLowering__program_state(rtoc_self_view).debug_mode)) AND ((value != NIL) AND (value IS_A Call))) AND (emittable__callee(value) == mIRLowering__current_function_zig_name(rtoc_self_view))))));
 }
 END
 PRIVATE FN mIRLowering__return_with_transfer_marks(self: MIRLowering, plan: ReturnOwnershipPlan, value: ?Emittable, ret: ReturnStmt) RETURNS !NodeRoot

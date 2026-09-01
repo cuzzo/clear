@@ -658,7 +658,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_select(self: Pipelin
 END
 PRIVATE FN pipelineConcurrentLowerer__concurrent_select_result_type(self: PipelineConcurrentLowerer, inner: SelectOp) RETURNS !Type ->
   MUTABLE expression = COPY inner.expression;
-  IF (((((inner.effect_mode == :fallible) OR (inner.effect_mode == :fallible_optional))) AND (aST__node_error_union_type(expression) EXISTS)) AND expression.error_union_type) THEN
+  IF (((((locatable__effect_mode(inner) == :fallible) OR (locatable__effect_mode(inner) == :fallible_optional))) AND (aST__node_error_union_type(expression) EXISTS)) AND locatable__error_union_type(expression)) THEN
     RETURN TRY (type__new(expression.error_union_type));
   END
   RETURN TRY (aST__full_type_mut(expression));
