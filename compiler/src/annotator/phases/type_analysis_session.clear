@@ -1507,13 +1507,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE previous: []Int64 = List[];
     MUTABLE rtoc_previous_seed = 0;
-    WHILE rtoc_previous_seed <= right.codepointCount() DO
+    WHILE rtoc_previous_seed <= right.length() DO
       &previous.append(rtoc_previous_seed);
       rtoc_previous_seed = rtoc_previous_seed + 1;
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < left.length() DO
-      MUTABLE current = [(rtoc_idx + 1)];
+      MUTABLE current: []Int64 = [(rtoc_idx + 1)];
       MUTABLE rtoc_idx_n1 = 0;
       WHILE rtoc_idx_n1 < right.length() DO
           MUTABLE cost = IF (left.substr(rtoc_idx, 1) == right.substr(rtoc_idx_n1, 1)) THEN
@@ -1521,13 +1521,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             ELSE
               1
             END;
-          &current.append(([(UNWRAP (current[rtoc_idx_n1]) + 1), (previous[(rtoc_idx_n1 + 1)] + 1), (previous[rtoc_idx_n1] + cost)]).min());
+          &current.append(min(min(((UNWRAP (current[rtoc_idx_n1])) + 1), ((UNWRAP (previous[(rtoc_idx_n1 + 1)])) + 1)), ((UNWRAP (previous[rtoc_idx_n1])) + cost)));
         rtoc_idx_n1 = rtoc_idx_n1 + 1;
       END
-      previous = current;
+      previous = COPY current;
     rtoc_idx = rtoc_idx + 1;
     END
-    RETURN previous.last();
+    RETURN UNWRAP (previous.last());
 }
 END
 PRIVATE FN typeAnalysisSession__emit_optional_field_safe_nav_finding_mut(self: TypeAnalysisSession, node: GetField, target_type: Type) RETURNS !Void
@@ -1593,7 +1593,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE prev: []Int64 = List[];
     MUTABLE rtoc_prev_seed = 0;
-    WHILE rtoc_prev_seed <= b.codepointCount() DO
+    WHILE rtoc_prev_seed <= b.length() DO
       &prev.append(rtoc_prev_seed);
       rtoc_prev_seed = rtoc_prev_seed + 1;
     END
@@ -1613,7 +1613,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       prev = curr;
     rtoc_idx = rtoc_idx + 1;
     END
-    RETURN prev.last();
+    RETURN UNWRAP (prev.last());
 }
 END
 PRIVATE FN typeAnalysisSession__emit_registry_mismatch_mut(self: TypeAnalysisSession, token: Token, name: NameCandidate, candidates: []NameCandidate, message: String, fix_label: String) RETURNS !Void
