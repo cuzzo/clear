@@ -104,7 +104,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 
-PUB UNION DiagnosticAnchor { TokenValue: Token, Locatable: Locatable }
+PUB UNION DiagnosticAnchor { TokenValue: Token, Locatable: Locatable, AnchorTokenValue: AnchorToken }
 
 # The token a diagnostic points at: a node contributes its own.
 # A node reaches a diagnostic through whichever materialized union its caller
@@ -120,6 +120,7 @@ PUB FN diagnosticAnchor__token(value: ?DiagnosticAnchor) RETURNS ?Token ->
     PARTIAL MATCH rtoc_anchor START
       DiagnosticAnchor.TokenValue AS item -> RETURN COPY item;,
       DiagnosticAnchor.Locatable AS item -> RETURN aST__node__token(item);,
+      DiagnosticAnchor.AnchorTokenValue AS item -> RETURN NIL;,
       DEFAULT -> RETURN NIL;
     END
   END

@@ -1694,9 +1694,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: DiagnosticKwValue{ StringValue: COPY name }, :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }})), [edit__new(span__new(NIL, anchor.line, anchor.column, name.codepointCount()), best_value)], :auto)));
     END
     IF (fixes.length() == 0) THEN
-      RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, anchor, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], {:detail: message}));
+      RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ AnchorTokenValue: COPY anchor }, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], {:detail: message}));
     END
-    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, anchor, :type, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: message}));
+    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ AnchorTokenValue: COPY anchor }, :type, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: message}));
 }
 END
 PRIVATE FN typeAnalysisSession__emit_use_of_moved_error_mut(self: TypeAnalysisSession, use_node: Identifier, og_node: OwnershipNode) RETURNS !Void
@@ -2074,7 +2074,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       anchor_branch_value = NIL;
     END
     MUTABLE anchor: ?AnchorToken = anchor_branch_value;
-    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, anchor, :lint, fixes, NIL, :LOCAL_NEVER_SHARED, :info, FALSE, {:name: name}));
+    TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ AnchorTokenValue: COPY anchor }, :lint, fixes, NIL, :LOCAL_NEVER_SHARED, :info, FALSE, {:name: name}));
 }
 END
 PRIVATE FN typeAnalysisSession__emit_immutable_assignment_error_mut(self: TypeAnalysisSession, node: BindExpr, scope: Scope) RETURNS !Void

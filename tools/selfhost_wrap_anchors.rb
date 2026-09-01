@@ -64,6 +64,7 @@ Dir.glob(File.join(ROOT, '**', '*.clear')).sort.each do |path|
       inner =
         if b == 'Token' then "DiagnosticAnchor{ TokenValue: COPY #{anchor} }"
         elsif b == 'Locatable' then "DiagnosticAnchor{ Locatable: COPY #{anchor} }"
+        elsif b == 'AnchorToken' then "DiagnosticAnchor{ AnchorTokenValue: COPY #{anchor} }"
         elsif b == 'DiagnosticAnchor' then nil
         elsif locatable.key?(b) then "DiagnosticAnchor{ Locatable: Locatable{ #{locatable[b]}: COPY #{anchor} } }"
         elsif variants.key?(b) && variants[b].any? { |_, ty| locatable.key?(bare(ty)) }
