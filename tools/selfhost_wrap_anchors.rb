@@ -20,6 +20,7 @@ apply = ARGV.include?('--apply')
 variants, fields = SelfhostUnionAccessor.load_types(ROOT)
 locatable = variants['Locatable'].to_h { |name, type| [type.sub(/@\w+\z/, ''), name] }
 $VARIANT_TYPES = variants.transform_values(&:to_h)
+$FIELDS = fields
 
 returns = {}
 Dir.glob(File.join(ROOT, '**', '*.clear')).each do |p|
@@ -46,6 +47,19 @@ def type_of(lines, index, name, returns)
     if l =~ /(\w+)\.(\w+)\s+AS\s+(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*->/
       return $VARIANT_TYPES&.dig(Regexp.last_match(1), Regexp.last_match(2)) || Regexp.last_match(2)
     end
+    # A pipeline block binds `_` to the source's element; the translation then
+    # copies it into a named local on the block's first line.
+    if l =~ /\b(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*=\s*COPY _;\s*$/
+      i.downto([0, i - 12].max) do |j|
+        next unless lines[j] =~ /([\w.]+)\s*\|>\s*(?:SELECT|EACH|WHERE|ANY|ALL|FIND)\s*\{?/
+
+        src = Regexp.last_match(1)
+        st = src.include?('.') ? field_type(lines, i, src, returns) : type_of(lines, j, src, returns)
+        el = element_of(st)
+        return el if el
+        break
+      end
+    end
     # An unannotated local takes the type of a simple initializer.
     if l =~ /\b(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*=\s*(?:COPY |KEEP |OWN )?(\w+);?\s*$/
       other = Regexp.last_match(1)
@@ -53,6 +67,26 @@ def type_of(lines, index, name, returns)
     end
     break if l.start_with?('PUB FN', 'FN ', 'PRIVATE FN') && i < index && !l.include?("#{name}:")
   end
+  nil
+end
+
+
+# The declared type of `head.field`, one field at a time.
+def field_type(lines, index, path, returns)
+  head, *steps = path.split('.')
+  type = type_of(lines, index, head, returns)
+  steps.each do |step|
+    owner = $FIELDS[type.to_s.sub(/@\w+\z/, '').delete_prefix('?')] or return nil
+    type = owner[step] or return nil
+  end
+  type
+end
+
+def element_of(type)
+  t = type.to_s.sub(/@\w+\z/, '').delete_prefix('?')
+  return Regexp.last_match(1) if t =~ /\A\[\](.+)\z/
+  return Regexp.last_match(1) if t =~ /\A\[Set\](.+)\z/
+
   nil
 end
 

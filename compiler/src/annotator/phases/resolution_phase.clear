@@ -696,20 +696,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE owner_name = resolutionSession__conformance_base_name(rtoc_self_view, rtoc_mutable_block_param_14.owner_type);
     MUTABLE protocol: ?ProtocolDef = COPY rtoc_self_view.protocols[protocol_name];
     IF !(protocol) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_PROTOCOL }, [], {:protocol: protocol_name}));
+        TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_PROTOCOL }, [], {:protocol: protocol_name}));
     END
     MUTABLE local_owner = local_structs[owner_name];
     MUTABLE owner_params: ?[]GenericParamDecl = TRY (resolutionSession__conformance_owner_params(rtoc_self_view, owner_name, local_owner));
     IF !(owner_params) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_OWNER }, [], {:owner: owner_name}));
+        TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_OWNER }, [], {:owner: owner_name}));
     END
     TRY (resolutionSession__infer_conformance_owner_application_mut(rtoc_self_view, &rtoc_mutable_block_param_14, owner_name, owner_params));
     IF !((local_owner OR local_protocols.contains?(protocol_name))) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_ORPHAN }, [], {:protocol: protocol_name, :owner: owner_name}));
+        TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_ORPHAN }, [], {:protocol: protocol_name, :owner: owner_name}));
     END
     MUTABLE key = "${protocol_name}:${owner_name}";
     IF seen.contains?(key) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_14, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_DUPLICATE }, [], {:protocol: protocol_name, :owner: owner_name}));
+        TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_DUPLICATE }, [], {:protocol: protocol_name, :owner: owner_name}));
     END
     &seen.insert(key);
     TRY (resolutionSession__validate_conformance_arity_mut(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name, owner_params));
