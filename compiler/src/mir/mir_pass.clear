@@ -155,7 +155,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (aST__each_bg_block(COPY fn_value.body, %(bg_value: BgNode) USE(facts) -> {
     MUTABLE resource_captures = (IF selectOp__capture_analysis(bg_value) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = (selectOp__capture_analysis(bg_value));
-    TRY (ownershipDataflow__resource_captures(rtoc_local_receiver_1)) }
+    COPY rtoc_local_receiver_1.resource_captures }
       ELSE
         NIL
       END);

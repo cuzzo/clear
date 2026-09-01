@@ -5027,7 +5027,7 @@ PUB FN typeAutoOptional?(value: ?Type) RETURNS Bool ->
   END
   RETURN FALSE;
 END
-PUB FN type__from_node_mut(node: ?Locatable, context: String) RETURNS !?Type EFFECTS REENTRANT ->
+PUB FN type__from_node_mut(node: ?Locatable, context: String = "post-annotation MIR") RETURNS !?Type EFFECTS REENTRANT ->
   IF node EXISTS AS node_value THEN
     RETURN TRY (aST__full_type_mut(node_value));
   END

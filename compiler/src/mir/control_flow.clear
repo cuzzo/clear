@@ -1541,7 +1541,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END);
       MUTABLE resource_captures = ( { MUTABLE rtoc_pipe_src = ((IF stmt.capture_analysis() != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_20 = (stmt.capture_analysis());
-      TRY (ownershipDataflow__resource_captures(rtoc_local_receiver_20)) }
+      COPY rtoc_local_receiver_20.resource_captures }
       ELSE
         NIL
       END) OR_ELSE List[]); rtoc_pipe_src |> DISTINCT _ } );
