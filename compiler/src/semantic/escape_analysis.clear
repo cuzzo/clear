@@ -1036,8 +1036,8 @@ PUB FN escapeAnalysis__push_locatable_children_mut(node: Locatable, MUTABLE stac
   FOR _ IN (aST__wrapped_children(node)) DO
   &stack.append(COPY _);
   END
-  FOR _ IN node.class().members DO
-  MUTABLE value = COPY node.substr(_, 1);
+  FOR rtoc_child IN locatable__child_nodes(node) DO
+  &stack.append(COPY rtoc_child);
   END
 END
 PUB FN escapeAnalysis__mark_capture_analysis_heap_mut(analysis: ?CaptureAnalysis, MUTABLE bg_heap: [Set]String) RETURNS Void ->

@@ -6472,11 +6472,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (locatable IS_A BgBlock OR locatable IS_A DoBlock) THEN
         RETURN;
       END
-      FOR _ IN locatable.class().members DO
-    MUTABLE val = COPY locatable.substr(_, 1);
-    IF ((FALSE OR FALSE) OR FALSE) THEN
-          typeAnalysisSession__each_shard_scan_node(rtoc_self_view, val, blk);
-    END
+      FOR rtoc_child IN locatable__child_nodes(locatable) DO
+        typeAnalysisSession__each_shard_scan_node(rtoc_self_view, rtoc_child, blk);
       END
     ELSE
       RETURN;
