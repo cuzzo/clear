@@ -1087,3 +1087,7 @@ PUB FN runtimeHost__next_label_call(self: RuntimeHost) RETURNS String ->
   MUTABLE fn_value = self.next_label;
   RETURN fn_value();
 END
+PUB FN runtimeHost__schema_lookup_call(self: RuntimeHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult ->
+  MUTABLE fn_value = self.schema_lookup;
+  RETURN fn_value();
+END
