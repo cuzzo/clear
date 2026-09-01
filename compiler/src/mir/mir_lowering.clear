@@ -3231,14 +3231,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF fact EXISTS THEN
       RETURN fact;
     END
-    IF (IF node IS_A Let AS let THEN TRUE ELSE FALSE END) THEN
-    IF node.init.ownership_consumption() IS_A OwnershipConsumptionFact THEN
-      RETURN node.init.ownership_consumption();
+    IF node IS_A Let AS rtoc_let THEN
+    IF emittable__ownership_consumption(rtoc_let.init) EXISTS AS rtoc_let_fact THEN
+      RETURN rtoc_let_fact;
     END
     END
-    IF (IF node IS_A ExprStmt AS expr_stmt THEN TRUE ELSE FALSE END) THEN
-    IF node.expr().ownership_consumption() IS_A OwnershipConsumptionFact THEN
-      RETURN node.expr().ownership_consumption();
+    IF node IS_A ExprStmt AS rtoc_expr_stmt THEN
+    IF emittable__ownership_consumption(exprStmt__expr(rtoc_expr_stmt)) EXISTS AS rtoc_expr_fact THEN
+      RETURN rtoc_expr_fact;
     END
     END
     RETURN NIL;
