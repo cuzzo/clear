@@ -12792,13 +12792,15 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
       &rtoc_body.append(blk(COPY rtoc_child));
     END
     item.body = rtoc_body;
+    MUTABLE rtoc_new_default_catch: ?[]Locatable = NIL;
     IF item.default_catch EXISTS AS rtoc_list THEN
       MUTABLE rtoc_default_catch: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_default_catch.append(blk(COPY rtoc_child));
       END
-      item.default_catch = rtoc_default_catch;
+      rtoc_new_default_catch = rtoc_default_catch;
     END
+    item.default_catch = rtoc_new_default_catch;
     RETURN Locatable{ FunctionDef: COPY item };
   END
   IF value IS_A VarDecl AS rtoc_variant THEN
@@ -12871,25 +12873,29 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A LambdaLit AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_deferred_drops: ?[]Locatable = NIL;
     IF item.deferred_drops EXISTS AS rtoc_list THEN
       MUTABLE rtoc_deferred_drops: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_deferred_drops.append(blk(COPY rtoc_child));
       END
-      item.deferred_drops = rtoc_deferred_drops;
+      rtoc_new_deferred_drops = rtoc_deferred_drops;
     END
+    item.deferred_drops = rtoc_new_deferred_drops;
     RETURN Locatable{ LambdaLit: COPY item };
   END
   IF value IS_A IfStatement AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
     item.condition = blk(COPY item.condition);
+    MUTABLE rtoc_new_else_branch: ?[]Locatable = NIL;
     IF item.else_branch EXISTS AS rtoc_list THEN
       MUTABLE rtoc_else_branch: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_else_branch.append(blk(COPY rtoc_child));
       END
-      item.else_branch = rtoc_else_branch;
+      rtoc_new_else_branch = rtoc_else_branch;
     END
+    item.else_branch = rtoc_new_else_branch;
     MUTABLE rtoc_then_branch: []Locatable = List[];
     FOR rtoc_child IN item.then_branch DO
       &rtoc_then_branch.append(blk(COPY rtoc_child));
@@ -12938,9 +12944,11 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
       &rtoc_args.append(blk(COPY rtoc_child));
     END
     item.args = rtoc_args;
+    MUTABLE rtoc_new_pipe_lhs: ?Locatable = NIL;
     IF item.pipe_lhs EXISTS AS rtoc_child THEN
-      item.pipe_lhs = blk(COPY rtoc_child);
+      rtoc_new_pipe_lhs = blk(COPY rtoc_child);
     END
+    item.pipe_lhs = rtoc_new_pipe_lhs;
     RETURN Locatable{ FuncCall: COPY item };
   END
   IF value IS_A MethodCall AS rtoc_variant THEN
@@ -12971,9 +12979,11 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A ReturnNode AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_value: ?Locatable = NIL;
     IF item.value EXISTS AS rtoc_child THEN
-      item.value = blk(COPY rtoc_child);
+      rtoc_new_value = blk(COPY rtoc_child);
     END
+    item.value = rtoc_new_value;
     RETURN Locatable{ ReturnNode: COPY item };
   END
   IF value IS_A Assert AS rtoc_variant THEN
@@ -12983,33 +12993,43 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A Raise AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_message_expr: ?Locatable = NIL;
     IF item.message_expr EXISTS AS rtoc_child THEN
-      item.message_expr = blk(COPY rtoc_child);
+      rtoc_new_message_expr = blk(COPY rtoc_child);
     END
+    item.message_expr = rtoc_new_message_expr;
     RETURN Locatable{ Raise: COPY item };
   END
   IF value IS_A ThrowNode AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_value: ?Locatable = NIL;
     IF item.value EXISTS AS rtoc_child THEN
-      item.value = blk(COPY rtoc_child);
+      rtoc_new_value = blk(COPY rtoc_child);
     END
+    item.value = rtoc_new_value;
     RETURN Locatable{ ThrowNode: COPY item };
   END
   IF value IS_A DieNode AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_status: ?Locatable = NIL;
     IF item.status EXISTS AS rtoc_child THEN
-      item.status = blk(COPY rtoc_child);
+      rtoc_new_status = blk(COPY rtoc_child);
     END
+    item.status = rtoc_new_status;
     RETURN Locatable{ DieNode: COPY item };
   END
   IF value IS_A Slice AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_end: ?Locatable = NIL;
     IF item.end EXISTS AS rtoc_child THEN
-      item.end = blk(COPY rtoc_child);
+      rtoc_new_end = blk(COPY rtoc_child);
     END
+    item.end = rtoc_new_end;
+    MUTABLE rtoc_new_start: ?Locatable = NIL;
     IF item.start EXISTS AS rtoc_child THEN
-      item.start = blk(COPY rtoc_child);
+      rtoc_new_start = blk(COPY rtoc_child);
     END
+    item.start = rtoc_new_start;
     item.target = blk(COPY item.target);
     RETURN Locatable{ Slice: COPY item };
   END
@@ -13043,47 +13063,61 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A IndexOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ IndexOp: COPY item };
   END
   IF value IS_A ReduceOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
+    MUTABLE rtoc_new_initial_value: ?Locatable = NIL;
     IF item.initial_value EXISTS AS rtoc_child THEN
-      item.initial_value = blk(COPY rtoc_child);
+      rtoc_new_initial_value = blk(COPY rtoc_child);
     END
+    item.initial_value = rtoc_new_initial_value;
     RETURN Locatable{ ReduceOp: COPY item };
   END
   IF value IS_A OrderByOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ OrderByOp: COPY item };
   END
   IF value IS_A LimitOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_count: ?Locatable = NIL;
     IF item.count EXISTS AS rtoc_child THEN
-      item.count = blk(COPY rtoc_child);
+      rtoc_new_count = blk(COPY rtoc_child);
     END
+    item.count = rtoc_new_count;
     RETURN Locatable{ LimitOp: COPY item };
   END
   IF value IS_A UnnestOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ UnnestOp: COPY item };
   END
   IF value IS_A DistinctOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ DistinctOp: COPY item };
   END
   IF value IS_A EachOp AS rtoc_variant THEN
@@ -13106,33 +13140,43 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A SkipOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_count: ?Locatable = NIL;
     IF item.count EXISTS AS rtoc_child THEN
-      item.count = blk(COPY rtoc_child);
+      rtoc_new_count = blk(COPY rtoc_child);
     END
+    item.count = rtoc_new_count;
     RETURN Locatable{ SkipOp: COPY item };
   END
   IF value IS_A TakeWhileOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ TakeWhileOp: COPY item };
   END
   IF value IS_A WindowOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
+    MUTABLE rtoc_new_size: ?Locatable = NIL;
     IF item.size EXISTS AS rtoc_child THEN
-      item.size = blk(COPY rtoc_child);
+      rtoc_new_size = blk(COPY rtoc_child);
     END
+    item.size = rtoc_new_size;
     RETURN Locatable{ WindowOp: COPY item };
   END
   IF value IS_A BatchWindowOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     MUTABLE rtoc_options: {String}Locatable = {};
     FOR rtoc_key IN item.options.keys() DO
       rtoc_options[rtoc_key] = blk(COPY UNWRAP (item.options[rtoc_key]));
@@ -13142,78 +13186,102 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A JoinOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_key_expr: ?Locatable = NIL;
     IF item.key_expr EXISTS AS rtoc_child THEN
-      item.key_expr = blk(COPY rtoc_child);
+      rtoc_new_key_expr = blk(COPY rtoc_child);
     END
+    item.key_expr = rtoc_new_key_expr;
+    MUTABLE rtoc_new_right_source: ?Locatable = NIL;
     IF item.right_source EXISTS AS rtoc_child THEN
-      item.right_source = blk(COPY rtoc_child);
+      rtoc_new_right_source = blk(COPY rtoc_child);
     END
+    item.right_source = rtoc_new_right_source;
     RETURN Locatable{ JoinOp: COPY item };
   END
   IF value IS_A FindOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ FindOp: COPY item };
   END
   IF value IS_A AnyOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ AnyOp: COPY item };
   END
   IF value IS_A AllOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ AllOp: COPY item };
   END
   IF value IS_A CountOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ CountOp: COPY item };
   END
   IF value IS_A SumOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ SumOp: COPY item };
   END
   IF value IS_A AverageOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ AverageOp: COPY item };
   END
   IF value IS_A MinOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable@boxed = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ MinOp: COPY item };
   END
   IF value IS_A MaxOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_expression: ?Locatable = NIL;
     IF item.expression EXISTS AS rtoc_child THEN
-      item.expression = blk(COPY rtoc_child);
+      rtoc_new_expression = blk(COPY rtoc_child);
     END
+    item.expression = rtoc_new_expression;
     RETURN Locatable{ MaxOp: COPY item };
   END
   IF value IS_A ShardOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_key_expr: ?Locatable = NIL;
     IF item.key_expr EXISTS AS rtoc_child THEN
-      item.key_expr = blk(COPY rtoc_child);
+      rtoc_new_key_expr = blk(COPY rtoc_child);
     END
+    item.key_expr = rtoc_new_key_expr;
+    MUTABLE rtoc_new_target_map: ?Locatable = NIL;
     IF item.target_map EXISTS AS rtoc_child THEN
-      item.target_map = blk(COPY rtoc_child);
+      rtoc_new_target_map = blk(COPY rtoc_child);
     END
+    item.target_map = rtoc_new_target_map;
     RETURN Locatable{ ShardOp: COPY item };
   END
   IF value IS_A ConcurrentOp AS rtoc_variant THEN
@@ -13247,27 +13315,33 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A OrElseExit AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_message: ?Locatable = NIL;
     IF item.message EXISTS AS rtoc_child THEN
-      item.message = blk(COPY rtoc_child);
+      rtoc_new_message = blk(COPY rtoc_child);
     END
+    item.message = rtoc_new_message;
     RETURN Locatable{ OrElseExit: COPY item };
   END
   IF value IS_A CatchBlock AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_default_body: ?[]Locatable = NIL;
     IF item.default_body EXISTS AS rtoc_list THEN
       MUTABLE rtoc_default_body: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_default_body.append(blk(COPY rtoc_child));
       END
-      item.default_body = rtoc_default_body;
+      rtoc_new_default_body = rtoc_default_body;
     END
+    item.default_body = rtoc_new_default_body;
     RETURN Locatable{ CatchBlock: COPY item };
   END
   IF value IS_A RecoverOp AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_default_expr: ?Locatable = NIL;
     IF item.default_expr EXISTS AS rtoc_child THEN
-      item.default_expr = blk(COPY rtoc_child);
+      rtoc_new_default_expr = blk(COPY rtoc_child);
     END
+    item.default_expr = rtoc_new_default_expr;
     RETURN Locatable{ RecoverOp: COPY item };
   END
   IF value IS_A BlockExpr AS rtoc_variant THEN
@@ -13277,9 +13351,11 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
       &rtoc_body.append(blk(COPY rtoc_child));
     END
     item.body = rtoc_body;
+    MUTABLE rtoc_new_result: ?Locatable = NIL;
     IF item.result EXISTS AS rtoc_child THEN
-      item.result = blk(COPY rtoc_child);
+      rtoc_new_result = blk(COPY rtoc_child);
     END
+    item.result = rtoc_new_result;
     RETURN Locatable{ BlockExpr: COPY item };
   END
   IF value IS_A StringConcat AS rtoc_variant THEN
@@ -13386,13 +13462,15 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A MatchStatement AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_default_case: ?[]Locatable = NIL;
     IF item.default_case EXISTS AS rtoc_list THEN
       MUTABLE rtoc_default_case: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_default_case.append(blk(COPY rtoc_child));
       END
-      item.default_case = rtoc_default_case;
+      rtoc_new_default_case = rtoc_default_case;
     END
+    item.default_case = rtoc_new_default_case;
     item.expr = blk(COPY item.expr);
     RETURN Locatable{ MatchStatement: COPY item };
   END
@@ -13403,13 +13481,15 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
       &rtoc_body.append(blk(COPY rtoc_child));
     END
     item.body = rtoc_body;
+    MUTABLE rtoc_new_deferred_drops: ?[]Locatable = NIL;
     IF item.deferred_drops EXISTS AS rtoc_list THEN
       MUTABLE rtoc_deferred_drops: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_deferred_drops.append(blk(COPY rtoc_child));
       END
-      item.deferred_drops = rtoc_deferred_drops;
+      rtoc_new_deferred_drops = rtoc_deferred_drops;
     END
+    item.deferred_drops = rtoc_new_deferred_drops;
     item.end_expr = blk(COPY item.end_expr);
     item.start_expr = blk(COPY item.start_expr);
     RETURN Locatable{ ForRange: COPY item };
@@ -13422,35 +13502,41 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
     END
     item.body = rtoc_body;
     item.collection = blk(COPY item.collection);
+    MUTABLE rtoc_new_deferred_drops: ?[]Locatable = NIL;
     IF item.deferred_drops EXISTS AS rtoc_list THEN
       MUTABLE rtoc_deferred_drops: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_deferred_drops.append(blk(COPY rtoc_child));
       END
-      item.deferred_drops = rtoc_deferred_drops;
+      rtoc_new_deferred_drops = rtoc_deferred_drops;
     END
+    item.deferred_drops = rtoc_new_deferred_drops;
     RETURN Locatable{ ForEach: COPY item };
   END
   IF value IS_A TestBlock AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_setup: ?[]Locatable = NIL;
     IF item.setup EXISTS AS rtoc_list THEN
       MUTABLE rtoc_setup: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_setup.append(blk(COPY rtoc_child));
       END
-      item.setup = rtoc_setup;
+      rtoc_new_setup = rtoc_setup;
     END
+    item.setup = rtoc_new_setup;
     RETURN Locatable{ TestBlock: COPY item };
   END
   IF value IS_A WhenBlock AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_setup: ?[]Locatable = NIL;
     IF item.setup EXISTS AS rtoc_list THEN
       MUTABLE rtoc_setup: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
         &rtoc_setup.append(blk(COPY rtoc_child));
       END
-      item.setup = rtoc_setup;
+      rtoc_new_setup = rtoc_setup;
     END
+    item.setup = rtoc_new_setup;
     RETURN Locatable{ WhenBlock: COPY item };
   END
   IF value IS_A LetBinding AS rtoc_variant THEN
@@ -13489,9 +13575,11 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A FieldCleanup AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_new_field: ?Locatable@boxed = NIL;
     IF item.field EXISTS AS rtoc_child THEN
-      item.field = blk(COPY rtoc_child);
+      rtoc_new_field = blk(COPY rtoc_child);
     END
+    item.field = rtoc_new_field;
     RETURN Locatable{ FieldCleanup: COPY item };
   END
   RETURN COPY value;
