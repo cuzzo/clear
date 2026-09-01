@@ -159,6 +159,8 @@ by.each do |f, rs|
       line_edits << [r['line'], :unwrap_is_a, nil]
     elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
       line_edits << [r['line'], :union_field_read, m[1]]
+    elsif (m = e.match(/RESTRICT capability requires a mutable variable, but '(\w+)' is immutable/))
+      line_edits << [r['line'], :mutable_param, m[1]]
     end
   end
 
@@ -263,6 +265,21 @@ by.each do |f, rs|
 
         counts[kind] += 1
         "#{fn}(#{recv})"
+      end
+    when :mutable_param
+      # The body takes a RESTRICT view of the parameter, so the parameter
+      # itself has to be declared MUTABLE.
+      j = i
+      while j >= 0
+        if lines[j] =~ /^(PUB |PRIVATE )?FN /
+          if lines[j] =~ /\(#{name}:/ || lines[j] =~ /,\s*#{name}:/
+            lines[j] = lines[j].sub(/(?<=[(,] )#{name}:/, "MUTABLE #{name}:")
+                               .sub(/\(#{name}:/, "(MUTABLE #{name}:")
+            counts[kind] += 1
+          end
+          break
+        end
+        j -= 1
       end
     when :drop_unwrap
       # Two spellings reach the same diagnostic. Rewrite only when the line
