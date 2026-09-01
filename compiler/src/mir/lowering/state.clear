@@ -54,7 +54,7 @@ STRUCT ConstInitEntry {
   name: String,
   zig_type: String,
   init: Emittable,
-  type_info: Any@multiowned,
+  type_info: ?Type,
   prelude: []Emittable
 }
 STRUCT MIRLoweringProgramState {

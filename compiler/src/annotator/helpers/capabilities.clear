@@ -74,12 +74,13 @@ PUB STRUCT PredicateContext {
   rejected_param_names: [Set]String,
   fn_name: ?String
 }
+PUB UNION PredicateCall { FuncCall: FuncCall, MethodCall: MethodCall }
 PUB STRUCT PredicateCallSite {
   kind: String@symbol,
   with_node: ?WithBlock,
   fn_node: ?FunctionDef,
   pred_expr: Locatable,
-  call: Any@multiowned,
+  call: PredicateCall,
   callee: String
 }
 # End Ruby module CapabilityHelper

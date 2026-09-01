@@ -50,7 +50,6 @@ REQUIRE "../semantic/escape_analysis.clear"
 REQUIRE "mir_checker.clear"
 REQUIRE "../ast/type_capabilities.clear"
 REQUIRE "../annotator/helpers/intrinsic_emit.clear"
-UNION MIRLoweringDispatch { SymbolValue: String@symbol, BoolValue: Bool }
 UNION MIRLoweringField { SymbolValue: String@symbol, StringValue: String }
 UNION K { StringValue: String, SymbolValue: String@symbol }
 UNION MIRLoweringFallback { ASTProgram: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, Emittable: Emittable }
@@ -58,7 +57,7 @@ UNION MIRLoweringReturnValue { Cleanup: Cleanup, ErrCleanup: ErrCleanup, InlineB
 UNION MIRLoweringType { StringValue: String, SymbolValue: String@symbol, Type: Type }
 UNION Mir { Emittable: Emittable, ArrayValue: []Emittable }
 UNION MIRLoweringName { StringValue: String, SymbolValue: String@symbol, OwnershipIdentityPlaceId: OwnershipIdentityPlaceId, ASTProgram: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecoveryRaise: TenseRecoveryRaise, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKindOrElseRaise: TenseOperationKindOrElseRaise, TenseOperationKindOrElseExit: TenseOperationKindOrElseExit, TenseOperationKindOrElsePass: TenseOperationKindOrElsePass, TenseOperationKindOrElsePrune: TenseOperationKindOrElsePrune, TenseOperationKindOrElseBreak: TenseOperationKindOrElseBreak, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup }
-UNION PinMode { SymbolValue: String@symbol, BoolValue: Bool }
+PUB UNION PinMode { SymbolValue: String@symbol, BoolValue: Bool }
 UNION Pinned { BoolValue: Bool, SymbolValue: String@symbol }
 UNION ReturnTypeNode { Type: Type, SymbolValue: String@symbol, StringValue: String }
 UNION Root { Emittable: Emittable, ArrayValue: []Emittable }
@@ -6578,21 +6577,19 @@ PRIVATE FN mIRLowering__lower_test_that(MUTABLE self: MIRLowering, test_that: Te
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE full_name = "${env.ctx.test_name()}: ${env.when_desc}: ${test_that.description}${env.tag_suffix}";
+    MUTABLE full_name = "${env.ctx.test_name}: ${env.when_desc}: ${test_that.description}${env.tag_suffix}";
     IF test_that.pending THEN
-      RETURN TestDef{ name: COPY full_name, body: [{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_225 = CAST(env.ctx AS TestBlockCtx);
-      testBlockCtx__fresh_preamble(rtoc_local_receiver_225) }, Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "error", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "SkipZigTest", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ ReturnStmt: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL };
+      RETURN TestDef{ name: COPY full_name, body: [testBlockCtx__fresh_preamble(env.ctx), Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "error", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "SkipZigTest", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ ReturnStmt: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL };
     END
     MUTABLE body_mir = mIRLowering__with_test_that_bindings(rtoc_self_view, test_that, %() USE(test_that, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_226 = TRY (mIRLowering__lower_body(&rtoc_self_view, test_that.body));
     rtoc_lambda_result_226
     });
-    MUTABLE before_mir = (env.ctx.test_before_each_mir().flatten() + env.when_before_each_mir.flatten());
-    MUTABLE after_defers = ((env.ctx.test_after_each_mir() + env.when_after_each_mir)) |> SELECT MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY ScopeBlock{ body: COPY _, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    MUTABLE used_let_names = TRY (mIRLowering__compute_used_let_names(rtoc_self_view, env.let_ast_map, ([test_that.body, env.when_block.before_each, env.when_block.after_each, env.ctx.test_block().before_each, env.ctx.test_block().after_each]).flatten()));
-    MUTABLE let_decls_mir = used_let_names |> SELECT Let{ name: COPY _, init: COPY TRY (mIRLowering__lower(&rtoc_self_view, (UNWRAP (env.let_ast_map[_])).expr())), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
-    MUTABLE body = ((((((([{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_227 = CAST(env.ctx AS TestBlockCtx);
-    testBlockCtx__fresh_preamble(rtoc_local_receiver_227) }] + env.stub_mir) + env.ctx.setup_mir) + env.when_setup_mir) + let_decls_mir) + before_mir) + after_defers) + body_mir);
+    MUTABLE before_mir = (env.ctx.test_before_each_mir.flatten() + env.when_before_each_mir.flatten());
+    MUTABLE after_defers = ((env.ctx.test_after_each_mir + env.when_after_each_mir)) |> SELECT MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY ScopeBlock{ body: COPY _, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    MUTABLE used_let_names = TRY (mIRLowering__compute_used_let_names(rtoc_self_view, env.let_ast_map, ([test_that.body, env.when_block.before_each, env.when_block.after_each, env.ctx.test_block.before_each, env.ctx.test_block.after_each]).flatten()));
+    MUTABLE let_decls_mir = used_let_names |> SELECT Let{ name: COPY _, init: COPY TRY (mIRLowering__lower(&rtoc_self_view, (UNWRAP (env.let_ast_map[_])).expr)), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
+    MUTABLE body = ((((((([testBlockCtx__fresh_preamble(env.ctx)] + env.stub_mir) + env.ctx.setup_mir) + env.when_setup_mir) + let_decls_mir) + before_mir) + after_defers) + body_mir);
     MUTABLE test_def = TestDef{ name: COPY full_name, body: COPY body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL };
     test_def.needs_scheduler = TRY (mIRLowering__test_body_spawns_fibers?(rtoc_self_view, body));
     RETURN test_def;
@@ -13065,14 +13062,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TaskConfigPlan{ stack_variant: COPY mIRLowering__task_config_variant(lowerer, stack_size, computed_tier), profile_site_id: NIL, profile_dispatch_id: NIL };
 }
 END
-PRIVATE FN mIRLowering__profiled_task_config_plan(self: MIRLowering, base: TaskConfigPlan, site_id: Int64, dispatch: MIRLoweringDispatch) RETURNS TaskConfigPlan
+PRIVATE FN mIRLowering__profiled_task_config_plan(self: MIRLowering, base: TaskConfigPlan, site_id: Int64, dispatch: PinMode) RETURNS TaskConfigPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TaskConfigPlan{ stack_variant: COPY base.stack_variant, profile_site_id: COPY site_id, profile_dispatch_id: mIRLowering__profile_dispatch_numeric_id(rtoc_self_view, dispatch) };
 }
 END
-PRIVATE FN mIRLowering__profile_dispatch_numeric_id(self: MIRLowering, dispatch: MIRLoweringDispatch) RETURNS Int64
+PRIVATE FN mIRLowering__profile_dispatch_numeric_id(self: MIRLowering, dispatch: PinMode) RETURNS Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13111,7 +13108,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END, ctx_type: COPY ctx_type, ctx_var: COPY ctx_var, task_config: COPY task_config, pass_ctx_by_address: TRUE, runtime_name: NIL };
 }
 END
-PRIVATE FN mIRLowering__profile_dispatch_symbol(self: MIRLowering, dispatch: MIRLoweringDispatch) RETURNS String@symbol
+PRIVATE FN mIRLowering__profile_dispatch_symbol(self: MIRLowering, dispatch: PinMode) RETURNS String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13127,7 +13124,7 @@ PRIVATE FN mIRLowering__bg_scheduler_plan(self: MIRLowering, node: BgBlock, name
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE task_cfg = mIRLowering__task_config_plan(rtoc_self_view, node.stack_size, node.computed_stack_tier);
-    MUTABLE pin_mode = node.pinned;
+    MUTABLE pin_mode: ?PinMode = PinMode{ BoolValue: node.pinned };
     MUTABLE site_id = (names.id + 1);
     MUTABLE site_line: Int64 = 0;
     IF node.token != NIL THEN
@@ -13137,17 +13134,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node.token != NIL THEN
       site_col = ((node.token)?).column;
     END
-    MUTABLE dispatch = IF node.parallel THEN
-      :parallel
+    MUTABLE dispatch: PinMode = IF node.parallel THEN
+      PinMode{ SymbolValue: :parallel }
     ELSE
-      (IF (((pin_mode == FALSE) OR FALSE)) THEN
-      :local
+      (IF !(node.pinned) THEN
+      PinMode{ SymbolValue: :local }
     ELSE
-      pin_mode
+      PinMode{ BoolValue: node.pinned }
     END)
     END;
-    MUTABLE profiled_task_cfg = mIRLowering__profiled_task_config_plan(rtoc_self_view, task_cfg, site_id, MIRLoweringDispatch{ SymbolValue: COPY dispatch });
-    RETURN BgSchedulerPlan{ pin_mode: pin_mode, site_id: site_id, site_line: site_line, site_col: site_col, dispatch: dispatch, profiled_task_cfg: COPY profiled_task_cfg, spawn_call: COPY mIRLowering__fiber_spawn_call_plan(rtoc_self_view, rt_name, names.ctx_type, names.ctx_var, profiled_task_cfg, PinMode{ SymbolValue: COPY dispatch }), profile_site: COPY ProfileTaskSite{ site_id: site_id, line: site_line, column: site_col, dispatch: mIRLowering__profile_dispatch_symbol(rtoc_self_view, MIRLoweringDispatch{ SymbolValue: COPY dispatch }), form: :stack }, arena_init: ruby_wrap_optional_Set_Emittable(COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_505: ?Set = NIL;
+    MUTABLE profiled_task_cfg = mIRLowering__profiled_task_config_plan(rtoc_self_view, task_cfg, site_id, COPY dispatch);
+    RETURN BgSchedulerPlan{ pin_mode: pin_mode, site_id: site_id, site_line: site_line, site_col: site_col, dispatch: dispatch, profiled_task_cfg: COPY profiled_task_cfg, spawn_call: COPY mIRLowering__fiber_spawn_call_plan(rtoc_self_view, rt_name, names.ctx_type, names.ctx_var, profiled_task_cfg, COPY dispatch), profile_site: COPY ProfileTaskSite{ site_id: site_id, line: site_line, column: site_col, dispatch: mIRLowering__profile_dispatch_symbol(rtoc_self_view, COPY dispatch), form: :stack }, arena_init: ruby_wrap_optional_Set_Emittable(COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_505: ?Set = NIL;
     IF node.arena_mode THEN
       rtoc_ternary_value_505 = Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY names.bg_rt, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "arena_mode", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     ELSE
@@ -15139,7 +15136,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     });
     MUTABLE task = mIRLowering__task_config_plan(rtoc_self_view, NIL, NIL);
     MUTABLE site_id = (id + 1);
-    MUTABLE profiled = mIRLowering__profiled_task_config_plan(rtoc_self_view, task, site_id, MIRLoweringDispatch{ SymbolValue: :local });
+    MUTABLE profiled = mIRLowering__profiled_task_config_plan(rtoc_self_view, task, site_id, PinMode{ SymbolValue: :local });
     MUTABLE spawn = mIRLowering__fiber_spawn_call_plan(rtoc_self_view, mIRLowering__runtime_binding_name(rtoc_self_view), names.ctx_type, names.ctx_var, profiled, PinMode{ SymbolValue: :local });
     MUTABLE profile = ProfileTaskSite{ site_id: site_id, line: ((IF node.token() != NIL THEN
       (node.token()).line

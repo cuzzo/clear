@@ -196,7 +196,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int
   END
   MUTABLE pivot_ast: ?SegmentStmt = pivot_ast_branch_value;
   MUTABLE sus = IF pivot_ast != NIL THEN
-    Segments.classify_suspend(castSegmentStmtToLocatable(pivot_ast))
+    segments__classify_suspend(castSegmentStmtToLocatable(pivot_ast))
   ELSE
     NIL
   END;
@@ -213,7 +213,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int
 END
 PRIVATE FN fsmRecursiveSplitter__emit_suspend_with_pre(susp_tail: SuspendTail, pre_value: []SegmentStmt, after_idx: Int64, MUTABLE builder: Builder) RETURNS !Int64 ->
   MUTABLE idx = builder__reserve_index(&builder);
-  IF !(Segments.suspend_tail?(castSuspendTailToOptionalSegmentTail(susp_tail))) THEN
+  IF !(segments__suspend_tail?(castSuspendTailToOptionalSegmentTail(susp_tail))) THEN
     panic("Unhandled suspend kind {}");
   END
   MUTABLE tail = susp_tail.with_next_index(after_idx);
@@ -222,7 +222,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_suspend_with_pre(susp_tail: SuspendTail, p
 END
 PRIVATE FN fsmRecursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETURNS !Bool ->
   IF stmt EXISTS AS stmt_value THEN
-    IF (IF stmt_value IS_A Locatable AS locatable THEN Segments.classify_suspend(locatable) ELSE FALSE END) THEN
+    IF (IF stmt_value IS_A Locatable AS locatable THEN segments__classify_suspend(locatable) ELSE FALSE END) THEN
       RETURN TRUE;
     END
     IF stmt_value IS_A WithBlock@multiowned AS with_block_multiowned THEN
@@ -240,7 +240,7 @@ END
 PRIVATE FN fsmRecursiveSplitter__contains_suspend_anywhere?(stmts: ?Stmts) RETURNS !Bool EFFECTS REENTRANT ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < stmts.length() DO
-    IF (stmts[rtoc_idx] IS_A Locatable AND Segments.classify_suspend(stmts[rtoc_idx])) THEN
+    IF (stmts[rtoc_idx] IS_A Locatable AND segments__classify_suspend(stmts[rtoc_idx])) THEN
         RETURN TRUE;
     END
     IF (stmts[rtoc_idx] IS_A WithBlock) THEN
@@ -286,7 +286,7 @@ PRIVATE FN fsmRecursiveSplitter__with_unsupported?(with_node: WithBlock) RETURNS
 END
 PRIVATE FN fsmRecursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) RETURNS !Bool ->
   MUTABLE sus = IF ((stmt != NIL) AND (stmt IS_A Locatable)) THEN
-    Segments.classify_suspend(castOptionalSegmentStmtToLocatable(stmt))
+    segments__classify_suspend(castOptionalSegmentStmtToLocatable(stmt))
   ELSE
     NIL
   END;
@@ -307,7 +307,7 @@ PRIVATE FN fsmRecursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) R
 END
 PRIVATE FN fsmRecursiveSplitter__emit_pivot(stmt: SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
   MUTABLE sus = IF stmt IS_A Locatable THEN
-    Segments.classify_suspend(castSegmentStmtToLocatable(stmt))
+    segments__classify_suspend(castSegmentStmtToLocatable(stmt))
   ELSE
     NIL
   END;
@@ -326,7 +326,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_pivot(stmt: SegmentStmt, after_idx: Int64,
 END
 PRIVATE FN fsmRecursiveSplitter__emit_suspend(susp_tail: SuspendTail, after_idx: Int64, MUTABLE builder: Builder) RETURNS !Int64 ->
   MUTABLE idx = builder__reserve_index(&builder);
-  IF !(Segments.suspend_tail?(castSuspendTailToOptionalSegmentTail(susp_tail))) THEN
+  IF !(segments__suspend_tail?(castSuspendTailToOptionalSegmentTail(susp_tail))) THEN
     panic("Unhandled suspend kind {}");
   END
   MUTABLE tail = susp_tail.with_next_index(after_idx);

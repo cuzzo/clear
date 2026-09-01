@@ -512,7 +512,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN typeAnalysisSession__analyze_loop_control_flow_branches(self: TypeAnalysisSession, branches: FN() -> []Any, merge_to_parent: Bool) RETURNS ![]Any@multiowned
+PUB FN typeAnalysisSession__analyze_loop_control_flow_branches(self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool) RETURNS ![]?[]DeferredDrop
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12816,7 +12816,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__analyze_control_flow_branches(self: TypeAnalysisSession, branches: FN() -> []Any, merge_to_parent: Bool = TRUE) RETURNS ![]Any@multiowned
+PRIVATE FN typeAnalysisSession__analyze_control_flow_branches(self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool = TRUE) RETURNS ![]?[]DeferredDrop
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12868,7 +12868,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN branch_results |> SELECT _.drops;
 }
 END
-PRIVATE FN typeAnalysisSession__analyze_control_flow_branch(self: TypeAnalysisSession, branch_logic: FN() -> Any, og_snapshot: ?LightweightSnapshot) RETURNS !BranchAnalysisResult
+PRIVATE FN typeAnalysisSession__analyze_control_flow_branch(self: TypeAnalysisSession, branch_logic: FN() -> ?[]DeferredDrop, og_snapshot: ?LightweightSnapshot) RETURNS !BranchAnalysisResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14015,11 +14015,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__collect_scope_drops(rtoc_self_view, node))
       }));
     END
-    MUTABLE all_drops: []Any@multiowned = TRY (typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branches));
+    MUTABLE all_drops: []?[]DeferredDrop = TRY (typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branches));
     IF node.default_case EXISTS AS default_case_value THEN
       node.default_drops = UNWRAP (&all_drops.pop());
     END
-    node.case_drops = all_drops;
+    node.case_drops = all_drops |> SELECT (_ OR_ELSE List[]);
     TRY (typeAnalysisSession__reject_duplicate_match_patterns_mut(rtoc_self_view, node, plan));
     TRY (typeAnalysisSession__check_match_exhaustiveness_mut(rtoc_self_view, node, plan));
     node.case_result_types = node.cases |> SELECT TRY (typeAnalysisSession__expr_result_type(rtoc_self_view, TRY (matchCase__body(_))));

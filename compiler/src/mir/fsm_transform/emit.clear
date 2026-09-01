@@ -942,7 +942,7 @@ END
 PRIVATE FN emit__build_segment_descriptor(seg: Segment, ctx: FsmEmitContext, lowering: MIRLowering, capture_map: {String}String, sp_idx: ?Int64 = NIL) RETURNS !?SuspendDescriptor ->
   MUTABLE lowering_api = COPY lowering;
   MUTABLE tail = seg.tail;
-  IF !(Segments.suspend_tail?(tail)) THEN
+  IF !(segments__suspend_tail?(tail)) THEN
     RETURN NIL;
   END
   MUTABLE bg_rt = COPY ctx.bg_rt;
@@ -987,7 +987,7 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
           &stack.push(seg_value.tail.next_index);
         END
       ELSE
-        IF (Segments.suspend_tail?(seg_value.tail) AND seg_value.tail.next_index) THEN
+        IF (segments__suspend_tail?(seg_value.tail) AND seg_value.tail.next_index) THEN
           &stack.push(seg_value.tail.next_index);
         END
       END
@@ -1012,8 +1012,16 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
   RETURN out;
 END
 PRIVATE FN emit__build_spawn_setup(ctx: FsmEmitContext) RETURNS !FsmSpawnSetup ->
-  MUTABLE is_local_pin = (((KEEP ctx.pin_mode == TRUE) OR (KEEP ctx.pin_mode == :local)));
-  MUTABLE is_default_local = (((((KEEP ctx.pin_mode) == NIL) OR ((KEEP ctx.pin_mode)? == FALSE))) AND !(ctx.parallel));
+  MUTABLE is_local_pin = PARTIAL MATCH ctx.pin_mode START
+    TRUE -> TRUE,
+    :local -> TRUE,
+    DEFAULT -> FALSE
+  END;
+  MUTABLE pin_mode_false = PARTIAL MATCH ctx.pin_mode START
+    FALSE -> TRUE,
+    DEFAULT -> FALSE
+  END;
+  MUTABLE is_default_local = (((ctx.pin_mode == NIL) OR pin_mode_false) AND !(ctx.parallel));
   MUTABLE is_local_dispatch = (is_local_pin OR is_default_local);
   MUTABLE dispatch = IF is_local_dispatch THEN
     :local

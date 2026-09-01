@@ -64,11 +64,11 @@ PUB STRUCT BgCaptureMaterialization {
   promoted_decls: []Emittable
 }
 PUB STRUCT BgSchedulerPlan {
-  pin_mode: ?Any@multiowned,
+  pin_mode: ?PinMode,
   site_id: Int64,
   site_line: Int64,
   site_col: Int64,
-  dispatch: Any@multiowned,
+  dispatch: PinMode,
   profiled_task_cfg: TaskConfigPlan,
   spawn_call: FiberSpawnCall,
   profile_site: ProfileTaskSite,
@@ -110,7 +110,11 @@ PUB FN bgFsmTransformContext__to_transform_hash(self: BgFsmTransformContext) RET
   result[:promoted_decls] = BgTransformValue{ ArrayValue: COPY self.capture.promoted_decls };
   result[:capture_inits] = BgTransformValue{ ArrayValue: COPY self.capture.capture_inits };
   result[:rt_name] = BgTransformValue{ StringValue: COPY self.rt_name };
-  result[:pin_mode] = COPY KEEP self.scheduler.pin_mode;
+  result[:pin_mode] = PARTIAL MATCH self.scheduler.pin_mode START
+    PinMode.BoolValue AS rtoc_pin_bool -> BgTransformValue{ BoolValue: rtoc_pin_bool },
+    PinMode.SymbolValue AS rtoc_pin_sym -> BgTransformValue{ SymbolValue: COPY rtoc_pin_sym },
+    DEFAULT -> NIL
+  END;
   result[:parallel] = (self.node.parallel == TRUE);
   result[:profile_site_id] = BgTransformValue{ Int64Value: self.scheduler.site_id };
   result[:profile_line] = BgTransformValue{ Int64Value: self.scheduler.site_line };

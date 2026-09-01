@@ -12,7 +12,7 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f616e6e6f7461746f722e636c656172" AS annotat
 PUB UNION MatchSchema { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
 PUB UNION MatchPayload { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, InlineStructVariantMultiowned: InlineStructVariant@multiowned, Type: Type }
 PUB STRUCT BranchAnalysisResult {
-  drops: Any@multiowned,
+  drops: ?[]DeferredDrop,
   snapshot: ?LightweightSnapshot,
   terminated: Bool
 }

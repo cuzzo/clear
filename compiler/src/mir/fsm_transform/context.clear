@@ -31,7 +31,7 @@ PUB STRUCT FsmEmitContext {
   capture_finalizers: []Emittable,
   arena_init_flag: Bool,
   is_void: Bool,
-  pin_mode: ?Any@multiowned,
+  pin_mode: ?TransformValue,
   parallel: Bool,
   profile_site_id: ?Int64,
   profile_line: ?Int64,

@@ -53,14 +53,14 @@ PUB FN testBlockCtx__new(test_block: TestBlock, lowering: MIRLowering) RETURNS !
   RETURN self @multiowned;
 END
 PUB STRUCT TestThatEnv {
-  ctx: Any@multiowned,
-  when_block: Any@multiowned,
-  when_desc: Any@multiowned,
-  tag_suffix: Any@multiowned,
-  stub_mir: Any@multiowned,
-  when_setup_mir: Any@multiowned,
-  when_before_each_mir: Any@multiowned,
-  when_after_each_mir: Any@multiowned,
-  let_ast_map: Any@multiowned
+  ctx: TestBlockCtx,
+  when_block: WhenBlock,
+  when_desc: String,
+  tag_suffix: String,
+  stub_mir: []Emittable,
+  when_setup_mir: []Emittable,
+  when_before_each_mir: [List, List]Emittable,
+  when_after_each_mir: [List, List]Emittable,
+  let_ast_map: {String}LetBinding
 }
 # End Ruby module TestLowering
