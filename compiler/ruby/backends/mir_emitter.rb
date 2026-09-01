@@ -2357,12 +2357,17 @@ class MIREmitter
         result += " else |_| {\n#{else_body}\n}" if else_body
         result += " else |_| {}" unless else_body
       else
-        capture = b[:pointer_capture] ? "*#{b[:capture]}" : b[:capture]
+        # A Zig payload capture is const. A mutable binding rebinds it into a
+        # var holding the pointer, the same shape a mutable MATCH arm binding
+        # has, so `&binding` is a mutable pointer at the call site.
+        capture = b[:pointer_capture] ? "*#{b[:capture]}__ptr" : b[:capture]
+        rebind = b[:pointer_capture] ? "var #{b[:capture]} = #{b[:capture]}__ptr;\n" : ""
         # An `anytype` parameter declared `?T` can arrive as a bare `T`, which
         # `if (x) |y|` rejects. Only a bare binding can have that shape; a call
-        # result carries its own optionality.
-        subject = b[:expr].is_a?(MIR::Ident) ? "CheatLib.optionalOf(#{expr})" : expr
-        result = "if (#{subject}) |#{capture}| {\n#{suppress}#{then_body}\n}"
+        # result carries its own optionality. A pointer capture needs the
+        # subject itself, not a temporary optional wrapping a copy of it.
+        subject = b[:expr].is_a?(MIR::Ident) && !b[:pointer_capture] ? "CheatLib.optionalOf(#{expr})" : expr
+        result = "if (#{subject}) |#{capture}| {\n#{rebind}#{suppress}#{then_body}\n}"
         result += " else {\n#{else_body}\n}" if else_body
       end
       result

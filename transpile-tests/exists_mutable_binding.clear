@@ -1,0 +1,35 @@
+# `EXISTS AS MUTABLE x` binds the optional's payload by pointer, so writes
+# through the binding land on the optional -- the same contract mutable MATCH
+# arm and IS_A bindings have.
+STRUCT Counter { n: Int64 }
+
+FN bump(MUTABLE c: Counter) RETURNS Void ->
+  c.n = c.n + 1;
+END
+
+FN read(opt: ?Counter) RETURNS Int64 ->
+  IF opt EXISTS AS c THEN
+    RETURN c.n;
+  END
+  RETURN 0;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE slot: ?Counter = Counter{ n: 1 };
+
+  IF slot EXISTS AS MUTABLE c THEN
+    bump(&c);
+  END
+  ASSERT read(slot) == 2, "EXISTS AS MUTABLE must write through to the optional";
+
+  IF slot EXISTS AS MUTABLE c2 THEN
+    c2.n = c2.n + 10;
+  END
+  ASSERT read(slot) == 12, "direct field write through an EXISTS binding must persist";
+
+  IF slot EXISTS AS c3 THEN
+    ASSERT c3.n == 12, "immutable EXISTS binding reads the current payload";
+  END
+
+  RETURN;
+END

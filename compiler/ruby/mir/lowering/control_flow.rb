@@ -256,6 +256,7 @@ module MIRLoweringControlFlow
         node_ref: Type.from_node!(b.expr).node_reference?,
         owns_capture: AST.capture_expr_owns_result?(b.expr),
         predicate: b.predicate,
+        pointer_capture: b.mutable == true,
       }
     end
     lowered_then = with_if_bind_alias_maps(node) { lower_body(node.then_branch) }

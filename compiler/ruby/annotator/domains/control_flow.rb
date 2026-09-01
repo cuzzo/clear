@@ -543,7 +543,10 @@ module Annotator
                 !unwrapped.any_rc?
               mutable_list_alias = b.expr.is_a?(AST::GetIndex) && root &&
                 !current_scope.is_immutable?(root.name) && mutable_slot_payload
-              current_scope.declare(b.name, nil, unwrapped, mutable_list_alias, false, nil, :stack)
+              explicit_mutable = b.mutable == true
+              verify_mutable_bind_subject!(b) if explicit_mutable
+              current_scope.declare(b.name, nil, unwrapped, mutable_list_alias || explicit_mutable,
+                                    false, nil, :stack)
               entry = current_scope.local_entry!(b.name)
               b.symbol = entry
               entry.mark_owned_optional_capture! if AST.capture_expr_owns_result?(b.expr)
@@ -587,6 +590,19 @@ module Annotator
 
         analyze_control_flow_branches(branch_logic)
         stamp_type!(node, :Void)
+      end
+
+      # `EXISTS AS MUTABLE x` binds the optional's payload by pointer, so the
+      # optional itself has to be a mutable binding.
+      sig { params(binding: AST::Binding).void }
+      def verify_mutable_bind_subject!(binding)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        subject = binding.expr
+        return unless subject.is_a?(AST::Identifier)
+        entry = current_scope.resolve_entry(subject.name)
+        return error!(binding.expr, :ASSIGN_VAR_IMMUTABLE, name: subject.name) if entry && !entry.mutable
+
+        mark_var_mutated(subject.name)
       end
 
       sig { params(binding: AST::Binding, type: Type).returns(Type) }
@@ -976,8 +992,9 @@ module Annotator
         subject = node.left
         return unless subject.is_a?(AST::Identifier)
         entry = current_scope.resolve_entry(subject.name)
-        return if entry.nil? || entry.mutable
-        error!(node, :ASSIGN_VAR_IMMUTABLE, name: subject.name)
+        return error!(node, :ASSIGN_VAR_IMMUTABLE, name: subject.name) if entry && !entry.mutable
+
+        mark_var_mutated(subject.name)
       end
 
       sig { params(plan: MatchSubjectPlan, variant_name: String, raw_payload: MatchPayload, match_case: AST::MatchCase).returns(Type) }

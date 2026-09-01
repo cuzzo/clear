@@ -316,7 +316,7 @@ module AST
   end
 
   Binding = Struct.new(:expr, :name, :name_token, :unwrapped_type, :symbol, :capture, :predicate,
-                       keyword_init: true) do
+                       :mutable, keyword_init: true) do
     extend T::Sig
     attr_accessor :mir_binding_entry
     # ruby-to-clear: field-type expr=Locatable
@@ -2392,13 +2392,14 @@ module AST
       self[:type] = val.nil? ? nil : Type.new(val)
     end
   end
-  BinaryOp     = Struct.new(:token, :left, :op, :right, :paren_bind) do
+  BinaryOp     = Struct.new(:token, :left, :op, :right, :paren_bind, :bind_mutable) do
     extend T::Sig
     include Locatable
     # ruby-to-clear: field-type op=String@symbol
     # ruby-to-clear: field-type left=Locatable
     # ruby-to-clear: field-type right=Locatable
     # ruby-to-clear: field-type paren_bind=?Bool
+    # ruby-to-clear: field-type bind_mutable=?Bool
     # Derived: comparison/logical -> Bool; otherwise an operand's type.
     sig { returns(Type) }
     def full_type

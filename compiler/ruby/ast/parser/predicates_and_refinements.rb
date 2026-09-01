@@ -146,7 +146,8 @@ class ClearParser
     if node.op == :BIND_VAR
       right = T.cast(node.right, AST::Identifier)
       predicate = node.token.text_is?('IS_OK') ? :is_ok : :exists
-      return [AST::Binding.new(expr: node.left, name: right.name, name_token: right.token, predicate: predicate)]
+      return [AST::Binding.new(expr: node.left, name: right.name, name_token: right.token,
+                               predicate: predicate, mutable: node.bind_mutable == true)]
     end
     if node.op == :OR && contains_refinement_binding?(node)
       error!(node.token, :CONDITIONAL_BINDING_UNDER_OR)
@@ -207,8 +208,10 @@ class ClearParser
     predicate_tok = consume(:KEYWORD)
     predicate = predicate_tok.text_is?('IS_OK') ? :is_ok : :exists
     consume(:KEYWORD, 'AS')
+    mutable = match!(:KEYWORD, 'MUTABLE') ? true : false
     name_tok = consume(:VAR_ID)
-    AST::Binding.new(expr: expr, name: name_tok.text!, name_token: name_tok, predicate: predicate)
+    AST::Binding.new(expr: expr, name: name_tok.text!, name_token: name_tok,
+                     predicate: predicate, mutable: mutable)
   end
 
   sig { params(if_token: Lexer::Token, bindings: T::Array[AST::Binding]).returns(AST::IfBind) }

@@ -197,12 +197,14 @@ class ClearParser
     if match?(:KEYWORD, 'EXISTS') || match?(:KEYWORD, 'IS_OK')
       predicate_tok = consume(:KEYWORD)
       consume(:KEYWORD, 'AS')
+      bind_mutable = match!(:KEYWORD, 'MUTABLE') ? true : false
       name_tok = consume(:VAR_ID)
       error!(current, :CONDITIONAL_BINDING_UNDER_OR) if match?(:KEYWORD, 'OR')
       consume(:CHAR, ')')
       bind = AST::BinaryOp.new(predicate_tok, expr, :BIND_VAR,
                AST::Identifier.new(name_tok, name_tok.text!))
       bind.paren_bind = true
+      bind.bind_mutable = bind_mutable
       return parse_suffixes(bind)
     elsif match?(:KEYWORD, 'AS')
       emit_legacy_optional_binding!(current)
@@ -629,11 +631,14 @@ class ClearParser
       # Anchor on the cursor before the operand: reaching for as_rhs.token asks
       # an AST node union for a field.
       as_anchor = current
+      as_mutable = match!(:KEYWORD, 'MUTABLE') ? true : false
       as_rhs = parse_var_id
       unless as_rhs.is_a?(AST::Identifier)
         error!(as_anchor, :EXPECTED_IDENT_AFTER_AS, got: "expression")
       end
-      return AST::BinaryOp.new(op_token, lhs, :BIND_VAR, as_rhs)
+      as_bind = AST::BinaryOp.new(op_token, lhs, :BIND_VAR, as_rhs)
+      as_bind.bind_mutable = as_mutable
+      return as_bind
 
     when 'OR_ELSE'
       or_rhs = parse_or_else
