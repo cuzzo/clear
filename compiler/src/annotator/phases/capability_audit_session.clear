@@ -632,8 +632,8 @@ PRIVATE FN capabilityAuditSession__emit_typo_suggestion_mut(self: CapabilityAudi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token_line: Int64 = CAST(UNWRAP (typoToken__line(token)) AS Int64);
-    MUTABLE token_column: Int64 = CAST(UNWRAP (typoToken__column(token)) AS Int64);
+    MUTABLE token_line: Int64 = CAST(UNWRAP (typoToken__line( UNWRAP (token))) AS Int64);
+    MUTABLE token_column: Int64 = CAST(UNWRAP (typoToken__column( UNWRAP (token))) AS Int64);
     MUTABLE best: ?String =   IF ((fix_label == "closest in-scope variable") AND compilerRegexMatch(name, compilerRegexCompile("\\A[A-Z]"))) THEN
       NIL
     ELSE
@@ -837,7 +837,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE loop_move_line: ?Int64 = og_node?.move_line;
     MUTABLE consumer: ?String = NIL;
     IF loop_move_line EXISTS THEN
-      consumer = capabilityAuditSession__consumer_source_text(rtoc_self_view, loop_move_line);
+      consumer = capabilityAuditSession__consumer_source_text(rtoc_self_view, UNWRAP (loop_move_line));
     END
     MUTABLE consumer_clause: String = "";
     IF consumer EXISTS AS consumer_value THEN
@@ -1006,7 +1006,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE new_suffix: ?String = COPY (CAST({:Int8: "i8", :Byte: "u8", :Int16: "i16", :UInt16: "u16", :Int32: "i32", :UInt32: "u32", :Int64: "i64", :UInt64: "u64"} AS {String@symbol}String))[best_value];
         IF ((new_suffix != NIL) AND (new_suffix != old_suffix)) THEN
           MUTABLE suffix_col = ((tok.column + compilerRegexCapture(m_value, 1).codepointCount()) + 1);
-          RETURN TRY (capabilityAuditSession__emit_overflow_suffix_fix_mut(rtoc_self_view, Locatable{ Literal: COPY node }, target_type, min_value, max_value, tok, suffix_col, old_suffix, new_suffix, val));
+          RETURN TRY (capabilityAuditSession__emit_overflow_suffix_fix_mut(rtoc_self_view, Locatable{ Literal: COPY node }, target_type, min_value, max_value, tok, suffix_col, old_suffix, UNWRAP (new_suffix), val));
         END
       END
       MUTABLE target_name = COPY CAST(target_type AS String);
@@ -1057,7 +1057,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END;
         MUTABLE start_col = ((idx_value + 1) - lead);
         MUTABLE length = ((6 + lead) + trail);
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_LOCAL_CAPABILITY, {:name: DiagnosticKwValue{ StringValue: COPY name }})), [edit__new(span__new(NIL, line, start_col, length), "")], :auto)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_LOCAL_CAPABILITY, {:name: DiagnosticKwValue{ StringValue: COPY name }})), [edit__new(span__new(NIL, UNWRAP (line), start_col, length), "")], :auto)));
       END
     END
     MUTABLE anchor_branch_value: ?AnchorToken = NIL;
@@ -1587,7 +1587,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE target_name: TypeTypeInput = target_name_branch_value?;
       MUTABLE text_length = NIL;
       PARTIAL MATCH value_value START
-        Locatable.Literal AS literal -> text_length = capabilityAuditSession__literal_source_length(rtoc_self_view, tok);,
+        Locatable.Literal AS literal -> text_length = capabilityAuditSession__literal_source_length(rtoc_self_view, UNWRAP (tok));,
         Locatable.Identifier AS identifier -> text_length = identifier__name(identifier).codepointCount();,
         DEFAULT -> text_length = NIL;
       END
@@ -3230,7 +3230,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE plain_reentrant_callee: ?String = TRY (capabilityAuditSession__find_plain_reentrant_callee(&rtoc_self_view, call_names));
     IF ((plain_reentrant_callee != NIL) AND (user_size != :service)) THEN
-      TRY (capabilityAuditSession__emit_service_required_error_mut(rtoc_self_view, node, plain_reentrant_callee, user_size));
+      TRY (capabilityAuditSession__emit_service_required_error_mut(rtoc_self_view, node, UNWRAP (plain_reentrant_callee), user_size));
       RETURN;
     END
     MUTABLE raw = TRY (capabilityAuditSession__max_tier_for_calls(&rtoc_self_view, call_names));

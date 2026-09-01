@@ -613,10 +613,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       frozenCleanupFacts__with_live_entry_for(facts, while_bind_loop_mutable.binding_name, %(entry: CleanupEntry) USE(MUTABLE while_bind_loop_mutable, rtoc_self_view) -> {
     MUTABLE cond_type = TRY (type__from_node_mut(while_bind_loop_mutable.condition, "while-bind allocation marker"));
     MUTABLE item_type_branch_value: ?Type = NIL;
-        IF TRY (type__stream_step?(cond_type)) THEN
-          item_type_branch_value = TRY (type__stream_step_item_type(cond_type));
+        IF TRY (type__stream_step?( UNWRAP (cond_type))) THEN
+          item_type_branch_value = TRY (type__stream_step_item_type( UNWRAP (cond_type)));
         ELSE
-          item_type_branch_value = TRY (type__wrapped_type(cond_type));
+          item_type_branch_value = TRY (type__wrapped_type( UNWRAP (cond_type)));
         END
     MUTABLE item_type: ?Type = item_type_branch_value;
     MUTABLE alloc_node = mIRPass__alloc_marker(rtoc_self_view, CAST(while_bind_loop_mutable.binding_name AS String), cleanupEntry__alloc(entry), item_type?);

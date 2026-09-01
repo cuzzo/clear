@@ -233,7 +233,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         pipelineRewriter__patch_chain_source_mut(rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
-    MUTABLE is_range_fold_terminal = (((terminal != NIL) AND (terminal IS_A EachOp)) OR aST__pipeline_terminal_fold?(terminal));
+    MUTABLE is_range_fold_terminal = (((terminal != NIL) AND (terminal IS_A EachOp)) OR aST__pipeline_terminal_fold?( UNWRAP (terminal)));
     MUTABLE source_type = &real_source.full_type_mut();
     MUTABLE has_limit = stages |> ANY _ IS_A LimitOp;
     IF (TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY &node.full_type_mut() }))))) AND (stages |> ANY _ IS_A SelectOp)) THEN
@@ -255,7 +255,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         pipelineRewriter__patch_chain_source_mut(rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
-    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal?) IS_A EachOp))) OR aST__pipeline_terminal_fold?(terminal)) OR aST__pipeline_list_terminal?(terminal));
+    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal?) IS_A EachOp))) OR aST__pipeline_terminal_fold?( UNWRAP (terminal))) OR aST__pipeline_list_terminal?( UNWRAP (terminal)));
     IF ((stages.length() > 0) OR ((is_fold AND (terminal != NIL)))) THEN
       IF is_fold THEN
         RETURN TRY (pipelineRewriter__fuse_pipeline(&rtoc_self_view, &node, &real_source, stages, terminal));
@@ -338,7 +338,7 @@ PRIVATE FN pipelineRewriter__is_fusible?(self: PipelineRewriter, node: ?Locatabl
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN aST__pipeline_fusible_stage?(node);
+    RETURN aST__pipeline_fusible_stage?( UNWRAP (node));
 }
 END
 PRIVATE FN pipelineRewriter__binding_source?(self: PipelineRewriter, node: ?Locatable) RETURNS Bool

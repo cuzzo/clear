@@ -952,7 +952,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       out = out.replace("{val_zig}", TRY (type__zig_type(value_type_value)));
     END
     IF allocs != NIL THEN
-        inlineAllocMetadata__each(allocs, %(key: String@symbol, sym: String@symbol) USE(MUTABLE out, rtoc_self_view) -> {
+        inlineAllocMetadata__each( UNWRAP (allocs), %(key: String@symbol, sym: String@symbol) USE(MUTABLE out, rtoc_self_view) -> {
         out = out.replace("{${key}}", TRY (mIREmitter__alloc_zig(rtoc_self_view, sym)));
         rubyToClearVoid__mir_emitter()
         });
@@ -4212,11 +4212,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fallback = TRY (mIREmitter__emit(&rtoc_self_view, node.fallback));
     MUTABLE result_type: ?Type = COPY node.result_type;
     IF ((result_type != NIL) AND !(fallback.startsWith?("@panic("))) THEN
-      fallback = "@as(${TRY (type__zig_type(result_type))}, ${fallback})";
+      fallback = "@as(${TRY (type__zig_type( UNWRAP (result_type)))}, ${fallback})";
     END
     MUTABLE expr: String = TRY (mIREmitter__emit(&rtoc_self_view, node.expr));
     IF ((result_type != NIL) AND (expr == "null")) THEN
-      expr = "@as(?${TRY (type__zig_type(result_type))}, null)";
+      expr = "@as(?${TRY (type__zig_type( UNWRAP (result_type)))}, null)";
     END
     RETURN "(${expr} orelse ${fallback})";
 }

@@ -1511,7 +1511,7 @@ PUB FN cleanupClassifier__classify_heap_storage(ti: Type, node: Locatable, schem
   END
   IF (type__fixed?(ti) AND type__array?(ti)) THEN
     MUTABLE elem: ?Type = TRY (type__element_type(ti));
-    IF ((elem != NIL) AND !(TRY (cleanupClassifier__elem_type_needs_cleanup?(elem, schema_lookup)))) THEN
+    IF ((elem != NIL) AND !(TRY (cleanupClassifier__elem_type_needs_cleanup?( UNWRAP (elem), schema_lookup)))) THEN
       RETURN NIL;
     END
   END
@@ -1555,7 +1555,7 @@ PUB FN cleanupClassifier__classify_heap_composite(ti: Type, node: Locatable, sch
   END
   IF (type__fixed?(ti) AND type__array?(ti)) THEN
     MUTABLE elem: ?Type = TRY (type__element_type(ti));
-    IF ((elem != NIL) AND !(TRY (cleanupClassifier__elem_type_needs_cleanup?(elem, schema_lookup)))) THEN
+    IF ((elem != NIL) AND !(TRY (cleanupClassifier__elem_type_needs_cleanup?( UNWRAP (elem), schema_lookup)))) THEN
       RETURN NIL;
     END
   END

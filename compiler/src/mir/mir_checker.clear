@@ -575,7 +575,7 @@ PUB FN mIRChecker__structural_consumed_names(MUTABLE self: MIRChecker, node: Emi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
     IF fact EXISTS THEN
-      RETURN TRY (mIRChecker__ownership_consumption_operand_names(rtoc_self_view, fact));
+      RETURN TRY (mIRChecker__ownership_consumption_operand_names(rtoc_self_view, UNWRAP (fact)));
     END
     IF !(mIRChecker__stdlib_takes_ownership?(rtoc_self_view, node)) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_14: []String = List[]; rtoc_empty_list_14 } ) AS []String);
@@ -1820,7 +1820,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF (rtoc_node IS_A Cleanup OR rtoc_node IS_A ErrCleanup) THEN
           MUTABLE let: ?Let = COPY lets[CAST((emittable__name(rtoc_node)) AS String)];
-          IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(rtoc_node)) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, let, castEmittableToMIRCheckerCleanup(rtoc_node))))) THEN
+          IF (((let != NIL) AND !(materialized_owners.contains?(CAST((emittable__name(rtoc_node)) AS String)))) AND !(TRY (mIRChecker__cleanup_source_owns_value?(&rtoc_self_view, UNWRAP (let), castEmittableToMIRCheckerCleanup(rtoc_node))))) THEN
             &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CLEANUP_FOR_BORROW, Name{ StringValue: COPY UNWRAP (emittable__name(rtoc_node)) }, "Cleanup was emitted for a binding initialized from a borrowed/non-owning expression; MIRChecker cannot prove this binding owns memory")));
           END
       END
@@ -2244,7 +2244,7 @@ PUB FN mIRChecker__check_fsm_destroy_cleanup_action_mut(action: FsmDestroyCleanu
   END
   IF (cleanupEntry__kind(entry) == :resource) THEN
     MUTABLE close_plan: ?ResourceClosePlan = cleanupEntry__resource_close_plan(entry);
-    IF !(((close_plan != NIL) AND !(resourceClosePlan__empty?(close_plan)))) THEN
+    IF !(((close_plan != NIL) AND !(resourceClosePlan__empty?( UNWRAP (close_plan))))) THEN
       RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-DESTROY-RESOURCE-PLAN", "resource cleanup '${action.name}' must carry at least one close action.", source);
     END
   END

@@ -465,7 +465,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_self_view.block_out[block.id] = new_out;
         FOR _ IN block.successors DO
         IF !(in_worklist[_.id]) THEN
-          ownershipDataflow__insert_ordered_worklist_mut(rtoc_self_view, &worklist, _, order_index);
+          ownershipDataflow__insert_ordered_worklist_mut(rtoc_self_view, &worklist, _, UNWRAP (order_index));
           in_worklist[_.id] = TRUE;
         END
         END
@@ -1123,7 +1123,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE loop_name: ?String = COPY header_value.loop_name;
         MUTABLE loop_binding: ?Locatable = COPY header_value.loop_binding;
         IF ((loop_name != NIL) AND (loop_binding != NIL)) THEN
-          TRY (ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, loop_name, loop_binding));
+          TRY (ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, UNWRAP (loop_name), UNWRAP (loop_binding)));
         END
       ELSE
         FOR _ IN (TRY (ownershipDataflow__collect_explicit_move_places(rtoc_self_view, stmt, state))) DO
@@ -1340,7 +1340,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF source IS_A Identifier THEN
       MUTABLE ti = TRY (type__from_node_mut(source, "share transfer"));
-      IF type__shared?(ti) THEN
+      IF type__shared?( UNWRAP (ti)) THEN
         RETURN;
       END
       MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(source.name() AS String), source);
@@ -1677,7 +1677,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, source.value(), state));
     ELSE_IF source IS_A Identifier AS source_narrowed THEN
       MUTABLE ti = TRY (type__from_node_mut(source, "share read"));
-      IF type__shared?(ti) THEN
+      IF type__shared?( UNWRAP (ti)) THEN
         useAfterMoveChecker__check_identifier_node_read(&rtoc_self_view, source_narrowed, state);
       END
     ELSE
@@ -1944,7 +1944,7 @@ PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema
     IF !(inner IS_A Type) THEN
       RETURN FALSE;
     END
-    RETURN (inner.needs_cleanup?(schema_lookup) AND (TRY (type__cleanup_allocator(inner, schema_lookup)) == :frame));
+    RETURN (inner.needs_cleanup?(schema_lookup) AND (TRY (type__cleanup_allocator( UNWRAP (inner), schema_lookup)) == :frame));
   ELSE
     RETURN FALSE;
   END
@@ -2218,7 +2218,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             &rtoc_self_view.errors.append("[ALIAS_VIOLATION] ${rtoc_self_view.fn_name}::${(source OR_ELSE "")} -- immutable borrow while mutably borrowed (RESTRICT)${borrowChecker__line_info(rtoc_self_view, token)}");
           END
       END
-      body_state = borrowState__add(body_state, source, kind);
+      body_state = borrowState__add(body_state, UNWRAP (source), kind);
     rtoc_idx = rtoc_idx + 1;
     END
     TRY (borrowChecker__check_stmts(&rtoc_self_view, stmt.body, body_state));

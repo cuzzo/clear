@@ -703,7 +703,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(owner_params) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_OWNER }, [], {:owner: owner_name}));
     END
-    TRY (resolutionSession__infer_conformance_owner_application_mut(rtoc_self_view, &rtoc_mutable_block_param_14, owner_name, owner_params));
+    TRY (resolutionSession__infer_conformance_owner_application_mut(rtoc_self_view, &rtoc_mutable_block_param_14, owner_name, UNWRAP (owner_params)));
     IF !((local_owner OR local_protocols.contains?(protocol_name))) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_ORPHAN }, [], {:protocol: protocol_name, :owner: owner_name}));
     END
@@ -712,7 +712,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_DUPLICATE }, [], {:protocol: protocol_name, :owner: owner_name}));
     END
     &seen.insert(key);
-    TRY (resolutionSession__validate_conformance_arity_mut(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name, owner_params));
+    TRY (resolutionSession__validate_conformance_arity_mut(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name, UNWRAP (owner_params)));
     MUTABLE associated = TRY (resolutionSession__conformance_associated_types(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol)));
     MUTABLE members = TRY (resolutionSession__collect_conformance_members_mut(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 }, :Void));

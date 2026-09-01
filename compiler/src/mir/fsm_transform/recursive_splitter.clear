@@ -294,13 +294,13 @@ PRIVATE FN fsmRecursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) R
     RETURN FALSE;
   END
   MUTABLE pt = TRY (type__from_node_mut(sus.promise_ast, "FSM suspend promise"));
-  IF !(type__future?(pt)) THEN
+  IF !(type__future?( UNWRAP (pt))) THEN
     RETURN TRUE;
   END
-  IF (TRUE AND TRY (type__stream?(pt))) THEN
+  IF (TRUE AND TRY (type__stream?( UNWRAP (pt)))) THEN
     RETURN TRUE;
   END
-  IF (TRUE AND type__promise_list?(pt)) THEN
+  IF (TRUE AND type__promise_list?( UNWRAP (pt))) THEN
     RETURN TRUE;
   END
   RETURN FALSE;

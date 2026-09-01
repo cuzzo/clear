@@ -71,7 +71,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwn
     MUTABLE value: Identifier = CAST(aST__node_value(stmt) AS Identifier);
     MUTABLE ti = TRY (type__from_node_mut(Locatable{ Identifier: COPY value }, "moved declaration root"));
     MUTABLE entry = (self.bindings[value.name] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
-    IF (TRY (mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, ti)) AND cleanupEntry__present?(entry)) THEN
+    IF (TRY (mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, UNWRAP (ti))) AND cleanupEntry__present?(entry)) THEN
       &names.append(COPY value.name);
     END
   END
@@ -80,7 +80,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwn
       RETURN;
   END
   MUTABLE ti = TRY (type__from_node_mut(arg, "moved argument root"));
-  IF !(TRY (mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, ti))) THEN
+  IF !(TRY (mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, UNWRAP (ti)))) THEN
       RETURN;
   END
   MUTABLE root: ?String = mIRLoweringOwnershipScanner__moved_arg_root(self, arg);

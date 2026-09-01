@@ -246,7 +246,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
           MUTABLE t = s.type();
           t.sync()
             });
-            IF ((unified AND (symbolEntry__sync(entry) != unified)) AND escapeAnalysis__param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, unified)) THEN
+            IF ((unified AND (symbolEntry__sync( UNWRAP (entry)) != unified)) AND escapeAnalysis__param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, UNWRAP (unified))) THEN
               symbolEntry__set_sync(&entry, unified);
               changed = TRUE;
             END
@@ -264,8 +264,8 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
           END
           NIL
         });
-        IF (unified_storage AND (symbolEntry__storage(entry) != unified_storage)) THEN
-            symbolEntry__set_storage(&entry, unified_storage);
+        IF (unified_storage AND (symbolEntry__storage( UNWRAP (entry)) != unified_storage)) THEN
+            symbolEntry__set_storage(&entry, UNWRAP (unified_storage));
             changed = TRUE;
         END
       rtoc_idx = rtoc_idx + 1;
@@ -296,7 +296,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF keptIdentityContract__rc?(contract) THEN
+      IF keptIdentityContract__rc?( UNWRAP (contract)) THEN
           entry.storage = :multiowned;
       END
       by_index[rtoc_idx] = UNWRAP (contract);
@@ -597,7 +597,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   });
 END
 PUB FN escapeAnalysis__unify_caller_attr(sites: []CallSiteFact, idx: Int64, project: FN(SymbolEntry) -> ?String@symbol) RETURNS ?String@symbol ->
-  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND (aST__node__symbol(arg) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol = arg.symbol; (IF !(symbol IS_A SymbolEntry@multiowned) THEN NIL ELSE project(symbol) END) } END) };
+  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND (aST__node__symbol( UNWRAP (arg)) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol = arg.symbol; (IF !(symbol IS_A SymbolEntry@multiowned) THEN NIL ELSE project(symbol) END) } END) };
   IF (observed.length() == 0) THEN
     RETURN NIL;
   END
@@ -700,7 +700,7 @@ PUB FN escapeAnalysis__apply_destructuring_escape_sink_mut(node: DestructuringAs
   CONTINUE;
     END
     MUTABLE ti = TRY (type__from_node_mut(UNWRAP (node.targets[rtoc_idx]), "destructured target placement"));
-    IF !(TRY (type__needs_explicit_cleanup?(ti, :heap, COPY context.schema_lookup))) THEN
+    IF !(TRY (type__needs_explicit_cleanup?( UNWRAP (ti), :heap, COPY context.schema_lookup))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1085,7 +1085,7 @@ PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Par
   CONTINUE;
     END
     MUTABLE arg_type = IF (arg != NIL) THEN
-        TRY (aST__full_type_mut(arg))
+        TRY (aST__full_type_mut( UNWRAP (arg)))
       ELSE
         NIL
       END;
@@ -1126,7 +1126,7 @@ PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, arg
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    IF !((TRY (escapeAnalysis__ownership_bearing_transfer_expr?(&arg, schema_lookup)) OR TRY (escapeAnalysis__call_result_is_heap?(arg, fn_nodes, schema_lookup, facts_by_name)))) THEN
+    IF !((TRY (escapeAnalysis__ownership_bearing_transfer_expr?(&arg, schema_lookup)) OR TRY (escapeAnalysis__call_result_is_heap?( UNWRAP (arg), fn_nodes, schema_lookup, facts_by_name)))) THEN
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1217,7 +1217,7 @@ PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable,
   IF escapeAnalysis__heap_owned_transfer_source?(arg) THEN
     RETURN TRUE;
   END
-  IF ((TRY (escapeAnalysis__ownership_transferring_expr?(arg, TRUE)) AND (arg != NIL)) AND TRY (escapeAnalysis__type_requires_owned_storage?(TRY (aST__full_type_mut(arg)), schema_lookup))) THEN
+  IF ((TRY (escapeAnalysis__ownership_transferring_expr?(arg, TRUE)) AND (arg != NIL)) AND TRY (escapeAnalysis__type_requires_owned_storage?(TRY (aST__full_type_mut( UNWRAP (arg))), schema_lookup))) THEN
     RETURN TRUE;
   END
   RETURN FALSE;
@@ -1575,7 +1575,7 @@ PUB FN escapeAnalysis__receiver_is_param?(receiver: Locatable) RETURNS Bool ->
   IF root != NIL THEN
     sym = COPY root.symbol;
   END
-  RETURN !(!(((((sym != NIL) AND TRUE) AND symbolEntry__is_param(sym)))));
+  RETURN !(!(((((sym != NIL) AND TRUE) AND symbolEntry__is_param( UNWRAP (sym))))));
 END
 PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg_heap: [Set]String, facts: ?FunctionFacts) RETURNS !Void ->
   MUTABLE names: [Set]String = Set[];
@@ -1707,7 +1707,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
   IF !(ti) THEN
     RETURN FALSE;
   END
-  MUTABLE top_heap_ptr = TRY (type__heap_ptr?(ti));
+  MUTABLE top_heap_ptr = TRY (type__heap_ptr?( UNWRAP (ti)));
   ti = TRY (type__value_payload_type(ti));
   IF !(ti) THEN
     RETURN FALSE;
@@ -1856,7 +1856,7 @@ PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}
     RETURN FALSE;
   END
   MUTABLE callee: ?FunctionDef = COPY fn_nodes[CAST(call.name() AS String)];
-  IF ((callee != NIL) AND escapeAnalysis__function_def_has_return_lifetime?(callee)) THEN
+  IF ((callee != NIL) AND escapeAnalysis__function_def_has_return_lifetime?( UNWRAP (callee))) THEN
     RETURN FALSE;
   END
   MUTABLE callee_facts: ?FunctionFacts = COPY facts_by_name[CAST(call.name() AS String)];
@@ -1930,15 +1930,15 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
           MUTABLE ret_value = TRY (type__success_type(ret_value));
         END
         IF (IF (IF ret != NIL THEN
-          TRY (type__string?(ret))
+          TRY (type__string?( UNWRAP (ret)))
         ELSE
           NIL
         END) != NIL THEN (IF ret != NIL THEN
-          TRY (type__string?(ret))
+          TRY (type__string?( UNWRAP (ret)))
         ELSE
           NIL
         END) ELSE (IF ret != NIL THEN
-          TRY (type__recursive_cleanup_shape?(ret, schema_lookup))
+          TRY (type__recursive_cleanup_shape?( UNWRAP (ret), schema_lookup))
         ELSE
           NIL
         END) END) THEN
