@@ -11,6 +11,11 @@ REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f736368656d615f72656769737472792e636c
 REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f66756e6374696f6e732e636c656172"
 REQUIRE "pkg:rtoc_6d69722f6c6f776572696e672f6361706162696c69746965732e636c656172"
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572652e636c656172"
+PUB STRUCT StubInfo {
+  kind: String@symbol,
+  var: String
+}
+
 STRUCT MIRLoweringInput {
   struct_schemas: {String@symbol}StructSchema@multiowned,
   enum_schemas: {String@symbol}[]MIRLoweringSchemasEnumVariantsItem,
@@ -101,7 +106,7 @@ STRUCT MIRLoweringOwnershipState {
   finalized_node_ids: [Set]LoweredNodeId
 }
 STRUCT MIRLoweringTestState {
-  active_stubs: Any@multiowned,
+  active_stubs: {String}StubInfo,
   stub_label_counter: Int64
 }
 STRUCT MIRLoweringState {

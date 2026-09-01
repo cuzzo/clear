@@ -6708,25 +6708,25 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE suppress_stmts = suppress_names |> SELECT Suppress{ name: COPY _, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     MUTABLE counter = (mIRLowering__test_state(rtoc_self_view).stub_label_counter + 1);
     rtoc_self_view.state.test.stub_label_counter = counter;
-    IF (stub_info[:kind] == :returns) THEN
+    IF ((UNWRAP (stub_info)).kind == :returns) THEN
       IF (suppress_stmts.length() == 0) THEN
-        RETURN Emittable{ Ident: COPY Ident{ name: COPY stub_info[:var], lowered_node_id: NIL, ownership_consumption: NIL } };
+        RETURN Emittable{ Ident: COPY Ident{ name: COPY (UNWRAP (stub_info)).var, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
       MUTABLE label = "__stub_ret_${counter.toString()}";
-      RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: COPY (suppress_stmts + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: COPY stub_info[:var], lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
-    ELSE_IF (stub_info[:kind] == :captures) THEN
-      MUTABLE cnt = Ident{ name: COPY stub_info[:var], lowered_node_id: NIL, ownership_consumption: NIL };
+      RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: COPY (suppress_stmts + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: COPY (UNWRAP (stub_info)).var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
+    ELSE_IF ((UNWRAP (stub_info)).kind == :captures) THEN
+      MUTABLE cnt = Ident{ name: COPY (UNWRAP (stub_info)).var, lowered_node_id: NIL, ownership_consumption: NIL };
       MUTABLE inc = Set{ target: Emittable{ Ident: COPY cnt }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY cnt }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
       RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: NIL, body: COPY (suppress_stmts + [Emittable{ Set: COPY inc }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
-    ELSE_IF (stub_info[:kind] == :sequence) THEN
+    ELSE_IF ((UNWRAP (stub_info)).kind == :sequence) THEN
       MUTABLE label = "__stub_seq_${counter.toString()}";
-      MUTABLE seq = Ident{ name: "${stub_info[:var]}_seq", lowered_node_id: NIL, ownership_consumption: NIL };
-      MUTABLE idx = Ident{ name: "${stub_info[:var]}_idx", lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE seq = Ident{ name: "${(UNWRAP (stub_info)).var}_seq", lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE idx = Ident{ name: "${(UNWRAP (stub_info)).var}_idx", lowered_node_id: NIL, ownership_consumption: NIL };
       MUTABLE si = "__stub_si_${counter.toString()}";
       RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: COPY (suppress_stmts + [Emittable{ Let: COPY Let{ name: COPY si, init: Emittable{ Ident: COPY idx }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY idx }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY idx }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ Ident: COPY seq }, index: Emittable{ Ident: COPY Ident{ name: COPY si, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
-    ELSE_IF (stub_info[:kind] == :with) THEN
+    ELSE_IF ((UNWRAP (stub_info)).kind == :with) THEN
       MUTABLE args_mir = call_inputs |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, _));
-      RETURN Emittable{ Call: COPY Call{ callee: COPY stub_info[:var], args: COPY ([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }] + args_mir), try_wrap: TRUE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
+      RETURN Emittable{ Call: COPY Call{ callee: COPY (UNWRAP (stub_info)).var, args: COPY ([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }] + args_mir), try_wrap: TRUE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     ELSE
       RETURN NIL;
     END
@@ -6758,12 +6758,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.kind == :returns) THEN
       MUTABLE val = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
       MUTABLE rtoc_index_receiver_235 = COPY mIRLowering__test_state(rtoc_self_view).active_stubs;
-      rtoc_index_receiver_235[fn_name] = {:kind: :returns, :var: stub_var};
+      rtoc_index_receiver_235[fn_name] = StubInfo{ kind: :returns, var: COPY stub_var };
       RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY stub_var, init: COPY val, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
     ELSE_IF (node.kind == :captures) THEN
       MUTABLE cap_name: ?StubValue@boxed = COPY node.value;
       MUTABLE rtoc_index_receiver_236 = COPY mIRLowering__test_state(rtoc_self_view).active_stubs;
-      rtoc_index_receiver_236[fn_name] = {:kind: :captures, :var: cap_name};
+      rtoc_index_receiver_236[fn_name] = StubInfo{ kind: :captures, var: CAST(cap_name AS String) };
       RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY cap_name, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "i64" })), suppression: "_ = &${cap_name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
     ELSE_IF (node.kind == :sequence) THEN
       MUTABLE values: ?StubValue@boxed = COPY node.value;
@@ -6774,12 +6774,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         items_mir = [CAST(TRY (mIRLowering__lower(&rtoc_self_view, values)) AS Any)];
       END
       MUTABLE rtoc_index_receiver_237 = COPY mIRLowering__test_state(rtoc_self_view).active_stubs;
-      rtoc_index_receiver_237[fn_name] = {:kind: :sequence, :var: stub_var};
+      rtoc_index_receiver_237[fn_name] = StubInfo{ kind: :sequence, var: COPY stub_var };
       RETURN NodeRoot{ ArrayValue: [Let{ name: MIRLoweringName{ StringValue: COPY "${stub_var}_seq" }, init: Emittable{ ArrayInit: COPY ArrayInit{ elem_type: "[]const u8", count: "_", items: COPY items_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: MIRLoweringName{ StringValue: COPY "${stub_var}_idx" }, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: "_ = &${stub_var}_idx;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] |> SELECT Emittable{ Let: COPY _ } };
     ELSE_IF (node.kind == :with) THEN
       MUTABLE val = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
       MUTABLE rtoc_index_receiver_238 = COPY mIRLowering__test_state(rtoc_self_view).active_stubs;
-      rtoc_index_receiver_238[fn_name] = {:kind: :with, :var: stub_var};
+      rtoc_index_receiver_238[fn_name] = StubInfo{ kind: :with, var: COPY stub_var };
       RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY stub_var, init: COPY val, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
     ELSE
       panic("MIRLowering: unhandled StubDecl kind: {} for {}");
