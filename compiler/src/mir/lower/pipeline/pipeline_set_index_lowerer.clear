@@ -231,7 +231,7 @@ PRIVATE FN pipelineSetIndexLowerer__build_index_gop_body(self: PipelineSetIndexL
 END
 PRIVATE FN pipelineSetIndexLowerer__index_prepared_value(self: PipelineSetIndexLowerer, item_var: String, elem_zig_type: String, alloc: String@symbol, item_type: ?Type, value_ownership: PipelineIndexValueOwnership) RETURNS !PipelineIndexPreparedValue ->
   MUTABLE item_owns = IF item_type != NIL THEN
-    pipelineSetIndexLowerer__cleanup_bearing_type_call(self, UNWRAP (item_type))
+    pipelineSetIndexLowerer__cleanup_bearing_type_call(self, item_type)
   ELSE
     TRUE
   END;

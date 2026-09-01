@@ -100,6 +100,10 @@ module SelfhostFnProbe
     lines = fn.text.lines
     cut = lines.index { |l| l.rstrip.end_with?('->') } or return nil
     head = lines[0..cut].join.rstrip
+    # A stub has no body, so a self-call is gone and REENTRANT no longer
+    # describes it. Leaving the effect in makes the compiler reject the stub
+    # for not being recursive -- a property of the stub, not of the caller.
+    head = head.gsub(/\s*EFFECTS\s+REENTRANT(?::\w+)?/, '')
     ret = fn.ret.to_s.delete_prefix('!')
     body = ret == 'Void' ? '  RETURN;' : %(  panic("stub");)
     "#{head}\n#{body}\nEND\n"

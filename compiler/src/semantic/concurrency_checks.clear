@@ -11,7 +11,7 @@ REQUIRE "../ast/param.clear"
 UNION SigLookupReturn { FunctionSignatureMultiowned: FunctionSignature@multiowned, TypeMultiowned: Type@multiowned, Type: Type }
 PUB FN concurrencyChecks__check_all_mut(fn_nodes: {String}FunctionDef, sig_lookup: FN(String) -> ?SigLookupReturn, error_handler: FN(Locatable, String) -> Void, body_summaries: {String}FunctionBodySummary, lock_ranks: {String@symbol}Int64) RETURNS !Void ->
   FOR _ IN fn_nodes.values() DO
-  IF !(_?.body) THEN
+  IF !(_.body) THEN
     CONTINUE;
   END
   MUTABLE summary = COPY body_summaries[_.name]?;

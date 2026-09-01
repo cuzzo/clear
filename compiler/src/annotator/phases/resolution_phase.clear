@@ -318,7 +318,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE expected_name = type__resolved((TRY (resolutionSession__to_type( UNWRAP (rtoc_self_view), castTypeToValue(requirement.params[rtoc_idx]?.type)))));
+      MUTABLE expected_name = type__resolved((TRY (resolutionSession__to_type( rtoc_self_view, castTypeToValue(requirement.params[rtoc_idx]?.type)))));
       MUTABLE actual_name = type__resolved((TRY (resolutionSession__to_type(rtoc_self_view, castTypeToValue(actual.type)))));
       IF (((expected_name == actual_name) OR (expected_name == :Any)) OR (actual_name == :Any)) THEN
               rtoc_idx = rtoc_idx + 1;
@@ -905,7 +905,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE mod_branch_value: ?CompiledModule = NIL;
     IF (node.kind == :package) THEN
-      mod_branch_value = TRY (moduleImporter__compile_package(&importer, node.path, resolutionSession__import_source_dir( UNWRAP (rtoc_self_view))));
+      mod_branch_value = TRY (moduleImporter__compile_package(&importer, node.path, resolutionSession__import_source_dir( rtoc_self_view)));
     ELSE
       mod_branch_value = TRY (moduleImporter__compile_file(&importer, node.path, resolutionSession__import_source_dir(rtoc_self_view)));
     END
@@ -1010,7 +1010,7 @@ PRIVATE FN resolutionSession__clone_resource_schema(self: ResolutionSession, sch
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (resourceSchema__new(resolutionSession__clone_resource_close_plan(rtoc_self_view, UNWRAP (schema.close_plan)), TRY (resolutionSession__clone_static_methods(rtoc_self_view, schema.static_methods)), TRY (resolutionSession__clone_struct_fields(rtoc_self_view, schema.fields)), COPY schema.type_params, schema.extern_module, schema.as_type, schema.visibility, TRY (resolutionSession__clone_resource_methods(rtoc_self_view, schema.methods))));
+    RETURN TRY (resourceSchema__new(resolutionSession__clone_resource_close_plan(rtoc_self_view, schema.close_plan), TRY (resolutionSession__clone_static_methods(rtoc_self_view, schema.static_methods)), TRY (resolutionSession__clone_struct_fields(rtoc_self_view, schema.fields)), COPY schema.type_params, schema.extern_module, schema.as_type, schema.visibility, TRY (resolutionSession__clone_resource_methods(rtoc_self_view, schema.methods))));
 }
 END
 PRIVATE FN resolutionSession__clone_union_schema(self: ResolutionSession, schema: UnionSchema) RETURNS !UnionSchema@multiowned
