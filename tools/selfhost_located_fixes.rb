@@ -139,13 +139,25 @@ by.each do |f, rs|
       line_edits << [r['line'], :declare_mutable, m[1]]
     elsif e.include?('UNWRAP_NON_OPTIONAL')
       line_edits << [r['line'], :drop_unwrap, nil]
+    elsif (m = e.match(/Cannot access field '(\w+)' on optional '\?[\w@\[\]{}]+' without safe navigation/))
+      line_edits << [r['line'], :unwrap_receiver, m[1]]
+    elsif (m = e.match(/Cannot modify field '\w+' of immutable object '(\w+)'/))
+      line_edits << [r['line'], :mutable_view, m[1]]
+    elsif e =~ /Undefined variable 'AST'/
+      line_edits << [r['line'], :ast_variant, nil]
     end
   end
 
   edits.uniq!
   edits.sort_by!(&:first)
+  # Two diagnostics can name overlapping spans; applying both splices one
+  # replacement into the middle of the other.
+  last_start = text.length
   edits.reverse_each do |a, b, s, kind|
+    next if b > last_start
+
     text = text[0...a] + s + text[b..]
+    last_start = a
     counts[kind] += 1
   end
 
@@ -170,6 +182,47 @@ by.each do |f, rs|
           break
         end
         j -= 1
+      end
+    when :unwrap_receiver
+      # The receiver of `.field` is optional. Ruby would have raised on nil
+      # here, so the value is non-nil by construction: unwrap it rather than
+      # introducing a safe-navigation branch Ruby does not have.
+      lines[i] = lines[i].gsub(/(?<![\w.)])((?:[a-z_]\w*(?:__\w+)?\((?:[^()]|\([^()]*\))*\)|[a-z_]\w*))\.#{name}\b/) do
+        whole = Regexp.last_match(0)
+        recv = Regexp.last_match(1)
+        # A guard match resets $~, so the original match has to be held first.
+        rest = Regexp.last_match.post_match
+        next whole if recv.start_with?('UNWRAP')
+        # An assignment target is not an expression: unwrapping it would
+        # produce a value on the left of `=`.
+        next whole if rest =~ /\A\s*=[^=]/
+
+        counts[kind] += 1
+        "UNWRAP (#{recv}).#{name}"
+      end
+    when :mutable_view
+      j = i
+      while j >= 0
+        if lines[j] =~ /WITH POLYMORPHIC\s+\w+\s+AS\s+#{name}\s*\{/
+          lines[j] = lines[j].sub(/AS\s+#{name}/, "AS MUTABLE #{name}")
+          counts[kind] += 1
+          break
+        end
+        break if lines[j] =~ /^(PUB |PRIVATE )?FN /
+
+        j -= 1
+      end
+    when :ast_variant
+      # `AST.StructDef` is Ruby's AST::StructDef; the CLEAR union that holds
+      # that variant is the one to name.
+      lines[i] = lines[i].gsub(/\bAST\.(\w+)\b/) do
+        whole = Regexp.last_match(0)
+        v = Regexp.last_match(1)
+        owner = VARIANT_OF.find { |_, vs| vs.value?(v) }&.first
+        next whole unless owner
+
+        counts[kind] += 1
+        "#{owner}.#{v}"
       end
     when :drop_unwrap
       # Two spellings reach the same diagnostic. Rewrite only when the line
