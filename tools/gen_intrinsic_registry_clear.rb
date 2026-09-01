@@ -67,8 +67,27 @@ module GenIntrinsicRegistryClear
 
   CLEAR
 
+  # INDEX_OPS is keyed by container kind, and each value is a `{get:, set:}`
+  # pair. Ruby never converts that pair as one entry -- every call site digs the
+  # sub-hash and converts it alone, as `"#{kind}_#{op}"`. Converting the pair
+  # instead nests one op's emit inside the other's and loses its return type,
+  # so flatten it the way the call sites read it.
+  def index_op_entries(registry)
+    out = {}
+    registry.each do |kind, ops|
+      next unless ops.is_a?(Hash)
+
+      ops.each_key do |op|
+        name = :"#{kind}_#{op}"
+        converted = IntrinsicRegistry.fs(ops[op], name)
+        out[name.to_s] = converted if converted
+      end
+    end
+    out
+  end
+
   def render_registry(registry, fn_suffix)
-    entries = IntrinsicRegistry.sigs(registry)
+    entries = fn_suffix == :index_ops ? index_op_entries(registry) : IntrinsicRegistry.sigs(registry)
     out = +"PUB FN stdLibRegistry__#{fn_suffix}() RETURNS !{String}[]FunctionSignature@multiowned ->\n"
     out << "  MUTABLE table: {String}[]FunctionSignature@multiowned = {};\n"
     # CLEAR index-assignment takes a VARIABLE index, not a literal.
