@@ -16,13 +16,15 @@ def split_args(s)
   # A generic argument list carries its own commas: `Tuple<Bool, T>` is one
   # type, not two. Collapse them before splitting.
   s = s.gsub(/<[^<>]*>/) { |g| g.tr(',', "\u0000") }
-  out = []; depth = 0; cur = +''; instr = false; esc = false
+  out = []; depth = 0; cur = +''; instr = false; esc = false; interp = 0
   s.each_char do |ch|
     if instr
       cur << ch
       if esc then esc = false
       elsif ch == '\\' then esc = true
-      elsif ch == '"' then instr = false
+      elsif ch == '{' && cur[-2] == '$' then interp += 1
+      elsif ch == '}' && interp.positive? then interp -= 1
+      elsif ch == '"' && interp.zero? then instr = false
       end
       next
     end
@@ -38,13 +40,15 @@ def split_args(s)
 end
 
 def close_paren(text, open_at)
-  k = open_at; depth = 0; instr = false; esc = false
+  k = open_at; depth = 0; instr = false; esc = false; interp = 0
   while k < text.length
     ch = text[k]
     if instr
       if esc then esc = false
       elsif ch == '\\' then esc = true
-      elsif ch == '"' then instr = false
+      elsif ch == '{' && text[k - 1] == '$' then interp += 1
+      elsif ch == '}' && interp.positive? then interp -= 1
+      elsif ch == '"' && interp.zero? then instr = false
       end
     elsif ch == '"' then instr = true
     elsif ch == '(' then depth += 1
