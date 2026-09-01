@@ -4957,7 +4957,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
           MUTABLE module_scope = (UNWRAP (mod)).global_scope;
           IF module_scope THEN
-            functionSignature__merge_imported_signatures_mut(TRY (mIRLowering__fn_sigs(rtoc_self_view)), module_scope);
+            MUTABLE rtoc_merged_sigs = TRY (mIRLowering__fn_sigs(rtoc_self_view));
+            TRY (functionSignature__merge_imported_signatures_mut(&rtoc_merged_sigs, module_scope));
+            mIRLowering__program_state(rtoc_self_view).fn_sigs = rtoc_merged_sigs;
           END
         END
         MUTABLE same_dir = ((UNWRAP (mod)).source_dir == mIRLowering__program_state(rtoc_self_view).source_dir);

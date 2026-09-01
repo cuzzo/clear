@@ -15141,3 +15141,8 @@ END
 FN rubyToClearVoid__ast() RETURNS Void ->
   RETURN;
 END
+# Ruby: a requirement's name and type as a plain Param -- no default, not
+# mutable, not TAKES.
+PUB FN unionMethodParamRequirement__to_param(self: UnionMethodParamRequirement) RETURNS Param ->
+  RETURN Param{ name: COPY self.name, type: COPY self.type, default: NIL, mutable: FALSE, takes: FALSE, comptime: NIL, name_token: NIL, required: TRUE, sync: NIL, symbol: NIL, carrier_contract: NIL };
+END

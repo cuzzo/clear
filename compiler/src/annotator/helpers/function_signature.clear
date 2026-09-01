@@ -827,3 +827,21 @@ PUB FN functionSignature__from_function_def(fn: FunctionDef) RETURNS !FunctionSi
   TRY (functionSignature__sync_from_function_def_mut(&resolved, FunctionSignatureSyncSource{ FunctionDef: COPY fn }));
   RETURN resolved;
 END
+
+# Ruby: adopt every module-aliased signature visible in the scope that the
+# caller does not already have under that name.
+PUB FN functionSignature__merge_imported_signatures_mut(MUTABLE sigs: {String@symbol}FunctionSignature@multiowned, scope: Scope) RETURNS !{String@symbol}FunctionSignature@multiowned ->
+  MUTABLE visible = TRY (scope__visible_entries(scope));
+  FOR rtoc_name IN visible.keys() DO
+    MUTABLE rtoc_key: String@symbol = symbol(rtoc_name);
+    IF sigs[rtoc_key] != NIL THEN
+      CONTINUE;
+    END
+    IF symbolEntry__fn_signature(UNWRAP (visible[rtoc_name])) EXISTS AS rtoc_imported THEN
+      IF functionSignature__module_alias(rtoc_imported) != NIL THEN
+        sigs[rtoc_key] = COPY rtoc_imported;
+      END
+    END
+  END
+  RETURN sigs;
+END
