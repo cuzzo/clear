@@ -7095,7 +7095,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__with_soa_tracking(self: TypeAnalysisSession, node: BinaryOp, item_type: Type, blk: Any) RETURNS !Void
+PRIVATE FN typeAnalysisSession__with_soa_tracking(self: TypeAnalysisSession, node: BinaryOp, item_type: Type, blk: FN() -> !Void) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
