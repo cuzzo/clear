@@ -14033,3 +14033,195 @@ END
 PUB FN varDecl__module_const(self: VarDecl) RETURNS ?Bool ->
   RETURN COPY self.module_const;
 END
+FN castPatternFieldValueToLocatable(value: PatternFieldValue) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    PatternFieldValue.Program AS item -> RETURN Locatable{ Program: COPY item };,
+    PatternFieldValue.RequireNode AS item -> RETURN Locatable{ RequireNode: COPY item };,
+    PatternFieldValue.ProtocolRequirement AS item -> RETURN Locatable{ ProtocolRequirement: COPY item };,
+    PatternFieldValue.ProtocolDef AS item -> RETURN Locatable{ ProtocolDef: COPY item };,
+    PatternFieldValue.FunctionDef AS item -> RETURN Locatable{ FunctionDef: COPY item };,
+    PatternFieldValue.ImplementationDef AS item -> RETURN Locatable{ ImplementationDef: COPY item };,
+    PatternFieldValue.ConformanceDef AS item -> RETURN Locatable{ ConformanceDef: COPY item };,
+    PatternFieldValue.StructDef AS item -> RETURN Locatable{ StructDef: COPY item };,
+    PatternFieldValue.VarDecl AS item -> RETURN Locatable{ VarDecl: COPY item };,
+    PatternFieldValue.Assignment AS item -> RETURN Locatable{ Assignment: COPY item };,
+    PatternFieldValue.DestructureTarget AS item -> RETURN Locatable{ DestructureTarget: COPY item };,
+    PatternFieldValue.DestructuringAssignment AS item -> RETURN Locatable{ DestructuringAssignment: COPY item };,
+    PatternFieldValue.BindExpr AS item -> RETURN Locatable{ BindExpr: COPY item };,
+    PatternFieldValue.BinaryOp AS item -> RETURN Locatable{ BinaryOp: COPY item };,
+    PatternFieldValue.IsA AS item -> RETURN Locatable{ IsA: COPY item };,
+    PatternFieldValue.UnaryOp AS item -> RETURN Locatable{ UnaryOp: COPY item };,
+    PatternFieldValue.CallSiteOverride AS item -> RETURN Locatable{ CallSiteOverride: COPY item };,
+    PatternFieldValue.Identifier AS item -> RETURN Locatable{ Identifier: COPY item };,
+    PatternFieldValue.Literal AS item -> RETURN Locatable{ Literal: COPY item };,
+    PatternFieldValue.ListLit AS item -> RETURN Locatable{ ListLit: COPY item };,
+    PatternFieldValue.TupleLit AS item -> RETURN Locatable{ TupleLit: COPY item };,
+    PatternFieldValue.DefaultArrayLit AS item -> RETURN Locatable{ DefaultArrayLit: COPY item };,
+    PatternFieldValue.HashLit AS item -> RETURN Locatable{ HashLit: COPY item };,
+    PatternFieldValue.DefaultLit AS item -> RETURN Locatable{ DefaultLit: COPY item };,
+    PatternFieldValue.StructLit AS item -> RETURN Locatable{ StructLit: COPY item };,
+    PatternFieldValue.LambdaLit AS item -> RETURN Locatable{ LambdaLit: COPY item };,
+    PatternFieldValue.IfStatement AS item -> RETURN Locatable{ IfStatement: COPY item };,
+    PatternFieldValue.IfBind AS item -> RETURN Locatable{ IfBind: COPY item };,
+    PatternFieldValue.WhileLoop AS item -> RETURN Locatable{ WhileLoop: COPY item };,
+    PatternFieldValue.WhileBindLoop AS item -> RETURN Locatable{ WhileBindLoop: COPY item };,
+    PatternFieldValue.BreakNode AS item -> RETURN Locatable{ BreakNode: COPY item };,
+    PatternFieldValue.ContinueNode AS item -> RETURN Locatable{ ContinueNode: COPY item };,
+    PatternFieldValue.FuncCall AS item -> RETURN Locatable{ FuncCall: COPY item };,
+    PatternFieldValue.MethodCall AS item -> RETURN Locatable{ MethodCall: COPY item };,
+    PatternFieldValue.GetField AS item -> RETURN Locatable{ GetField: COPY item };,
+    PatternFieldValue.GetIndex AS item -> RETURN Locatable{ GetIndex: COPY item };,
+    PatternFieldValue.Cast AS item -> RETURN Locatable{ Cast: COPY item };,
+    PatternFieldValue.ReturnNode AS item -> RETURN Locatable{ ReturnNode: COPY item };,
+    PatternFieldValue.Assert AS item -> RETURN Locatable{ Assert: COPY item };,
+    PatternFieldValue.Raise AS item -> RETURN Locatable{ Raise: COPY item };,
+    PatternFieldValue.ThrowNode AS item -> RETURN Locatable{ ThrowNode: COPY item };,
+    PatternFieldValue.DieNode AS item -> RETURN Locatable{ DieNode: COPY item };,
+    PatternFieldValue.Slice AS item -> RETURN Locatable{ Slice: COPY item };,
+    PatternFieldValue.Require AS item -> RETURN Locatable{ Require: COPY item };,
+    PatternFieldValue.DeferStmt AS item -> RETURN Locatable{ DeferStmt: COPY item };,
+    PatternFieldValue.WithBlock AS item -> RETURN Locatable{ WithBlock: COPY item };,
+    PatternFieldValue.SyncPolicyDecl AS item -> RETURN Locatable{ SyncPolicyDecl: COPY item };,
+    PatternFieldValue.SelectOp AS item -> RETURN Locatable{ SelectOp: COPY item };,
+    PatternFieldValue.WhereOp AS item -> RETURN Locatable{ WhereOp: COPY item };,
+    PatternFieldValue.IndexOp AS item -> RETURN Locatable{ IndexOp: COPY item };,
+    PatternFieldValue.ReduceOp AS item -> RETURN Locatable{ ReduceOp: COPY item };,
+    PatternFieldValue.OrderByOp AS item -> RETURN Locatable{ OrderByOp: COPY item };,
+    PatternFieldValue.LimitOp AS item -> RETURN Locatable{ LimitOp: COPY item };,
+    PatternFieldValue.UnnestOp AS item -> RETURN Locatable{ UnnestOp: COPY item };,
+    PatternFieldValue.DistinctOp AS item -> RETURN Locatable{ DistinctOp: COPY item };,
+    PatternFieldValue.EachOp AS item -> RETURN Locatable{ EachOp: COPY item };,
+    PatternFieldValue.TapOp AS item -> RETURN Locatable{ TapOp: COPY item };,
+    PatternFieldValue.SkipOp AS item -> RETURN Locatable{ SkipOp: COPY item };,
+    PatternFieldValue.CollectOp AS item -> RETURN Locatable{ CollectOp: COPY item };,
+    PatternFieldValue.TakeWhileOp AS item -> RETURN Locatable{ TakeWhileOp: COPY item };,
+    PatternFieldValue.WindowOp AS item -> RETURN Locatable{ WindowOp: COPY item };,
+    PatternFieldValue.BatchWindowOp AS item -> RETURN Locatable{ BatchWindowOp: COPY item };,
+    PatternFieldValue.JoinOp AS item -> RETURN Locatable{ JoinOp: COPY item };,
+    PatternFieldValue.FindOp AS item -> RETURN Locatable{ FindOp: COPY item };,
+    PatternFieldValue.AnyOp AS item -> RETURN Locatable{ AnyOp: COPY item };,
+    PatternFieldValue.AllOp AS item -> RETURN Locatable{ AllOp: COPY item };,
+    PatternFieldValue.CountOp AS item -> RETURN Locatable{ CountOp: COPY item };,
+    PatternFieldValue.SumOp AS item -> RETURN Locatable{ SumOp: COPY item };,
+    PatternFieldValue.AverageOp AS item -> RETURN Locatable{ AverageOp: COPY item };,
+    PatternFieldValue.MinOp AS item -> RETURN Locatable{ MinOp: COPY item };,
+    PatternFieldValue.MaxOp AS item -> RETURN Locatable{ MaxOp: COPY item };,
+    PatternFieldValue.ShardOp AS item -> RETURN Locatable{ ShardOp: COPY item };,
+    PatternFieldValue.ConcurrentOp AS item -> RETURN Locatable{ ConcurrentOp: COPY item };,
+    PatternFieldValue.Placeholder AS item -> RETURN Locatable{ Placeholder: COPY item };,
+    PatternFieldValue.Copy AS item -> RETURN Locatable{ Copy: COPY item };,
+    PatternFieldValue.OptionalUnwrap AS item -> RETURN Locatable{ OptionalUnwrap: COPY item };,
+    PatternFieldValue.TenseNavigation AS item -> RETURN Locatable{ TenseNavigation: COPY item };,
+    PatternFieldValue.MutableBorrow AS item -> RETURN Locatable{ MutableBorrow: COPY item };,
+    PatternFieldValue.OrElseRaise AS item -> RETURN Locatable{ OrElseRaise: COPY item };,
+    PatternFieldValue.OrElseExit AS item -> RETURN Locatable{ OrElseExit: COPY item };,
+    PatternFieldValue.OrElsePass AS item -> RETURN Locatable{ OrElsePass: COPY item };,
+    PatternFieldValue.OrElsePrune AS item -> RETURN Locatable{ OrElsePrune: COPY item };,
+    PatternFieldValue.OrElseBreak AS item -> RETURN Locatable{ OrElseBreak: COPY item };,
+    PatternFieldValue.CatchBlock AS item -> RETURN Locatable{ CatchBlock: COPY item };,
+    PatternFieldValue.RecoverOp AS item -> RETURN Locatable{ RecoverOp: COPY item };,
+    PatternFieldValue.BlockExpr AS item -> RETURN Locatable{ BlockExpr: COPY item };,
+    PatternFieldValue.StringConcat AS item -> RETURN Locatable{ StringConcat: COPY item };,
+    PatternFieldValue.CapabilityWrap AS item -> RETURN Locatable{ CapabilityWrap: COPY item };,
+    PatternFieldValue.MoveNode AS item -> RETURN Locatable{ MoveNode: COPY item };,
+    PatternFieldValue.CopyNode AS item -> RETURN Locatable{ CopyNode: COPY item };,
+    PatternFieldValue.KeepNode AS item -> RETURN Locatable{ KeepNode: COPY item };,
+    PatternFieldValue.ShareNode AS item -> RETURN Locatable{ ShareNode: COPY item };,
+    PatternFieldValue.LinkNode AS item -> RETURN Locatable{ LinkNode: COPY item };,
+    PatternFieldValue.ResolveNode AS item -> RETURN Locatable{ ResolveNode: COPY item };,
+    PatternFieldValue.FreezeNode AS item -> RETURN Locatable{ FreezeNode: COPY item };,
+    PatternFieldValue.PassStmt AS item -> RETURN Locatable{ PassStmt: COPY item };,
+    PatternFieldValue.StructPattern AS item -> RETURN Locatable{ StructPattern: COPY item };,
+    PatternFieldValue.RangeLit AS item -> RETURN Locatable{ RangeLit: COPY item };,
+    PatternFieldValue.ExternFnDecl AS item -> RETURN Locatable{ ExternFnDecl: COPY item };,
+    PatternFieldValue.ExternStructDecl AS item -> RETURN Locatable{ ExternStructDecl: COPY item };,
+    PatternFieldValue.EnumDef AS item -> RETURN Locatable{ EnumDef: COPY item };,
+    PatternFieldValue.UnionDef AS item -> RETURN Locatable{ UnionDef: COPY item };,
+    PatternFieldValue.UnionVariantLit AS item -> RETURN Locatable{ UnionVariantLit: COPY item };,
+    PatternFieldValue.StaticCall AS item -> RETURN Locatable{ StaticCall: COPY item };,
+    PatternFieldValue.DoBlock AS item -> RETURN Locatable{ DoBlock: COPY item };,
+    PatternFieldValue.BgBlock AS item -> RETURN Locatable{ BgBlock: COPY item };,
+    PatternFieldValue.ThenChain AS item -> RETURN Locatable{ ThenChain: COPY item };,
+    PatternFieldValue.BgStreamBlock AS item -> RETURN Locatable{ BgStreamBlock: COPY item };,
+    PatternFieldValue.YieldExpr AS item -> RETURN Locatable{ YieldExpr: COPY item };,
+    PatternFieldValue.CloseStream AS item -> RETURN Locatable{ CloseStream: COPY item };,
+    PatternFieldValue.NextExpr AS item -> RETURN Locatable{ NextExpr: COPY item };,
+    PatternFieldValue.MatchStatement AS item -> RETURN Locatable{ MatchStatement: COPY item };,
+    PatternFieldValue.ForRange AS item -> RETURN Locatable{ ForRange: COPY item };,
+    PatternFieldValue.ForEach AS item -> RETURN Locatable{ ForEach: COPY item };,
+    PatternFieldValue.TestBlock AS item -> RETURN Locatable{ TestBlock: COPY item };,
+    PatternFieldValue.WhenBlock AS item -> RETURN Locatable{ WhenBlock: COPY item };,
+    PatternFieldValue.LetBinding AS item -> RETURN Locatable{ LetBinding: COPY item };,
+    PatternFieldValue.TestThat AS item -> RETURN Locatable{ TestThat: COPY item };,
+    PatternFieldValue.AssertRaises AS item -> RETURN Locatable{ AssertRaises: COPY item };,
+    PatternFieldValue.BenchmarkStmt AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
+    PatternFieldValue.SmashStmt AS item -> RETURN Locatable{ SmashStmt: COPY item };,
+    PatternFieldValue.ProfileStmt AS item -> RETURN Locatable{ ProfileStmt: COPY item };,
+    PatternFieldValue.StubDecl AS item -> RETURN Locatable{ StubDecl: COPY item };,
+    PatternFieldValue.Drop AS item -> RETURN Locatable{ Drop: COPY item };,
+    PatternFieldValue.SuppressCleanup AS item -> RETURN Locatable{ SuppressCleanup: COPY item };,
+    PatternFieldValue.Return AS item -> RETURN Locatable{ Return: COPY item };,
+    PatternFieldValue.ReassignCleanup AS item -> RETURN Locatable{ ReassignCleanup: COPY item };,
+    PatternFieldValue.FieldCleanup AS item -> RETURN Locatable{ FieldCleanup: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+PUB FN patternField__wildcard?(self: PatternField) RETURNS Bool ->
+  RETURN PARTIAL MATCH self.value START
+    :wildcard -> TRUE,
+    DEFAULT -> FALSE
+  END;
+END
+PUB FN patternField__bind?(self: PatternField) RETURNS Bool ->
+  RETURN PARTIAL MATCH self.value START
+    :bind -> TRUE,
+    DEFAULT -> FALSE
+  END;
+END
+# Ruby: the value when it is an AST node, NIL for the :wildcard / :bind sentinels.
+PUB FN patternField__expr(self: PatternField) RETURNS ?Locatable ->
+  RETURN castPatternFieldValueToLocatable(self.value);
+END
+PUB FN getField__wildcard?(self: GetField) RETURNS Bool ->
+  RETURN (self.field == "*");
+END
+PUB FN functionDef__implicit_return_type?(self: FunctionDef) RETURNS Bool ->
+  RETURN (self.return_type == NIL);
+END
+PUB FN functionDef__declared_return_type(self: FunctionDef) RETURNS ?Type ->
+  RETURN COPY self.return_type;
+END
+PUB FN functionDef__lowering_return_type(self: FunctionDef) RETURNS !Type ->
+  IF self.return_type EXISTS AS rtoc_declared THEN
+    RETURN COPY rtoc_declared;
+  END
+  RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
+END
+PUB FN functionDef__uses_runtime?(self: FunctionDef) RETURNS Bool ->
+  RETURN ((((self.uses_frame == TRUE) OR (self.uses_heap == TRUE)) OR (self.uses_alloc == TRUE)) OR (self.uses_rt == TRUE));
+END
+PUB FN functionDef__reentrance_guard_required?(self: FunctionDef) RETURNS Bool ->
+  RETURN ((self.reentrance_kind == :reentrant_not_logical) OR (self.reentrance_kind == :reentrant_max_depth));
+END
+PUB FN functionDef__declared_plain_reentrant?(self: FunctionDef) RETURNS Bool ->
+  RETURN ((self.reentrance_kind OR_ELSE self.effects_decl) == :reentrant);
+END
+PUB FN capabilityWrap__indirect?(self: CapabilityWrap) RETURNS Bool ->
+  RETURN (self.layout == :indirect);
+END
+PUB FN capabilityWrap__atomic?(self: CapabilityWrap) RETURNS Bool ->
+  RETURN symbolEntry__atomic_sync?(self.sync);
+END
+PUB FN capabilityWrap__atomic_ptr?(self: CapabilityWrap) RETURNS Bool ->
+  RETURN (capabilityWrap__atomic?(self) AND capabilityWrap__indirect?(self));
+END
+PUB FN literal__true_boolean?(self: Literal) RETURNS Bool ->
+  IF self.value EXISTS AS rtoc_value THEN
+    IF rtoc_value IS_A Bool AS rtoc_bool THEN
+      RETURN ((self.type == :BOOLEAN) AND rtoc_bool);
+    END
+  END
+  RETURN FALSE;
+END

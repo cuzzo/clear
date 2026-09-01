@@ -5056,3 +5056,7 @@ PUB FN typeTypeInput__multiowned?(value: TypeTypeInput) RETURNS ?Bool ->
   END
   RETURN NIL;
 END
+
+PUB FN type__byte_string?(self: Type) RETURNS !Bool ->
+  RETURN (TRY (type__string?(self)) AND !(type__symbol?(self)));
+END
