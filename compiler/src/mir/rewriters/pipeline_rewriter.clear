@@ -1305,11 +1305,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == name) ELSE FALSE END) THEN
       RETURN Locatable{ Identifier: COPY replacement };
     END
-    MUTABLE new_node = COPY node;
-    FOR _ IN node.class().members() DO
-    MUTABLE val = COPY node.substr(_, 1);
-    END
-    RETURN new_node;
+    RETURN locatable__map_children(node, %(rtoc_child: Locatable) USE(rtoc_self_view, name, replacement) -> pipelineRewriter__replace_named_placeholder(rtoc_self_view, rtoc_child, name, replacement));
 }
 END
 PRIVATE FN pipelineRewriter__replace_placeholder(self: PipelineRewriter, node: Locatable, replacement: Identifier) RETURNS Locatable
@@ -1326,11 +1322,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       new_node.right = pipelineRewriter__clone_ast_node(rtoc_self_view, node.right());
       RETURN new_node;
     END
-    MUTABLE new_node = COPY node;
-    FOR _ IN node.class().members() DO
-    MUTABLE val = COPY node.substr(_, 1);
-    END
-    RETURN new_node;
+    RETURN locatable__map_children(node, %(rtoc_child: Locatable) USE(rtoc_self_view, replacement) -> pipelineRewriter__replace_placeholder(rtoc_self_view, rtoc_child, replacement));
 }
 END
 PRIVATE FN pipelineRewriter__clone_ast_node(self: PipelineRewriter, node: Locatable) RETURNS Locatable
@@ -1339,9 +1331,6 @@ PRIVATE FN pipelineRewriter__clone_ast_node(self: PipelineRewriter, node: Locata
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE new_node = COPY node;
-    FOR _ IN node.class().members() DO
-    MUTABLE val = COPY node.substr(_, 1);
-    END
     RETURN new_node;
 }
 END

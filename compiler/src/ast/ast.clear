@@ -12771,3 +12771,728 @@ PUB FN locatable__child_nodes(value: Locatable) RETURNS []Locatable EFFECTS REEN
   END
   RETURN out;
 END
+
+# Ruby rebuilds a node with each AST child passed through a function, walking
+# the struct members to find them. CLEAR narrows to the variant instead, and
+# every tree rewrite that Ruby writes as reflection is this one operation.
+PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable) RETURNS Locatable EFFECTS REENTRANT ->
+  IF value IS_A Program AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_statements: []Locatable = List[];
+    FOR rtoc_child IN item.statements DO
+      &rtoc_statements.append(blk(COPY rtoc_child));
+    END
+    item.statements = rtoc_statements;
+    RETURN Locatable{ Program: COPY item };
+  END
+  IF value IS_A FunctionDef AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    IF item.default_catch EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_default_catch: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_default_catch.append(blk(COPY rtoc_child));
+      END
+      item.default_catch = rtoc_default_catch;
+    END
+    RETURN Locatable{ FunctionDef: COPY item };
+  END
+  IF value IS_A VarDecl AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ VarDecl: COPY item };
+  END
+  IF value IS_A Assignment AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ Assignment: COPY item };
+  END
+  IF value IS_A DestructuringAssignment AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ DestructuringAssignment: COPY item };
+  END
+  IF value IS_A BindExpr AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ BindExpr: COPY item };
+  END
+  IF value IS_A BinaryOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.left = blk(COPY item.left);
+    item.right = blk(COPY item.right);
+    RETURN Locatable{ BinaryOp: COPY item };
+  END
+  IF value IS_A IsA AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.left = blk(COPY item.left);
+    RETURN Locatable{ IsA: COPY item };
+  END
+  IF value IS_A UnaryOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.right = blk(COPY item.right);
+    RETURN Locatable{ UnaryOp: COPY item };
+  END
+  IF value IS_A CallSiteOverride AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.inner = blk(COPY item.inner);
+    RETURN Locatable{ CallSiteOverride: COPY item };
+  END
+  IF value IS_A ListLit AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_items: []Locatable = List[];
+    FOR rtoc_child IN item.items DO
+      &rtoc_items.append(blk(COPY rtoc_child));
+    END
+    item.items = rtoc_items;
+    RETURN Locatable{ ListLit: COPY item };
+  END
+  IF value IS_A TupleLit AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_items: []Locatable = List[];
+    FOR rtoc_child IN item.items DO
+      &rtoc_items.append(blk(COPY rtoc_child));
+    END
+    item.items = rtoc_items;
+    RETURN Locatable{ TupleLit: COPY item };
+  END
+  IF value IS_A StructLit AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_fields: {String}Locatable = {};
+    FOR rtoc_key IN item.fields.keys() DO
+      rtoc_fields[rtoc_key] = blk(COPY UNWRAP (item.fields[rtoc_key]));
+    END
+    item.fields = rtoc_fields;
+    RETURN Locatable{ StructLit: COPY item };
+  END
+  IF value IS_A LambdaLit AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.deferred_drops EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_deferred_drops: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_deferred_drops.append(blk(COPY rtoc_child));
+      END
+      item.deferred_drops = rtoc_deferred_drops;
+    END
+    RETURN Locatable{ LambdaLit: COPY item };
+  END
+  IF value IS_A IfStatement AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.condition = blk(COPY item.condition);
+    IF item.else_branch EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_else_branch: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_else_branch.append(blk(COPY rtoc_child));
+      END
+      item.else_branch = rtoc_else_branch;
+    END
+    MUTABLE rtoc_then_branch: []Locatable = List[];
+    FOR rtoc_child IN item.then_branch DO
+      &rtoc_then_branch.append(blk(COPY rtoc_child));
+    END
+    item.then_branch = rtoc_then_branch;
+    RETURN Locatable{ IfStatement: COPY item };
+  END
+  IF value IS_A IfBind AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_else_branch: []Locatable = List[];
+    FOR rtoc_child IN item.else_branch DO
+      &rtoc_else_branch.append(blk(COPY rtoc_child));
+    END
+    item.else_branch = rtoc_else_branch;
+    MUTABLE rtoc_then_branch: []Locatable = List[];
+    FOR rtoc_child IN item.then_branch DO
+      &rtoc_then_branch.append(blk(COPY rtoc_child));
+    END
+    item.then_branch = rtoc_then_branch;
+    RETURN Locatable{ IfBind: COPY item };
+  END
+  IF value IS_A WhileLoop AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.condition = blk(COPY item.condition);
+    MUTABLE rtoc_do_branch: []Locatable = List[];
+    FOR rtoc_child IN item.do_branch DO
+      &rtoc_do_branch.append(blk(COPY rtoc_child));
+    END
+    item.do_branch = rtoc_do_branch;
+    RETURN Locatable{ WhileLoop: COPY item };
+  END
+  IF value IS_A WhileBindLoop AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.condition = blk(COPY item.condition);
+    MUTABLE rtoc_do_branch: []Locatable = List[];
+    FOR rtoc_child IN item.do_branch DO
+      &rtoc_do_branch.append(blk(COPY rtoc_child));
+    END
+    item.do_branch = rtoc_do_branch;
+    RETURN Locatable{ WhileBindLoop: COPY item };
+  END
+  IF value IS_A FuncCall AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_args: []Locatable = List[];
+    FOR rtoc_child IN item.args DO
+      &rtoc_args.append(blk(COPY rtoc_child));
+    END
+    item.args = rtoc_args;
+    IF item.pipe_lhs EXISTS AS rtoc_child THEN
+      item.pipe_lhs = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ FuncCall: COPY item };
+  END
+  IF value IS_A MethodCall AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_args: []Locatable = List[];
+    FOR rtoc_child IN item.args DO
+      &rtoc_args.append(blk(COPY rtoc_child));
+    END
+    item.args = rtoc_args;
+    item.object = blk(COPY item.object);
+    RETURN Locatable{ MethodCall: COPY item };
+  END
+  IF value IS_A GetField AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.target = blk(COPY item.target);
+    RETURN Locatable{ GetField: COPY item };
+  END
+  IF value IS_A GetIndex AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.index = blk(COPY item.index);
+    item.target = blk(COPY item.target);
+    RETURN Locatable{ GetIndex: COPY item };
+  END
+  IF value IS_A Cast AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ Cast: COPY item };
+  END
+  IF value IS_A ReturnNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.value EXISTS AS rtoc_child THEN
+      item.value = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ ReturnNode: COPY item };
+  END
+  IF value IS_A Assert AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.condition = blk(COPY item.condition);
+    RETURN Locatable{ Assert: COPY item };
+  END
+  IF value IS_A Raise AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.message_expr EXISTS AS rtoc_child THEN
+      item.message_expr = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ Raise: COPY item };
+  END
+  IF value IS_A ThrowNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.value EXISTS AS rtoc_child THEN
+      item.value = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ ThrowNode: COPY item };
+  END
+  IF value IS_A DieNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.status EXISTS AS rtoc_child THEN
+      item.status = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ DieNode: COPY item };
+  END
+  IF value IS_A Slice AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.end EXISTS AS rtoc_child THEN
+      item.end = blk(COPY rtoc_child);
+    END
+    IF item.start EXISTS AS rtoc_child THEN
+      item.start = blk(COPY rtoc_child);
+    END
+    item.target = blk(COPY item.target);
+    RETURN Locatable{ Slice: COPY item };
+  END
+  IF value IS_A DeferStmt AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    RETURN Locatable{ DeferStmt: COPY item };
+  END
+  IF value IS_A WithBlock AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    RETURN Locatable{ WithBlock: COPY item };
+  END
+  IF value IS_A SelectOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expression = blk(COPY item.expression);
+    RETURN Locatable{ SelectOp: COPY item };
+  END
+  IF value IS_A WhereOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expression = blk(COPY item.expression);
+    RETURN Locatable{ WhereOp: COPY item };
+  END
+  IF value IS_A IndexOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ IndexOp: COPY item };
+  END
+  IF value IS_A ReduceOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    IF item.initial_value EXISTS AS rtoc_child THEN
+      item.initial_value = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ ReduceOp: COPY item };
+  END
+  IF value IS_A OrderByOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ OrderByOp: COPY item };
+  END
+  IF value IS_A LimitOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.count EXISTS AS rtoc_child THEN
+      item.count = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ LimitOp: COPY item };
+  END
+  IF value IS_A UnnestOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ UnnestOp: COPY item };
+  END
+  IF value IS_A DistinctOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ DistinctOp: COPY item };
+  END
+  IF value IS_A EachOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    RETURN Locatable{ EachOp: COPY item };
+  END
+  IF value IS_A TapOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    RETURN Locatable{ TapOp: COPY item };
+  END
+  IF value IS_A SkipOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.count EXISTS AS rtoc_child THEN
+      item.count = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ SkipOp: COPY item };
+  END
+  IF value IS_A TakeWhileOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ TakeWhileOp: COPY item };
+  END
+  IF value IS_A WindowOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    IF item.size EXISTS AS rtoc_child THEN
+      item.size = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ WindowOp: COPY item };
+  END
+  IF value IS_A BatchWindowOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    MUTABLE rtoc_options: {String}Locatable = {};
+    FOR rtoc_key IN item.options.keys() DO
+      rtoc_options[rtoc_key] = blk(COPY UNWRAP (item.options[rtoc_key]));
+    END
+    item.options = rtoc_options;
+    RETURN Locatable{ BatchWindowOp: COPY item };
+  END
+  IF value IS_A JoinOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.key_expr EXISTS AS rtoc_child THEN
+      item.key_expr = blk(COPY rtoc_child);
+    END
+    IF item.right_source EXISTS AS rtoc_child THEN
+      item.right_source = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ JoinOp: COPY item };
+  END
+  IF value IS_A FindOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ FindOp: COPY item };
+  END
+  IF value IS_A AnyOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ AnyOp: COPY item };
+  END
+  IF value IS_A AllOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ AllOp: COPY item };
+  END
+  IF value IS_A CountOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ CountOp: COPY item };
+  END
+  IF value IS_A SumOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ SumOp: COPY item };
+  END
+  IF value IS_A AverageOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ AverageOp: COPY item };
+  END
+  IF value IS_A MinOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ MinOp: COPY item };
+  END
+  IF value IS_A MaxOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.expression EXISTS AS rtoc_child THEN
+      item.expression = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ MaxOp: COPY item };
+  END
+  IF value IS_A ShardOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.key_expr EXISTS AS rtoc_child THEN
+      item.key_expr = blk(COPY rtoc_child);
+    END
+    IF item.target_map EXISTS AS rtoc_child THEN
+      item.target_map = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ ShardOp: COPY item };
+  END
+  IF value IS_A ConcurrentOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_options: {String}Locatable = {};
+    FOR rtoc_key IN item.options.keys() DO
+      rtoc_options[rtoc_key] = blk(COPY UNWRAP (item.options[rtoc_key]));
+    END
+    item.options = rtoc_options;
+    RETURN Locatable{ ConcurrentOp: COPY item };
+  END
+  IF value IS_A Copy AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ Copy: COPY item };
+  END
+  IF value IS_A OptionalUnwrap AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.target = blk(COPY item.target);
+    RETURN Locatable{ OptionalUnwrap: COPY item };
+  END
+  IF value IS_A TenseNavigation AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.target = blk(COPY item.target);
+    RETURN Locatable{ TenseNavigation: COPY item };
+  END
+  IF value IS_A MutableBorrow AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.target = blk(COPY item.target);
+    RETURN Locatable{ MutableBorrow: COPY item };
+  END
+  IF value IS_A OrElseExit AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.message EXISTS AS rtoc_child THEN
+      item.message = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ OrElseExit: COPY item };
+  END
+  IF value IS_A CatchBlock AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.default_body EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_default_body: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_default_body.append(blk(COPY rtoc_child));
+      END
+      item.default_body = rtoc_default_body;
+    END
+    RETURN Locatable{ CatchBlock: COPY item };
+  END
+  IF value IS_A RecoverOp AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.default_expr EXISTS AS rtoc_child THEN
+      item.default_expr = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ RecoverOp: COPY item };
+  END
+  IF value IS_A BlockExpr AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    IF item.result EXISTS AS rtoc_child THEN
+      item.result = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ BlockExpr: COPY item };
+  END
+  IF value IS_A StringConcat AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_parts: []Locatable = List[];
+    FOR rtoc_child IN item.parts DO
+      &rtoc_parts.append(blk(COPY rtoc_child));
+    END
+    item.parts = rtoc_parts;
+    RETURN Locatable{ StringConcat: COPY item };
+  END
+  IF value IS_A CapabilityWrap AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ CapabilityWrap: COPY item };
+  END
+  IF value IS_A MoveNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ MoveNode: COPY item };
+  END
+  IF value IS_A CopyNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ CopyNode: COPY item };
+  END
+  IF value IS_A KeepNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ KeepNode: COPY item };
+  END
+  IF value IS_A ShareNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ ShareNode: COPY item };
+  END
+  IF value IS_A LinkNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ LinkNode: COPY item };
+  END
+  IF value IS_A ResolveNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ ResolveNode: COPY item };
+  END
+  IF value IS_A FreezeNode AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.value = blk(COPY item.value);
+    RETURN Locatable{ FreezeNode: COPY item };
+  END
+  IF value IS_A RangeLit AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.finish = blk(COPY item.finish);
+    item.start = blk(COPY item.start);
+    RETURN Locatable{ RangeLit: COPY item };
+  END
+  IF value IS_A UnionVariantLit AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_fields: {String}Locatable = {};
+    FOR rtoc_key IN item.fields.keys() DO
+      rtoc_fields[rtoc_key] = blk(COPY UNWRAP (item.fields[rtoc_key]));
+    END
+    item.fields = rtoc_fields;
+    RETURN Locatable{ UnionVariantLit: COPY item };
+  END
+  IF value IS_A StaticCall AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_args: []Locatable = List[];
+    FOR rtoc_child IN item.args DO
+      &rtoc_args.append(blk(COPY rtoc_child));
+    END
+    item.args = rtoc_args;
+    item.type_name = blk(COPY item.type_name);
+    RETURN Locatable{ StaticCall: COPY item };
+  END
+  IF value IS_A BgBlock AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    RETURN Locatable{ BgBlock: COPY item };
+  END
+  IF value IS_A BgStreamBlock AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    RETURN Locatable{ BgStreamBlock: COPY item };
+  END
+  IF value IS_A YieldExpr AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expr = blk(COPY item.expr);
+    RETURN Locatable{ YieldExpr: COPY item };
+  END
+  IF value IS_A NextExpr AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expr = blk(COPY item.expr);
+    RETURN Locatable{ NextExpr: COPY item };
+  END
+  IF value IS_A MatchStatement AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.default_case EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_default_case: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_default_case.append(blk(COPY rtoc_child));
+      END
+      item.default_case = rtoc_default_case;
+    END
+    item.expr = blk(COPY item.expr);
+    RETURN Locatable{ MatchStatement: COPY item };
+  END
+  IF value IS_A ForRange AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    IF item.deferred_drops EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_deferred_drops: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_deferred_drops.append(blk(COPY rtoc_child));
+      END
+      item.deferred_drops = rtoc_deferred_drops;
+    END
+    item.end_expr = blk(COPY item.end_expr);
+    item.start_expr = blk(COPY item.start_expr);
+    RETURN Locatable{ ForRange: COPY item };
+  END
+  IF value IS_A ForEach AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    item.collection = blk(COPY item.collection);
+    IF item.deferred_drops EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_deferred_drops: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_deferred_drops.append(blk(COPY rtoc_child));
+      END
+      item.deferred_drops = rtoc_deferred_drops;
+    END
+    RETURN Locatable{ ForEach: COPY item };
+  END
+  IF value IS_A TestBlock AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.setup EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_setup: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_setup.append(blk(COPY rtoc_child));
+      END
+      item.setup = rtoc_setup;
+    END
+    RETURN Locatable{ TestBlock: COPY item };
+  END
+  IF value IS_A WhenBlock AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.setup EXISTS AS rtoc_list THEN
+      MUTABLE rtoc_setup: []Locatable = List[];
+      FOR rtoc_child IN rtoc_list DO
+        &rtoc_setup.append(blk(COPY rtoc_child));
+      END
+      item.setup = rtoc_setup;
+    END
+    RETURN Locatable{ WhenBlock: COPY item };
+  END
+  IF value IS_A LetBinding AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expr = blk(COPY item.expr);
+    RETURN Locatable{ LetBinding: COPY item };
+  END
+  IF value IS_A TestThat AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    MUTABLE rtoc_body: []Locatable = List[];
+    FOR rtoc_child IN item.body DO
+      &rtoc_body.append(blk(COPY rtoc_child));
+    END
+    item.body = rtoc_body;
+    RETURN Locatable{ TestThat: COPY item };
+  END
+  IF value IS_A AssertRaises AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expression = blk(COPY item.expression);
+    RETURN Locatable{ AssertRaises: COPY item };
+  END
+  IF value IS_A BenchmarkStmt AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expression = blk(COPY item.expression);
+    RETURN Locatable{ BenchmarkStmt: COPY item };
+  END
+  IF value IS_A SmashStmt AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expression = blk(COPY item.expression);
+    RETURN Locatable{ SmashStmt: COPY item };
+  END
+  IF value IS_A ProfileStmt AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    item.expression = blk(COPY item.expression);
+    RETURN Locatable{ ProfileStmt: COPY item };
+  END
+  IF value IS_A FieldCleanup AS rtoc_variant THEN
+    MUTABLE item = COPY rtoc_variant;
+    IF item.field EXISTS AS rtoc_child THEN
+      item.field = blk(COPY rtoc_child);
+    END
+    RETURN Locatable{ FieldCleanup: COPY item };
+  END
+  RETURN COPY value;
+END
