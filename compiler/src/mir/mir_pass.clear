@@ -338,7 +338,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF value_expr IS_A MoveNode THEN
       value_expr = value_expr.value();
     END
-    TRY (mIRPass__walk_consumed(rtoc_self_view, value_expr, &names, facts));
+    TRY (mIRPass__walk_consumed(rtoc_self_view, &value_expr, &names, facts));
     RETURN names;
 }
 END
@@ -359,13 +359,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF rtoc_mutable_block_param_6 IS_A Identifier THEN
           TRY (mIRPass__add_if_consumed(rtoc_self_view, &rtoc_mutable_block_param_6, &names, facts, FALSE));
         ELSE
-          TRY (mIRPass__walk_consumed(rtoc_self_view, rtoc_mutable_block_param_6, &names, facts));
+          TRY (mIRPass__walk_consumed(rtoc_self_view, &rtoc_mutable_block_param_6, &names, facts));
         END
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
         MUTABLE list_lit_mutable = COPY list_lit;
         FOR _ IN list_lit_mutable.items DO
-        TRY (mIRPass__walk_consumed(rtoc_self_view, _, &names, facts));
+        TRY (mIRPass__walk_consumed(rtoc_self_view, &_, &names, facts));
         END
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
         MUTABLE get_field_mutable = COPY get_field;
@@ -390,7 +390,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           TRY (mIRPass__walk_consumed(rtoc_self_view, move_node_mutable.value, &names, facts));
         END
       ELSE_IF (node_value_mutable IS_A FuncCall) OR (node_value_mutable IS_A MethodCall) THEN
-        TRY (mIRPass__consume_call_args(rtoc_self_view, castLocatableToNode__mir_pass(node_value_mutable), names, facts));
+        TRY (mIRPass__consume_call_args(rtoc_self_view, castLocatableToNode__mir_pass(node_value_mutable), &names, facts));
         IF node_value_mutable IS_A MethodCall THEN
           TRY (mIRPass__walk_consumed(rtoc_self_view, node_value_mutable.object, &names, facts));
         END
@@ -401,7 +401,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF node_value_mutable IS_A Assert AS assert THEN
         MUTABLE assert_mutable = COPY assert;
         MUTABLE expr = assert_mutable.condition;
-        TRY (mIRPass__walk_consumed(rtoc_self_view, expr, &names, facts));
+        TRY (mIRPass__walk_consumed(rtoc_self_view, &expr, &names, facts));
       ELSE_IF node_value_mutable IS_A ReturnNode AS return_node THEN
         MUTABLE return_node_mutable = COPY return_node;
         MUTABLE expr = IF return_node_mutable IS_A Assert THEN
@@ -409,7 +409,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ELSE
           return_node_mutable.value
         END;
-        TRY (mIRPass__walk_consumed(rtoc_self_view, expr, &names, facts));
+        TRY (mIRPass__walk_consumed(rtoc_self_view, &expr, &names, facts));
       END
     ELSE
       RETURN;

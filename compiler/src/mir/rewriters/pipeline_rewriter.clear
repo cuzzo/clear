@@ -55,10 +55,10 @@ PRIVATE FN pipelineRewriter__rewrite_children_mut(MUTABLE self: PipelineRewriter
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node IS_A Program) THEN
-      node.statements = node.statements() |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+      node.statements = node.statements() |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
     ELSE_IF node IS_A FunctionDef AS function_def THEN
       MUTABLE function_def_mutable = COPY function_def;
-      function_def_mutable.body = function_def_mutable.body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+      function_def_mutable.body = function_def_mutable.body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
     ELSE_IF node IS_A VarDecl AS var_decl THEN
       MUTABLE var_decl_mutable = COPY var_decl;
       MUTABLE prev_dest: ?String@symbol = COPY rtoc_self_view.dest_storage;
@@ -108,11 +108,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE then_branch = COPY if_statement_mutable.then_branch;
       MUTABLE else_branch: ?[]Locatable = COPY if_statement_mutable.else_branch;
       IF then_branch THEN
-        then_branch = then_branch |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+        then_branch = then_branch |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
       END
       IF else_branch EXISTS AS else_branch_value THEN
         MUTABLE else_branch_value_mutable = COPY else_branch_value;
-        else_branch_value_mutable = else_branch_value_mutable |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+        else_branch_value_mutable = else_branch_value_mutable |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
       END
     ELSE_IF node IS_A MatchStatement AS match_statement THEN
       MUTABLE match_statement_mutable = COPY match_statement;
@@ -120,30 +120,30 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       FOR _ IN match_statement_mutable.cases DO
     MUTABLE body = COPY TRY (matchCase__body(_));
     IF body THEN
-          body = body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+          body = body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
     END
       END
       MUTABLE default_case: ?[]Locatable = COPY match_statement_mutable.default_case;
       IF default_case EXISTS AS default_case_value THEN
         MUTABLE default_case_value_mutable = COPY default_case_value;
-        default_case_value_mutable = default_case_value_mutable |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+        default_case_value_mutable = default_case_value_mutable |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
       END
     ELSE_IF node IS_A WhileLoop AS while_loop THEN
       MUTABLE while_loop_mutable = COPY while_loop;
       while_loop_mutable.condition = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, while_loop_mutable.condition));
       MUTABLE do_branch = COPY while_loop_mutable.do_branch;
       IF do_branch IS_A []Any THEN
-        do_branch = do_branch |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+        do_branch = do_branch |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
       END
     ELSE_IF node IS_A ForRange AS for_range THEN
       MUTABLE for_range_mutable = COPY for_range;
       for_range_mutable.start_expr = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, for_range_mutable.start_expr));
       for_range_mutable.end_expr = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, for_range_mutable.end_expr));
-      for_range_mutable.body = for_range_mutable.body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+      for_range_mutable.body = for_range_mutable.body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
     ELSE_IF node IS_A ForEach AS for_each THEN
       MUTABLE for_each_mutable = COPY for_each;
       for_each_mutable.collection = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, for_each_mutable.collection));
-      for_each_mutable.body = for_each_mutable.body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+      for_each_mutable.body = for_each_mutable.body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
     ELSE_IF node IS_A BinaryOp AS binary_op THEN
       MUTABLE binary_op_mutable = COPY binary_op;
       binary_op_mutable.left = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, binary_op_mutable.left));
@@ -160,9 +160,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     ELSE_IF node IS_A ListLit AS list_lit THEN
       MUTABLE list_lit_mutable = COPY list_lit;
-      list_lit_mutable.items = list_lit_mutable.items |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+      list_lit_mutable.items = list_lit_mutable.items |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
     ELSE_IF (node IS_A BlockExpr) THEN
-      node.body = node.body() |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, _));
+      node.body = node.body() |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
       node.result = TRY (pipelineRewriter__rewrite_optional_node(&rtoc_self_view, node.result()));
     END
     RETURN COPY node;
@@ -175,7 +175,7 @@ PRIVATE FN pipelineRewriter__rewrite_optional_node(MUTABLE self: PipelineRewrite
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF value EXISTS AS value_value THEN
       MUTABLE value_value_mutable = COPY value_value;
-      RETURN TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, value_value_mutable));
+      RETURN TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &value_value_mutable));
     ELSE
       RETURN NIL;
     END
@@ -194,7 +194,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END;
-  MUTABLE replaced = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, argument));
+  MUTABLE replaced = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &argument));
   IF (moved AND respondsTo?(replaced, "was_moved=")) THEN
       replaced.was_moved = TRUE;
       RETURN TRUE;
@@ -210,7 +210,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE prev_dest: ?String@symbol = COPY rtoc_self_view.dest_storage;
   DEFER rtoc_self_view.dest_storage = prev_dest;
   rtoc_self_view.dest_storage = :heap;
-  RETURN TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, value));
+  RETURN TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &value));
 }
 END
 PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MUTABLE node: BinaryOp) RETURNS !Locatable
@@ -228,7 +228,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF pipelineRewriter__binding_source?(rtoc_self_view, real_source) THEN
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
-    real_source = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, real_source));
+    real_source = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &real_source));
     IF (pipelineRewriter__needs_transpiler_pipeline?(rtoc_self_view, &real_source) OR ((IF real_source IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END))) THEN
         pipelineRewriter__patch_chain_source_mut(rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
@@ -258,7 +258,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal?) IS_A EachOp))) OR aST__pipeline_terminal_fold?(terminal)) OR aST__pipeline_list_terminal?(terminal));
     IF ((stages.length() > 0) OR ((is_fold AND (terminal != NIL)))) THEN
       IF is_fold THEN
-        RETURN TRY (pipelineRewriter__fuse_pipeline(&rtoc_self_view, &node, &real_source, stages, terminal));
+        RETURN TRY (pipelineRewriter__fuse_pipeline(&rtoc_self_view, &node, &real_source, stages, &terminal));
       ELSE
         MUTABLE list_proxy = COPY node;
         MUTABLE rtoc_union_writeback_1: Locatable = Locatable{ BinaryOp: COPY list_proxy };
@@ -419,7 +419,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE stage_inits = List[];
     MUTABLE res_type = &smooth_node.full_type_mut();
-    MUTABLE loop_body = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, stages, terminal, current_it, res_var, token, &stage_inits, CAST(res_type AS ?Type)));
+    MUTABLE loop_body = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, stages, terminal, &current_it, res_var, token, &stage_inits, CAST(res_type AS ?Type)));
     body = ruby_array_concat_Any__pipeline_rewriter(body, stage_inits);
     MUTABLE is_each = ((terminal != NIL) AND (terminal IS_A EachOp));
     MUTABLE foreach = ForEach{ token: COPY token, var_name: it_var, collection: COPY source, body: loop_body, deferred_drops: NIL, is_mutable: is_each, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE };
@@ -791,7 +791,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF stage IS_A WhereOp AS where_op THEN
       MUTABLE where_op_mutable = COPY where_op;
       MUTABLE pred = pipelineRewriter__replace_placeholder(rtoc_self_view, whereOp__expression(where_op_mutable), current_val);
-      MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, current_val, res_var, token, &stage_inits, res_type));
+      MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
       MUTABLE if_stmt = IfStatement{ token: COPY where_op_mutable.token, condition: COPY pred, then_branch: COPY then_branch, else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_43: Locatable = Locatable{ IfStatement: COPY if_stmt };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_43, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
@@ -820,16 +820,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_45, SyntheticTypeInput{ Type: COPY selected_type }, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_45 START Locatable.Identifier AS rtoc_union_writeback_45_item -> sel_ident = COPY rtoc_union_writeback_45_item;, END
       NIL;
-      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, sel_ident, res_var, token, &stage_inits, res_type));
+      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &sel_ident, res_var, token, &stage_inits, res_type));
       RETURN ([sel_decl] + rest);
     ELSE_IF stage IS_A TapOp AS tap_op THEN
       MUTABLE tap_op_mutable = COPY tap_op;
       MUTABLE tap_body = tap_op_mutable.body |> SELECT pipelineRewriter__replace_placeholder(rtoc_self_view, _, current_val);
-      RETURN (tap_body + TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, current_val, res_var, token, &stage_inits, res_type)));
+      RETURN (tap_body + TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type)));
     ELSE_IF stage IS_A TakeWhileOp AS take_while_op THEN
       MUTABLE take_while_op_mutable = COPY take_while_op;
       MUTABLE pred = pipelineRewriter__replace_placeholder(rtoc_self_view, takeWhileOp__expression(take_while_op_mutable), current_val);
-      MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, current_val, res_var, token, &stage_inits, res_type));
+      MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
       MUTABLE if_stmt = IfStatement{ token: COPY take_while_op_mutable.token, condition: COPY pred, then_branch: COPY then_branch, else_branch: COPY [BreakNode{ token: COPY take_while_op_mutable.token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_46: Locatable = Locatable{ IfStatement: COPY if_stmt };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_46, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
@@ -880,7 +880,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_53, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_53 START Locatable.IfStatement AS rtoc_union_writeback_53_item -> skip_if = COPY rtoc_union_writeback_53_item;, END
       NIL;
-      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, current_val, res_var, token, &stage_inits, res_type));
+      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
       RETURN (CAST(Tuple{increment, skip_if} AS Tuple<Assignment, IfStatement>) + rest);
     ELSE_IF stage IS_A LimitOp AS limit_op THEN
       MUTABLE limit_op_mutable = COPY limit_op;
@@ -926,10 +926,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_60, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_60 START Locatable.IfStatement AS rtoc_union_writeback_60_item -> limit_if = COPY rtoc_union_writeback_60_item;, END
       NIL;
-      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, current_val, res_var, token, &stage_inits, res_type));
+      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
       RETURN (CAST(Tuple{increment, limit_if} AS Tuple<Assignment, IfStatement>) + rest);
     ELSE
-      RETURN TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, current_val, res_var, token, &stage_inits, res_type));
+      RETURN TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
     END
 }
 END

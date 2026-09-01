@@ -151,7 +151,7 @@ PUB FN fsmRecursiveSplitter__split(body: []Locatable, lowering: MIRLowering, ctx
   END
   MUTABLE builder = builder__new();
   MUTABLE done_idx = builder__reserve_index(&builder);
-  MUTABLE entry: ?Int64 = TRY (fsmRecursiveSplitter__emit_stmts_or_nil(body, done_idx, builder, lowering, (ctx OR_ELSE {})));
+  MUTABLE entry: ?Int64 = TRY (fsmRecursiveSplitter__emit_stmts_or_nil(body, done_idx, &builder, lowering, (ctx OR_ELSE {})));
   IF entry EXISTS AS entry_value THEN
     MUTABLE entry_value_mutable = COPY entry_value;
     builder__fill(&builder, done_idx, ( { MUTABLE rtoc_empty_list_4: []SegmentStmt = List[]; rtoc_empty_list_4 } ), SegmentTail{ Done: COPY Done{ _: NIL } });
@@ -203,7 +203,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int
   IF sus THEN
     RETURN TRY (fsmRecursiveSplitter__emit_suspend_with_pre(sus, pre, rest_entry, &builder));
   ELSE
-    MUTABLE pivot_entry = TRY (fsmRecursiveSplitter__emit_pivot(UNWRAP (pivot), rest_entry, builder, lowering, ctx));
+    MUTABLE pivot_entry = TRY (fsmRecursiveSplitter__emit_pivot(UNWRAP (pivot), rest_entry, &builder, lowering, ctx));
     IF pre.empty?() THEN
       RETURN pivot_entry;
     ELSE

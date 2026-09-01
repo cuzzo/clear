@@ -28,7 +28,7 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
   MUTABLE seg_defs: {String}?Type = UNWRAP (defs_by_seg[seg.index]);
   MUTABLE seg_uses: [Set]String = UNWRAP (uses_by_seg[seg.index]);
   FOR stmt IN seg.stmts DO
-    TRY (liveness__collect_defs(stmt, &seg_defs));
+    TRY (liveness__collect_defs( &stmt, &seg_defs));
     liveness__collect_uses(stmt, &seg_uses);
   END
   defs_by_seg[seg.index] = seg_defs;

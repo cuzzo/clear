@@ -1267,7 +1267,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE as_token: ?Token = COPY capability__as_token(fact.source);
     IF view_token EXISTS AS view_token_value THEN
       IF as_token THEN
-        MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, {:name: DiagnosticKwValue{ StringValue: COPY name }})), [edit__new(span__new(NIL, view_token_value.line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token.line, as_token.column, 0), "LENGTH 0 ")], :interactive));
+        MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, {:name: DiagnosticKwValue{ StringValue: COPY name }})), [edit__new(span__new(NIL, view_token_value?.line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token.line, as_token.column, 0), "LENGTH 0 ")], :interactive));
         TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, [fix], NIL, :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, :error, TRUE, {:name: name}));
       ELSE
         RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_VIEW_FOREIGN_NEEDS_UNSAFE }, [], {:name: name}));
@@ -1284,7 +1284,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
     MUTABLE fixes = List[];
     IF src EXISTS AS src_value THEN
-      MUTABLE line_num = node.source_range.start_line;
+      MUTABLE line_num = node.source_range?.start_line;
       MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
       MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
@@ -1738,7 +1738,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE reg: ?SymbolEntryRegInput = reg_branch_value;
       IF reg EXISTS AS reg_value THEN
         IF symbolEntryRegInput__token(reg_value) THEN
-          MUTABLE line_num = symbolEntryRegInput__token(reg_value).line;
+          MUTABLE line_num = symbolEntryRegInput__token(reg_value)?.line;
           IF !(line_num) THEN
             RETURN NIL;
           END
@@ -1838,7 +1838,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE idx = 0;
     WHILE (idx < candidates.length()) DO
       MUTABLE candidate: ?AutoCandidate = COPY candidates[idx];
-      MUTABLE type_sym = candidate.type_sym;
+      MUTABLE type_sym = candidate?.type_sym;
       MUTABLE note: ?String = candidate.note;
       MUTABLE label = "";
       IF (idx == 0) THEN
@@ -3078,7 +3078,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fn) THEN
           CONTINUE;
     END
-    IF (fn.stack_tier == :unbounded) THEN
+    IF (fn?.stack_tier == :unbounded) THEN
           CONTINUE;
     END
     IF callees |> ANY ((fn_nodes[rtoc_each_17] != NIL) AND (((fn_nodes[rtoc_each_17])?).stack_tier == :unbounded)) THEN
@@ -3626,7 +3626,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(span) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_24: []Edit = List[]; rtoc_empty_list_24 } ) AS []Edit);
     END
-    MUTABLE s = span.start_token;
+    MUTABLE s = span?.start_token;
     MUTABLE e = span.end_token;
     IF (s.line != e.line) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_25: []Edit = List[]; rtoc_empty_list_25 } ) AS []Edit);
@@ -4192,7 +4192,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_45.length() DO
       MUTABLE fact = COPY rtoc_each_items_45[rtoc_idx]?.fact;
-      MUTABLE var_node = COPY fact.var_node;
+      MUTABLE var_node = COPY fact?.var_node;
       MUTABLE syn = (IF var_node.symbol != NIL THEN
           (var_node.symbol).sync()
         ELSE

@@ -98,7 +98,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE declarations = TRY (declarationIndexer__index(program));
     rtoc_self_view.local_type_declaration_names = (declarations.type_declarations |> SELECT type__to_sym(_.name())) |> DISTINCT _;
     FOR _ IN declarations.imports DO
-    TRY (resolutionSession__visit_RequireNode(rtoc_self_view, _));
+    TRY (resolutionSession__visit_RequireNode(rtoc_self_view, &_));
     END
     TRY (resolutionSession__register_type_declarations(&rtoc_self_view, declarations));
     MUTABLE conformance_resolutions = TRY (resolutionSession__resolve_conformance_declarations_mut(rtoc_self_view, declarations));
@@ -136,7 +136,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF node IS_A UnionDef AS union_def THEN
       TRY (resolutionSession__register_type_declaration(rtoc_self_view, TypeDeclaration{ UnionDef: COPY union_def }));
     ELSE_IF node IS_A ExternFnDecl AS extern_fn_decl THEN
-      TRY (resolutionSession__register_extern_function_signature(rtoc_self_view, extern_fn_decl));
+      TRY (resolutionSession__register_extern_function_signature(rtoc_self_view, &extern_fn_decl));
     END
 }
 END
@@ -662,7 +662,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     FOR _ IN builtin_type_bindings DO
     MUTABLE rtoc_local_receiver_13 = TRY (resolutionSession__current_scope(rtoc_self_view));
-    scope__install_type(rtoc_local_receiver_13, _.name, (COPY _.schema_factory)());
+    scope__install_type( &rtoc_local_receiver_13, _.name, (COPY _.schema_factory)());
     END
     NIL;
 }
@@ -1329,7 +1329,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__register_function_signature(rtoc_self_view, CAST(COPY _ AS FunctionDef)));
     END
     FOR _ IN declarations.extern_function_declarations DO
-    TRY (resolutionSession__register_extern_function_signature(rtoc_self_view, _));
+    TRY (resolutionSession__register_extern_function_signature(rtoc_self_view, &_));
     END
     resolutionSession__clear_synthetic_function_definitions_mut(&rtoc_self_view);
     FOR _ IN declarations.union_method_declarations DO
@@ -1381,7 +1381,7 @@ PRIVATE FN resolutionSession__register_extern_function_signature(self: Resolutio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (node.extern_source.abi == :c) THEN
+    IF (node.extern_source?.abi == :c) THEN
       TRY (resolutionSession__validate_c_extern_signature_mut(rtoc_self_view, node));
     END
     MUTABLE signature = TRY (signatureRegistry__extern_function_signature(node));
@@ -1609,7 +1609,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN declarations.type_declarations DO
     IF _ IS_A ProtocolDef AS protocol_def THEN
       MUTABLE protocol_def_mutable = COPY protocol_def;
-      TRY (resolutionSession__register_protocol_declaration(&rtoc_self_view, protocol_def_mutable));
+      TRY (resolutionSession__register_protocol_declaration(&rtoc_self_view, &protocol_def_mutable));
     END
     END
     MUTABLE rtoc_idx = 0;
@@ -1831,13 +1831,13 @@ PRIVATE FN resolutionSession__register_type_declaration(self: ResolutionSession,
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A StructDef AS struct_def THEN
-      TRY (resolutionSession__register_struct_declaration(rtoc_self_view, struct_def));
+      TRY (resolutionSession__register_struct_declaration(rtoc_self_view, &struct_def));
     ELSE_IF node IS_A ExternStructDecl AS extern_struct_decl THEN
-      TRY (resolutionSession__register_extern_struct_declaration(rtoc_self_view, extern_struct_decl));
+      TRY (resolutionSession__register_extern_struct_declaration(rtoc_self_view, &extern_struct_decl));
     ELSE_IF node IS_A EnumDef AS enum_def THEN
-      TRY (resolutionSession__register_enum_declaration(rtoc_self_view, enum_def));
+      TRY (resolutionSession__register_enum_declaration(rtoc_self_view, &enum_def));
     ELSE_IF node IS_A UnionDef AS union_def THEN
-      TRY (resolutionSession__register_union_declaration(rtoc_self_view, union_def));
+      TRY (resolutionSession__register_union_declaration(rtoc_self_view, &union_def));
     END
 }
 END
@@ -1848,7 +1848,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE schema =   IF ((node.close_method != NIL) AND (node.from_module != NIL)) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
-      IF (node.extern_source.abi == :c) THEN
+      IF (node.extern_source?.abi == :c) THEN
       close_plan = resourceClosePlan__c_function(UNWRAP (node.close_method));
     ELSE
       close_plan = resourceClosePlan__method(UNWRAP (node.close_method));

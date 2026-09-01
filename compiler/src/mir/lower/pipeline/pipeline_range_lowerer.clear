@@ -557,7 +557,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(rtoc_self_view, &range_lit, stages, NIL, NIL, NIL, TRUE));
     label = runtimeHost__range_next_label(rtoc_self_view.host);
     MUTABLE names = pipelineRangeFoldNames__for_label(label, runtimeHost__range_bc_target?(rtoc_self_view.host));
-    MUTABLE plan = TRY (pipelineRangeLowerer__scalar_fold_plan(rtoc_self_view, UNWRAP (prefix), fold_op, smooth_node, names));
+    MUTABLE plan = TRY (pipelineRangeLowerer__scalar_fold_plan(rtoc_self_view, UNWRAP (prefix), fold_op, &smooth_node, names));
     RETURN TRY (pipelineRangeLowerer__range_accumulating_block(rtoc_self_view, &range_lit, UNWRAP (prefix), label, UNWRAP (plan), prefix.initial_capture));
 }
 END
@@ -596,9 +596,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF fold_op IS_A AverageOp@multiowned AS average_op_multiowned THEN
       RETURN TRY (pipelineRangeLowerer__average_fold_plan(rtoc_self_view, prefix, CAST(COPY average_op_multiowned AS AverageOp), names));
     ELSE_IF fold_op IS_A MinOp@multiowned AS min_op_multiowned THEN
-      RETURN TRY (pipelineRangeLowerer__min_fold_plan(rtoc_self_view, prefix, CAST(COPY min_op_multiowned AS MinOp), smooth_node, names));
+      RETURN TRY (pipelineRangeLowerer__min_fold_plan(rtoc_self_view, prefix, CAST(COPY min_op_multiowned AS MinOp), &smooth_node, names));
     ELSE_IF fold_op IS_A MaxOp@multiowned AS max_op_multiowned THEN
-      RETURN TRY (pipelineRangeLowerer__max_fold_plan(rtoc_self_view, prefix, CAST(COPY max_op_multiowned AS MaxOp), smooth_node, names));
+      RETURN TRY (pipelineRangeLowerer__max_fold_plan(rtoc_self_view, prefix, CAST(COPY max_op_multiowned AS MaxOp), &smooth_node, names));
     ELSE_IF fold_op IS_A AnyOp@multiowned AS any_op_multiowned THEN
       RETURN pipelineRangeLowerer__any_fold_plan(rtoc_self_view, prefix, CAST(COPY any_op_multiowned AS AnyOp), names);
     ELSE_IF fold_op IS_A AllOp@multiowned AS all_op_multiowned THEN

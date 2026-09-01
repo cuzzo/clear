@@ -40,17 +40,17 @@ PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImpor
   MUTABLE tokens = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_1 = (TRY (lexer__new(cheat_code, 0, NIL, 1, 1, 0, budget)));
   TRY (lexer__tokenize(&rtoc_mutable_receiver_1)) };
   MUTABLE ast = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (TRY (clearParser__new(tokens, cheat_code, (ownership_mode == :easy), budget)));
-  TRY (clearParser__parse(rtoc_local_receiver_2)) };
+  TRY (clearParser__parse( &rtoc_local_receiver_2)) };
   program__set_language_mode(&ast, ownership_mode);
   MUTABLE annotator = TRY (semanticAnnotator__new(importer, NIL, source_dir, strict_test, cheat_code));
   TRY (semanticAnnotator__annotate_mut(&annotator, &ast));
   MUTABLE rtoc_mutable_receiver_3 = pipelineRewriter__new(annotator);
   TRY (pipelineRewriter__rewrite_mut(&rtoc_mutable_receiver_3, castProgramToLocatable__compiler_frontend(ast)));
-  MUTABLE rtoc_mutable_receiver_4 = mIRPassState__for_mut(ast);
+  MUTABLE rtoc_mutable_receiver_4 = mIRPassState__for_mut( &ast);
   TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_4, :pipeline_rewritten));
   MUTABLE rtoc_local_receiver_5 = stringConcatRewriter__new();
   TRY (stringConcatRewriter__rewrite_mut(rtoc_local_receiver_5, &ast));
-  MUTABLE rtoc_mutable_receiver_6 = mIRPassState__for_mut(ast);
+  MUTABLE rtoc_mutable_receiver_6 = mIRPassState__for_mut( &ast);
   TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_6, :string_concat_rewritten));
   MUTABLE schema_lookup = %(name) USE(annotator) -> {
   rtoc_lambda_result_7 = TRY (semanticAnnotator__lookup_type_schema(annotator, name));

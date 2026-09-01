@@ -55,7 +55,7 @@ PRIVATE FN stringConcatRewriter__rewrite_required_node_mut(self: StringConcatRew
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node_mutable = COPY node;
-    RETURN UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, node_mutable)));
+    RETURN UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, &node_mutable)));
 }
 END
 PRIVATE FN stringConcatRewriter__rewrite_body_mut(self: StringConcatRewriter, MUTABLE body: []Locatable) RETURNS !Void

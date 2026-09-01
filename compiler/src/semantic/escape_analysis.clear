@@ -215,7 +215,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
   FOR _ IN body_summaries.values() DO
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < _.call_site_facts.length() DO
-    IF _.call_site_facts[rtoc_idx].fn_var_call THEN
+    IF _.call_site_facts[rtoc_idx]?.fn_var_call THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -287,7 +287,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
   MUTABLE by_index: {Int64}KeptIdentityContract = {};
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
-      MUTABLE entry: ?SymbolEntry@multiowned = COPY params[rtoc_idx].symbol;
+      MUTABLE entry: ?SymbolEntry@multiowned = COPY params[rtoc_idx]?.symbol;
       MUTABLE contract: ?KeptIdentityContract = NIL;
       IF entry EXISTS AS entry_value THEN
         contract = COPY symbolEntry__kept_identity(entry_value);
@@ -990,7 +990,7 @@ PUB FN escapeAnalysis__mark_expr_identifiers_heap_mut(expr: ?Locatable) RETURNS 
     IF (((node != NIL) AND (node IS_A CopyNode)) OR ((node != NIL) AND (node IS_A KeepNode))) THEN
       CONTINUE;
     END
-    node = escapeAnalysis__unwrap_value(node);
+    MUTABLE node = escapeAnalysis__unwrap_value(node);
     IF !((node != NIL)) THEN
       CONTINUE;
     END
@@ -1488,7 +1488,7 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
   IF summary EXISTS AS summary_value THEN
     MUTABLE summary_value_mutable = COPY summary_value;
     FOR _ IN summary_value_mutable.binding_nodes DO
-    escapeAnalysis__record_binding_fact_mut(_, symbols, binding_values);
+    escapeAnalysis__record_binding_fact_mut(_, &symbols, binding_values);
     END
     FOR _ IN summary_value_mutable.assignment_nodes DO
   IF _ IS_A BindExpr AS bind_expr THEN
@@ -1498,7 +1498,7 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
   &assignment_nodes.append(COPY _);
     END
     FOR _ IN hoist_bindings DO
-    escapeAnalysis__record_binding_fact_mut(_, symbols, binding_values);
+    escapeAnalysis__record_binding_fact_mut(_, &symbols, binding_values);
     END
     FOR _ IN summary_value_mutable.return_nodes DO
     IF _.value THEN
@@ -1520,12 +1520,12 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
       &assignment_nodes.append(COPY node);
   END
   IF (node IS_A VarDecl) THEN
-      escapeAnalysis__record_binding_fact_mut(node, symbols, binding_values);
+      escapeAnalysis__record_binding_fact_mut(node, &symbols, binding_values);
   ELSE_IF (node IS_A BindExpr) THEN
       IF (node.mode == :assign) THEN
         &assignment_nodes.append(COPY node);
       ELSE
-        escapeAnalysis__record_binding_fact_mut(node, symbols, binding_values);
+        escapeAnalysis__record_binding_fact_mut(node, &symbols, binding_values);
       END
   ELSE_IF (node IS_A DestructuringAssignment) THEN
       MUTABLE rtoc_each_items_23 = node.targets;
@@ -1540,7 +1540,7 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
           ELSE
             NIL
           END).equal?(UNWRAP (rtoc_each_items_23[rtoc_idx])) THEN
-            escapeAnalysis__record_binding_fact_mut(UNWRAP (rtoc_each_items_23[rtoc_idx]), symbols, binding_values);
+            escapeAnalysis__record_binding_fact_mut(UNWRAP (rtoc_each_items_23[rtoc_idx]), &symbols, binding_values);
       END
     rtoc_idx = rtoc_idx + 1;
       END

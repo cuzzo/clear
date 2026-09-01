@@ -154,7 +154,7 @@ PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(self: PipelineLoweringBr
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fact: ?PipelineAllocMarkFact = TRY (mIRLowering__pipeline_alloc_mark_fact(rtoc_self_view.lowering, value, name, fallback_alloc, type_info, ast_node, context, known_allocating, accept_owned_call, include_cleanup));
+    MUTABLE fact: ?PipelineAllocMarkFact = TRY (mIRLowering__pipeline_alloc_mark_fact(rtoc_self_view.lowering, &value, name, fallback_alloc, type_info, ast_node, context, known_allocating, accept_owned_call, include_cleanup));
     IF fact EXISTS AS fact_value THEN
       RETURN PipelineBridgeAllocationFact{ alloc: COPY fact_value.alloc, mark: COPY fact_value.mark, cleanup_entry: KEEP fact_value.cleanup_entry };
     ELSE
@@ -190,7 +190,7 @@ PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(self: Pipeli
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIRLowering__pipeline_index_insert_with_ownership(rtoc_self_view.lowering, insert, value, value_owns, target_alloc));
+    RETURN TRY (mIRLowering__pipeline_index_insert_with_ownership(rtoc_self_view.lowering, &insert, value, value_owns, target_alloc));
 }
 END
 PUB FN pipelineLoweringBridge__with_runtime_binding_name<U>(self: PipelineLoweringBridge, rt_name: String, blk: FN() -> U) RETURNS U
