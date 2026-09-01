@@ -7686,7 +7686,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, optional_prefix);
       RETURN prefix;
     END
-    MUTABLE result_children = expr.ownership_source_exprs();
+    MUTABLE result_children = TRY (emittable__ownership_source_exprs(expr));
     MUTABLE owned_sources: [Set]Emittable = expr.owned_position_source_exprs() |> DISTINCT _;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < result_children.length() DO
@@ -7959,7 +7959,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (((alloc != NIL) AND (TRY (ownershipEffect__of(expr))).produces_owned) AND (aST__node_alloc(expr) EXISTS)) THEN
         expr.alloc = COPY alloc;
       END
-      FOR _ IN expr.ownership_source_exprs() DO
+      FOR _ IN (TRY (emittable__ownership_source_exprs(expr)) OR_ELSE List[]) DO
     MUTABLE rtoc_mutable_block_param_285 = COPY _;
     MUTABLE has_alloc_metadata = (respondsTo?(rtoc_mutable_block_param_285, "has_alloc_metadata?") AND rtoc_mutable_block_param_285.has_alloc_metadata?());
     IF (has_alloc_metadata OR TRY (mIRLowering__mir_allocates?(rtoc_self_view, rtoc_mutable_block_param_285))) THEN
@@ -8347,7 +8347,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF !(emittable__responds_to_ownership_source_exprs?(node_value)) THEN
           RETURN CAST(( { MUTABLE rtoc_empty_list_288: []String = List[]; rtoc_empty_list_288 } ) AS []String);
         END
-        FOR _ IN node_value.ownership_source_exprs() DO
+        FOR _ IN (TRY (emittable__ownership_source_exprs(node_value)) OR_ELSE List[]) DO
         FOR _ IN mIRLowering__mir_ident_names(rtoc_self_view, _) DO
         &names.append(COPY _);
         END
