@@ -14452,8 +14452,8 @@ PUB FN aST__expr_each_bg_block_shallow(expr: ?Locatable, blk: FN(BgNode) -> Void
     END
     IF rtoc_expr IS_A HashLit AS rtoc_hash THEN
       FOR rtoc_pair IN rtoc_hash.pairs DO
+        aST__expr_each_bg_block_shallow(rtoc_pair._0, blk);
         aST__expr_each_bg_block_shallow(rtoc_pair._1, blk);
-        aST__expr_each_bg_block_shallow(rtoc_pair._2, blk);
       END
       RETURN;
     END
@@ -14548,4 +14548,8 @@ PUB FN aST__collection_method_call?(node: Locatable) RETURNS Bool ->
     RETURN (((rtoc_call.pool_method != NIL) OR (rtoc_call.set_method != NIL)) OR (rtoc_call.map_method != NIL));
   END
   RETURN FALSE;
+END
+PUB FN selectOp__set_capture_analysis(MUTABLE self: SelectOp, value: ?PassStateValue) RETURNS Void ->
+  self.capture_analysis = value;
+  RETURN;
 END

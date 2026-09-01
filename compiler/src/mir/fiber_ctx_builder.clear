@@ -6,6 +6,15 @@ REQUIRE "pkg:rtoc_73656d616e7469632f636170747572655f73747261746567792e636c656172
 # Ruby module FiberCtxBuilder
 PUB ENUM CaptureCleanupKind { None, CapturedValue, UniformValue, RcRelease }
 PUB ENUM CaptureRcKind { Rc, Arc, AtomicPtr }
+PUB FN captureRcKind__retain_func(self: CaptureRcKind) RETURNS String ->
+  IF (self == CaptureRcKind.AtomicPtr) THEN
+    RETURN "atomicPtrRetain";
+  END
+  IF (self == CaptureRcKind.Arc) THEN
+    RETURN "arcRetain";
+  END
+  RETURN "rcRetain";
+END
 PUB FN captureRcKind__release_func(self: CaptureRcKind) RETURNS String ->
   IF (self == CaptureRcKind.AtomicPtr) THEN
     RETURN "atomicPtrRelease";
