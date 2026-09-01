@@ -3766,7 +3766,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF callArityPlan__exact?(plan) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castFunctionCallNodeToLocatable(plan.site.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :ARITY_MISMATCH }, [], {:name: plan.site.name, :expected: plan.min_args, :got: plan.given_args}));
     ELSE
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, plan.site.node, TypeAnalysisCodeOrMessage{ SymbolValue: :ARITY_MISMATCH_RANGE }, [], {:name: plan.site.name, :min: plan.min_args, :max: plan.max_args, :got: plan.given_args}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castFunctionCallNodeToLocatable(plan.site.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :ARITY_MISMATCH_RANGE }, [], {:name: plan.site.name, :min: plan.min_args, :max: plan.max_args, :got: plan.given_args}));
     END
 }
 END
@@ -4116,7 +4116,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF ((type__indirect?(facts.expected_type) AND !(type__indirect?(facts.actual_type))) AND (type__resolved(facts.expected_type) == type__resolved(facts.actual_type))) THEN
       IF !((typeAnalysisSession__language_mode(rtoc_self_view) == :easy)) THEN
-        TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.arg_node, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ARGUMENT_EXPLICIT }, [], {:index: (facts.index + 1), :expected: TRY (type__coercion_surface_name(castTypeToTypeTypeInput__type_analysis_session(facts.expected_type)))}));
+        TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ARGUMENT_EXPLICIT }, [], {:index: (facts.index + 1), :expected: TRY (type__coercion_surface_name(castTypeToTypeTypeInput__type_analysis_session(facts.expected_type)))}));
       END
       facts.arg_node.coerced_type = COPY facts.expected_type;
     END
@@ -7638,7 +7638,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castAnnotationNodeToLocatable(facts.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :ATSPLIT_STREAM_ONLY }));
     END
     IF TRY (type__list_requires_array_shape?(shape)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], {:cap: "@list", :example: "User[]@list or User[N]@list"}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castAnnotationNodeToLocatable(facts.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], {:cap: "@list", :example: "User[]@list or User[N]@list"}));
     END
     IF ((type__pool?(shape) AND !(type__array?(shape))) AND !(facts.inner_array)) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], {:cap: "@pool", :example: "User[]@pool or User[N]@pool"}));
@@ -7725,7 +7725,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE shard_count: ?Int64 = type__shard_count(type_obj);
     IF ((shard_count != NIL) AND (shard_count < 2)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_NEEDS_2_PLUS }, [], {:got: shard_count}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castAnnotationNodeToLocatable(facts.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_NEEDS_2_PLUS }, [], {:got: shard_count}));
     END
     IF (type__pool?(type_obj) AND !(type__fixed?(type_obj))) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :POOL_NEEDS_FIXED_CAPACITY }, [], {:element: (IF TRY (type__element_type(type_obj)) != NIL THEN
@@ -7774,7 +7774,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE expected = type_params.length();
     MUTABLE actual = (TRY (type__generic_args(inner))).length();
     IF (actual != expected) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], {:type: base_name, :expected: expected, :got: actual}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castAnnotationNodeToLocatable(facts.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], {:type: base_name, :expected: expected, :got: actual}));
     END
     FOR _ IN (TRY (type__generic_args(inner))) DO
     TRY (typeAnalysisSession__validate_generic_type_arg_mut(rtoc_self_view, facts, _));
@@ -13030,7 +13030,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE type_name: String@symbol = type_name_branch_value?;
     MUTABLE schema: ?MatchSchema = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type_name)) AS ?MatchSchema);
     IF !(schemas__union?(castOptionalMatchSchemaToOptionalSchemaValue(schema))) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.left, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_NEEDS_UNION }, [], {:got: CAST(subject_type AS String)}));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node.left }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_NEEDS_UNION }, [], {:got: CAST(subject_type AS String)}));
     END
     MUTABLE union_schema: UnionSchema@multiowned = castOptionalMatchSchemaToUnionSchemaMultiowned(schema);
     MUTABLE subst = TRY (typeAnalysisSession__match_union_substitution(rtoc_self_view, subject_type, MatchSchema{ UnionSchemaMultiowned: COPY union_schema }, TRUE));
