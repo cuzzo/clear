@@ -185,10 +185,11 @@ module SelfhostFnProbe
     stubs = emitted.values
     body = target.text.sub(/\A(PUB |PRIVATE )?FN #{Regexp.escape(target.name)}/, "FN #{safe}")
 
-    [%(REQUIRE "pkg:#{pkg_name}"\n),
-     "\n# --- stand-ins for what it calls ---\n", stubs.join,
-     "\n# --- #{rel(target.file)} : #{target.name} ---\n", body,
-     "\nFN main() RETURNS !Void ->\n  RETURN;\nEND\n"].join
+    head = [%(REQUIRE "pkg:#{pkg_name}"\n),
+            "\n# --- stand-ins for what it calls ---\n", stubs.join,
+            "\n# --- #{rel(target.file)} : #{target.name} ---\n"].join
+    @probe_offset = head.lines.length
+    head + body + "\nFN main() RETURNS !Void ->\n  RETURN;\nEND\n"
   end
 
   def rel(path) = path.sub("#{SRC}/", '')
@@ -249,13 +250,14 @@ module SelfhostFnProbe
       end
       text = "#{out}\n#{err}"
       msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
+      probe_line = text[/^\s*(\d+) \|/, 1] || text[/line (\d+)/, 1]
       # Not every failure announces itself with one of those banners -- a Ruby
       # backtrace out of the compiler, a Zig error, an ENOSPC. Fall back to the
       # last lines that are not warnings, so no failure lands without a reason.
       msg ||= text.lines.grep(/Error|error/).reject { |l| l.include?('[Warning]') }
                   .reject { |l| l =~ /\A\s*(from|\t)/ }.last.to_s.strip
       msg = text.lines.reject { |l| l.include?('[Warning]') || l.strip.empty? }.last(2).join(' ').strip if msg.empty?
-      [status.success?, msg.to_s.gsub(/\e\[[0-9;]*m/, '')[0, 200]]
+      [status.success?, msg.to_s.gsub(/\e\[[0-9;]*m/, '')[0, 200], probe_line]
     end
   end
 
@@ -310,8 +312,12 @@ module SelfhostFnProbe
           rescue ThreadError
             break
           end
-          ok, msg = compile(probe_source(target, group, cache, pkg_name), stage, pkg_flag)
-          results[idx] = [rel(target.file), target.name, ok, msg]
+          src = probe_source(target, group, cache, pkg_name)
+          offset = @probe_offset
+          ok, msg, probe_line = compile(src, stage, pkg_flag)
+          # The target is restated verbatim, so a probe line maps straight back.
+          line = probe_line ? target.start + (probe_line.to_i - offset) : nil
+          results[idx] = [rel(target.file), target.name, ok, msg, line]
           mutex.synchronize do
             done += 1
             # Each build leaves Zig cache entries behind; 3405 of them fill the
@@ -323,7 +329,7 @@ module SelfhostFnProbe
               good = results.count { |r| r && r[2] }
               warn "  #{done}/#{targets.length}  compiling: #{good} (#{(100.0 * good / done).round(1)}%)"
               File.write(File.join(ROOT, '.fn_probe.json'), JSON.pretty_generate(
-                           results.compact.map { |f, n, o, m| { file: f, fn: n, ok: o, error: m } }))
+                           results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }))
             end
           end
         end
@@ -344,7 +350,7 @@ module SelfhostFnProbe
       puts format('  %3d/%3d fail  %s', bad, rs.length, f)
     end
     File.write(File.join(ROOT, '.fn_probe.json'), JSON.pretty_generate(
-                 results.compact.map { |f, n, o, m| { file: f, fn: n, ok: o, error: m } }
+                 results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }
                ))
     warn "\nwrote .fn_probe.json"
     0
