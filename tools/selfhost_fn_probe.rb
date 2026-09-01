@@ -269,6 +269,11 @@ module SelfhostFnProbe
           results[idx] = [rel(target.file), target.name, ok, msg]
           mutex.synchronize do
             done += 1
+            # Each build leaves Zig cache entries behind; 3405 of them fill the
+            # disk and every probe after that fails for the wrong reason.
+            if (done % 300).zero?
+              FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-cache'))
+            end
             if (done % 20).zero?
               good = results.count { |r| r && r[2] }
               warn "  #{done}/#{targets.length}  compiling: #{good} (#{(100.0 * good / done).round(1)}%)"
