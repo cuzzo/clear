@@ -1548,7 +1548,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF reg_value IS_A VarDecl AS var_decl THEN
         tok_branch_value = varDecl__token(var_decl);
       ELSE
-        tok_branch_value = (MATCH reg_value START TypeAnalysisReg.VarDecl AS item -> item.token, TypeAnalysisReg.DestructureTarget AS item -> item.token END);
+        PARTIAL MATCH reg_value START
+          TypeAnalysisReg.VarDecl AS item -> tok_branch_value = COPY item.token;,
+          TypeAnalysisReg.DestructureTarget AS item -> tok_branch_value = COPY item.token;,
+          DEFAULT -> tok_branch_value = NIL;
+        END
       END
       MUTABLE tok: Token = tok_branch_value?;
       MUTABLE fixes = List[];
@@ -2889,7 +2893,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE type_str = typeAnalysisSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__type_analysis_session(decl.type()));
     MUTABLE name: String = "";
     IF TRUE THEN
-      name = (MATCH decl START AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> item.name, AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> item.name, AutoConstraintCollectorSlotDeclNode.BindExpr AS item -> item.name END);
+      PARTIAL MATCH decl START
+        AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> name = COPY item.name;,
+        AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> name = COPY item.name;,
+        AutoConstraintCollectorSlotDeclNode.BindExpr AS item -> name = COPY item.name;,
+        DEFAULT -> name = "";
+      END
     ELSE
       name = "<binding>";
     END
@@ -8622,7 +8631,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE container_value_mutable = COPY container_value;
       MUTABLE var_name: String = "";
       IF (MATCH node START DeclarationNode.VarDecl AS item -> item.name IS_A String, DeclarationNode.BindExpr AS item -> item.name IS_A String END) THEN
-        var_name = (MATCH node START DeclarationNode.VarDecl AS item -> item.name, DeclarationNode.BindExpr AS item -> item.name END);
+        PARTIAL MATCH node START
+          DeclarationNode.VarDecl AS item -> var_name = COPY item.name;,
+          DeclarationNode.BindExpr AS item -> var_name = COPY item.name;,
+          DEFAULT -> var_name = "";
+        END
       ELSE
         var_name = COPY (MATCH node START DeclarationNode.VarDecl AS item -> CAST(item.name AS String), DeclarationNode.BindExpr AS item -> CAST(item.name AS String) END);
       END
@@ -19599,7 +19612,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF call_node IS_A MethodCall AS method_call THEN
           args_branch_value = ([method_call.object] + method_call.args);
         ELSE
-          args_branch_value = (MATCH call_node START TypeAnalysisCallNode.FuncCall AS item -> item.args, TypeAnalysisCallNode.MethodCall AS item -> item.args END);
+          PARTIAL MATCH call_node START
+            TypeAnalysisCallNode.FuncCall AS item -> args_branch_value = COPY item.args;,
+            TypeAnalysisCallNode.MethodCall AS item -> args_branch_value = COPY item.args;,
+            DEFAULT -> args_branch_value = NIL;
+          END
         END
         MUTABLE args: []Locatable = args_branch_value?;
         MUTABLE idx = (TRY (functionSignature__intrinsic_arg_specs(matched_def_value_mutable))).indexOf();
@@ -19631,7 +19648,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF call_node IS_A MethodCall AS method_call THEN
           args_branch_value = ([method_call.object] + method_call.args);
         ELSE
-          args_branch_value = (MATCH call_node START TypeAnalysisCallNode.FuncCall AS item -> item.args, TypeAnalysisCallNode.MethodCall AS item -> item.args END);
+          PARTIAL MATCH call_node START
+            TypeAnalysisCallNode.FuncCall AS item -> args_branch_value = COPY item.args;,
+            TypeAnalysisCallNode.MethodCall AS item -> args_branch_value = COPY item.args;,
+            DEFAULT -> args_branch_value = NIL;
+          END
         END
         MUTABLE args: []Locatable = args_branch_value?;
         RETURN COPY args[param_index];

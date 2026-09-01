@@ -537,7 +537,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF reg_value IS_A VarDecl AS var_decl THEN
         tok_branch_value = varDecl__token(var_decl);
       ELSE
-        tok_branch_value = (MATCH reg_value START CapabilityAuditReg.VarDecl AS item -> item.token, CapabilityAuditReg.DestructureTarget AS item -> item.token END);
+        PARTIAL MATCH reg_value START
+          CapabilityAuditReg.VarDecl AS item -> tok_branch_value = COPY item.token;,
+          CapabilityAuditReg.DestructureTarget AS item -> tok_branch_value = COPY item.token;,
+          DEFAULT -> tok_branch_value = NIL;
+        END
       END
       MUTABLE tok: Token = tok_branch_value?;
       MUTABLE fixes = List[];
@@ -1881,7 +1885,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__capability_audit_session(decl.type()));
     MUTABLE name: String = "";
     IF TRUE THEN
-      name = (MATCH decl START AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> item.name, AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> item.name, AutoConstraintCollectorSlotDeclNode.BindExpr AS item -> item.name END);
+      PARTIAL MATCH decl START
+        AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> name = COPY item.name;,
+        AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> name = COPY item.name;,
+        AutoConstraintCollectorSlotDeclNode.BindExpr AS item -> name = COPY item.name;,
+        DEFAULT -> name = "";
+      END
     ELSE
       name = "<binding>";
     END
