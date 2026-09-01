@@ -14328,3 +14328,52 @@ END
 PUB FN aST__pipeline_stream_value_op?(node: Locatable) RETURNS Bool ->
   RETURN (aST__pipeline_select_filter_op?(node) OR (node IS_A EachOp));
 END
+
+PUB FN aST__pipeline_terminal_fold?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.SumOp AS item -> RETURN TRUE;,
+    Locatable.AverageOp AS item -> RETURN TRUE;,
+    Locatable.CountOp AS item -> RETURN TRUE;,
+    Locatable.ReduceOp AS item -> RETURN TRUE;,
+    Locatable.MinOp AS item -> RETURN TRUE;,
+    Locatable.MaxOp AS item -> RETURN TRUE;,
+    Locatable.AnyOp AS item -> RETURN TRUE;,
+    Locatable.AllOp AS item -> RETURN TRUE;,
+    Locatable.FindOp AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+PUB FN aST__call_like_boundary?(node: Locatable) RETURNS Bool ->
+  PARTIAL MATCH node START
+    Locatable.FunctionDef AS item -> RETURN TRUE;,
+    Locatable.LambdaLit AS item -> RETURN TRUE;,
+    Locatable.BgBlock AS item -> RETURN TRUE;,
+    Locatable.BgStreamBlock AS item -> RETURN TRUE;,
+    Locatable.WithBlock AS item -> RETURN TRUE;,
+    Locatable.DoBlock AS item -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+PUB FN aST__recovery_wrapper?(node: Locatable) RETURNS Bool ->
+  IF node IS_A UnaryOp AS rtoc_unary THEN
+    RETURN (rtoc_unary.op == :TRY);
+  END
+  RETURN ((node IS_A OptionalUnwrap) OR (node IS_A TenseNavigation));
+END
+# Ruby: the value a recovery wrapper wraps, or the node itself when it is not one.
+PUB FN aST__recovery_payload(node: Locatable) RETURNS Locatable EFFECTS REENTRANT ->
+  IF node IS_A UnaryOp AS rtoc_unary THEN
+    IF (rtoc_unary.op == :TRY) THEN
+      RETURN COPY rtoc_unary.right;
+    END
+  END
+  IF node IS_A OptionalUnwrap AS rtoc_unwrap THEN
+    RETURN COPY rtoc_unwrap.target;
+  END
+  IF node IS_A TenseNavigation AS rtoc_nav THEN
+    RETURN COPY rtoc_nav.target;
+  END
+  RETURN COPY node;
+END
