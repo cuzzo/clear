@@ -118,6 +118,20 @@ module SelfhostFnProbe
     [target, %(REQUIRE "pkg:rtoc_#{target.unpack1('H*')}"#{alias_part}\n)]
   end
 
+  def stdlib_requires
+    @stdlib_requires ||= begin
+      seen = Set.new
+      all_files.each do |rel|
+        File.foreach(File.join(SRC, rel)) do |line|
+          break unless line.start_with?('REQUIRE') || line.strip.empty?
+
+          seen << line if line =~ /REQUIRE "pkg:[a-z_]+"/
+        end
+      end
+      seen.to_a.sort.join
+    end
+  end
+
   def all_files
     @all_files ||= Dir.glob(File.join(SRC, '**', '*.clear')).sort.map { |p| p.sub("#{SRC}/", '') }
   end
@@ -192,7 +206,7 @@ module SelfhostFnProbe
     stubs = emitted.values
     body = target.text.sub(/\A(PUB |PRIVATE )?FN #{Regexp.escape(target.name)}/, "FN #{safe}")
 
-    head = [%(REQUIRE "pkg:#{pkg_name}"\n),
+    head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n),
             "\n# --- stand-ins for what it calls ---\n", stubs.join,
             "\n# --- #{rel(target.file)} : #{target.name} ---\n"].join
     @probe_offset = head.lines.length
@@ -335,7 +349,7 @@ module SelfhostFnProbe
             if (done % 20).zero?
               good = results.count { |r| r && r[2] }
               warn "  #{done}/#{targets.length}  compiling: #{good} (#{(100.0 * good / done).round(1)}%)"
-              File.write(File.join(ROOT, '.fn_probe.json'), JSON.pretty_generate(
+              File.write(File.join(ROOT, only_file ? '.fn_probe_file.json' : '.fn_probe.json'), JSON.pretty_generate(
                            results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }))
             end
           end
@@ -356,7 +370,7 @@ module SelfhostFnProbe
 
       puts format('  %3d/%3d fail  %s', bad, rs.length, f)
     end
-    File.write(File.join(ROOT, '.fn_probe.json'), JSON.pretty_generate(
+    File.write(File.join(ROOT, only_file ? '.fn_probe_file.json' : '.fn_probe.json'), JSON.pretty_generate(
                  results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }
                ))
     warn "\nwrote .fn_probe.json"
