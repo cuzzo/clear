@@ -15052,3 +15052,8 @@ PUB FN capabilityWrap__local_storage_wrap?(self: CapabilityWrap) RETURNS Bool ->
   END
   RETURN (((self.layout == :indirect) AND (self.sync == NIL)) AND (self.ownership == NIL));
 END
+# Ruby: `walk_body` is `AST.each_locatable` over a statement list.
+PUB FN aST__walk_body(body: []Locatable, visitor: FN(Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+  MUTABLE descend: Bool = FALSE;
+  aST__each_locatable_list(body, &descend, visitor);
+END

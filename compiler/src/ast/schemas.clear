@@ -658,3 +658,22 @@ PUB FN castTypeSchemaLookupResultToSchemaValue(value: TypeSchemaLookupResult) RE
   END
   panic("Invalid cast to SchemaValue");
 END
+
+# Ruby: each declared field's raw type, wrapped as a Type, keyed by name.
+PUB FN inlineStructVariant__typed_fields(self: InlineStructVariant) RETURNS !{String}Type ->
+  MUTABLE out: {String}Type = {};
+  FOR rtoc_key IN self.fields.keys() DO
+    out[CAST(rtoc_key AS String)] = TRY (type__new(castTypeTypeInputToTypeConstructionInput__inline_struct_variant(UNWRAP (self.fields[rtoc_key]))));
+  END
+  RETURN out;
+END
+FN castTypeTypeInputToTypeConstructionInput__inline_struct_variant(value: TypeTypeInput) RETURNS TypeConstructionInput ->
+  PARTIAL MATCH value START
+    TypeTypeInput.FunctionType AS rtoc_ft -> RETURN TypeConstructionInput{ FunctionType: COPY rtoc_ft };,
+    TypeTypeInput.Type AS rtoc_ty -> RETURN TypeConstructionInput{ Type: COPY rtoc_ty };,
+    TypeTypeInput.SymbolValue AS rtoc_sym -> RETURN TypeConstructionInput{ SymbolValue: COPY rtoc_sym };,
+    TypeTypeInput.StringValue AS rtoc_str -> RETURN TypeConstructionInput{ StringValue: COPY rtoc_str };,
+    DEFAULT -> RETURN TypeConstructionInput{ SymbolValue: :Untyped };
+  END
+  RETURN TypeConstructionInput{ SymbolValue: :Untyped };
+END

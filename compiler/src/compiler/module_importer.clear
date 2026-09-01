@@ -33,3 +33,10 @@ END
 PUB FN moduleImporter__owning_package_name(self: ModuleImporter, pkg_name: String) RETURNS String ->
   RETURN COPY pkg_name;
 END
+
+# Ruby answers true when the package has no registered path and does not
+# resolve on disk. This importer registers none, so every package is stdlib
+# as far as it is concerned.
+PUB FN moduleImporter__stdlib_package?(self: ModuleImporter, pkg_name: String) RETURNS Bool ->
+  RETURN TRUE;
+END
