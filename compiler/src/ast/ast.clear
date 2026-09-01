@@ -13994,3 +13994,42 @@ FN castNodeToLocatable(value: Node) RETURNS ?Locatable ->
   END
   RETURN NIL;
 END
+PUB FN binding__name(self: Binding) RETURNS String ->
+  RETURN COPY self.name;
+END
+PUB FN binding__unwrapped_type(self: Binding) RETURNS Type ->
+  RETURN COPY self.unwrapped_type;
+END
+PUB FN destructuringAssignment__targets(self: DestructuringAssignment) RETURNS []DestructureTarget ->
+  RETURN COPY self.targets;
+END
+PUB FN distinctOp__expression(self: DistinctOp) RETURNS ?Locatable@boxed ->
+  RETURN COPY self.expression;
+END
+PUB FN funcCall__name(self: FuncCall) RETURNS CallName@boxed ->
+  RETURN COPY self.name;
+END
+PUB FN matchCase__extra_values(self: MatchCase) RETURNS []Locatable ->
+  RETURN COPY self.extra_values;
+END
+PUB FN matchCase__kind(self: MatchCase) RETURNS String@symbol ->
+  RETURN COPY self.kind;
+END
+PUB FN matchCase__value(self: MatchCase) RETURNS Locatable@boxed ->
+  RETURN COPY self.value;
+END
+PUB FN matchStatement__expr(self: MatchStatement) RETURNS Locatable@boxed ->
+  RETURN COPY self.expr;
+END
+PUB FN methodCall__source_method_name(self: MethodCall) RETURNS ?String ->
+  RETURN COPY self.source_method_name;
+END
+PUB FN reduceOp__expression(self: ReduceOp) RETURNS ?Locatable@boxed ->
+  RETURN COPY self.expression;
+END
+PUB FN unionDef__type_params(self: UnionDef) RETURNS []String ->
+  RETURN COPY self.type_params;
+END
+PUB FN varDecl__module_const(self: VarDecl) RETURNS ?Bool ->
+  RETURN COPY self.module_const;
+END
