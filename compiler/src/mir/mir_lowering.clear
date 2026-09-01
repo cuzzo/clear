@@ -6395,7 +6395,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__with_bg_fiber_body_context(rtoc_self_view, pointer_captures, blk);
 }
 END
-PUB FN mIRLowering__fsm_cap_metadata(self: MIRLowering, cap: CapabilityTransition, with_node: WithBlock, ctx_id: Int64, captured: {String}Type) RETURNS !?{String@symbol}FsmCapMetadataValue
+PUB FN mIRLowering__fsm_cap_metadata(self: MIRLowering, cap: CapabilityTransition, with_node: WithBlock, ctx_id: Int64, captured: {String}Type@multiowned) RETURNS !?{String@symbol}FsmCapMetadataValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

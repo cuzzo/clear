@@ -786,12 +786,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.lifetime;
 }
 END
-PUB FN symbolEntry__tied_lifetime(sources: []SymbolEntry) RETURNS ![]SymbolEntry@multiowned ->
+PUB FN symbolEntry__tied_lifetime(sources: []SymbolEntry@multiowned) RETURNS ![]SymbolEntry@multiowned ->
   RETURN TRY (symbolEntry__unique_sources(sources));
 END
 # Ruby's `sources.uniq` keeps an Array; DISTINCT yields a set, and a set of
 # retained handles compares by payload rather than by identity.
-PRIVATE FN symbolEntry__unique_sources(sources: []SymbolEntry) RETURNS ![]SymbolEntry@multiowned ->
+PRIVATE FN symbolEntry__unique_sources(sources: []SymbolEntry@multiowned) RETURNS ![]SymbolEntry@multiowned ->
   MUTABLE seen: [Set]Int64 = Set[];
   MUTABLE unique: []SymbolEntry@multiowned = List[];
   FOR source IN sources DO

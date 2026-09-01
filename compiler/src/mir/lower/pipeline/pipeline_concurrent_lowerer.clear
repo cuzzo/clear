@@ -1261,7 +1261,7 @@ PUB FN pipelineConcurrentLowerer__lower_head_with_placeholder_call(self: Pipelin
   MUTABLE fn_value = self.lower_head_with_placeholder;
   RETURN fn_value(arg0, arg1);
 END
-PUB FN pipelineConcurrentLowerer__callback_expr_mir_call(self: PipelineConcurrentLowerer, arg0: Locatable, arg1: String, arg2: {String}String, arg3: {String}SymbolEntry, arg4: String) RETURNS Emittable ->
+PUB FN pipelineConcurrentLowerer__callback_expr_mir_call(self: PipelineConcurrentLowerer, arg0: Locatable, arg1: String, arg2: {String}String, arg3: {String}SymbolEntry@multiowned, arg4: String) RETURNS Emittable ->
   MUTABLE fn_value = self.callback_expr_mir;
   RETURN fn_value(arg0, arg1, arg2, arg3, arg4);
 END

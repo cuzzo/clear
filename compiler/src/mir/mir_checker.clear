@@ -1129,7 +1129,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__normalize_guarded_conditional_releases_mut(self: MIRChecker, states: []LinearOwnershipState) RETURNS Void
+PUB FN mIRChecker__normalize_guarded_conditional_releases_mut(self: MIRChecker, states: []LinearOwnershipState@multiowned) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

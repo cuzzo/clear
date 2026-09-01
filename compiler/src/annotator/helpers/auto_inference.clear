@@ -507,7 +507,7 @@ FN autoUnifier__default_type_of(node: Locatable) RETURNS !?AutoConstraintCollect
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN NIL;
 END
-FN autoUnifier__initialize(MUTABLE self: AutoUnifier, slots: {AutoSlotId}Slot, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS Void
+FN autoUnifier__initialize(MUTABLE self: AutoUnifier, slots: {AutoSlotId}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -714,7 +714,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
 }
 END
-PUB FN autoUnifier__new(slots: {AutoSlotId}Slot, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS AutoUnifier@multiowned ->
+PUB FN autoUnifier__new(slots: {AutoSlotId}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS AutoUnifier@multiowned ->
   MUTABLE self = AutoUnifier{ slots: COPY slots, type_of: (COPY type_of OR_ELSE autoUnifier__default_type_of) };
   autoUnifier__initialize(&self, slots, type_of);
   RETURN self @multiowned;
@@ -724,7 +724,7 @@ STRUCT ShapeEvidenceCollector {
   slots: {AutoSlotId@multiowned}Slot@multiowned
 }
 
-FN shapeEvidenceCollector__initialize(MUTABLE self: ShapeEvidenceCollector, slots: {AutoSlotId}Slot, fn_nodes: {String}FunctionDef) RETURNS Void
+FN shapeEvidenceCollector__initialize(MUTABLE self: ShapeEvidenceCollector, slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -806,7 +806,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN shapeEvidenceCollector__walk(self: ShapeEvidenceCollector, node: ?AutoInferenceWalkNode, name_map: {String}AutoShapeSlots) RETURNS !Void
+PRIVATE FN shapeEvidenceCollector__walk(self: ShapeEvidenceCollector, node: ?AutoInferenceWalkNode, name_map: {String}AutoShapeSlots@multiowned) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -839,7 +839,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN shapeEvidenceCollector__record_method_call(self: ShapeEvidenceCollector, call: MethodCall, name_map: {String}AutoShapeSlots) RETURNS !Void
+PRIVATE FN shapeEvidenceCollector__record_method_call(self: ShapeEvidenceCollector, call: MethodCall, name_map: {String}AutoShapeSlots@multiowned) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -876,7 +876,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ((UNWRAP (slots.value)).sources).append(COPY UNWRAP (args[1]));
 }
 END
-PRIVATE FN shapeEvidenceCollector__record_index_assign(self: ShapeEvidenceCollector, assign: Assignment, name_map: {String}AutoShapeSlots) RETURNS Void
+PRIVATE FN shapeEvidenceCollector__record_index_assign(self: ShapeEvidenceCollector, assign: Assignment, name_map: {String}AutoShapeSlots@multiowned) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -906,7 +906,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN shapeEvidenceCollector__new(slots: {AutoSlotId}Slot, fn_nodes: {String}FunctionDef) RETURNS ShapeEvidenceCollector@multiowned ->
+PUB FN shapeEvidenceCollector__new(slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS ShapeEvidenceCollector@multiowned ->
   MUTABLE self = ShapeEvidenceCollector{ fn_nodes: COPY fn_nodes, slots: COPY slots };
   shapeEvidenceCollector__initialize(&self, slots, fn_nodes);
   RETURN self @multiowned;
@@ -917,7 +917,7 @@ STRUCT OperatorEvidenceCollector {
   slots: {AutoSlotId@multiowned}Slot@multiowned
 }
 
-FN operatorEvidenceCollector__initialize(MUTABLE self: OperatorEvidenceCollector, slots: {AutoSlotId}Slot, fn_nodes: {String}FunctionDef) RETURNS Void
+FN operatorEvidenceCollector__initialize(MUTABLE self: OperatorEvidenceCollector, slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1003,7 +1003,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN operatorEvidenceCollector__walk_binops(self: OperatorEvidenceCollector, node: ?AutoInferenceWalkNode, name_to_slot: {String}AutoSlotId, fn_value: FunctionDef) RETURNS Void
+PRIVATE FN operatorEvidenceCollector__walk_binops(self: OperatorEvidenceCollector, node: ?AutoInferenceWalkNode, name_to_slot: {String}AutoSlotId@multiowned, fn_value: FunctionDef) RETURNS Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1055,7 +1055,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN operatorEvidenceCollector__record_binop(self: OperatorEvidenceCollector, binop: BinaryOp, name_to_slot: {String}AutoSlotId) RETURNS Void
+PRIVATE FN operatorEvidenceCollector__record_binop(self: OperatorEvidenceCollector, binop: BinaryOp, name_to_slot: {String}AutoSlotId@multiowned) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1090,7 +1090,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PUB FN operatorEvidenceCollector__new(slots: {AutoSlotId}Slot, fn_nodes: {String}FunctionDef) RETURNS OperatorEvidenceCollector@multiowned ->
+PUB FN operatorEvidenceCollector__new(slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS OperatorEvidenceCollector@multiowned ->
   MUTABLE self = OperatorEvidenceCollector{ evidence: {}, fn_nodes: COPY fn_nodes, slots: COPY slots };
   operatorEvidenceCollector__initialize(&self, slots, fn_nodes);
   RETURN self @multiowned;

@@ -22417,7 +22417,7 @@ FN ruby_array_concat_Edit__type_analysis_session(left: []Edit, right: []Edit) RE
   END
   RETURN result;
 END
-FN ruby_array_concat_SymbolEntry_multiowned(left: []SymbolEntry, right: []SymbolEntry) RETURNS []SymbolEntry@multiowned ->
+FN ruby_array_concat_SymbolEntry_multiowned(left: []SymbolEntry, right: []SymbolEntry@multiowned) RETURNS []SymbolEntry@multiowned ->
   MUTABLE result: []SymbolEntry@multiowned = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);

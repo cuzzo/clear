@@ -47,7 +47,7 @@ PUB STRUCT CapabilityTargetFact {
 FN capabilityTargetFact__lock_identity(self: CapabilityTargetFact) RETURNS !?String@symbol ->
   RETURN TRY (type__base_type(self.resolved_type));
 END
-FN capabilityTargetFact__with_source_entry(self: CapabilityTargetFact, live_symbols: {String}SymbolEntry, key: String) RETURNS !CapabilityTargetFact ->
+FN capabilityTargetFact__with_source_entry(self: CapabilityTargetFact, live_symbols: {String}SymbolEntry@multiowned, key: String) RETURNS !CapabilityTargetFact ->
   IF live_symbols[key] EXISTS AS source_entry_value THEN
     RETURN CapabilityTargetFact{ var_node: COPY self.var_node, var_name: COPY self.var_name, target_label: COPY self.target_label, field_target: self.field_target, index_target: self.index_target, resolved_type: COPY self.resolved_type, old_scope: KEEP self.old_scope, source_entry: KEEP source_entry_value, source_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY symbolEntry__type(source_entry_value) })), sync: ( { MUTABLE rtoc_optional_or_source_1: ?String@symbol = symbolEntry__sync(source_entry_value); MUTABLE rtoc_optional_or_result_2: ?String@symbol = NIL; IF rtoc_optional_or_source_1 != NIL THEN rtoc_optional_or_result_2 = COPY rtoc_optional_or_source_1; ELSE rtoc_optional_or_result_2 = type__sync(self.resolved_type); END rtoc_optional_or_result_2 } ), storage: COPY symbolEntry__storage(source_entry_value), layout: ( { MUTABLE rtoc_optional_or_source_3: ?String@symbol = symbolEntry__layout(source_entry_value); MUTABLE rtoc_optional_or_result_4: ?String@symbol = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = type__layout(self.resolved_type); END rtoc_optional_or_result_4 } ), live_symbol_refreshed: TRUE };
   ELSE
@@ -192,7 +192,7 @@ FN capabilityTransition__admits_atomic?(self: CapabilityTransition) RETURNS Bool
     RETURN FALSE;
   END
 END
-FN capabilityTransition__with_source_entry(self: CapabilityTransition, live_symbols: {String}SymbolEntry, key: String) RETURNS !CapabilityTransition EFFECTS REENTRANT ->
+FN capabilityTransition__with_source_entry(self: CapabilityTransition, live_symbols: {String}SymbolEntry@multiowned, key: String) RETURNS !CapabilityTransition EFFECTS REENTRANT ->
   MUTABLE refreshed_target = TRY (capabilityTargetFact__with_source_entry(self.target, live_symbols, key));
   RETURN TRY (capabilityPlan__transition_from(self.request, refreshed_target, self.borrowed_qualifier));
 END
@@ -221,7 +221,7 @@ END
 PUB FN withCapabilityPlan__first_transition(self: WithCapabilityPlan) RETURNS CapabilityTransition ->
   RETURN COPY UNWRAP (self.all.first());
 END
-FN withCapabilityPlan__refresh_live_symbols(self: WithCapabilityPlan, live_symbols: {String}SymbolEntry) RETURNS !WithCapabilityPlan ->
+FN withCapabilityPlan__refresh_live_symbols(self: WithCapabilityPlan, live_symbols: {String}SymbolEntry@multiowned) RETURNS !WithCapabilityPlan ->
   MUTABLE refreshed = WithCapabilityPlan{ all: List[] };
   FOR _ IN self.all DO
   withCapabilityPlan__add(&refreshed, TRY (capabilityTransition__with_source_entry(_, live_symbols, _.var_name)));

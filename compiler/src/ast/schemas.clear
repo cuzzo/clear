@@ -146,7 +146,7 @@ PUB STRUCT ResourceSchema {
 PUB UNION SchemasResourceSchemaFieldMetadataValue { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Locatable: Locatable, BoolValue: Bool, Type: Type }
 PUB UNION SchemasResourceSchemaFieldInput { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, StructFieldMultiowned: StructField@multiowned, HashMapValue: {String@symbol}SchemasResourceSchemaFieldMetadataValue, Type: Type, StructField: StructField }
 PUB UNION SchemasResourceSchemaStaticMethodValue { ArrayValue: []String@symbol, SymbolValue: String@symbol, StringValue: String, BoolValue: Bool }
-FN resourceSchema__initialize(MUTABLE self: ResourceSchema, close_plan: ResourceClosePlan, static_methods: {String}{String@symbol}SchemasResourceSchemaStaticMethodValue, fields: {String@symbol}SchemasResourceSchemaFieldInput, type_params: []String@symbol, extern_module: ?String = NIL, as_type: ?String = NIL, visibility: String@symbol = :package, methods: {String@symbol}FunctionSignature) RETURNS !Void
+FN resourceSchema__initialize(MUTABLE self: ResourceSchema, close_plan: ResourceClosePlan, static_methods: {String}{String@symbol}SchemasResourceSchemaStaticMethodValue, fields: {String@symbol}SchemasResourceSchemaFieldInput, type_params: []String@symbol, extern_module: ?String = NIL, as_type: ?String = NIL, visibility: String@symbol = :package, methods: {String@symbol}FunctionSignature@multiowned) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -268,7 +268,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
 }
 END
-PUB FN resourceSchema__new(close_plan: ResourceClosePlan, static_methods: {String}{String@symbol}SchemasResourceSchemaStaticMethodValue, fields: {String@symbol}SchemasResourceSchemaFieldInput, type_params: []String@symbol, extern_module: ?String = NIL, as_type: ?String = NIL, visibility: String@symbol = :package, methods: {String@symbol}FunctionSignature) RETURNS !ResourceSchema@multiowned ->
+PUB FN resourceSchema__new(close_plan: ResourceClosePlan, static_methods: {String}{String@symbol}SchemasResourceSchemaStaticMethodValue, fields: {String@symbol}SchemasResourceSchemaFieldInput, type_params: []String@symbol, extern_module: ?String = NIL, as_type: ?String = NIL, visibility: String@symbol = :package, methods: {String@symbol}FunctionSignature@multiowned) RETURNS !ResourceSchema@multiowned ->
   MUTABLE self = ResourceSchema{ as_type: COPY as_type, close_plan: COPY close_plan, extern_module: COPY extern_module, fields: {}, methods: COPY methods, static_methods: COPY static_methods, type_params: COPY type_params, visibility: COPY visibility };
   TRY (resourceSchema__initialize(&self, close_plan, static_methods, fields, type_params, extern_module, as_type, visibility, methods));
   RETURN self @multiowned;
@@ -458,7 +458,7 @@ PUB STRUCT StructSchema {
 
 PUB UNION SchemasStructSchemaFieldMetadataValue { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Locatable: Locatable, BoolValue: Bool, Type: Type }
 PUB UNION SchemasStructSchemaFieldInput { FunctionType: FunctionType, TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, StructFieldMultiowned: StructField@multiowned, HashMapValue: {String@symbol}SchemasStructSchemaFieldMetadataValue, Type: Type, StructField: StructField }
-FN structSchema__initialize(MUTABLE self: StructSchema, fields: {String@symbol}SchemasStructSchemaFieldInput, type_params: []String@symbol, generic_params: []GenericParamDecl, methods: {String@symbol}FunctionSignature, static_methods: {String@symbol}FunctionSignature, visibility: String@symbol = :package, extern_module: ?String = NIL, as_type: ?String = NIL) RETURNS !Void
+FN structSchema__initialize(MUTABLE self: StructSchema, fields: {String@symbol}SchemasStructSchemaFieldInput, type_params: []String@symbol, generic_params: []GenericParamDecl, methods: {String@symbol}FunctionSignature@multiowned, static_methods: {String@symbol}FunctionSignature@multiowned, visibility: String@symbol = :package, extern_module: ?String = NIL, as_type: ?String = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -611,7 +611,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
 }
 END
-PUB FN structSchema__new(fields: {String@symbol}SchemasStructSchemaFieldInput, type_params: []String@symbol, generic_params: []GenericParamDecl, methods: {String@symbol}FunctionSignature, static_methods: {String@symbol}FunctionSignature, visibility: String@symbol = :package, extern_module: ?String = NIL, as_type: ?String = NIL) RETURNS !StructSchema@multiowned ->
+PUB FN structSchema__new(fields: {String@symbol}SchemasStructSchemaFieldInput, type_params: []String@symbol, generic_params: []GenericParamDecl, methods: {String@symbol}FunctionSignature@multiowned, static_methods: {String@symbol}FunctionSignature@multiowned, visibility: String@symbol = :package, extern_module: ?String = NIL, as_type: ?String = NIL) RETURNS !StructSchema@multiowned ->
   MUTABLE self = StructSchema{ as_type: COPY as_type, extern_module: COPY extern_module, fields: {}, generic_params: COPY generic_params, methods: COPY methods, static_methods: COPY static_methods, type_params: COPY type_params, visibility: COPY visibility };
   TRY (structSchema__initialize(&self, fields, type_params, generic_params, methods, static_methods, visibility, extern_module, as_type));
   RETURN self @multiowned;
