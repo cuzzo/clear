@@ -25,7 +25,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
     panic("IoSuspend missing stdlib_def");
   END
   MUTABLE id = ctx.id;
-  MUTABLE em = stdlib_def.emit();
+  MUTABLE em = functionSignature__emit(UNWRAP (stdlib_def));
   MUTABLE setup_ops: []Any = List[];
   IF em != NIL THEN
     setup_ops = COPY em.fsm_setup;

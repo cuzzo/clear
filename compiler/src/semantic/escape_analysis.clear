@@ -1559,7 +1559,7 @@ PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbol
   escapeAnalysis__record_symbol_fact_mut(node, &symbols);
   MUTABLE value: ?Locatable = NIL;
   IF (node IS_A VarDecl OR node IS_A BindExpr) THEN
-    value = node.value();
+    value = aST__node_value(UNWRAP (castBindingNodeToLocatable(node)));
   END
   IF !((value != NIL)) THEN
     RETURN;

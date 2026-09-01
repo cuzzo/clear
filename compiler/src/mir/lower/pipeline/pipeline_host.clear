@@ -887,7 +887,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
     MUTABLE smooth_node = COPY site.options;
     MUTABLE len_expr_branch_value: ?MIRCast = NIL;
-    IF lhs_type.pool?() THEN
+    IF type__pool?(lhs_type) THEN
       len_expr_branch_value = MIRCast{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__soa_src", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "live_count", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL };
     ELSE
       len_expr_branch_value = MIRCast{ expr: Emittable{ ListLength: COPY ListLength{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__soa_src", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL };

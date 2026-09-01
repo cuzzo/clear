@@ -671,7 +671,7 @@ PRIVATE FN capabilityAuditSession__variant_anchor_from_unionlit(self: Capability
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(node.token()) THEN
+    IF !(locatable__token(UNWRAP (castNodeToLocatable(node)))) THEN
       RETURN NIL;
     END
     RETURN capabilityAuditSession__anchor_at(rtoc_self_view, node.token().line, (node.token().column - variant_name.codepointCount()));
@@ -1342,7 +1342,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < missing_caps.length() DO
       MUTABLE vn = COPY missing_caps[rtoc_idx]?.var_node;
-      IF !(((IF UNWRAP (vn) IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) AND vn.token())) THEN
+      IF !(((IF UNWRAP (vn) IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) AND locatable__token(UNWRAP (vn)))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

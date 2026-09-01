@@ -302,6 +302,11 @@ module SelfhostFnProbe
       msg ||= text.lines.grep(/Error|error/).reject { |l| l.include?('[Warning]') }
                   .reject { |l| l =~ /\A\s*(from|\t)/ }.last.to_s.strip
       msg = text.lines.reject { |l| l.include?('[Warning]') || l.strip.empty? }.last(2).join(' ').strip if msg.empty?
+      # The MIR checker prints its violations after the banner, and the banner
+      # alone says nothing about which invariant broke.
+      if (violations = text[/MIR ownership verification failed[^\n]*\n\n(.+)/m, 1])
+        msg = "MIR ownership: #{violations.lines.first(2).join(' ').strip}"
+      end
       [status.success?, msg.to_s.gsub(/\e\[[0-9;]*m/, '')[0, 200], probe_line]
     end
   end
