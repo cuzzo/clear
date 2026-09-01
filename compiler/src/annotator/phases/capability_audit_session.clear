@@ -592,7 +592,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < a.length() DO
-      MUTABLE curr = [(rtoc_idx + 1)];
+      MUTABLE curr: []Int64 = [(rtoc_idx + 1)];
       MUTABLE rtoc_idx_n2 = 0;
       WHILE rtoc_idx_n2 < b.length() DO
           MUTABLE cost = IF (a.substr(rtoc_idx, 1) == b.substr(rtoc_idx_n2, 1)) THEN
@@ -600,10 +600,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             ELSE
               1
             END;
-          &curr.append(([(UNWRAP (curr[rtoc_idx_n2]) + 1), (prev[(rtoc_idx_n2 + 1)] + 1), (prev[rtoc_idx_n2] + cost)]).min());
+          &curr.append(min(min(((UNWRAP (curr[rtoc_idx_n2])) + 1), ((UNWRAP (prev[(rtoc_idx_n2 + 1)])) + 1)), ((UNWRAP (prev[rtoc_idx_n2])) + cost)));
         rtoc_idx_n2 = rtoc_idx_n2 + 1;
       END
-      prev = curr;
+      prev = COPY curr;
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN UNWRAP (prev.last());
