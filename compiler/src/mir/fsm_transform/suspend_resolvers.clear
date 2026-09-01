@@ -146,7 +146,7 @@ PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitCo
     &ctx_field_decls.append(suspendResolvers__ctx_field_decl(captured_promise_guard_name_value, "bool", Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }));
   END
   IF (result_var AND (inner_zig != NIL)) THEN
-    &ctx_field_decls.append(suspendResolvers__ctx_field_decl( UNWRAP (result_var), UNWRAP (inner_zig), Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }));
+    &ctx_field_decls.append(suspendResolvers__ctx_field_decl( UNWRAP (result_var), inner_zig, Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }));
     IF result_needs_cleanup THEN
       &ctx_field_decls.append(suspendResolvers__fsm_owned_guard_decl( UNWRAP (result_var)));
     END

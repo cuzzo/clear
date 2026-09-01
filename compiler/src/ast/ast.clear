@@ -6359,7 +6359,7 @@ PUB FN aST__soa_placeholder_assignment?(node: ?Locatable) RETURNS Bool ->
   RETURN FALSE;
 END
 PUB FN aST__moved?(node: ?Locatable) RETURNS Bool ->
-  RETURN !(!((((node != NIL) AND (locatable__was_moved( UNWRAP (node)) == TRUE)))));
+  RETURN !(!((((node != NIL) AND (locatable__was_moved(node) == TRUE)))));
 END
 # Ruby module AST::HasBodies
 STRUCT PipelineShardContext {

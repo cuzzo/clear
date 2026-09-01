@@ -396,7 +396,7 @@ PRIVATE FN hoist__composite_element_store?(call: MethodCall) RETURNS !Bool ->
     RETURN FALSE;
   END
   MUTABLE et: ?Type = TRY (type__element_type(ti));
-  RETURN !(!(((((et != NIL) AND !(type__primitive?( UNWRAP (et)))) AND !(TRY (type__string?( UNWRAP (et))))))));
+  RETURN !(!(((((et != NIL) AND !(type__primitive?(et))) AND !(TRY (type__string?(et)))))));
 END
 PRIVATE FN hoist__empty_list_literal?(node: ?Locatable) RETURNS Bool ->
   RETURN (IF node? IS_A ListLit AS list_lit THEN list_lit.items.empty?() ELSE FALSE END);

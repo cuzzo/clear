@@ -106,6 +106,13 @@ texts.each_key do |path|
       got = type_of(lines, line_no, arg.strip, returns)
       next unless got&.start_with?('?')
       next unless got.delete_prefix('?') == want
+      # A nil check or an EXISTS narrowing above already made it non-optional
+      # here, and unwrapping again is UNWRAP_NON_OPTIONAL.
+      name = arg.strip
+      window = lines[[0, line_no - 15].max..line_no].join
+      next if window =~ /#{Regexp.escape(name)}\s*(?:!=|==)\s*NIL/ ||
+              window =~ /#{Regexp.escape(name)}\s+EXISTS/ ||
+              window =~ /IS_A\s+[\w@?\[\]{}]+\s+AS\s+#{Regexp.escape(name)}\b/
 
       skipped[:candidates] += 1
       edits << [start, start + arg.length, " UNWRAP (#{arg.strip})"]

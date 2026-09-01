@@ -372,7 +372,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__bounded_concurrent_task_cfg_mir(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS StructInit ->
   MUTABLE size_node: ?Locatable = pipelineConcurrentLowerer__concurrent_option(self, conc_op, "size");
   MUTABLE size_name: ?String@symbol = IF ((size_node != NIL) AND (size_node IS_A Identifier)) THEN
-    type__to_sym(locatable__name( UNWRAP (size_node)).downcase())
+    type__to_sym(locatable__name(size_node).downcase())
   ELSE
     NIL
   END;
@@ -779,7 +779,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__shard_task_config_variant(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS String ->
   MUTABLE size_node: ?Locatable = pipelineConcurrentLowerer__concurrent_option(self, conc_op, "size");
   MUTABLE size_name: ?String@symbol = IF ((size_node != NIL) AND (size_node IS_A Identifier)) THEN
-    type__to_sym(locatable__name( UNWRAP (size_node)).downcase())
+    type__to_sym(locatable__name(size_node).downcase())
   ELSE
     NIL
   END;

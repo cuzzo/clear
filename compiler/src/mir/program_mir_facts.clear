@@ -74,7 +74,7 @@ PRIVATE FN programMIRFinalizer__function_needs_runtime?(function: FunctionDef, c
   IF programMIRFinalizer__params_need_runtime_cleanup?(function.params) THEN
     RETURN TRUE;
   END
-  IF ((cleanup != NIL) AND programMIRFinalizer__runtime_cleanup_facts?( UNWRAP (cleanup))) THEN
+  IF ((cleanup != NIL) AND programMIRFinalizer__runtime_cleanup_facts?(cleanup)) THEN
     RETURN TRUE;
   END
   MUTABLE found: Bool = FALSE;
@@ -114,7 +114,7 @@ PRIVATE FN programMIRFinalizer__generic_direct_parameter_return?(function: Funct
 END
 PRIVATE FN programMIRFinalizer__generic_projection_return?(function: FunctionDef) RETURNS Bool ->
   MUTABLE return_type: ?Type = COPY function.return_type;
-  IF !(((return_type != NIL) AND type__generic_type_parameter?( UNWRAP (return_type)))) THEN
+  IF !(((return_type != NIL) AND type__generic_type_parameter?(return_type))) THEN
     RETURN FALSE;
   END
   MUTABLE returns: []ReturnNode = ( { MUTABLE rtoc_empty_list_1: []ReturnNode = List[]; rtoc_empty_list_1 } );
@@ -131,7 +131,7 @@ PRIVATE FN programMIRFinalizer__generic_projection_return?(function: FunctionDef
 END
 PRIVATE FN programMIRFinalizer__generic_returned_parameter_name(function: FunctionDef) RETURNS ?String ->
   MUTABLE return_type: ?Type = COPY function.return_type;
-  IF !(((return_type != NIL) AND type__generic_type_parameter?( UNWRAP (return_type)))) THEN
+  IF !(((return_type != NIL) AND type__generic_type_parameter?(return_type))) THEN
     RETURN NIL;
   END
   MUTABLE returns: []ReturnNode = ( { MUTABLE rtoc_empty_list_2: []ReturnNode = List[]; rtoc_empty_list_2 } );

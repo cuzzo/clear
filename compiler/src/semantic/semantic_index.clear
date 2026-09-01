@@ -22,7 +22,7 @@ PUB FN semanticIndex__from_products(annotation_products: AnnotationProducts, id_
   IF !((((resolution != NIL) AND (typed_program != NIL)) AND (audit != NIL))) THEN
     panic("semantic index requires complete annotation products");
   END
-  IF !(capabilityAuditReport__success?( UNWRAP (audit))) THEN
+  IF !(capabilityAuditReport__success?(audit)) THEN
     panic("semantic index requires a successful capability audit");
   END
   IF !(annotation_products.frozen?()) THEN

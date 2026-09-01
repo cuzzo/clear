@@ -1123,7 +1123,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE loop_name: ?String = COPY header_value.loop_name;
         MUTABLE loop_binding: ?Locatable = COPY header_value.loop_binding;
         IF ((loop_name != NIL) AND (loop_binding != NIL)) THEN
-          TRY (ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, UNWRAP (loop_name), UNWRAP (loop_binding)));
+          TRY (ownershipDataflow__update_declared_owner_mut(rtoc_self_view, state, loop_name, loop_binding));
         END
       ELSE
         FOR _ IN (TRY (ownershipDataflow__collect_explicit_move_places(rtoc_self_view, stmt, state))) DO
