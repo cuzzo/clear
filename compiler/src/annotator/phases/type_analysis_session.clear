@@ -4183,7 +4183,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(type__fn_type?(facts.actual_type)) THEN
       RETURN FALSE;
     END
-    MUTABLE actual_sig: ?Any@multiowned = type__function_signature(facts.actual_type);
+    MUTABLE actual_sig: ?FunctionSignature@multiowned = type__function_signature(facts.actual_type);
     IF actual_sig EXISTS AS actual_sig_value THEN
       IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_78 = CAST(actual_sig_value AS FunctionSignature);
       functionSignature__reentrant(rtoc_local_receiver_78) } THEN
@@ -4211,7 +4211,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(type__fn_type?(facts.actual_type)) THEN
       RETURN FALSE;
     END
-    MUTABLE actual_sig: ?Any@multiowned = type__function_signature(facts.actual_type);
+    MUTABLE actual_sig: ?FunctionSignature@multiowned = type__function_signature(facts.actual_type);
     IF actual_sig EXISTS AS actual_sig_value THEN
       IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_79 = CAST(actual_sig_value AS FunctionSignature);
       functionSignature__reentrant(rtoc_local_receiver_79) } THEN

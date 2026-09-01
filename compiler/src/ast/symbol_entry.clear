@@ -434,7 +434,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE function_type: ?FunctionType = type__function_type(symbolEntry__type(rtoc_self_view));
     IF function_type EXISTS AS function_type_value THEN
       IF function_type_value.source_signature EXISTS AS signature_value THEN
-        RETURN NIL;
+        PARTIAL MATCH signature_value START
+          TypeSourceSignature.FunctionSignature AS rtoc_memoized -> RETURN COPY rtoc_memoized;,
+          DEFAULT -> RETURN NIL;
+        END
       ELSE
         RETURN NIL;
       END

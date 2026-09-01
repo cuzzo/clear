@@ -356,10 +356,11 @@ PUB FN functionSignature__unwrap(x: ?X) RETURNS ?FunctionSignature@multiowned ->
     MUTABLE type = COPY type;
     MUTABLE function_type: ?FunctionType = type__function_type(type);
     IF function_type EXISTS AS function_type_value THEN
-      # The slot records only whether type.clear memoized a signature; that
-      # module sits below FunctionSignature and cannot name it.
       IF function_type_value.source_signature EXISTS AS source_signature_value THEN
-        RETURN NIL;
+        PARTIAL MATCH source_signature_value START
+          TypeSourceSignature.FunctionSignature AS rtoc_memoized -> RETURN COPY rtoc_memoized;,
+          DEFAULT -> RETURN NIL;
+        END
       END
     ELSE
       RETURN NIL;

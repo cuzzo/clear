@@ -70,7 +70,11 @@ PUB FN type__capacity_text(capacity: ?TypeArrayCapacity) RETURNS String ->
   END
   RETURN "";
 END
-PUB UNION TypeSourceSignature { Unset: Bool }
+# `ast/type.clear` and `annotator/helpers/function_signature.clear` are the same
+# package (scc_function_return_24 -- they are mutually recursive), so the slot
+# can hold the signature Ruby memoizes here rather than a flag standing in for
+# one.
+PUB UNION TypeSourceSignature { FunctionSignature: FunctionSignature@multiowned }
 PUB UNION TypeArrayCapacity { Int64Value: Int64, SymbolValue: String@symbol }
 PUB STRUCT FunctionTypeParam {
   type: Type
@@ -5063,4 +5067,16 @@ END
 
 PUB FN type__slice_shaped_field_array?(self: Type) RETURNS Bool ->
   RETURN ((type__array?(self) AND type__dynamic?(self)) AND !(type__list_collection?(self)));
+END
+
+PUB FN type__function_signature(self: Type) RETURNS ?FunctionSignature@multiowned ->
+  IF type__function_type(self) EXISTS AS rtoc_fn_type THEN
+    IF rtoc_fn_type.source_signature EXISTS AS rtoc_slot THEN
+      PARTIAL MATCH rtoc_slot START
+        TypeSourceSignature.FunctionSignature AS rtoc_signature -> RETURN COPY rtoc_signature;,
+        DEFAULT -> RETURN NIL;
+      END
+    END
+  END
+  RETURN NIL;
 END
