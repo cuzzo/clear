@@ -837,7 +837,8 @@ PUB FN functionSignature__merge_imported_signatures_mut(MUTABLE sigs: {String@sy
     IF sigs[rtoc_key] != NIL THEN
       CONTINUE;
     END
-    IF symbolEntry__fn_signature(UNWRAP (visible[rtoc_name])) EXISTS AS rtoc_imported THEN
+    MUTABLE rtoc_entry: SymbolEntry@multiowned = UNWRAP (visible[rtoc_name]);
+    IF symbolEntry__fn_signature(rtoc_entry) EXISTS AS rtoc_imported THEN
       IF functionSignature__module_alias(rtoc_imported) != NIL THEN
         sigs[rtoc_key] = COPY rtoc_imported;
       END
