@@ -1758,7 +1758,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (FALSE OR ops.empty?()) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_3: []AutoCandidate = List[]; rtoc_empty_list_3 } ) AS []AutoCandidate);
     END
-    MUTABLE agg = {};
+    MUTABLE agg: {String@symbol}AutoCandidateStat = {};
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < ops.length() DO
       MUTABLE entry: ?{String@symbol}Any@multiowned = COPY (CAST({:ADD: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :CONCAT: CAST({:default: :String, :alts: List[]} AS {String@symbol}Any@multiowned), :SUB: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :MUL: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :DIV: CAST({:default: :Float64, :alts: [:Int64], :notes: {:Int64: "integer division \u{2014} TRUNCATES toward zero"}} AS {String@symbol}Any@multiowned), symbol("MOD"): CAST({:default: :Int64, :alts: List[]} AS {String@symbol}Any@multiowned), :EQ: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :NEQ: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :LT: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :GT: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :LTE: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :GTE: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), symbol("AND"): CAST({:default: :Bool, :alts: List[]} AS {String@symbol}Any@multiowned), symbol("OR"): CAST({:default: :Bool, :alts: List[]} AS {String@symbol}Any@multiowned)} AS {String@symbol}{String@symbol}Any@multiowned))[ops[rtoc_idx]];
@@ -1772,25 +1772,28 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE ranked = ([default] + alts);
       MUTABLE rtoc_idx_n3 = 0;
       WHILE rtoc_idx_n3 < ranked.length() DO
-          MUTABLE stat: ?Any = COPY agg[ranked[rtoc_idx_n3]];
-          IF !(stat) THEN
-              stat = {:count: 0, :rank_sum: 0, :notes: List[]};
-              agg[ranked[rtoc_idx_n3]] = UNWRAP (stat);
+          MUTABLE stat: AutoCandidateStat = (agg[ranked[rtoc_idx_n3]] OR_ELSE AutoCandidateStat{ count: 0, rank_sum: 0, notes: List[] });
+          stat.count = (stat.count + 1);
+          stat.rank_sum = (stat.rank_sum + rtoc_idx_n3);
+          IF notes[ranked[rtoc_idx_n3]] EXISTS AS rtoc_note THEN
+              &stat.notes.append(COPY rtoc_note);
           END
-          stat[:count] = (CAST(stat[:count] AS Int64) + 1);
-          stat[:rank_sum] = (CAST(stat[:rank_sum] AS Int64) + rtoc_idx_n3);
-          IF notes[ranked[rtoc_idx_n3]] THEN
-              (CAST(stat[:notes] AS []String)).append(UNWRAP (notes[ranked[rtoc_idx_n3]]));
-          END
+          agg[ranked[rtoc_idx_n3]] = stat;
         rtoc_idx_n3 = rtoc_idx_n3 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE n_ops = ops.size();
-    MUTABLE intersection = agg |> WHERE (_._1[:count] == n_ops);
-    RETURN (intersection |> ORDER_BY _._1[:rank_sum]).keys() |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY (CAST(((CAST(((intersection |> ORDER_BY _._1[:rank_sum])[_] OR_ELSE panic("missing hash key"))[:notes] AS []String)) |> DISTINCT _) AS []String)).first() };
+    MUTABLE intersection = agg |> WHERE (_._1.count == n_ops);
+    MUTABLE ordered = intersection |> ORDER_BY _._1.rank_sum;
+    RETURN ordered.keys() |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY ((UNWRAP (ordered[_])).notes |> DISTINCT _).first() };
 }
 END
+PUB STRUCT AutoCandidateStat {
+  count: Int64,
+  rank_sum: Int64,
+  notes: []String
+}
 PRIVATE FN capabilityAuditSession__build_auto_candidate_fix(self: CapabilityAuditSession, slot: Slot, type_sym: String@symbol, note: ?String, position: Int64) RETURNS !?Fix
   REQUIRES self: LOCAL
 ->
