@@ -15044,7 +15044,7 @@ PUB FN binaryOp__lazy_fields(self: BinaryOp) RETURNS []String@symbol ->
   IF (((self.op == symbol("AND")) OR (self.op == symbol("OR"))) OR (self.op == symbol("OR_ELSE"))) THEN
     RETURN [:right];
   END
-  RETURN List[];
+  RETURN CAST(List[] AS []String@symbol);
 END
 PUB FN capabilityWrap__local_storage_wrap?(self: CapabilityWrap) RETURNS Bool ->
   IF (self.ownership == :local) THEN

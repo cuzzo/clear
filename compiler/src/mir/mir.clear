@@ -14708,7 +14708,7 @@ FN castDeferBodyToEmittable(value: DeferBody) RETURNS []Emittable ->
   IF value IS_A []Emittable AS cast_payload THEN
     RETURN cast_payload;
   END
-  RETURN List[];
+  RETURN CAST(List[] AS []Emittable);
 END
 FN castNameToStringSymbol__mir(value: Name) RETURNS String@symbol ->
   IF value IS_A String@symbol AS cast_payload THEN

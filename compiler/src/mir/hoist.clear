@@ -334,7 +334,7 @@ PRIVATE FN hoist__each_call_like(node: ?Locatable, matches: FN(Locatable) -> Boo
 END
 PRIVATE FN hoist__non_body_exprs(node: Locatable) RETURNS ![]Locatable ->
   IF hoist__pipeline_stage_node?(node) THEN
-    RETURN List[];
+    RETURN CAST(List[] AS []Locatable);
   END
   PARTIAL MATCH node START
     Locatable.IfStatement AS if_statement -> RETURN CAST([COPY if_statement.condition] AS []Locatable);,

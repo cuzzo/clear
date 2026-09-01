@@ -291,7 +291,7 @@ FN castTransformValueToEmittable(value: TransformValue) RETURNS []Emittable ->
   IF value IS_A []Emittable AS cast_payload THEN
     RETURN cast_payload;
   END
-  RETURN List[];
+  RETURN CAST(List[] AS []Emittable);
 END
 FN castTransformValueToHashMapStringResourceClosePlan(value: TransformValue) RETURNS {String}ResourceClosePlan ->
   IF value IS_A {String}ResourceClosePlan AS cast_payload THEN
@@ -309,7 +309,7 @@ FN castTransformValueToString(value: TransformValue) RETURNS []String ->
   IF value IS_A []String AS cast_payload THEN
     RETURN cast_payload;
   END
-  RETURN List[];
+  RETURN CAST(List[] AS []String);
 END
 FN rubyToClearVoid__fsm_transform() RETURNS Void ->
   RETURN;

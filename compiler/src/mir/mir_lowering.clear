@@ -11833,7 +11833,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__with_capability_alias_maps(rtoc_self_view, node, %() USE(materialization, node, with_label, MUTABLE rtoc_self_view) -> {
     IF TRY (mIRLowering__mutable_snapshot_with?(rtoc_self_view, node)) THEN
       withBindingMaterialization__add_binding(materialization, WithBindingNode{ Emittable: castMIRLoweringCapabilitiesReturnValueToEmittable(TRY (mIRLowering__emit_snapshot_mutable_call(&rtoc_self_view, node, with_label))) });
-      RETURN List[];
+      RETURN CAST(List[] AS []Emittable);
     ELSE
       MUTABLE lowered_body = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_455 = (CAST(rtoc_self_view AS MIRLowering@multiowned));
       TRY (mIRLowering__lower_body(&rtoc_mutable_receiver_455, node.body)) };
@@ -20322,7 +20322,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((node.default_case != NIL) AND !(((node.default_case)?).empty?())) THEN
       RETURN TRY (mIRLowering__lower_match_branch(&rtoc_self_view, (node.default_case)?, facts.expr_label));
     END
-    RETURN List[];
+    RETURN CAST(List[] AS []Emittable);
 }
 END
 PRIVATE FN mIRLowering__union_match_arm_plans(MUTABLE self: MIRLowering, c: MatchCase, node: MatchStatement, expr_label: ?String) RETURNS ![]UnionMatchArmPlan

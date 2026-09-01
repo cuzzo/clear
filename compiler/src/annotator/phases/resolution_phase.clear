@@ -837,7 +837,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY struct_schema.generic_params;
     END
     IF builtin_type_parameter_names.contains?(symbol(owner_name)) THEN
-      RETURN List[];
+      RETURN CAST(List[] AS []GenericParamDecl);
     END
     RETURN NIL;
 }

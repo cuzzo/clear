@@ -508,7 +508,7 @@ PRIVATE FN cleanupClassifier__block_body(node: Locatable) RETURNS []Locatable ->
     Locatable.BgBlock AS item -> RETURN COPY item.body;,
     Locatable.BgStreamBlock AS item -> RETURN COPY item.body;
   END
-  RETURN List[];
+  RETURN CAST(List[] AS []Locatable);
 END
 PUB FN cleanupClassifier__classify_cleanup_binding_node(MUTABLE node: BindingNode, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry, MUTABLE entries_by_place: {PlaceId}CleanupEntry) RETURNS !Void ->
   IF node IS_A BindExpr AS bind_expr THEN
@@ -1622,7 +1622,7 @@ PRIVATE FN cleanupClassifier__schema_field_names(schema: FieldBearingSchema) RET
     FieldBearingSchema.ResourceSchemaMultiowned AS resource_schema -> RETURN resource_schema.fields.keys();,
     FieldBearingSchema.InlineStructVariantMultiowned AS inline_variant -> RETURN inline_variant.fields.keys() |> SELECT CAST(_ AS String);
   END
-  RETURN List[];
+  RETURN CAST(List[] AS []String);
 END
 PRIVATE FN cleanupClassifier__type_input_to_construction(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
