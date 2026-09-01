@@ -13991,24 +13991,24 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__consume_match_subject_if_takes_mut(rtoc_self_view, node, plan));
     MUTABLE branches: FN() -> []Any@multiowned = ( { MUTABLE rtoc_empty_list_341: FN() -> []Any@multiowned = List[]; rtoc_empty_list_341 } );
     FOR _ IN node.cases DO
-    &branches.append(Kernel.proc(%() USE(node, plan, _, MUTABLE rtoc_self_view) -> {
+    &branches.append(%() USE(node, plan, _, MUTABLE rtoc_self_view) -> {
     TRY (typeAnalysisSession__analyze_match_case_mut(&rtoc_self_view, node, _, plan));
     typeAnalysisSession__with_conditional_context(rtoc_self_view, %() USE(_, MUTABLE rtoc_self_view) -> {
       rtoc_lambda_result_342 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, TRY (matchCase__body(_))));
       rtoc_lambda_result_342
     });
     TRY (typeAnalysisSession__collect_scope_drops(rtoc_self_view, node))
-    }));
+    });
     END
     IF node.default_case EXISTS AS default_case_value THEN
       MUTABLE default_case_value_mutable = COPY default_case_value;
-      &branches.append(Kernel.proc(%() USE(node, MUTABLE rtoc_self_view) -> {
+      &branches.append(%() USE(node, MUTABLE rtoc_self_view) -> {
     typeAnalysisSession__with_conditional_context(rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
       rtoc_lambda_result_343 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, default_case_value_mutable));
       rtoc_lambda_result_343
     });
     TRY (typeAnalysisSession__collect_scope_drops(rtoc_self_view, node))
-      }));
+      });
     END
     MUTABLE all_drops: []?[]DeferredDrop = TRY (typeAnalysisSession__analyze_control_flow_branches(rtoc_self_view, branches));
     IF node.default_case EXISTS AS default_case_value THEN
@@ -20151,14 +20151,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (["Identifier", "Literal", "FuncCall", "MethodCall", "GetField", "GetIndex", "BinaryOp", "UnaryOp"] |> DISTINCT _).contains?(locatable__variant_name(expr)) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_510: []SymbolEntry@multiowned = List[]; rtoc_empty_list_510 } ) AS []SymbolEntry@multiowned);
     END
-    IF expr? IS_A Struct AS struct THEN
-      RETURN struct.members |> UNNEST {
-    MUTABLE v = COPY struct[_];
-    TRY (typeAnalysisSession__collect_bg_sources_walk(rtoc_self_view, v))
-      };
-    ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_511: []SymbolEntry@multiowned = List[]; rtoc_empty_list_511 } ) AS []SymbolEntry@multiowned);
+    IF expr EXISTS AS rtoc_expr THEN
+      IF castBgSourceWalkValueToLocatable(rtoc_expr) EXISTS AS rtoc_node THEN
+        RETURN locatable__child_nodes(rtoc_node) |> UNNEST TRY (typeAnalysisSession__collect_bg_sources_walk(rtoc_self_view, castLocatableToBgSourceWalkValue(_)));
+      END
     END
+    RETURN CAST(( { MUTABLE rtoc_empty_list_511: []SymbolEntry@multiowned = List[]; rtoc_empty_list_511 } ) AS []SymbolEntry@multiowned);
 }
 END
 PRIVATE FN typeAnalysisSession__collect_bg_sources_walk(self: TypeAnalysisSession, v: ?BgSourceWalkValue) RETURNS ![]SymbolEntry@multiowned
@@ -20166,15 +20164,7 @@ PRIVATE FN typeAnalysisSession__collect_bg_sources_walk(self: TypeAnalysisSessio
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF v IS_A []Any@multiowned AS array THEN
-      RETURN array |> UNNEST typeAnalysisSession__collect_bg_sources_walk(rtoc_self_view, BgSourceWalkValue{ ArrayValue: COPY _ });
-    ELSE_IF (v == Hash) THEN
-      RETURN v.values() |> UNNEST typeAnalysisSession__collect_bg_sources_walk(rtoc_self_view, _);
-    ELSE_IF v IS_A Struct AS struct THEN
-      RETURN TRY (typeAnalysisSession__collect_bg_sources_in_expr(rtoc_self_view, BgSourceWalkValue{ Struct: COPY struct }));
-    ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_512: []SymbolEntry@multiowned = List[]; rtoc_empty_list_512 } ) AS []SymbolEntry@multiowned);
-    END
+    RETURN TRY (typeAnalysisSession__collect_bg_sources_in_expr(rtoc_self_view, v));
 }
 END
 PRIVATE FN typeAnalysisSession__bg_sources_for_block(self: TypeAnalysisSession, expr: ?BgSourceWalkValue) RETURNS ![]SymbolEntry@multiowned
