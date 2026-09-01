@@ -1582,7 +1582,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE if_chain_mutable = COPY if_chain;
       IF !((if_chain_mutable.branches).empty?()) THEN
             FOR _ IN if_chain_mutable.branches DO
-          TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _.cond } NIL, alloc_by_name));
+          TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _.cond }, NIL, alloc_by_name));
           TRY (mIRChecker__check_aggregate_stmts_mut(&rtoc_self_view, _.body, alloc_by_name));
             END
       END
@@ -1615,12 +1615,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE expr_value_mutable = COPY expr_value;
       IF expr_value_mutable IS_A Emittable AS rtoc_expr_node THEN
       IF rtoc_expr_node IS_A MIRCast AS rtoc_mIRCast THEN
-        TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY rtoc_mIRCast.expr } owner_alloc, alloc_by_name));
+        TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY rtoc_mIRCast.expr }, owner_alloc, alloc_by_name));
       ELSE_IF rtoc_expr_node IS_A MakeList AS rtoc_makeList THEN
         MUTABLE list_alloc = rtoc_makeList.alloc;
         IF !((rtoc_makeList.items).empty?()) THEN
                 FOR _ IN (rtoc_makeList.items) DO
-                TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _ } list_alloc, alloc_by_name));
+                TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _ }, list_alloc, alloc_by_name));
                 END
         END
       ELSE_IF rtoc_expr_node IS_A StructInit AS rtoc_structInit THEN
@@ -1633,7 +1633,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF rtoc_expr_node IS_A ArrayInit AS rtoc_arrayInit THEN
         IF !((rtoc_arrayInit.items).empty?()) THEN
                 FOR _ IN (rtoc_arrayInit.items) DO
-                TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _ } owner_alloc, alloc_by_name));
+                TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _ }, owner_alloc, alloc_by_name));
                 END
         END
       ELSE_IF (rtoc_expr_node IS_A DeepCopy) OR (rtoc_expr_node IS_A RcRetain) OR (rtoc_expr_node IS_A RcDowngrade) OR (rtoc_expr_node IS_A WeakUpgrade) THEN
@@ -1654,7 +1654,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       ELSE
           FOR _ IN (TRY (emittable__child_exprs(rtoc_expr_node))) DO
-          TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _ } NIL, alloc_by_name));
+          TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, MIRCheckerAggregateExpr{ Emittable: COPY _ }, NIL, alloc_by_name));
         END
       END
       END

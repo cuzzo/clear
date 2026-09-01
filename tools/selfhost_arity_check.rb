@@ -13,6 +13,9 @@
 ROOT = File.expand_path('../compiler/src', __dir__)
 
 def split_args(s)
+  # A generic argument list carries its own commas: `Tuple<Bool, T>` is one
+  # type, not two. Collapse them before splitting.
+  s = s.gsub(/<[^<>]*>/) { |g| g.tr(',', "\u0000") }
   out = []; depth = 0; cur = +''; instr = false; esc = false
   s.each_char do |ch|
     if instr
@@ -31,7 +34,7 @@ def split_args(s)
     end
   end
   out << cur unless cur.strip.empty?
-  out
+  out.map { |x| x.tr("\u0000", ',') }
 end
 
 def close_paren(text, open_at)
@@ -88,4 +91,5 @@ puts "#{bad.length} arity mismatches (#{parser} inside the parser, i.e. this too
 bad.group_by { |b| b[2] }.sort_by { |_, v| -v.length }.first(12).each do |name, v|
   lo, hi = sigs[name]
   puts format('  %3d  %-46s wants %d..%d, got %s', v.length, name, lo, hi, v.map { |x| x[3] }.uniq.sort.join('/'))
+  v.first(2).each { |b| puts format('        %s:%d', b[0], b[1]) } if ARGV.include?('--where')
 end
