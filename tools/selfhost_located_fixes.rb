@@ -101,7 +101,16 @@ end.to_set.freeze
 
 def accessor_for(union, field)
   name = "#{union[0].to_s.downcase}#{union[1..]}__#{field}"
-  DEFINED.include?(name) ? name : nil
+  return name if DEFINED.include?(name)
+
+  # A field whose type differs across variants is published by the AST module
+  # rather than as a per-union accessor.
+  return "aST__node_#{field}" if %w[Locatable Node].include?(union) &&
+                                 DEFINED.include?("aST__node_#{field}")
+  return "aST__node__#{field}" if %w[Locatable Node].include?(union) &&
+                                  DEFINED.include?("aST__node__#{field}")
+
+  nil
 end
 
 rows = JSON.parse(File.read(probe)).select { |r| !r['ok'] && r['line'] && r['error'] }
@@ -158,6 +167,7 @@ by.each do |f, rs|
           VARIANT_OF.key?(m[1])
       line_edits << [r['line'], :unwrap_is_a, nil]
     elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
+      line_edits << [r['line'], :union_field_write, m[1]]
       line_edits << [r['line'], :union_field_read, m[1]]
     elsif (m = e.match(/RESTRICT capability requires a mutable variable, but '(\w+)' is immutable/))
       line_edits << [r['line'], :mutable_param, m[1]]
@@ -249,11 +259,25 @@ by.each do |f, rs|
         counts[kind] += 1
         "UNWRAP (#{recv}) IS_A"
       end
+    when :union_field_write
+      lines[i] = lines[i].sub(/(?<![\w.)])((?:[a-z_]\w*(?:\.[a-z_]\w*)*))\.(\w+)\s*=\s*(.+?);\s*$/) do
+        whole = Regexp.last_match(0)
+        recv = Regexp.last_match(1)
+        field = Regexp.last_match(2)
+        value = Regexp.last_match(3)
+        fn = "#{name[0].to_s.downcase}#{name[1..]}__set_#{field}_mut"
+        next whole unless DEFINED.include?(fn)
+
+        counts[kind] += 1
+        "#{fn}(&#{recv}, #{value});"
+      end
     when :union_field_read
       # The union has no field of that name; the generated accessor does.
       # Gating on the accessor's existence keeps a same-named field on some
       # other receiver on the line from being rewritten.
-      lines[i] = lines[i].gsub(/(?<![\w.)])([a-z_]\w*(?:\.[a-z_]\w*)*)\.(\w+)\b/) do
+      # The receiver may be a path, a call, or an UNWRAP of either.
+      recv_pat = /(?:UNWRAP\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:__\w+)?\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:\.[a-z_]\w*)*)/
+      lines[i] = lines[i].gsub(/(?<![\w.)])(#{recv_pat})\.(\w+)\b/) do
         whole = Regexp.last_match(0)
         recv = Regexp.last_match(1)
         field = Regexp.last_match(2)

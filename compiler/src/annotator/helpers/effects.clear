@@ -66,3 +66,15 @@ PUB FN callLikeNode__matched_stdlib_def(value: CallLikeNode) RETURNS ?FunctionSi
   END
   RETURN NIL;
 END
+
+# The mirror of asyncStackTarget__computed_stack_tier: a variant that carries the field takes
+# the write, and one that does not ignores it -- which is what Ruby does
+# when the node has no such attribute.
+PUB FN asyncStackTarget__set_computed_stack_tier_mut(MUTABLE value: AsyncStackTarget, new_value: ?String@symbol) RETURNS Void ->
+  PARTIAL MATCH value START
+    AsyncStackTarget.BgBlock AS MUTABLE item -> item.computed_stack_tier = COPY new_value;,
+    AsyncStackTarget.BgStreamBlock AS MUTABLE item -> item.computed_stack_tier = COPY new_value;,
+    AsyncStackTarget.DoBranch AS MUTABLE item -> item.computed_stack_tier = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END
