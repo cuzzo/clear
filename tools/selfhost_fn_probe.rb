@@ -143,7 +143,14 @@ module SelfhostFnProbe
           out << (d.start_with?('PUB ', 'EXTERN') ? d : "PUB #{d}")
         end
       end
-      out.join
+      # Non-rtoc requires name real external packages (stdlib path, fs, regex).
+      # Dropping them makes the probe report `Undefined function 'expand'` for
+      # a file that does require it.
+      externals = Set.new
+      all_files.each do |rel|
+        cache[File.join(SRC, rel)][0].each { |line| externals << line if line =~ /REQUIRE "pkg:[a-z_]+"/ }
+      end
+      externals.to_a.sort.join + out.join
     end
   end
 
