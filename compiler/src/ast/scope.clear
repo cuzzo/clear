@@ -594,3 +594,16 @@ FN castLocatableToIdentifier__scope(value: Locatable) RETURNS Identifier ->
   END
   RETURN panic("Invalid cast to Identifier");
 END
+
+# Ruby reads class.name and strips the module prefix; the variant name is
+# that name.
+PUB FN scopeScopeTypeSchema__variant_name(value: ScopeScopeTypeSchema) RETURNS String ->
+  PARTIAL MATCH value START
+    ScopeScopeTypeSchema.EnumSchemaMultiowned AS item -> RETURN "EnumSchemaMultiowned";,
+    ScopeScopeTypeSchema.ResourceSchemaMultiowned AS item -> RETURN "ResourceSchemaMultiowned";,
+    ScopeScopeTypeSchema.StructSchemaMultiowned AS item -> RETURN "StructSchemaMultiowned";,
+    ScopeScopeTypeSchema.UnionSchemaMultiowned AS item -> RETURN "UnionSchemaMultiowned";,
+    DEFAULT -> RETURN "";
+  END
+  RETURN "";
+END

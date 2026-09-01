@@ -2964,7 +2964,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (aST__node_name(source_node) EXISTS) THEN
       RETURN COPY CAST(source_node.name() AS String);
     END
-    RETURN (source_node.class().name() OR CAST(source_node.class() AS String));
+    RETURN emittable__variant_name(source_node);
 }
 END
 FN mIRLowering__ownership_contract_source_node(self: MIRLowering, node: Emittable) RETURNS Emittable

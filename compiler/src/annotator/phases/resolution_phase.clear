@@ -2002,7 +2002,7 @@ PRIVATE FN resolutionSession__equivalent_extern_type_schema?(self: ResolutionSes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((existing.class() == incoming.class())) THEN
+    IF !((scopeScopeTypeSchema__variant_name(existing) == scopeScopeTypeSchema__variant_name(incoming))) THEN
       RETURN FALSE;
     END
     IF !((resolutionSession__extern_type_schema?(rtoc_self_view, existing) AND resolutionSession__extern_type_schema?(rtoc_self_view, incoming))) THEN
