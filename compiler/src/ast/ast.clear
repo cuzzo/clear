@@ -14225,3 +14225,24 @@ PUB FN literal__true_boolean?(self: Literal) RETURNS Bool ->
   END
   RETURN FALSE;
 END
+PUB FN capability__alias_mutable(self: Capability) RETURNS Bool ->
+  RETURN COPY self.alias_mutable;
+END
+PUB FN capability__as_token(self: Capability) RETURNS ?Token ->
+  RETURN COPY self.as_token;
+END
+PUB FN capability__capability(self: Capability) RETURNS ?String@symbol ->
+  RETURN COPY self.capability;
+END
+PUB FN capability__old_scope(self: Capability) RETURNS ?PassStateValue ->
+  RETURN COPY self.old_scope;
+END
+PUB FN capability__resolved_type(self: Capability) RETURNS Type ->
+  RETURN COPY self.resolved_type;
+END
+PUB FN capability__var_node(self: Capability) RETURNS Locatable@boxed ->
+  RETURN COPY self.var_node;
+END
+PUB FN capability__view_token(self: Capability) RETURNS ?Token ->
+  RETURN COPY self.view_token;
+END

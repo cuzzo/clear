@@ -1259,8 +1259,8 @@ PRIVATE FN capabilityAuditSession__emit_foreign_with_view_needs_unsafe_mut(self:
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name = COPY fact.target_label;
-    MUTABLE view_token: ?Token = COPY aSTCapability__view_token(fact.source);
-    MUTABLE as_token: ?Token = COPY aSTCapability__as_token(fact.source);
+    MUTABLE view_token: ?Token = COPY capability__view_token(fact.source);
+    MUTABLE as_token: ?Token = COPY capability__as_token(fact.source);
     IF view_token EXISTS AS view_token_value THEN
       IF as_token THEN
         MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, {:name: DiagnosticKwValue{ StringValue: COPY name }})), [edit__new(span__new(NIL, view_token_value.line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token.line, as_token.column, 0), "LENGTH 0 ")], :interactive));
