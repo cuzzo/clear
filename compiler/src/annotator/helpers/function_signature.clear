@@ -782,7 +782,7 @@ END
 # every one of these except `return_strategy`, so that line never fires.
 # `heap_carry_return_vars` is skipped too: the translation gave FunctionDef a
 # PassStateValue where the facts hold a set of names.
-PUB FN functionSignature__sync_from_function_def_mut(MUTABLE self: FunctionSignature, fn: FunctionSignatureSyncSource) RETURNS !FunctionSignature
+PUB FN functionSignature__sync_from_function_def_mut(MUTABLE self: FunctionSignature, fn: FunctionSignatureSyncSource) RETURNS !Void
   REQUIRES self: LOCAL
 ->
   MUTABLE source: ?FunctionDef@multiowned = NIL;
@@ -804,7 +804,7 @@ PUB FN functionSignature__sync_from_function_def_mut(MUTABLE self: FunctionSigna
     self.facts.stack_tier = rtoc_fn.stack_tier;
     self.facts.heap_carry_return = rtoc_fn.heap_carry_return;
   END
-  RETURN self;
+  RETURN;
 END
 
 # Ruby: reuse the signature the annotator already memoized on the node when
@@ -823,5 +823,6 @@ PUB FN functionSignature__from_function_def(fn: FunctionDef) RETURNS !FunctionSi
     sig = TRY (functionSignature__new(COPY fn.params, castTypeToTypeTypeInput__function_signature(TRY (functionDef__annotation_return_type(fn))), NIL, fn.visibility, fn.type_params |> SELECT symbol(COPY _), {}, functionDef__declared_plain_reentrant?(fn)));
   END
   MUTABLE resolved: FunctionSignature@multiowned = UNWRAP (sig);
-  RETURN TRY (functionSignature__sync_from_function_def_mut(&resolved, FunctionSignatureSyncSource{ FunctionDef: COPY fn }));
+  TRY (functionSignature__sync_from_function_def_mut(&resolved, FunctionSignatureSyncSource{ FunctionDef: COPY fn }));
+  RETURN resolved;
 END
