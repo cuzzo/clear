@@ -491,7 +491,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol(_))).binding_id == entry.binding_id));
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable(_))))).binding_id == entry.binding_id));
   IF decl EXISTS AS decl_value THEN
     MUTABLE decl_value_mutable = COPY decl_value;
     MUTABLE stamped = (decl_value_mutable.full_type());
@@ -1493,7 +1493,7 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
     FOR _ IN summary_value_mutable.assignment_nodes DO
   IF _ IS_A BindExpr AS bind_expr THEN
         MUTABLE bind_expr_mutable = COPY bind_expr;
-        escapeAnalysis__record_symbol_fact_mut(bind_expr_mutable, &symbols);
+        escapeAnalysis__record_symbol_fact_mut( BindingNode{ BindExpr: COPY bind_expr_mutable }, &symbols);
   END
   &assignment_nodes.append(COPY _);
     END
@@ -1559,7 +1559,7 @@ PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbol
   escapeAnalysis__record_symbol_fact_mut(node, &symbols);
   MUTABLE value: ?Locatable = NIL;
   IF (node IS_A VarDecl OR node IS_A BindExpr) THEN
-    value = aST__node_value(UNWRAP (castBindingNodeToLocatable(node)));
+    value = aST__node_value(castBindingNodeToLocatable(node));
   END
   IF !((value != NIL)) THEN
     RETURN;
@@ -1606,7 +1606,7 @@ PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{In
   IF !(node IS_A LambdaLit) THEN
       RETURN;
   END
-  refs[node.object_id()] = TRY (escapeAnalysis__collect_lambda_body_identifiers(node));
+  refs[node.object_id()] = TRY (escapeAnalysis__collect_lambda_body_identifiers( UNWRAP (castLocatableToLambdaLit(node))));
   rubyToClearVoid__escape_analysis()
   });
   RETURN refs;

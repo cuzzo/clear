@@ -674,7 +674,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(locatable__token(UNWRAP (castNodeToLocatable(node)))) THEN
       RETURN NIL;
     END
-    RETURN capabilityAuditSession__anchor_at(rtoc_self_view, node.token().line, (node.token().column - variant_name.codepointCount()));
+    RETURN capabilityAuditSession__anchor_at(rtoc_self_view, locatable__token(UNWRAP (castNodeToLocatable(node))).line, (locatable__token(UNWRAP (castNodeToLocatable(node))).column - variant_name.codepointCount()));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_variant_typo_mut(self: CapabilityAuditSession, anchor: AnchorToken, name: String, candidates: []NameCandidate, message: String, fix_label: String, cascade: Bool = FALSE) RETURNS !Void
@@ -1346,7 +1346,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE tok = vn.token();
+      MUTABLE tok = locatable__token(UNWRAP (vn));
       MUTABLE name = COPY CAST(vn.name() AS String);
       &edits.append(edit__new(span__new(NIL, tok.line, (tok.column + name.codepointCount()), 0), " AS ${name}_v"));
     rtoc_idx = rtoc_idx + 1;
@@ -4270,7 +4270,7 @@ PRIVATE FN capabilityAuditSession__restamp_function_metadata_mut(self: Capabilit
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (capabilityAuditSession__semantic_function_nodes(rtoc_self_view))).values() DO
     MUTABLE rtoc_mutable_block_param_46 = COPY _;
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (aST__full_type_mut(rtoc_mutable_block_param_46)));
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (aST__full_type_mut( Locatable{ FunctionDef: COPY rtoc_mutable_block_param_46 })));
     IF !(signature) THEN
         CONTINUE;
     END

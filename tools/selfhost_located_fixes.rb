@@ -9,6 +9,8 @@
 # drift as soon as any file is edited, so re-probe between rounds.
 require 'json'
 require 'optparse'
+require 'set'
+require_relative 'selfhost_union_accessor'
 
 ROOT = File.expand_path('../compiler/src', __dir__)
 probe = File.expand_path('../.fn_probe.json', __dir__)
@@ -83,6 +85,16 @@ def locate_arg(text, offsets, ln, argno)
   nil
 end
 
+variants, = SelfhostUnionAccessor.load_types(ROOT)
+# variant name keyed by payload type, so `got X` names the variant directly
+VARIANT_OF = variants.transform_values do |vs|
+  vs.to_h { |name, type| [type.to_s.sub(/@\w+\z/, ''), name] }
+end.freeze
+
+CASTS = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
+  File.read(f).scan(/\bFN (cast\w+To\w+)\(/).flatten
+end.to_set.freeze
+
 rows = JSON.parse(File.read(probe)).select { |r| !r['ok'] && r['line'] && r['error'] }
 by = Hash.new { |h, k| h[k] = [] }
 rows.each { |r| by[r['file']] << r }
@@ -105,6 +117,18 @@ by.each do |f, rs|
       next if expr.empty? || expr.start_with?('UNWRAP')
 
       edits << [sp[0], sp[1], " UNWRAP (#{expr})", :unwrap_arg]
+    elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && VARIANT_OF[m[1]]&.key?(m[2])
+      sp = locate_arg(text, offsets, r['line'], argno) or next
+      expr = text[sp[0]...sp[1]].strip
+      next if expr.empty? || expr.start_with?("#{m[1]}{")
+
+      edits << [sp[0], sp[1], " #{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}: COPY #{expr} }", :wrap_variant]
+    elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && CASTS.include?("cast#{m[2]}To#{m[1]}")
+      sp = locate_arg(text, offsets, r['line'], argno) or next
+      expr = text[sp[0]...sp[1]].strip
+      next if expr.empty? || expr.start_with?('cast')
+
+      edits << [sp[0], sp[1], " UNWRAP (cast#{m[2]}To#{m[1]}(#{expr}))", :cast_arg]
     elsif (m = e.match(/Pass '(\w+)' as '&\w+'/))
       sp = locate_arg(text, offsets, r['line'], argno) or next
       expr = text[sp[0]...sp[1]].strip

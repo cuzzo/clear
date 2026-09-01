@@ -1311,7 +1311,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF TRUE THEN
       t_branch_value = COPY type;
     ELSE
-      t_branch_value = TRY (type__new(castTypeToTypeConstructionInput__pipeline_host(type)));
+      t_branch_value = TRY (type__new(castTypeToTypeConstructionInput__pipeline_host( PipelineHostTypeInput{ Type: COPY type })));
     END
     MUTABLE t: Type = t_branch_value?;
     RETURN TRY (type__zig_type(t, is_param, is_field));
