@@ -26,3 +26,10 @@ END
 PUB FN moduleImporter__compile_file(MUTABLE self: ModuleImporter, path: String, caller_dir: String) RETURNS !?CompiledModule ->
   RETURN panic("module import is not available in the self-hosted annotator yet");
 END
+
+# Ruby looks the package up in `@pkg_paths` and falls back to the name it was
+# given. This importer registers no paths -- module import is stubbed here --
+# so the fallback is the whole behaviour.
+PUB FN moduleImporter__owning_package_name(self: ModuleImporter, pkg_name: String) RETURNS String ->
+  RETURN COPY pkg_name;
+END
