@@ -400,9 +400,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL
     };
     IF fiber_rt EXISTS AS fiber_rt_value THEN
-      runtimeHost__range_with_fiber_rt(rtoc_self_view.host, fiber_rt_value, %() USE(lower_stages) -> runtimeCallSpec__call(lower_stages));
+      runtimeHost__range_with_fiber_rt(rtoc_self_view.host, fiber_rt_value, %() USE(lower_stages) -> lower_stages());
     ELSE
-      runtimeCallSpec__call(lower_stages);
+      lower_stages();
     END
     MUTABLE is_var_stream = (IF source_node IS_A Identifier AS identifier THEN ((((TRY (type__dynamic_stream?(source_ti)) OR TRY (type__open_stream?(source_ti))) OR TRY (type__bounded_stream?(source_ti))) OR TRY (type__inf_stream?(source_ti)))) ELSE FALSE END);
     MUTABLE source_name: String = "";

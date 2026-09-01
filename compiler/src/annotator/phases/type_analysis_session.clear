@@ -16717,7 +16717,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF is_snapshot_txn_body THEN
       RETURN TRY (typeAnalysisSession__with_snapshot_transaction_body(rtoc_self_view, node, with_body));
     ELSE
-      RETURN runtimeCallSpec__call(with_body);
+      RETURN with_body();
     END
     NIL
     });

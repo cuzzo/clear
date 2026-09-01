@@ -19296,7 +19296,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF facts.cleanup_alloc EXISTS AS cleanup_alloc_value THEN
         MUTABLE cleanup_alloc_value_mutable = COPY cleanup_alloc_value;
         stmts = (value_pending + CAST([Emittable{ Let: COPY Let{ name: COPY "__old", init: Emittable{ FieldGet: COPY get_field }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Set: COPY castEmittableToSet(TRY (mIRLowering__with_ownership_consumption_for_value(rtoc_self_view, Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY get_field }, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, value, node.value, "MIR::Set", :owned_sink, facts.alloc_sym))) }] AS []Emittable));
-        &stmts.append(Emittable{ Call: COPY runtimeCallSpec__call(len_guard, "__old", cleanup_alloc_value_mutable) });
+        &stmts.append(Emittable{ Call: COPY len_guard("__old", cleanup_alloc_value_mutable) });
         RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view, stmts)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
       ELSE
         MUTABLE set = Set{ target: Emittable{ FieldGet: COPY get_field }, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
@@ -19321,7 +19321,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE cleanup_alloc_value_mutable = COPY cleanup_alloc_value;
       &stmts.append(Emittable{ Let: COPY Let{ name: COPY "__old", init: Emittable{ FieldGet: COPY alias_field }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
       &stmts.append(Emittable{ Set: COPY castEmittableToSet(TRY (mIRLowering__with_ownership_consumption_for_value(rtoc_self_view, Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY alias_field }, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, value, node.value, "MIR::Set", :owned_sink, facts.alloc_sym))) });
-      &stmts.append(Emittable{ Call: COPY runtimeCallSpec__call(len_guard, "__old", cleanup_alloc_value_mutable) });
+      &stmts.append(Emittable{ Call: COPY len_guard("__old", cleanup_alloc_value_mutable) });
     ELSE
       &stmts.append(Emittable{ Set: COPY castEmittableToSet(TRY (mIRLowering__with_ownership_consumption_for_value(rtoc_self_view, Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY alias_field }, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, value, node.value, "MIR::Set", :owned_sink, facts.alloc_sym))) });
     END
