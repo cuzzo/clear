@@ -1380,7 +1380,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE claimed = TRY (mIRLowering__claim_block_result_ownership_mut(rtoc_self_view, mir));
     MUTABLE source_alloc = ((IF TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, mir)) != NIL THEN TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, mir)) ELSE TRY (ownershipEffect__alloc_of(mir)) END) OR_ELSE dest_alloc);
     MUTABLE source_owned = (claimed OR TRY (mIRLowering__owned_branch_source_owns?(rtoc_self_view, mir)));
-    MUTABLE source_cleanup = NIL;
+    MUTABLE source_cleanup: ?CleanupEntry@multiowned = NIL;
     IF source_owned THEN
       source_cleanup = cleanupEntry__build(:uniform, source_alloc, FALSE, NIL, TRY (type__zig_type(type_info)));
       TRY (mIRLowering__build_drop_entry_mut(rtoc_self_view, &source_cleanup, type_info, NIL));
@@ -4871,7 +4871,7 @@ PRIVATE FN mIRLowering__lower_or_else_exit(MUTABLE self: MIRLowering, node: OrEl
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE msg_mir = NIL;
+    MUTABLE msg_mir: ?Emittable = NIL;
     MUTABLE facts = TRY (mIRLowering__or_else_exit_facts(rtoc_self_view, node, node.token.line));
     IF mIRLowering__bc_target?(rtoc_self_view) THEN
       IF node.message EXISTS AS message_value THEN
@@ -10566,7 +10566,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         panic("MIRLowering: unhandled symbol intrinsic: {}");
       END
     END
-    MUTABLE pre_resolved_alloc = NIL;
+    MUTABLE pre_resolved_alloc: ?String@symbol = NIL;
     MUTABLE entry: ?FunctionSignature@multiowned = TRY (mIRLowering__intrinsic_signature_for(rtoc_self_view, node));
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
@@ -11054,7 +11054,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_indexed_output_415.append({
     MUTABLE p = sig_params[rtoc_indexed_i_414];
     MUTABLE field_type = NIL;
-    MUTABLE field_zig_type = NIL;
+    MUTABLE field_zig_type: ?String = NIL;
     IF (p AND ((source != NIL) AND (source.abi == :c))) THEN
         field_zig_type = TRY (mIRLowering__c_abi_param_zig_type(rtoc_self_view, p));
     ELSE_IF p THEN
@@ -16811,7 +16811,7 @@ PRIVATE FN mIRLowering__lower_share(MUTABLE self: MIRLowering, node: ShareNode) 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE source = NIL;
+    MUTABLE source: ?Emittable = NIL;
     MUTABLE zig_base: String = "";
     MUTABLE source_ti = TRY (aST__full_type_mut(node.value));
     IF (TRUE AND !(TRUE)) THEN
@@ -19000,7 +19000,7 @@ PRIVATE FN mIRLowering__lower_indexed_assignment(MUTABLE self: MIRLowering, node
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE call = NIL;
+    MUTABLE call: ?Emittable = NIL;
     IF (assignmentName__name(node).protocol_operation == :map_put) THEN
       call = TRY (mIRLowering__lower_protocol_map_put_call(&rtoc_self_view, node.name.target, node.name.indexOf(), node.value));
       RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY call, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
@@ -19392,7 +19392,7 @@ PRIVATE FN mIRLowering__lower_if(MUTABLE self: MIRLowering, node: IfStatement) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE else_body = NIL;
+    MUTABLE else_body: ?[]Emittable = NIL;
     MUTABLE then_body: []Emittable = List[];
     IF (locatable__condition(node) IS_A IsA AND locatable__condition(node).runtime_variant_name) THEN
       RETURN TRY (mIRLowering__lower_runtime_is_a_if(&rtoc_self_view, node, castLocatableToIsA__mir_lowering(node.condition)));
@@ -19423,7 +19423,7 @@ PRIVATE FN mIRLowering__lower_runtime_is_a_if(MUTABLE self: MIRLowering, node: I
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE else_body = NIL;
+    MUTABLE else_body: ?[]Emittable = NIL;
     MUTABLE then_body = NIL;
     MUTABLE subject, subject_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(condition, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition(rtoc_self_view, condition.left)));
     MUTABLE variant: ?String = COPY condition.runtime_variant_name;
@@ -20055,7 +20055,7 @@ PRIVATE FN mIRLowering__lower_match(MUTABLE self: MIRLowering, node: MatchStatem
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE result = NIL;
+    MUTABLE result: ?SwitchStmt = NIL;
     MUTABLE facts = TRY (mIRLowering__match_lowering_facts(&rtoc_self_view, node));
     MUTABLE expr_label: ?String = COPY facts.expr_label;
     MUTABLE subject = COPY facts.subject;

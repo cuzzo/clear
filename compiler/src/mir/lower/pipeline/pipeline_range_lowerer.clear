@@ -530,7 +530,7 @@ PUB FN pipelineRangeLowerer__lower_range_fold(self: PipelineRangeLowerer, MUTABL
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE label = NIL;
+    MUTABLE label: ?String = NIL;
     IF smooth_node.observable_dest THEN
       MUTABLE terminal: ?String@symbol = COPY (TRY (type__observable_terminals())).each_with_object({}, %(tuple_param_0, h) -> {
     MUTABLE sym = tuple_param_0._0;
@@ -565,7 +565,7 @@ PUB FN pipelineRangeLowerer__lower_range_reduce(self: PipelineRangeLowerer, MUTA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE label = NIL;
+    MUTABLE label: ?String = NIL;
     MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(rtoc_self_view, &range_lit, stages, NIL, IF smooth_node?.observable_dest THEN
       :heap
     ELSE

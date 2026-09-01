@@ -2168,7 +2168,7 @@ PRIVATE FN typeAnalysisSession__emit_reentrant_error_mut(self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE arrow = COPY fn_node.arrow_token;
-    MUTABLE fix = NIL;
+    MUTABLE fix: ?Fix = NIL;
     IF arrow THEN
       fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :ADD_EFFECTS_REENTRANT)), [edit__new(span__new(NIL, arrow.line, arrow.column, 0), "EFFECTS REENTRANT ")], :auto));
     END
@@ -2196,7 +2196,7 @@ PRIVATE FN typeAnalysisSession__emit_ambiguous_return_error_mut(self: TypeAnalys
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE return_types = ( { MUTABLE rtoc_map_results = CAST([] AS []Type); found_returns |> EACH { &rtoc_map_results.append(COPY _.type); }; rtoc_map_results } );
     MUTABLE arrow = COPY fn_node.arrow_token;
-    MUTABLE fix = NIL;
+    MUTABLE fix: ?Fix = NIL;
     IF arrow THEN
       fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :INSERT_RETURNS_ANY)), [edit__new(span__new(NIL, arrow.line, arrow.column, 0), "RETURNS :Any ")], :auto));
     END
@@ -2211,7 +2211,7 @@ PRIVATE FN typeAnalysisSession__emit_match_partial_fix_mut(self: TypeAnalysisSes
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE tok = COPY match_node.token;
-    MUTABLE fix = NIL;
+    MUTABLE fix: ?Fix = NIL;
     IF tok THEN
       fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :REPLACE_MATCH_WITH_PARTIAL)), [edit__new(span__new(NIL, tok.line, tok.column, 0), "PARTIAL ")], :auto));
     END
@@ -2231,7 +2231,7 @@ PRIVATE FN typeAnalysisSession__emit_return_borrowed_no_copy_error_mut(self: Typ
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fix = NIL;
+    MUTABLE fix: ?Fix = NIL;
     IF aST__node__token(node) THEN
       MUTABLE tok: ?Token = aST__node__token(node);
       fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_RETURN_WITH_COPY)), [edit__new(span__new(NIL, tok?.line, tok.column, 0), "COPY ")], :auto));
@@ -2461,7 +2461,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END))?).reg;
     END
-    MUTABLE fix = NIL;
+    MUTABLE fix: ?Fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
       MUTABLE token: ?Token = aST__node__token(decl);
       IF token THEN
@@ -2503,7 +2503,7 @@ PRIVATE FN typeAnalysisSession__emit_can_smash_unsupported_error_mut(self: TypeA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fix = NIL;
+    MUTABLE fix: ?Fix = NIL;
     MUTABLE tok = IF (asyncValidationNode__can_smash_token(node) != NIL) THEN
       asyncValidationNode__can_smash_token(node)
     ELSE
@@ -2712,7 +2712,7 @@ PRIVATE FN typeAnalysisSession__build_declare_mutable_fix(self: TypeAnalysisSess
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE info: ?SymbolEntry@multiowned = scope__resolve_entry(scope, name);
     IF info EXISTS AS info_value THEN
-      MUTABLE tok = NIL;
+      MUTABLE tok: ?Token = NIL;
       MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
       IF ((decl != NIL) AND aST__node__token(decl)) THEN
         tok = aST__node__token(decl);
@@ -8682,7 +8682,7 @@ PRIVATE FN typeAnalysisSession__find_container_source(self: TypeAnalysisSession,
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ti = NIL;
+    MUTABLE ti: ?Type = NIL;
     IF expr EXISTS AS expr_value THEN
       MUTABLE expr_value_mutable = COPY expr_value;
       IF (expr_value_mutable IS_A CopyNode OR expr_value_mutable IS_A KeepNode) THEN
@@ -10520,7 +10520,7 @@ PRIVATE FN typeAnalysisSession__resolve_typed_method(MUTABLE self: TypeAnalysisS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE actual_type = NIL;
+    MUTABLE actual_type: ?Type = NIL;
     MUTABLE defn: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX__type_analysis_session(TRY (intrinsicRegistry__lookup(registry, RegistryKey{ StringValue: COPY node.name }))));
     IF defn EXISTS AS defn_value THEN
       MUTABLE defn_value_mutable = COPY defn_value;
@@ -18757,7 +18757,7 @@ PRIVATE FN typeAnalysisSession__promote_to_expr_if_mut(self: TypeAnalysisSession
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE else_result = NIL;
+    MUTABLE else_result: ?Type = NIL;
     IF ((if_node.else_branch != NIL) AND (((if_node.else_branch)?).length() == 1)) THEN
     MUTABLE nested = if_node.else_branch.first();
     IF (nested) IS_A IfStatement THEN
@@ -20540,7 +20540,7 @@ PRIVATE FN typeAnalysisSession__reject_borrowed_value_mut(self: TypeAnalysisSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE borrowed_name = NIL;
+    MUTABLE borrowed_name: ?String = NIL;
     IF val_node IS_A GetIndex AS get_index THEN
       borrowed_name = "${(typeAnalysisSession__root_variable_name(rtoc_self_view, Locatable{ GetIndex: COPY get_index }) OR_ELSE "")}[index]";
     ELSE_IF (IF val_node IS_A Identifier AS identifier THEN ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier)) != NIL) AND (((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier)))?).kind == :borrowed)) ELSE FALSE END) THEN
