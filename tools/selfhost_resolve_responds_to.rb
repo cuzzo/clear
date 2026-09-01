@@ -49,6 +49,14 @@ module SelfhostRespondsTo
       if (m = line.match(/\b(?:MUTABLE\s+)?#{Regexp.escape(name)}:\s*([\w@?\[\]{}]+)/))
         return m[1]
       end
+      # A narrowing binds a name to a known type just as a declaration does.
+      if (m = line.match(/IS_A\s+([\w@?\[\]{}]+)\s+AS\s+(?:MUTABLE\s+)?#{Regexp.escape(name)}\b/))
+        return m[1]
+      end
+      # `PARTIAL MATCH x START Union.Variant AS name ->` binds the variant type.
+      if (m = line.match(/(\w+)\.(\w+)\s+AS\s+(?:MUTABLE\s+)?#{Regexp.escape(name)}\s*->/))
+        return @variant_types&.dig(m[1], m[2]) || m[2]
+      end
     end
     nil
   end
@@ -66,6 +74,7 @@ module SelfhostRespondsTo
 
   # The receiver expression, reduced to a declared type where that is certain.
   attr_accessor :returns_table
+  attr_accessor :variant_types
 
   def resolve(expr, lines, index, fields, variants)
     expr = expr.strip
@@ -80,6 +89,10 @@ module SelfhostRespondsTo
       ret = @returns_table["#{base[0].downcase}#{base[1..]}__#{m[2]}"] ||
             @returns_table[m[2]]
       return ret && bare(ret.delete_prefix('!'))
+    end
+    # A plain call: the callee's declared return type is the receiver's type.
+    if (m = expr.match(/\A([\w?!]+)\(.*\)\z/m)) && (ret = @returns_table[m[1]])
+      return bare(ret.delete_prefix('!'))
     end
     # A field chain: resolve the head, then walk one field at a time.
     if (m = expr.match(/\A([A-Za-z_]\w*)((?:\.\w+)+)\z/))
@@ -236,6 +249,7 @@ module SelfhostRespondsTo
     end
 
     @returns_table = returns
+    @variant_types = variants.transform_values { |vs| vs.to_h }
     counts = Hash.new(0)
     unresolved = Hash.new(0)
     decided = []
