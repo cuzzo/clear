@@ -14377,3 +14377,33 @@ PUB FN aST__recovery_payload(node: Locatable) RETURNS Locatable EFFECTS REENTRAN
   END
   RETURN COPY node;
 END
+
+PUB FN functionDef__recursive_reentrance_declared?(self: FunctionDef) RETURNS Bool ->
+  RETURN (((self.reentrance_kind == :reentrant) OR (self.reentrance_kind == :reentrant_thunk)) OR (self.reentrance_kind == :reentrant_tail_call));
+END
+PUB FN functionDef__runtime_stack_required?(self: FunctionDef, recursion_yield: Bool, declared_runtime_return: Bool) RETURNS Bool ->
+  RETURN (((((functionDef__uses_runtime?(self) OR (self.fn_value_ref == TRUE)) OR (self.thunk_plan != NIL)) OR (self.mutual_thunk_plan != NIL)) OR recursion_yield) OR declared_runtime_return);
+END
+PUB FN listLit__constructor_collection(self: ListLit) RETURNS ?String@symbol ->
+  IF self.constructor_options EXISTS AS rtoc_options THEN
+    RETURN rtoc_options.collection;
+  END
+  RETURN NIL;
+END
+PUB FN listLit__constructor_soa?(self: ListLit) RETURNS Bool ->
+  IF self.constructor_options EXISTS AS rtoc_options THEN
+    RETURN (rtoc_options.soa == TRUE);
+  END
+  RETURN FALSE;
+END
+PUB FN listLit__constructor_shard_count(self: ListLit) RETURNS ?Int64 ->
+  IF self.constructor_options EXISTS AS rtoc_options THEN
+    RETURN rtoc_options.shard_count;
+  END
+  RETURN NIL;
+END
+# Ruby: `def name; target.name end` -- a GetField's name is its TARGET's name,
+# not the field it reads.
+PUB FN getField__name(self: GetField) RETURNS String ->
+  RETURN (locatable__name(self.target) OR_ELSE "");
+END
