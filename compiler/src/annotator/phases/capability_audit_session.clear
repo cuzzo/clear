@@ -4286,7 +4286,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE body_summaries = TRY (capabilityAuditSession__function_body_summaries(rtoc_self_view));
     escapeAnalysis__propagate_caller_sync_mut(fn_nodes, body_summaries);
     FOR _ IN fn_nodes.values() DO
-    TRY (capabilityPlan__refresh_function_plans_mut(_, body_summaries[_.name]?.with_blocks));
+    TRY (capabilityPlan__refresh_function_plans_mut(_, UNWRAP (body_summaries[_.name]?.with_blocks)));
     END
     TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, %(type) USE(rtoc_self_view) -> (TRY (capabilityAuditSession__lookup_type_schema(rtoc_self_view, type)))));
     TRY (effectInference__analyze_mut(fn_nodes));

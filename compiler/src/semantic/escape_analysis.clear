@@ -296,7 +296,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF keptIdentityContract__rc?(contract) THEN
+      IF keptIdentityContract__rc?( UNWRAP (contract)) THEN
           entry.storage = :multiowned;
       END
       by_index[rtoc_idx] = UNWRAP (contract);
@@ -661,7 +661,7 @@ PUB FN escapeAnalysis__apply_return_escape_sink_mut(node: ReturnNode, context: E
   IF !(value) THEN
     RETURN;
   END
-  IF !(TRY (escapeAnalysis__owning_return_needs_heap_placement?(COPY context.fn, &value, COPY context.schema_lookup))) THEN
+  IF !(TRY (escapeAnalysis__owning_return_needs_heap_placement?(COPY context.fn, UNWRAP (&value), COPY context.schema_lookup))) THEN
     RETURN;
   END
   IF !(escapeAnalysis__returned_call_result?(value)) THEN
@@ -685,7 +685,7 @@ END
 PUB FN escapeAnalysis__apply_binding_escape_sink_mut(node: Node, context: EscapeContext) RETURNS !Void ->
   IF TRY (escapeAnalysis__borrow_return_expr?(aST__node_value(UNWRAP (castNodeToLocatable(node))))) THEN
     escapeAnalysis__mark_symbol_borrow_mut(node__symbol(node));
-  ELSE_IF TRY (escapeAnalysis__call_result_is_heap?(aST__node_value(UNWRAP (castNodeToLocatable(node))), context.fn_nodes, COPY context.schema_lookup, context.facts_by_name)) THEN
+  ELSE_IF TRY (escapeAnalysis__call_result_is_heap?( UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))), context.fn_nodes, COPY context.schema_lookup, context.facts_by_name)) THEN
     escapeAnalysis__mark_symbol_heap_mut(node.symbol);
   END
 END

@@ -318,7 +318,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE expected_name = type__resolved((TRY (resolutionSession__to_type(rtoc_self_view, castTypeToValue(requirement.params[rtoc_idx]?.type)))));
+      MUTABLE expected_name = type__resolved((TRY (resolutionSession__to_type( UNWRAP (rtoc_self_view), castTypeToValue(requirement.params[rtoc_idx]?.type)))));
       MUTABLE actual_name = type__resolved((TRY (resolutionSession__to_type(rtoc_self_view, castTypeToValue(actual.type)))));
       IF (((expected_name == actual_name) OR (expected_name == :Any)) OR (actual_name == :Any)) THEN
               rtoc_idx = rtoc_idx + 1;
@@ -905,7 +905,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE mod_branch_value: ?CompiledModule = NIL;
     IF (node.kind == :package) THEN
-      mod_branch_value = TRY (moduleImporter__compile_package(&importer, node.path, resolutionSession__import_source_dir(rtoc_self_view)));
+      mod_branch_value = TRY (moduleImporter__compile_package(&importer, node.path, resolutionSession__import_source_dir( UNWRAP (rtoc_self_view))));
     ELSE
       mod_branch_value = TRY (moduleImporter__compile_file(&importer, node.path, resolutionSession__import_source_dir(rtoc_self_view)));
     END
@@ -1909,7 +1909,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN params DO
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < _.bounds.length() DO
-      IF resolutionSession__protocol_declared?(rtoc_self_view, CAST((type__resolved((_.bounds[rtoc_idx]?.type))) AS String)) THEN
+      IF resolutionSession__protocol_declared?(rtoc_self_view, CAST((type__resolved( UNWRAP ((_.bounds[rtoc_idx]?.type)))) AS String)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

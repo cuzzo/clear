@@ -85,7 +85,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE target = (emit__tail_resume_target(segment_specs[rtoc_idx]?.tail) OR_ELSE (rtoc_idx + 1));
+    MUTABLE target = (emit__tail_resume_target( UNWRAP (segment_specs[rtoc_idx]?.tail)) OR_ELSE (rtoc_idx + 1));
     bind_for_index[target] = TRY (emit__fsm_body_mir_items(d.bind_stmts));
   rtoc_idx = rtoc_idx + 1;
   END

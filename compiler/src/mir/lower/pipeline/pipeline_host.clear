@@ -71,7 +71,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.stream_select_counter = 0;
     rtoc_self_view.do_rt_name = NIL;
     rtoc_self_view.pipeline_node_alloc = NIL;
-    rtoc_self_view.materializer = pipelineMaterializer__new(TRY (pipelineHost__build_materializer_host(&rtoc_self_view)));
+    rtoc_self_view.materializer = pipelineMaterializer__new(TRY (pipelineHost__build_materializer_host( UNWRAP (&rtoc_self_view))));
     rtoc_self_view.range_lowerer = pipelineRangeLowerer__new(TRY (pipelineHost__build_range_lowerer_host(rtoc_self_view)));
     rtoc_self_view.binding_chain_lowerer = TRY (pipelineHost__build_binding_chain_lowerer(rtoc_self_view));
     rtoc_self_view.plan_builder = TRY (pipelineHost__build_plan_builder(rtoc_self_view));
@@ -871,7 +871,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fields: []String = ( { MUTABLE rtoc_empty_list_33: []String = List[]; rtoc_empty_list_33 } );
     MUTABLE needs_whole_item: Bool = FALSE;
     pipelineHost__with_soa_rewrite(&rtoc_self_view, FALSE, %() USE(fold_node, MUTABLE rtoc_self_view) -> {
-      expr_mir = pipelineHost__with_pipeline_context(&rtoc_self_view, "it", %() USE(fold_node, rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, pipelineMaterializedScalarOp__expression(fold_node))));
+      expr_mir = pipelineHost__with_pipeline_context(&rtoc_self_view, "it", %() USE(fold_node, rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, UNWRAP (pipelineMaterializedScalarOp__expression(fold_node)))));
     fields = (pipelineHost__current_context(rtoc_self_view).soa_needed_fields |> SELECT _.toString()) |> ORDER_BY _;
     needs_whole_item = (fold_node IS_A FindOp OR !(!(((TRUE AND pipelineHost__ast_uses_bare_placeholder?(rtoc_self_view, pipelineMaterializedScalarOp__expression(fold_node)))))));
     NIL

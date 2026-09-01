@@ -107,7 +107,7 @@ PRIVATE FN pipelineSetIndexLowerer__lower_range_distinct(self: PipelineSetIndexL
   MUTABLE elem_type: ?Type = TRY (type__element_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))));
   MUTABLE elem_zig = COPY ((compilerRegexMatchGroup(set_zig, compilerRegexCompile("CheatLib\\.Set\\((.*)\\)"), 1)) OR_ELSE "");
   MUTABLE insert_body =   IF elem_type THEN
-    TRY (pipelineSetIndexLowerer__distinct_insert_body(self, key_expr_mir, distinct_node.expression, UNWRAP (elem_type), elem_zig, alloc, TRUE))
+    TRY (pipelineSetIndexLowerer__distinct_insert_body(self, key_expr_mir, UNWRAP (distinct_node.expression), UNWRAP (elem_type), elem_zig, alloc, TRUE))
   ELSE
     [Emittable{ Let: COPY Let{ name: COPY "dist_key", init: COPY key_expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ExprStmt: COPY TRY (pipelineSetIndexLowerer__distinct_insert_stmt(self, alloc, Emittable{ Ident: COPY Ident{ name: "dist_key", lowered_node_id: NIL, ownership_consumption: NIL } }, TRUE)) }]
   END;
