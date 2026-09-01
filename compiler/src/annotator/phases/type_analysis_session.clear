@@ -10904,7 +10904,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE outer_tok: ?Token@multiowned = KEEP (UNWRAP (held_locks[vn])).token;
       MUTABLE escape: ?DeadlockEscape = COPY node.deadlock_escape;
-      IF (escape AND (escape[:kind] == :deadlock)) THEN
+      IF (escape AND (escape?.kind == :deadlock)) THEN
           typeAnalysisSession__note_mut(rtoc_self_view, lock_capabilities[rtoc_idx]?.var_node, "POSSIBLE_DEADLOCK accepted: '${vn}' already held by an enclosing WITH (outer line ${(IF outer_tok != NIL THEN
             outer_tok.line
           ELSE

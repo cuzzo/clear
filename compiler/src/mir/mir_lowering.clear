@@ -3700,8 +3700,8 @@ FN mIRLowering__discard_owned_zig_type(self: MIRLowering, node: Locatable, entry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF entry[:zig_type] THEN
-      RETURN COPY entry[:zig_type];
+    IF entry.zig_type EXISTS AS rtoc_zig_type THEN
+      RETURN COPY rtoc_zig_type;
     END
     MUTABLE ti = TRY (type__from_node_mut(node, "discard owned type"));
     ti = TRY (type__success_type(ti));
@@ -4474,12 +4474,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END)) THEN
       panic("MIR::Drop lacks annotation lifecycle plan for {}");
     END
-    MUTABLE has_guard = IF respondsTo?(entry, "has_moved_guard?") THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_124 = CAST(entry AS CleanupEntry);
-    cleanupEntry__has_moved_guard?(rtoc_local_receiver_124) }
-    ELSE
-      !(!(((respondsTo?(entry, "[]") AND entry[:has_moved_guard]))))
-    END;
+    MUTABLE has_guard = cleanupEntry__has_moved_guard?(CAST(entry AS CleanupEntry));
     IF has_guard THEN
       MUTABLE rtoc_index_receiver_125 = mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names;
       rtoc_index_receiver_125[safe] = TRUE;
@@ -16717,7 +16712,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF lhs IS_A Identifier AS identifier THEN
           MUTABLE identifier_mutable = COPY identifier;
           MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[identifier__name(identifier_mutable)];
-          IF !((((entry != NIL) AND cleanupEntry__present?(entry)) AND (entry[:source_kind] == :kept_param))) THEN
+          IF !((((entry != NIL) AND cleanupEntry__present?(entry)) AND (entry?.source_kind == :kept_param))) THEN
             RETURN NIL;
           END
           MUTABLE bare = TRY (type__bare_data_type(expected_ft));
