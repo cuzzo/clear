@@ -1013,12 +1013,12 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
 END
 PRIVATE FN emit__build_spawn_setup(ctx: FsmEmitContext) RETURNS !FsmSpawnSetup ->
   MUTABLE is_local_pin = PARTIAL MATCH ctx.pin_mode START
-    TRUE -> TRUE,
-    :local -> TRUE,
+    TransformValue.BoolValue AS rtoc_pin_bool -> rtoc_pin_bool,
+    TransformValue.SymbolValue AS rtoc_pin_sym -> (rtoc_pin_sym == :local),
     DEFAULT -> FALSE
   END;
   MUTABLE pin_mode_false = PARTIAL MATCH ctx.pin_mode START
-    FALSE -> TRUE,
+    TransformValue.BoolValue AS rtoc_pin_unset -> !(rtoc_pin_unset),
     DEFAULT -> FALSE
   END;
   MUTABLE is_default_local = (((ctx.pin_mode == NIL) OR pin_mode_false) AND !(ctx.parallel));

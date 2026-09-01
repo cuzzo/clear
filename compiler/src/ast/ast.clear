@@ -14169,16 +14169,18 @@ FN castPatternFieldValueToLocatable(value: PatternFieldValue) RETURNS ?Locatable
 END
 
 PUB FN patternField__wildcard?(self: PatternField) RETURNS Bool ->
-  RETURN PARTIAL MATCH self.value START
-    :wildcard -> TRUE,
-    DEFAULT -> FALSE
-  END;
+  PARTIAL MATCH self.value START
+    PatternFieldValue.SymbolValue AS rtoc_sentinel -> RETURN (rtoc_sentinel == :wildcard);,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
 END
 PUB FN patternField__bind?(self: PatternField) RETURNS Bool ->
-  RETURN PARTIAL MATCH self.value START
-    :bind -> TRUE,
-    DEFAULT -> FALSE
-  END;
+  PARTIAL MATCH self.value START
+    PatternFieldValue.SymbolValue AS rtoc_sentinel -> RETURN (rtoc_sentinel == :bind);,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
 END
 # Ruby: the value when it is an AST node, NIL for the :wildcard / :bind sentinels.
 PUB FN patternField__expr(self: PatternField) RETURNS ?Locatable ->

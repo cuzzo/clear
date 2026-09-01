@@ -5190,8 +5190,7 @@ PRIVATE FN mIRLowering__profile_dispatch_id(self: MIRLowering, dispatch: MIRLowe
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PARTIAL MATCH dispatch START
-      :parallel -> 2,
-      :shared -> 3,
+      PinMode.SymbolValue AS rtoc_dispatch_sym -> (IF (rtoc_dispatch_sym == :parallel) THEN 2 ELSE (IF (rtoc_dispatch_sym == :shared) THEN 3 ELSE 1 END) END),
       DEFAULT -> 1
     END;
 }
@@ -13057,8 +13056,7 @@ PRIVATE FN mIRLowering__profile_dispatch_numeric_id(self: MIRLowering, dispatch:
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PARTIAL MATCH dispatch START
-      :parallel -> 2,
-      :shared -> 3,
+      PinMode.SymbolValue AS rtoc_dispatch_sym -> (IF (rtoc_dispatch_sym == :parallel) THEN 2 ELSE (IF (rtoc_dispatch_sym == :shared) THEN 3 ELSE 1 END) END),
       DEFAULT -> 1
     END;
 }
@@ -13068,9 +13066,8 @@ PRIVATE FN mIRLowering__fiber_spawn_call_plan(self: MIRLowering, rt_name: String
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE target = PARTIAL MATCH pin_mode START
-      :local -> :runtime_submit,
-      TRUE -> :runtime_submit,
-      :shared -> :pinned,
+      PinMode.SymbolValue AS rtoc_pin_sym -> (IF (rtoc_pin_sym == :local) THEN :runtime_submit ELSE (IF (rtoc_pin_sym == :shared) THEN :pinned ELSE :best END) END),
+      PinMode.BoolValue AS rtoc_pin_bool -> (IF rtoc_pin_bool THEN :runtime_submit ELSE :best END),
       DEFAULT -> :best
     END;
     RETURN FiberSpawnCall{ target: COPY target, runtime_name: COPY rt_name, ctx_type: COPY ctx_type, ctx_var: COPY ctx_var, task_config: COPY task_config, wait_group_name: NIL, pass_ctx_by_address: FALSE };
@@ -13096,8 +13093,7 @@ PRIVATE FN mIRLowering__profile_dispatch_symbol(self: MIRLowering, dispatch: Pin
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PARTIAL MATCH dispatch START
-      :parallel -> :parallel,
-      :shared -> :shared,
+      PinMode.SymbolValue AS rtoc_symbol -> (IF (rtoc_symbol == :parallel) THEN :parallel ELSE (IF (rtoc_symbol == :shared) THEN :shared ELSE :local END) END),
       DEFAULT -> :local
     END;
 }
