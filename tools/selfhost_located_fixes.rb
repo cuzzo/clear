@@ -95,6 +95,15 @@ CASTS = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
   File.read(f).scan(/\bFN (cast\w+To\w+)\(/).flatten
 end.to_set.freeze
 
+DEFINED = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
+  File.read(f).scan(/\bFN ([\w?!]+)\s*(?:<[^>]*>)?\(/).flatten
+end.to_set.freeze
+
+def accessor_for(union, field)
+  name = "#{union[0].to_s.downcase}#{union[1..]}__#{field}"
+  DEFINED.include?(name) ? name : nil
+end
+
 rows = JSON.parse(File.read(probe)).select { |r| !r['ok'] && r['line'] && r['error'] }
 by = Hash.new { |h, k| h[k] = [] }
 rows.each { |r| by[r['file']] << r }
@@ -145,6 +154,11 @@ by.each do |f, rs|
       line_edits << [r['line'], :mutable_view, m[1]]
     elsif e =~ /Undefined variable 'AST'/
       line_edits << [r['line'], :ast_variant, nil]
+    elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got \?(\w+)/)) &&
+          VARIANT_OF.key?(m[1])
+      line_edits << [r['line'], :unwrap_is_a, nil]
+    elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
+      line_edits << [r['line'], :union_field_read, m[1]]
     end
   end
 
@@ -223,6 +237,32 @@ by.each do |f, rs|
 
         counts[kind] += 1
         "#{owner}.#{v}"
+      end
+    when :unwrap_is_a
+      lines[i] = lines[i].gsub(/(?<![\w.)])((?:[a-z_]\w*(?:\.[a-z_]\w*)*))\s+IS_A\b/) do
+        whole = Regexp.last_match(0)
+        recv = Regexp.last_match(1)
+        next whole if recv.start_with?('UNWRAP')
+
+        counts[kind] += 1
+        "UNWRAP (#{recv}) IS_A"
+      end
+    when :union_field_read
+      # The union has no field of that name; the generated accessor does.
+      # Gating on the accessor's existence keeps a same-named field on some
+      # other receiver on the line from being rewritten.
+      lines[i] = lines[i].gsub(/(?<![\w.)])([a-z_]\w*(?:\.[a-z_]\w*)*)\.(\w+)\b/) do
+        whole = Regexp.last_match(0)
+        recv = Regexp.last_match(1)
+        field = Regexp.last_match(2)
+        rest = Regexp.last_match.post_match
+        next whole if rest =~ /\A\s*[=(]/ && rest !~ /\A\s*==/
+
+        fn = accessor_for(name, field)
+        next whole unless fn
+
+        counts[kind] += 1
+        "#{fn}(#{recv})"
       end
     when :drop_unwrap
       # Two spellings reach the same diagnostic. Rewrite only when the line
