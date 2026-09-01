@@ -4520,7 +4520,7 @@ FN ruby_wrap_optional_String_symbol_DiagnosticKwValue(value: ?String@symbol) RET
   END
   NIL;
 END
-FN ruby_wrap_optional_Type_multiowned_X__capability_audit_session(value: ?Type@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_Type_multiowned_X__capability_audit_session(value: ?Type) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ Type: Type{ Type: COPY optional_payload } };
   END

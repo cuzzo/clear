@@ -2766,7 +2766,7 @@ FN ruby_set_intersection_String_set__escape_analysis(left: [Set]String, right: [
   };
   RETURN result;
 END
-FN ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(value: ?FunctionSignature) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END

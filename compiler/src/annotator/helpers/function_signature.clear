@@ -830,7 +830,7 @@ END
 
 # Ruby: adopt every module-aliased signature visible in the scope that the
 # caller does not already have under that name.
-PUB FN functionSignature__merge_imported_signatures_mut(MUTABLE sigs: {String@symbol}FunctionSignature@multiowned, scope: Scope) RETURNS !{String@symbol}FunctionSignature@multiowned ->
+PUB FN functionSignature__merge_imported_signatures_mut(MUTABLE sigs: {String@symbol}FunctionSignature, scope: Scope) RETURNS !{String@symbol}FunctionSignature@multiowned ->
   MUTABLE visible = TRY (scope__visible_entries(scope));
   FOR rtoc_name IN visible.keys() DO
     MUTABLE rtoc_key: String@symbol = symbol(rtoc_name);

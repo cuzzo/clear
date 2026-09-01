@@ -1261,15 +1261,15 @@ PUB FN pipelineConcurrentLowerer__lower_head_with_placeholder_call(self: Pipelin
   MUTABLE fn_value = self.lower_head_with_placeholder;
   RETURN fn_value(arg0, arg1);
 END
-PUB FN pipelineConcurrentLowerer__callback_expr_mir_call(self: PipelineConcurrentLowerer, arg0: Locatable, arg1: String, arg2: {String}String, arg3: {String}SymbolEntry@multiowned, arg4: String) RETURNS Emittable ->
+PUB FN pipelineConcurrentLowerer__callback_expr_mir_call(self: PipelineConcurrentLowerer, arg0: Locatable, arg1: String, arg2: {String}String, arg3: {String}SymbolEntry, arg4: String) RETURNS Emittable ->
   MUTABLE fn_value = self.callback_expr_mir;
   RETURN fn_value(arg0, arg1, arg2, arg3, arg4);
 END
-PUB FN pipelineConcurrentLowerer__callback_body_mir_call(self: PipelineConcurrentLowerer, arg0: Locatable[], arg1: String, arg2: HashMap<String, String>, arg3: HashMap<String, SymbolEntry@multiowned>, arg4: String) RETURNS ![]Emittable ->
+PUB FN pipelineConcurrentLowerer__callback_body_mir_call(self: PipelineConcurrentLowerer, arg0: Locatable[], arg1: String, arg2: HashMap<String, String>, arg3: HashMap<String, SymbolEntry>, arg4: String) RETURNS ![]Emittable ->
   MUTABLE fn_value = self.callback_body_mir;
   RETURN fn_value(arg0, arg1, arg2, arg3, arg4);
 END
-PUB FN pipelineConcurrentLowerer__callback_body_mir_with_shard_call(self: PipelineConcurrentLowerer, arg0: Locatable[], arg1: String, arg2: HashMap<String, String>, arg3: HashMap<String, SymbolEntry@multiowned>, arg4: String, arg5: ?HashMap<String@symbol, String>) RETURNS ![]Emittable ->
+PUB FN pipelineConcurrentLowerer__callback_body_mir_with_shard_call(self: PipelineConcurrentLowerer, arg0: Locatable[], arg1: String, arg2: HashMap<String, String>, arg3: HashMap<String, SymbolEntry>, arg4: String, arg5: ?HashMap<String@symbol, String>) RETURNS ![]Emittable ->
   MUTABLE fn_value = self.callback_body_mir_with_shard;
   RETURN fn_value(arg0, arg1, arg2, arg3, arg4, arg5);
 END

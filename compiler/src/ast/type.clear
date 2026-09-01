@@ -5083,7 +5083,7 @@ END
 
 # Ruby: the function type a signature describes, memoizing the signature in the
 # type so a later reader gets it back rather than reconstructing it.
-PUB FN type__from_function_signature(signature: FunctionSignature@multiowned) RETURNS !Type ->
+PUB FN type__from_function_signature(signature: FunctionSignature) RETURNS !Type ->
   MUTABLE param_types: []Type = List[];
   FOR rtoc_param IN TRY (functionSignature__params(signature)) DO
     &param_types.append(COPY rtoc_param.type);

@@ -1045,7 +1045,7 @@ PUB FN runtimeHost__transpile_type_call(self: RuntimeHost, arg0: PipelineTypeInp
   MUTABLE fn_value = self.transpile_type;
   RETURN fn_value(arg0);
 END
-PUB FN runtimeHost__with_fiber_rt_call(self: RuntimeHost, arg0: String, arg1: FN() -> Any@multiowned) RETURNS Any@multiowned ->
+PUB FN runtimeHost__with_fiber_rt_call(self: RuntimeHost, arg0: String, arg1: FN() -> Any) RETURNS Any@multiowned ->
   MUTABLE fn_value = self.with_fiber_rt;
   RETURN fn_value(arg0, arg1);
 END

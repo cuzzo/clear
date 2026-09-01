@@ -6395,7 +6395,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__with_bg_fiber_body_context(rtoc_self_view, pointer_captures, blk);
 }
 END
-PUB FN mIRLowering__fsm_cap_metadata(self: MIRLowering, cap: CapabilityTransition, with_node: WithBlock, ctx_id: Int64, captured: {String}Type@multiowned) RETURNS !?{String@symbol}FsmCapMetadataValue
+PUB FN mIRLowering__fsm_cap_metadata(self: MIRLowering, cap: CapabilityTransition, with_node: WithBlock, ctx_id: Int64, captured: {String}Type) RETURNS !?{String@symbol}FsmCapMetadataValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -22836,7 +22836,7 @@ FN ruby_wrap_optional_Emittable_MIRLoweringLoweredMir(value: ?Emittable) RETURNS
   END
   NIL;
 END
-FN ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(value: ?FunctionSignature) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END
@@ -22854,7 +22854,7 @@ FN ruby_wrap_optional_Type_TypeTypeInput__mir_lowering(value: ?Type) RETURNS ?Ty
   END
   NIL;
 END
-FN ruby_wrap_optional_Type_multiowned_TypeTypeInput(value: ?Type@multiowned) RETURNS ?TypeTypeInput ->
+FN ruby_wrap_optional_Type_multiowned_TypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
   IF value EXISTS AS optional_payload THEN
     RETURN TypeTypeInput{ Type: COPY optional_payload };
   END

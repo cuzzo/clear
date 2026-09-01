@@ -22417,7 +22417,7 @@ FN ruby_array_concat_Edit__type_analysis_session(left: []Edit, right: []Edit) RE
   END
   RETURN result;
 END
-FN ruby_array_concat_SymbolEntry_multiowned(left: []SymbolEntry, right: []SymbolEntry@multiowned) RETURNS []SymbolEntry@multiowned ->
+FN ruby_array_concat_SymbolEntry_multiowned(left: []SymbolEntry, right: []SymbolEntry) RETURNS []SymbolEntry@multiowned ->
   MUTABLE result: []SymbolEntry@multiowned = [];
   FOR rtoc_left_item IN left DO
     &result.append(COPY rtoc_left_item);
@@ -22481,7 +22481,7 @@ FN ruby_union_scalar_equal_Type_String_symbol(value: Type, expected: String@symb
   END
   FALSE;
 END
-FN ruby_union_scalar_equal_Type_Type_multiowned(value: Type, expected: Type@multiowned) RETURNS Bool ->
+FN ruby_union_scalar_equal_Type_Type_multiowned(value: Type, expected: Type) RETURNS Bool ->
   IF value IS_A Type@multiowned AS equality_payload THEN
     RETURN equality_payload == expected;
   END
@@ -22519,13 +22519,13 @@ FN ruby_union_scalar_equal_optional_TypeTypeInput_String_symbol(value: ?TypeType
   END
   FALSE;
 END
-FN ruby_wrap_optional_Any_multiowned_ReturnDescriptor(value: ?Any@multiowned) RETURNS ?ReturnDescriptor ->
+FN ruby_wrap_optional_Any_multiowned_ReturnDescriptor(value: ?Any) RETURNS ?ReturnDescriptor ->
   IF value EXISTS AS optional_payload THEN
     RETURN ReturnDescriptor{ AnyMultiowned: COPY optional_payload };
   END
   NIL;
 END
-FN ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(value: ?FunctionSignature@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(value: ?FunctionSignature) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END
@@ -22561,7 +22561,7 @@ FN ruby_wrap_optional_String_symbol_TypeAnalysisSessionReturnValue(value: ?Strin
   END
   NIL;
 END
-FN ruby_wrap_optional_Type_multiowned_X__type_analysis_session(value: ?Type@multiowned) RETURNS ?X ->
+FN ruby_wrap_optional_Type_multiowned_X__type_analysis_session(value: ?Type) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ Type: Type{ Type: COPY optional_payload } };
   END

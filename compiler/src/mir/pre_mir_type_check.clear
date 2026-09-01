@@ -571,7 +571,7 @@ FN rtocChildrenOfWalkNodeAllOp(v: AllOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeAllOpMultiowned(v: AllOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeAllOpMultiowned(v: AllOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -697,7 +697,7 @@ FN rtocChildrenOfWalkNodeAnyOp(v: AnyOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeAnyOpMultiowned(v: AnyOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeAnyOpMultiowned(v: AnyOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -889,7 +889,7 @@ FN rtocChildrenOfWalkNodeAssertRaises(v: AssertRaises) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeAssertRaisesMultiowned(v: AssertRaises@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeAssertRaisesMultiowned(v: AssertRaises) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.kind });
@@ -1086,7 +1086,7 @@ FN rtocChildrenOfWalkNodeAverageOp(v: AverageOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeAverageOpMultiowned(v: AverageOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeAverageOpMultiowned(v: AverageOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -1213,7 +1213,7 @@ FN rtocChildrenOfWalkNodeBatchWindowOp(v: BatchWindowOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeBatchWindowOpMultiowned(v: BatchWindowOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeBatchWindowOpMultiowned(v: BatchWindowOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.options });
@@ -1341,7 +1341,7 @@ FN rtocChildrenOfWalkNodeBenchmarkStmt(v: BenchmarkStmt) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeBenchmarkStmtMultiowned(v: BenchmarkStmt@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeBenchmarkStmtMultiowned(v: BenchmarkStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -2397,7 +2397,7 @@ FN rtocChildrenOfWalkNodeCountOp(v: CountOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeCountOpMultiowned(v: CountOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeCountOpMultiowned(v: CountOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -2775,7 +2775,7 @@ FN rtocChildrenOfWalkNodeDistinctOp(v: DistinctOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeDistinctOpMultiowned(v: DistinctOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeDistinctOpMultiowned(v: DistinctOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -3247,7 +3247,7 @@ FN rtocChildrenOfWalkNodeFindOp(v: FindOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeFindOpMultiowned(v: FindOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeFindOpMultiowned(v: FindOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -3727,7 +3727,7 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   &out.append(WalkNode{ SymbolValue: COPY v.source_name });
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.name });
@@ -4387,7 +4387,7 @@ FN rtocChildrenOfWalkNodeIndexOp(v: IndexOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeIndexOpMultiowned(v: IndexOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeIndexOpMultiowned(v: IndexOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -5167,7 +5167,7 @@ FN rtocChildrenOfWalkNodeMaxOp(v: MaxOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeMaxOpMultiowned(v: MaxOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeMaxOpMultiowned(v: MaxOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -5293,7 +5293,7 @@ FN rtocChildrenOfWalkNodeMinOp(v: MinOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeMinOpMultiowned(v: MinOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeMinOpMultiowned(v: MinOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -5921,7 +5921,7 @@ FN rtocChildrenOfWalkNodeOrderByOp(v: OrderByOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeOrderByOpMultiowned(v: OrderByOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeOrderByOpMultiowned(v: OrderByOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -6171,7 +6171,7 @@ FN rtocChildrenOfWalkNodeProfileStmt(v: ProfileStmt) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeProfileStmtMultiowned(v: ProfileStmt@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeProfileStmtMultiowned(v: ProfileStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -6624,7 +6624,7 @@ FN rtocChildrenOfWalkNodeReduceOp(v: ReduceOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeReduceOpMultiowned(v: ReduceOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeReduceOpMultiowned(v: ReduceOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.initial_value });
@@ -7072,7 +7072,7 @@ FN rtocChildrenOfWalkNodeSelectOp(v: SelectOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeSelectOpMultiowned(v: SelectOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeSelectOpMultiowned(v: SelectOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -7458,7 +7458,7 @@ FN rtocChildrenOfWalkNodeSmashStmt(v: SmashStmt) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeSmashStmtMultiowned(v: SmashStmt@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeSmashStmtMultiowned(v: SmashStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -7917,7 +7917,7 @@ FN rtocChildrenOfWalkNodeSumOp(v: SumOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeSumOpMultiowned(v: SumOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeSumOpMultiowned(v: SumOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -8169,7 +8169,7 @@ FN rtocChildrenOfWalkNodeTakeWhileOp(v: TakeWhileOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeTakeWhileOpMultiowned(v: TakeWhileOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeTakeWhileOpMultiowned(v: TakeWhileOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -8632,7 +8632,7 @@ FN rtocChildrenOfWalkNodeToken(v: Token) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeTokenMultiowned(v: Token@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeTokenMultiowned(v: Token) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ SymbolValue: COPY v.type });
   IF v.value EXISTS AS rtoc_opt_child THEN
@@ -8902,7 +8902,7 @@ FN rtocChildrenOfWalkNodeUnnestOp(v: UnnestOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeUnnestOpMultiowned(v: UnnestOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeUnnestOpMultiowned(v: UnnestOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -9176,7 +9176,7 @@ FN rtocChildrenOfWalkNodeWhereOp(v: WhereOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeWhereOpMultiowned(v: WhereOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeWhereOpMultiowned(v: WhereOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.expression });
@@ -9443,7 +9443,7 @@ FN rtocChildrenOfWalkNodeWindowOp(v: WindowOp) RETURNS []WalkNode ->
   END
   RETURN out;
 END
-FN rtocChildrenOfWalkNodeWindowOpMultiowned(v: WindowOp@multiowned) RETURNS []WalkNode ->
+FN rtocChildrenOfWalkNodeWindowOpMultiowned(v: WindowOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.size });
