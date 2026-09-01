@@ -680,7 +680,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE opted_out = !((node.deadlock_escape == NIL));
   FOR _ IN lock_capabilities DO
     MUTABLE variable_name = COPY _.var_name;
-    MUTABLE token = _.var_aST__node__token(node);
+    MUTABLE token = aST__node__token(node);
     rtoc_self_view.audit_inputs.held_locks[variable_name] = (rtoc_self_view.audit_inputs.held_locks[variable_name] OR_ELSE HeldLockEntry{ token: token });
     MUTABLE lock_type: ?String@symbol = capabilityTransition__lock_identity(_);
     IF lock_type EXISTS AS lock_type_value THEN
@@ -9185,8 +9185,8 @@ PRIVATE FN typeAnalysisSession__cap_var_sync(self: TypeAnalysisSession, MUTABLE 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sym_sync = (IF var_aST__node__symbol(node) != NIL THEN
-      (var_aST__node__symbol(node)).sync()
+    MUTABLE sym_sync = (IF aST__node__symbol(node) != NIL THEN
+      (aST__node__symbol(node)).sync()
     ELSE
       NIL
     END);
@@ -9200,7 +9200,7 @@ PRIVATE FN typeAnalysisSession__cap_var_storage(self: TypeAnalysisSession, MUTAB
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sym = var_aST__node__symbol(node);
+    MUTABLE sym = aST__node__symbol(node);
     IF sym THEN
       RETURN sym.storage();
     END
@@ -9211,8 +9211,8 @@ PRIVATE FN typeAnalysisSession__cap_var_layout(self: TypeAnalysisSession, MUTABL
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sym_layout = (IF var_aST__node__symbol(node) != NIL THEN
-      (var_aST__node__symbol(node)).layout()
+    MUTABLE sym_layout = (IF aST__node__symbol(node) != NIL THEN
+      (aST__node__symbol(node)).layout()
     ELSE
       NIL
     END);
@@ -9266,7 +9266,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
     ELSE_IF (fact.capability == symbol("RESTRICT")) THEN
-      IF ((IF var_node IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND !(var_aST__node__symbol(node).mutable())) THEN
+      IF ((IF var_node IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND !(aST__node__symbol(node).mutable())) THEN
         TRY (typeAnalysisSession__emit_with_restrict_immutable_error_mut(rtoc_self_view, node, castLocatableToIdentifier__type_analysis_session(var_node)));
       END
     ELSE_IF (fact.capability == symbol("BORROWED")) THEN
@@ -9658,8 +9658,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE root: ?Identifier = aST__root_identifier(var_node);
-    MUTABLE is_mut = ((aSTCapability__alias_mutable(cap) OR (IF var_aST__node__symbol(node) != NIL THEN
-        (var_aST__node__symbol(node)).mutable()
+    MUTABLE is_mut = ((aSTCapability__alias_mutable(cap) OR (IF aST__node__symbol(node) != NIL THEN
+        (aST__node__symbol(node)).mutable()
       ELSE
         NIL
       END)) OR root?.symbol?.mutable);
@@ -10988,7 +10988,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         panic("T.must: map slot is NIL");
       END
-      MUTABLE site_tok = cap.var_aST__node__token(node);
+      MUTABLE site_tok = cap.aST__node__token(node);
       MUTABLE acquirer_opt = !((escape == NIL));
       FOR _ IN held_stack DO
       IF state.direct_edges[fn_name] EXISTS AS rtoc_map_slot_251 THEN
@@ -19014,7 +19014,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN NIL;
       END
       END
-      MUTABLE copy = CopyNode{ token: COPY val_aST__node__token(node), value: COPY val_node, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL };
+      MUTABLE copy = CopyNode{ token: COPY aST__node__token(node), value: COPY val_node, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL };
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ CopyNode: COPY copy }, (expected_t OR TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })))));
       copy.storage = COPY container_alloc;
       copy.alloc = COPY container_alloc;
@@ -19026,14 +19026,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN Locatable{ CopyNode: COPY copy };
     END
     IF (TRY (type__string?(vti)) AND type__rodata?(vti)) THEN
-      MUTABLE copy = CopyNode{ token: COPY val_aST__node__token(node), value: COPY val_node, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL };
+      MUTABLE copy = CopyNode{ token: COPY aST__node__token(node), value: COPY val_node, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL };
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ CopyNode: COPY copy }, TRY (type__new(string_type, NIL, NIL, NIL, container_alloc))));
       copy.storage = COPY container_alloc;
       copy.alloc = COPY container_alloc;
       RETURN Locatable{ CopyNode: COPY copy };
     END
     IF ((TRY (type__string?(vti)) AND val_node IS_A Identifier) AND (container_desc != NIL)) THEN
-      MUTABLE sym = val_aST__node__symbol(node);
+      MUTABLE sym = aST__node__symbol(node);
       IF !((IF sym != NIL THEN
         symbolEntry__heap_storage?(sym)
       ELSE
@@ -20023,7 +20023,7 @@ PRIVATE FN typeAnalysisSession__lifetime_sources_for_value(self: TypeAnalysisSes
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sources: []SymbolEntry@multiowned = ( { MUTABLE rtoc_empty_list_507: []SymbolEntry@multiowned = List[]; rtoc_empty_list_507 } );
     IF TRUE THEN
-      MUTABLE sym = val_aST__node__symbol(node);
+      MUTABLE sym = aST__node__symbol(node);
       IF sym THEN
         sources = ruby_array_concat_SymbolEntry_multiowned(sources, CAST(TRY (symbolEntry__lifetime_sources(sym)) AS []SymbolEntry@multiowned));
       END

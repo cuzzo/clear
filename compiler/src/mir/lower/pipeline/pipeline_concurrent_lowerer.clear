@@ -812,7 +812,7 @@ PRIVATE FN pipelineConcurrentLowerer__capture_field_def(self: PipelineConcurrent
   MUTABLE field = FieldDef{ name: COPY spec.name, zig_type: COPY spec.field_type_zig, default: NIL, lowered_node_id: NIL, ownership_consumption: NIL, boxed_capture: NIL };
   MUTABLE sym: ?SymbolEntry = COPY capture_symbols[spec.name];
   IF sym EXISTS AS sym_value THEN
-    IF sym_valuebolEntry__boxed_capture_storage?(sym_value) THEN
+    IF symbolEntry__boxed_capture_storage?(sym_value) THEN
     field.boxed_capture = ((TRY (pipelineConcurrentLowerer__struct_name_hint_for_sym(self, sym)) != NIL) OR TRUE);
   END
   END
