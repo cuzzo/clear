@@ -11,7 +11,7 @@ PUB STRUCT PipelineScalarLowerer {
   loop_mark_stmts: FN() -> ![]Emittable
 }
 
-PUB FN pipelineScalarLowerer__lower(self: PipelineScalarLowerer, site: PipelineSite, op: PipelineMaterializedScalarOp) RETURNS !?MIRBlockExpr ->
+PUB FN pipelineScalarLowerer__lower(self: PipelineScalarLowerer, site: PipelineSite, op: PipelineMaterializedScalarOp) RETURNS !MIRBlockExpr ->
   IF op IS_A CountOp@multiowned AS count_op_multiowned THEN
     RETURN TRY (pipelineScalarLowerer__lower_count(self, site, CAST(COPY count_op_multiowned AS CountOp)));
   ELSE_IF op IS_A SumOp@multiowned AS sum_op_multiowned THEN
@@ -29,7 +29,7 @@ PUB FN pipelineScalarLowerer__lower(self: PipelineScalarLowerer, site: PipelineS
   ELSE_IF op IS_A FindOp@multiowned AS find_op_multiowned THEN
     RETURN TRY (pipelineScalarLowerer__lower_find(self, site, CAST(COPY find_op_multiowned AS FindOp)));
   ELSE
-    RETURN NIL;
+    panic("pipeline scalar lowerer: unhandled op");
   END
 END
 PRIVATE FN pipelineScalarLowerer__lower_count(self: PipelineScalarLowerer, site: PipelineSite, count_node: CountOp) RETURNS !MIRBlockExpr ->
