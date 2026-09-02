@@ -859,7 +859,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fid = runtimeHost__range_next_observable_id(rtoc_self_view.host);
     MUTABLE curr_var = "__obs_reduce_curr_${fid.toString()}";
     MUTABLE next_var = "__obs_reduce_next_${fid.toString()}";
-    MUTABLE actual_var = "__obs_reduce_actual_${fid}";
+    MUTABLE actual_var = "__obs_reduce_actual_${fid.toString()}";
     MUTABLE blk_label = "__obs_reduce_blk_${fid}";
     MUTABLE item_var = COPY p.item_var;
     MUTABLE body_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (reduce_op.expression), item_var, curr_var);
