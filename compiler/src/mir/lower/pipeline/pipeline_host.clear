@@ -435,7 +435,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PipelineHostReturnValue{ StringValue: COPY UNWRAP (TRY (pipelineLoweringBridge__emit_mir(rtoc_self_view.lowering_bridge, mir_node))) };
 }
 END
-PUB FN pipelineHost__visit_mir(self: PipelineHost, node: Locatable) RETURNS !Emittable
+PUB FN pipelineHost__visit_mir(MUTABLE self: PipelineHost, node: Locatable) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -443,7 +443,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (pipelineLoweringBridge__lower_node( &rtoc_self_view.lowering_bridge, substituted));
 }
 END
-PUB FN pipelineHost__visit_mir_head(self: PipelineHost, node: Locatable) RETURNS !PipelineElementHead
+PUB FN pipelineHost__visit_mir_head(MUTABLE self: PipelineHost, node: Locatable) RETURNS !PipelineElementHead
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -783,7 +783,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN pipelineHost__pipeline_block(self: PipelineHost, MUTABLE list_node: Locatable, blk: FN(String, String) -> ![]Emittable) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__pipeline_block(MUTABLE self: PipelineHost, MUTABLE list_node: Locatable, blk: FN(String, String) -> ![]Emittable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -837,7 +837,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineMaterializer__owning_pipeline_temp_stmts(rtoc_self_view.materializer, name, source, type_info, zig_type, alloc));
 }
 END
-PRIVATE FN pipelineHost__concurrent_source_setup(self: PipelineHost, MUTABLE lhs: Locatable) RETURNS ![]Emittable
+PRIVATE FN pipelineHost__concurrent_source_setup(MUTABLE self: PipelineHost, MUTABLE lhs: Locatable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
