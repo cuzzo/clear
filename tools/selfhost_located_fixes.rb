@@ -222,6 +222,8 @@ by.each do |f, rs|
       line_edits << [r['line'], :orelse_bool, nil]
     elsif e =~ /OR_ELSE requires a fallible/
       line_edits << [r['line'], :drop_or_else, nil]
+    elsif (m = e.match(/No overload for 'toString' matches arguments \((\w+)\)/))
+      line_edits << [r['line'], :to_s_helper, m[1]]
     end
   end
 
@@ -439,6 +441,18 @@ by.each do |f, rs|
 
         counts[kind] += 1
         "(#{operand} OR_ELSE FALSE)"
+      end
+    when :to_s_helper
+      # The type has no toString intrinsic but carries Ruby's to_s as a
+      # helper, which is the function Ruby called here.
+      fn = "#{name[0].to_s.downcase}#{name[1..]}__to_s"
+      if DEFINED.include?(fn)
+        lines[i] = lines[i].gsub(/(?<![\w.])([a-z_]\w*(?:\.[a-z_]\w*)*)\.toString\(\)/) do
+          whole = Regexp.last_match(0)
+          recv = Regexp.last_match(1)
+          counts[kind] += 1
+          "#{fn}(#{recv})"
+        end
       end
     when :drop_or_else
       # OR_ELSE on a value that is neither fallible nor optional is dead: the
