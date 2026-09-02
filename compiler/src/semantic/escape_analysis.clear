@@ -1360,7 +1360,7 @@ PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes
   IF !((aST__node_value( castAssignmentNodeToLocatable(node)) EXISTS)) THEN
     RETURN FALSE;
   END
-  MUTABLE value = aST__node_value(UNWRAP (castAssignmentNodeToLocatable(node)));
+  MUTABLE value = aST__node_value(castAssignmentNodeToLocatable(node));
   IF TRY (escapeAnalysis__ownership_transferring_expr?(value, FALSE)) THEN
     RETURN TRUE;
   END
