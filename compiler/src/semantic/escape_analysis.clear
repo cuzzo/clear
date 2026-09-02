@@ -743,7 +743,7 @@ PUB FN escapeAnalysis__mark_value_position_heap_mut(expr: ?Locatable) RETURNS Vo
     END
   END
 END
-PUB FN escapeAnalysis__apply_execution_boundary_escape_sink_mut(node: Node, context: EscapeContext) RETURNS !Void ->
+PUB FN escapeAnalysis__apply_execution_boundary_escape_sink_mut(node: Node, MUTABLE context: EscapeContext) RETURNS !Void ->
   escapeAnalysis__mark_capture_analysis_heap_mut(node__capture_analysis(node), &context.bg_heap);
   IF node IS_A BgBlock AS bg_block THEN
     TRY (escapeAnalysis__mark_fsm_ctx_locals_heap_mut(bg_block, COPY context.schema_lookup));

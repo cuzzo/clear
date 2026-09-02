@@ -13321,7 +13321,7 @@ PRIVATE FN mIRLowering__enforce_bg_capture_strategies_mut(self: MIRLowering, nod
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE strategies: {Any}Any = {};
     IF node__capture_analysis(node) THEN
-      strategies = node__capture_analysis(node).strategies;
+      strategies = UNWRAP (node__capture_analysis(node)).strategies;
     ELSE
       strategies = {};
     END
