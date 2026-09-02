@@ -594,7 +594,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_soa_scalar_fold(&rtoc_self_view, plan.site, CAST(plan.rhs AS PipelineMaterializedScalarOp))) };
     ELSE_IF (execution == PipelineExecutionKind.FusedRangeFold) THEN
       MUTABLE range_chain = COPY UNWRAP (plan.source.range_chain);
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_fold(rtoc_self_view, &range_chain.source, range_chain.stages, CAST(plan.rhs AS PipelineDefaultObservableFoldOp), plan.site.options)) };
+      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_fold(rtoc_self_view, &range_chain.source, range_chain.stages, CAST(plan.rhs AS PipelineDefaultObservableFoldOp), &plan.site.options)) };
     ELSE_IF (execution == PipelineExecutionKind.FusedRangeReduce) THEN
       MUTABLE range_chain = COPY UNWRAP (plan.source.range_chain);
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_reduce(rtoc_self_view, range_chain.source, range_chain.stages, castLocatableToReduceOp(plan.rhs), plan.site.options)) };

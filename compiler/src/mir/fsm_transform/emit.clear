@@ -895,7 +895,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   rtoc_map_results_37 } );
   MUTABLE pointer_captures = COPY ctx.pointer_captures;
   MUTABLE err =   IF with_node.lock_error_clause THEN
-    TRY (mIRLowering__emit_fsm_lock_error_arm_split( &lowering_api, with_node.lock_error_clause, id, with_node, capture_map, pointer_captures, bg_rt))
+    TRY (mIRLowering__emit_fsm_lock_error_arm_split( &lowering_api, UNWRAP (with_node.lock_error_clause), id, with_node, capture_map, pointer_captures, bg_rt))
   ELSE
     mIRLowering__default_fsm_lock_error_arm_split(lowering_api, id)
   END;

@@ -458,7 +458,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_with_optional_binding(self: Pipeline
   END
   RETURN work();
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_bc_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_bc_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   IF (terminal_kind == PipelineConcurrentTerminalKind.Select) THEN
     MUTABLE expr = COPY UNWRAP (plan.bc_expression);
     RETURN TRY (pipelineConcurrentLowerer__lower_bc_select_expression(self, expr.policy, expr, &plan));
@@ -536,7 +536,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(self: PipelineC
     RETURN TRY (pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(self, plan.lhs, TRY (aST__full_type_mut(plan.lhs)), plan.inner));
   END
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_list_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_list_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE work = %() USE(plan, self) -> {
   rtoc_lambda_result_15 = TRY (pipelineConcurrentLowerer__lower_list_terminal_plan(self, plan.terminal_kind, &plan));
   rtoc_lambda_result_15
@@ -549,7 +549,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_list_terminal_plan(self: PipelineCon
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Where) THEN
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_where(self, &plan.real_lhs, plan.conc_op, castLocatableToWhereOp__pipeline_concurrent_lowerer(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Count) THEN
-    RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_count(self, plan.real_lhs, plan.conc_op, castLocatableToCountOp(plan.inner))) };
+    RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_count(self, &plan.real_lhs, plan.conc_op, castLocatableToCountOp(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Sum) OR (terminal_kind == PipelineConcurrentTerminalKind.Average) OR (terminal_kind == PipelineConcurrentTerminalKind.Min) OR (terminal_kind == PipelineConcurrentTerminalKind.Max) THEN
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_reduce(self, plan.real_lhs, plan.conc_op, CAST(plan.inner AS Any@multiowned), &plan.smooth_node)) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Each) THEN
