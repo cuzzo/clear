@@ -1338,7 +1338,7 @@ PUB FN escapeAnalysis__propagate_assignment_ownership_mut(facts: FunctionFacts, 
 END
 PUB FN escapeAnalysis__assigned_binding_name(node: AssignmentNode) RETURNS ?String ->
   IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
-    RETURN COPY CAST(node.name() AS String);
+    RETURN COPY CAST(aST__node_name(UNWRAP (castAssignmentNodeToLocatable(node))) AS String);
   END
   IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
     RETURN NIL;
