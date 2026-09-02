@@ -128,3 +128,22 @@ FN castAsyncValidationNodeToLocatable(value: AsyncValidationNode) RETURNS ?Locat
   END
   RETURN NIL;
 END
+
+FN castAsyncBodyNodeToAsyncSpawnNode(value: AsyncBodyNode) RETURNS AsyncSpawnNode ->
+  PARTIAL MATCH value START
+    AsyncBodyNode.BgBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgBlock: COPY cast_payload };,
+    AsyncBodyNode.BgStreamBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgStreamBlock: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to AsyncSpawnNode");
+  END
+  panic("Invalid cast to AsyncSpawnNode");
+END
+
+FN castAssignmentNodeToLocatable(value: AssignmentNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    AssignmentNode.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    AssignmentNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    AssignmentNode.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END

@@ -1703,7 +1703,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF info EXISTS AS info_value THEN
       MUTABLE tok: ?Token = NIL;
       MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
-      IF ((decl != NIL) AND aST__node__token(decl)) THEN
+      IF ((decl != NIL) AND aST__node__token( UNWRAP (castSymbolEntryRegInputToLocatable(decl)))) THEN
         tok = aST__node__token(decl);
       ELSE_IF (symbolEntry__is_param(info_value) AND (COPY info_value.param_decl_token != NIL)) THEN
         tok = COPY COPY info_value.param_decl_token;
@@ -2865,7 +2865,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE node = COPY _.node;
     MUTABLE body_scan = COPY _.summary;
     IF (node IS_A BgBlock) THEN
-        TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, &node, body_scan));
+        TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, UNWRAP (castAsyncBodyNodeToAsyncSpawnNode(&node)), body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, node, body_scan.callees, node.stack_size, node.can_smash, node));
     ELSE_IF (node IS_A BgStreamBlock) THEN
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, &node, body_scan));

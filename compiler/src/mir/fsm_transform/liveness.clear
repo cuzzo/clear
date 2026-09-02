@@ -185,7 +185,7 @@ PRIVATE FN liveness__collect_defs(MUTABLE stmt: Stmt, MUTABLE into: {String}?Typ
 END
 PRIVATE FN liveness__stmt_decl_type(MUTABLE stmt: BindingStmt) RETURNS !?Type ->
   MUTABLE candidates: []?TypeTypeInput = List[];
-  &candidates.append(TRY (aST__full_type_mut(stmt)));
+  &candidates.append(TRY (aST__full_type_mut( UNWRAP (castBindingStmtToLocatable(stmt)))));
   &candidates.append(UNWRAP (CAST(bindingStmt__type(stmt) AS ?TypeTypeInput)));
   IF respondsTo?(stmt, "declared_type") THEN
     &candidates.append(UNWRAP (CAST(stmt.declared_type() AS ?TypeTypeInput)));
@@ -1066,4 +1066,14 @@ PUB FN bindingStmt__type(value: BindingStmt) RETURNS ?Type ->
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
+END
+
+FN castBindingStmtToLocatable(value: BindingStmt) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    BindingStmt.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    BindingStmt.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    BindingStmt.DestructureTarget AS cast_payload -> RETURN Locatable{ DestructureTarget: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
 END

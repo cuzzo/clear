@@ -15,3 +15,12 @@ PUB FN allocDeclarationNode__value(value: AllocDeclarationNode) RETURNS ?Locatab
   END
   RETURN NIL;
 END
+
+FN castAllocDeclarationNodeToLocatable(value: AllocDeclarationNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    AllocDeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    AllocDeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
