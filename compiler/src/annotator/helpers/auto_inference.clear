@@ -10955,3 +10955,15 @@ PUB FN autoConstraintCollectorDeclarationNode__type(value: AutoConstraintCollect
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:type)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN autoConstraintCollectorSlotDeclNode__type(value: AutoConstraintCollectorSlotDeclNode) RETURNS ?Type ->
+  PARTIAL MATCH value START
+    AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> RETURN COPY item.type;,
+    AutoConstraintCollectorSlotDeclNode.BindExpr AS item -> RETURN COPY item.type;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

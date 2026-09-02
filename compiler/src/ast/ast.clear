@@ -16549,3 +16549,146 @@ FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLowering
   END
   panic("Invalid cast to MIRLoweringLowerableStmt");
 END
+
+# Ruby asks `respond_to?(:capture_analysis)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN node__capture_analysis(value: Node) RETURNS ?CaptureAnalysis ->
+  PARTIAL MATCH value START
+    Node.SelectOp AS item -> RETURN COPY item.capture_analysis;,
+    Node.ConcurrentOp AS item -> RETURN COPY item.capture_analysis;,
+    Node.BgBlock AS item -> RETURN COPY item.capture_analysis;,
+    Node.BgStreamBlock AS item -> RETURN COPY item.capture_analysis;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:body)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN clearParserConcurrentPipelineOp__body(value: ClearParserConcurrentPipelineOp) RETURNS ?[]Locatable ->
+  PARTIAL MATCH value START
+    ClearParserConcurrentPipelineOp.EachOp AS item -> RETURN COPY item.body;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:expression)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN clearParserConcurrentPipelineOp__expression(value: ClearParserConcurrentPipelineOp) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    ClearParserConcurrentPipelineOp.SelectOpMultiowned AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.WhereOpMultiowned AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.SumOpMultiowned AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.CountOpMultiowned AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.MinOpMultiowned AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.MaxOpMultiowned AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.AverageOpMultiowned AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.SelectOp AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.WhereOp AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.SumOp AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.CountOp AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.MinOp AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.MaxOp AS item -> RETURN COPY item.expression;,
+    ClearParserConcurrentPipelineOp.AverageOp AS item -> RETURN COPY item.expression;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:body)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN bgNode__body(value: BgNode) RETURNS ?[]Locatable ->
+  PARTIAL MATCH value START
+    BgNode.BgBlock AS item -> RETURN COPY item.body;,
+    BgNode.BgStreamBlock AS item -> RETURN COPY item.body;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:expression)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__expression(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.SelectOp AS item -> RETURN COPY item.expression;,
+    Locatable.WhereOp AS item -> RETURN COPY item.expression;,
+    Locatable.IndexOp AS item -> RETURN COPY item.expression;,
+    Locatable.ReduceOp AS item -> RETURN COPY item.expression;,
+    Locatable.OrderByOp AS item -> RETURN COPY item.expression;,
+    Locatable.UnnestOp AS item -> RETURN COPY item.expression;,
+    Locatable.DistinctOp AS item -> RETURN COPY item.expression;,
+    Locatable.TakeWhileOp AS item -> RETURN COPY item.expression;,
+    Locatable.WindowOp AS item -> RETURN COPY item.expression;,
+    Locatable.BatchWindowOp AS item -> RETURN COPY item.expression;,
+    Locatable.FindOp AS item -> RETURN COPY item.expression;,
+    Locatable.AnyOp AS item -> RETURN COPY item.expression;,
+    Locatable.AllOp AS item -> RETURN COPY item.expression;,
+    Locatable.CountOp AS item -> RETURN COPY item.expression;,
+    Locatable.SumOp AS item -> RETURN COPY item.expression;,
+    Locatable.AverageOp AS item -> RETURN COPY item.expression;,
+    Locatable.MinOp AS item -> RETURN COPY item.expression;,
+    Locatable.MaxOp AS item -> RETURN COPY item.expression;,
+    Locatable.AssertRaises AS item -> RETURN COPY item.expression;,
+    Locatable.BenchmarkStmt AS item -> RETURN COPY item.expression;,
+    Locatable.SmashStmt AS item -> RETURN COPY item.expression;,
+    Locatable.ProfileStmt AS item -> RETURN COPY item.expression;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:count)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__count(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.LimitOp AS item -> RETURN COPY item.count;,
+    Locatable.SkipOp AS item -> RETURN COPY item.count;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:markers)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__markers(value: Locatable) RETURNS ?String ->
+  PARTIAL MATCH value START
+    Locatable.TenseNavigation AS item -> RETURN COPY item.markers;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:start)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__start(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.Slice AS item -> RETURN COPY item.start;,
+    Locatable.RangeLit AS item -> RETURN COPY item.start;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:visibility)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__visibility(value: Locatable) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    Locatable.ProtocolDef AS item -> RETURN COPY item.visibility;,
+    Locatable.FunctionDef AS item -> RETURN COPY item.visibility;,
+    Locatable.StructDef AS item -> RETURN COPY item.visibility;,
+    Locatable.EnumDef AS item -> RETURN COPY item.visibility;,
+    Locatable.UnionDef AS item -> RETURN COPY item.visibility;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

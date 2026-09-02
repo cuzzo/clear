@@ -639,7 +639,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_stream_each(self: Pipelin
 END
 PRIVATE FN pipelineConcurrentLowerer__concurrent_list_item_type(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable) RETURNS !Type ->
   IF lhs IS_A RangeLit THEN
-    MUTABLE elem = lhs.start().full_type_mut();
+    MUTABLE elem = locatable__start(lhs).full_type_mut();
     IF TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))) != NIL THEN
       elem = type__resolved((UNWRAP (TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))))));
     END
@@ -859,7 +859,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__callback_expression(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS !Locatable ->
   MUTABLE op: ?ClearParserConcurrentPipelineOp@boxed = COPY conc_op.op;
   IF (UNWRAP (op) IS_A AverageOp) OR (UNWRAP (op) IS_A CountOp) OR (UNWRAP (op) IS_A MaxOp) OR (UNWRAP (op) IS_A MinOp) OR (UNWRAP (op) IS_A SelectOp) OR (UNWRAP (op) IS_A SumOp) OR (UNWRAP (op) IS_A WhereOp) THEN
-    RETURN op.expression();
+    RETURN clearParserConcurrentPipelineOp__expression(UNWRAP (op));
   ELSE
     panic("concurrent callback expression expected expression op, got {}");
   END

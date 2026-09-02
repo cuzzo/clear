@@ -1876,7 +1876,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((decl IS_A VarDecl OR decl IS_A BindExpr)) THEN
       RETURN;
     END
-    IF !(decl.type()) THEN
+    IF !(autoConstraintCollectorSlotDeclNode__type(decl)) THEN
       RETURN;
     END
     IF type__auto?(decl.type()) THEN

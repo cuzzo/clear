@@ -142,3 +142,17 @@ END
 # End Ruby module CapabilityAudit
 # Ruby module CapabilityUsageAudit
 # Ruby module CapabilityAudit
+
+# Ruby asks `respond_to?(:value)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN captureSiteNode__value(value: CaptureSiteNode) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    CaptureSiteNode.MoveNode AS item -> RETURN COPY item.value;,
+    CaptureSiteNode.CopyNode AS item -> RETURN COPY item.value;,
+    CaptureSiteNode.Copy AS item -> RETURN COPY item.value;,
+    CaptureSiteNode.KeepNode AS item -> RETURN COPY item.value;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

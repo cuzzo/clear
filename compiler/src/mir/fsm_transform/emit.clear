@@ -788,7 +788,7 @@ PRIVATE FN emit__lift_ctx_cleanups_to_destroy_mut(body: []Emittable, promoted_na
   IF (_ IS_A Cleanup OR _ IS_A ErrCleanup) THEN
       MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(emittable__name(_) AS String), promoted_names);
       IF promoted_name EXISTS AS promoted_name_value THEN
-        &ctx.destroy_actions.append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :body, name: COPY promoted_name_value, target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY ctx_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY promoted_name_value, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: _.cleanup_entry(), guard: NIL, allocator: NIL } });
+        &ctx.destroy_actions.append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :body, name: COPY promoted_name_value, target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY ctx_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY promoted_name_value, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: emittable__cleanup_entry(_), guard: NIL, allocator: NIL } });
         CONTINUE;
       END
   END

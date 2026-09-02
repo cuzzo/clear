@@ -19784,3 +19784,29 @@ FN castMIRFsmLoweringResultFsmBodyToFsmBody(value: MIRFsmLoweringResultFsmBody) 
   END
   panic("Invalid cast to FsmBody");
 END
+
+# Ruby asks `respond_to?(:cleanup_entry)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN emittable__cleanup_entry(value: Emittable) RETURNS ?CleanupEntry@multiowned ->
+  PARTIAL MATCH value START
+    Emittable.DiscardOwned AS item -> RETURN COPY item.cleanup_entry;,
+    Emittable.Cleanup AS item -> RETURN COPY item.cleanup_entry;,
+    Emittable.ErrCleanup AS item -> RETURN COPY item.cleanup_entry;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:receiver)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN emittable__receiver(value: Emittable) RETURNS ?Emittable@boxed ->
+  PARTIAL MATCH value START
+    Emittable.MIRMethodCall AS item -> RETURN COPY item.receiver;,
+    Emittable.ProtocolCall AS item -> RETURN COPY item.receiver;,
+    Emittable.ExternTrampoline AS item -> RETURN COPY item.receiver;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

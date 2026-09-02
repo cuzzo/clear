@@ -21,6 +21,25 @@ text = sources.to_h { |p| [p, File.read(p)] }
 # with every reflected name buries the tree in code nothing calls; a call that
 # exists with no definition is a site that is already blocked.
 called = text.values.join.scan(/\b([a-z]\w*)__([a-zA-Z_?!]+)\(/).uniq
+
+# A site that still spells the read as `x.field` has no call to find, so the
+# probe's diagnostics are the other half of the demand: they name the union and
+# the field the compiler could not resolve.
+probe_path = File.expand_path('../.fn_probe.json', __dir__)
+if File.exist?(probe_path)
+  require 'json'
+  JSON.parse(File.read(probe_path)).each do |r|
+    next if r['ok']
+
+    e = r['error'].to_s
+    m = e.match(/Type ([\w@?\[\]{}]+) has no inherent METHOD named '([\w?!]+)'/)
+    next unless m
+
+    u = m[1].sub(/@\w+\z/, '').delete_prefix('?')
+    called << ["#{u[0].to_s.downcase}#{u[1..]}", m[2]] if variants.key?(u)
+  end
+  called.uniq!
+end
 defined = text.values.join.scan(/FN (\w+)\(/).flatten.to_set
 wanted = Hash.new { |h, k| h[k] = [] }
 called.each do |recv, field|
@@ -50,9 +69,10 @@ variants.each do |union, members|
     carrying = members.select { |_, type| fields[type.sub(/@\w+\z/, '')].key?(field) }
     next if carrying.empty?
 
+    # Types differing only by optionality unify to the optional form: a value
+    # that is always present is a valid optional. A field that means different
+    # things on different variants still needs a human to pick the meaning.
     types = carrying.map { |_, t| fields[t.sub(/@\w+\z/, '')][field].delete_prefix('?') }.uniq
-    # A field meaning different things on different variants needs a human to
-    # say which meaning the call site wants.
     (skipped[:mixed] += 1) and next if types.length > 1
 
     result = types.first

@@ -789,7 +789,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE pending: []Emittable = COPY nodes;
     WHILE !((pending.length() == 0)) DO
       MUTABLE node = UNWRAP (&pending.pop());
-      IF ((IF node IS_A MIRMethodCall AS mir_method_call THEN mir_method_call.receiver IS_A Call ELSE FALSE END) AND ((CAST(node.receiver() AS Call)).callee == "CheatLib.SharedNodeStore")) THEN
+      IF ((IF node IS_A MIRMethodCall AS mir_method_call THEN mir_method_call.receiver IS_A Call ELSE FALSE END) AND ((CAST(emittable__receiver(node) AS Call)).callee == "CheatLib.SharedNodeStore")) THEN
         MUTABLE arg: ?Emittable = COPY ((CAST(node.receiver() AS Call)).args).first();
         IF arg? IS_A Ident AS ident THEN
           &found.insert(ident.name);
@@ -881,7 +881,7 @@ FN mIRLowering__shared_node_write_mir?(self: MIRLowering, node: Emittable) RETUR
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF ((IF node IS_A MIRMethodCall AS mir_method_call THEN mir_method_call.receiver IS_A Call ELSE FALSE END) AND ((CAST(node.receiver() AS Call)).callee == "CheatLib.SharedNodeStore")) THEN
+    IF ((IF node IS_A MIRMethodCall AS mir_method_call THEN mir_method_call.receiver IS_A Call ELSE FALSE END) AND ((CAST(emittable__receiver(node) AS Call)).callee == "CheatLib.SharedNodeStore")) THEN
       IF (["createBound", "removeBound"]).contains?(node.method()) THEN
         RETURN TRUE;
       END
@@ -2181,7 +2181,7 @@ FN mIRLowering__emitted_guarded_cleanup_for_name?(self: MIRLowering, nodes: []Em
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN nodes |> ANY (IF !((_ IS_A Cleanup OR _ IS_A ErrCleanup)) THEN FALSE ELSE ((emittable__name(_) == name) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_37 = _.cleanup_entry();
+    RETURN nodes |> ANY (IF !((_ IS_A Cleanup OR _ IS_A ErrCleanup)) THEN FALSE ELSE ((emittable__name(_) == name) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_37 = emittable__cleanup_entry(_);
     cleanupEntry__has_moved_guard?(rtoc_local_receiver_37) }) END);
 }
 END
@@ -2524,7 +2524,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE owner_cleanup: ?MIRLoweringReturnValue = mIRLowering__owner_cleanup_for_transfer(rtoc_self_view, state, name);
         IF owner_cleanup EXISTS AS owner_cleanup_value THEN
           MUTABLE owner_cleanup_value_mutable = COPY owner_cleanup_value;
-          MUTABLE rtoc_mutable_receiver_51 = owner_cleanup_value_mutable.cleanup_entry();
+          MUTABLE rtoc_mutable_receiver_51 = mIRLoweringReturnValue__cleanup_entry(owner_cleanup_value_mutable);
           cleanupEntry__mark_moved_guard_mut(&rtoc_mutable_receiver_51);
           &state.guarded_cleanup_names.insert(name);
           state.parent?.guarded_cleanup_names.insert(name);
@@ -5113,7 +5113,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE same_dir = (mod_value.source_dir == mIRLowering__program_state(rtoc_self_view).source_dir);
-    MUTABLE vis = (stmt.visibility() OR :package);
+    MUTABLE vis = (locatable__visibility(stmt) OR :package);
     IF (vis == :pub) THEN
       RETURN FALSE;
     END
@@ -13320,7 +13320,7 @@ PRIVATE FN mIRLowering__enforce_bg_capture_strategies_mut(self: MIRLowering, nod
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE strategies: {Any}Any = {};
-    IF node.capture_analysis() THEN
+    IF node__capture_analysis(node) THEN
       strategies = node.capture_analysis().strategies;
     ELSE
       strategies = {};
@@ -23286,4 +23286,16 @@ FN castCallNodeToLocatable(value: CallNode) RETURNS Locatable ->
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
+END
+
+# Ruby asks `respond_to?(:cleanup_entry)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN mIRLoweringReturnValue__cleanup_entry(value: MIRLoweringReturnValue) RETURNS ?CleanupEntry@multiowned ->
+  PARTIAL MATCH value START
+    MIRLoweringReturnValue.Cleanup AS item -> RETURN COPY item.cleanup_entry;,
+    MIRLoweringReturnValue.ErrCleanup AS item -> RETURN COPY item.cleanup_entry;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

@@ -183,3 +183,15 @@ PUB FN functionCallNode__token(value: FunctionCallNode) RETURNS ?Token ->
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:requires)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN routineNode__requires(value: RoutineNode) RETURNS ?{String}[Set]String@symbol ->
+  PARTIAL MATCH value START
+    RoutineNode.FunctionDefMultiowned AS item -> RETURN COPY item.requires;,
+    RoutineNode.FunctionDef AS item -> RETURN COPY item.requires;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
