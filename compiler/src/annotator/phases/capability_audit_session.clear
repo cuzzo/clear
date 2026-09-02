@@ -664,7 +664,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(locatable__token(tgt)) THEN
       RETURN NIL;
     END
-    RETURN capabilityAuditSession__anchor_at(rtoc_self_view, UNWRAP (locatable__token(tgt)).line, ((locatable__token(tgt).column + (CAST(tgt.name() AS String)).codepointCount()) + 1));
+    RETURN capabilityAuditSession__anchor_at(rtoc_self_view, UNWRAP (locatable__token(tgt)).line, ((UNWRAP (locatable__token(tgt)).column + (CAST(tgt.name() AS String)).codepointCount()) + 1));
 }
 END
 PRIVATE FN capabilityAuditSession__variant_anchor_from_unionlit(self: CapabilityAuditSession, node: Node, variant_name: String) RETURNS ?AnchorToken
@@ -1223,7 +1223,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fix: ?Fix = NIL;
     IF locatable__token(node) THEN
       MUTABLE tok: ?Token = locatable__token(node);
-      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_RETURN_WITH_COPY)), [edit__new(span__new(NIL, tok.line, tok.column, 0), "COPY ")], :auto));
+      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_RETURN_WITH_COPY)), [edit__new(span__new(NIL, UNWRAP (tok).line, tok.column, 0), "COPY ")], :auto));
     END
     MUTABLE kw = {:type: TRY (aST__full_type_mut(node))};
     IF !(fix) THEN
@@ -1347,7 +1347,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE tok: ?Token = locatable__token(UNWRAP (vn));
-      MUTABLE name = COPY CAST(vn.name() AS String);
+      MUTABLE name = COPY CAST(aST__node_name(UNWRAP (vn)) AS String);
       &edits.append(edit__new(span__new(NIL, tok.line, (tok.column + name.codepointCount()), 0), " AS ${name}_v"));
     rtoc_idx = rtoc_idx + 1;
     END
@@ -1594,7 +1594,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(text_length) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, CAST({:type: castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name)} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "CAST("), edit__new(span__new(NIL, tok.line, (tok.column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, CAST({:type: castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name)} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (tok).line, tok.column, 0), "CAST("), edit__new(span__new(NIL, UNWRAP (tok).line, (tok.column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
     ELSE
       RETURN NIL;
     END
@@ -3628,7 +3628,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE s = span?.start_token;
     MUTABLE e = UNWRAP (span).end_token;
-    IF (s.line != e.line) THEN
+    IF (UNWRAP (s).line != UNWRAP (e).line) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_25: []Edit = List[]; rtoc_empty_list_25 } ) AS []Edit);
     END
     MUTABLE end_col = (e.column + (CAST(e.value AS String)).codepointCount());
@@ -4193,7 +4193,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_45.length() DO
       MUTABLE fact = COPY rtoc_each_items_45[rtoc_idx]?.fact;
       MUTABLE var_node = COPY fact?.var_node;
-      MUTABLE syn = (IF UNWRAP (var_node).symbol != NIL THEN
+      MUTABLE syn = (IF locatable__symbol(UNWRAP (var_node)) != NIL THEN
           (var_node.symbol).sync()
         ELSE
           NIL
