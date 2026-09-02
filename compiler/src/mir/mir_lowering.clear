@@ -6246,7 +6246,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_200: []String = List[]; rtoc_empty_list_200 } );
     IF UNWRAP (node) IS_A MoveNode AS move_node THEN
       IF move_node.value IS_A Identifier THEN
-        &names.append(COPY CAST(move_node.value.name() AS String));
+        &names.append(COPY CAST(aST__node_name(move_node.value) AS String));
       ELSE
         names = ruby_array_concat_String__mir_lowering(names, mIRLowering__fsm_ast_result_consumed_roots(rtoc_self_view, move_node.value));
       END
@@ -9206,7 +9206,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF assignment.name IS_A Identifier THEN
         MUTABLE alloc: ?String@symbol = mIRLowering__infer_catch_value_allocator(rtoc_self_view, assignment.value);
         IF alloc EXISTS AS alloc_value THEN
-          &reassigns.append(CatchReassign{ name: COPY CAST(assignment.name.name() AS String), alloc: COPY alloc_value, line: assignment.token.line });
+          &reassigns.append(CatchReassign{ name: COPY CAST(assignmentName__name(assignment.name) AS String), alloc: COPY alloc_value, line: assignment.token.line });
         END
       END
     ELSE_IF _ IS_A IfStatement AS if_statement THEN
@@ -14447,7 +14447,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(get_field.target IS_A Identifier) THEN
         RETURN NIL;
       END
-      MUTABLE type_name = type__to_sym(get_field.target.name());
+      MUTABLE type_name = type__to_sym(aST__node_name(get_field.target));
       MUTABLE schema = (TRY (mIRLowering__union_schemas(rtoc_self_view)))[type_name];
       IF !(schema IS_A UnionSchema@multiowned) THEN
         RETURN NIL;
@@ -18726,7 +18726,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target_ident = Ident{ name: (mIRLowering__capture_mapped_name(rtoc_self_view, target_name) OR_ELSE safe), lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE cell = Deref{ expr: Emittable{ Ident: COPY target_ident }, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE arg_ast =   IF node.compound_op THEN
-      node.value.right()
+      aST__node_right(node.value)
     ELSE
       node.value
     END;

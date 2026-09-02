@@ -87,7 +87,10 @@ by.each do |f, hits|
       end
     end
 
-    new = lines[i].gsub(/(?<![\w.])([a-z_]\w*)\.#{Regexp.escape(meth)}\(\)/) do
+    # The receiver may be a path, an indexed element, a call, or an UNWRAP of
+    # any of those; a bare-identifier pattern misses most real sites.
+    recv_pat = /(?:UNWRAP\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:__\w+)?\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:\[[^\]]*\])?(?:\.[a-z_]\w*(?:\[[^\]]*\])?)*)/
+    new = lines[i].gsub(/(?<![\w.])(#{recv_pat})\.#{Regexp.escape(meth)}\(\)/) do
       recv = Regexp.last_match(1)
       recv = "UNWRAP (#{recv})" if optional
       recv = "UNWRAP (#{cast}(#{recv}))" if cast

@@ -3647,7 +3647,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (all.length() == 0) THEN
       RETURN FALSE;
     END
-    MUTABLE blessed = UNWRAP (capabilityAuditBodyFacts__return_nodes(body_facts)) |> SELECT:? (  IF (UNWRAP (_.value) IS_A FuncCall AND (_.value.name() == fn_node.name)) THEN
+    MUTABLE blessed = UNWRAP (capabilityAuditBodyFacts__return_nodes(body_facts)) |> SELECT:? (  IF (UNWRAP (_.value) IS_A FuncCall AND (aST__node_name(UNWRAP (_.value)) == fn_node.name)) THEN
       _.value
     ELSE
       NIL
