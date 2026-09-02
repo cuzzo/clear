@@ -99,6 +99,10 @@ DEFINED = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
   File.read(f).scan(/\bFN ([\w?!]+)\s*(?:<[^>]*>)?\(/).flatten
 end.to_set.freeze
 
+RETURNS = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
+  File.read(f).scan(/\bFN ([\w?!]+)\([^\n]*?\)\s*RETURNS\s+([\w@?\[\]{}!]+)/)
+end.to_h.freeze
+
 def accessor_for(union, field)
   name = "#{union[0].to_s.downcase}#{union[1..]}__#{field}"
   return name if DEFINED.include?(name)
@@ -178,6 +182,10 @@ by.each do |f, rs|
       line_edits << [r['line'], :union_field_read, m[1]]
     elsif (m = e.match(/RESTRICT capability requires a mutable variable, but '(\w+)' is immutable/))
       line_edits << [r['line'], :mutable_param, m[1]]
+    elsif e =~ /Operator NEQ cannot compare \w+ with NIL/
+      line_edits << [r['line'], :fold_nil_compare, nil]
+    elsif (m = e.match(/Cannot infer `(\w+)` from an optional value/))
+      line_edits << [r['line'], :annotate_optional, m[1]]
     end
   end
 
@@ -256,6 +264,26 @@ by.each do |f, rs|
 
         counts[kind] += 1
         "#{owner}.#{v}"
+      end
+    when :fold_nil_compare
+      # The operand is not optional, so Ruby's nil guard is decided here.
+      # Only an unambiguous line is folded.
+      if lines[i].scan(/!=\s*NIL/).length == 1 && lines[i].scan(/==\s*NIL/).empty?
+        lines[i] = lines[i].sub(/(?<![\w.)])[a-z_]\w*(?:\.[a-z_]\w*)*\s*!=\s*NIL/, 'TRUE')
+        counts[kind] += 1
+      elsif lines[i].scan(/==\s*NIL/).length == 1 && lines[i].scan(/!=\s*NIL/).empty?
+        lines[i] = lines[i].sub(/(?<![\w.)])[a-z_]\w*(?:\.[a-z_]\w*)*\s*==\s*NIL/, 'FALSE')
+        counts[kind] += 1
+      end
+    when :annotate_optional
+      # An optional initializer needs the binding's type spelled out; the
+      # callee's declared return type is that type.
+      m = lines[i].match(/^(\s*)MUTABLE #{name}\s*=\s*(?:TRY\s*\()?\s*([\w?!]+)\(/)
+      if m && (ret = RETURNS[m[2]])
+        ret = ret.delete_prefix('!')
+        ret = "?#{ret}" unless ret.start_with?('?')
+        lines[i] = lines[i].sub(/^(\s*)MUTABLE #{name}\s*=/) { "#{Regexp.last_match(1)}MUTABLE #{name}: #{ret} =" }
+        counts[kind] += 1
       end
     when :static_is_a
       # The subject's static type already IS the tested type, so Ruby's guard
