@@ -14502,7 +14502,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE recover_op_mutable = COPY recover_op;
       RETURN Emittable{ TryCatch: COPY TRY (mIRLowering__lower_recover_smooth(&rtoc_self_view, &node, &recover_op_mutable)) };
     END
-    RETURN TRY (mIRLowering__lower_call_smooth(&rtoc_self_view, node));
+    RETURN TRY (mIRLowering__lower_call_smooth(&rtoc_self_view, &node));
 }
 END
 PRIVATE FN mIRLowering__lower_complex_smooth(MUTABLE self: MIRLowering, MUTABLE node: BinaryOp) RETURNS !Emittable
