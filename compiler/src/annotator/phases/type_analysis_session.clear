@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -15359,7 +15359,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE bytes = (((declarationNode__slot_size(node) OR_ELSE 1)) * 8);
-    functionContext__record_stack_bytes_mut( &UNWRAP (fn_ctx), bytes);
+    functionContext__record_stack_bytes_mut( &fn_ctx, bytes);
     RETURN bytes;
 }
 END
@@ -20328,7 +20328,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((val != NIL) AND ((val IS_A FuncCall OR val IS_A MethodCall))) THEN
       MUTABLE matched_def: ?FunctionSignature@multiowned = locatable__matched_stdlib_def(val);
       IF matched_def THEN
-        IF !((TRY (functionSignature__intrinsic_lifetime( &UNWRAP (matched_def)))).empty?()) THEN
+        IF !((TRY (functionSignature__intrinsic_lifetime( &matched_def))).empty?()) THEN
           IF respondsTo?(val, "storage=") THEN
             val.storage = :borrow;
           END

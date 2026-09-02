@@ -840,7 +840,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN CAST(( { MUTABLE rtoc_empty_list_32: []Emittable = List[]; rtoc_empty_list_32 } ) AS []Emittable);
         END
         entry = cleanupEntry__with_alloc( UNWRAP (entry), :heap);
-        cleanupEntry__mark_moved_guard_mut( &UNWRAP (entry));
+        cleanupEntry__mark_moved_guard_mut( &entry);
         RETURN CAST([Emittable{ AllocMark: COPY AllocMark{ name: COPY item_var, alloc: :heap, type_info: COPY elem_t_value_mutable, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Cleanup: COPY Cleanup{ name: COPY item_var, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
       ELSE
         RETURN CAST(( { MUTABLE rtoc_empty_list_31: []Emittable = List[]; rtoc_empty_list_31 } ) AS []Emittable);

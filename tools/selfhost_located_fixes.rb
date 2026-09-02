@@ -197,6 +197,10 @@ by.each do |f, rs|
       # A view or a receiver the compiler reported as optional once can be
       # reported again after an unrelated edit; wrapping twice is never right.
       next if expr.include?('UNWRAP (')
+      # `&x` is a mutating argument. Neither UNWRAP (&x) nor &UNWRAP (x) is
+      # accepted here: an optional mutable argument needs an EXISTS AS
+      # MUTABLE binding at the call site, which is not a wrap.
+      next if expr.start_with?('&')
 
       edits << [sp[0], sp[1], " UNWRAP (#{expr})", :unwrap_arg]
     elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && VARIANT_OF[m[1]]&.key?(m[2])
@@ -257,8 +261,6 @@ by.each do |f, rs|
       line_edits << [r['line'], :drop_or_else, nil]
     elsif (m = e.match(/No overload for 'toString' matches arguments \((\w+)\)/))
       line_edits << [r['line'], :to_s_helper, m[1]]
-    elsif e =~ /'&' is only valid on an argument passed to a MUTABLE parameter/
-      line_edits << [r['line'], :hoist_mutable_marker, nil]
     elsif (m = e.match(/argument \d+ expects (\[\][\w@]+|\[Set\][\w@]+|\{[^}]*\}[\w@]+), got NIL\z/))
       # Ruby defaults the collection parameter to an empty one; the
       # translation dropped the default and the caller passes nil.
@@ -514,13 +516,6 @@ by.each do |f, rs|
 
         counts[kind] += 1
         "(#{operand} OR_ELSE FALSE)"
-      end
-    when :hoist_mutable_marker
-      # `&` marks the ARGUMENT as mutating. Inside the unwrap it marks the
-      # unwrapped operand instead, which is not an argument position.
-      lines[i] = lines[i].gsub(/UNWRAP \(&(\w+)\)/) do
-        counts[kind] += 1
-        "&UNWRAP (#{Regexp.last_match(1)})"
       end
     when :to_s_helper
       # The type has no toString intrinsic but carries Ruby's to_s as a
