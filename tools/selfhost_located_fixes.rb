@@ -203,8 +203,8 @@ by.each do |f, rs|
       line_edits << [r['line'], :fold_nil_compare, nil]
     elsif (m = e.match(/Cannot infer `(\w+)` from an optional value/))
       line_edits << [r['line'], :annotate_optional, m[1]]
-    elsif e =~ /Operator \$\+ requires String operands, got \?String/
-      line_edits << [r['line'], :unwrap_interp, nil]
+    elsif (m = e.match(/Operator \$\+ requires String operands, got ([\w?@\[\]]+)/))
+      line_edits << [r['line'], :stringify_interp, m[1]]
     elsif e =~ /Ambiguous \?Bool (?:AND|OR) operand/
       line_edits << [r['line'], :orelse_bool, nil]
     end
@@ -400,16 +400,17 @@ by.each do |f, rs|
         lines[i] = lines[i].sub(/(?<=[(,] )#{name}(?=\s*[,)])|(?<=\()#{name}(?=\s*[,)])/, "&#{name}")
         counts[kind] += 1
       end
-    when :unwrap_interp
-      # Ruby interpolates nil as the empty string only because it never gets
-      # there; the value is present by construction, so unwrap it.
-      lines[i] = lines[i].gsub(/\$\{([a-z_]\w*(?:\.[a-z_]\w*)+)\}/) do
-        whole = Regexp.last_match(0)
-        path = Regexp.last_match(1)
-        next whole unless OPTIONAL_FIELD[path.split('.').last]
-
+    when :stringify_interp
+      # The diagnostic names the operand's type but not which operand it is,
+      # so only an unambiguous line is rewritten: exactly one interpolation
+      # that is not already stringified or unwrapped.
+      cands = lines[i].scan(/\$\{([^{}]+)\}/).flatten
+                      .reject { |x| x.include?('.toString()') || x.include?('UNWRAP ') }
+      if cands.length == 1
+        inner = cands.first
+        repl = name.start_with?('?') ? "${UNWRAP (#{inner})}" : "${#{inner}.toString()}"
+        lines[i] = lines[i].sub("${#{inner}}", repl)
         counts[kind] += 1
-        "${UNWRAP (#{path})}"
       end
     when :orelse_bool
       # Ruby's truthiness on a nil-or-false value is exactly OR_ELSE FALSE.

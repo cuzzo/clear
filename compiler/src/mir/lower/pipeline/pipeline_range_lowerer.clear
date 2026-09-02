@@ -857,7 +857,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE inner_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node }))))) });
     MUTABLE init_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, UNWRAP (reduce_op.initial_value));
     MUTABLE fid = runtimeHost__range_next_observable_id(rtoc_self_view.host);
-    MUTABLE curr_var = "__obs_reduce_curr_${fid}";
+    MUTABLE curr_var = "__obs_reduce_curr_${fid.toString()}";
     MUTABLE next_var = "__obs_reduce_next_${fid}";
     MUTABLE actual_var = "__obs_reduce_actual_${fid}";
     MUTABLE blk_label = "__obs_reduce_blk_${fid}";

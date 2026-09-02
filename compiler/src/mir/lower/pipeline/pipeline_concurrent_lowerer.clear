@@ -136,7 +136,7 @@ PRIVATE FN pipelineConcurrentLowerer__concurrent_plan(self: PipelineConcurrentLo
   END
   RETURN PipelineConcurrentPlan{ source_kind: UNWRAP (COPY source_kind), terminal_kind: COPY terminal_kind, lhs: COPY lhs, real_lhs: COPY real_lhs, smooth_node: COPY smooth_node, conc_op: COPY conc_op, inner: COPY inner, binding_name: COPY binding_name, shard_context: COPY pipelineConcurrentLowerer__shard_context(self, conc_op), bc_expression: COPY pipelineConcurrentLowerer__bc_expression_for(self, terminal_kind, inner), list_each_mutates_placeholder: pipelineConcurrentLowerer__list_each_mutates_placeholder?(self, UNWRAP (source_kind), terminal_kind, inner) };
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   RETURN TRY (pipelineConcurrentLowerer__lower_source_plan(self, plan.source_kind, &plan));
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(self: PipelineConcurrentLowerer, source_kind: PipelineConcurrentSourceKind, MUTABLE plan: PipelineConcurrentPlan) RETURNS !?PipelineConcurrentResult ->
