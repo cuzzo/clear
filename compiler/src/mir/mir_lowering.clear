@@ -13383,7 +13383,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE alloc_var = "__sg${mIRLoweringGeneratedId__to_s(id)}_alloc";
     MUTABLE stream_var = "__sg${mIRLoweringGeneratedId__to_s(id)}_stream";
     MUTABLE ctx_var = "__sg${mIRLoweringGeneratedId__to_s(id)}_ctx";
-    MUTABLE blk_label = "__sg${id.toString()}";
+    MUTABLE blk_label = "__sg${mIRLoweringGeneratedId__to_s(id)}";
     MUTABLE local_stream = "__sg${id}_local";
     IF mIRLowering__bc_target?(rtoc_self_view) THEN
       MUTABLE run_body = mIRLowering__with_stream_body_context(rtoc_self_view, local_stream, is_inf, IF is_inf THEN
