@@ -16154,3 +16154,30 @@ PUB FN locatable__set_tense_plan_mut(MUTABLE value: Locatable, new_value: ?Tense
     DEFAULT -> RETURN;
   END
 END
+
+# Ruby: `(node.is_a?(VarDecl) || node.is_a?(BindExpr)) && node.symbol&.storage == :heap`
+PUB FN aST__declaration_with_heap_symbol?(node: Locatable) RETURNS Bool ->
+  MUTABLE is_declaration: Bool = FALSE;
+  IF node IS_A VarDecl AS rtoc_var_decl THEN
+    is_declaration = TRUE;
+  END
+  IF node IS_A BindExpr AS rtoc_bind_expr THEN
+    is_declaration = TRUE;
+  END
+  IF !(is_declaration) THEN
+    RETURN FALSE;
+  END
+  MUTABLE sym: ?SymbolEntry@multiowned = aST__node__symbol(node);
+  IF sym EXISTS AS sym_value THEN
+    RETURN (symbolEntry__storage(sym_value) == :heap);
+  END
+  RETURN FALSE;
+END
+
+# Ruby: `each_bg_block(body) { |bg| ... }` walks every statement of a body,
+# where `each_bg_block_in_stmt` already walks one statement recursively.
+PUB FN aST__each_bg_block(body: []Locatable, blk: FN(BgNode) -> Void) RETURNS Void ->
+  FOR rtoc_stmt IN body DO
+    aST__each_bg_block_in_stmt(rtoc_stmt, blk);
+  END
+END
