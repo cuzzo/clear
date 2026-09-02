@@ -69,7 +69,7 @@ end
 # call has its own argument 1 -- the site is ambiguous and is left alone:
 # guessing rewrites the inner call and the compiler then contradicts itself
 # about the same operand forever.
-def locate_arg(text, offsets, ln, argno, fn_name = nil)
+def locate_arg(text, offsets, ln, argno, fn_name = nil, expect = nil)
   (0..8).each do |back|
     idx = ln - 1 - back
     break if idx.negative?
@@ -92,6 +92,13 @@ def locate_arg(text, offsets, ln, argno, fn_name = nil)
       return exact[1]
     end
     return cands.first[1] if cands.length == 1
+
+    # Several calls on the line could be the subject. The declared parameter
+    # type settles it exactly: only one callee declares `expects` at index N.
+    if expect
+      typed = cands.select { |n, _| PARAM_TYPES[n]&.[](argno - 1) == expect }
+      return typed.first[1] if typed.length == 1
+    end
 
     return nil
   end
@@ -127,6 +134,16 @@ end.to_set.freeze
 DEFINED = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
   File.read(f).scan(/\bFN ([\w?!]+)\s*(?:<[^>]*>)?\(/).flatten
 end.to_set.freeze
+
+PARAM_TYPES = {}
+Dir.glob(File.join(ROOT, '**', '*.clear')).each do |f|
+  File.read(f).scan(/\bFN ([\w?!]+)\(([^\n]*?)\)\s*RETURNS/) do |name, params|
+    PARAM_TYPES[name] = params.split(/,\s*(?=(?:MUTABLE\s+)?\w+:)/).map do |p|
+      p[/:\s*([\w@?\[\]{}]+)/, 1]
+    end
+  end
+end
+PARAM_TYPES.freeze
 
 RETURNS = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
   File.read(f).scan(/\bFN ([\w?!]+)\([^\n]*?\)\s*RETURNS\s+([\w@?\[\]{}!]+)/)
@@ -168,7 +185,7 @@ by.each do |f, rs|
     argno = e[/[Aa]rgument (\d+)/, 1].to_i
 
     if (m = e.match(/argument \d+ expects ([\w@\[\]{}]+), got \?([\w@\[\]{}]+)\z/)) && m[1] == m[2]
-      sp = locate_arg(text, offsets, r['line'], argno) or next
+      sp = locate_arg(text, offsets, r['line'], argno, nil, m[1]) or next
       expr = text[sp[0]...sp[1]].strip
       next if expr.empty? || expr.start_with?('UNWRAP')
       # A view or a receiver the compiler reported as optional once can be
@@ -177,13 +194,13 @@ by.each do |f, rs|
 
       edits << [sp[0], sp[1], " UNWRAP (#{expr})", :unwrap_arg]
     elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && VARIANT_OF[m[1]]&.key?(m[2])
-      sp = locate_arg(text, offsets, r['line'], argno) or next
+      sp = locate_arg(text, offsets, r['line'], argno, nil, m[1]) or next
       expr = text[sp[0]...sp[1]].strip
       next if expr.empty? || expr.include?("#{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}:")
 
       edits << [sp[0], sp[1], " #{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}: COPY #{expr} }", :wrap_variant]
     elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && CASTS.include?("cast#{m[2]}To#{m[1]}")
-      sp = locate_arg(text, offsets, r['line'], argno) or next
+      sp = locate_arg(text, offsets, r['line'], argno, nil, m[1]) or next
       expr = text[sp[0]...sp[1]].strip
       # The rewrite wraps the argument, so a later round sees its own output.
       # Without this the cast nests on every round.

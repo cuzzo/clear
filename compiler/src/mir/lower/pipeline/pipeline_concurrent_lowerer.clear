@@ -846,7 +846,7 @@ PRIVATE FN pipelineConcurrentLowerer__callback_body(self: PipelineConcurrentLowe
     IF (expr_mir IS_A Call OR expr_mir IS_A MIRMethodCall) THEN
       emittable__set_try_wrap_mut(&expr_mir, FALSE);    END
     MUTABLE expr_type = TRY (aST__full_type_mut(expr_node));
-    IF ((expr_type AND type__integer?((TRY (type__new(expr_type))))) AND type__float?( TypeConstructionInput{ Type: COPY ret_type })) THEN
+    IF ((expr_type AND type__integer?((TRY (type__new( TypeConstructionInput{ Type: COPY expr_type }))))) AND type__float?( TypeConstructionInput{ Type: COPY ret_type })) THEN
       expr_mir = Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY expr_mir, target_type: NIL, method: :floatFromInt, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: TRY (type__zig_type(ret_type)), method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     RETURN CAST([Emittable{ ReturnStmt: COPY ReturnStmt{ value: COPY expr_mir, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);

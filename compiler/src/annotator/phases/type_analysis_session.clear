@@ -5375,7 +5375,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, MUTABLE selector_effect, source, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_112 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_112, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    IF (aST__node_right(node) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR node.right.stream_mode))) THEN
+    IF (aST__node_right( Locatable{ BinaryOp: COPY node }) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR node.right.stream_mode))) THEN
         MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, %() USE(item_type, node, rtoc_self_view) -> {
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
       rubyToClearVoid__type_analysis_session()
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -10028,7 +10028,7 @@ PRIVATE FN typeAnalysisSession__record_capture_local_mut(self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF name EXISTS AS name_value THEN
-      (typeAnalysisSession__current_capture_context( rtoc_self_view)?.locals).insert(COPY name_value);
+      (typeAnalysisSession__current_capture_context( UNWRAP (rtoc_self_view))?.locals).insert(COPY name_value);
     END
 }
 END
@@ -10461,7 +10461,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         MUTABLE val_arg = COPY UNWRAP (args[1]);
         MUTABLE val_type: ?String@symbol = locatable__resolved_type(val_arg);
-        MUTABLE new_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${UNWRAP (val_type)}[]") }, NIL, NIL, NIL, NIL, type__collection(ti)));
+        MUTABLE new_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${UNWRAP (val_type)}[]") }, NIL, NIL, NIL, NIL, type__collection( UNWRAP (ti))));
         TRY (type__copy_collection_shape_from_mut(&new_type, CAST(ti AS Type)));
         TRY (type__copy_element_capabilities_from_mut(&new_type, CAST(ti AS Type)));
         type__copy_placement_from_mut(&new_type, CAST(ti AS Type), FALSE);
@@ -19502,7 +19502,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE rhs_name: ?String = aST__node_name(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))));
     MUTABLE rhs_type = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_480 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-    TRY (scope__resolve_type(rtoc_local_receiver_480, rhs_name)) };
+    TRY (scope__resolve_type(rtoc_local_receiver_480, UNWRAP (rhs_name))) };
     MUTABLE rhs_info: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_481 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     scope__resolve_entry(rtoc_local_receiver_481, rhs_name) };
     IF (IF (IF rhs_info != NIL THEN
@@ -19842,7 +19842,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &drops.append(TRY (typeAnalysisSession__deferred_drop_for(rtoc_self_view, rtoc_mutable_block_param_503._0, rtoc_mutable_block_param_503._1, TRUE)));
         TRY (typeAnalysisSession__og_drop(rtoc_self_view, rtoc_mutable_block_param_503._0));
     ELSE_IF (symbolEntry__ownership_kind(rtoc_mutable_block_param_503._1) == :affine) THEN
-        MUTABLE t = TRY (type__new(symbolEntry__type(rtoc_mutable_block_param_503._1)));
+        MUTABLE t = TRY (type__new( TypeConstructionInput{ Type: COPY symbolEntry__type(rtoc_mutable_block_param_503._1) }));
         IF ((node != NIL) AND TRY (type__single_future?(t))) THEN
           TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :PROMISE_NOT_CONSUMED }, [], CAST({:name: rtoc_mutable_block_param_503._0} AS {String@symbol}Any)));
         END

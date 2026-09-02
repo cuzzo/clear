@@ -905,7 +905,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE mod_branch_value: ?CompiledModule = NIL;
     IF (node.kind == :package) THEN
-      mod_branch_value = TRY (moduleImporter__compile_package(&importer, node.path, resolutionSession__import_source_dir( rtoc_self_view)));
+      mod_branch_value = TRY (moduleImporter__compile_package( UNWRAP (&importer), node.path, resolutionSession__import_source_dir( rtoc_self_view)));
     ELSE
       mod_branch_value = TRY (moduleImporter__compile_file(&importer, node.path, resolutionSession__import_source_dir(rtoc_self_view)));
     END

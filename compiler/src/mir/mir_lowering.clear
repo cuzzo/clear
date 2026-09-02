@@ -13348,7 +13348,7 @@ PRIVATE FN mIRLowering__fsm_bg_block_from_transform_mut(self: MIRLowering, MUTAB
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fsm_structure = COPY transform_result.structure;
-    MUTABLE result_type = TRY (type__tense_type((TRY (type__from_node_mut( Locatable{ BgBlock: COPY node }, "FSM BG result")))));
+    MUTABLE result_type = TRY (type__tense_type( UNWRAP ((TRY (type__from_node_mut( Locatable{ BgBlock: COPY node }, "FSM BG result"))))));
     fsm_structure.owned_result_required = !(!(((TRUE AND TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type))))));
     TRY (mIRChecker__check_fsm_structure_mut(fsm_structure, Locatable{ BgBlock: COPY node }));
     MUTABLE bg = MIRBgBlock{ code: castFsmBodyToBgBlockPlan(COPY transform_result.body), captures: COPY captured, run_body: ( { MUTABLE rtoc_empty_list_516: []Emittable = List[]; rtoc_empty_list_516 } ), fsm_structure: Emittable{ FsmStructure: COPY fsm_structure }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
@@ -14433,7 +14433,7 @@ PRIVATE FN mIRLowering__lower_boolean_operand(MUTABLE self: MIRLowering, node: L
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lowered: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering( node))) AS Emittable);
-    IF !(type__optional?((TRY (type__from_node_mut( node, "logical operand"))))) THEN
+    IF !(type__optional?( UNWRAP ((TRY (type__from_node_mut( node, "logical operand")))))) THEN
       RETURN lowered;
     END
     RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: "!=", left: COPY lowered, right: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -20897,7 +20897,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[name];
     IF ((entry != NIL) AND !(cleanupEntry__needs_cleanup?(entry))) THEN
       IF !((IF cleanupEntry__lifecycle_plan( entry) != NIL THEN
-        lifecyclePlan__needs_drop?((cleanupEntry__lifecycle_plan( entry)))
+        lifecyclePlan__needs_drop?( UNWRAP ((cleanupEntry__lifecycle_plan( entry))))
       ELSE
         NIL
       END)) THEN
