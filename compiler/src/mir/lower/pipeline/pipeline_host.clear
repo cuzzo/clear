@@ -389,7 +389,7 @@ PUB FN pipelineHost__with_fiber_capture_map<U>(self: PipelineHost, new_entries: 
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineLoweringBridge__with_fiber_capture_map( &rtoc_self_view.lowering_bridge, new_entries, capture_symbols, rt_override, blk);
 }
 END
@@ -583,7 +583,7 @@ PUB FN pipelineHost__lower_dispatch_plan(MUTABLE self: PipelineHost, plan: Pipel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (pipelineHost__lower_execution_plan(&rtoc_self_view, plan.execution, plan));
+    RETURN TRY (pipelineHost__lower_execution_plan(&rtoc_self_view, plan.execution, &plan));
 }
 END
 PUB FN pipelineHost__lower_execution_plan(MUTABLE self: PipelineHost, execution: PipelineExecutionKind, MUTABLE plan: PipelineOperationPlan) RETURNS !?PipelineLoweringResult
@@ -597,7 +597,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_fold(rtoc_self_view, &range_chain.source, range_chain.stages, CAST(plan.rhs AS PipelineDefaultObservableFoldOp), &plan.site.options)) };
     ELSE_IF (execution == PipelineExecutionKind.FusedRangeReduce) THEN
       MUTABLE range_chain = COPY UNWRAP (plan.source.range_chain);
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_reduce(rtoc_self_view, range_chain.source, range_chain.stages, castLocatableToReduceOp(plan.rhs), plan.site.options)) };
+      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_reduce(rtoc_self_view, &range_chain.source, range_chain.stages, castLocatableToReduceOp(plan.rhs), plan.site.options)) };
     ELSE_IF (execution == PipelineExecutionKind.BindingChain) THEN
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_binding_chain(rtoc_self_view, UNWRAP (plan.source.binding_chain), plan.site.options)) };
     ELSE_IF (execution == PipelineExecutionKind.MaterializedScalar) THEN

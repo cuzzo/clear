@@ -139,7 +139,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__lower_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   RETURN TRY (pipelineConcurrentLowerer__lower_source_plan(self, plan.source_kind, plan));
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(self: PipelineConcurrentLowerer, source_kind: PipelineConcurrentSourceKind, plan: PipelineConcurrentPlan) RETURNS !?PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(self: PipelineConcurrentLowerer, source_kind: PipelineConcurrentSourceKind, MUTABLE plan: PipelineConcurrentPlan) RETURNS !?PipelineConcurrentResult ->
   IF (source_kind == PipelineConcurrentSourceKind.ShardEach) THEN
     RETURN TRY (pipelineConcurrentLowerer__lower_shard_concurrent_each(self, plan.lhs, plan.conc_op, plan.smooth_node));
   ELSE_IF (source_kind == PipelineConcurrentSourceKind.BcMaterialized) THEN
@@ -445,7 +445,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_bounded_each(self: Pipeli
   MUTABLE call = pipelineConcurrentLowerer__emit_builtin_call(self, :concurrentBoundedEach, ([Emittable{ Ident: COPY Ident{ name: COPY TRY (type__zig_type(item_t)), lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Lit: COPY Lit{ value: COPY CAST((TRY (type__stream_capacity((TRY (aST__full_type_mut(Locatable{ Identifier: COPY lhs })))))) AS String), lowered_node_id: NIL, ownership_consumption: NIL } }] + TRY (pipelineConcurrentInvocation__bounded_each_args(invoke, source.pointer))));
   RETURN ScopeBlock{ body: TRY (pipelineConcurrentInvocation__scoped_body(invoke, ( { MUTABLE rtoc_empty_list_13: []Emittable = List[]; rtoc_empty_list_13 } ), (COPY source.setup + CAST([Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY call, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable) + source_move))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_bc_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_bc_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE work = %() USE(plan, self) -> {
   rtoc_lambda_result_14 = TRY (pipelineConcurrentLowerer__lower_bc_terminal_plan(self, plan.terminal_kind, &plan));
   rtoc_lambda_result_14
@@ -554,7 +554,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_list_terminal_plan(self: PipelineCon
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_reduce(self, &plan.real_lhs, plan.conc_op, CAST(plan.inner AS Any@multiowned), &plan.smooth_node)) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Each) THEN
     MUTABLE each_op: EachOp = COPY castLocatableToEachOp__pipeline_concurrent_lowerer(plan.inner);
-    RETURN PipelineConcurrentResult{ ScopeBlock: COPY TRY (pipelineConcurrentLowerer__lower_list_each_terminal(self, plan.list_each_mutates_placeholder, plan.real_lhs, plan.conc_op, each_op)) };
+    RETURN PipelineConcurrentResult{ ScopeBlock: COPY TRY (pipelineConcurrentLowerer__lower_list_each_terminal(self, plan.list_each_mutates_placeholder, &plan.real_lhs, plan.conc_op, each_op)) };
   ELSE
     panic("lower_concurrent: unsupported list CONCURRENT op {}");
   END
