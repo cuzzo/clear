@@ -8777,7 +8777,7 @@ PRIVATE FN typeAnalysisSession__effect_direct_effects_for(self: TypeAnalysisSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    typeAnalysisSession__effect_direct_effects(rtoc_self_view)[fn_name] = (typeAnalysisSession__effect_direct_effects(rtoc_self_view)[fn_name] OR_ELSE Set[]);
+    typeAnalysisSession__set_direct_effect_mut(&rtoc_self_view, fn_name, (typeAnalysisSession__effect_direct_effects(rtoc_self_view)[fn_name] OR_ELSE Set[]));
     RETURN typeAnalysisSession__effect_direct_effects(rtoc_self_view)[fn_name];
 }
 END
@@ -8785,7 +8785,7 @@ PRIVATE FN typeAnalysisSession__effect_call_site_context_for(self: TypeAnalysisS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    typeAnalysisSession__effect_call_site_context(rtoc_self_view)[caller_name] = (typeAnalysisSession__effect_call_site_context(rtoc_self_view)[caller_name] OR_ELSE {});
+    typeAnalysisSession__set_call_site_context_mut(&rtoc_self_view, caller_name, (typeAnalysisSession__effect_call_site_context(rtoc_self_view)[caller_name] OR_ELSE {}));
     MUTABLE caller_context = COPY UNWRAP (typeAnalysisSession__effect_call_site_context(rtoc_self_view)[caller_name]);
     caller_context[callee_name] = (caller_context[callee_name] OR_ELSE {:loop: FALSE, :cond: FALSE});
     RETURN caller_context[callee_name];
@@ -8795,7 +8795,7 @@ PRIVATE FN typeAnalysisSession__effect_call_site_arg_families_for(self: TypeAnal
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    typeAnalysisSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] = (typeAnalysisSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] OR_ELSE {});
+    typeAnalysisSession__set_call_site_arg_families_mut(&rtoc_self_view, caller_name, (typeAnalysisSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] OR_ELSE {}));
     MUTABLE caller_families = COPY UNWRAP (typeAnalysisSession__effect_call_site_arg_families(rtoc_self_view)[caller_name]);
     IF !(caller_families.contains?(callee_name)) THEN
       caller_families[callee_name] = [];
@@ -22690,4 +22690,37 @@ PUB FN typeAnalysisBodyFacts__return_nodes(value: TypeAnalysisBodyFacts) RETURNS
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
+END
+
+# Ruby writes straight through the accessor; the CLEAR accessor returns a COPY,
+# so the write needs a path to the real field. Mirrors the capability audit
+# session's setters.
+PRIVATE FN typeAnalysisSession__set_direct_effect_mut(MUTABLE self: TypeAnalysisSession, fn_name: String, value: [Set]String@symbol) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF rtoc_self_view.audit_inputs.effect_state EXISTS AS MUTABLE rtoc_state THEN
+      rtoc_state.direct_effects[fn_name] = COPY value;
+    END
+}
+END
+
+PRIVATE FN typeAnalysisSession__set_call_site_context_mut(MUTABLE self: TypeAnalysisSession, caller_name: String, value: {String}{String@symbol}Bool) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF rtoc_self_view.audit_inputs.effect_state EXISTS AS MUTABLE rtoc_state THEN
+      rtoc_state.call_site_context[caller_name] = COPY value;
+    END
+}
+END
+
+PRIVATE FN typeAnalysisSession__set_call_site_arg_families_mut(MUTABLE self: TypeAnalysisSession, caller_name: String, value: {String}[][][Set]String@symbol) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF rtoc_self_view.audit_inputs.effect_state EXISTS AS MUTABLE rtoc_state THEN
+      rtoc_state.call_site_arg_families[caller_name] = COPY value;
+    END
+}
 END
