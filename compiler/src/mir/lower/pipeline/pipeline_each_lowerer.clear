@@ -32,7 +32,7 @@ PUB STRUCT PipelineEachLowerer {
   source_alloc_fact: FN(Emittable, String, Type) -> ?Tuple<AllocMark, CleanupEntry@multiowned>
 }
 
-PUB FN pipelineEachLowerer__lower(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS !?PipelineEachResult ->
+PUB FN pipelineEachLowerer__lower(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS !PipelineEachResult ->
   RETURN TRY (pipelineEachLowerer__lower_plan(self, TRY (pipelineEachLowerer__each_plan(self, &list_node, each_op))));
 END
 PRIVATE FN pipelineEachLowerer__each_plan(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS !PipelineEachPlan ->
@@ -41,7 +41,7 @@ PRIVATE FN pipelineEachLowerer__each_plan(self: PipelineEachLowerer, MUTABLE lis
   MUTABLE range_chain: ?PipelineRangeChain = pipelineEachLowerer__range_chain_call(self, list_node);
   RETURN PipelineEachPlan{ source_kind: COPY pipelineEachLowerer__each_source_kind(self, list_node, lhs_type, range_chain, &bc_target), list_node: COPY list_node, each_op: COPY each_op, lhs_type: COPY lhs_type, range_chain: COPY range_chain, bc_target: bc_target };
 END
-PRIVATE FN pipelineEachLowerer__lower_plan(self: PipelineEachLowerer, MUTABLE plan: PipelineEachPlan) RETURNS !?PipelineEachResult ->
+PRIVATE FN pipelineEachLowerer__lower_plan(self: PipelineEachLowerer, MUTABLE plan: PipelineEachPlan) RETURNS !PipelineEachResult ->
   RETURN TRY (pipelineEachLowerer__lower_source_plan(self, plan.source_kind, &plan));
 END
 PRIVATE FN pipelineEachLowerer__lower_source_plan(self: PipelineEachLowerer, source_kind: PipelineEachSourceKind, MUTABLE plan: PipelineEachPlan) RETURNS !?PipelineEachResult ->

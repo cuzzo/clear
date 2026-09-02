@@ -150,7 +150,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineHost__with_named_binding(&rtoc_self_view, entry.name, entry.zig, %() USE(blk, entries, index_value, MUTABLE rtoc_self_view) -> pipelineHost__apply_named_bindings(&rtoc_self_view, entries, (index_value + 1), blk));
 }
 END
-PRIVATE FN pipelineHost__build_each_lowerer(MUTABLE self: PipelineHost) RETURNS !?PipelineEachLowerer
+PRIVATE FN pipelineHost__build_each_lowerer(MUTABLE self: PipelineHost) RETURNS !PipelineEachLowerer
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -493,7 +493,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (pipelineHost__pipeline_alloc(rtoc_self_view, smooth_node) == :heap);
 }
 END
-PUB FN pipelineHost__lower_pipeline(MUTABLE self: PipelineHost, MUTABLE node: BinaryOp) RETURNS !?PipelineLoweringResult
+PUB FN pipelineHost__lower_pipeline(MUTABLE self: PipelineHost, MUTABLE node: BinaryOp) RETURNS !PipelineLoweringResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -579,7 +579,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineHost__typed_block_expr(rtoc_self_view, label, (CAST([Emittable{ Let: COPY Let{ name: COPY promises_name, init: castPromisesToEmittable(COPY promises), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY call, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable) + TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY promises_name, target: :call, target_alloc: :heap, move_guarded: FALSE })))), result_type);
 }
 END
-PUB FN pipelineHost__lower_dispatch_plan(MUTABLE self: PipelineHost, MUTABLE plan: PipelineOperationPlan) RETURNS !?PipelineLoweringResult
+PUB FN pipelineHost__lower_dispatch_plan(MUTABLE self: PipelineHost, MUTABLE plan: PipelineOperationPlan) RETURNS !PipelineLoweringResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
