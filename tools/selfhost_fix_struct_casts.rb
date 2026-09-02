@@ -24,7 +24,7 @@ skipped = Hash.new(0)
 Dir.glob(File.join(ROOT, '**', '*.clear')).sort.each do |path|
   text = File.read(path)
   out = text.gsub(
-    /^(FN (?:cast\w+To\w+(?:__\w+)?)\(value: (\w+)\) RETURNS (\w+) ->\n)(.*?)(^END\n)/m
+    /^(FN (?:cast\w+To\w+(?:__\w+)?)\(value: (\w+)\) RETURNS ([\w@?\[\]{}]+) ->\n)(.*?)(^END\n)/m
   ) do
     head = Regexp.last_match(1)
     src = Regexp.last_match(2)
@@ -33,10 +33,20 @@ Dir.glob(File.join(ROOT, '**', '*.clear')).sort.each do |path|
     tail = Regexp.last_match(5)
     whole = Regexp.last_match(0)
 
-    # Only bodies that match the source as a union, where it is not one.
-    next whole unless body.include?("PARTIAL MATCH value") && body.include?("#{src}.")
     next whole if variants.key?(src)
     next whole unless struct_fields.key?(src)
+
+    # The IF form asks whether the struct IS some other type. A struct is
+    # never a variant of anything, so the branch is unreachable and the
+    # function's own fall-through is the answer.
+    # The fall-through spelling varies with the return type: NIL, "", a panic.
+    if (fall = body[/\A\s*IF value IS_A [\w@]+ AS \w+ THEN\n.*?\n\s*END\n(\s*(?:RETURN [^\n]+|panic\([^\n]+)\n)\z/m, 1])
+      fixed += 1
+      next "#{head}#{fall}#{tail}"
+    end
+
+    # Only bodies that match the source as a union, where it is not one.
+    next whole unless body.include?("PARTIAL MATCH value") && body.include?("#{src}.")
 
     members = variants[dst]
     unless members

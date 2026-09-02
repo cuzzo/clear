@@ -22282,9 +22282,6 @@ FN castTypeToOptionalSourceType(value: Type) RETURNS ?SourceType ->
   panic("Invalid cast to ?SourceType");
 END
 FN castTypeToOptionalStringSymbol(value: Type) RETURNS ?String@symbol ->
-  IF value IS_A String@symbol AS cast_payload THEN
-    RETURN cast_payload;
-  END
   RETURN NIL;
 END
 FN castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(value: Type) RETURNS ?SymbolEntryTypeInput ->
@@ -22314,15 +22311,9 @@ FN castTypeToOptionalTypeTypeInput__type_analysis_session(value: Type) RETURNS ?
   panic("Invalid cast to ?TypeTypeInput");
 END
 FN castTypeToString(value: Type) RETURNS String ->
-  IF value IS_A String AS cast_payload THEN
-    RETURN cast_payload;
-  END
   RETURN "";
 END
 FN castTypeToStringSymbol(value: Type) RETURNS String@symbol ->
-  IF value IS_A String@symbol AS cast_payload THEN
-    RETURN cast_payload;
-  END
   RETURN panic("Invalid cast to String@symbol");
 END
 FN castTypeToType(value: Type) RETURNS Type ->
