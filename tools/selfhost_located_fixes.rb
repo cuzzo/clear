@@ -226,6 +226,14 @@ by.each do |f, rs|
       line_edits << [r['line'], :to_s_helper, m[1]]
     elsif e =~ /'&' is only valid on an argument passed to a MUTABLE parameter/
       line_edits << [r['line'], :hoist_mutable_marker, nil]
+    elsif (m = e.match(/argument \d+ expects (\[\][\w@]+|\[Set\][\w@]+|\{[^}]*\}[\w@]+), got NIL\z/))
+      # Ruby defaults the collection parameter to an empty one; the
+      # translation dropped the default and the caller passes nil.
+      sp = locate_arg(text, offsets, r['line'], argno)
+      if sp && text[sp[0]...sp[1]].strip == 'NIL'
+        empty = m[1].start_with?('[Set]') ? 'Set[]' : (m[1].start_with?('{') ? '{}' : 'List[]')
+        edits << [sp[0], sp[1], " #{empty}", :empty_collection_arg]
+      end
     end
   end
 

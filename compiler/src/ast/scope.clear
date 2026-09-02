@@ -152,7 +152,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.depth = 0;
 }
 END
-PUB FN scope__declare(MUTABLE self: Scope, name: String, reg: ?SymbolEntryRegInput, type: ?SymbolEntryTypeInput, MUTABLE is_mutable: ?ScopeMutabilityInput = ScopeMutabilityInput{ BoolValue: TRUE }, is_rebindable: Bool = FALSE, size: ?Int64 = NIL, storage: String@symbol = :stack, capabilities: [Set]String@symbol = Set[], ignored_borrowed_paths: []SymbolEntry, sync_value: ?String@symbol = NIL, layout: ?String@symbol = NIL, resource: ?Bool = NIL, close_plan: ?ResourceClosePlan = NIL) RETURNS !SymbolEntry@multiowned
+PUB FN scope__declare(MUTABLE self: Scope, name: String, reg: ?SymbolEntryRegInput, type: ?SymbolEntryTypeInput, MUTABLE is_mutable: ?ScopeMutabilityInput = ScopeMutabilityInput{ BoolValue: TRUE }, is_rebindable: Bool = FALSE, size: ?Int64 = NIL, storage: String@symbol = :stack, capabilities: [Set]String@symbol = Set[], ignored_borrowed_paths: []SymbolEntry = List[], sync_value: ?String@symbol = NIL, layout: ?String@symbol = NIL, resource: ?Bool = NIL, close_plan: ?ResourceClosePlan = NIL) RETURNS !SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
