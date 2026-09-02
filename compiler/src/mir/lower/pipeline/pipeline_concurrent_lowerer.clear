@@ -149,7 +149,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(self: PipelineConcurrent
   ELSE_IF (source_kind == PipelineConcurrentSourceKind.RuntimeStream) THEN
     RETURN TRY (pipelineConcurrentLowerer__lower_stream_plan(self, plan));
   ELSE_IF (source_kind == PipelineConcurrentSourceKind.RuntimeList) THEN
-    RETURN TRY (pipelineConcurrentLowerer__lower_list_plan(self, plan));
+    RETURN TRY (pipelineConcurrentLowerer__lower_list_plan(self, &plan));
   ELSE
     RETURN NIL;
   END
@@ -447,7 +447,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_bounded_each(self: Pipeli
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE work = %() USE(plan, self) -> {
-  rtoc_lambda_result_14 = TRY (pipelineConcurrentLowerer__lower_bc_terminal_plan(self, plan.terminal_kind, plan));
+  rtoc_lambda_result_14 = TRY (pipelineConcurrentLowerer__lower_bc_terminal_plan(self, plan.terminal_kind, &plan));
   rtoc_lambda_result_14
   };
   RETURN pipelineConcurrentLowerer__lower_with_optional_binding(self, plan.binding_name, "it", work);
@@ -464,7 +464,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_terminal_plan(self: PipelineConcu
     RETURN TRY (pipelineConcurrentLowerer__lower_bc_select_expression(self, expr.policy, expr, &plan));
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Where) THEN
     MUTABLE expr = COPY UNWRAP (plan.bc_expression);
-    RETURN TRY (pipelineConcurrentLowerer__lower_bc_where_expression(self, expr.policy, expr, plan));
+    RETURN TRY (pipelineConcurrentLowerer__lower_bc_where_expression(self, expr.policy, expr, &plan));
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Each) THEN
     RETURN pipelineConcurrentLowerer__lower_each_call(self, plan.real_lhs, plan.smooth_node, castLocatableToEachOp__pipeline_concurrent_lowerer(plan.inner));
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Sum) THEN
@@ -551,7 +551,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_list_terminal_plan(self: PipelineCon
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Count) THEN
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_count(self, &plan.real_lhs, plan.conc_op, castLocatableToCountOp(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Sum) OR (terminal_kind == PipelineConcurrentTerminalKind.Average) OR (terminal_kind == PipelineConcurrentTerminalKind.Min) OR (terminal_kind == PipelineConcurrentTerminalKind.Max) THEN
-    RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_reduce(self, plan.real_lhs, plan.conc_op, CAST(plan.inner AS Any@multiowned), &plan.smooth_node)) };
+    RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_reduce(self, &plan.real_lhs, plan.conc_op, CAST(plan.inner AS Any@multiowned), &plan.smooth_node)) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Each) THEN
     MUTABLE each_op: EachOp = COPY castLocatableToEachOp__pipeline_concurrent_lowerer(plan.inner);
     RETURN PipelineConcurrentResult{ ScopeBlock: COPY TRY (pipelineConcurrentLowerer__lower_list_each_terminal(self, plan.list_each_mutates_placeholder, plan.real_lhs, plan.conc_op, each_op)) };
