@@ -428,7 +428,16 @@ by.each do |f, rs|
                       .reject { |x| x.include?('.toString()') || x.include?('UNWRAP ') }
       if cands.length == 1
         inner = cands.first
-        repl = name.start_with?('?') ? "${UNWRAP (#{inner})}" : "${#{inner}.toString()}"
+        bare = name.delete_prefix('?')
+        helper = "#{bare[0].to_s.downcase}#{bare[1..]}__to_s"
+        repl = if name.start_with?('?')
+                 "${UNWRAP (#{inner})}"
+               elsif DEFINED.include?(helper)
+                 # The type carries Ruby's to_s; toString has no overload for it.
+                 "${#{helper}(#{inner})}"
+               else
+                 "${#{inner}.toString()}"
+               end
         lines[i] = lines[i].sub("${#{inner}}", repl)
         counts[kind] += 1
       end
