@@ -137,6 +137,16 @@ rows = JSON.parse(File.read(probe)).select { |r| !r['ok'] && r['line'] && r['err
 by = Hash.new { |h, k| h[k] = [] }
 rows.each { |r| by[r['file']] << r }
 
+# Two rules can disagree about one site -- unwrap_arg adds UNWRAP where the
+# compiler asks for it, drop_unwrap removes it when the compiler then calls
+# the operand non-optional -- and the pair will trade the same line back and
+# forth forever. The ledger remembers every line text this fixer has already
+# produced for a file; producing one a second time means the site is cycling,
+# so it is frozen instead.
+LEDGER_PATH = File.expand_path('../.fn_probe_ledger.json', __dir__)
+ledger = File.exist?(LEDGER_PATH) ? JSON.parse(File.read(LEDGER_PATH)) : {}
+frozen_sites = 0
+
 counts = Hash.new(0)
 by.each do |f, rs|
   path = File.join(ROOT, f)
@@ -443,9 +453,24 @@ by.each do |f, rs|
       end
     end
   end
-  File.write(path, lines.join) if apply
+  seen = ledger[f] ||= []
+  final = lines.each_with_index.map do |l, idx|
+    key = "#{idx}\u0000#{l.strip}"
+    if seen.include?(key) && l != text.lines[idx]
+      frozen_sites += 1
+      text.lines[idx]
+    else
+      l
+    end
+  end
+  final.each_with_index { |l, idx| seen << "#{idx}\u0000#{l.strip}" }
+  ledger[f] = seen.last(4000)
+  File.write(path, final.join) if apply
 end
+
+File.write(LEDGER_PATH, JSON.pretty_generate(ledger)) if apply
 
 counts.sort_by { |_, v| -v }.each { |k, v| puts format('  %-16s %d', k, v) }
 puts "total #{counts.values.sum}"
+puts "frozen #{frozen_sites} cycling site(s)" if frozen_sites.positive?
 puts '(dry run -- pass --apply to write)' unless apply

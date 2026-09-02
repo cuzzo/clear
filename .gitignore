@@ -223,3 +223,4 @@ compiler/.ruby-original/
 # Local Spinel fork used for the AOT experiment
 tmp/spinel/
 
+.fn_probe_ledger.json
