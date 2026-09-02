@@ -98,7 +98,7 @@ PUB FN escapeSink__matches?(self: EscapeSink, node: Any) RETURNS Bool ->
   RETURN PARTIAL MATCH node START
     BgSourceWalkValue.ReturnNode -> (self.handler == symbol("apply_return_escape_sink!")),
     BgSourceWalkValue.Assignment -> (self.handler == symbol("apply_assignment_escape_sink!")),
-    AST.VarDecl -> (self.handler == symbol("apply_binding_escape_sink!")),
+    BgSourceWalkValue.VarDecl -> (self.handler == symbol("apply_binding_escape_sink!")),
     AST.BindExpr -> (self.handler == symbol("apply_binding_escape_sink!")),
     AST.DestructuringAssignment -> (self.handler == symbol("apply_destructuring_escape_sink!")),
     AST.BgBlock -> (self.handler == symbol("apply_execution_boundary_escape_sink!")),
@@ -491,7 +491,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable(_))))))))).binding_id == entry.binding_id));
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable(_))))))))))).binding_id == entry.binding_id));
   IF decl EXISTS AS decl_value THEN
     MUTABLE decl_value_mutable = COPY decl_value;
     MUTABLE stamped = (decl_value_mutable.full_type());
@@ -1712,7 +1712,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
   IF !(ti) THEN
     RETURN FALSE;
   END
-  IF ((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) THEN
+  IF ((type__primitive?(ti) OR type__void?(ti)) OR type__any?( UNWRAP (ti))) THEN
     RETURN FALSE;
   END
   IF (IF expr IS_A Identifier AS identifier THEN escapeAnalysis__symbol_heap?(identifier.symbol) ELSE FALSE END) THEN
