@@ -1379,7 +1379,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source_name = "__owned_branch_src_${mIRLoweringGeneratedId__to_s(tmp_id)}";
     MUTABLE copy_name = "__owned_branch_copy_val_${mIRLoweringGeneratedId__to_s(tmp_id)}";
     MUTABLE claimed = TRY (mIRLowering__claim_block_result_ownership_mut(rtoc_self_view, mir));
-    MUTABLE source_alloc = ((IF TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, mir)) != NIL THEN TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, mir)) ELSE TRY (ownershipEffect__alloc_of(mir)) END) OR_ELSE dest_alloc);
+    MUTABLE source_alloc = ((IF TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, mir)) != NIL THEN TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, mir)) ELSE TRY (ownershipEffect__alloc_of(mir)) END));
     MUTABLE source_owned = (claimed OR TRY (mIRLowering__owned_branch_source_owns?(rtoc_self_view, mir)));
     MUTABLE source_cleanup: ?CleanupEntry@multiowned = NIL;
     IF source_owned THEN
@@ -13382,7 +13382,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ctx_type = "__SgCtx${mIRLoweringGeneratedId__to_s(id)}";
     MUTABLE alloc_var = "__sg${mIRLoweringGeneratedId__to_s(id)}_alloc";
     MUTABLE stream_var = "__sg${mIRLoweringGeneratedId__to_s(id)}_stream";
-    MUTABLE ctx_var = "__sg${id}_ctx";
+    MUTABLE ctx_var = "__sg${id.toString()}_ctx";
     MUTABLE blk_label = "__sg${id}";
     MUTABLE local_stream = "__sg${id}_local";
     IF mIRLowering__bc_target?(rtoc_self_view) THEN
