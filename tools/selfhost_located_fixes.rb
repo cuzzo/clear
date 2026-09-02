@@ -178,6 +178,11 @@ by.each do |f, rs|
   text = File.read(path)
   offsets = [0]
   text.each_line { |l| offsets << offsets.last + l.length }
+  # A WITH POLYMORPHIC alias is a borrow of the receiver: it is never optional
+  # and never needs a cast. Unwrapping one is always wrong, however the
+  # diagnostic's call is resolved.
+  view_aliases = text.scan(/WITH POLYMORPHIC\s+\w+\s+AS\s+(?:MUTABLE\s+)?(\w+)/).flatten.to_set
+
   edits = []
   line_edits = []
   rs.each do |r|
@@ -188,6 +193,7 @@ by.each do |f, rs|
       sp = locate_arg(text, offsets, r['line'], argno, nil, m[1]) or next
       expr = text[sp[0]...sp[1]].strip
       next if expr.empty? || expr.start_with?('UNWRAP')
+      next if view_aliases.include?(expr)
       # A view or a receiver the compiler reported as optional once can be
       # reported again after an unrelated edit; wrapping twice is never right.
       next if expr.include?('UNWRAP (')
@@ -205,6 +211,7 @@ by.each do |f, rs|
       # The rewrite wraps the argument, so a later round sees its own output.
       # Without this the cast nests on every round.
       next if expr.empty? || expr.include?("cast#{m[2]}To#{m[1]}(")
+      next if view_aliases.include?(expr)
 
       edits << [sp[0], sp[1], " UNWRAP (cast#{m[2]}To#{m[1]}(#{expr}))", :cast_arg]
     elsif (m = e.match(/Pass '(\w+)' as '&\w+'/))
