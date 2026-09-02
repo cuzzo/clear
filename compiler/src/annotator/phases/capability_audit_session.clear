@@ -664,7 +664,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(locatable__token(tgt)) THEN
       RETURN NIL;
     END
-    RETURN capabilityAuditSession__anchor_at(rtoc_self_view, locatable__token(tgt).line, ((locatable__token(tgt).column + (CAST(tgt.name() AS String)).codepointCount()) + 1));
+    RETURN capabilityAuditSession__anchor_at(rtoc_self_view, UNWRAP (locatable__token(tgt)).line, ((locatable__token(tgt).column + (CAST(tgt.name() AS String)).codepointCount()) + 1));
 }
 END
 PRIVATE FN capabilityAuditSession__variant_anchor_from_unionlit(self: CapabilityAuditSession, node: Node, variant_name: String) RETURNS ?AnchorToken
@@ -1222,7 +1222,7 @@ PRIVATE FN capabilityAuditSession__emit_return_borrowed_no_copy_error_mut(self: 
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fix: ?Fix = NIL;
     IF locatable__token(node) THEN
-      MUTABLE tok = locatable__token(node);
+      MUTABLE tok: ?Token = locatable__token(node);
       fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_RETURN_WITH_COPY)), [edit__new(span__new(NIL, tok.line, tok.column, 0), "COPY ")], :auto));
     END
     MUTABLE kw = {:type: TRY (aST__full_type_mut(node))};
@@ -1267,7 +1267,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE as_token: ?Token = COPY capability__as_token(fact.source);
     IF view_token EXISTS AS view_token_value THEN
       IF as_token THEN
-        MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, view_token_value.line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token.line, as_token.column, 0), "LENGTH 0 ")], :interactive));
+        MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (view_token_value).line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, UNWRAP (as_token).line, as_token.column, 0), "LENGTH 0 ")], :interactive));
         TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, [fix], NIL, :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, :error, TRUE, CAST({:name: name} AS {String@symbol}Any)));
       ELSE
         RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_VIEW_FOREIGN_NEEDS_UNSAFE }, [], CAST({:name: name} AS {String@symbol}Any)));
@@ -1346,7 +1346,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE tok = locatable__token(UNWRAP (vn));
+      MUTABLE tok: ?Token = locatable__token(UNWRAP (vn));
       MUTABLE name = COPY CAST(vn.name() AS String);
       &edits.append(edit__new(span__new(NIL, tok.line, (tok.column + name.codepointCount()), 0), " AS ${name}_v"));
     rtoc_idx = rtoc_idx + 1;
@@ -1512,7 +1512,7 @@ PRIVATE FN capabilityAuditSession__emit_type_mismatch_assign_error_mut(self: Cap
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE kw = {:got: value_type, :expected: target_type};
-    MUTABLE value = aST__node_value(UNWRAP (castNodeToLocatable(node)));
+    MUTABLE value: ?Locatable = aST__node_value(UNWRAP (castNodeToLocatable(node)));
     MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_cast_wrap_fix(rtoc_self_view, value, target_type));
     IF fix EXISTS AS fix_value THEN
       TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), :type, [fix_value], NIL, :TYPE_MISMATCH_ASSIGN, :error, FALSE, kw));
@@ -1577,7 +1577,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(locatable__token(value_value)) THEN
         RETURN NIL;
       END
-      MUTABLE tok = locatable__token(value_value);
+      MUTABLE tok: ?Token = locatable__token(value_value);
       MUTABLE target_name_branch_value: ?TypeTypeInput = NIL;
       IF target_type IS_A Type AS type THEN
         target_name_branch_value = TypeTypeInput{ SymbolValue: COPY type__resolved(type) };
@@ -1839,7 +1839,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE (idx < candidates.length()) DO
       MUTABLE candidate: ?AutoCandidate = COPY candidates[idx];
       MUTABLE type_sym = candidate?.type_sym;
-      MUTABLE note: ?String = candidate.note;
+      MUTABLE note: ?String = UNWRAP (candidate).note;
       MUTABLE label = "";
       IF (idx == 0) THEN
         label = "(recommended)";
@@ -2825,7 +2825,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     fn_nodes.keys() |> EACH {
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
-    MUTABLE effs = (fn_node.effects() OR_ELSE Set[]);
+    MUTABLE effs = (fn_node.effects OR_ELSE Set[]);
     MUTABLE reason = NIL;
     IF (effs.contains?(reentrant) OR fn_node.plain_reentrant?()) THEN
         reason = :reentrant;
@@ -2851,7 +2851,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(fn_node.fsm_eligible) THEN
       CONTINUE;
     END
-    fn_node.fsm_suspend_points = summaries[fn_node.name()]?.suspend_points;
+    fn_node.fsm_suspend_points = summaries[fn_node.name]?.suspend_points;
         END
     RETURN NIL;
 }
@@ -3627,7 +3627,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN CAST(( { MUTABLE rtoc_empty_list_24: []Edit = List[]; rtoc_empty_list_24 } ) AS []Edit);
     END
     MUTABLE s = span?.start_token;
-    MUTABLE e = span.end_token;
+    MUTABLE e = UNWRAP (span).end_token;
     IF (s.line != e.line) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_25: []Edit = List[]; rtoc_empty_list_25 } ) AS []Edit);
     END
@@ -3647,7 +3647,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (all.length() == 0) THEN
       RETURN FALSE;
     END
-    MUTABLE blessed = UNWRAP (capabilityAuditBodyFacts__return_nodes(body_facts)) |> SELECT:? (  IF (_.value IS_A FuncCall AND (_.value.name() == fn_node.name)) THEN
+    MUTABLE blessed = UNWRAP (capabilityAuditBodyFacts__return_nodes(body_facts)) |> SELECT:? (  IF (UNWRAP (_.value) IS_A FuncCall AND (_.value.name() == fn_node.name)) THEN
       _.value
     ELSE
       NIL
@@ -4193,7 +4193,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_45.length() DO
       MUTABLE fact = COPY rtoc_each_items_45[rtoc_idx]?.fact;
       MUTABLE var_node = COPY fact?.var_node;
-      MUTABLE syn = (IF var_node.symbol != NIL THEN
+      MUTABLE syn = (IF UNWRAP (var_node).symbol != NIL THEN
           (var_node.symbol).sync()
         ELSE
           NIL
