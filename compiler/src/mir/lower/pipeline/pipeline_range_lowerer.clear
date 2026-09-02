@@ -581,7 +581,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE init_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, UNWRAP (reduce_op.initial_value));
     MUTABLE expr_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (reduce_op.expression), item_var, "acc");
     MUTABLE plan = PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY "acc", init: COPY init_mir, mutable: TRUE, annotation: COPY TRY (type__new( TypeConstructionInput{ StringValue: COPY acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY expr_mir, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } ), result_expr: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } } };
-    RETURN TRY (pipelineRangeLowerer__range_accumulating_block(rtoc_self_view, &range_lit, UNWRAP (prefix), label, plan, UNWRAP (prefix).initial_capture));
+    RETURN TRY (pipelineRangeLowerer__range_accumulating_block(rtoc_self_view, &range_lit, UNWRAP (prefix), UNWRAP (label), plan, UNWRAP (prefix).initial_capture));
 }
 END
 PUB FN pipelineRangeLowerer__scalar_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !?PipelineRangeFoldPlan

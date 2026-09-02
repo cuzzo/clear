@@ -385,7 +385,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineHost__with_context_state(&rtoc_self_view, pipelineContextState__with_named_binding(pipelineHost__current_context(rtoc_self_view), clear_name, zig_var), blk);
 }
 END
-PUB FN pipelineHost__with_fiber_capture_map<U>(self: PipelineHost, new_entries: {String}String, capture_symbols: {String}SymbolEntry, rt_override: String = "__rt", blk: FN() -> U) RETURNS U
+PUB FN pipelineHost__with_fiber_capture_map<U>(MUTABLE self: PipelineHost, new_entries: {String}String, capture_symbols: {String}SymbolEntry, rt_override: String = "__rt", blk: FN() -> U) RETURNS U
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -579,7 +579,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineHost__typed_block_expr(rtoc_self_view, label, (CAST([Emittable{ Let: COPY Let{ name: COPY promises_name, init: castPromisesToEmittable(COPY promises), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY call, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable) + TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY promises_name, target: :call, target_alloc: :heap, move_guarded: FALSE })))), result_type);
 }
 END
-PUB FN pipelineHost__lower_dispatch_plan(MUTABLE self: PipelineHost, plan: PipelineOperationPlan) RETURNS !?PipelineLoweringResult
+PUB FN pipelineHost__lower_dispatch_plan(MUTABLE self: PipelineHost, MUTABLE plan: PipelineOperationPlan) RETURNS !?PipelineLoweringResult
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -597,7 +597,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_fold(rtoc_self_view, &range_chain.source, range_chain.stages, CAST(plan.rhs AS PipelineDefaultObservableFoldOp), &plan.site.options)) };
     ELSE_IF (execution == PipelineExecutionKind.FusedRangeReduce) THEN
       MUTABLE range_chain = COPY UNWRAP (plan.source.range_chain);
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_reduce(rtoc_self_view, &range_chain.source, range_chain.stages, castLocatableToReduceOp(plan.rhs), plan.site.options)) };
+      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_reduce(rtoc_self_view, &range_chain.source, range_chain.stages, castLocatableToReduceOp(plan.rhs), &plan.site.options)) };
     ELSE_IF (execution == PipelineExecutionKind.BindingChain) THEN
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_binding_chain(rtoc_self_view, UNWRAP (plan.source.binding_chain), plan.site.options)) };
     ELSE_IF (execution == PipelineExecutionKind.MaterializedScalar) THEN
