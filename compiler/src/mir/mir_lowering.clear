@@ -10317,7 +10317,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((aST__node_name( castCallNodeToLocatable(node)) EXISTS)) THEN
       RETURN FALSE;
     END
-    MUTABLE fn: ?FunctionDef@multiowned = COPY mIRLowering__program_state(rtoc_self_view).fn_nodes[CAST(node.name() AS String)];
+    MUTABLE fn: ?FunctionDef@multiowned = COPY mIRLowering__program_state(rtoc_self_view).fn_nodes[CAST(aST__node_name(UNWRAP (castCallNodeToLocatable(node))) AS String)];
     IF !((fn != NIL)) THEN
       RETURN FALSE;
     END
