@@ -93,7 +93,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   MUTABLE member_fns = segment_specs |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE body: []FsmBodyItem = ( { MUTABLE rtoc_empty_list_1: []FsmBodyItem = List[]; rtoc_empty_list_1 } ); { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.prologue_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE incoming_bind: ?[]FsmBodyItem = COPY bind_for_index[_.index]; { MUTABLE rtoc_value_block_marker = 0; MUTABLE fn_name: ?String = COPY _.fn_name; { MUTABLE rtoc_value_block_marker = 0; IF incoming_bind EXISTS AS incoming_bind_value THEN
     fn_name = (fn_name OR_ELSE "runSeg${_.index.toString()}");
     body = ruby_array_concat_FsmBodyItem(body, CAST(incoming_bind_value AS []FsmBodyItem));
-  END (IF (fn_name == NIL) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; body_fn_names_by_index[_.index] = UNWRAP (fn_name); { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.body_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE d: ?SuspendDescriptor = COPY _.descriptor;
+  END (IF (fn_name == NIL) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; body_fn_names_by_index[_.index] = fn_name; { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.body_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE d: ?SuspendDescriptor = COPY _.descriptor;
   IF d EXISTS AS d_value THEN
     body = ruby_array_concat_FsmBodyItem(body, TRY (emit__fsm_body_mir_items(d_value.setup_stmts)));
   END FsmMemberFn{ fn_name: fn_name, ctx_id: id, bg_rt: COPY bg_rt, suppress_runtime_ref: _.suppress_runtime_ref, body_stmts: TRY (emit__fsm_body_emit_values(body)), extra_prologue_stmts: _.extra_prologue_stmts } } } } END) } } } } } |> WHERE _ != NIL;
@@ -886,7 +886,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   MUTABLE try_success_idx = COPY held_set_idx;
   MUTABLE prior_meta: []{String@symbol}FsmCapMetadataValue = ( { MUTABLE rtoc_map_results_37: []{String@symbol}FsmCapMetadataValue = List[];
   FOR rtoc_map_item_36 IN prior DO
-  MUTABLE m = TRY (mIRLowering__fsm_cap_metadata(lowering_api, castLockCapToCapabilityTransition(rtoc_map_item_36), with_node, id, captured));
+  MUTABLE m: ?{String@symbol}FsmCapMetadataValue = TRY (mIRLowering__fsm_cap_metadata(lowering_api, castLockCapToCapabilityTransition(rtoc_map_item_36), with_node, id, captured));
   IF (m == NIL) THEN
       RETURN NIL;
   END

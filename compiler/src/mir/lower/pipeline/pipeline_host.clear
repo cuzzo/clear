@@ -594,7 +594,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_soa_scalar_fold(&rtoc_self_view, plan.site, CAST(plan.rhs AS PipelineMaterializedScalarOp))) };
     ELSE_IF (execution == PipelineExecutionKind.FusedRangeFold) THEN
       MUTABLE range_chain = COPY UNWRAP (plan.source.range_chain);
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_fold(rtoc_self_view, range_chain.source, range_chain.stages, CAST(plan.rhs AS PipelineDefaultObservableFoldOp), plan.site.options)) };
+      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_fold(rtoc_self_view, &range_chain.source, range_chain.stages, CAST(plan.rhs AS PipelineDefaultObservableFoldOp), plan.site.options)) };
     ELSE_IF (execution == PipelineExecutionKind.FusedRangeReduce) THEN
       MUTABLE range_chain = COPY UNWRAP (plan.source.range_chain);
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_range_reduce(rtoc_self_view, range_chain.source, range_chain.stages, castLocatableToReduceOp(plan.rhs), plan.site.options)) };
@@ -1280,7 +1280,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__observable_alloc_expr(rtoc_self_view.range_lowerer, target, method_value, args));
 }
 END
-PRIVATE FN pipelineHost__lower_range_fold(self: PipelineHost, MUTABLE range_lit: Locatable, stages: []Locatable, fold_op: PipelineDefaultObservableFoldOp, smooth_node: BinaryOp) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_range_fold(self: PipelineHost, MUTABLE range_lit: Locatable, stages: []Locatable, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -1288,7 +1288,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (pipelineRangeLowerer__lower_range_fold(rtoc_self_view.range_lowerer, &range_lit, stages, fold_op, &smooth_node));
 }
 END
-PRIVATE FN pipelineHost__lower_range_reduce(self: PipelineHost, MUTABLE range_lit: Locatable, stages: []Locatable, MUTABLE reduce_op: ReduceOp, smooth_node: ?BinaryOp = NIL) RETURNS !MIRBlockExpr
+PRIVATE FN pipelineHost__lower_range_reduce(self: PipelineHost, MUTABLE range_lit: Locatable, stages: []Locatable, MUTABLE reduce_op: ReduceOp, MUTABLE smooth_node: ?BinaryOp = NIL) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

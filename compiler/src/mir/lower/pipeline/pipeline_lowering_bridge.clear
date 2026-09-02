@@ -181,7 +181,7 @@ END
 PUB FN pipelineLoweringBridge__with_pipeline_decl_alloc<U>(self: PipelineLoweringBridge, alloc: String@symbol, blk: FN() -> U) RETURNS U
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__pipeline_with_decl_alloc( &rtoc_self_view.lowering, alloc, blk);
 }
 END
@@ -205,7 +205,7 @@ PUB FN pipelineLoweringBridge__with_fiber_capture_map<U>(self: PipelineLoweringB
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__with_fiber_capture_map( &rtoc_self_view.lowering, new_entries, capture_symbols, rt_override, blk);
 }
 END
@@ -222,7 +222,7 @@ PUB FN pipelineLoweringBridge__with_shard_context<U>(MUTABLE self: PipelineLower
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE previous: ?{String@symbol}String = TRY (mIRLowering__shard_context(rtoc_self_view.lowering));
   DEFER (mIRLowering__set_shard_context( &rtoc_self_view.lowering, previous));
-  (mIRLowering__set_shard_context(rtoc_self_view.lowering, context));
+  (mIRLowering__set_shard_context( &rtoc_self_view.lowering, context));
   RETURN blk();
 }
 END

@@ -293,7 +293,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each_zig(self: Pipe
     MUTABLE head = pipelineConcurrentLowerer__lower_head_with_placeholder_call(self, ctx.key_expr, idx_var);
     MUTABLE key_setup: []Emittable = COPY head.pending;
     MUTABLE key_cleanup: []Emittable = ( { MUTABLE rtoc_empty_list_3: []Emittable = List[]; rtoc_empty_list_3 } );
-    MUTABLE key_fact: ?PipelineConcurrentAllocationFact = pipelineConcurrentLowerer__pipeline_alloc_mark_fact_call(self, head.value, key_var, :heap, TRY (type__from_node_mut(ctx.key_expr, "SHARD key binding")), ctx.key_expr, TRUE, TRUE);
+    MUTABLE key_fact: ?PipelineConcurrentAllocationFact = pipelineConcurrentLowerer__pipeline_alloc_mark_fact_call(self, head.value, key_var, :heap, UNWRAP (TRY (type__from_node_mut(ctx.key_expr, "SHARD key binding"))), ctx.key_expr, TRUE, TRUE);
     IF key_fact EXISTS AS key_fact_value THEN
       &key_setup.append(Emittable{ AllocMark: COPY key_fact_value.mark });
       IF KEEP key_fact_value.cleanup_entry EXISTS AS cleanup_entry_value THEN
@@ -461,7 +461,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   IF (terminal_kind == PipelineConcurrentTerminalKind.Select) THEN
     MUTABLE expr = COPY UNWRAP (plan.bc_expression);
-    RETURN TRY (pipelineConcurrentLowerer__lower_bc_select_expression(self, expr.policy, expr, plan));
+    RETURN TRY (pipelineConcurrentLowerer__lower_bc_select_expression(self, expr.policy, expr, &plan));
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Where) THEN
     MUTABLE expr = COPY UNWRAP (plan.bc_expression);
     RETURN TRY (pipelineConcurrentLowerer__lower_bc_where_expression(self, expr.policy, expr, plan));
@@ -538,7 +538,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(self: PipelineC
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_list_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE work = %() USE(plan, self) -> {
-  rtoc_lambda_result_15 = TRY (pipelineConcurrentLowerer__lower_list_terminal_plan(self, plan.terminal_kind, plan));
+  rtoc_lambda_result_15 = TRY (pipelineConcurrentLowerer__lower_list_terminal_plan(self, plan.terminal_kind, &plan));
   rtoc_lambda_result_15
   };
   RETURN pipelineConcurrentLowerer__lower_with_optional_binding(self, plan.binding_name, "__item", work);
@@ -547,7 +547,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_list_terminal_plan(self: PipelineCon
   IF (terminal_kind == PipelineConcurrentTerminalKind.Select) THEN
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_select(self, &plan.real_lhs, plan.conc_op, castLocatableToSelectOp__pipeline_concurrent_lowerer(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Where) THEN
-    RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_where(self, plan.real_lhs, plan.conc_op, castLocatableToWhereOp__pipeline_concurrent_lowerer(plan.inner))) };
+    RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_where(self, &plan.real_lhs, plan.conc_op, castLocatableToWhereOp__pipeline_concurrent_lowerer(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Count) THEN
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_list_count(self, plan.real_lhs, plan.conc_op, castLocatableToCountOp(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Sum) OR (terminal_kind == PipelineConcurrentTerminalKind.Average) OR (terminal_kind == PipelineConcurrentTerminalKind.Min) OR (terminal_kind == PipelineConcurrentTerminalKind.Max) THEN
@@ -846,7 +846,7 @@ PRIVATE FN pipelineConcurrentLowerer__callback_body(self: PipelineConcurrentLowe
     IF (expr_mir IS_A Call OR expr_mir IS_A MIRMethodCall) THEN
       emittable__set_try_wrap_mut(&expr_mir, FALSE);    END
     MUTABLE expr_type = TRY (aST__full_type_mut(expr_node));
-    IF ((expr_type AND type__integer?((TRY (type__new(expr_type))))) AND type__float?(ret_type)) THEN
+    IF ((expr_type AND type__integer?((TRY (type__new(expr_type))))) AND type__float?( TypeConstructionInput{ Type: COPY ret_type })) THEN
       expr_mir = Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY expr_mir, target_type: NIL, method: :floatFromInt, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: TRY (type__zig_type(ret_type)), method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     RETURN CAST([Emittable{ ReturnStmt: COPY ReturnStmt{ value: COPY expr_mir, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);

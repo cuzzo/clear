@@ -49,7 +49,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PUB FN testBlockCtx__new(test_block: TestBlock, lowering: MIRLowering) RETURNS !TestBlockCtx@multiowned ->
   MUTABLE self = TestBlockCtx{ lowering: COPY lowering, setup_mir: List[], test_after_each_mir: List[], test_before_each_mir: List[], test_block: COPY test_block, test_name: "" };
-  TRY (testBlockCtx__initialize(&self, test_block, lowering));
+  TRY (testBlockCtx__initialize(&self, test_block, &lowering));
   RETURN self @multiowned;
 END
 PUB STRUCT TestThatEnv {

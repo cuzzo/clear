@@ -11086,7 +11086,7 @@ PRIVATE FN typeAnalysisSession__visit_test_lets(MUTABLE self: TypeAnalysisSessio
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN ((testContainerNode__lets(node) OR_ELSE List[])) DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _.expr));
-    MUTABLE let_type = _.expr().full_type_mut({:context: "TEST LET expression"});
+    MUTABLE let_type = _.expr.full_type_mut({:context: "TEST LET expression"});
     MUTABLE rtoc_mutable_receiver_253 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_253, _.name(), _, let_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__og_declare(rtoc_self_view, _.name(), _, let_type));
