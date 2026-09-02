@@ -424,6 +424,25 @@ by.each do |f, rs|
       # The diagnostic names the operand's type but not which operand it is,
       # so only an unambiguous line is rewritten: exactly one interpolation
       # that is not already stringified or unwrapped.
+      bare_t = name.delete_prefix('?')
+      helper_fn = "#{bare_t[0].to_s.downcase}#{bare_t[1..]}__to_s"
+      # An operand already carrying .toString() is not finished when the type
+      # has no such intrinsic: the earlier rule put it there, and the type's
+      # own to_s is what Ruby called.
+      # The diagnostic names the operand's type, not which operand it is, so
+      # a line with several stringified operands is ambiguous -- the others
+      # are ordinary Int64s whose toString is correct.
+      stringified = lines[i].scan(/\$\{[a-z_]\w*(?:\.[a-z_]\w*)*\.toString\(\)\}/)
+      if DEFINED.include?(helper_fn) && stringified.length == 1
+        swapped = lines[i].gsub(/\$\{([a-z_]\w*(?:\.[a-z_]\w*)*)\.toString\(\)\}/) do
+          counts[kind] += 1
+          "${#{helper_fn}(#{Regexp.last_match(1)})}"
+        end
+        if swapped != lines[i]
+          lines[i] = swapped
+          next
+        end
+      end
       cands = lines[i].scan(/\$\{([^{}]+)\}/).flatten
                       .reject { |x| x.include?('.toString()') || x.include?('UNWRAP ') }
       if cands.length == 1
