@@ -85,7 +85,23 @@ def locate_arg(text, offsets, ln, argno)
   nil
 end
 
-variants, = SelfhostUnionAccessor.load_types(ROOT)
+variants, STRUCT_FIELDS = SelfhostUnionAccessor.load_types(ROOT)
+
+# A field name is treated as optional only when EVERY struct declaring it
+# declares it optional -- otherwise the same name on another receiver in the
+# line would be rewritten wrongly.
+OPTIONAL_FIELD = Hash.new(false)
+begin
+  seen = Hash.new { |h, k| h[k] = [] }
+  STRUCT_FIELDS.each_value { |fs| fs.each { |f, ty| seen[f] << ty.to_s } }
+  seen.each { |f, tys| OPTIONAL_FIELD[f] = tys.all? { |ty| ty.start_with?('?') } }
+end
+BOOL_FIELD = Hash.new(false)
+begin
+  seen = Hash.new { |h, k| h[k] = [] }
+  STRUCT_FIELDS.each_value { |fs| fs.each { |f, ty| seen[f] << ty.to_s } }
+  seen.each { |f, tys| BOOL_FIELD[f] = tys.all? { |ty| ty == '?Bool' } }
+end
 # variant name keyed by payload type, so `got X` names the variant directly
 VARIANT_OF = variants.transform_values do |vs|
   vs.to_h { |name, type| [type.to_s.sub(/@\w+\z/, ''), name] }
@@ -187,6 +203,10 @@ by.each do |f, rs|
       line_edits << [r['line'], :fold_nil_compare, nil]
     elsif (m = e.match(/Cannot infer `(\w+)` from an optional value/))
       line_edits << [r['line'], :annotate_optional, m[1]]
+    elsif e =~ /Operator \$\+ requires String operands, got \?String/
+      line_edits << [r['line'], :unwrap_interp, nil]
+    elsif e =~ /Ambiguous \?Bool (?:AND|OR) operand/
+      line_edits << [r['line'], :orelse_bool, nil]
     end
   end
 
@@ -379,6 +399,27 @@ by.each do |f, rs|
       if hits == 1
         lines[i] = lines[i].sub(/(?<=[(,] )#{name}(?=\s*[,)])|(?<=\()#{name}(?=\s*[,)])/, "&#{name}")
         counts[kind] += 1
+      end
+    when :unwrap_interp
+      # Ruby interpolates nil as the empty string only because it never gets
+      # there; the value is present by construction, so unwrap it.
+      lines[i] = lines[i].gsub(/\$\{([a-z_]\w*(?:\.[a-z_]\w*)+)\}/) do
+        whole = Regexp.last_match(0)
+        path = Regexp.last_match(1)
+        next whole unless OPTIONAL_FIELD[path.split('.').last]
+
+        counts[kind] += 1
+        "${UNWRAP (#{path})}"
+      end
+    when :orelse_bool
+      # Ruby's truthiness on a nil-or-false value is exactly OR_ELSE FALSE.
+      lines[i] = lines[i].gsub(/(?<![\w.)])([a-z_]\w*(?:\.[a-z_]\w*)+)(?=\s+(?:AND|OR)\b)/) do
+        whole = Regexp.last_match(0)
+        path = Regexp.last_match(1)
+        next whole unless BOOL_FIELD[path.split('.').last]
+
+        counts[kind] += 1
+        "(#{path} OR_ELSE FALSE)"
       end
     when :drop_unwrap
       # Two spellings reach the same diagnostic. Rewrite only when the line
