@@ -106,7 +106,7 @@ PRIVATE FN annotationTypeInventory__class_name(node: Locatable) RETURNS String -
   RETURN locatable__variant_name(node);
 END
 PRIVATE FN annotationTypeInventory__location(node: Locatable) RETURNS String ->
-  MUTABLE token = locatable__token(node);
+  MUTABLE token: ?Token = locatable__token(node);
   IF !(token) THEN
     RETURN "?";
   END

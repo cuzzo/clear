@@ -86,7 +86,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   CONTINUE;
     END
     MUTABLE target = (emit__tail_resume_target( UNWRAP (segment_specs[rtoc_idx]?.tail)) OR_ELSE (rtoc_idx + 1));
-    bind_for_index[target] = TRY (emit__fsm_body_mir_items(d.bind_stmts));
+    bind_for_index[target] = TRY (emit__fsm_body_mir_items(UNWRAP (d).bind_stmts));
   rtoc_idx = rtoc_idx + 1;
   END
   MUTABLE body_fn_names_by_index: {Int64}String = {};
@@ -874,7 +874,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   MUTABLE bg_rt = COPY ctx.bg_rt;
   MUTABLE id = ctx.id;
   MUTABLE captured = COPY ctx.captured;
-  MUTABLE meta = TRY (mIRLowering__fsm_cap_metadata(lowering_api, castLockCapToCapabilityTransition(cap), with_node, id, captured));
+  MUTABLE meta: ?{String@symbol}FsmCapMetadataValue = TRY (mIRLowering__fsm_cap_metadata(lowering_api, castLockCapToCapabilityTransition(cap), with_node, id, captured));
   IF (meta == NIL) THEN
     RETURN NIL;
   END

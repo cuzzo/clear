@@ -149,7 +149,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view.lowering, body));
 }
 END
-PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(self: PipelineLoweringBridge, value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS !?PipelineBridgeAllocationFact
+PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(self: PipelineLoweringBridge, MUTABLE value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS !?PipelineBridgeAllocationFact
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -182,10 +182,10 @@ PUB FN pipelineLoweringBridge__with_pipeline_decl_alloc<U>(self: PipelineLowerin
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN mIRLowering__pipeline_with_decl_alloc(rtoc_self_view.lowering, alloc, blk);
+    RETURN mIRLowering__pipeline_with_decl_alloc( &rtoc_self_view.lowering, alloc, blk);
 }
 END
-PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(self: PipelineLoweringBridge, insert: IndexInsert, value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
+PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(self: PipelineLoweringBridge, MUTABLE insert: IndexInsert, value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -206,7 +206,7 @@ PUB FN pipelineLoweringBridge__with_fiber_capture_map<U>(self: PipelineLoweringB
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN mIRLowering__with_fiber_capture_map(rtoc_self_view.lowering, new_entries, capture_symbols, rt_override, blk);
+    RETURN mIRLowering__with_fiber_capture_map( &rtoc_self_view.lowering, new_entries, capture_symbols, rt_override, blk);
 }
 END
 PUB FN pipelineLoweringBridge__execution_boundary_fact(self: PipelineLoweringBridge, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS !ExecutionBoundaryFact
@@ -221,7 +221,7 @@ PUB FN pipelineLoweringBridge__with_shard_context<U>(MUTABLE self: PipelineLower
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE previous: ?{String@symbol}String = TRY (mIRLowering__shard_context(rtoc_self_view.lowering));
-  DEFER (mIRLowering__set_shard_context(rtoc_self_view.lowering, previous));
+  DEFER (mIRLowering__set_shard_context( &rtoc_self_view.lowering, previous));
   (mIRLowering__set_shard_context(rtoc_self_view.lowering, context));
   RETURN blk();
 }

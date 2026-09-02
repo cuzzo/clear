@@ -58,7 +58,7 @@ PUB FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETUR
     :check
   END };
 END
-FN emit__lower_frame_expr(ast_expr: Locatable, lowering: MIRLowering, context: FrameBindingContext) RETURNS !Emittable ->
+FN emit__lower_frame_expr(MUTABLE ast_expr: Locatable, lowering: MIRLowering, context: FrameBindingContext) RETURNS !Emittable ->
   MUTABLE lowering_api = COPY lowering;
   MUTABLE mir = TRY (mIRLowering__lower( &lowering_api, &ast_expr));
   RETURN emit__bind_frame_refs(CAST(mir AS Emittable), context);

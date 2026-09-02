@@ -44,7 +44,7 @@ END
 PRIVATE FN pipelineEachLowerer__lower_plan(self: PipelineEachLowerer, plan: PipelineEachPlan) RETURNS !?PipelineEachResult ->
   RETURN TRY (pipelineEachLowerer__lower_source_plan(self, plan.source_kind, plan));
 END
-PRIVATE FN pipelineEachLowerer__lower_source_plan(self: PipelineEachLowerer, source_kind: PipelineEachSourceKind, plan: PipelineEachPlan) RETURNS !?PipelineEachResult ->
+PRIVATE FN pipelineEachLowerer__lower_source_plan(self: PipelineEachLowerer, source_kind: PipelineEachSourceKind, MUTABLE plan: PipelineEachPlan) RETURNS !?PipelineEachResult ->
   IF (source_kind == PipelineEachSourceKind.Sharded) THEN
     RETURN PipelineEachResult{ ScopeBlock: COPY pipelineEachLowerer__lower_sharded_each_call(self, plan.list_node, plan.each_op) };
   ELSE_IF (source_kind == PipelineEachSourceKind.Soa) THEN

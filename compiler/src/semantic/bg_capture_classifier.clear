@@ -9,7 +9,7 @@ PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, sche
   MUTABLE analyses: {String}CaptureAnalysis = {};
   FOR rtoc_each_key IN fn_nodes.keys() DO
   MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_each_key]);
-  IF !((IF fn_value != NIL THEN
+  IF !((IF TRUE THEN
       fn_value.body
     ELSE
       NIL

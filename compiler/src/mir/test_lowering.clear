@@ -15,7 +15,7 @@ PUB STRUCT TestBlockCtx {
   test_name: String
 }
 
-PUB FN testBlockCtx__initialize(MUTABLE self: TestBlockCtx, test_block: TestBlock, lowering: MIRLowering) RETURNS !Void
+PUB FN testBlockCtx__initialize(MUTABLE self: TestBlockCtx, test_block: TestBlock, MUTABLE lowering: MIRLowering) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

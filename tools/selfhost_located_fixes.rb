@@ -157,11 +157,12 @@ by.each do |f, rs|
 
       edits << [sp[0], sp[1], " UNWRAP (cast#{m[2]}To#{m[1]}(#{expr}))", :cast_arg]
     elsif (m = e.match(/Pass '(\w+)' as '&\w+'/))
-      sp = locate_arg(text, offsets, r['line'], argno) or next
-      expr = text[sp[0]...sp[1]].strip
-      next unless expr =~ /\A#{m[1]}(\.|\z)/
-
-      edits << [sp[0], sp[1], " &#{expr}", :mutable_arg]
+      sp = locate_arg(text, offsets, r['line'], argno)
+      if sp && (expr = text[sp[0]...sp[1]].strip) =~ /\A#{m[1]}(\.|\z)/
+        edits << [sp[0], sp[1], " &#{expr}", :mutable_arg]
+      else
+        line_edits << [r['line'], :mutable_arg_line, m[1]]
+      end
     elsif (m = e.match(/passed immutable variable '(\w+)'/))
       line_edits << [r['line'], :declare_mutable, m[1]]
     elsif e.include?('UNWRAP_NON_OPTIONAL')
@@ -211,7 +212,15 @@ by.each do |f, rs|
     when :declare_mutable
       j = i
       while j >= 0
-        break if lines[j] =~ /^(PUB |PRIVATE )?FN /
+        if lines[j] =~ /^(PUB |PRIVATE )?FN /
+          # No local declares it, so the name is a parameter.
+          if lines[j] =~ /[(,]\s*#{name}:/ && lines[j] !~ /MUTABLE #{name}:/
+            lines[j] = lines[j].sub(/(?<=[(,] )#{name}:/, "MUTABLE #{name}:")
+                               .sub(/\(#{name}:/, "(MUTABLE #{name}:")
+            counts[kind] += 1
+          end
+          break
+        end
 
         if lines[j] =~ /\bAS\s+#{name}\b/ && lines[j] !~ /AS\s+MUTABLE\s+#{name}\b/
           lines[j] = lines[j].sub(/\bAS\s+#{name}\b/, "AS MUTABLE #{name}")
@@ -362,6 +371,14 @@ by.each do |f, rs|
           break
         end
         j -= 1
+      end
+    when :mutable_arg_line
+      # The call spans lines, so the argument span could not be located; the
+      # name still appears exactly once in argument position on this line.
+      hits = lines[i].scan(/(?<=[(,] )#{name}(?=\s*[,)])|(?<=\()#{name}(?=\s*[,)])/).length
+      if hits == 1
+        lines[i] = lines[i].sub(/(?<=[(,] )#{name}(?=\s*[,)])|(?<=\()#{name}(?=\s*[,)])/, "&#{name}")
+        counts[kind] += 1
       end
     when :drop_unwrap
       # Two spellings reach the same diagnostic. Rewrite only when the line

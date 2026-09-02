@@ -100,7 +100,7 @@ PUB FN escapeSink__matches?(self: EscapeSink, node: Any) RETURNS Bool ->
     BgSourceWalkValue.Assignment -> (self.handler == symbol("apply_assignment_escape_sink!")),
     BgSourceWalkValue.VarDecl -> (self.handler == symbol("apply_binding_escape_sink!")),
     BgSourceWalkValue.BindExpr -> (self.handler == symbol("apply_binding_escape_sink!")),
-    AST.DestructuringAssignment -> (self.handler == symbol("apply_destructuring_escape_sink!")),
+    BgSourceWalkValue.DestructuringAssignment -> (self.handler == symbol("apply_destructuring_escape_sink!")),
     AST.BgBlock -> (self.handler == symbol("apply_execution_boundary_escape_sink!")),
     AST.BgStreamBlock -> (self.handler == symbol("apply_execution_boundary_escape_sink!")),
     AST.LambdaLit -> (self.handler == symbol("apply_lambda_escape_sink!")),
@@ -491,7 +491,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable(_))))))))))))).binding_id == entry.binding_id));
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable(_))))))))))))))))).binding_id == entry.binding_id));
   IF decl EXISTS AS decl_value THEN
     MUTABLE decl_value_mutable = COPY decl_value;
     MUTABLE stamped = (decl_value_mutable.full_type());
@@ -749,7 +749,7 @@ PUB FN escapeAnalysis__apply_execution_boundary_escape_sink_mut(node: Node, cont
     TRY (escapeAnalysis__mark_fsm_ctx_locals_heap_mut(bg_block, COPY context.schema_lookup));
   END
 END
-PUB FN escapeAnalysis__apply_lambda_escape_sink_mut(node: LambdaLit, context: EscapeContext) RETURNS !Void ->
+PUB FN escapeAnalysis__apply_lambda_escape_sink_mut(node: LambdaLit, MUTABLE context: EscapeContext) RETURNS !Void ->
   TRY (escapeAnalysis__mark_lambda_captures_heap_mut(node, &context.bg_heap, context.facts));
 END
 PUB FN escapeAnalysis__apply_func_call_escape_sink_mut(node: FuncCall, context: EscapeContext) RETURNS !Void ->
