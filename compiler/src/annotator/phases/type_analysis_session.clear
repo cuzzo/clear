@@ -5375,7 +5375,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, MUTABLE selector_effect, source, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_112 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_112, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    IF (aST__node_right( Locatable{ BinaryOp: COPY node }) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR node.right.stream_mode))) THEN
+    IF (UNWRAP (aST__node_right( Locatable{ BinaryOp: COPY node })) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR node.right.stream_mode))) THEN
         MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, %() USE(item_type, node, rtoc_self_view) -> {
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
       rubyToClearVoid__type_analysis_session()
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -10028,7 +10028,7 @@ PRIVATE FN typeAnalysisSession__record_capture_local_mut(self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF name EXISTS AS name_value THEN
-      (typeAnalysisSession__current_capture_context( UNWRAP (rtoc_self_view))?.locals).insert(COPY name_value);
+      (typeAnalysisSession__current_capture_context( rtoc_self_view)?.locals).insert(COPY name_value);
     END
 }
 END
@@ -19504,7 +19504,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rhs_type = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_480 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type(rtoc_local_receiver_480, UNWRAP (rhs_name))) };
     MUTABLE rhs_info: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_481 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-    scope__resolve_entry(rtoc_local_receiver_481, rhs_name) };
+    scope__resolve_entry(rtoc_local_receiver_481, UNWRAP (rhs_name)) };
     IF (IF (IF rhs_info != NIL THEN
       symbolEntry__rc_stored?(rhs_info)
     ELSE
