@@ -2791,7 +2791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (capabilityAuditSession__function_body_summaries(rtoc_self_view))).values() DO
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < _.escape_nodes.length() DO
-      IF !(_.escape_nodes[rtoc_idx] IS_A Identifier) THEN
+      IF !(UNWRAP (_.escape_nodes[rtoc_idx]) IS_A Identifier) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

@@ -7065,7 +7065,7 @@ PRIVATE FN mIRLowering__hoist_alloc(self: MIRLowering, MUTABLE expr: Emittable, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (IF expr IS_A MIRBlockExpr AS MUTABLE mir_block_expr THEN (blockExpr__lazy_boundary(&mir_block_expr) != NIL) ELSE FALSE END) THEN
+    IF (IF expr IS_A MIRBlockExpr AS MUTABLE mir_block_expr THEN (TRUE) ELSE FALSE END) THEN
       RETURN COPY expr;
     END
     MUTABLE composite_materialization: ?OwnedCompositeMaterialization = TRY (mIRLowering__owned_composite_transfer_materialization(rtoc_self_view, expr, ast_node, ownership_materialization_alloc));

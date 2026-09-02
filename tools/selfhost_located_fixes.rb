@@ -132,6 +132,11 @@ RETURNS = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
   File.read(f).scan(/\bFN ([\w?!]+)\([^\n]*?\)\s*RETURNS\s+([\w@?\[\]{}!]+)/)
 end.to_h.freeze
 
+# Receivers in this tree are rarely bare identifiers: they are calls, indexed
+# elements, and UNWRAPs. A narrow pattern makes a rule silently match nothing,
+# which reads as "the class needs a new rule" when it does not.
+RECV = /(?:UNWRAP\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:__\w+)?\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:\[[^\]]*\])?(?:\.[a-z_]\w*(?:\[[^\]]*\])?)*)/
+
 def accessor_for(union, field)
   name = "#{union[0].to_s.downcase}#{union[1..]}__#{field}"
   return name if DEFINED.include?(name)
@@ -318,10 +323,10 @@ by.each do |f, rs|
       # The operand is not optional, so Ruby's nil guard is decided here.
       # Only an unambiguous line is folded.
       if lines[i].scan(/!=\s*NIL/).length == 1 && lines[i].scan(/==\s*NIL/).empty?
-        lines[i] = lines[i].sub(/(?<![\w.)])[a-z_]\w*(?:\.[a-z_]\w*)*\s*!=\s*NIL/, 'TRUE')
+        lines[i] = lines[i].sub(/(?<![\w.)])#{RECV}\s*!=\s*NIL/, 'TRUE')
         counts[kind] += 1
       elsif lines[i].scan(/==\s*NIL/).length == 1 && lines[i].scan(/!=\s*NIL/).empty?
-        lines[i] = lines[i].sub(/(?<![\w.)])[a-z_]\w*(?:\.[a-z_]\w*)*\s*==\s*NIL/, 'FALSE')
+        lines[i] = lines[i].sub(/(?<![\w.)])#{RECV}\s*==\s*NIL/, 'FALSE')
         counts[kind] += 1
       end
     when :annotate_optional
@@ -338,7 +343,7 @@ by.each do |f, rs|
       # The subject's static type already IS the tested type, so Ruby's guard
       # is decided at compile time: true when they match, false for a NIL
       # subject that can never be the type.
-      lines[i] = lines[i].gsub(/(?<![\w.)])((?:[a-z_]\w*(?:\.[a-z_]\w*)*|NIL))\s+IS_A\s+(\w+)/) do
+      lines[i] = lines[i].gsub(/(?<![\w.)])(#{RECV}|NIL)\s+IS_A\s+(\w+)/) do
         whole = Regexp.last_match(0)
         subject = Regexp.last_match(1)
         target = Regexp.last_match(2)
@@ -358,7 +363,7 @@ by.each do |f, rs|
         end
       end
     when :unwrap_is_a
-      lines[i] = lines[i].gsub(/(?<![\w.)])((?:[a-z_]\w*(?:\.[a-z_]\w*)*))\s+IS_A\b/) do
+      lines[i] = lines[i].gsub(/(?<![\w.)])(#{RECV})\s+IS_A\b/) do
         whole = Regexp.last_match(0)
         recv = Regexp.last_match(1)
         next whole if recv.start_with?('UNWRAP')
@@ -494,7 +499,7 @@ by.each do |f, rs|
       # helper, which is the function Ruby called here.
       fn = "#{name[0].to_s.downcase}#{name[1..]}__to_s"
       if DEFINED.include?(fn)
-        lines[i] = lines[i].gsub(/(?<![\w.])([a-z_]\w*(?:\.[a-z_]\w*)*)\.toString\(\)/) do
+        lines[i] = lines[i].gsub(/(?<![\w.])(#{RECV})\.toString\(\)/) do
           whole = Regexp.last_match(0)
           recv = Regexp.last_match(1)
           counts[kind] += 1

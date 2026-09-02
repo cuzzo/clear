@@ -74,7 +74,7 @@ PRIVATE FN annotationTypeInventory__ignored_node_ids(program: Program) RETURNS !
   MUTABLE ignored: [Set]Int64 = Set[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < program.statements.length() DO
-    IF !((program.statements[rtoc_idx] IS_A FunctionDef OR program.statements[rtoc_idx] IS_A ExternFnDecl)) THEN
+    IF !((UNWRAP (program.statements[rtoc_idx]) IS_A FunctionDef OR UNWRAP (program.statements[rtoc_idx]) IS_A ExternFnDecl)) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
