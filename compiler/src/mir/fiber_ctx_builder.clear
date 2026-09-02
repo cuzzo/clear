@@ -313,11 +313,5 @@ FN castCallToEmittable(value: Call) RETURNS Emittable ->
   RETURN Emittable{ Call: COPY value };
 END
 FN castTypeToTypeConstructionInput__fiber_ctx_builder(value: Type) RETURNS TypeConstructionInput ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
-  END
-  panic("Invalid cast to TypeConstructionInput");
+  RETURN TypeConstructionInput{ Type: COPY value };
 END

@@ -22262,35 +22262,16 @@ FN castTypeShapeRawToTypeConstructionInput(value: TypeShapeRaw) RETURNS TypeCons
   panic("Invalid cast to TypeConstructionInput");
 END
 FN castTypeToAnnotationTypeShape(value: Type) RETURNS AnnotationTypeShape ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN AnnotationTypeShape{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN AnnotationTypeShape{ SymbolValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to AnnotationTypeShape");
-  END
-  panic("Invalid cast to AnnotationTypeShape");
+  RETURN AnnotationTypeShape{ Type: COPY value };
 END
 FN castTypeToAutoConstraintCollectorObservedType__type_analysis_session(value: Type) RETURNS AutoConstraintCollectorObservedType ->
-  PARTIAL MATCH value START
-    Type.SymbolValue AS cast_payload -> RETURN AutoConstraintCollectorObservedType{ SymbolValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to AutoConstraintCollectorObservedType");
-  END
-  panic("Invalid cast to AutoConstraintCollectorObservedType");
+  RETURN AutoConstraintCollectorObservedType{ Type: COPY value };
 END
 FN castTypeToFinalType(value: Type) RETURNS FinalType ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN FinalType{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN FinalType{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN FinalType{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to FinalType");
-  END
-  panic("Invalid cast to FinalType");
+  RETURN FinalType{ Type: COPY value };
 END
 FN castTypeToGenericBinding(value: Type) RETURNS GenericBinding ->
-  PARTIAL MATCH value START
-    Type.SymbolValue AS cast_payload -> RETURN GenericBinding{ SymbolValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to GenericBinding");
-  END
-  panic("Invalid cast to GenericBinding");
+  RETURN GenericBinding{ Type: COPY value };
 END
 FN castTypeToOptionalSourceType(value: Type) RETURNS ?SourceType ->
   PARTIAL MATCH value START
@@ -22355,13 +22336,7 @@ FN castTypeToType(value: Type) RETURNS Type ->
   panic("Invalid cast to Type");
 END
 FN castTypeToTypeConstructionInput__type_analysis_session(value: Type) RETURNS TypeConstructionInput ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
-  END
-  panic("Invalid cast to TypeConstructionInput");
+  RETURN TypeConstructionInput{ Type: COPY value };
 END
 FN castTypeToTypeTypeInput__type_analysis_session(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };

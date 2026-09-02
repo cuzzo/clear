@@ -1229,22 +1229,10 @@ FN castReturnTypeToTypeConstructionInput(value: ReturnType) RETURNS TypeConstruc
   panic("Invalid cast to TypeConstructionInput");
 END
 FN castTypeToReturnType(value: Type) RETURNS ReturnType ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN ReturnType{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN ReturnType{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN ReturnType{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ReturnType");
-  END
-  panic("Invalid cast to ReturnType");
+  RETURN ReturnType{ Type: COPY value };
 END
 FN castTypeToTypeConstructionInput__pipeline_concurrent_lowerer(value: Type) RETURNS TypeConstructionInput ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
-  END
-  panic("Invalid cast to TypeConstructionInput");
+  RETURN TypeConstructionInput{ Type: COPY value };
 END
 FN ruby_array_concat_Emittable__pipeline_concurrent_lowerer(left: []Emittable, right: []Emittable) RETURNS []Emittable ->
   MUTABLE result: []Emittable = [];

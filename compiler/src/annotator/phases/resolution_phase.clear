@@ -2367,13 +2367,7 @@ FN castTypeToOptionalSymbolEntryTypeInput__resolution_phase(value: Type) RETURNS
   panic("Invalid cast to ?SymbolEntryTypeInput");
 END
 FN castTypeToTypeConstructionInput__resolution_phase(value: Type) RETURNS TypeConstructionInput ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to TypeConstructionInput");
-  END
-  panic("Invalid cast to TypeConstructionInput");
+  RETURN TypeConstructionInput{ Type: COPY value };
 END
 FN castTypeToTypeTypeInput__resolution_phase(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
