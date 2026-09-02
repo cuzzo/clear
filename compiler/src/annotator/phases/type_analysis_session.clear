@@ -772,7 +772,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inventory = TRY (annotationTypeInventory__scan(CAST(COPY COPY resolution.program AS Program)));
     TRY (annotationTypeInventory__verify_resolved_mut(inventory));
     TRY (typeAnalysisSession__apply_keep_analysis_mut(rtoc_self_view, resolution));
-    MUTABLE schema_lookup = %(name) USE(rtoc_self_view) -> TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, name));
+    MUTABLE schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult = %(name: String@symbol) USE(rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(rtoc_self_view, name));
     MUTABLE lifecycle_inventory = TRY (lifecycleRegistry__type_inventory(CAST(COPY COPY resolution.program AS Program), schema_lookup));
     MUTABLE linear_resource_facts = TRY (linearResourceFacts__build_types(lifecycle_inventory.values(), schema_lookup));
     TRY (typeAnalysisSession__validate_copy_linear_resource_facts_mut(rtoc_self_view, CAST(COPY COPY resolution.program AS Program), linear_resource_facts));
@@ -22723,4 +22723,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_state.call_site_arg_families[caller_name] = COPY value;
     END
 }
+END
+
+# The schema_lookup callback is declared FN(String@symbol) -> ?TypeSchemaLookupResult
+# by every callee. The scope answers with ScopeScopeTypeSchema, so the lookup
+# is wrapped here rather than at each call site; NIL stays NIL.
+PRIVATE FN typeAnalysisSession__schema_lookup_result(self: TypeAnalysisSession, name: String@symbol) RETURNS !?TypeSchemaLookupResult
+  REQUIRES self: LOCAL
+->
+  MUTABLE found: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(self, name));
+  IF found EXISTS AS found_value THEN
+    RETURN castScopeScopeTypeSchemaToTypeSchemaLookupResult(found_value);
+  END
+  RETURN NIL;
 END

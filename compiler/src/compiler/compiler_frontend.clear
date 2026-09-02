@@ -52,8 +52,8 @@ PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImpor
   TRY (stringConcatRewriter__rewrite_mut(rtoc_local_receiver_5, &ast));
   MUTABLE rtoc_mutable_receiver_6 = mIRPassState__for_mut( &ast);
   TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_6, :string_concat_rewritten));
-  MUTABLE schema_lookup = %(name) USE(annotator) -> {
-  rtoc_lambda_result_7 = TRY (semanticAnnotator__lookup_type_schema(annotator, name));
+  MUTABLE schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult = %(name: String@symbol) USE(annotator) -> {
+  rtoc_lambda_result_7 = TRY (semanticAnnotator__schema_lookup_result(annotator, name));
   rtoc_lambda_result_7
   };
   MUTABLE hoist_result = TRY (hoist__apply_mut(ast, schema_lookup));

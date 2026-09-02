@@ -103,3 +103,13 @@ PUB FN semanticAnnotator__new(importer: ?ModuleImporter = NIL, compiler: ?Module
   TRY (semanticAnnotator__initialize(&self, importer, compiler, source_dir, strict_test, source_code));
   RETURN self @multiowned;
 END
+
+# Callers declare the callback as FN(String@symbol) -> ?TypeSchemaLookupResult;
+# the scope answers with ScopeScopeTypeSchema, so the lookup is wrapped here.
+PUB FN semanticAnnotator__schema_lookup_result(self: SemanticAnnotator, name: String@symbol) RETURNS !?TypeSchemaLookupResult ->
+  MUTABLE found: ?ScopeScopeTypeSchema = TRY (semanticAnnotator__lookup_type_schema(self, name));
+  IF found EXISTS AS found_value THEN
+    RETURN castScopeScopeTypeSchemaToTypeSchemaLookupResult(found_value);
+  END
+  RETURN NIL;
+END
