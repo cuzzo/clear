@@ -12998,7 +12998,7 @@ PRIVATE FN typeAnalysisSession__annotate_comptime_is_a_mut(MUTABLE self: TypeAna
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (typeAnalysisSession__annotate_is_a_operand_mut(&rtoc_self_view, UNWRAP (castLocatableToNode(&node.left)), "Left"));
+    TRY (typeAnalysisSession__annotate_is_a_operand_mut(&rtoc_self_view, &UNWRAP (castLocatableToNode(node.left)), "Left"));
     TRY (typeAnalysisSession__annotate_is_a_operand_mut(&rtoc_self_view, &node.right, "Right"));
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ IsA: COPY node }, :Bool));
 }
