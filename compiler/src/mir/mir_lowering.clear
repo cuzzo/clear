@@ -790,7 +790,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     WHILE !((pending.length() == 0)) DO
       MUTABLE node = UNWRAP (&pending.pop());
       IF ((IF node IS_A MIRMethodCall AS mir_method_call THEN mir_method_call.receiver IS_A Call ELSE FALSE END) AND ((CAST(emittable__receiver(node) AS Call)).callee == "CheatLib.SharedNodeStore")) THEN
-        MUTABLE arg: ?Emittable = COPY ((CAST(node.receiver() AS Call)).args).first();
+        MUTABLE arg: ?Emittable = COPY ((CAST(emittable__receiver(node) AS Call)).args).first();
         IF arg? IS_A Ident AS ident THEN
           &found.insert(ident.name);
         END
@@ -2524,7 +2524,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE owner_cleanup: ?MIRLoweringReturnValue = mIRLowering__owner_cleanup_for_transfer(rtoc_self_view, state, name);
         IF owner_cleanup EXISTS AS owner_cleanup_value THEN
           MUTABLE owner_cleanup_value_mutable = COPY owner_cleanup_value;
-          MUTABLE rtoc_mutable_receiver_51 = mIRLoweringReturnValue__cleanup_entry(owner_cleanup_value_mutable);
+          MUTABLE rtoc_mutable_receiver_51: ?CleanupEntry@multiowned = mIRLoweringReturnValue__cleanup_entry(owner_cleanup_value_mutable);
           cleanupEntry__mark_moved_guard_mut(&rtoc_mutable_receiver_51);
           &state.guarded_cleanup_names.insert(name);
           state.parent?.guarded_cleanup_names.insert(name);
@@ -13321,7 +13321,7 @@ PRIVATE FN mIRLowering__enforce_bg_capture_strategies_mut(self: MIRLowering, nod
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE strategies: {Any}Any = {};
     IF node__capture_analysis(node) THEN
-      strategies = node.capture_analysis().strategies;
+      strategies = node__capture_analysis(node).strategies;
     ELSE
       strategies = {};
     END

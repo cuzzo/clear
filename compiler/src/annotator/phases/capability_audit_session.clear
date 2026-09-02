@@ -1879,7 +1879,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(autoConstraintCollectorSlotDeclNode__type(decl)) THEN
       RETURN;
     END
-    IF type__auto?(decl.type()) THEN
+    IF type__auto?(autoConstraintCollectorSlotDeclNode__type(decl)) THEN
       RETURN;
     END
     MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__capability_audit_session(decl.type()));

@@ -17,7 +17,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
   MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
   aST__each_bg_block_in_stmt(stmt, %(bg_value: BgNode) USE(MUTABLE names, self) -> {
   MUTABLE body_names: [Set]String = Set[];
-  aST__each_locatable_list(bgNode__body(bg_value), FALSE, %(node: Locatable) USE(MUTABLE body_names) -> {
+  aST__each_locatable_list( UNWRAP (bgNode__body(bg_value)), FALSE, %(node: Locatable) USE(MUTABLE body_names) -> {
     IF node IS_A Identifier AS identifier THEN
         &body_names.insert(COPY identifier__name(identifier));
     END
@@ -59,7 +59,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_explicit_move_roots(self: MIRLowerin
   collect( castLocatableToMIRLoweringOwnershipScannerScanRoot(node));
   aST__each_bg_block_in_stmt(node, %(bg_value: BgNode) USE(collect) -> {
   IF bgNode__body(bg_value) THEN
-      collect(bg_value.body());
+      collect(bgNode__body(bg_value));
   END
   rubyToClearVoid__ownership_scanner()
   });

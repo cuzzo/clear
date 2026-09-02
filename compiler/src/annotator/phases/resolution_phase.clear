@@ -1570,7 +1570,7 @@ PRIVATE FN resolutionSession__reject_duplicate_extern_method_mut(self: Resolutio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE methods = scopeScopeTypeSchema__methods(type_schema);
+    MUTABLE methods: ?{String@symbol}FunctionSignature@multiowned = scopeScopeTypeSchema__methods(type_schema);
     IF !((methods IS_A {}Any AND methods.key?(node.name))) THEN
       RETURN;
     END
