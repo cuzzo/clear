@@ -576,7 +576,11 @@ module Annotator
               if container_source
                 graph_node = ownership_graph[b.name.to_s]
                 graph_node.kind = :borrowed if graph_node
-                ownership_graph.borrow(b.name.to_s, container_source, mutable: mutable_list_alias == true)
+                # `EXISTS AS MUTABLE` binds the payload for writing, so the
+                # borrow it takes is a mutable one -- otherwise the write is
+                # rejected as an assignment through a shared borrow.
+                ownership_graph.borrow(b.name.to_s, container_source,
+                                       mutable: mutable_list_alias == true || explicit_mutable)
               end
             end
             visit_stmts(node.then_branch)

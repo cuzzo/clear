@@ -14,7 +14,24 @@ FN read(opt: ?Counter) RETURNS Int64 ->
   RETURN 0;
 END
 
+STRUCT Holder { slot: ?Counter }
+
+# A binding taken from a FIELD borrows its container; the borrow has to be a
+# mutable one or the write through it is rejected. A plain local takes no
+# container borrow, so it does not exercise this.
+FN bump_field(MUTABLE h: Holder) RETURNS Void ->
+  IF h.slot EXISTS AS MUTABLE c THEN
+    c.n = c.n + 5;
+  END
+END
+
 FN main() RETURNS Void ->
+  MUTABLE holder: Holder = Holder{ slot: Counter{ n: 1 } };
+  bump_field(&holder);
+  IF holder.slot EXISTS AS seen THEN
+    ASSERT seen.n == 6, "EXISTS AS MUTABLE must write through a field's optional";
+  END
+
   MUTABLE slot: ?Counter = Counter{ n: 1 };
 
   IF slot EXISTS AS MUTABLE c THEN
