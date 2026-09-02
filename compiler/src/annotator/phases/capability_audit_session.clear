@@ -3656,7 +3656,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE blessed_ids = (blessed |> SELECT aST__node_identity( UNWRAP (_))) |> DISTINCT _;
-    RETURN all |> ALL blessed_ids.contains?(aST__node_identity(_));
+    RETURN all |> ALL blessed_ids.contains?(aST__node_identity( UNWRAP (_)));
 }
 END
 PRIVATE FN capabilityAuditSession__validate_predicate_purity_mut(self: CapabilityAuditSession) RETURNS !Void
