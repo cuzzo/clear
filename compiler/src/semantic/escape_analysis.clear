@@ -97,7 +97,7 @@ PUB STRUCT EscapeSink {
 PUB FN escapeSink__matches?(self: EscapeSink, node: Any) RETURNS Bool ->
   RETURN PARTIAL MATCH node START
     BgSourceWalkValue.ReturnNode -> (self.handler == symbol("apply_return_escape_sink!")),
-    AST.Assignment -> (self.handler == symbol("apply_assignment_escape_sink!")),
+    BgSourceWalkValue.Assignment -> (self.handler == symbol("apply_assignment_escape_sink!")),
     AST.VarDecl -> (self.handler == symbol("apply_binding_escape_sink!")),
     AST.BindExpr -> (self.handler == symbol("apply_binding_escape_sink!")),
     AST.DestructuringAssignment -> (self.handler == symbol("apply_destructuring_escape_sink!")),
@@ -491,7 +491,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable(_))))))).binding_id == entry.binding_id));
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable( UNWRAP (castBindingNodeToLocatable(_))))))))).binding_id == entry.binding_id));
   IF decl EXISTS AS decl_value THEN
     MUTABLE decl_value_mutable = COPY decl_value;
     MUTABLE stamped = (decl_value_mutable.full_type());
@@ -1159,7 +1159,7 @@ PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Lo
   symbolEntry__heap_storage?(rtoc_local_receiver_13) })) THEN
     RETURN FALSE;
   END
-  MUTABLE value = aST__node_value(node);
+  MUTABLE value: ?Locatable = aST__node_value(node);
   MUTABLE unwrapped = escapeAnalysis__unwrap_value(value);
   IF (unwrapped IS_A Locatable AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
     RETURN TRUE;
@@ -1708,7 +1708,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
     RETURN FALSE;
   END
   MUTABLE top_heap_ptr = TRY (type__heap_ptr?( UNWRAP (ti)));
-  ti = TRY (type__value_payload_type(ti));
+  ti = TRY (type__value_payload_type( UNWRAP (ti)));
   IF !(ti) THEN
     RETURN FALSE;
   END
@@ -1839,7 +1839,7 @@ PUB FN escapeAnalysis__heap_destination?(facts: FunctionFacts, target: Locatable
     IF target IS_A Identifier AS identifier THEN
       RETURN FALSE;
     END
-    MUTABLE ti = TRY (aST__full_type_mut(root_value_mutable));
+    MUTABLE ti = TRY (aST__full_type_mut( Locatable{ Identifier: COPY root_value_mutable }));
     RETURN (TRY (type__cleanup_allocator(ti, schema_lookup)) == :heap);
   ELSE
     RETURN FALSE;
@@ -2013,7 +2013,7 @@ PUB FN escapeAnalysis__mark_symbol_heap_mut(sym: ?SymbolEntry, MUTABLE names: ?[
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?(sym_entry)) THEN
+  IF (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :heap;
@@ -2043,7 +2043,7 @@ PUB FN escapeAnalysis__mark_symbol_borrow_mut(sym: ?SymbolEntry) RETURNS Bool ->
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?(sym_entry)) THEN
+  IF (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :borrow;
@@ -2054,7 +2054,7 @@ PUB FN escapeAnalysis__mark_reassigned_symbol_heap_mut(sym: ?SymbolEntry) RETURN
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF symbolEntry__heap_storage?(sym_entry) THEN
+  IF symbolEntry__heap_storage?( UNWRAP (sym_entry)) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :heap;
