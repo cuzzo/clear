@@ -150,16 +150,6 @@ rows = JSON.parse(File.read(probe)).select { |r| !r['ok'] && r['line'] && r['err
 by = Hash.new { |h, k| h[k] = [] }
 rows.each { |r| by[r['file']] << r }
 
-# Two rules can disagree about one site -- unwrap_arg adds UNWRAP where the
-# compiler asks for it, drop_unwrap removes it when the compiler then calls
-# the operand non-optional -- and the pair will trade the same line back and
-# forth forever. The ledger remembers every line text this fixer has already
-# produced for a file; producing one a second time means the site is cycling,
-# so it is frozen instead.
-LEDGER_PATH = File.expand_path('../.fn_probe_ledger.json', __dir__)
-ledger = File.exist?(LEDGER_PATH) ? JSON.parse(File.read(LEDGER_PATH)) : {}
-frozen_sites = 0
-
 counts = Hash.new(0)
 by.each do |f, rs|
   path = File.join(ROOT, f)
@@ -230,23 +220,18 @@ by.each do |f, rs|
       line_edits << [r['line'], :stringify_interp, m[1]]
     elsif e =~ /Ambiguous \?Bool (?:AND|OR) operand/
       line_edits << [r['line'], :orelse_bool, nil]
+    elsif e =~ /OR_ELSE requires a fallible/
+      line_edits << [r['line'], :drop_or_else, nil]
     end
   end
 
-  edits.uniq!
-  edits.sort_by!(&:first)
-  # Two diagnostics can name overlapping spans; applying both splices one
-  # replacement into the middle of the other.
-  last_start = text.length
-  edits.reverse_each do |a, b, s, kind|
-    next if b > last_start
-
-    text = text[0...a] + s + text[b..]
-    last_start = a
-    counts[kind] += 1
-  end
-
-  lines = text.lines
+  # Line rules run against the ORIGINAL line array. A span edit can cover a
+  # newline -- an argument list split across lines replaced by one string --
+  # which collapses lines and shifts every later index, so line rules must not
+  # see a partially span-edited buffer. Both kinds are converted to spans over
+  # the original text and applied together, right to left.
+  original = text
+  lines = original.lines
   line_edits.uniq.each do |ln, kind, name|
     i = ln - 1
     next unless lines[i]
@@ -418,9 +403,15 @@ by.each do |f, rs|
     when :mutable_arg_line
       # The call spans lines, so the argument span could not be located; the
       # name still appears exactly once in argument position on this line.
-      hits = lines[i].scan(/(?<=[(,] )#{name}(?=\s*[,)])|(?<=\()#{name}(?=\s*[,)])/).length
-      if hits == 1
-        lines[i] = lines[i].sub(/(?<=[(,] )#{name}(?=\s*[,)])|(?<=\()#{name}(?=\s*[,)])/, "&#{name}")
+      pat = /(?<=[(,] )#{name}(?=\s*[,)])|(?<=\()#{name}(?=\s*[,)])/
+      at = lines[i].index(pat)
+      # A lambda's USE(...) capture list is not an argument list; `&` there is
+      # a syntax error.
+      inside_use = at && lines[i][0...at].scan(/USE\(/).any? &&
+                   lines[i][0...at].rpartition('USE(').last.count('(') >=
+                   lines[i][0...at].rpartition('USE(').last.count(')')
+      if lines[i].scan(pat).length == 1 && !inside_use
+        lines[i] = lines[i].sub(pat, "&#{name}")
         counts[kind] += 1
       end
     when :stringify_interp
@@ -437,13 +428,26 @@ by.each do |f, rs|
       end
     when :orelse_bool
       # Ruby's truthiness on a nil-or-false value is exactly OR_ELSE FALSE.
-      lines[i] = lines[i].gsub(/(?<![\w.)])([a-z_]\w*(?:\.[a-z_]\w*)+)(?=\s+(?:AND|OR)\b)/) do
+      # Only operands that are provably optional are rewritten: a safe
+      # navigation makes the expression optional outright, and a field name
+      # qualifies when every struct declaring it declares it ?Bool. Wrapping a
+      # plain Bool would just raise OR_ELSE_NEEDS_RECOVERABLE_LEFT instead.
+      lines[i] = lines[i].gsub(/(?<![\w.)])([a-z_]\w*(?:\[[^\]]*\])?(?:\??\.[a-z_]\w*)+)(?=\s+(?:AND|OR)\b)/) do
         whole = Regexp.last_match(0)
-        path = Regexp.last_match(1)
-        next whole unless BOOL_FIELD[path.split('.').last]
+        operand = Regexp.last_match(1)
+        next whole unless operand.include?('?.') || BOOL_FIELD[operand.split('.').last]
 
         counts[kind] += 1
-        "(#{path} OR_ELSE FALSE)"
+        "(#{operand} OR_ELSE FALSE)"
+      end
+    when :drop_or_else
+      # OR_ELSE on a value that is neither fallible nor optional is dead: the
+      # fallback can never be taken.
+      # The fallback must be a complete simple value. `OR_ELSE CAST(...)` and
+      # any other call would leave its argument list dangling.
+      lines[i] = lines[i].sub(/\s+OR_ELSE\s+(?:\w+\[\]|\{\}|[\w:.]+(?![\w(]))/) do
+        counts[kind] += 1
+        ''
       end
     when :drop_unwrap
       # Two spellings reach the same diagnostic. Rewrite only when the line
@@ -466,24 +470,29 @@ by.each do |f, rs|
       end
     end
   end
-  seen = ledger[f] ||= []
-  final = lines.each_with_index.map do |l, idx|
-    key = "#{idx}\u0000#{l.strip}"
-    if seen.include?(key) && l != text.lines[idx]
-      frozen_sites += 1
-      text.lines[idx]
-    else
-      l
-    end
+  lines.each_with_index do |l, idx|
+    next if l == original.lines[idx]
+
+    edits << [offsets[idx], offsets[idx + 1] || original.length, l, :line_rule]
   end
-  final.each_with_index { |l, idx| seen << "#{idx}\u0000#{l.strip}" }
-  ledger[f] = seen.last(4000)
-  File.write(path, final.join) if apply
+
+  edits.uniq!
+  edits.sort_by!(&:first)
+  # Two diagnostics can name overlapping spans; applying both would splice one
+  # replacement into the middle of the other.
+  last_start = original.length
+  applied = original.dup
+  edits.reverse_each do |a, b, s, kind|
+    next if b > last_start
+
+    applied = applied[0...a] + s + applied[b..]
+    last_start = a
+    counts[kind] += 1 unless kind == :line_rule
+  end
+  File.write(path, applied) if apply
 end
 
-File.write(LEDGER_PATH, JSON.pretty_generate(ledger)) if apply
 
 counts.sort_by { |_, v| -v }.each { |k, v| puts format('  %-16s %d', k, v) }
 puts "total #{counts.values.sum}"
-puts "frozen #{frozen_sites} cycling site(s)" if frozen_sites.positive?
 puts '(dry run -- pass --apply to write)' unless apply

@@ -2019,7 +2019,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (slot.kind == :param) THEN
       RETURN capabilityAuditSession__auto_param_slot_label(rtoc_self_view, slot);
     ELSE_IF (slot.kind == :return) THEN
-      RETURN "return type of `${slot.fn_name}`";
+      RETURN "return type of `${UNWRAP (slot.fn_name)}`";
     ELSE_IF (slot.kind == :local) THEN
       RETURN capabilityAuditSession__auto_local_slot_label(rtoc_self_view, slot);
     ELSE
@@ -2039,7 +2039,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         name = COPY item.name;,
     END
     IF (slot.shape == :list_element) THEN
-      RETURN "element type of list `${name}`";
+      RETURN "element type of list `${name.toString()}`";
     ELSE_IF (slot.shape == :map_key) THEN
       RETURN "key type of map `${name}`";
     ELSE_IF (slot.shape == :map_value) THEN
@@ -2069,7 +2069,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
         name = COPY item.name;,
     END
-    RETURN "local '${name}'";
+    RETURN "local '${name.toString()}'";
 }
 END
 PRIVATE FN capabilityAuditSession__auto_token_for(self: CapabilityAuditSession, slot: Slot) RETURNS ?Token
@@ -3773,7 +3773,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (capabilityAuditSession__capability_audit(rtoc_self_view))).values() DO
     MUTABLE loc: String = "";
       IF _.line EXISTS AS line_value THEN
-        loc = " (line ${line_value})";
+        loc = " (line ${line_value.toString()})";
       ELSE
         loc = "";
       END
@@ -3867,7 +3867,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE edges: []LockEdge = (capabilityAuditSession__phase_audit_inputs(rtoc_self_view).lock_analysis.direct_edges[rtoc_each_22] OR_ELSE CAST(panic("missing hash key") AS []LockEdge));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < edges.length() DO
-      IF (edges[rtoc_idx]?.opted_out AND !(include_opted_out)) THEN
+      IF ((edges[rtoc_idx]?.opted_out OR_ELSE FALSE) AND !(include_opted_out)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

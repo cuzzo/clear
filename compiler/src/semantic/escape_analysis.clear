@@ -125,7 +125,7 @@ PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schem
       hoist_bindings[rtoc_key]
     ELSE
       NIL
-    END) OR_ELSE List[])));
+    END))));
   END
   END
   FOR _ IN facts_by_name.values() DO
@@ -950,7 +950,7 @@ END
 PUB FN escapeAnalysis__mark_loop_method_value_params_heap_mut(node: MethodCall, value_params: []Param) RETURNS !Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < value_params.length() DO
-    IF !((value_params[rtoc_idx]?.takes OR value_params[rtoc_idx]?.mutable)) THEN
+    IF !(((value_params[rtoc_idx]?.takes OR_ELSE FALSE) OR value_params[rtoc_idx]?.mutable)) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1080,7 +1080,7 @@ PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Par
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
     MUTABLE arg: ?Locatable = COPY args[rtoc_idx];
-    IF !((params[rtoc_idx]?.takes OR escapeAnalysis__symbol_heap?(params[rtoc_idx]?.symbol))) THEN
+    IF !(((params[rtoc_idx]?.takes OR_ELSE FALSE) OR escapeAnalysis__symbol_heap?(params[rtoc_idx]?.symbol))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1252,7 +1252,7 @@ PUB FN escapeAnalysis__mark_receiver_scope_escapes_mut(receiver: Locatable, args
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
-    IF !((params[rtoc_idx]?.takes OR params[rtoc_idx]?.mutable)) THEN
+    IF !(((params[rtoc_idx]?.takes OR_ELSE FALSE) OR params[rtoc_idx]?.mutable)) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
