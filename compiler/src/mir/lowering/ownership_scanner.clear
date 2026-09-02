@@ -56,7 +56,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_explicit_move_roots(self: MIRLowerin
   END
   rubyToClearVoid__ownership_scanner()
   });
-  collect( UNWRAP (castLocatableToMIRLoweringOwnershipScannerScanRoot(node)));
+  collect( castLocatableToMIRLoweringOwnershipScannerScanRoot(node));
   aST__each_bg_block_in_stmt(node, %(bg_value: BgNode) USE(collect) -> {
   IF bg_value.body() THEN
       collect(bg_value.body());

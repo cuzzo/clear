@@ -2714,7 +2714,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF info EXISTS AS info_value THEN
       MUTABLE tok: ?Token = NIL;
       MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
-      IF ((decl != NIL) AND aST__node__token( UNWRAP (castSymbolEntryRegInputToLocatable(decl)))) THEN
+      IF ((decl != NIL) AND aST__node__token( castSymbolEntryRegInputToLocatable(decl))) THEN
         tok = aST__node__token(decl);
       ELSE_IF (symbolEntry__is_param(info_value) AND (COPY info_value.param_decl_token != NIL)) THEN
         tok = COPY COPY info_value.param_decl_token;
@@ -8881,7 +8881,7 @@ PRIVATE FN typeAnalysisSession__validate_tight_body_mut(self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn_nodes = TRY (typeAnalysisSession__function_node_map(rtoc_self_view));
-    aST__each_locatable( UNWRAP (castAstScanInputToLocatable(stmts)), FALSE, %(node: Locatable) USE(fn_nodes, loop_node, rtoc_self_view) -> {
+    aST__each_locatable( castAstScanInputToLocatable(stmts), FALSE, %(node: Locatable) USE(fn_nodes, loop_node, rtoc_self_view) -> {
     TRY (typeAnalysisSession__validate_tight_node_mut(rtoc_self_view, node, loop_node, fn_nodes));
     rubyToClearVoid__type_analysis_session()
     });
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -10321,7 +10321,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((MATCH node START AllocDeclarationNode.VarDecl AS item -> item.value IS_A StructLit, AllocDeclarationNode.BindExpr AS item -> item.value IS_A StructLit END)) THEN
       RETURN storage;
     END
-    MUTABLE rtoc_mutable_receiver_238 = (TRY (aST__full_type_mut( UNWRAP (castAllocDeclarationNodeToLocatable(node)))));
+    MUTABLE rtoc_mutable_receiver_238 = (TRY (aST__full_type_mut( castAllocDeclarationNodeToLocatable(node))));
     type__mark_stack_value_mut(&rtoc_mutable_receiver_238);
     node.storage = :stack;
     MUTABLE value_node: Any = NIL;
@@ -12985,7 +12985,7 @@ PRIVATE FN typeAnalysisSession__visit_IsA(MUTABLE self: TypeAnalysisSession, MUT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(TRY (typeAnalysisSession__static_type_expr?(rtoc_self_view, UNWRAP (castLocatableToNode(node.left))))) THEN
+    IF !(TRY (typeAnalysisSession__static_type_expr?(rtoc_self_view, castLocatableToNode(node.left)))) THEN
       TRY (typeAnalysisSession__annotate_runtime_is_a_mut(&rtoc_self_view, &node));
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ IsA: COPY node }, :Bool));
       RETURN NIL;

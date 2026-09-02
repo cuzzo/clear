@@ -10314,7 +10314,7 @@ PRIVATE FN mIRLowering__call_never_returns_success?(self: MIRLowering, node: Cal
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((aST__node_name( UNWRAP (castCallNodeToLocatable(node))) EXISTS)) THEN
+    IF !((aST__node_name( castCallNodeToLocatable(node)) EXISTS)) THEN
       RETURN FALSE;
     END
     MUTABLE fn: ?FunctionDef@multiowned = COPY mIRLowering__program_state(rtoc_self_view).fn_nodes[CAST(node.name() AS String)];
@@ -13351,7 +13351,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE result_type = TRY (type__tense_type( UNWRAP ((TRY (type__from_node_mut( Locatable{ BgBlock: COPY node }, "FSM BG result"))))));
     fsm_structure.owned_result_required = !(!(((TRUE AND TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, result_type))))));
     TRY (mIRChecker__check_fsm_structure_mut(fsm_structure, Locatable{ BgBlock: COPY node }));
-    MUTABLE bg = MIRBgBlock{ code: castFsmBodyToBgBlockPlan( UNWRAP (castMIRFsmLoweringResultFsmBodyToFsmBody(COPY transform_result.body))), captures: COPY captured, run_body: ( { MUTABLE rtoc_empty_list_516: []Emittable = List[]; rtoc_empty_list_516 } ), fsm_structure: Emittable{ FsmStructure: COPY fsm_structure }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
+    MUTABLE bg = MIRBgBlock{ code: castFsmBodyToBgBlockPlan( castMIRFsmLoweringResultFsmBodyToFsmBody(COPY transform_result.body)), captures: COPY captured, run_body: ( { MUTABLE rtoc_empty_list_516: []Emittable = List[]; rtoc_empty_list_516 } ), fsm_structure: Emittable{ FsmStructure: COPY fsm_structure }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
     bg.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BgBlock: COPY node })) }));
     bg.boundary_fact = TRY (mIRLowering__execution_boundary_fact(rtoc_self_view, :bg, mIRLowering__execution_boundary_dispatch(rtoc_self_view, node.parallel, Pinned{ BoolValue: node.pinned }), analysis));
     RETURN bg;

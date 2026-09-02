@@ -1338,7 +1338,7 @@ PUB FN escapeAnalysis__propagate_assignment_ownership_mut(facts: FunctionFacts, 
 END
 PUB FN escapeAnalysis__assigned_binding_name(node: AssignmentNode) RETURNS ?String ->
   IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :assign) ELSE FALSE END) THEN
-    RETURN COPY CAST(aST__node_name(UNWRAP (castAssignmentNodeToLocatable(node))) AS String);
+    RETURN COPY CAST(aST__node_name(castAssignmentNodeToLocatable(node)) AS String);
   END
   IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
     RETURN NIL;
@@ -1357,7 +1357,7 @@ PUB FN escapeAnalysis__assigned_binding_name(node: AssignmentNode) RETURNS ?Stri
   END
 END
 PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
-  IF !((aST__node_value( UNWRAP (castAssignmentNodeToLocatable(node))) EXISTS)) THEN
+  IF !((aST__node_value( castAssignmentNodeToLocatable(node)) EXISTS)) THEN
     RETURN FALSE;
   END
   MUTABLE value = node.value();
@@ -1822,7 +1822,7 @@ PUB FN escapeAnalysis__assignment_target_heap_destination?(facts: FunctionFacts,
   RETURN PARTIAL MATCH target START
     AssignmentTarget.StringValue AS string -> escapeAnalysis__symbol_heap?(escapeAnalysis__symbol_for_name(facts, string)),
     AssignmentTarget.SymbolValue AS string_symbol -> escapeAnalysis__symbol_heap?(escapeAnalysis__symbol_for_name(facts, CAST(string_symbol AS String))),
-    DEFAULT -> TRY (escapeAnalysis__heap_destination?(facts, UNWRAP (castAssignmentTargetToLocatable(target)), schema_lookup))
+    DEFAULT -> TRY (escapeAnalysis__heap_destination?(facts, castAssignmentTargetToLocatable(target), schema_lookup))
   END;
 END
 PUB FN escapeAnalysis__heap_destination?(facts: FunctionFacts, target: Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
@@ -2069,7 +2069,7 @@ PUB FN escapeAnalysis__canonical_symbol(sym: ?SymbolEntry) RETURNS ?SymbolEntry@
       decl_branch_value = NIL;
     END
     MUTABLE decl: ?SymbolEntryRegInput = decl_branch_value;
-    RETURN (((((decl != NIL) AND (aST__node__symbol( UNWRAP (castSymbolEntryRegInputToLocatable(decl))) EXISTS)) AND decl.symbol)) OR sym_value);
+    RETURN (((((decl != NIL) AND (aST__node__symbol( castSymbolEntryRegInputToLocatable(decl)) EXISTS)) AND decl.symbol)) OR sym_value);
   ELSE
     RETURN NIL;
   END
