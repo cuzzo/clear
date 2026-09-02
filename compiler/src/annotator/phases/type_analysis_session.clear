@@ -6646,7 +6646,7 @@ PRIVATE FN typeAnalysisSession__shard_concurrent_source?(self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((IF UNWRAP (lhs) IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND aST__node_right(lhs) IS_A ShardOp);
+    RETURN ((IF lhs IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND aST__node_right(lhs) IS_A ShardOp);
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_concurrent_op(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?String@symbol
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -10028,7 +10028,7 @@ PRIVATE FN typeAnalysisSession__record_capture_local_mut(self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF name EXISTS AS name_value THEN
-      (typeAnalysisSession__current_capture_context( UNWRAP (rtoc_self_view))?.locals).insert(COPY name_value);
+      (typeAnalysisSession__current_capture_context( rtoc_self_view)?.locals).insert(COPY name_value);
     END
 }
 END
@@ -12927,7 +12927,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((node.result != NIL) AND (UNWRAP (node.result) IS_A IfStatement)) THEN
         TRY (typeAnalysisSession__promote_to_expr_if_mut(rtoc_self_view, Locatable{ BlockExpr: COPY node }, castOptionalLocatableToIfStatement(node.result)));
     END
-    TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BlockExpr: COPY &node }, TRY (aST__full_type_mut( UNWRAP (node.result)))));
+    TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BlockExpr: COPY node }, TRY (aST__full_type_mut( UNWRAP (node.result)))));
     node.storage = node.result.storage();
     NIL
     });
@@ -14000,7 +14000,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN node.body DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ DeferStmt: COPY &node }, :Void));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ DeferStmt: COPY node }, :Void));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_MatchStatement(MUTABLE self: TypeAnalysisSession, MUTABLE node: MatchStatement) RETURNS !?String@symbol
@@ -15359,7 +15359,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE bytes = (((declarationNode__slot_size(node) OR_ELSE 1)) * 8);
-    functionContext__record_stack_bytes_mut( UNWRAP (&fn_ctx), bytes);
+    functionContext__record_stack_bytes_mut( &UNWRAP (fn_ctx), bytes);
     RETURN bytes;
 }
 END
@@ -18072,28 +18072,28 @@ PRIVATE FN typeAnalysisSession__visit_OrElseRaise(self: TypeAnalysisSession, MUT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ OrElseRaise: COPY &node }, :Void));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ OrElseRaise: COPY node }, :Void));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_OrElseBreak(self: TypeAnalysisSession, MUTABLE node: OrElseBreak) RETURNS !String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ OrElseBreak: COPY &node }, :Void));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ OrElseBreak: COPY node }, :Void));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_OrElsePass(self: TypeAnalysisSession, MUTABLE node: OrElsePass) RETURNS !String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ OrElsePass: COPY &node }, :Void));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ OrElsePass: COPY node }, :Void));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_OrElsePrune(self: TypeAnalysisSession, MUTABLE node: OrElsePrune) RETURNS !String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ OrElsePrune: COPY &node }, :Void));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ OrElsePrune: COPY node }, :Void));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_OrElseExit(MUTABLE self: TypeAnalysisSession, MUTABLE node: OrElseExit) RETURNS !?String@symbol
@@ -18242,7 +18242,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
     END
     IF (node.op == :NOT) OR (node.op == "!") THEN
-      TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ UnaryOp: COPY &node }, :Bool));
+      TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ UnaryOp: COPY node }, :Bool));
     ELSE_IF (node.op == :EXISTS) THEN
       MUTABLE operand_type = TRY (aST__full_type_mut(node.right));
       IF !((type__optional?((TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (operand_type) })))) OR TRY (type__stream_step?((TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (operand_type) }))))))) THEN
@@ -20328,7 +20328,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((val != NIL) AND ((val IS_A FuncCall OR val IS_A MethodCall))) THEN
       MUTABLE matched_def: ?FunctionSignature@multiowned = locatable__matched_stdlib_def(val);
       IF matched_def THEN
-        IF !((TRY (functionSignature__intrinsic_lifetime( UNWRAP (&matched_def)))).empty?()) THEN
+        IF !((TRY (functionSignature__intrinsic_lifetime( &UNWRAP (matched_def)))).empty?()) THEN
           IF respondsTo?(val, "storage=") THEN
             val.storage = :borrow;
           END

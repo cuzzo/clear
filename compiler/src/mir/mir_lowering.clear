@@ -1377,7 +1377,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_23) };
     MUTABLE label = "__owned_branch_copy_${mIRLoweringGeneratedId__to_s(tmp_id)}";
     MUTABLE source_name = "__owned_branch_src_${mIRLoweringGeneratedId__to_s(tmp_id)}";
-    MUTABLE copy_name = "__owned_branch_copy_val_${tmp_id}";
+    MUTABLE copy_name = "__owned_branch_copy_val_${tmp_id.toString()}";
     MUTABLE claimed = TRY (mIRLowering__claim_block_result_ownership_mut(rtoc_self_view, mir));
     MUTABLE source_alloc = ((IF TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, mir)) != NIL THEN TRY (mIRLowering__mir_owned_alloc(rtoc_self_view, mir)) ELSE TRY (ownershipEffect__alloc_of(mir)) END) OR_ELSE dest_alloc);
     MUTABLE source_owned = (claimed OR TRY (mIRLowering__owned_branch_source_owns?(rtoc_self_view, mir)));
@@ -11097,7 +11097,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE obj: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.object))) AS Emittable);
     MUTABLE args = node.args |> SELECT ExternTrampolineArg{ expr: COPY TRY (mIRLowering__lower_extern_arg(&rtoc_self_view, _)), field_type: NIL, field_zig_type: NIL };
     signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature));
-    MUTABLE return_type = TRY (mIRLowering__extern_trampoline_return_type(rtoc_self_view, Locatable{ MethodCall: COPY &node }, signature));
+    MUTABLE return_type = TRY (mIRLowering__extern_trampoline_return_type(rtoc_self_view, Locatable{ MethodCall: COPY node }, signature));
     RETURN ExternTrampoline{ id: id.value, callee_name: COPY node.name, method_name: COPY node.name, receiver: COPY obj, runtime_args: COPY args, alloc_kind: COPY (IF node.extern_effects != NIL THEN
       node.extern_effects[:alloc]
     ELSE
@@ -13381,7 +13381,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE ctx_type = "__SgCtx${mIRLoweringGeneratedId__to_s(id)}";
     MUTABLE alloc_var = "__sg${mIRLoweringGeneratedId__to_s(id)}_alloc";
-    MUTABLE stream_var = "__sg${id}_stream";
+    MUTABLE stream_var = "__sg${id.toString()}_stream";
     MUTABLE ctx_var = "__sg${id}_ctx";
     MUTABLE blk_label = "__sg${id}";
     MUTABLE local_stream = "__sg${id}_local";
@@ -14615,7 +14615,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_553) };
     MUTABLE label = "__collect_blk_${mIRLoweringGeneratedId__to_s(block_id)}";
     MUTABLE collect_var = "__collect_acc_${mIRLoweringGeneratedId__to_s(block_id)}";
-    MUTABLE val_var = "__collect_val_${block_id}";
+    MUTABLE val_var = "__collect_val_${block_id.toString()}";
     MUTABLE left_effect = TRY (ownershipEffect__of(left));
     MUTABLE collect_source_alloc = IF type__observable?(ft) THEN
       :heap

@@ -661,7 +661,7 @@ PUB FN escapeAnalysis__apply_return_escape_sink_mut(node: ReturnNode, context: E
   IF !(value) THEN
     RETURN;
   END
-  IF !(TRY (escapeAnalysis__owning_return_needs_heap_placement?(COPY context.fn, UNWRAP (&value), COPY context.schema_lookup))) THEN
+  IF !(TRY (escapeAnalysis__owning_return_needs_heap_placement?(COPY context.fn, &UNWRAP (value), COPY context.schema_lookup))) THEN
     RETURN;
   END
   IF !(escapeAnalysis__returned_call_result?(value)) THEN

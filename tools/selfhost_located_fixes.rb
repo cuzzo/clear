@@ -224,6 +224,8 @@ by.each do |f, rs|
       line_edits << [r['line'], :drop_or_else, nil]
     elsif (m = e.match(/No overload for 'toString' matches arguments \((\w+)\)/))
       line_edits << [r['line'], :to_s_helper, m[1]]
+    elsif e =~ /'&' is only valid on an argument passed to a MUTABLE parameter/
+      line_edits << [r['line'], :hoist_mutable_marker, nil]
     end
   end
 
@@ -405,7 +407,9 @@ by.each do |f, rs|
     when :mutable_arg_line
       # The call spans lines, so the argument span could not be located; the
       # name still appears exactly once in argument position on this line.
-      pat = /(?<=[(,] )#{name}(?=\s*[,)])|(?<=\()#{name}(?=\s*[,)])/
+      # Not after COPY/UNWRAP: `&` marks a mutating argument, and inside a
+      # literal field or an unwrap it is a syntax error.
+      pat = /(?<=[(,] )(?<!COPY )#{name}(?=\s*[,)])|(?<=\()(?<!COPY \()#{name}(?=\s*[,)])/
       at = lines[i].index(pat)
       # A lambda's USE(...) capture list is not an argument list; `&` there is
       # a syntax error.
@@ -441,6 +445,13 @@ by.each do |f, rs|
 
         counts[kind] += 1
         "(#{operand} OR_ELSE FALSE)"
+      end
+    when :hoist_mutable_marker
+      # `&` marks the ARGUMENT as mutating. Inside the unwrap it marks the
+      # unwrapped operand instead, which is not an argument position.
+      lines[i] = lines[i].gsub(/UNWRAP \(&(\w+)\)/) do
+        counts[kind] += 1
+        "&UNWRAP (#{Regexp.last_match(1)})"
       end
     when :to_s_helper
       # The type has no toString intrinsic but carries Ruby's to_s as a

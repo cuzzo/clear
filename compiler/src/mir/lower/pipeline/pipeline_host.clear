@@ -71,7 +71,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.stream_select_counter = 0;
     rtoc_self_view.do_rt_name = NIL;
     rtoc_self_view.pipeline_node_alloc = NIL;
-    rtoc_self_view.materializer = pipelineMaterializer__new(TRY (pipelineHost__build_materializer_host( UNWRAP (&rtoc_self_view))));
+    rtoc_self_view.materializer = pipelineMaterializer__new(TRY (pipelineHost__build_materializer_host( &UNWRAP (rtoc_self_view))));
     rtoc_self_view.range_lowerer = pipelineRangeLowerer__new(TRY (pipelineHost__build_range_lowerer_host(rtoc_self_view)));
     rtoc_self_view.binding_chain_lowerer = TRY (pipelineHost__build_binding_chain_lowerer(rtoc_self_view));
     rtoc_self_view.plan_builder = TRY (pipelineHost__build_plan_builder(rtoc_self_view));
