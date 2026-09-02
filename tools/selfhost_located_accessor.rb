@@ -20,6 +20,9 @@ OptionParser.new do |p|
   p.on('--probe FILE') { |v| probe = v }
 end.parse!
 
+require_relative 'selfhost_union_accessor'
+VARIANTS, STRUCT_FIELDS = SelfhostUnionAccessor.load_types(ROOT)
+
 defined_fns = Set.new
 Dir.glob(File.join(ROOT, '**', '*.clear')).each do |f|
   File.read(f).scan(/\bFN ([\w?!]+)\s*(?:<[^>]*>)?\(/) { |m| defined_fns << m[0] }
@@ -56,6 +59,19 @@ by.each do |f, hits|
 
     b = bare(type)
     optional = type.start_with?('?')
+
+    # A struct has no methods, but Ruby's attr reader translated as a call.
+    # The field is right there: drop the parens rather than invent an accessor.
+    if STRUCT_FIELDS[b]&.key?(meth) && !VARIANTS.key?(b)
+      before = lines[i]
+      lines[i] = lines[i].gsub(/(?<![\w.])([a-z_]\w*(?:\.[a-z_]\w*)*)\.#{Regexp.escape(meth)}\(\)/) do
+        recv = Regexp.last_match(1)
+        optional ? "UNWRAP (#{recv}).#{meth}" : "#{recv}.#{meth}"
+      end
+      rewrites += lines[i] == before ? 0 : 1
+      next
+    end
+
     fn = ALIASES[[b, meth]] || "#{b[0].to_s.downcase}#{b[1..]}__#{meth}"
     cast = nil
     unless defined_fns.include?(fn)
