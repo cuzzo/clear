@@ -13,6 +13,15 @@ require 'set'
 RUBY_ROOT = File.expand_path('../compiler/ruby', __dir__)
 CLEAR_ROOT = File.expand_path('../compiler/src', __dir__)
 
+# A Sorbet type alias can itself be nilable, so the alias name alone says
+# nothing about optionality. Resolve them before comparing.
+NILABLE_ALIAS = Set.new
+Dir.glob("#{RUBY_ROOT}/**/*.rb").each do |f|
+  File.read(f).scan(/(\w+)\s*=\s*T\.type_alias\s*\{(.+?)\}/m) do |name, body|
+    NILABLE_ALIAS << name if body.include?('nilable') || body.include?('NilClass')
+  end
+end
+
 # Ruby: the sig line immediately preceding a def.
 ruby_returns = {}
 Dir.glob("#{RUBY_ROOT}/**/*.rb").each do |f|
@@ -42,6 +51,7 @@ Dir.glob("#{CLEAR_ROOT}/**/*.clear").each do |f|
     rb = ruby_returns[key]
     # Ruby says the value is always present; CLEAR says it may be nil.
     next if rb.include?('nilable')
+    next if NILABLE_ALIAS.include?(rb.strip.split('::').last)
 
     mismatches << [f.sub("#{CLEAR_ROOT}/", ''), "#{recv}__#{meth}", ret, rb[0, 40], key]
   end
