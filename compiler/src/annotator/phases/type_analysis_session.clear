@@ -6646,7 +6646,7 @@ PRIVATE FN typeAnalysisSession__shard_concurrent_source?(self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((IF lhs IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND aST__node_right(lhs) IS_A ShardOp);
+    RETURN ((IF UNWRAP (lhs) IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND UNWRAP (aST__node_right(lhs)) IS_A ShardOp);
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_concurrent_op(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?String@symbol
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -10028,7 +10028,7 @@ PRIVATE FN typeAnalysisSession__record_capture_local_mut(self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF name EXISTS AS name_value THEN
-      (typeAnalysisSession__current_capture_context( rtoc_self_view)?.locals).insert(COPY name_value);
+      (typeAnalysisSession__current_capture_context( UNWRAP (rtoc_self_view))?.locals).insert(COPY name_value);
     END
 }
 END
@@ -15559,7 +15559,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       scope__is_immutable?(rtoc_local_receiver_387, UNWRAP (var_name)) } THEN
         TRY (typeAnalysisSession__emit_immutable_index_assignment_error_mut(rtoc_self_view, assignment_node, TRY (typeAnalysisSession__current_scope(rtoc_self_view)), UNWRAP (var_name)));
       END
-      TRY (typeAnalysisSession__mark_var_mutated(rtoc_self_view, var_name));
+      TRY (typeAnalysisSession__mark_var_mutated(rtoc_self_view, UNWRAP (var_name)));
     ELSE
       MUTABLE root: ?String = typeAnalysisSession__chain_root_name(rtoc_self_view, index_node.target);
       IF root EXISTS AS root_value THEN
@@ -19500,7 +19500,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier) THEN
       RETURN;
     END
-    MUTABLE rhs_name = aST__node_value(UNWRAP (castNodeToLocatable(node))).name();
+    MUTABLE rhs_name = aST__node_name(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))));
     MUTABLE rhs_type = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_480 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type(rtoc_local_receiver_480, rhs_name)) };
     MUTABLE rhs_info: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_481 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
@@ -19553,7 +19553,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A FuncCall OR UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A MethodCall)) THEN
       RETURN;
     END
-    MUTABLE call_node = aST__node_value(UNWRAP (castNodeToLocatable(node)));
+    MUTABLE call_node: ?Locatable = aST__node_value(UNWRAP (castNodeToLocatable(node)));
     IF aST__collection_method_call?( UNWRAP (call_node)) THEN
       RETURN;
     END
