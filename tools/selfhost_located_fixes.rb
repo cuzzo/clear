@@ -171,6 +171,8 @@ by.each do |f, rs|
     elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got \?(\w+)/)) &&
           VARIANT_OF.key?(m[1])
       line_edits << [r['line'], :unwrap_is_a, nil]
+    elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got (\w+)\.?\z/))
+      line_edits << [r['line'], :static_is_a, m[1]]
     elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
       line_edits << [r['line'], :union_field_write, m[1]]
       line_edits << [r['line'], :union_field_read, m[1]]
@@ -254,6 +256,29 @@ by.each do |f, rs|
 
         counts[kind] += 1
         "#{owner}.#{v}"
+      end
+    when :static_is_a
+      # The subject's static type already IS the tested type, so Ruby's guard
+      # is decided at compile time: true when they match, false for a NIL
+      # subject that can never be the type.
+      lines[i] = lines[i].gsub(/(?<![\w.)])((?:[a-z_]\w*(?:\.[a-z_]\w*)*|NIL))\s+IS_A\s+(\w+)/) do
+        whole = Regexp.last_match(0)
+        subject = Regexp.last_match(1)
+        target = Regexp.last_match(2)
+        rest = Regexp.last_match.post_match
+        # `IS_A T AS x` binds the payload and `IS_A T@cap` carries a
+        # capability: neither is a bare boolean test to fold away.
+        next whole if rest =~ /\A\s*(?:AS\b|@)/
+
+        if subject == 'NIL'
+          counts[kind] += 1
+          'FALSE'
+        elsif target == name
+          counts[kind] += 1
+          'TRUE'
+        else
+          whole
+        end
       end
     when :unwrap_is_a
       lines[i] = lines[i].gsub(/(?<![\w.)])((?:[a-z_]\w*(?:\.[a-z_]\w*)*))\s+IS_A\b/) do
