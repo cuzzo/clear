@@ -64,23 +64,36 @@ def arg_spans(t, from, fin)
 end
 
 # The Nth argument of the call whose closing paren reaches the reported line.
-def locate_arg(text, offsets, ln, argno)
+# The Nth argument of the call the diagnostic is about. When more than one
+# call on the line could be the one -- a call passed as an argument to another
+# call has its own argument 1 -- the site is ambiguous and is left alone:
+# guessing rewrites the inner call and the compiler then contradicts itself
+# about the same operand forever.
+def locate_arg(text, offsets, ln, argno, fn_name = nil)
   (0..8).each do |back|
     idx = ln - 1 - back
     break if idx.negative?
 
-    found = nil
+    cands = []
     text[offsets[idx]...offsets[idx + 1]].to_s
         .to_enum(:scan, /(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).each do
       mm = Regexp.last_match
+      name = mm[1]
       open_at = offsets[idx] + mm.end(0) - 1
       fin = close_paren(text, open_at) or next
       next unless fin >= offsets[ln - 1]
 
       sp = arg_spans(text, open_at + 1, fin)[argno - 1] or next
-      found = sp
+      cands << [name, sp]
     end
-    return found if found
+    next if cands.empty?
+
+    if fn_name && (exact = cands.find { |n, _| n == fn_name })
+      return exact[1]
+    end
+    return cands.first[1] if cands.length == 1
+
+    return nil
   end
   nil
 end
