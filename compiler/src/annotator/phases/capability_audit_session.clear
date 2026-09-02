@@ -853,7 +853,7 @@ PRIVATE FN capabilityAuditSession__emit_use_of_moved_path_error_mut(self: Capabi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE path_str = (path |> SELECT _.toString()).join(".");
+    MUTABLE path_str = (path |> SELECT nameCandidate__to_s(_)).join(".");
     MUTABLE root = COPY CAST(path.first() AS String);
     MUTABLE msg: String = "";
     IF ((og_node != NIL) AND (og_node.move_line != NIL)) THEN

@@ -13,3 +13,13 @@ PUB FN nameCandidate__text(value: NameCandidate) RETURNS String ->
   RETURN COPY "";
 END
 # End Ruby module FixableSuggestionHelper
+
+# Ruby interpolates this value directly; each variant renders the
+# way Ruby renders it.
+PUB FN nameCandidate__to_s(value: NameCandidate) RETURNS String ->
+  PARTIAL MATCH value START
+    NameCandidate.StringValue AS item -> RETURN COPY item;,
+    NameCandidate.SymbolValue AS item -> RETURN COPY item;,
+  END
+  RETURN "";
+END
