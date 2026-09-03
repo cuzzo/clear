@@ -2235,8 +2235,8 @@ END
 PRIVATE FN capabilityAuditSession__effect_direct_effects_for(self: CapabilityAuditSession, fn_name: String) RETURNS ![Set]String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    capabilityAuditSession__set_direct_effect_mut(&rtoc_self_view, fn_name, (capabilityAuditSession__effect_direct_effects(rtoc_self_view)[fn_name] OR_ELSE Set[]));
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    capabilityAuditSession__set_direct_effect_mut(&rtoc_self_view, fn_name, (capabilityAuditSession__effect_direct_effects(&rtoc_self_view)[fn_name] OR_ELSE Set[]));
     RETURN capabilityAuditSession__effect_direct_effects(rtoc_self_view)[fn_name];
 }
 END
@@ -2257,8 +2257,8 @@ END
 PRIVATE FN capabilityAuditSession__effect_call_site_context_for(self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    capabilityAuditSession__set_call_site_context_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_context(rtoc_self_view)[caller_name] OR_ELSE {}));
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    capabilityAuditSession__set_call_site_context_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_context(&rtoc_self_view)[caller_name] OR_ELSE {}));
     MUTABLE caller_context = UNWRAP (capabilityAuditSession__effect_call_site_context(rtoc_self_view)[caller_name]);
     caller_context[callee_name] = (caller_context[callee_name] OR_ELSE {:loop: FALSE, :cond: FALSE});
     RETURN caller_context[callee_name];
@@ -2267,8 +2267,8 @@ END
 PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS ![][][Set]String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    capabilityAuditSession__set_call_site_arg_families_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] OR_ELSE {}));
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    capabilityAuditSession__set_call_site_arg_families_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_arg_families(&rtoc_self_view)[caller_name] OR_ELSE {}));
     MUTABLE caller_families = UNWRAP (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name]);
     IF !(caller_families.contains?(callee_name)) THEN
       caller_families[callee_name] = [];
@@ -2292,7 +2292,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF fn_node.tight_reentrance THEN
       CONTINUE;
     END
-    MUTABLE kind = fn_node.reentrance_kind;
+    MUTABLE kind: ?String = fn_node.reentrance_kind;
     IF !(([:reentrant, :reentrant_tail_call, :reentrant_thunk, :reentrant_max_depth]).contains?(kind)) THEN
         CONTINUE;
     END
