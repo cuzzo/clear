@@ -239,7 +239,10 @@ module SelfhostFnProbe
             "\n# --- stand-ins for what it calls ---\n", stubs.join,
             "\n# --- #{rel(target.file)} : #{target.name} ---\n"].join
     @probe_offset = head.lines.length
-    head + body + "\nFN main() RETURNS !Void ->\n  RETURN;\nEND\n"
+    # Stage 3 supplies a main() that runs recorded inputs through the target
+    # and asserts Ruby's answers; without one the probe only proves it links.
+    main_body = ENV['FN_PROBE_MAIN'] && File.exist?(ENV['FN_PROBE_MAIN']) ? File.read(ENV['FN_PROBE_MAIN']) : "  RETURN;\n"
+    head + body + "\nFN main() RETURNS !Void ->\n#{main_body}END\n"
   end
 
   def rel(path) = path.sub("#{SRC}/", '')
