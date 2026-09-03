@@ -2225,7 +2225,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY UNWRAP (capabilityAuditSession__phase_audit_inputs(rtoc_self_view).effect_state);
 }
 END
-PRIVATE FN capabilityAuditSession__effect_direct_effects(self: CapabilityAuditSession) RETURNS EffectSetMap
+PRIVATE FN capabilityAuditSession__effect_direct_effects(self: CapabilityAuditSession) RETURNS {String}[Set]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2240,21 +2240,21 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN capabilityAuditSession__effect_direct_effects(rtoc_self_view)[fn_name];
 }
 END
-PRIVATE FN capabilityAuditSession__effect_call_site_context(self: CapabilityAuditSession) RETURNS CallSiteContextMap
+PRIVATE FN capabilityAuditSession__effect_call_site_context(self: CapabilityAuditSession) RETURNS {String}{String}{String@symbol}Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY capabilityAuditSession__effect_state(rtoc_self_view).call_site_context;
 }
 END
-PRIVATE FN capabilityAuditSession__effect_call_site_arg_families(self: CapabilityAuditSession) RETURNS CallSiteArgFamilyMap
+PRIVATE FN capabilityAuditSession__effect_call_site_arg_families(self: CapabilityAuditSession) RETURNS {String}{String}[][][Set]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY capabilityAuditSession__effect_state(rtoc_self_view).call_site_arg_families;
 }
 END
-PRIVATE FN capabilityAuditSession__effect_call_site_context_for(self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS CallContext
+PRIVATE FN capabilityAuditSession__effect_call_site_context_for(self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2397,7 +2397,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN result;
 }
 END
-PRIVATE FN capabilityAuditSession__inherit_effects_from_callee(self: CapabilityAuditSession, MUTABLE caller_set: [Set]String@symbol, callee_set: [Set]String@symbol, site_ctx: CallContext) RETURNS !?[Set]String@symbol
+PRIVATE FN capabilityAuditSession__inherit_effects_from_callee(self: CapabilityAuditSession, MUTABLE caller_set: [Set]String@symbol, callee_set: [Set]String@symbol, site_ctx: {String@symbol}Bool) RETURNS !?[Set]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
