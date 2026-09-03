@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -14310,7 +14310,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((type__future?( UNWRAP (target)) AND type__observable?( UNWRAP (target)))) THEN
       RETURN NIL;
     END
-    MUTABLE pipe: Any = NIL;
+    MUTABLE pipe: ?Locatable = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         pipe = COPY item.value;,
@@ -14356,7 +14356,7 @@ END
 PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(self: TypeAnalysisSession, MUTABLE node: DeclarationNode, MUTABLE mutable_flag: Bool) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE value = UNWRAP (declarationNode__value(node));
     TRY (typeAnalysisSession__verify_unrestricted_mut(rtoc_self_view, castDeclarationNodeToNode(node)));
     TRY (typeAnalysisSession__handle_assign_move(rtoc_self_view, castDeclarationNodeToNode(node)));
@@ -14598,7 +14598,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF declarationNode__type(node) THEN
       RETURN;
     END
-    MUTABLE value: Any = NIL;
+    MUTABLE value: ?Locatable = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         value = COPY item.value;,
@@ -14731,7 +14731,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((((declarationNode__type(node) != NIL) AND type__future?(((declarationNode__type(node))?))) AND (MATCH node START DeclarationNode.VarDecl AS item -> type__observable?( UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__observable?( UNWRAP (item.type)) END))) THEN
       RETURN TRUE;
     END
-    MUTABLE pipe: Any = NIL;
+    MUTABLE pipe: ?Locatable = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         pipe = COPY item.value;,
@@ -14838,7 +14838,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (typeAnalysisSession__language_mode(rtoc_self_view) == :strict) THEN
       RETURN;
     END
-    IF !(plan IS_A OwnershipTransportPlan) THEN
+    IF !(UNWRAP (plan) IS_A OwnershipTransportPlan) THEN
       MUTABLE source: Any = NIL;
       MATCH node START
         DeclarationNode.VarDecl AS item ->
@@ -15037,7 +15037,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       DeclarationNode.BindExpr AS item ->
         plan = COPY item.ownership_transport_plan;,
     END
-    IF !(plan IS_A OwnershipTransportPlan) THEN
+    IF !(UNWRAP (plan) IS_A OwnershipTransportPlan) THEN
       RETURN;
     END
     IF (typeAnalysisSession__language_mode(rtoc_self_view) == :strict) THEN
@@ -15080,7 +15080,7 @@ PRIVATE FN typeAnalysisSession__propagate_carrier_polymorphic_mut(self: TypeAnal
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rhs: Any = NIL;
+    MUTABLE rhs: ?Locatable = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         rhs = COPY item.value;,
