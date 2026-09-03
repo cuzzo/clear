@@ -285,6 +285,11 @@ module SelfhostFnProbe
       # FileNotFound for alloc-profile.zig and compiler_regex.zig.
       native_dirs = [SRC, File.join(ROOT, 'zig'), File.join(ROOT, 'zig', 'runtime')].join(File::PATH_SEPARATOR)
       env = { 'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8', 'CLEAR_EXTRA_NATIVE_DIRS' => native_dirs }
+      # Zig's local cache is not safe to share across concurrent builds: at high
+      # job counts probes clobber each other's entries and the link stage
+      # reports FileNotFound for runtime modules that are plainly present.
+      # Each probe gets its own.
+      env['ZIG_LOCAL_CACHE_DIR'] = File.join(dir, 'zig-cache')
       case stage
       when :clear
         env['CLEAR_TRANSPILE_ONLY'] = '1'
