@@ -131,6 +131,15 @@ CASTS = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
   File.read(f).scan(/\bFN (cast\w+To\w+)\(/).flatten
 end.to_set.freeze
 
+# Enum members, so an IS_A against one can become the equality test it is.
+ENUM_MEMBERS = {}
+Dir.glob(File.join(ROOT, '**', '*.clear')).each do |f|
+  File.read(f).scan(/^(?:PUB )?ENUM (\w+)\s*\{([^}]*)\}/) do |name, body|
+    ENUM_MEMBERS[name] = body.split(',').map(&:strip).reject(&:empty?)
+  end
+end
+ENUM_MEMBERS.freeze
+
 DEFINED = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
   File.read(f).scan(/\bFN ([\w?!]+)\s*(?:<[^>]*>)?\(/).flatten
 end.to_set.freeze
@@ -253,6 +262,9 @@ by.each do |f, rs|
       line_edits << [r['line'], :unwrap_is_a, nil]
     elsif e =~ /Runtime IS_A requires a union-typed value on the left, got NIL\.?\z/
       line_edits << [r['line'], :retype_from_assignment, nil]
+    elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got (\w+)\.?\z/)) &&
+          ENUM_MEMBERS.key?(m[1])
+      line_edits << [r['line'], :enum_is_a, m[1]]
     elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got (\w+)\.?\z/))
       line_edits << [r['line'], :static_is_a, m[1]]
     elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
@@ -439,6 +451,18 @@ by.each do |f, rs|
             counts[kind] += 1
           end
         end
+      end
+    when :enum_is_a
+      # An enum value is not a union: Ruby compares it, and the tree's own
+      # spelling is `Enum.Member`.
+      lines[i] = lines[i].gsub(/(?<![\w.)])(#{RECV})\s+IS_A\s+(\w+)/) do
+        whole = Regexp.last_match(0)
+        subject = Regexp.last_match(1)
+        member = Regexp.last_match(2)
+        next whole unless ENUM_MEMBERS[name]&.include?(member)
+
+        counts[kind] += 1
+        "#{subject} == #{name}.#{member}"
       end
     when :static_is_a
       # The subject's static type already IS the tested type, so Ruby's guard
