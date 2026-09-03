@@ -258,6 +258,8 @@ by.each do |f, rs|
     elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
       line_edits << [r['line'], :union_field_write, m[1]]
       line_edits << [r['line'], :union_field_read, m[1]]
+    elsif e =~ /ILLEGAL_FIELD_LOOKUP.*Receiver is 'Any'/m
+      line_edits << [r['line'], :unwrap_pipeline_source, nil]
     elsif e =~ /Map protocol indexing expects String, but this key is \?String/
       line_edits << [r['line'], :unwrap_map_key, nil]
     elsif (m = e.match(/RESTRICT capability requires a mutable variable, but '(\w+)' is immutable/))
@@ -601,6 +603,27 @@ by.each do |f, rs|
           recv = Regexp.last_match(1)
           counts[kind] += 1
           "#{fn}(#{recv})"
+        end
+      end
+    when :unwrap_pipeline_source
+      # A pipeline over an optional collection has no element type, so the
+      # placeholder reads as Any. Ruby iterates the collection itself.
+      lines[i] = lines[i].sub(/(?<![\w.(])([a-z_]\w*(?:\.[a-z_]\w*)+)(\s*\|>)/) do
+        path = Regexp.last_match(1)
+        tail = Regexp.last_match(2)
+        segs = path.split('.')
+        root = lines[0...i].reverse.filter_map { |l| l[/(?:MUTABLE\s+)?#{segs.first}:\s*([\w@?\[\]{}]+)/, 1] }.first
+        cur = root&.sub(/@\w+\z/, '')&.delete_prefix('?')
+        ft = nil
+        segs[1..].each do |seg|
+          ft = cur && STRUCT_FIELDS[cur]&.[](seg)
+          cur = ft&.to_s&.sub(/@\w+\z/, '')&.delete_prefix('?')
+        end
+        if ft.to_s.start_with?('?')
+          counts[kind] += 1
+          "UNWRAP (#{path})#{tail}"
+        else
+          Regexp.last_match(0)
         end
       end
     when :unwrap_map_key
