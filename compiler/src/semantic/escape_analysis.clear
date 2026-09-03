@@ -644,7 +644,7 @@ PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, 
   ELSE_IF (sink.handler == symbol("apply_destructuring_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_destructuring_escape_sink_mut(castLocatableToDestructuringAssignment(node), context));
   ELSE_IF (sink.handler == symbol("apply_execution_boundary_escape_sink!")) THEN
-    TRY (escapeAnalysis__apply_execution_boundary_escape_sink_mut(CAST(node AS Any@multiowned), context));
+    TRY (escapeAnalysis__apply_execution_boundary_escape_sink_mut(CAST(node AS Any@multiowned), &context));
   ELSE_IF (sink.handler == symbol("apply_lambda_escape_sink!")) THEN
     TRY (escapeAnalysis__apply_lambda_escape_sink_mut(castLocatableToLambdaLit(node), &context));
   ELSE_IF (sink.handler == symbol("apply_func_call_escape_sink!")) THEN

@@ -1882,7 +1882,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF type__auto?( UNWRAP (autoConstraintCollectorSlotDeclNode__type(decl))) THEN
       RETURN;
     END
-    MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__capability_audit_session(decl.type()));
+    MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__capability_audit_session(autoConstraintCollectorSlotDeclNode__type(decl)));
     MUTABLE name: String = "";
     IF TRUE THEN
       PARTIAL MATCH decl START
