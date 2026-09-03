@@ -13114,7 +13114,7 @@ PRIVATE FN typeAnalysisSession__runtime_union_payload(self: TypeAnalysisSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE key: ?ControlFlowReturnValue = typeAnalysisSession__runtime_union_variant_key(rtoc_self_view, schema, variant_name);
+    MUTABLE key: ?TypeAnalysisSessionReturnValue = typeAnalysisSession__runtime_union_variant_key(rtoc_self_view, schema, variant_name);
     IF key EXISTS AS key_value THEN
       RETURN COPY castOptionalSchemasUnionSchemaVariantValueToOptionalMatchPayload(schema.variants[castControlFlowReturnValueToStringSymbol(key_value)]);
     ELSE
@@ -20877,7 +20877,7 @@ FN castCodeOrMessageToOptionalString__type_analysis_session(value: TypeAnalysisC
   END
   RETURN NIL;
 END
-FN castControlFlowReturnValueToStringSymbol(value: ControlFlowReturnValue) RETURNS String@symbol ->
+FN castControlFlowReturnValueToStringSymbol(value: TypeAnalysisSessionReturnValue) RETURNS String@symbol ->
   IF value IS_A String@symbol AS cast_payload THEN
     RETURN cast_payload;
   END

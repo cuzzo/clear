@@ -3796,7 +3796,7 @@ PRIVATE FN capabilityAuditSession__propagate_lock_acquires_mut(MUTABLE self: Cap
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE transitive: TransitiveAcquires = {};
+    MUTABLE transitive: {String}[Set]String@symbol = {};
     capabilityAuditSession__phase_audit_inputs(rtoc_self_view).lock_analysis.direct_acquires.keys() |> EACH {
     MUTABLE set: [Set]String@symbol = (capabilityAuditSession__phase_audit_inputs(rtoc_self_view).lock_analysis.direct_acquires[_] OR_ELSE CAST(panic("missing hash key") AS [Set]String@symbol));
     transitive[_] = COPY set;
@@ -3836,7 +3836,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN transitive;
 }
 END
-PRIVATE FN capabilityAuditSession__resolve_held_calls_mut(self: CapabilityAuditSession, transitive_acquires: TransitiveAcquires) RETURNS Void
+PRIVATE FN capabilityAuditSession__resolve_held_calls_mut(self: CapabilityAuditSession, transitive_acquires: {String}[Set]String@symbol) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
