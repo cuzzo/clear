@@ -373,6 +373,26 @@ by.each do |f, rs|
     when :annotate_optional
       # An optional initializer needs the binding's type spelled out; the
       # callee's declared return type is that type.
+      # A field read needs the field's declared type; the receiver's own type
+      # comes from the cast that produced it or from its declaration.
+      fm = lines[i].match(/^(\s*)MUTABLE #{name}\s*=\s*([a-z_]\w*)\.(\w+);/)
+      if fm
+        recv, field = fm[2], fm[3]
+        start = i
+        start -= 1 while start.positive? && lines[start] !~ /^(PUB |PRIVATE )?FN /
+        recv_type = (start...i).reverse_each.filter_map { |k|
+          lines[k][/MUTABLE #{recv}\s*=\s*cast\w+To(\w+?)(?:__\w+)?\(/, 1] ||
+            lines[k][/MUTABLE #{recv}:\s*\??([\w]+)/, 1]
+        }.first
+        ft = recv_type && STRUCT_FIELDS[recv_type]&.[](field)
+        if ft
+          ft = ft.sub(/@\w+\z/, '')
+          ft = "?#{ft}" unless ft.start_with?('?')
+          lines[i] = lines[i].sub(/^(\s*)MUTABLE #{name}\s*=/) { "#{Regexp.last_match(1)}MUTABLE #{name}: #{ft} =" }
+          counts[kind] += 1
+          next
+        end
+      end
       m = lines[i].match(/^(\s*)MUTABLE #{name}\s*=\s*(?:TRY\s*\()?\s*([\w?!]+)\(/)
       if m && (ret = RETURNS[m[2]])
         ret = ret.delete_prefix('!')
