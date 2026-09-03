@@ -180,9 +180,10 @@ module SelfhostFnProbe
           name = d[/\A(?:PUB |EXTERN )*(?:STRUCT|UNION|ENUM|FN) ([\w?!]+)/, 1]
           next if name && !seen.add?(name)
 
-          next if d.start_with?('EXTERN')
-
-          out << (d.start_with?('PUB ') ? d : "PUB #{d}")
+          # The package has fields typed by EXTERN structs, so it needs the
+          # declarations itself. Transpiling only checks names and passes
+          # without them; compiling the package's Zig does not.
+          out << (d.start_with?('EXTERN') || d.start_with?('PUB ') ? d : "PUB #{d}")
         end
       end
       # Non-rtoc requires name real external packages (stdlib path, fs, regex).
