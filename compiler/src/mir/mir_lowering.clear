@@ -13912,7 +13912,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable);
     END
     IF ((node.op == symbol("AND")) OR (node.op == symbol("OR"))) THEN
-      RETURN Emittable{ MIRBinOp: COPY TRY (mIRLowering__lower_lazy_boolean_op(&rtoc_self_view, node)) };
+      RETURN Emittable{ MIRBinOp: COPY TRY (mIRLowering__lower_lazy_boolean_op(&rtoc_self_view, &node)) };
     END
     IF node.string_concat THEN
       MUTABLE left = TRY (mIRLowering__hoist_alloc(rtoc_self_view, TRY (mIRLowering__widen_symbol_to_bytes(rtoc_self_view, CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable), node.left)), node.left));
@@ -19659,7 +19659,7 @@ PRIVATE FN mIRLowering__if_bind_pointer_alias?(self: MIRLowering, MUTABLE expr: 
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF expr IS_A GetIndex AS get_index THEN
       MUTABLE get_index_mutable = COPY get_index;
-      MUTABLE receiver: ?Type = TRY (type__from_node_mut(get_index_mutable.target, "IF binding runtime shape"));
+      MUTABLE receiver: ?Type = TRY (type__from_node_mut(aST__node_target(get_index_mutable), "IF binding runtime shape"));
       RETURN ((type__pool?( UNWRAP (receiver)) OR TRY (mIRLowering__mutable_struct_list_bind?(rtoc_self_view, Locatable{ GetIndex: COPY get_index_mutable }))) OR TRY (mIRLowering__plain_map_pointer_bind?(rtoc_self_view, Locatable{ GetIndex: COPY get_index_mutable })));
     END
     RETURN (expr IS_A MethodCall AND (expr.pool_method == :get));
