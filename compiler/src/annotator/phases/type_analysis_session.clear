@@ -932,7 +932,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE kept_fns = fn_nodes.each_with_object({}, %(tuple_param_0: Tuple<String,FunctionDef>, map) -> {
     MUTABLE name = tuple_param_0._0;
     MUTABLE fn = tuple_param_0._1;
-    MUTABLE kept_param = fn.params() |> FIND (IF aST__node__symbol(_) != NIL THEN
+    MUTABLE kept_param = fn.params |> FIND (IF aST__node__symbol(_) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12 = (aST__node__symbol(_));
     symbolEntry__kept_identity(rtoc_local_receiver_12) }
       ELSE
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
