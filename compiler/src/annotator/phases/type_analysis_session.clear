@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -14828,7 +14828,7 @@ PRIVATE FN typeAnalysisSession__prepare_implicit_ownership_transport_mut(self: T
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE detail: String = "";
-    MUTABLE plan: ?PassStateValue = NIL;
+    MUTABLE plan: Any = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         plan = COPY item.ownership_transport_plan;,
@@ -15030,7 +15030,7 @@ PRIVATE FN typeAnalysisSession__establish_inferred_alias_mut(self: TypeAnalysisS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE plan: ?PassStateValue = NIL;
+    MUTABLE plan: Any = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         plan = COPY item.ownership_transport_plan;,
@@ -15070,7 +15070,7 @@ PRIVATE FN typeAnalysisSession__finalize_var_declaration_mut(self: TypeAnalysisS
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__promote_declaration_value_mut(rtoc_self_view, DeclarationNode{ VarDecl: COPY node }));
-    TRY (typeAnalysisSession__finalize_decl_node_mut(rtoc_self_view, DeclarationNode{ VarDecl: COPY node }, &node.mutable));
+    TRY (typeAnalysisSession__finalize_decl_node_mut( &rtoc_self_view, DeclarationNode{ VarDecl: COPY node }, &node.mutable));
     TRY (typeAnalysisSession__stamp_init_contents_heap_mut(rtoc_self_view, DeclNode{ VarDecl: COPY node }));
     TRY (typeAnalysisSession__stamp_bg_handle_lifetime_mut(rtoc_self_view, DeclNode{ VarDecl: COPY node }));
     TRY (typeAnalysisSession__propagate_carrier_polymorphic_mut(rtoc_self_view, DeclarationNode{ VarDecl: COPY node }));
@@ -15088,7 +15088,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rhs = COPY item.value;,
     END
     IF UNWRAP (rhs) IS_A MoveNode THEN
-      rhs = aST__node_value(UNWRAP (castBgSourceWalkValueToLocatable(UNWRAP (rhs))));
+      rhs = aST__node_value(UNWRAP (castBgSourceWalkValueToLocatable( UNWRAP (castLocatableToBgSourceWalkValue(UNWRAP (rhs))))));
     END
     IF !(UNWRAP (rhs) IS_A Identifier) THEN
       RETURN;
@@ -15129,7 +15129,7 @@ PRIVATE FN typeAnalysisSession__finalize_bind_declaration_mut(self: TypeAnalysis
 WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__promote_declaration_value_mut(rtoc_self_view, DeclarationNode{ BindExpr: COPY node }));
     node.mode = :decl;
-    TRY (typeAnalysisSession__finalize_decl_node_mut(rtoc_self_view, DeclarationNode{ BindExpr: COPY node }, FALSE));
+    TRY (typeAnalysisSession__finalize_decl_node_mut( &rtoc_self_view, DeclarationNode{ BindExpr: COPY node }, FALSE));
     TRY (typeAnalysisSession__mark_borrowed_field_bind_alias_mut(rtoc_self_view, node));
     TRY (typeAnalysisSession__stamp_init_contents_heap_mut(rtoc_self_view, DeclNode{ BindExpr: COPY node }));
     TRY (typeAnalysisSession__stamp_bg_handle_lifetime_mut(rtoc_self_view, DeclNode{ BindExpr: COPY node }));

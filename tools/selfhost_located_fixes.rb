@@ -401,7 +401,13 @@ by.each do |f, rs|
             }.first or next
             STRUCT_FIELDS[variant]&.[](field)
           end.uniq
-          if types.length == 1
+          # The data flow proposes a type; the IS_A target has to be a variant
+          # of it. When they disagree the variable holds more than the field's
+          # declared type admits, and neither answer is safe to write.
+          tested = lines[i][/(?<![\w.])[a-z_]\w*\s+IS_A\s+(\w+)/, 1]
+          agree = types.length == 1 &&
+                  VARIANT_OF[types.first.sub(/@\w+\z/, '').delete_prefix('?')]&.value?(tested)
+          if agree
             # The field's own type may already be optional; the declaration
             # takes one `?`, not two.
             base = types.first.sub(/@\w+\z/, '').delete_prefix('?')
