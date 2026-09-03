@@ -14711,7 +14711,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       synthetic.zig_pattern = COPY zig_pattern_value;
     END
     IF rhs.coerced_type() THEN
-      synthetic.coerced_type = rhs.coerced_type();
+      locatable__set_coerced_type_object_mut(&synthetic, rhs.coerced_type());
     END
     RETURN TRY (mIRLowering__lower_func_call(&rtoc_self_view, synthetic));
 }

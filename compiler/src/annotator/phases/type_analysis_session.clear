@@ -4118,7 +4118,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !((typeAnalysisSession__language_mode(rtoc_self_view) == :easy)) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ARGUMENT_EXPLICIT }, [], CAST({:index: (facts.index + 1), :expected: TRY (type__coercion_surface_name(castTypeToTypeTypeInput__type_analysis_session(facts.expected_type)))} AS {String@symbol}Any)));
       END
-      facts.arg_node.coerced_type = COPY facts.expected_type;
+      locatable__set_coerced_type_object_mut(&facts.arg_node, COPY facts.expected_type);
     END
     MUTABLE match = TRY (typeAnalysisSession__fn_type_argument_match?(rtoc_self_view, facts));
     TRY (typeAnalysisSession__verify_atomic_argument_mut(rtoc_self_view, facts, signature, &atomic_bare_value_args));
@@ -4292,7 +4292,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF TRY (type__accepts?(facts.expected_type, facts.actual_type)) THEN
       IF (TRY (type__node_reference?(facts.expected_type)) AND !(TRY (type__node_reference?(facts.actual_type)))) THEN
-        facts.arg_node.coerced_type = COPY facts.expected_type;
+        locatable__set_coerced_type_object_mut(&facts.arg_node, COPY facts.expected_type);
       END
       RETURN TRUE;
     END
@@ -4302,7 +4302,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, ruby_wrap_optional_String_symbol_SourceType(facts.actual), castTypeToTypeTypeInput__type_analysis_session(facts.expected_type)))) THEN
       RETURN FALSE;
     END
-    facts.arg_node.coerced_type = COPY facts.expected_type;
+    locatable__set_coerced_type_object_mut(&facts.arg_node, COPY facts.expected_type);
     RETURN TRUE;
 }
 END
@@ -10541,7 +10541,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
-          value_arg.coerced_type = element_type;
+          locatable__set_coerced_type_object_mut(&value_arg, element_type);
         END
       END
       IF (tag_field == :pool_method) THEN
@@ -10601,7 +10601,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
-          value_arg.coerced_type = element_type;
+          locatable__set_coerced_type_object_mut(&value_arg, element_type);
         END
       END
       RETURN TRUE;
@@ -11315,7 +11315,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &value, concrete));
-    value.coerced_type = concrete;
+    locatable__set_coerced_type_object_mut(&value, concrete);
 }
 END
 PRIVATE FN typeAnalysisSession__restamp_auto_function_signature_mut(self: TypeAnalysisSession, MUTABLE fn_value: FunctionDef) RETURNS !Void
@@ -12148,7 +12148,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
-          value_arg.coerced_type = element_type;
+          locatable__set_coerced_type_object_mut(&value_arg, element_type);
         END
       END
       TRY (typeAnalysisSession__reject_mutating_borrowed_receiver_mut(rtoc_self_view, node));
@@ -12802,7 +12802,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
-          value_arg.coerced_type = element_type;
+          locatable__set_coerced_type_object_mut(&value_arg, element_type);
         END
       END
       TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ MethodCall: COPY node }));
@@ -14394,7 +14394,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE capability_target: Type = capability_target_branch_value?;
       TRY (type__merge_capabilities_from_mut(&capability_target, TRY (aST__full_type_mut(value))));
-      value.coerced_type = capability_target;
+      locatable__set_coerced_type_object_mut(&value, capability_target);
       final_type = capability_target;
     END
     IF aST__empty_auto_collection_literal_decl?(castDeclarationNodeToOptionalLocatable(node)) THEN
@@ -14815,10 +14815,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       value_node.storage = :stack;
     END
     IF (value_node IS_A ListLit AND ((declarationNode__type(node) != NIL) AND type__tuple?(((declarationNode__type(node))?)))) THEN
-      value_node.coerced_type = declarationNode__type(node);
+      locatable__set_coerced_type_object_mut(&value_node, declarationNode__type(node));
     END
     IF (value_node IS_A HashLit AND ((declarationNode__type(node) != NIL) AND type__map?(((declarationNode__type(node))?)))) THEN
-      value_node.coerced_type = declarationNode__type(node);
+      locatable__set_coerced_type_object_mut(&value_node, declarationNode__type(node));
     END
     TRY (typeAnalysisSession__visit(&rtoc_self_view, value_node));
 }
@@ -15681,12 +15681,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE union_schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved((TRY (type__value_payload_type(target))))));
       MUTABLE value_node: ?Locatable = aST__node_value(UNWRAP (castNodeToLocatable(node)));
       IF TRY (unionPayloadCompatibility__unique_variant(target, CAST(value AS Type), union_schema)) THEN
-        value_node.coerced_type = target;
+        locatable__set_coerced_type_object_mut(&value_node, target);
         RETURN;
       END
       IF TRY (type__accepts?(target, CAST(value AS Type))) THEN
         IF (!(ruby_union_scalar_equal_Type_Type_multiowned(target, value)) OR ((TRY (type__node_reference?(target)) AND !(TRY (type__node_reference?(value)))))) THEN
-          value_node.coerced_type = target;
+          locatable__set_coerced_type_object_mut(&value_node, target);
         END
         RETURN;
       END
@@ -16196,8 +16196,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE expected_value = TRY (type__value_type(expected_map));
       FOR rtoc_each_key IN node.pairs.keys() DO
     MUTABLE value: Locatable = COPY UNWRAP (node.pairs[rtoc_each_key]);
-    rtoc_each_key.coerced_type = expected_key;
-    value.coerced_type = expected_value;
+    locatable__set_coerced_type_object_mut(&rtoc_each_key, expected_key);
+    locatable__set_coerced_type_object_mut(&value, expected_value);
     TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_each_key));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, value));
     MUTABLE actual_key = TRY (aST__full_type_mut(rtoc_each_key));
@@ -16402,7 +16402,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :FIELD_TYPE_MISMATCH }, [], CAST({:field: rtoc_each_key, :expected: expected_type, :got: actual_type} AS {String@symbol}Any)));
         END
         IF !((indirect_construction OR ((nil_value AND type__indirect?(expected_type))))) THEN
-          val_node.coerced_type = expected_type;
+          locatable__set_coerced_type_object_mut(&val_node, expected_type);
         END
     END
     MUTABLE pending_owned_transfer = (((((typeAnalysisSession__language_mode(rtoc_self_view) != :strict) AND !(field_is_borrowed)) AND !(is_call_arg)) AND ((val_node != NIL) AND (val_node IS_A Identifier))) AND !(TRY (type__implicitly_copyable?(actual_type, %(name: String@symbol) USE(rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(rtoc_self_view, name))))));
@@ -16579,10 +16579,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE finish_is_float = type__float?((TRY (type__new(finish_type))));
     IF (start_is_float != finish_is_float) THEN
       IF !(start_is_float) THEN
-        node.start.coerced_type = :Float64;
+        locatable__set_coerced_type_object_mut(&node.start, :Float64);
       END
       IF !(finish_is_float) THEN
-        node.finish.coerced_type = :Float64;
+        locatable__set_coerced_type_object_mut(&node.finish, :Float64);
       END
     ELSE_IF start_is_float THEN
   
@@ -17801,9 +17801,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       value.declared_async_payload = TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(TRY (type__tense_type(return_payload)))));
     END
     IF (value IS_A ListLit AND ((type__collection?(return_payload) OR type__tuple?(return_payload)))) THEN
-      value.coerced_type = return_payload;
+      locatable__set_coerced_type_object_mut(&value, return_payload);
     ELSE_IF (value IS_A HashLit AND type__map?(return_payload)) THEN
-      value.coerced_type = return_payload;
+      locatable__set_coerced_type_object_mut(&value, return_payload);
     END
     TRY (typeAnalysisSession__visit(&rtoc_self_view, value));
     MUTABLE inline_bg_sources = CAST((TRY (typeAnalysisSession__collect_bg_sources_in_expr(rtoc_self_view, value)) |> DISTINCT _) AS []SymbolEntry@multiowned);
@@ -17879,7 +17879,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         expected
       END;
-      value.coerced_type = coerce_target;
+      locatable__set_coerced_type_object_mut(&value, coerce_target);
       TRY (typeAnalysisSession__check_prefixed_int_range_mut(rtoc_self_view, value, coerce_target));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ ReturnNode: COPY node }, actual));
@@ -18201,9 +18201,9 @@ PRIVATE FN typeAnalysisSession__visit_Cast(MUTABLE self: TypeAnalysisSession, MU
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target_type = TRY (type__new(TypeConstructionInput{ Type: COPY node.target }));
     IF (node.value IS_A ListLit AND type__tuple?(target_type)) THEN
-      node.value.coerced_type = target_type;
+      locatable__set_coerced_type_object_mut(&node.value, target_type);
     ELSE_IF (node.value IS_A HashLit AND type__map?(target_type)) THEN
-      node.value.coerced_type = target_type;
+      locatable__set_coerced_type_object_mut(&node.value, target_type);
     END
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &node, target_type));
@@ -18406,10 +18406,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, result.type));
     IF result.left_coercion EXISTS AS left_coercion_value THEN
-      node.left.coerced_type = COPY left_coercion_value;
+      locatable__set_coerced_type_object_mut(&node.left, COPY left_coercion_value);
     END
     IF result.right_coercion EXISTS AS right_coercion_value THEN
-      node.right.coerced_type = COPY right_coercion_value;
+      locatable__set_coerced_type_object_mut(&node.right, COPY right_coercion_value);
     END
     IF result.storage EXISTS AS storage_value THEN
       node.storage = COPY storage_value;
