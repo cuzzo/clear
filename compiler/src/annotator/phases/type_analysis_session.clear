@@ -512,7 +512,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN typeAnalysisSession__analyze_loop_control_flow_branches(MUTABLE self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool) RETURNS ![]?[]DeferredDrop
+PUB FN typeAnalysisSession__analyze_loop_control_flow_branches(MUTABLE self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool) RETURNS !?[]DeferredDrop
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -12832,7 +12832,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__analyze_control_flow_branches(MUTABLE self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool = TRUE) RETURNS ![]?[]DeferredDrop
+PRIVATE FN typeAnalysisSession__analyze_control_flow_branches(MUTABLE self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool = TRUE) RETURNS !?[]DeferredDrop
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
