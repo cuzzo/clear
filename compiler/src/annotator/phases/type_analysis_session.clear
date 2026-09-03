@@ -20287,7 +20287,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((paths.length() != 1) OR ruby_union_scalar_equal_optional_LifetimesReturnValueItem_String_symbol(paths.first(), :wildcard)) THEN
       RETURN NIL;
     END
-    MUTABLE first: ?LifetimesReturnValueItem = COPY paths.first();
+    MUTABLE first: ?FunctionSignatureLifetimeSource = COPY paths.first();
     IF first? IS_A String AS string THEN
       RETURN COPY string;
     ELSE
@@ -21103,10 +21103,10 @@ FN castLambdaBodyToRoutineBody(value: LambdaBody) RETURNS RoutineBody ->
   END
   panic("Invalid cast to RoutineBody");
 END
-FN castLifetimesReturnValueItemToFunctionSignatureLifetimeSource(value: LifetimesReturnValueItem) RETURNS FunctionSignatureLifetimeSource ->
+FN castLifetimesReturnValueItemToFunctionSignatureLifetimeSource(value: FunctionSignatureLifetimeSource) RETURNS FunctionSignatureLifetimeSource ->
   PARTIAL MATCH value START
-    LifetimesReturnValueItem.StringValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ StringValue: COPY cast_payload };,
-    LifetimesReturnValueItem.SymbolValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: COPY cast_payload };,
+    FunctionSignatureLifetimeSource.StringValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ StringValue: COPY cast_payload };,
+    FunctionSignatureLifetimeSource.SymbolValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to FunctionSignatureLifetimeSource");
   END
   panic("Invalid cast to FunctionSignatureLifetimeSource");
@@ -22434,7 +22434,7 @@ FN ruby_union_scalar_equal_optional_FunctionSignatureLifetimeSource_String_symbo
   END
   FALSE;
 END
-FN ruby_union_scalar_equal_optional_LifetimesReturnValueItem_String_symbol(value: ?LifetimesReturnValueItem, expected: String@symbol) RETURNS Bool ->
+FN ruby_union_scalar_equal_optional_LifetimesReturnValueItem_String_symbol(value: ?FunctionSignatureLifetimeSource, expected: String@symbol) RETURNS Bool ->
   IF value EXISTS AS equality_value THEN
     IF equality_value IS_A String@symbol AS equality_payload THEN
       RETURN equality_payload == expected;
