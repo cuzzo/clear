@@ -14838,7 +14838,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (typeAnalysisSession__language_mode(rtoc_self_view) == :strict) THEN
       RETURN;
     END
-    IF !(UNWRAP (plan) IS_A OwnershipTransportPlan) THEN
+    IF !(plan IS_A OwnershipTransportPlan) THEN
       MUTABLE source: Any = NIL;
       MATCH node START
         DeclarationNode.VarDecl AS item ->
@@ -15037,7 +15037,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       DeclarationNode.BindExpr AS item ->
         plan = COPY item.ownership_transport_plan;,
     END
-    IF !(UNWRAP (plan) IS_A OwnershipTransportPlan) THEN
+    IF !(plan IS_A OwnershipTransportPlan) THEN
       RETURN;
     END
     IF (typeAnalysisSession__language_mode(rtoc_self_view) == :strict) THEN
@@ -19403,7 +19403,7 @@ PRIVATE FN typeAnalysisSession__handle_assign_move(self: TypeAnalysisSession, no
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE plan: ?PassStateValue = aST__node_ownership_transport_plan( UNWRAP (castNodeToLocatable(node)));
-    IF (((typeAnalysisSession__language_mode(rtoc_self_view) != :strict) AND UNWRAP (plan) IS_A OwnershipTransportPlan) AND (plan.action != :move)) THEN
+    IF (((typeAnalysisSession__language_mode(rtoc_self_view) != :strict) AND plan IS_A OwnershipTransportPlan) AND (plan.action != :move)) THEN
       RETURN;
     END
     IF (((typeAnalysisSession__language_mode(rtoc_self_view) != :strict) AND aST__node_value(UNWRAP (castNodeToLocatable(node))) IS_A Identifier) AND (aST__node_value(UNWRAP (castNodeToLocatable(node))).ownership_pending_transfer == TRUE)) THEN
