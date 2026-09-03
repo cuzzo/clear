@@ -231,9 +231,15 @@ by.each do |f, rs|
         line_edits << [r['line'], :mutable_arg_line, m[1]]
       end
     elsif (m = e.match(/passed immutable variable '(\w+)'/))
-      # A WITH POLYMORPHIC alias is not a local declaration: it is made
-      # mutable at the WITH, and the parameter it views follows from that.
-      line_edits << [r['line'], view_aliases.include?(m[1]) ? :mutable_view : :declare_mutable, m[1]]
+      if view_aliases.include?(m[1])
+        # A WITH POLYMORPHIC alias is not a local declaration. It is made
+        # mutable at the WITH -- a no-op when it already is -- and the
+        # argument still needs the marker that says the call mutates it.
+        line_edits << [r['line'], :mutable_view, m[1]]
+        line_edits << [r['line'], :mutable_arg_line, m[1]]
+      else
+        line_edits << [r['line'], :declare_mutable, m[1]]
+      end
     elsif e.include?('UNWRAP_NON_OPTIONAL')
       line_edits << [r['line'], :drop_unwrap, nil]
     elsif (m = e.match(/Cannot access field '(\w+)' on optional '\?[\w@\[\]{}]+' without safe navigation/))
@@ -456,14 +462,19 @@ by.each do |f, rs|
       # Not after COPY/UNWRAP: `&` marks a mutating argument, and inside a
       # literal field or an unwrap it is a syntax error.
       pat = /(?<=[(,] )(?<!COPY )#{name}(?=\s*[,)])|(?<=\()(?<!COPY \()#{name}(?=\s*[,)])/
-      at = lines[i].index(pat)
-      # A lambda's USE(...) capture list is not an argument list; `&` there is
-      # a syntax error.
-      inside_use = at && lines[i][0...at].scan(/USE\(/).any? &&
-                   lines[i][0...at].rpartition('USE(').last.count('(') >=
-                   lines[i][0...at].rpartition('USE(').last.count(')')
-      if lines[i].scan(pat).length == 1 && !inside_use
-        lines[i] = lines[i].sub(pat, "&#{name}")
+      # The same name often appears again in a lambda's USE(...) capture list,
+      # which is not an argument list -- `&` there is a syntax error. Filter
+      # by position rather than refusing any line that mentions it twice.
+      spots = []
+      lines[i].to_enum(:scan, pat).each { spots << Regexp.last_match.begin(0) }
+      outside = spots.reject do |at|
+        before = lines[i][0...at]
+        tail = before.rpartition('USE(').last
+        before.include?('USE(') && tail.count('(') >= tail.count(')')
+      end
+      if outside.length == 1
+        at = outside.first
+        lines[i] = lines[i][0...at] + "&#{name}" + lines[i][(at + name.length)..]
         counts[kind] += 1
       end
     when :stringify_interp
