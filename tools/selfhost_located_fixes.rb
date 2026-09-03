@@ -251,6 +251,8 @@ by.each do |f, rs|
     elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got \?(\w+)/)) &&
           VARIANT_OF.key?(m[1])
       line_edits << [r['line'], :unwrap_is_a, nil]
+    elsif e =~ /Runtime IS_A requires a union-typed value on the left, got NIL\.?\z/
+      line_edits << [r['line'], :retype_from_assignment, nil]
     elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got (\w+)\.?\z/))
       line_edits << [r['line'], :static_is_a, m[1]]
     elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
@@ -377,6 +379,36 @@ by.each do |f, rs|
         ret = "?#{ret}" unless ret.start_with?('?')
         lines[i] = lines[i].sub(/^(\s*)MUTABLE #{name}\s*=/) { "#{Regexp.last_match(1)}MUTABLE #{name}: #{ret} =" }
         counts[kind] += 1
+      end
+    when :retype_from_assignment
+      # `MUTABLE x: Any = NIL` cannot satisfy IS_A -- Any is a float in CLEAR,
+      # not a dynamic type. The union to declare is NOT inferable from the
+      # tested variant (BinaryOp belongs to four unions); it comes from what
+      # is assigned to the variable.
+      subject = lines[i][/(?<![\w.])([a-z_]\w*)\s+IS_A\s+\w+/, 1]
+      if subject
+        start = i
+        start -= 1 while start.positive? && lines[start] !~ /^(PUB |PRIVATE )?FN /
+        decl = (start..i).find { |j| lines[j] =~ /^\s*MUTABLE #{subject}:\s*Any\s*=\s*NIL;/ }
+        if decl
+          # Every `x = COPY recv.field;` in the function, with recv's variant
+          # taken from the MATCH arm that bound it.
+          types = (start..i).filter_map do |j|
+            am = lines[j].match(/^\s*#{subject} = COPY (\w+)\.(\w+);/) or next
+            recv, field = am[1], am[2]
+            variant = (start...j).reverse_each.filter_map { |k|
+              lines[k][/\w+\.(\w+) AS (?:MUTABLE )?#{recv}\b/, 1]
+            }.first or next
+            STRUCT_FIELDS[variant]&.[](field)
+          end.uniq
+          if types.length == 1
+            # The field's own type may already be optional; the declaration
+            # takes one `?`, not two.
+            base = types.first.sub(/@\w+\z/, '').delete_prefix('?')
+            lines[decl] = lines[decl].sub(/:\s*Any\s*=/, ": ?#{base} =")
+            counts[kind] += 1
+          end
+        end
       end
     when :static_is_a
       # The subject's static type already IS the tested type, so Ruby's guard
