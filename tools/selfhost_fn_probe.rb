@@ -387,7 +387,16 @@ module SelfhostFnProbe
             # Each build leaves Zig cache entries behind; 3405 of them fill the
             # disk and every probe after that fails for the wrong reason.
             if (done % (stage == :clear ? 200 : 15)).zero?
-              FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-cache'))
+              # Only entries no in-flight build is using. Deleting the whole
+              # cache while other workers are mid-build removes the runtime
+              # modules they staged, and they fail with FileNotFound for files
+              # that are plainly present -- which reads as a code failure.
+              cutoff = Time.now - 300
+              Dir.glob(File.join(ROOT, 'zig', '.clear-cache', '*')).each do |entry|
+                FileUtils.rm_rf(entry) if File.mtime(entry) < cutoff
+              rescue Errno::ENOENT
+                next
+              end
               # The transpile cache is content-addressed and grows without
               # bound across thousands of distinct probe sources; the types
               # package is the only entry worth keeping warm.
