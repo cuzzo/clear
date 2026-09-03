@@ -251,8 +251,6 @@ by.each do |f, rs|
     elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got \?(\w+)/)) &&
           VARIANT_OF.key?(m[1])
       line_edits << [r['line'], :unwrap_is_a, nil]
-    elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got NIL\.?\z/))
-      line_edits << [r['line'], :retype_any_decl, nil]
     elsif (m = e.match(/Runtime IS_A requires a union-typed value on the left, got (\w+)\.?\z/))
       line_edits << [r['line'], :static_is_a, m[1]]
     elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
@@ -379,24 +377,6 @@ by.each do |f, rs|
         ret = "?#{ret}" unless ret.start_with?('?')
         lines[i] = lines[i].sub(/^(\s*)MUTABLE #{name}\s*=/) { "#{Regexp.last_match(1)}MUTABLE #{name}: #{ret} =" }
         counts[kind] += 1
-      end
-    when :retype_any_decl
-      # The subject is declared `Any`, which in CLEAR is a float, not a
-      # dynamic type -- it can never satisfy IS_A. The union to declare is
-      # the one owning the variant the test names.
-      subject, target = lines[i].match(/(?<![\w.])([a-z_]\w*)\s+IS_A\s+(\w+)/)&.captures || [nil, nil]
-      if subject && target && (owner = VARIANT_OF.find { |_, vs| vs.value?(target) }&.first)
-        j = i
-        while j >= 0
-          break if lines[j] =~ /^(PUB |PRIVATE )?FN /
-
-          if lines[j] =~ /^(\s*)MUTABLE #{subject}:\s*Any\s*=\s*NIL;/
-            lines[j] = lines[j].sub(/:\s*Any\s*=/, ": ?#{owner} =")
-            counts[kind] += 1
-            break
-          end
-          j -= 1
-        end
       end
     when :static_is_a
       # The subject's static type already IS the tested type, so Ruby's guard
