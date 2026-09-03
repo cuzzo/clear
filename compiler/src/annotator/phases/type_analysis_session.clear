@@ -796,7 +796,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rubyToClearVoid__type_analysis_session()
     });
     FOR _ IN rtoc_self_view.traversal_state.deferred_copy_wrapper_bindings DO
-    TRY (typeAnalysisSession__reject_implicit_wrapper_binding_mut(rtoc_self_view, _, TRUE));
+    TRY (typeAnalysisSession__reject_implicit_wrapper_binding_mut( &rtoc_self_view, _, TRUE));
     END
 }
 END
@@ -993,7 +993,7 @@ PUB FN typeAnalysisSession__kept_identity_declaration_anchor(self: TypeAnalysisS
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR rtoc_each_item_14 IN body_summaries.values() DO
-    MUTABLE decl = rtoc_each_item_14.binding_nodes |> FIND (TRUE AND ((UNWRAP (aST__node__symbol(_))).binding_id == entry.binding_id));
+    MUTABLE decl = rtoc_each_item_14.binding_nodes |> FIND (TRUE AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable(_))))).binding_id == entry.binding_id));
     IF decl THEN
         RETURN decl;
     END
@@ -6215,7 +6215,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_144 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_144, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
+    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))))
     });
     MUTABLE expr_type = node.right.expression().resolved_type;
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6238,7 +6238,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_145 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_145, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
+    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))))
     });
     MUTABLE expr_type = node.right.expression().resolved_type;
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6261,7 +6261,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_146 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_146, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
+    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))))
     });
     MUTABLE expr_type = node.right.expression().resolved_type;
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6284,7 +6284,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_147 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_147, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
+    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))))
     });
     MUTABLE expr_type = node.right.expression().resolved_type;
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6971,7 +6971,7 @@ PRIVATE FN typeAnalysisSession__validate_concurrent_where_expression_mut(self: T
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE op = castLocatableToConcurrentOp__type_analysis_session(node.right).op;
+    MUTABLE op: ?ConcurrentOp = castLocatableToConcurrentOp__type_analysis_session(node.right).op;
     IF !(op IS_A WhereOp) THEN
       RETURN;
     END
@@ -6982,7 +6982,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(self: TypeA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE op = castLocatableToConcurrentOp__type_analysis_session(node.right).op;
+    MUTABLE op: ?ConcurrentOp = castLocatableToConcurrentOp__type_analysis_session(node.right).op;
     IF op IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(rtoc_self_view, op.expression()));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(rtoc_self_view, &op, effect));
@@ -7480,7 +7480,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((locatable__symbol_op(node) == :SUB)) THEN
       RETURN NIL;
     END
-    MUTABLE lit = aST__node_right(node);
+    MUTABLE lit: ?Locatable = aST__node_right(node);
     IF !(lit IS_A Literal) THEN
       RETURN NIL;
     END
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -11088,7 +11088,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _.expr));
     MUTABLE let_type = TRY (aST__full_type_mut(_.expr));
     MUTABLE rtoc_mutable_receiver_253 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_253, _.name(), _, let_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+    TRY (scope__declare(&rtoc_mutable_receiver_253, _.name, _, let_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__og_declare(rtoc_self_view, _.name(), _, let_type));
     END
 }
@@ -17376,7 +17376,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE binding: ?String = _.binding;
     IF binding THEN
         MUTABLE bind_type = COPY step_type;
-        IF step_type.error_union?() THEN
+        IF type__error_union?(step_type) THEN
           bind_type = step_type.payload_type();
         END
         MUTABLE rtoc_mutable_receiver_425 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
