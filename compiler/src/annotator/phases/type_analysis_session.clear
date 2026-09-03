@@ -22450,12 +22450,6 @@ FN ruby_union_scalar_equal_optional_TypeTypeInput_String_symbol(value: ?TypeType
   END
   FALSE;
 END
-FN ruby_wrap_optional_Any_multiowned_ReturnDescriptor(value: ?Any) RETURNS ?ReturnDescriptor ->
-  IF value EXISTS AS optional_payload THEN
-    RETURN ReturnDescriptor{ AnyMultiowned: COPY optional_payload };
-  END
-  NIL;
-END
 FN ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(value: ?FunctionSignature) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
     RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
