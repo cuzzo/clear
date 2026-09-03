@@ -60,7 +60,7 @@ PUB FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETUR
 END
 FN emit__lower_frame_expr(MUTABLE ast_expr: Locatable, lowering: MIRLowering, context: FrameBindingContext) RETURNS !Emittable ->
   MUTABLE lowering_api = COPY lowering;
-  MUTABLE mir = TRY (mIRLowering__lower( &lowering_api, castLocatableToMIRLoweringLowerableStmt(ast_expr)));
+  MUTABLE mir: ?Emittable = TRY (mIRLowering__lower( &lowering_api, castLocatableToMIRLoweringLowerableStmt(ast_expr)));
   RETURN emit__bind_frame_refs(CAST(mir AS Emittable), context);
 END
 FN emit__frame_init(field_name: String, value: Emittable) RETURNS ThunkFrameInit ->
