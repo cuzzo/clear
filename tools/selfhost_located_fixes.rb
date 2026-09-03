@@ -231,7 +231,9 @@ by.each do |f, rs|
         line_edits << [r['line'], :mutable_arg_line, m[1]]
       end
     elsif (m = e.match(/passed immutable variable '(\w+)'/))
-      line_edits << [r['line'], :declare_mutable, m[1]]
+      # A WITH POLYMORPHIC alias is not a local declaration: it is made
+      # mutable at the WITH, and the parameter it views follows from that.
+      line_edits << [r['line'], view_aliases.include?(m[1]) ? :mutable_view : :declare_mutable, m[1]]
     elsif e.include?('UNWRAP_NON_OPTIONAL')
       line_edits << [r['line'], :drop_unwrap, nil]
     elsif (m = e.match(/Cannot access field '(\w+)' on optional '\?[\w@\[\]{}]+' without safe navigation/))

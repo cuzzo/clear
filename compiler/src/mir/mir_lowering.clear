@@ -16270,7 +16270,7 @@ PRIVATE FN mIRLowering__lower_range_lit(MUTABLE self: MIRLowering, MUTABLE node:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE s: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.start)));
-    MUTABLE e = TRY (mIRLowering__lower(&rtoc_self_view, &node.finish));
+    MUTABLE e = TRY (mIRLowering__lower(&rtoc_self_view, UNWRAP (castLocatableToMIRLoweringLowerableStmt(node.finish))));
     MUTABLE elem_type: ?String@symbol = (IF TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ RangeLit: COPY node }))))) != NIL THEN
       type__resolved((TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ RangeLit: COPY node }))))))))))
     ELSE
@@ -16858,7 +16858,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner = mIRLowering__with_decl_alloc(rtoc_self_view, :heap, %() USE(inner_type, node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_621 = mIRLowering__with_sink_type(rtoc_self_view, inner_type, %() USE(inner_type, node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_620 = mIRLowering__with_expected_type(rtoc_self_view, inner_type, %() USE(inner_type, node, MUTABLE rtoc_self_view) -> {
-    MUTABLE value = TRY (mIRLowering__lower(&rtoc_self_view, node.value));
+    MUTABLE value = TRY (mIRLowering__lower(&rtoc_self_view, &node.value));
     TRY (mIRLowering__place_value_for_destination(rtoc_self_view, UNWRAP (value), node.value, :heap, inner_type))
     });
     rtoc_lambda_result_620
