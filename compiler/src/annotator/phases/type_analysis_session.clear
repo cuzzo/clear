@@ -5828,7 +5828,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__count(node.right)));
     MUTABLE count_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__count(node.right)));
     IF !(([:Int64, :Float64]).contains?(count_type)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.count(), TypeAnalysisCodeOrMessage{ SymbolValue: :LIMIT_COUNT_NEEDS_NUMBER }, [], CAST({:got: count_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, locatable__count(node.right), TypeAnalysisCodeOrMessage{ SymbolValue: :LIMIT_COUNT_NEEDS_NUMBER }, [], CAST({:got: count_type} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${castTypeToString(item_type)}[]") }))));
     node.storage = :frame;
@@ -6079,7 +6079,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__count(node.right)));
     MUTABLE count_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__count(node.right)));
     IF !(([:Int64, :Float64]).contains?(count_type)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.count(), TypeAnalysisCodeOrMessage{ SymbolValue: :SKIP_COUNT_NEEDS_NUMBER }, [], CAST({:got: count_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, locatable__count(node.right), TypeAnalysisCodeOrMessage{ SymbolValue: :SKIP_COUNT_NEEDS_NUMBER }, [], CAST({:got: count_type} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF pipelineSourceFact__inf_stream?(source) THEN
       symbol("~${castTypeToString(item_type)}[INF]")
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }

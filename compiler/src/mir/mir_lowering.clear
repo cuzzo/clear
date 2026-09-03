@@ -16270,7 +16270,7 @@ PRIVATE FN mIRLowering__lower_range_lit(MUTABLE self: MIRLowering, MUTABLE node:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE s: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.start)));
-    MUTABLE e = TRY (mIRLowering__lower(&rtoc_self_view, node.finish));
+    MUTABLE e = TRY (mIRLowering__lower(&rtoc_self_view, &node.finish));
     MUTABLE elem_type: ?String@symbol = (IF TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ RangeLit: COPY node }))))) != NIL THEN
       type__resolved((TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ RangeLit: COPY node }))))))))))
     ELSE
@@ -16292,7 +16292,7 @@ PRIVATE FN mIRLowering__lower_slice(MUTABLE self: MIRLowering, MUTABLE node: Sli
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.target)));
-    MUTABLE start_expr = TRY (mIRLowering__lower(&rtoc_self_view, node.start));
+    MUTABLE start_expr = TRY (mIRLowering__lower(&rtoc_self_view, &node.start));
     MUTABLE end_expr = TRY (mIRLowering__lower(&rtoc_self_view, node.end));
     MUTABLE exclusive = node.exclusive;
     MUTABLE target_ti = TRY (type__from_node_mut(node.target, "slice target"));
@@ -16852,7 +16852,7 @@ PRIVATE FN mIRLowering__lower_cap_wrap(MUTABLE self: MIRLowering, MUTABLE node: 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((node.ownership == :node) OR (node.ownership == :shared_node)) THEN
       MUTABLE node_value: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.value)));
-      RETURN Emittable{ MIRMethodCall: COPY TRY (mIRLowering__node_create_mir(rtoc_self_view, CAST(node_value AS Emittable), TRY (aST__full_type_mut(Locatable{ CapabilityWrap: COPY node })), node.value)) };
+      RETURN Emittable{ MIRMethodCall: COPY TRY (mIRLowering__node_create_mir(rtoc_self_view, CAST(node_value AS Emittable), TRY (aST__full_type_mut(Locatable{ CapabilityWrap: COPY node })), &node.value)) };
     END
     MUTABLE inner_type = TRY (aST__full_type_mut(node.value));
     MUTABLE inner = mIRLowering__with_decl_alloc(rtoc_self_view, :heap, %() USE(inner_type, node, MUTABLE rtoc_self_view) -> {
@@ -16907,7 +16907,7 @@ PRIVATE FN mIRLowering__lower_link(MUTABLE self: MIRLowering, MUTABLE node: Link
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.value)));
     MUTABLE ti = TRY (aST__full_type_mut(node.value));
-    MUTABLE base = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ StringValue: COPY CAST(ti.resolved() AS String) }));
+    MUTABLE base = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ StringValue: COPY CAST(type__resolved(ti) AS String) }));
     MUTABLE func: String = "";
     IF type__shared?(ti) THEN
       func = "arcDowngrade";
@@ -16923,7 +16923,7 @@ PRIVATE FN mIRLowering__lower_resolve(MUTABLE self: MIRLowering, MUTABLE node: R
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.value)));
     MUTABLE ti = TRY (aST__full_type_mut(node.value));
-    MUTABLE base = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ StringValue: COPY CAST(ti.resolved() AS String) }));
+    MUTABLE base = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ StringValue: COPY CAST(type__resolved(ti) AS String) }));
     MUTABLE source = (ti.link_source() OR :multiowned);
     MUTABLE func: String = "";
     IF (source == :shared) THEN
