@@ -159,7 +159,7 @@ PUB FN fsmRecursiveSplitter__split(body: []Locatable, lowering: MIRLowering, ctx
     MUTABLE pre_renumber_overrides = COPY finalized.alias_overrides_by_index;
     MUTABLE segments, mapping = fsmRecursiveSplitter__renumber_with_entry(finalized.segments, entry_value_mutable);
     MUTABLE synth = COPY builder.synthetic_fields;
-    MUTABLE alias_table = pre_renumber_overrides.each_with_object({}, %(tuple_param_0, h: Tuple<Int64,{String}String>) USE(mapping) -> {
+    MUTABLE alias_table = pre_renumber_overrides.each_with_object({}, %(tuple_param_0: Tuple<Int64,{String}String>, h) USE(mapping) -> {
   MUTABLE orig = tuple_param_0._0;
   MUTABLE ov = tuple_param_0._1;
   MUTABLE new_idx = mapping[orig]?;

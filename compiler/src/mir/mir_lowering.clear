@@ -16171,7 +16171,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF variant_data EXISTS AS variant_data_value THEN
       IF variant_data_value IS_A InlineStructVariant AS inline_struct_variant THEN
         MUTABLE fields = COPY (CAST(inline_struct_variant AS InlineStructVariant@multiowned)).fields;
-        RETURN fields.each_with_object({}, %(tuple_param_0, h: Tuple<String@symbol,TypeTypeInput>) -> {
+        RETURN fields.each_with_object({}, %(tuple_param_0: Tuple<String@symbol,TypeTypeInput>, h) -> {
     MUTABLE k = tuple_param_0._0;
     MUTABLE field_type = tuple_param_0._1;
     h[CAST(k AS String)] = field_type;

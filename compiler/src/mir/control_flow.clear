@@ -796,7 +796,7 @@ PRIVATE FN ownershipDataflow__state_to_names(self: OwnershipDataflow, state: {Pl
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN state.each_with_object({}, %(tuple_param_0, out: Tuple<PlaceId,OwnerEntry>) -> {
+    RETURN state.each_with_object({}, %(tuple_param_0: Tuple<PlaceId,OwnerEntry>, out) -> {
     MUTABLE place = tuple_param_0._0;
     MUTABLE entry = tuple_param_0._1;
     out[place.path] = entry;

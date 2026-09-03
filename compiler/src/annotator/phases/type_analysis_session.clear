@@ -929,7 +929,7 @@ PUB FN typeAnalysisSession__reject_kept_function_values_mut(self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE kept_fns = fn_nodes.each_with_object({}, %(tuple_param_0, map: Tuple<String,FunctionDef>) -> {
+    MUTABLE kept_fns = fn_nodes.each_with_object({}, %(tuple_param_0: Tuple<String,FunctionDef>, map) -> {
     MUTABLE name = tuple_param_0._0;
     MUTABLE fn = tuple_param_0._1;
     MUTABLE kept_param = fn.params() |> FIND (IF aST__node__symbol(_) != NIL THEN

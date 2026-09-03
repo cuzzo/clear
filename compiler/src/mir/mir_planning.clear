@@ -27,7 +27,7 @@ PUB FN mIRPlanner__plan_all_mut(fn_nodes: {String}FunctionDef, schema_lookup: FN
   cleanup_plans[rtoc_key] = TRY (cleanupClassifier__classify_plan(function, schema_lookup, lifecycle_registry));
   END
   TRY (loopFrameAnalysis__analyze_mut(fn_nodes, schema_lookup));
-  MUTABLE fallible = fn_nodes.each_with_object(Set[], %(tuple_param_0, names: Tuple<String,FunctionDef>) -> {
+  MUTABLE fallible = fn_nodes.each_with_object(Set[], %(tuple_param_0: Tuple<String,FunctionDef>, names) -> {
   MUTABLE name = tuple_param_0._0;
   MUTABLE function = tuple_param_0._1;
   IF functionSignature__can_fail(function) THEN

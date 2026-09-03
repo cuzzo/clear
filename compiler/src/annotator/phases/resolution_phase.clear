@@ -285,7 +285,7 @@ PRIVATE FN resolutionSession__resolved_function_names(self: ResolutionSession) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (scope__visible_entries(rtoc_self_view.root_scope))).each_with_object(List[], %(tuple_param_0, names: Tuple<String,SymbolEntry@multiowned>) -> {
+    RETURN (TRY (scope__visible_entries(rtoc_self_view.root_scope))).each_with_object(List[], %(tuple_param_0: Tuple<String,SymbolEntry@multiowned>, names) -> {
     MUTABLE name = tuple_param_0._0;
     MUTABLE entry = tuple_param_0._1;
     IF symbolEntry__fn_signature(entry) THEN
@@ -2052,7 +2052,7 @@ PRIVATE FN resolutionSession__inline_struct_deinit_entries(self: ResolutionSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN variant_data.fields.each_with_object(List[], %(tuple_param_0, entries: Tuple<String@symbol,TypeTypeInput>) -> {
+    RETURN variant_data.fields.each_with_object(List[], %(tuple_param_0: Tuple<String@symbol,TypeTypeInput>, entries) -> {
     MUTABLE field_name = tuple_param_0._0;
     MUTABLE field_type = tuple_param_0._1;
     MUTABLE field_type_info = field_type;

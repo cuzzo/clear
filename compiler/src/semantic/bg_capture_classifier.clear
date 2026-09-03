@@ -45,7 +45,7 @@ PUB FN bgCaptureClassifier__classify_one_mut(MUTABLE a: CaptureAnalysis, live_pa
   strategies[rtoc_inner_key] = TRY (captureStrategy__classify(rtoc_inner_key, CAST(t AS Type), site_info, a.resource_captures.contains?(rtoc_inner_key), schema_lookup));
   END
   a.strategies = strategies;
-  a.move_mark_names = strategies.each_with_object(Set[], %(tuple_param_0, set: Tuple<String,Strategy>) -> {
+  a.move_mark_names = strategies.each_with_object(Set[], %(tuple_param_0: Tuple<String,Strategy>, set) -> {
   MUTABLE n = tuple_param_0._0;
   MUTABLE s = tuple_param_0._1;
   IF s IS_A MoveInto THEN
@@ -53,7 +53,7 @@ PUB FN bgCaptureClassifier__classify_one_mut(MUTABLE a: CaptureAnalysis, live_pa
   END
   NIL
   });
-  a.alloc_mark_entries = strategies.each_with_object({}, %(tuple_param_0, h: Tuple<String,Strategy>) -> {
+  a.alloc_mark_entries = strategies.each_with_object({}, %(tuple_param_0: Tuple<String,Strategy>, h) -> {
   MUTABLE n = tuple_param_0._0;
   MUTABLE s = tuple_param_0._1;
   IF s IS_A FreshHeapCopy THEN
