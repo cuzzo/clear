@@ -6893,7 +6893,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_157 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_157, "_", NIL, item_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view) -> {
-        rtoc_lambda_result_158 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.op().expression()));
+        rtoc_lambda_result_158 = TRY (typeAnalysisSession__visit(&rtoc_self_view, castLocatableToConcurrentOp__type_analysis_session(node.right).op.expression()));
         rtoc_lambda_result_158
       }))
     });
@@ -6923,7 +6923,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_160 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_160, "_", NIL, item_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view) -> {
-        FOR _ IN node.right.op().body() DO
+        FOR _ IN castLocatableToConcurrentOp__type_analysis_session(node.right).op.body() DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
         END
         NIL
@@ -6949,7 +6949,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_161 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_161, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
-        rtoc_lambda_result_162 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.op().expression()));
+        rtoc_lambda_result_162 = TRY (typeAnalysisSession__visit(&rtoc_self_view, castLocatableToConcurrentOp__type_analysis_session(node.right).op.expression()));
         rtoc_lambda_result_162
       }))
     });
@@ -6971,7 +6971,7 @@ PRIVATE FN typeAnalysisSession__validate_concurrent_where_expression_mut(self: T
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE op = node.right.op();
+    MUTABLE op = castLocatableToConcurrentOp__type_analysis_session(node.right).op;
     IF !(op IS_A WhereOp) THEN
       RETURN;
     END
@@ -6982,7 +6982,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(self: TypeA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE op = node.right.op();
+    MUTABLE op = castLocatableToConcurrentOp__type_analysis_session(node.right).op;
     IF op IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(rtoc_self_view, op.expression()));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(rtoc_self_view, &op, effect));
@@ -7010,7 +7010,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_164 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_164, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
-        FOR _ IN node.right.op().body() DO
+        FOR _ IN castLocatableToConcurrentOp__type_analysis_session(node.right).op.body() DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
         END
         NIL
@@ -7477,7 +7477,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(node IS_A UnaryOp) THEN
       RETURN NIL;
     END
-    IF !((node.op() == :SUB)) THEN
+    IF !((locatable__symbol_op(node) == :SUB)) THEN
       RETURN NIL;
     END
     MUTABLE lit = aST__node_right(node);
@@ -11813,7 +11813,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF (node IS_A Raise) OR (node IS_A OrElseRaise) OR (node IS_A BgBlock) OR (node IS_A BgStreamBlock) THEN
         summary.raises_directly = TRUE;
     ELSE_IF (node IS_A UnaryOp) THEN
-        IF (node.op() == :TRY) THEN
+        IF (locatable__symbol_op(node) == :TRY) THEN
           summary.raises_directly = TRUE;
         END
     ELSE_IF node IS_A WithBlock AS with_block THEN
@@ -18433,10 +18433,10 @@ PRIVATE FN typeAnalysisSession__short_circuit_non_nil_refinements(self: TypeAnal
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A UnaryOp THEN
-      IF (node.op() == :NOT) THEN
+      IF (locatable__symbol_op(node) == :NOT) THEN
         RETURN typeAnalysisSession__short_circuit_non_nil_refinements(rtoc_self_view, aST__node_right(node), !(truthy));
       END
-      IF ((node.op() == :EXISTS) AND truthy) THEN
+      IF ((locatable__symbol_op(node) == :EXISTS) AND truthy) THEN
         RETURN TRY (typeAnalysisSession__identifier_non_nil_refinement(rtoc_self_view, aST__node_right(node)));
       END
       RETURN {};

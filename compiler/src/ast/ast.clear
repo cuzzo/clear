@@ -16838,3 +16838,16 @@ PUB FN locatable__set_coerced_type_object_mut(MUTABLE value: Locatable, new_valu
     Locatable.FieldCleanup AS MUTABLE item -> item.coerced_type_object = COPY new_value;,
   END
 END
+
+# `op` means two different things across Locatable: a symbol on BinaryOp and
+# UnaryOp, a pipeline op on ConcurrentOp. Ruby picks by the receiver's class;
+# this reader answers the symbol question, and a ConcurrentOp receiver is
+# narrowed at its call sites instead.
+PUB FN locatable__symbol_op(value: Locatable) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    Locatable.BinaryOp AS item -> RETURN COPY item.op;,
+    Locatable.UnaryOp AS item -> RETURN COPY item.op;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
