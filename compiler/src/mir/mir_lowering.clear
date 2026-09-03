@@ -16924,7 +16924,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.value)));
     MUTABLE ti = TRY (aST__full_type_mut(node.value));
     MUTABLE base = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ StringValue: COPY CAST(type__resolved(ti) AS String) }));
-    MUTABLE source = (ti.link_source() OR :multiowned);
+    MUTABLE source = (type__link_source(ti) OR :multiowned);
     MUTABLE func: String = "";
     IF (source == :shared) THEN
       func = "weakArcUpgrade";
