@@ -516,7 +516,7 @@ PUB FN typeAnalysisSession__analyze_loop_control_flow_branches(MUTABLE self: Typ
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN typeAnalysisSession__with_loop_context(&rtoc_self_view, %() USE(branches, merge_to_parent, rtoc_self_view) -> TRY (typeAnalysisSession__analyze_control_flow_branches( &rtoc_self_view, branches, merge_to_parent)));
+    RETURN typeAnalysisSession__with_loop_context(&rtoc_self_view, %() USE(branches, merge_to_parent, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__analyze_control_flow_branches( &rtoc_self_view, branches, merge_to_parent)));
 }
 END
 PUB FN typeAnalysisSession__with_smooth_context<RESULT>(MUTABLE self: TypeAnalysisSession, blk: FN() -> RESULT) RETURNS RESULT
@@ -988,7 +988,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     });
 }
 END
-PUB FN typeAnalysisSession__kept_identity_declaration_anchor(self: TypeAnalysisSession, body_summaries: {String}Any, entry: SymbolEntry) RETURNS ?Locatable
+PUB FN typeAnalysisSession__kept_identity_declaration_anchor(self: TypeAnalysisSession, body_summaries: {String}FunctionBodySummary, entry: SymbolEntry) RETURNS ?Locatable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -5377,12 +5377,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (scope__declare(&rtoc_mutable_receiver_112, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     IF (UNWRAP (aST__node_right( Locatable{ BinaryOp: COPY node })) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR node.right.stream_mode))) THEN
         MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, %() USE(item_type, node, rtoc_self_view) -> {
-      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
+      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
       rubyToClearVoid__type_analysis_session()
         });
         node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(rtoc_self_view, castLocatableToNode__type_analysis_session(node.right), analysis, FALSE, FALSE)) OR_ELSE analysis);
     ELSE
-        TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
+        TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
     END
     selector_effect = TRY (typeAnalysisSession__selector_effect_fact(rtoc_self_view, node.right.expression()));
     IF node.right IS_A WhereOp THEN
@@ -6215,7 +6215,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_144 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_144, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
+    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
     });
     MUTABLE expr_type = node.right.expression().resolved_type;
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6238,7 +6238,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_145 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_145, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
+    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
     });
     MUTABLE expr_type = node.right.expression().resolved_type;
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6261,7 +6261,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_146 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_146, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
+    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
     });
     MUTABLE expr_type = node.right.expression().resolved_type;
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -6284,7 +6284,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_147 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_147, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
+    TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))))
     });
     MUTABLE expr_type = node.right.expression().resolved_type;
     IF !(type__numeric?((TRY (type__new(expr_type))))) THEN
@@ -16710,7 +16710,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__finalize_scope(rtoc_self_view, Locatable{ WithBlock: COPY node }))
     })
     });
-    typeAnalysisSession__with_held_locks(&rtoc_self_view, node, lock_capabilities, %() USE(is_snapshot_txn_body, node, with_body, rtoc_self_view) -> {
+    typeAnalysisSession__with_held_locks(&rtoc_self_view, node, lock_capabilities, %() USE(is_snapshot_txn_body, node, with_body, MUTABLE rtoc_self_view) -> {
     IF is_snapshot_txn_body THEN
       RETURN TRY (typeAnalysisSession__with_snapshot_transaction_body(rtoc_self_view, node, with_body));
     ELSE
