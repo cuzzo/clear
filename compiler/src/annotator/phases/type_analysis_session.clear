@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -14594,7 +14594,7 @@ END
 PRIVATE FN typeAnalysisSession__reject_implicit_wrapper_binding_mut(self: TypeAnalysisSession, node: DeclarationNode, MUTABLE process_deferred_copy: Bool = FALSE) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF declarationNode__type(node) THEN
       RETURN;
     END
@@ -15088,7 +15088,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rhs = COPY item.value;,
     END
     IF UNWRAP (rhs) IS_A MoveNode THEN
-      rhs = rhs.value();
+      rhs = aST__node_value(UNWRAP (castBgSourceWalkValueToLocatable(UNWRAP (rhs))));
     END
     IF !(rhs IS_A Identifier) THEN
       RETURN;
