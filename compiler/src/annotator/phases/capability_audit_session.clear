@@ -2232,7 +2232,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY capabilityAuditSession__effect_state(rtoc_self_view).direct_effects;
 }
 END
-PRIVATE FN capabilityAuditSession__effect_direct_effects_for(self: CapabilityAuditSession, fn_name: String) RETURNS ![Set]String@symbol
+PRIVATE FN capabilityAuditSession__effect_direct_effects_for(MUTABLE self: CapabilityAuditSession, fn_name: String) RETURNS ![Set]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2254,7 +2254,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY capabilityAuditSession__effect_state(rtoc_self_view).call_site_arg_families;
 }
 END
-PRIVATE FN capabilityAuditSession__effect_call_site_context_for(self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool
+PRIVATE FN capabilityAuditSession__effect_call_site_context_for(MUTABLE self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2264,7 +2264,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN caller_context[callee_name];
 }
 END
-PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS ![][][Set]String@symbol
+PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(MUTABLE self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS ![][][Set]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
