@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -15068,7 +15068,7 @@ END
 PRIVATE FN typeAnalysisSession__finalize_var_declaration_mut(self: TypeAnalysisSession, MUTABLE node: VarDecl) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__promote_declaration_value_mut(rtoc_self_view, DeclarationNode{ VarDecl: COPY node }));
     TRY (typeAnalysisSession__finalize_decl_node_mut( &rtoc_self_view, DeclarationNode{ VarDecl: COPY node }, &node.mutable));
     TRY (typeAnalysisSession__stamp_init_contents_heap_mut(rtoc_self_view, DeclNode{ VarDecl: COPY node }));
@@ -15093,7 +15093,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(UNWRAP (rhs) IS_A Identifier) THEN
       RETURN;
     END
-    MUTABLE src = rhs.symbol;
+    MUTABLE src = UNWRAP (rhs).symbol;
     IF !((src IS_A SymbolEntry@multiowned AND symbolEntry__carrier_polymorphic(src))) THEN
       RETURN;
     END
@@ -15126,7 +15126,7 @@ END
 PRIVATE FN typeAnalysisSession__finalize_bind_declaration_mut(self: TypeAnalysisSession, MUTABLE node: BindExpr) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__promote_declaration_value_mut(rtoc_self_view, DeclarationNode{ BindExpr: COPY node }));
     node.mode = :decl;
     TRY (typeAnalysisSession__finalize_decl_node_mut( &rtoc_self_view, DeclarationNode{ BindExpr: COPY node }, FALSE));
@@ -19403,7 +19403,7 @@ PRIVATE FN typeAnalysisSession__handle_assign_move(self: TypeAnalysisSession, no
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE plan: ?PassStateValue = aST__node_ownership_transport_plan( UNWRAP (castNodeToLocatable(node)));
-    IF (((typeAnalysisSession__language_mode(rtoc_self_view) != :strict) AND plan IS_A OwnershipTransportPlan) AND (plan.action != :move)) THEN
+    IF (((typeAnalysisSession__language_mode(rtoc_self_view) != :strict) AND UNWRAP (plan) IS_A OwnershipTransportPlan) AND (plan.action != :move)) THEN
       RETURN;
     END
     IF (((typeAnalysisSession__language_mode(rtoc_self_view) != :strict) AND aST__node_value(UNWRAP (castNodeToLocatable(node))) IS_A Identifier) AND (aST__node_value(UNWRAP (castNodeToLocatable(node))).ownership_pending_transfer == TRUE)) THEN
