@@ -4350,7 +4350,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE owner: ?String = COPY (IF mIRLowering__capability_state(rtoc_self_view).with_alias_owner_map != NIL THEN
-      (mIRLowering__capability_state(rtoc_self_view).with_alias_owner_map)[UNWRAP (root.name)]
+      (mIRLowering__capability_state(rtoc_self_view).with_alias_owner_map)[UNWRAP (UNWRAP (root).name)]
     ELSE
       NIL
     END);
