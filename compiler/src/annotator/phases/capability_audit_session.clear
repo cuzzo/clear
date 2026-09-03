@@ -3871,7 +3871,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF adj[edges[rtoc_idx]?.held] == NIL THEN
+      IF adj[UNWRAP (edges[rtoc_idx].held)] == NIL THEN
           adj[edges[rtoc_idx]?.held] = Set[];
         END
         IF adj[edges[rtoc_idx]?.held] EXISTS AS rtoc_map_slot_30 THEN

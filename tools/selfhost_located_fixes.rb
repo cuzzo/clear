@@ -258,6 +258,8 @@ by.each do |f, rs|
     elsif (m = e.match(/'(\w+)' is a union type\. Access variants with/))
       line_edits << [r['line'], :union_field_write, m[1]]
       line_edits << [r['line'], :union_field_read, m[1]]
+    elsif e =~ /Map protocol indexing expects String, but this key is \?String/
+      line_edits << [r['line'], :unwrap_map_key, nil]
     elsif (m = e.match(/RESTRICT capability requires a mutable variable, but '(\w+)' is immutable/))
       line_edits << [r['line'], :mutable_param, m[1]]
     elsif e =~ /Operator NEQ cannot compare \w+ with NIL/
@@ -600,6 +602,14 @@ by.each do |f, rs|
           counts[kind] += 1
           "#{fn}(#{recv})"
         end
+      end
+    when :unwrap_map_key
+      # A safe navigation yields an optional; the map protocol indexes by the
+      # bare String, and Ruby would have raised on nil before reaching here.
+      subs = lines[i].scan(/\[([a-z_]\w*(?:\[[^\]]*\])?\?\.[a-z_]\w*)\]/).flatten
+      if subs.length == 1
+        lines[i] = lines[i].sub("[#{subs.first}]", "[UNWRAP (#{subs.first.sub('?.', '.')})]")
+        counts[kind] += 1
       end
     when :drop_or_else
       # OR_ELSE on a value that is neither fallible nor optional is dead: the
