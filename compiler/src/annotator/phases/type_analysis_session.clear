@@ -789,7 +789,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(node IS_A CopyNode) THEN
         RETURN;
     END
-    MUTABLE type_info = aST__node_value(node).full_type_mut("post-annotation COPY resource validation");
+    MUTABLE type_info = TRY (aST__full_type_mut(UNWRAP (aST__node_value(node))));
     IF TRY (linearResourceFacts__contains?(facts, type_info)) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :COPY_NON_COPYABLE }, [], {:type: CAST(type_info AS String)}));
     END
@@ -10620,7 +10620,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE params: []Param = [Param{ name: "receiver", type: COPY receiver_type, required: TRUE, mutable: TRY (functionSignature__mutates_receiver?(&definition)), takes: FALSE, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
-    &params.append(Param{ name: "arg${(rtoc_idx + 1).toString()}", type: COPY &node.args[rtoc_idx].full_type_mut({:context: "collection method argument"}), required: TRUE, mutable: FALSE, takes: takes.contains?(rtoc_idx), default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL });
+    &params.append(Param{ name: "arg${(rtoc_idx + 1).toString()}", type: COPY &TRY (aST__full_type_mut(UNWRAP (node.args[rtoc_idx]))), required: TRUE, mutable: FALSE, takes: takes.contains?(rtoc_idx), default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL });
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN TRY (functionSignature__new(params, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node })) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_244: []String@symbol = List[]; rtoc_empty_list_244 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_245: []String@symbol = List[]; rtoc_empty_list_245 } ), NIL, ( { MUTABLE rtoc_empty_list_246: []String@symbol = List[]; rtoc_empty_list_246 } )));
@@ -11086,7 +11086,7 @@ PRIVATE FN typeAnalysisSession__visit_test_lets(MUTABLE self: TypeAnalysisSessio
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN ((testContainerNode__lets(node) OR_ELSE List[])) DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _.expr));
-    MUTABLE let_type = _.expr.full_type_mut({:context: "TEST LET expression"});
+    MUTABLE let_type = TRY (aST__full_type_mut(_.expr));
     MUTABLE rtoc_mutable_receiver_253 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_253, _.name(), _, let_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__og_declare(rtoc_self_view, _.name(), _, let_type));
@@ -12305,7 +12305,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE params: []Param = [Param{ name: "receiver", type: COPY receiver, required: TRUE, mutable: TRUE, takes: FALSE, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
-    &params.append(Param{ name: "arg${(rtoc_idx + 1).toString()}", type: COPY &node.args[rtoc_idx].full_type_mut({:context: "generic map method argument"}), required: TRUE, mutable: FALSE, takes: FALSE, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL });
+    &params.append(Param{ name: "arg${(rtoc_idx + 1).toString()}", type: COPY &TRY (aST__full_type_mut(UNWRAP (node.args[rtoc_idx]))), required: TRUE, mutable: FALSE, takes: FALSE, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL });
     rtoc_idx = rtoc_idx + 1;
     END
     TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, TRY (functionSignature__new(params, castTypeToOptionalTypeTypeInput__type_analysis_session(TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }))), NIL, NIL, ( { MUTABLE rtoc_empty_list_292: []String@symbol = List[]; rtoc_empty_list_292 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_293: []String@symbol = List[]; rtoc_empty_list_293 } ), NIL, ( { MUTABLE rtoc_empty_list_294: []String@symbol = List[]; rtoc_empty_list_294 } ))), ([node.object] + node.args)));
@@ -17372,7 +17372,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE last_type: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
     FOR _ IN node.steps DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _.expr));
-    MUTABLE step_type = _.expr.full_type_mut({:context: "THEN step"});
+    MUTABLE step_type = TRY (aST__full_type_mut(_.expr));
     MUTABLE binding: ?String = _.binding;
     IF binding THEN
         MUTABLE bind_type = COPY step_type;

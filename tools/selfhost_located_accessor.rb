@@ -35,8 +35,24 @@ def bare(type) = type.to_s.sub(/@\w+\z/, '').delete_prefix('?').sub(/\A\[[^\]]*\
 ALIASES = {
   %w[Locatable value] => 'aST__node_value', %w[Node value] => 'aST__node_value',
   %w[Locatable name] => 'aST__node_name', %w[Node name] => 'aST__node_name',
-  %w[Locatable right] => 'aST__node_right'
+  %w[Locatable right] => 'aST__node_right',
+  %w[Locatable full_type_mut] => 'aST__full_type_mut',
+  %w[Node full_type_mut] => 'aST__full_type_mut'
 }.freeze
+
+# A fallible accessor has to be called through TRY, like every other
+# fallible call in the tree.
+RETURNS = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
+  File.read(f).scan(/\bFN ([\w?!]+)\([^\n]*?\)\s*RETURNS\s+([\w@?\[\]{}!]+)/)
+end.to_h.freeze
+
+# Ruby passes a diagnostic context the CLEAR accessor does not take; when the
+# accessor's only parameter is the receiver, the extra arguments go.
+ARITY = Dir.glob(File.join(ROOT, '**', '*.clear')).flat_map do |f|
+  File.read(f).scan(/\bFN ([\w?!]+)\(([^\n]*?)\)\s*RETURNS/).map do |n, params|
+    [n, params.split(/,\s*(?=(?:MUTABLE\s+)?\w+:)/).reject { |x| x.strip.empty? }.length]
+  end
+end.to_h.freeze
 
 rows = JSON.parse(File.read(probe)).select do |r|
   !r['ok'] && r['line'] && r['error'].to_s.include?('UNKNOWN_INHERENT_METHOD')
@@ -90,12 +106,15 @@ by.each do |f, hits|
     # The receiver may be a path, an indexed element, a call, or an UNWRAP of
     # any of those; a bare-identifier pattern misses most real sites.
     recv_pat = /(?:UNWRAP\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:__\w+)?\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:\[[^\]]*\])?(?:\.[a-z_]\w*(?:\[[^\]]*\])?)*)/
-    new = lines[i].gsub(/(?<![\w.])(#{recv_pat})\.#{Regexp.escape(meth)}\(\)/) do
+    # `.meth()` or `.meth(args)` -- the latter only when the accessor takes
+    # nothing but the receiver.
+    call_pat = ARITY[fn] == 1 ? /\((?:[^()]|\([^()]*\))*\)/ : /\(\)/
+    new = lines[i].gsub(/(?<![\w.])(#{recv_pat})\.#{Regexp.escape(meth)}#{call_pat}/) do
       recv = Regexp.last_match(1)
       recv = "UNWRAP (#{recv})" if optional
       recv = "UNWRAP (#{cast}(#{recv}))" if cast
       rewrites += 1
-      "#{fn}(#{recv})"
+      RETURNS[fn].to_s.start_with?('!') ? "TRY (#{fn}(#{recv}))" : "#{fn}(#{recv})"
     end
     lines[i] = new
   end
