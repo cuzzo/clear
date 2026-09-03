@@ -1765,7 +1765,7 @@ PUB FN escapeAnalysis__materializing_pipeline_expr?(expr: Locatable) RETURNS Boo
   IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END
-  RETURN ((node IS_A BinaryOp AND node.smooth?()) AND !(node.right() IS_A SkipOp));
+  RETURN ((IF node IS_A BinaryOp AS rtoc_smooth_n THEN binaryOp__smooth?(rtoc_smooth_n) ELSE FALSE END) AND !(node.right() IS_A SkipOp));
 END
 PUB FN escapeAnalysis__returned_call_result?(expr: Locatable) RETURNS Bool ->
   MUTABLE node = escapeAnalysis__unwrap_value(expr);

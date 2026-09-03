@@ -16279,7 +16279,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF schemas__inline_struct?(raw_expected) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_INLINE_VARIANT_OLD_SYNTAX }, [], CAST({:union: node.name, :variant: variant_name, :union2: node.name, :variant2: variant_name} AS {String@symbol}Any)));
       END
-      MUTABLE indirect_payload = (raw_expected IS_A Type AND raw_expected.indirect?());
+      MUTABLE indirect_payload = (IF raw_expected IS_A Type AS rtoc_indirect_n THEN type__indirect?(rtoc_indirect_n) ELSE FALSE END);
       MUTABLE raw_for_check =     IF indirect_payload THEN
         {
     MUTABLE rtoc_value_block_marker = 0;

@@ -18143,7 +18143,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF type__set_collection?(ft) THEN
-      IF (rhs IS_A BinaryOp AND rhs.smooth?()) THEN
+      IF (IF rhs IS_A BinaryOp AS rtoc_smooth_n THEN binaryOp__smooth?(rtoc_smooth_n) ELSE FALSE END) THEN
         RETURN TRY (mIRLowering__lower(&rtoc_self_view, node.value));
       END
       IF ((rhs_unwrapped IS_A MoveNode OR aST__call?(rhs_unwrapped)) OR !(rhs_unwrapped IS_A ListLit)) THEN
