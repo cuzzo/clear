@@ -18309,7 +18309,7 @@ PRIVATE FN mIRLowering__list_collection_copy?(self: MIRLowering, rhs: Locatable)
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((rhs IS_A CopyNode OR rhs IS_A KeepNode)) AND aST__node_value(rhs).full_type_mut("collection copy source").list_collection?());
+    RETURN (((rhs IS_A CopyNode OR rhs IS_A KeepNode)) AND TRY (aST__full_type_mut(UNWRAP (aST__node_value(rhs)))).list_collection?());
 }
 END
 PRIVATE FN mIRLowering__field_owner_move_marks(self: MIRLowering, node: VarDecl) RETURNS ![]Emittable

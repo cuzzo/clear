@@ -639,7 +639,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_stream_each(self: Pipelin
 END
 PRIVATE FN pipelineConcurrentLowerer__concurrent_list_item_type(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable) RETURNS !Type ->
   IF lhs IS_A RangeLit THEN
-    MUTABLE elem = locatable__start(lhs).full_type_mut();
+    MUTABLE elem = TRY (aST__full_type_mut(UNWRAP (locatable__start(lhs))));
     IF TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))) != NIL THEN
       elem = type__resolved((UNWRAP (TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(lhs)))))))))));
     END
