@@ -6302,7 +6302,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE conc = castLocatableToConcurrentOp__type_analysis_session(COPY node.right);
     MUTABLE each_op: ?ClearParserConcurrentPipelineOp = conc.op;
     MUTABLE ti = TRY (aST__full_type_mut( UNWRAP (shard_node.target_map)));
-    MUTABLE key_type = (((ti.numeric_map?() AND ((TRY (type__key_type(ti)) != NIL) AND type__resolved(((TRY (type__key_type(ti)))?))))) OR :String);
+    MUTABLE key_type = (((type__numeric_map?(ti) AND ((TRY (type__key_type(ti)) != NIL) AND type__resolved(((TRY (type__key_type(ti)))?))))) OR :String);
     typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(each_op, key_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_148 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_148, "_", NIL, key_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
