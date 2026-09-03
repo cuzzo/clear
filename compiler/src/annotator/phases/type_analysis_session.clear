@@ -21990,16 +21990,10 @@ FN castOptionalSymbolEntryRegInputToOptionalReg(value: ?SymbolEntryRegInput) RET
   panic("Invalid cast to ?TypeAnalysisReg");
 END
 FN castOptionalTypeToOptionalTypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
-  IF value == NIL THEN
-    panic("Invalid cast to ?TypeTypeInput");
+  IF value EXISTS AS cast_payload THEN
+    RETURN TypeTypeInput{ Type: COPY cast_payload };
   END
-  PARTIAL MATCH value? START
-    Type.StringValue AS cast_payload -> RETURN TypeTypeInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN TypeTypeInput{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN TypeTypeInput{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?TypeTypeInput");
-  END
-  panic("Invalid cast to ?TypeTypeInput");
+  RETURN NIL;
 END
 FN castOptionalTypeTypeInputToTypeConstructionInput(value: ?TypeTypeInput) RETURNS TypeConstructionInput ->
   IF value == NIL THEN
@@ -22273,42 +22267,19 @@ FN castTypeToGenericBinding(value: Type) RETURNS GenericBinding ->
   RETURN GenericBinding{ Type: COPY value };
 END
 FN castTypeToOptionalSourceType(value: Type) RETURNS ?SourceType ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN SourceType{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN SourceType{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN SourceType{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?SourceType");
-  END
-  panic("Invalid cast to ?SourceType");
+  RETURN SourceType{ Type: COPY value };
 END
 FN castTypeToOptionalStringSymbol(value: Type) RETURNS ?String@symbol ->
   RETURN NIL;
 END
 FN castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(value: Type) RETURNS ?SymbolEntryTypeInput ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN SymbolEntryTypeInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN SymbolEntryTypeInput{ SymbolValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?SymbolEntryTypeInput");
-  END
-  panic("Invalid cast to ?SymbolEntryTypeInput");
+  RETURN SymbolEntryTypeInput{ Type: COPY value };
 END
 FN castTypeToOptionalTypeAnalysisSessionReturnValue(value: Type) RETURNS ?TypeAnalysisSessionReturnValue ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN TypeAnalysisSessionReturnValue{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN TypeAnalysisSessionReturnValue{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN TypeAnalysisSessionReturnValue{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?TypeAnalysisSessionReturnValue");
-  END
-  panic("Invalid cast to ?TypeAnalysisSessionReturnValue");
+  RETURN TypeAnalysisSessionReturnValue{ Type: COPY value };
 END
 FN castTypeToOptionalTypeTypeInput__type_analysis_session(value: Type) RETURNS ?TypeTypeInput ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN TypeTypeInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN TypeTypeInput{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN TypeTypeInput{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?TypeTypeInput");
-  END
-  panic("Invalid cast to ?TypeTypeInput");
+  RETURN TypeTypeInput{ Type: COPY value };
 END
 FN castTypeToString(value: Type) RETURNS String ->
   RETURN "";

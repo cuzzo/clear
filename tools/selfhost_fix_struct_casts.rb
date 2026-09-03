@@ -24,11 +24,15 @@ skipped = Hash.new(0)
 Dir.glob(File.join(ROOT, '**', '*.clear')).sort.each do |path|
   text = File.read(path)
   out = text.gsub(
-    /^(FN (?:cast\w+To\w+(?:__\w+)?)\(value: (\w+)\) RETURNS ([\w@?\[\]{}]+) ->\n)(.*?)(^END\n)/m
+    /^(FN (?:cast\w+To\w+(?:__\w+)?)\(value: ([\w@?\[\]{}]+)\) RETURNS ([\w@?\[\]{}]+) ->\n)(.*?)(^END\n)/m
   ) do
     head = Regexp.last_match(1)
-    src = Regexp.last_match(2)
-    dst = Regexp.last_match(3)
+    src_raw = Regexp.last_match(2)
+    dst_raw = Regexp.last_match(3)
+    # An optional cast is the same wrap with NIL passed through.
+    optional = src_raw.start_with?('?') && dst_raw.start_with?('?')
+    src = src_raw.delete_prefix('?')
+    dst = dst_raw.delete_prefix('?')
     body = Regexp.last_match(4)
     tail = Regexp.last_match(5)
     whole = Regexp.last_match(0)
@@ -64,7 +68,12 @@ Dir.glob(File.join(ROOT, '**', '*.clear')).sort.each do |path|
     end
 
     fixed += 1
-    "#{head}  RETURN #{dst}{ #{variant[0]}: COPY value };\n#{tail}"
+    if optional
+      "#{head}  IF value EXISTS AS cast_payload THEN\n" \
+        "    RETURN #{dst}{ #{variant[0]}: COPY cast_payload };\n  END\n  RETURN NIL;\n#{tail}"
+    else
+      "#{head}  RETURN #{dst}{ #{variant[0]}: COPY value };\n#{tail}"
+    end
   end
   File.write(path, out) if apply && out != text
 end

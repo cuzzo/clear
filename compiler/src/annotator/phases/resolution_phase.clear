@@ -2350,21 +2350,10 @@ FN castTypeDeclarationToProtocolDef(value: TypeDeclaration) RETURNS ProtocolDef 
   RETURN panic("Invalid cast to ProtocolDef");
 END
 FN castTypeToOptionalSchemasUnionSchemaVariantValue(value: Type) RETURNS ?SchemasUnionSchemaVariantValue ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN SchemasUnionSchemaVariantValue{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN SchemasUnionSchemaVariantValue{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN SchemasUnionSchemaVariantValue{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?SchemasUnionSchemaVariantValue");
-  END
-  panic("Invalid cast to ?SchemasUnionSchemaVariantValue");
+  RETURN SchemasUnionSchemaVariantValue{ Type: COPY value };
 END
 FN castTypeToOptionalSymbolEntryTypeInput__resolution_phase(value: Type) RETURNS ?SymbolEntryTypeInput ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN SymbolEntryTypeInput{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN SymbolEntryTypeInput{ SymbolValue: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?SymbolEntryTypeInput");
-  END
-  panic("Invalid cast to ?SymbolEntryTypeInput");
+  RETURN SymbolEntryTypeInput{ Type: COPY value };
 END
 FN castTypeToTypeConstructionInput__resolution_phase(value: Type) RETURNS TypeConstructionInput ->
   RETURN TypeConstructionInput{ Type: COPY value };

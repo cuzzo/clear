@@ -4420,11 +4420,7 @@ FN castTypeToAutoConstraintCollectorObservedType__capability_audit_session(value
   RETURN AutoConstraintCollectorObservedType{ Type: COPY value };
 END
 FN castTypeToOptionalX(value: Type) RETURNS ?X ->
-  PARTIAL MATCH value START
-    Type.Type AS cast_payload -> RETURN X{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to ?X");
-  END
-  panic("Invalid cast to ?X");
+  RETURN X{ Type: COPY value };
 END
 FN castTypeToTypeConstructionInput__capability_audit_session(value: Type) RETURNS TypeConstructionInput ->
   RETURN TypeConstructionInput{ Type: COPY value };
