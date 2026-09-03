@@ -6477,9 +6477,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN;
     END
-    IF node? IS_A ASTCapability AS ast_capability THEN
+    IF node? IS_A Capability AS ast_capability THEN
       FOR _ IN (CAST(Tuple{ast_capability.var_node, ast_capability.guard_expr, ast_capability.view_length} AS Tuple<Locatable, ?Locatable, ?Locatable>)) DO
-      IF ((_ IS_A []@multiowned Any OR _ IS_A ASTCapability) OR _ IS_A Locatable) THEN
+      IF ((_ IS_A []@multiowned Any OR _ IS_A Capability) OR _ IS_A Locatable) THEN
         typeAnalysisSession__each_shard_scan_node(rtoc_self_view, _, blk);
       END
       END
@@ -9640,7 +9640,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__acquire_capability_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, MUTABLE cap: ASTCapability, MUTABLE expanded: WithCapabilityPlan) RETURNS !Void
+PRIVATE FN typeAnalysisSession__acquire_capability_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, MUTABLE cap: Capability, MUTABLE expanded: WithCapabilityPlan) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9721,18 +9721,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       FOR rtoc_each_key IN fields.keys() DO
     MUTABLE ignored_1 = COPY UNWRAP (fields[rtoc_each_key]);
     (TRY (typeAnalysisSession__visit(&rtoc_self_view, Locatable{ GetField: COPY field_node })));
-    MUTABLE expanded_cap = ASTCapability{ capability: COPY capability__capability(cap), var_node: Locatable{ GetField: COPY field_node }, old_scope: COPY capability__old_scope(cap), resolved_type: CAST(COPY TRY (aST__full_type_mut(field_node)) AS Type), alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
+    MUTABLE expanded_cap = Capability{ capability: COPY capability__capability(cap), var_node: Locatable{ GetField: COPY field_node }, old_scope: COPY capability__old_scope(cap), resolved_type: CAST(COPY TRY (aST__full_type_mut(field_node)) AS Type), alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
     withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(rtoc_self_view, expanded_cap)));
       END
       MUTABLE base_t = var_node.target.full_type_mut({:context: "WITH wildcard base"});
-      MUTABLE expanded_cap = ASTCapability{ capability: COPY capability__capability(cap), var_node: COPY var_node.target, old_scope: COPY capability__old_scope(cap), resolved_type: COPY base_t, alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
+      MUTABLE expanded_cap = Capability{ capability: COPY capability__capability(cap), var_node: COPY var_node.target, old_scope: COPY capability__old_scope(cap), resolved_type: COPY base_t, alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
       withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(rtoc_self_view, expanded_cap)));
     ELSE
       withCapabilityPlan__add( &expanded, fact);
     END
 }
 END
-PRIVATE FN typeAnalysisSession__with_capability_fact(self: TypeAnalysisSession, cap: ASTCapability) RETURNS !CapabilityTransition
+PRIVATE FN typeAnalysisSession__with_capability_fact(self: TypeAnalysisSession, cap: Capability) RETURNS !CapabilityTransition
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
