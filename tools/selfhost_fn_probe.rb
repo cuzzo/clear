@@ -280,7 +280,11 @@ module SelfhostFnProbe
     Dir.mktmpdir('fn-probe') do |dir|
       source = File.join(dir, 'probe.clear')
       File.write(source, source_text)
-      env = { 'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8', 'CLEAR_EXTRA_NATIVE_DIRS' => SRC }
+      # Sibling .zig modules an EXTERN names live beside the CLEAR sources and
+      # in the runtime tree; without both dirs the link stage reports
+      # FileNotFound for alloc-profile.zig and compiler_regex.zig.
+      native_dirs = [SRC, File.join(ROOT, 'zig'), File.join(ROOT, 'zig', 'runtime')].join(File::PATH_SEPARATOR)
+      env = { 'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8', 'CLEAR_EXTRA_NATIVE_DIRS' => native_dirs }
       case stage
       when :clear
         env['CLEAR_TRANSPILE_ONLY'] = '1'
