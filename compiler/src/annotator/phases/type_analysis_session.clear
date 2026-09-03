@@ -4103,7 +4103,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :LINK_NEEDS_RESOLVE_FOR_CALL }, [], CAST({:name: typeAnalysisSession__argument_name(rtoc_self_view, facts.arg_node, "Expression"), :param: facts.param.name} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__verify_argument_type_mut(self: TypeAnalysisSession, facts: CallArgumentFacts, signature: FunctionSignature, MUTABLE atomic_bare_value_args: []Locatable) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_argument_type_mut(self: TypeAnalysisSession, MUTABLE facts: CallArgumentFacts, signature: FunctionSignature, MUTABLE atomic_bare_value_args: []Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4279,7 +4279,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRUE;
 }
 END
-PRIVATE FN typeAnalysisSession__basic_argument_match?(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__basic_argument_match?(self: TypeAnalysisSession, MUTABLE facts: CallArgumentFacts) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -12176,7 +12176,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     scope__resolve_entry(rtoc_local_receiver_287, node.name) } THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :DOT_CALL_REQUIRES_METHOD }, [], CAST({:name: node.name} AS {String@symbol}Any)));
     END
-    TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNKNOWN_INHERENT_METHOD }, [], CAST({:name: node.name, :type: TRY (type__surface_name(TRY (aST__full_type_mut(node.object))))} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNKNOWN_INHERENT_METHOD }, [], CAST({:name: node.name, :type: TRY (type__surface_name( TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(node.object)) }))} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__finalize_tense_navigation_method_mut(self: TypeAnalysisSession, MUTABLE node: MethodCall) RETURNS !Void
@@ -18206,7 +18206,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       locatable__set_coerced_type_object_mut(&node.value, target_type);
     END
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &node, target_type));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ Cast: COPY &node }, target_type));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_CallSiteOverride(self: TypeAnalysisSession, node: CallSiteOverride) RETURNS !Void
