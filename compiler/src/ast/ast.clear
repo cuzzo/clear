@@ -16692,3 +16692,13 @@ PUB FN locatable__visibility(value: Locatable) RETURNS ?String@symbol ->
   END
   RETURN NIL;
 END
+
+# The mirror of locatable__ownership_pending_transfer: a variant that carries the field takes
+# the write, and one that does not ignores it -- which is what Ruby does
+# when the node has no such attribute.
+PUB FN locatable__set_ownership_pending_transfer_mut(MUTABLE value: Locatable, new_value: ?Bool) RETURNS Void ->
+  PARTIAL MATCH value START
+    Locatable.Identifier AS MUTABLE item -> item.ownership_pending_transfer = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END

@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -15534,8 +15534,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE expected_type = TRY (scope__resolve_full_type(scope, var_name));
     IF (((typeAnalysisSession__language_mode(rtoc_self_view) != :strict) AND node.value IS_A Identifier) AND !(TRY (type__implicitly_copyable?((TRY (aST__full_type_mut(node.value))), %(name: String@symbol) USE(rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(rtoc_self_view, name)))))) THEN
-      node.value.ownership_pending_transfer = TRUE;
-    END
+      locatable__set_ownership_pending_transfer_mut(&aST__node_value(node), TRUE);    END
     TRY (typeAnalysisSession__validate_assignment_type(rtoc_self_view, Node{ Assignment: COPY node }, TypeTypeInput{ Type: COPY TRY (scope__resolve_type(scope, var_name)) }, node.value.resolved_type));
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ Assignment: COPY node }, TRY (scope__resolve_type(scope, var_name))));
     MUTABLE entry: ?SymbolEntry@multiowned = scope__resolve_entry(scope, var_name);
@@ -19478,7 +19477,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF is_copy THEN
           RETURN;
         END
-        IF !(TRY (typeAnalysisSession__find_container_source(rtoc_self_view, assignment.value))) THEN
+        IF !(TRY (typeAnalysisSession__find_container_source(rtoc_self_view, &assignment.value))) THEN
           RETURN;
         END
         MUTABLE source_name: ?String = typeAnalysisSession__root_variable_name(rtoc_self_view, assignment.value);
@@ -20435,7 +20434,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE existing: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier_mutable));
       IF existing EXISTS AS existing_value THEN
         IF ownershipNode__specific_move_action?(existing_value) THEN
-        IF ((consumer_param_type != NIL) AND (existing.move_consumer_param_type == NIL)) THEN
+        IF ((consumer_param_type != NIL) AND (UNWRAP (existing).move_consumer_param_type == NIL)) THEN
           existing.move_consumer_param_type = COPY castTypeToOptionalTypeTypeInput__type_analysis_session(consumer_param_type);
         END
         identifier_mutable.was_moved = TRUE;
