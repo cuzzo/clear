@@ -218,10 +218,11 @@ by.each do |f, rs|
       next if view_aliases.include?(expr)
       # The cast takes its value by value. A `&` on the argument marks the
       # OUTER call's parameter as mutating, so it belongs outside the cast.
+      # A cast returns a value, not a place, so a mutating marker on the
+      # result has nothing to mark. Drop it rather than move it.
       inner = expr.delete_prefix('&')
-      marker = expr.start_with?('&') ? '&' : ''
 
-      edits << [sp[0], sp[1], " #{marker}UNWRAP (cast#{m[2]}To#{m[1]}(#{inner}))", :cast_arg]
+      edits << [sp[0], sp[1], " UNWRAP (cast#{m[2]}To#{m[1]}(#{inner}))", :cast_arg]
     elsif (m = e.match(/Pass '(\w+)' as '&\w+'/))
       sp = locate_arg(text, offsets, r['line'], argno)
       if sp && (expr = text[sp[0]...sp[1]].strip) =~ /\A#{m[1]}(\.|\z)/
