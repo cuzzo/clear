@@ -403,8 +403,8 @@ pub fn main() !void {
     rt.wireAllocator();
 
     // 4. Shared infrastructure
-    const fm = @import("fiber-memory.zig");
-    const fp = @import("scheduler.zig");
+    const fm = @import("runtime/fiber-memory.zig");
+    const fp = @import("runtime/scheduler.zig");
     var stack_pool = fm.StackPool.init(allocator);
     defer stack_pool.deinit();
 
@@ -513,7 +513,7 @@ pub fn main() !void {
     else
         false;
     if (profiling_enabled) {
-        @import("alloc-profile.zig").dump();
+        @import("runtime/alloc-profile.zig").dump();
     }
 }
 
