@@ -784,7 +784,7 @@ END
 PUB FN typeAnalysisSession__validate_copy_linear_resource_facts_mut(self: TypeAnalysisSession, program: Program, facts: LinearResourceFacts) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(node: Locatable) USE(facts, rtoc_self_view) -> {
     IF !(node IS_A CopyNode) THEN
         RETURN;
@@ -7481,7 +7481,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE lit: ?Locatable = aST__node_right(node);
-    IF !(lit IS_A Literal) THEN
+    IF !(UNWRAP (lit) IS_A Literal) THEN
       RETURN NIL;
     END
     IF !(((lit.type() == :INT64) OR (lit.type() == :PREFIXED_INT))) THEN
@@ -9791,7 +9791,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE alias_name = COPY fact.alias_name;
     IF alias_name THEN
       (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
-      scope__resolve_entry( UNWRAP (rtoc_local_receiver_217), alias_name) })?.capabilities).insert(COPY fact.capability);
+      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
     END
     RETURN NIL;
 }
@@ -17377,7 +17377,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF binding THEN
         MUTABLE bind_type = COPY step_type;
         IF type__error_union?(step_type) THEN
-          bind_type = step_type.payload_type();
+          bind_type = TRY (type__payload_type(step_type));
         END
         MUTABLE rtoc_mutable_receiver_425 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
         TRY (scope__declare(&rtoc_mutable_receiver_425, UNWRAP (binding), NIL, bind_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
