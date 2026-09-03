@@ -8609,8 +8609,8 @@ PRIVATE FN mIRLowering__function_lowering_context(self: MIRLowering, node: Funct
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE mutable_scalar_params: NameSet = Set[];
-    MUTABLE collection_params: NameSet = Set[];
+    MUTABLE mutable_scalar_params: [Set]String = Set[];
+    MUTABLE collection_params: [Set]String = Set[];
     MUTABLE protocol_map_allocators: {String}String = {};
     FOR _ IN param_facts DO
     IF _.mutable_scalar THEN
@@ -8654,11 +8654,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     functionState__activate_mut(&rtoc_mutable_receiver_292, context);
 }
 END
-PRIVATE FN mIRLowering__typed_name_set(self: MIRLowering, values: ?[]ValuesItem) RETURNS NameSet
+PRIVATE FN mIRLowering__typed_name_set(self: MIRLowering, values: ?[]ValuesItem) RETURNS [Set]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE names: NameSet = Set[];
+    MUTABLE names: [Set]String = Set[];
     IF values != NIL THEN
         FOR _ IN values DO
         &names.append(COPY CAST(_ AS String));
@@ -8853,7 +8853,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN !(((TRY (mIRLowering__default_catch_body(rtoc_self_view, node))).length() == 0));
 }
 END
-PRIVATE FN mIRLowering__function_entry_plan(self: MIRLowering, node: FunctionDef, fn_needs_rt: Bool, mutable_scalar_params: NameSet, used_names: [Set]String) RETURNS !FunctionEntryPlan
+PRIVATE FN mIRLowering__function_entry_plan(self: MIRLowering, node: FunctionDef, fn_needs_rt: Bool, mutable_scalar_params: [Set]String, used_names: [Set]String) RETURNS !FunctionEntryPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
