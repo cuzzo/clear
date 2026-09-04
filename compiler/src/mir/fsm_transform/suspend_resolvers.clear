@@ -14,7 +14,7 @@ PUB FN suspendResolvers__resolve(seg: Segment, ctx: FsmEmitContext, lowering: MI
   IF (seg.tail IS_A IoSuspend) THEN
     RETURN TRY (suspendResolvers__resolve_io(seg.tail, ctx, lowering));
   ELSE_IF (seg.tail IS_A NextSuspend) THEN
-    RETURN TRY (suspendResolvers__resolve_next(seg.tail, ctx, lowering, (susp_idx OR_ELSE ((seg.index + 1)))));
+    RETURN TRY (suspendResolvers__resolve_next(seg.tail, ctx, &lowering, (susp_idx OR_ELSE ((seg.index + 1)))));
   ELSE
     panic("{}Add a resolve_<kind> branch when introducing a new suspend kind.");
   END

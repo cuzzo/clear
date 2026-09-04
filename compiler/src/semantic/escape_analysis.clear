@@ -631,7 +631,7 @@ PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {St
   FOR _ IN facts.escape_nodes DO
   FOR _ IN escapeAnalysis__escape_sinks() DO
   IF escapeSink__matches?(_, _) THEN
-    TRY (escapeAnalysis__apply_escape_sink_mut(_, _, context));
+    TRY (escapeAnalysis__apply_escape_sink_mut(_, _, &context));
   END
   END
   END

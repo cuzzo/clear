@@ -145,9 +145,9 @@ PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(MUTABLE self: PipelineCo
   ELSE_IF (source_kind == PipelineConcurrentSourceKind.BcMaterialized) THEN
     RETURN TRY (pipelineConcurrentLowerer__lower_bc_plan(self, &plan));
   ELSE_IF (source_kind == PipelineConcurrentSourceKind.BoundedStream) THEN
-    RETURN TRY (pipelineConcurrentLowerer__lower_bounded_stream_plan(self, plan));
+    RETURN TRY (pipelineConcurrentLowerer__lower_bounded_stream_plan(self, &plan));
   ELSE_IF (source_kind == PipelineConcurrentSourceKind.RuntimeStream) THEN
-    RETURN TRY (pipelineConcurrentLowerer__lower_stream_plan(&self, plan));
+    RETURN TRY (pipelineConcurrentLowerer__lower_stream_plan(&self, &plan));
   ELSE_IF (source_kind == PipelineConcurrentSourceKind.RuntimeList) THEN
     RETURN TRY (pipelineConcurrentLowerer__lower_list_plan(self, &plan));
   ELSE
@@ -330,7 +330,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_where_prune(self: Pipe
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bounded_stream_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE lhs: Identifier = COPY castLocatableToIdentifier__pipeline_concurrent_lowerer(plan.lhs);
-  RETURN TRY (pipelineConcurrentLowerer__lower_bounded_stream_terminal_plan(self, plan.terminal_kind, &lhs, plan));
+  RETURN TRY (pipelineConcurrentLowerer__lower_bounded_stream_terminal_plan(self, plan.terminal_kind, &lhs, &plan));
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bounded_stream_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, MUTABLE lhs: Identifier, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   IF (terminal_kind == PipelineConcurrentTerminalKind.Select) THEN
@@ -523,7 +523,7 @@ PRIVATE FN pipelineConcurrentLowerer__bc_rescue_policy(self: PipelineConcurrentL
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_stream_plan(MUTABLE self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE lhs: Identifier = COPY castLocatableToIdentifier__pipeline_concurrent_lowerer(plan.lhs);
-  RETURN TRY (pipelineConcurrentLowerer__lower_stream_terminal_plan(&self, plan.terminal_kind, &lhs, plan));
+  RETURN TRY (pipelineConcurrentLowerer__lower_stream_terminal_plan(&self, plan.terminal_kind, &lhs, &plan));
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(MUTABLE self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, MUTABLE lhs: Identifier, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   IF (terminal_kind == PipelineConcurrentTerminalKind.Select) THEN
