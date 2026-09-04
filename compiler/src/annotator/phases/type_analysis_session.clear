@@ -7581,7 +7581,7 @@ PRIVATE FN typeAnalysisSession__type_annotation_facts(self: TypeAnalysisSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TypeAnnotationFacts{ node: COPY node, type_obj: COPY type_obj, is_param: is_param, inner: CAST(COPY TRY (typeAnalysisSession__type_annotation_inner(rtoc_self_view, type_obj)) AS Type), inner_array: (type__tense?(type_obj) AND ((TRY (type__tense_type(type_obj)) != NIL) AND (type__array?(((TRY (type__tense_type(type_obj)))?)) == TRUE))), fn_type_params: COPY TRY (typeAnalysisSession__current_function_type_params(rtoc_self_view)) };
+    RETURN TypeAnnotationFacts{ node: COPY node, type_obj: COPY type_obj, is_param: is_param, inner: CAST(COPY TRY (typeAnalysisSession__type_annotation_inner(rtoc_self_view, type_obj)) AS Type), inner_array: (type__tense?(type_obj) AND (type__array?(TRY (type__tense_type(type_obj))) == TRUE)), fn_type_params: COPY TRY (typeAnalysisSession__current_function_type_params(rtoc_self_view)) };
 }
 END
 PRIVATE FN typeAnalysisSession__type_annotation_inner(self: TypeAnalysisSession, type_obj: Type) RETURNS !?Type
@@ -10025,7 +10025,9 @@ PRIVATE FN typeAnalysisSession__record_capture_local_mut(self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF name EXISTS AS name_value THEN
-      (typeAnalysisSession__current_capture_context( rtoc_self_view)?.locals).insert(COPY name_value);
+      IF typeAnalysisSession__current_capture_context(rtoc_self_view) EXISTS AS MUTABLE capture_context THEN
+      &capture_context.locals.insert(COPY name_value);
+    END
     END
 }
 END
@@ -10360,7 +10362,7 @@ PRIVATE FN typeAnalysisSession__resolve_resource_close(self: TypeAnalysisSession
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE ti = TRY (aST__full_type_mut(node));
-    RETURN ti.resolve_resource_close(%(name: String@symbol) USE(rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(rtoc_self_view, name)));
+    RETURN type__resolve_resource_close(ti, %(name: String@symbol) USE(rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(rtoc_self_view, name)));
 }
 END
 PRIVATE FN typeAnalysisSession__declaration_allocates?(self: TypeAnalysisSession, node: AllocDeclarationNode) RETURNS Bool
@@ -13071,7 +13073,11 @@ PRIVATE FN typeAnalysisSession__runtime_is_a_target_names(self: TypeAnalysisSess
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE segments = TRY (typeAnalysisSession__runtime_is_a_target_segments(rtoc_self_view, node));
     MUTABLE full = segments.join(".");
-    RETURN CAST((([full, segments.last()]) |> DISTINCT _) AS []String);
+    MUTABLE names: []String = [COPY full];
+    IF segments.last() EXISTS AS last_segment THEN
+      &names.append(COPY last_segment);
+    END
+    RETURN CAST((names |> DISTINCT _) AS []String);
 }
 END
 PRIVATE FN typeAnalysisSession__runtime_is_a_target_segments(self: TypeAnalysisSession, node: Node) RETURNS ![]String
