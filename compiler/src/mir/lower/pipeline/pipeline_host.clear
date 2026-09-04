@@ -478,10 +478,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN pipelinePlaceholderUsage__node_uses_placeholder?(node);
 }
 END
-PRIVATE FN pipelineHost__substitute_placeholders(self: PipelineHost, node: Locatable) RETURNS !Locatable
+PRIVATE FN pipelineHost__substitute_placeholders(MUTABLE self: PipelineHost, node: Locatable) RETURNS !Locatable
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_25 = (pipelinePlaceholderRewriter__new(pipelineHost__current_context(rtoc_self_view)));
     TRY (pipelinePlaceholderRewriter__substitute( &rtoc_local_receiver_25, node)) };
 }

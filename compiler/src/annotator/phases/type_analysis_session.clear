@@ -3648,10 +3648,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, UNWRAP (castFunctionCallNodeToLocatable(node)), TRY (type__success_type(error_union))));
 }
 END
-PRIVATE FN typeAnalysisSession__mark_owned_c_out_parameters_mut(self: TypeAnalysisSession, signature: FunctionSignature, args: []Locatable) RETURNS !Void
+PRIVATE FN typeAnalysisSession__mark_owned_c_out_parameters_mut(MUTABLE self: TypeAnalysisSession, signature: FunctionSignature, args: []Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(((functionSignature__extern_source(signature) != NIL) AND (((functionSignature__extern_source(signature))?).abi == :c))) THEN
       RETURN;
     END
@@ -3689,10 +3689,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN typeAnalysisSession__receiver_container_alloc(self: TypeAnalysisSession, node: FunctionCallNode) RETURNS ?String@symbol
+PRIVATE FN typeAnalysisSession__receiver_container_alloc(MUTABLE self: TypeAnalysisSession, node: FunctionCallNode) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A MethodCall AS method_call THEN
       MUTABLE obj = method_call.object;
       MUTABLE sym: ?SymbolEntry@multiowned = aST__node__symbol(obj);
@@ -3733,7 +3733,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE facts = TRY (typeAnalysisSession__call_argument_facts(rtoc_self_view, site, param, site.args[rtoc_idx]?, rtoc_idx));
+      MUTABLE facts = TRY (typeAnalysisSession__call_argument_facts(&rtoc_self_view, site, param, site.args[rtoc_idx]?, rtoc_idx));
       TRY (typeAnalysisSession__verify_param_lifetime_mut(rtoc_self_view, facts.arg_node, facts.param, signature));
       TRY (typeAnalysisSession__verify_mutable_argument_mut(rtoc_self_view, facts));
       TRY (typeAnalysisSession__verify_takes_argument_mut(&rtoc_self_view, facts));
@@ -3749,10 +3749,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__call_signature_site(self: TypeAnalysisSession, node: FunctionCallNode, args_input: ?[]Locatable = NIL) RETURNS CallSignatureSite
+PRIVATE FN typeAnalysisSession__call_signature_site(MUTABLE self: TypeAnalysisSession, node: FunctionCallNode, args_input: ?[]Locatable = NIL) RETURNS CallSignatureSite
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE args = COPY args_input;
     args = (args OR_ELSE UNWRAP (functionCallNode__args(node)));
     MUTABLE source_name: String = "";
@@ -3764,18 +3764,18 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CallSignatureSite{ node: COPY node, name: COPY source_name, args: COPY args };
 }
 END
-PRIVATE FN typeAnalysisSession__call_arity_plan(self: TypeAnalysisSession, site: CallSignatureSite, signature: FunctionSignature) RETURNS !CallArityPlan
+PRIVATE FN typeAnalysisSession__call_arity_plan(MUTABLE self: TypeAnalysisSession, site: CallSignatureSite, signature: FunctionSignature) RETURNS !CallArityPlan
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE params = TRY (functionSignature__params(signature));
     RETURN CallArityPlan{ site: COPY site, params: COPY params, min_args: params |> COUNT (_.required == TRUE), max_args: params.length(), given_args: site.args.length() };
 }
 END
-PRIVATE FN typeAnalysisSession__verify_call_arity_mut(self: TypeAnalysisSession, plan: CallArityPlan) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_call_arity_mut(MUTABLE self: TypeAnalysisSession, plan: CallArityPlan) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(callArityPlan__mismatch?(plan)) THEN
       RETURN;
     END
@@ -3797,10 +3797,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__default_argument_for(self: TypeAnalysisSession, param: Param) RETURNS Locatable
+PRIVATE FN typeAnalysisSession__default_argument_for(MUTABLE self: TypeAnalysisSession, param: Param) RETURNS Locatable
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE default: ?Locatable = COPY param.default;
     IF UNWRAP (default) IS_A DefaultLit THEN
       RETURN Locatable{ StructLit: COPY StructLit{ token: COPY UNWRAP (locatable__token(UNWRAP (default))), name: COPY type__to_s(param.type), fields: COPY {}, storage: NIL, type_args: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, borrowed_field_names: NIL, field_tokens: {} } };
@@ -4186,7 +4186,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF TRY (typeAnalysisSession__reentrant_fn_argument_allowed_by_callee?(&rtoc_self_view, facts)) THEN
       RETURN TRUE;
     END
-    IF !(TRY (typeAnalysisSession__reentrant_fn_argument_rejected?(rtoc_self_view, facts))) THEN
+    IF !(TRY (typeAnalysisSession__reentrant_fn_argument_rejected?(&rtoc_self_view, facts))) THEN
       RETURN FALSE;
     END
     RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :REENTRANT_FN_TO_NON_REENTRANT_PARAM }, [], CAST({:name: typeAnalysisSession__argument_name(rtoc_self_view, facts.arg_node, "Expression"), :param: facts.param.name} AS {String@symbol}Any)));
@@ -16856,11 +16856,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN typeAnalysisSession__mark_unrequired_polymorphic_with_runtime_mut(self: TypeAnalysisSession, node: WithBlock, MUTABLE fn_ctx: FunctionContext) RETURNS !Void
+PRIVATE FN typeAnalysisSession__mark_unrequired_polymorphic_with_runtime_mut(self: TypeAnalysisSession, MUTABLE node: WithBlock, MUTABLE fn_ctx: FunctionContext) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE bound_name: ?String = TRY (typeAnalysisSession__unrequired_polymorphic_runtime_bound_name(rtoc_self_view, node));
+    MUTABLE bound_name: ?String = TRY (typeAnalysisSession__unrequired_polymorphic_runtime_bound_name(rtoc_self_view, &node));
     IF bound_name EXISTS AS bound_name_value THEN
       MUTABLE fn_node: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(rtoc_self_view, fn_ctx.name));
       IF fn_node EXISTS AS fn_node_value THEN

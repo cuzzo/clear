@@ -13687,7 +13687,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Emittable{ AsyncPayloadTake: COPY AsyncPayloadTake{ source: Emittable{ TryExpr: COPY unwrapped_transport }, result_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY result_t })) } };
 }
 END
-PRIVATE FN mIRLowering__lower_literal(self: MIRLowering, node: Literal) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_literal(self: MIRLowering, MUTABLE node: Literal) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13814,7 +13814,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((codepoint >= 97) AND (codepoint <= 122));
 }
 END
-PRIVATE FN mIRLowering__atomic_capture_load?(self: MIRLowering, node: Identifier) RETURNS Bool
+PRIVATE FN mIRLowering__atomic_capture_load?(self: MIRLowering, MUTABLE node: Identifier) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13878,7 +13878,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__require_tense_operation_plan_mut(self: MIRLowering, node: Locatable, operation: TenseOperationKind, backend: TenseBackendForm) RETURNS !TenseOperationPlan
+PRIVATE FN mIRLowering__require_tense_operation_plan_mut(self: MIRLowering, MUTABLE node: Locatable, operation: TenseOperationKind, backend: TenseBackendForm) RETURNS !TenseOperationPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13889,7 +13889,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN UNWRAP (plan);
 }
 END
-PRIVATE FN mIRLowering__lower_optional_unwrap(MUTABLE self: MIRLowering, node: OptionalUnwrap) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_optional_unwrap(MUTABLE self: MIRLowering, MUTABLE node: OptionalUnwrap) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13921,7 +13921,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable);
     END
     IF ((node.op == symbol("AND")) OR (node.op == symbol("OR"))) THEN
-      RETURN Emittable{ MIRBinOp: COPY TRY (mIRLowering__lower_lazy_boolean_op(&rtoc_self_view, node)) };
+      RETURN Emittable{ MIRBinOp: COPY TRY (mIRLowering__lower_lazy_boolean_op(&rtoc_self_view, &node)) };
     END
     IF node.string_concat THEN
       MUTABLE left = TRY (mIRLowering__hoist_alloc(rtoc_self_view, TRY (mIRLowering__widen_symbol_to_bytes(rtoc_self_view, CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable), node.left)), node.left));
@@ -13943,7 +13943,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Emittable{ TypeEq: COPY TypeEq{ left: COPY TRY (mIRLowering__lower_type_value_expr(&rtoc_self_view, node.left)), right: COPY TRY (mIRLowering__lower_type_value_expr(&rtoc_self_view, node.right)), lowered_node_id: NIL, ownership_consumption: NIL } };
 }
 END
-PRIVATE FN mIRLowering__lower_type_value_expr(MUTABLE self: MIRLowering, node: Node) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_type_value_expr(MUTABLE self: MIRLowering, MUTABLE node: Node) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13965,7 +13965,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(name) })))));
 }
 END
-PRIVATE FN mIRLowering__dotted_type_value_zig_name(self: MIRLowering, node: GetField) RETURNS !String
+PRIVATE FN mIRLowering__dotted_type_value_zig_name(self: MIRLowering, MUTABLE node: GetField) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
