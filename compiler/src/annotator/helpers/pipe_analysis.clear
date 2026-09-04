@@ -60,7 +60,13 @@ END
 PUB FN selectorEffectFact__fallible?(self: SelectorEffectFact) RETURNS Bool EFFECTS REENTRANT ->
   RETURN tenseSelectorPlan__fallible?(self.plan);
 END
-observable_reducible_numeric = [:Int8, :Int16, :Int32, :Int64, :UInt8, :Byte, :UInt16, :UInt32, :UInt64, :Float32, :Float64];
-valid_concurrent_options = ["workers", "capacity", "batch", "parallel", "size"];
-valid_concurrent_sizes = ["MICRO", "STANDARD", "LARGE", "XL"];
+PUB FN pipeAnalysis__observable_reducible_numeric() RETURNS []String@symbol EFFECTS REENTRANT ->
+  RETURN [:Int8, :Int16, :Int32, :Int64, :UInt8, :Byte, :UInt16, :UInt32, :UInt64, :Float32, :Float64];
+END
+PUB FN pipeAnalysis__valid_concurrent_options() RETURNS []String EFFECTS REENTRANT ->
+  RETURN ["workers", "capacity", "batch", "parallel", "size"];
+END
+PUB FN pipeAnalysis__valid_concurrent_sizes() RETURNS []String EFFECTS REENTRANT ->
+  RETURN ["MICRO", "STANDARD", "LARGE", "XL"];
+END
 # End Ruby module PipeAnalysis

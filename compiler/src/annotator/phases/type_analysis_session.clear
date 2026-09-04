@@ -6819,10 +6819,10 @@ PRIVATE FN typeAnalysisSession__validate_concurrent_size_option_mut(self: TypeAn
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE size: ?Locatable = COPY options["size"];
     IF size EXISTS AS size_value THEN
-      IF (IF size_value IS_A Identifier AS identifier THEN valid_concurrent_sizes.contains?(identifier__name(identifier)) ELSE FALSE END) THEN
+      IF (IF size_value IS_A Identifier AS identifier THEN pipeAnalysis__valid_concurrent_sizes().contains?(identifier__name(identifier)) ELSE FALSE END) THEN
         RETURN;
       END
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY size_value }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_SIZE_BAD_VALUE }, [], CAST({:valid: valid_concurrent_sizes.join(", "), :got: typeAnalysisSession__concurrent_option_label(rtoc_self_view, size_value)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY size_value }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_SIZE_BAD_VALUE }, [], CAST({:valid: pipeAnalysis__valid_concurrent_sizes().join(", "), :got: typeAnalysisSession__concurrent_option_label(rtoc_self_view, size_value)} AS {String@symbol}Any)));
     ELSE
       RETURN;
     END
@@ -6843,8 +6843,8 @@ PRIVATE FN typeAnalysisSession__validate_known_concurrent_options_mut(self: Type
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN options.keys() DO
-    IF !(valid_concurrent_options.contains?(_)) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConcurrentOp: COPY conc } }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_UNKNOWN_OPTION }, [], CAST({:name: _, :valid: valid_concurrent_options.join(", ")} AS {String@symbol}Any)));
+    IF !(pipeAnalysis__valid_concurrent_options().contains?(_)) THEN
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConcurrentOp: COPY conc } }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_UNKNOWN_OPTION }, [], CAST({:name: _, :valid: pipeAnalysis__valid_concurrent_options().join(", ")} AS {String@symbol}Any)));
     END
     END
 }
