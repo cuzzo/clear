@@ -60,6 +60,120 @@ PUB FN diagnosticKwargs__rendered(kwargs: {String@symbol}?DiagnosticKwValue) RET
   RETURN out;
 END
 PUB UNION ResolutionSessionReturnValue { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecovery: TenseRecovery, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKind: TenseOperationKind, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, TokenMultiowned: Token@multiowned, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, Token: Token }
+PUB FN castNodeToResolutionSessionReturnValue(value: Node) RETURNS ResolutionSessionReturnValue ->
+  PARTIAL MATCH value START
+    Node.RequireNode AS item -> RETURN ResolutionSessionReturnValue{ RequireNode: COPY item };,
+    Node.ProtocolRequirement AS item -> RETURN ResolutionSessionReturnValue{ ProtocolRequirement: COPY item };,
+    Node.ProtocolDef AS item -> RETURN ResolutionSessionReturnValue{ ProtocolDef: COPY item };,
+    Node.FunctionDef AS item -> RETURN ResolutionSessionReturnValue{ FunctionDef: COPY item };,
+    Node.ImplementationDef AS item -> RETURN ResolutionSessionReturnValue{ ImplementationDef: COPY item };,
+    Node.ConformanceDef AS item -> RETURN ResolutionSessionReturnValue{ ConformanceDef: COPY item };,
+    Node.VarDecl AS item -> RETURN ResolutionSessionReturnValue{ VarDecl: COPY item };,
+    Node.Assignment AS item -> RETURN ResolutionSessionReturnValue{ Assignment: COPY item };,
+    Node.DestructuringAssignment AS item -> RETURN ResolutionSessionReturnValue{ DestructuringAssignment: COPY item };,
+    Node.BindExpr AS item -> RETURN ResolutionSessionReturnValue{ BindExpr: COPY item };,
+    Node.BinaryOp AS item -> RETURN ResolutionSessionReturnValue{ BinaryOp: COPY item };,
+    Node.IsA AS item -> RETURN ResolutionSessionReturnValue{ IsA: COPY item };,
+    Node.CallSiteOverride AS item -> RETURN ResolutionSessionReturnValue{ CallSiteOverride: COPY item };,
+    Node.Identifier AS item -> RETURN ResolutionSessionReturnValue{ Identifier: COPY item };,
+    Node.Literal AS item -> RETURN ResolutionSessionReturnValue{ Literal: COPY item };,
+    Node.ListLit AS item -> RETURN ResolutionSessionReturnValue{ ListLit: COPY item };,
+    Node.TupleLit AS item -> RETURN ResolutionSessionReturnValue{ TupleLit: COPY item };,
+    Node.DefaultArrayLit AS item -> RETURN ResolutionSessionReturnValue{ DefaultArrayLit: COPY item };,
+    Node.HashLit AS item -> RETURN ResolutionSessionReturnValue{ HashLit: COPY item };,
+    Node.DefaultLit AS item -> RETURN ResolutionSessionReturnValue{ DefaultLit: COPY item };,
+    Node.StructLit AS item -> RETURN ResolutionSessionReturnValue{ StructLit: COPY item };,
+    Node.LambdaLit AS item -> RETURN ResolutionSessionReturnValue{ LambdaLit: COPY item };,
+    Node.IfStatement AS item -> RETURN ResolutionSessionReturnValue{ IfStatement: COPY item };,
+    Node.IfBind AS item -> RETURN ResolutionSessionReturnValue{ IfBind: COPY item };,
+    Node.WhileLoop AS item -> RETURN ResolutionSessionReturnValue{ WhileLoop: COPY item };,
+    Node.WhileBindLoop AS item -> RETURN ResolutionSessionReturnValue{ WhileBindLoop: COPY item };,
+    Node.BreakNode AS item -> RETURN ResolutionSessionReturnValue{ BreakNode: COPY item };,
+    Node.ContinueNode AS item -> RETURN ResolutionSessionReturnValue{ ContinueNode: COPY item };,
+    Node.FuncCall AS item -> RETURN ResolutionSessionReturnValue{ FuncCall: COPY item };,
+    Node.GetField AS item -> RETURN ResolutionSessionReturnValue{ GetField: COPY item };,
+    Node.GetIndex AS item -> RETURN ResolutionSessionReturnValue{ GetIndex: COPY item };,
+    Node.ReturnNode AS item -> RETURN ResolutionSessionReturnValue{ ReturnNode: COPY item };,
+    Node.Assert AS item -> RETURN ResolutionSessionReturnValue{ Assert: COPY item };,
+    Node.ThrowNode AS item -> RETURN ResolutionSessionReturnValue{ ThrowNode: COPY item };,
+    Node.DieNode AS item -> RETURN ResolutionSessionReturnValue{ DieNode: COPY item };,
+    Node.Slice AS item -> RETURN ResolutionSessionReturnValue{ Slice: COPY item };,
+    Node.Require AS item -> RETURN ResolutionSessionReturnValue{ Require: COPY item };,
+    Node.WithBlock AS item -> RETURN ResolutionSessionReturnValue{ WithBlock: COPY item };,
+    Node.SyncPolicyDecl AS item -> RETURN ResolutionSessionReturnValue{ SyncPolicyDecl: COPY item };,
+    Node.SelectOp AS item -> RETURN ResolutionSessionReturnValue{ SelectOp: COPY item };,
+    Node.WhereOp AS item -> RETURN ResolutionSessionReturnValue{ WhereOp: COPY item };,
+    Node.IndexOp AS item -> RETURN ResolutionSessionReturnValue{ IndexOp: COPY item };,
+    Node.ReduceOp AS item -> RETURN ResolutionSessionReturnValue{ ReduceOp: COPY item };,
+    Node.OrderByOp AS item -> RETURN ResolutionSessionReturnValue{ OrderByOp: COPY item };,
+    Node.LimitOp AS item -> RETURN ResolutionSessionReturnValue{ LimitOp: COPY item };,
+    Node.UnnestOp AS item -> RETURN ResolutionSessionReturnValue{ UnnestOp: COPY item };,
+    Node.DistinctOp AS item -> RETURN ResolutionSessionReturnValue{ DistinctOp: COPY item };,
+    Node.EachOp AS item -> RETURN ResolutionSessionReturnValue{ EachOp: COPY item };,
+    Node.TapOp AS item -> RETURN ResolutionSessionReturnValue{ TapOp: COPY item };,
+    Node.SkipOp AS item -> RETURN ResolutionSessionReturnValue{ SkipOp: COPY item };,
+    Node.CollectOp AS item -> RETURN ResolutionSessionReturnValue{ CollectOp: COPY item };,
+    Node.TakeWhileOp AS item -> RETURN ResolutionSessionReturnValue{ TakeWhileOp: COPY item };,
+    Node.WindowOp AS item -> RETURN ResolutionSessionReturnValue{ WindowOp: COPY item };,
+    Node.BatchWindowOp AS item -> RETURN ResolutionSessionReturnValue{ BatchWindowOp: COPY item };,
+    Node.JoinOp AS item -> RETURN ResolutionSessionReturnValue{ JoinOp: COPY item };,
+    Node.FindOp AS item -> RETURN ResolutionSessionReturnValue{ FindOp: COPY item };,
+    Node.AnyOp AS item -> RETURN ResolutionSessionReturnValue{ AnyOp: COPY item };,
+    Node.AllOp AS item -> RETURN ResolutionSessionReturnValue{ AllOp: COPY item };,
+    Node.CountOp AS item -> RETURN ResolutionSessionReturnValue{ CountOp: COPY item };,
+    Node.SumOp AS item -> RETURN ResolutionSessionReturnValue{ SumOp: COPY item };,
+    Node.AverageOp AS item -> RETURN ResolutionSessionReturnValue{ AverageOp: COPY item };,
+    Node.MinOp AS item -> RETURN ResolutionSessionReturnValue{ MinOp: COPY item };,
+    Node.MaxOp AS item -> RETURN ResolutionSessionReturnValue{ MaxOp: COPY item };,
+    Node.ShardOp AS item -> RETURN ResolutionSessionReturnValue{ ShardOp: COPY item };,
+    Node.ConcurrentOp AS item -> RETURN ResolutionSessionReturnValue{ ConcurrentOp: COPY item };,
+    Node.Placeholder AS item -> RETURN ResolutionSessionReturnValue{ Placeholder: COPY item };,
+    Node.Copy AS item -> RETURN ResolutionSessionReturnValue{ Copy: COPY item };,
+    Node.TenseNavigation AS item -> RETURN ResolutionSessionReturnValue{ TenseNavigation: COPY item };,
+    Node.MutableBorrow AS item -> RETURN ResolutionSessionReturnValue{ MutableBorrow: COPY item };,
+    Node.CatchBlock AS item -> RETURN ResolutionSessionReturnValue{ CatchBlock: COPY item };,
+    Node.RecoverOp AS item -> RETURN ResolutionSessionReturnValue{ RecoverOp: COPY item };,
+    Node.StringConcat AS item -> RETURN ResolutionSessionReturnValue{ StringConcat: COPY item };,
+    Node.CapabilityWrap AS item -> RETURN ResolutionSessionReturnValue{ CapabilityWrap: COPY item };,
+    Node.MoveNode AS item -> RETURN ResolutionSessionReturnValue{ MoveNode: COPY item };,
+    Node.CopyNode AS item -> RETURN ResolutionSessionReturnValue{ CopyNode: COPY item };,
+    Node.KeepNode AS item -> RETURN ResolutionSessionReturnValue{ KeepNode: COPY item };,
+    Node.ShareNode AS item -> RETURN ResolutionSessionReturnValue{ ShareNode: COPY item };,
+    Node.LinkNode AS item -> RETURN ResolutionSessionReturnValue{ LinkNode: COPY item };,
+    Node.ResolveNode AS item -> RETURN ResolutionSessionReturnValue{ ResolveNode: COPY item };,
+    Node.FreezeNode AS item -> RETURN ResolutionSessionReturnValue{ FreezeNode: COPY item };,
+    Node.PassStmt AS item -> RETURN ResolutionSessionReturnValue{ PassStmt: COPY item };,
+    Node.StructPattern AS item -> RETURN ResolutionSessionReturnValue{ StructPattern: COPY item };,
+    Node.ExternFnDecl AS item -> RETURN ResolutionSessionReturnValue{ ExternFnDecl: COPY item };,
+    Node.ExternStructDecl AS item -> RETURN ResolutionSessionReturnValue{ ExternStructDecl: COPY item };,
+    Node.UnionDef AS item -> RETURN ResolutionSessionReturnValue{ UnionDef: COPY item };,
+    Node.UnionVariantLit AS item -> RETURN ResolutionSessionReturnValue{ UnionVariantLit: COPY item };,
+    Node.StaticCall AS item -> RETURN ResolutionSessionReturnValue{ StaticCall: COPY item };,
+    Node.ThenChain AS item -> RETURN ResolutionSessionReturnValue{ ThenChain: COPY item };,
+    Node.BgStreamBlock AS item -> RETURN ResolutionSessionReturnValue{ BgStreamBlock: COPY item };,
+    Node.YieldExpr AS item -> RETURN ResolutionSessionReturnValue{ YieldExpr: COPY item };,
+    Node.CloseStream AS item -> RETURN ResolutionSessionReturnValue{ CloseStream: COPY item };,
+    Node.NextExpr AS item -> RETURN ResolutionSessionReturnValue{ NextExpr: COPY item };,
+    Node.MatchStatement AS item -> RETURN ResolutionSessionReturnValue{ MatchStatement: COPY item };,
+    Node.ForRange AS item -> RETURN ResolutionSessionReturnValue{ ForRange: COPY item };,
+    Node.ForEach AS item -> RETURN ResolutionSessionReturnValue{ ForEach: COPY item };,
+    Node.TestBlock AS item -> RETURN ResolutionSessionReturnValue{ TestBlock: COPY item };,
+    Node.WhenBlock AS item -> RETURN ResolutionSessionReturnValue{ WhenBlock: COPY item };,
+    Node.LetBinding AS item -> RETURN ResolutionSessionReturnValue{ LetBinding: COPY item };,
+    Node.TestThat AS item -> RETURN ResolutionSessionReturnValue{ TestThat: COPY item };,
+    Node.AssertRaises AS item -> RETURN ResolutionSessionReturnValue{ AssertRaises: COPY item };,
+    Node.BenchmarkStmt AS item -> RETURN ResolutionSessionReturnValue{ BenchmarkStmt: COPY item };,
+    Node.SmashStmt AS item -> RETURN ResolutionSessionReturnValue{ SmashStmt: COPY item };,
+    Node.ProfileStmt AS item -> RETURN ResolutionSessionReturnValue{ ProfileStmt: COPY item };,
+    Node.StubDecl AS item -> RETURN ResolutionSessionReturnValue{ StubDecl: COPY item };,
+    Node.Drop AS item -> RETURN ResolutionSessionReturnValue{ Drop: COPY item };,
+    Node.SuppressCleanup AS item -> RETURN ResolutionSessionReturnValue{ SuppressCleanup: COPY item };,
+    Node.Return AS item -> RETURN ResolutionSessionReturnValue{ Return: COPY item };,
+    Node.ReassignCleanup AS item -> RETURN ResolutionSessionReturnValue{ ReassignCleanup: COPY item };,
+    Node.FieldCleanup AS item -> RETURN ResolutionSessionReturnValue{ FieldCleanup: COPY item };
+  END
+  panic("Invalid cast to ResolutionSessionReturnValue");
+END
 # Ruby module Annotator
 # Ruby module Annotator::Phases
 PUB STRUCT ResolutionSession {
@@ -219,12 +333,15 @@ PUB FN resolutionSession__generic_param_token(self: ResolutionSession, node: Nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE param = node__generic_params(node) |> FIND (_.name == name);
-    RETURN ((IF param != NIL THEN
-      param.token()
-    ELSE
-      NIL
-    END) OR_ELSE node);
+    IF node__generic_params(node) EXISTS AS params THEN
+      MUTABLE param: ?GenericParamDecl = params |> FIND (_.name == name);
+      IF param EXISTS AS param_value THEN
+        IF param_value.token EXISTS AS param_token THEN
+          RETURN ResolutionSessionReturnValue{ Token: COPY param_token };
+        END
+      END
+    END
+    RETURN castNodeToResolutionSessionReturnValue(node);
 }
 END
 PUB FN resolutionSession__get_lifetime_path(self: ResolutionSession, node: FunctionDef) RETURNS !?String
@@ -2001,7 +2118,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (scope__resolve_type_entry(rtoc_local_receiver_62, name)) } THEN
       TRY (resolutionSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castTypeDeclarationToLocatable(node)), ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: "type", :name: name} AS {String@symbol}Any)));
     END
-    (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(name, schema);
+    MUTABLE scope = TRY (resolutionSession__current_scope(rtoc_self_view));
+    scope__declare_type(&scope, name, schema);
 }
 END
 PRIVATE FN resolutionSession__equivalent_extern_type_schema?(self: ResolutionSession, existing: SchemaValue, incoming: SchemaValue) RETURNS Bool
