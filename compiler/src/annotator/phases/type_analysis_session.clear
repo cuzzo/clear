@@ -1082,7 +1082,7 @@ PRIVATE FN typeAnalysisSession__body_identity_for_function(self: TypeAnalysisSes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ordinal = ((TRY (functionRegistry__names(typeAnalysisSession__semantic_function_registry(rtoc_self_view)))).indexOf(name) + 1);
+    MUTABLE ordinal = (UNWRAP ((TRY (functionRegistry__names(typeAnalysisSession__semantic_function_registry(rtoc_self_view)))).indexOf(name)) + 1);
     RETURN bodyIdentity__for_ordinal(ordinal);
 }
 END
@@ -6645,7 +6645,7 @@ PRIVATE FN typeAnalysisSession__shard_concurrent_source?(self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((IF UNWRAP (lhs) IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND UNWRAP (aST__node_right(lhs)) IS_A ShardOp);
+    RETURN ((IF lhs IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) AND UNWRAP (aST__node_right(lhs)) IS_A ShardOp);
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_concurrent_op(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?String@symbol
@@ -8770,12 +8770,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY typeAnalysisSession__effect_state(rtoc_self_view).call_site_arg_families;
 }
 END
-PRIVATE FN typeAnalysisSession__effect_direct_effects_for(self: TypeAnalysisSession, fn_name: String) RETURNS ![Set]String@symbol
+PRIVATE FN typeAnalysisSession__effect_direct_effects_for(MUTABLE self: TypeAnalysisSession, fn_name: String) RETURNS ![Set]String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__set_direct_effect_mut(&rtoc_self_view, fn_name, (typeAnalysisSession__effect_direct_effects(rtoc_self_view)[fn_name] OR_ELSE Set[]));
-    RETURN typeAnalysisSession__effect_direct_effects(rtoc_self_view)[fn_name];
+    RETURN COPY (typeAnalysisSession__effect_direct_effects(rtoc_self_view)[fn_name] OR_ELSE Set[]);
 }
 END
 PRIVATE FN typeAnalysisSession__effect_call_site_context_for(self: TypeAnalysisSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool
@@ -8819,7 +8819,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     effect = typeAnalysisSession__promote_suspends_for_current_context(rtoc_self_view, effect);
-    (TRY (typeAnalysisSession__effect_direct_effects_for(rtoc_self_view, UNWRAP (fn_ctx?.name)))).insert(COPY effect);
+    (TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, UNWRAP (fn_ctx?.name)))).insert(COPY effect);
     IF (typeAnalysisSession__inside_snapshot_transaction_body?(rtoc_self_view) AND suspends_family.contains?(effect)) THEN
       typeAnalysisSession__record_snapshot_txn_violation_mut(rtoc_self_view, effect, fn_ctx.name);
     END
@@ -16657,7 +16657,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE direct_effects = typeAnalysisSession__effect_direct_effects(rtoc_self_view);
           MUTABLE snapshot_branch_value: ?[Set]String@symbol = NIL;
           IF fn_ctx_name EXISTS AS fn_ctx_name_value THEN
-            snapshot_branch_value = COPY TRY (typeAnalysisSession__effect_direct_effects_for(rtoc_self_view, fn_ctx_name_value));
+            snapshot_branch_value = COPY TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, fn_ctx_name_value));
           ELSE
             snapshot_branch_value = NIL;
           END
@@ -16666,7 +16666,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           FOR _ IN arms_value_mutable DO
         MUTABLE before_branch_value: ?[Set]String@symbol = NIL;
             IF fn_ctx_name EXISTS AS fn_ctx_name_value THEN
-              before_branch_value = COPY TRY (typeAnalysisSession__effect_direct_effects_for(rtoc_self_view, fn_ctx_name_value));
+              before_branch_value = COPY TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, fn_ctx_name_value));
             ELSE
               before_branch_value = NIL;
             END
@@ -16682,7 +16682,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (typeAnalysisSession__finalize_scope(rtoc_self_view, Locatable{ WithBlock: COPY node }))
         });
         IF fn_ctx_name EXISTS AS fn_ctx_name_value THEN
-              MUTABLE after = TRY (typeAnalysisSession__effect_direct_effects_for(rtoc_self_view, fn_ctx_name_value));
+              MUTABLE after = TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, fn_ctx_name_value));
               MUTABLE arm_delta = (after - before?);
               &per_arm_effects.append(arm_delta);
               direct_effects[fn_ctx_name_value] = COPY UNWRAP (snapshot);
@@ -16693,7 +16693,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE all_union = per_arm_effects |> REDUCE(Set[]) (ruby_set_union(acc, _));
             MUTABLE maybe_set = (all_union - concrete);
             MUTABLE maybe_projection = {symbol("CONTENTION"): symbol("CONTENTION_MAYBE"), symbol("BLOCKING"): symbol("BLOCKING_MAYBE")};
-            MUTABLE target_effects = TRY (typeAnalysisSession__effect_direct_effects_for(rtoc_self_view, fn_ctx_name));
+            MUTABLE target_effects = TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, fn_ctx_name));
             FOR _ IN concrete DO
             &target_effects.insert(COPY _);
             END
