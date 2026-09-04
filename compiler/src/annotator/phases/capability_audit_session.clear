@@ -674,7 +674,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(locatable__token(UNWRAP (castNodeToLocatable(node)))) THEN
       RETURN NIL;
     END
-    RETURN capabilityAuditSession__anchor_at(rtoc_self_view, locatable__token(UNWRAP (castNodeToLocatable(node))).line, (locatable__token(UNWRAP (castNodeToLocatable(node))).column - variant_name.codepointCount()));
+    RETURN capabilityAuditSession__anchor_at(rtoc_self_view, UNWRAP (locatable__token(UNWRAP (castNodeToLocatable(node)))).line, (UNWRAP (locatable__token(UNWRAP (castNodeToLocatable(node)))).column - variant_name.codepointCount()));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_variant_typo_mut(self: CapabilityAuditSession, anchor: AnchorToken, name: String, candidates: []NameCandidate, message: String, fix_label: String, cascade: Bool = FALSE) RETURNS !Void
@@ -2055,7 +2055,7 @@ PRIVATE FN capabilityAuditSession__auto_param_slot_label(self: CapabilityAuditSe
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn: FunctionDef = COPY CAST(slot.decl_node AS FunctionDef);
     MUTABLE param = COPY UNWRAP (fn.params[UNWRAP (slot.index)]);
-    RETURN "parameter '${param.name}' of `${slot.fn_name}`";
+    RETURN "parameter '${param.name}' of `${(slot.fn_name OR_ELSE "")}`";
 }
 END
 PRIVATE FN capabilityAuditSession__auto_local_slot_label(self: CapabilityAuditSession, slot: Slot) RETURNS String
@@ -2238,8 +2238,8 @@ PRIVATE FN capabilityAuditSession__effect_direct_effects_for(MUTABLE self: Capab
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    capabilityAuditSession__set_direct_effect_mut(&rtoc_self_view, fn_name, (capabilityAuditSession__effect_direct_effects(&rtoc_self_view)[fn_name] OR_ELSE Set[]));
-    RETURN capabilityAuditSession__effect_direct_effects(rtoc_self_view)[fn_name];
+    capabilityAuditSession__set_direct_effect_mut(&rtoc_self_view, fn_name, (capabilityAuditSession__effect_direct_effects(rtoc_self_view)[fn_name] OR_ELSE Set[]));
+    RETURN COPY (capabilityAuditSession__effect_direct_effects(rtoc_self_view)[fn_name] OR_ELSE Set[]);
 }
 END
 PRIVATE FN capabilityAuditSession__effect_call_site_context(self: CapabilityAuditSession) RETURNS {String}{String}{String@symbol}Bool
@@ -2260,7 +2260,7 @@ PRIVATE FN capabilityAuditSession__effect_call_site_context_for(MUTABLE self: Ca
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    capabilityAuditSession__set_call_site_context_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_context(&rtoc_self_view)[caller_name] OR_ELSE {}));
+    capabilityAuditSession__set_call_site_context_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_context(rtoc_self_view)[caller_name] OR_ELSE {}));
     MUTABLE caller_context = UNWRAP (capabilityAuditSession__effect_call_site_context(rtoc_self_view)[caller_name]);
     caller_context[callee_name] = (caller_context[callee_name] OR_ELSE {:loop: FALSE, :cond: FALSE});
     RETURN caller_context[callee_name];
@@ -2270,7 +2270,7 @@ PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    capabilityAuditSession__set_call_site_arg_families_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_arg_families(&rtoc_self_view)[caller_name] OR_ELSE {}));
+    capabilityAuditSession__set_call_site_arg_families_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] OR_ELSE {}));
     MUTABLE caller_families = UNWRAP (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name]);
     IF !(caller_families.contains?(callee_name)) THEN
       caller_families[callee_name] = [];
@@ -4510,7 +4510,7 @@ FN ruby_wrap_optional_String_symbol_DiagnosticKwValue(value: ?String@symbol) RET
 END
 FN ruby_wrap_optional_Type_multiowned_X__capability_audit_session(value: ?Type) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
-    RETURN X{ Type: Type{ Type: COPY optional_payload } };
+    RETURN X{ Type: COPY optional_payload };
   END
   NIL;
 END
