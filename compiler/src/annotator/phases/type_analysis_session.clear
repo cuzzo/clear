@@ -5718,7 +5718,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "JOIN"));
     MUTABLE left_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__right_source(node.right)));
-    MUTABLE rhs_type_info = node.right.right_source.full_type_mut({:context: "pipeline right source"});
+    MUTABLE rhs_type_info = locatable__right_source(node.right).full_type_mut({:context: "pipeline right source"});
     IF !(((node.right.right_source.metatype == :array) OR (IF rhs_type_info != NIL THEN
       type__collection?(rhs_type_info)
     ELSE
@@ -5786,7 +5786,7 @@ PRIVATE FN typeAnalysisSession__analyze_recover_op(MUTABLE self: TypeAnalysisSes
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__default_expr(node.right)));
     MUTABLE lhs_type = TRY (aST__full_type_mut(node.left));
-    MUTABLE lhs_t = (typeAnalysisSession__recoverable_result_type(rtoc_self_view, &node.left, "RECOVER input") OR_ELSE TRY (type__new(lhs_type)));
+    MUTABLE lhs_t = (typeAnalysisSession__recoverable_result_type(rtoc_self_view, &node.left, "RECOVER input") OR_ELSE TRY (type__new(TypeConstructionInput{ Type: COPY lhs_type })));
     IF lhs_t EXISTS AS lhs_t_value THEN
       IF lhs_t_value.error_union?() THEN
       MUTABLE fallback_type = node.right.default_expr.full_type_mut({:context: "RECOVER fallback"});
@@ -5811,7 +5811,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "REDUCE", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__initial_value(node.right)));
-    MUTABLE acc_type = node.right.initial_value.resolved_type;
+    MUTABLE acc_type = locatable__resolved_type(node.right.initial_value);
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(acc_type, item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_130 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_130, "acc", NIL, acc_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
@@ -6887,7 +6887,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE shard_node: ?Locatable = aST__node_right(node.left);
-    MUTABLE target_info = locatable__target_map(UNWRAP (shard_node)).full_type_mut({:context: "shard target map"});
+    MUTABLE target_info = UNWRAP (locatable__target_map(UNWRAP (shard_node))).full_type_mut({:context: "shard target map"});
     conc.shard_context = PipelineShardContext{ map_var: COPY shard_node.target_map, shard_count: (IF target_info != NIL THEN
       type__shard_count(target_info)
     ELSE
@@ -19392,7 +19392,7 @@ PRIVATE FN typeAnalysisSession__stamp_keep_carrier_op_mut(self: TypeAnalysisSess
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((IF root IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_474: ?SymbolEntry@multiowned = locatable__symbol(root);
     symbolEntry__carrier_polymorphic( UNWRAP (rtoc_local_receiver_474)) }) THEN
-      node.carrier_op = IF ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_475 = locatable__symbol(root);
+      node.carrier_op = IF ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_475: ?SymbolEntry@multiowned = locatable__symbol(root);
       symbolEntry__carrier_contract(rtoc_local_receiver_475) } == :monomorphic) THEN
         :monomorphic_keep
       ELSE
