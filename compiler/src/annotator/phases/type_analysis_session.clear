@@ -4022,7 +4022,7 @@ PRIVATE FN typeAnalysisSession__verify_takes_argument_mut(self: TypeAnalysisSess
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (facts.is_give AND !(facts.param.takes)) THEN
-      TRY (typeAnalysisSession__record_deferred_give_validation_mut(rtoc_self_view, facts));
+      TRY (typeAnalysisSession__record_deferred_give_validation_mut(&rtoc_self_view, facts));
     END
     IF !((facts.param.takes OR facts.is_give)) THEN
       RETURN;
@@ -9259,7 +9259,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (capabilityTransition__exclusive_validation_action(fact) == :valid) OR (capabilityTransition__exclusive_validation_action(fact) == :declared_contract) THEN
     
       ELSE_IF (capabilityTransition__exclusive_validation_action(fact) == :defer) THEN
-        TRY (typeAnalysisSession__record_deferred_with_validation_mut(rtoc_self_view, node, fact));
+        TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, node, fact));
       ELSE
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE name = COPY fact.target_label;
@@ -9268,7 +9268,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (fact.capability == :write_locked_read) THEN
       IF !(capabilityTransition__write_locked_sync?(fact)) THEN
         IF capabilityTransition__deferred_sync_param?(fact) THEN
-          TRY (typeAnalysisSession__record_deferred_with_validation_mut(rtoc_self_view, node, fact));
+          TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, node, fact));
         ELSE
           MUTABLE name = COPY fact.target_label;
           TRY (typeAnalysisSession__emit_with_read_needs_write_lock_mut(rtoc_self_view, node, name, &var_node));
@@ -9369,7 +9369,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE syn: ?String@symbol = COPY fact.sync;
       IF !((syn == :atomic)) THEN
         IF capabilityTransition__deferred_sync_param?(fact) THEN
-          TRY (typeAnalysisSession__record_deferred_with_validation_mut(rtoc_self_view, node, fact));
+          TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, node, fact));
         ELSE
           MUTABLE name = COPY fact.target_label;
           MUTABLE storage: ?String@symbol = COPY fact.storage;
@@ -12014,25 +12014,25 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "EFFECTS REENTRANT${suffix}";
 }
 END
-PRIVATE FN typeAnalysisSession__record_deferred_with_validation_mut(self: TypeAnalysisSession, node: WithBlock, fact: CapabilityTransition) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_deferred_with_validation_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, fact: CapabilityTransition) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    (TRY (typeAnalysisSession__deferred_with_validations(rtoc_self_view))).append(DeferredWithValidation{ node: node, fact: COPY fact });
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.audit_inputs.deferred_with_validations.append(DeferredWithValidation{ node: COPY node, fact: COPY fact });
 }
 END
-PRIVATE FN typeAnalysisSession__record_deferred_recovery_validation_mut(self: TypeAnalysisSession, node: BinaryOp, left: FuncCall, callee_name: String, value_type: Type) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_deferred_recovery_validation_mut(MUTABLE self: TypeAnalysisSession, node: BinaryOp, left: FuncCall, callee_name: String, value_type: Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    (TRY (typeAnalysisSession__deferred_recovery_validations(rtoc_self_view))).append(DeferredRecoveryValidation{ node: COPY node, left: COPY left, callee_name: COPY callee_name, value_type: COPY value_type });
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.audit_inputs.deferred_recovery_validations.append(DeferredRecoveryValidation{ node: COPY node, left: COPY left, callee_name: COPY callee_name, value_type: COPY value_type });
 }
 END
-PRIVATE FN typeAnalysisSession__record_deferred_give_validation_mut(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_deferred_give_validation_mut(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    (TRY (typeAnalysisSession__deferred_give_validations(rtoc_self_view))).append(DeferredGiveValidation{ arg_node: COPY facts.arg_node, callee_name: COPY CAST(aST__node_name(UNWRAP (castFunctionCallNodeToLocatable(facts.site.node))) AS String), param_index: facts.index, param_name: COPY facts.param.name });
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.audit_inputs.deferred_give_validations.append(DeferredGiveValidation{ arg_node: COPY facts.arg_node, callee_name: COPY CAST(aST__node_name(UNWRAP (castFunctionCallNodeToLocatable(facts.site.node))) AS String), param_index: facts.index, param_name: COPY facts.param.name });
 }
 END
 PRIVATE FN typeAnalysisSession__visit_FuncCall(MUTABLE self: TypeAnalysisSession, MUTABLE node: FuncCall) RETURNS !Void
@@ -17990,7 +17990,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF type__optional?(left_value_type) THEN
         t_left_type = COPY left_value_type;
       ELSE_IF (node.left IS_A FuncCall AND (TRY (typeAnalysisSession__function_node_map(rtoc_self_view))).contains?(node.left.name())) THEN
-        TRY (typeAnalysisSession__record_deferred_recovery_validation_mut(rtoc_self_view, node, castLocatableToFuncCall__type_analysis_session(node.left), node.left.name(), left_value_type));
+        TRY (typeAnalysisSession__record_deferred_recovery_validation_mut(&rtoc_self_view, node, castLocatableToFuncCall__type_analysis_session(node.left), node.left.name(), left_value_type));
         t_left_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(left_value_type)));
       ELSE
         t_left_type = left_value_type;
