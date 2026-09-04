@@ -4999,7 +4999,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(mod_value.ast) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_151: []Emittable = List[]; rtoc_empty_list_151 } ) AS []Emittable);
     END
-    RETURN ((mod_value.ast.statements() |> SELECT:? (IF !((_ IS_A ExternFnDecl OR _ IS_A ExternStructDecl)) THEN NIL ELSE TRY (mIRLowering__lower(&rtoc_self_view, &_)) END) |> WHERE _ != NIL).flatten()) |> WHERE _ IS_A Emittable;
+    RETURN ((UNWRAP (mod_value.ast).statements |> SELECT:? (IF !((_ IS_A ExternFnDecl OR _ IS_A ExternStructDecl)) THEN NIL ELSE TRY (mIRLowering__lower(&rtoc_self_view, &_)) END) |> WHERE _ != NIL).flatten()) |> WHERE _ IS_A Emittable;
 }
 END
 PRIVATE FN mIRLowering__record_module_const_init_mut(self: MIRLowering, mod_value: ?CompiledModule, alias_name: String) RETURNS Void
@@ -5055,7 +5055,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(mod_value.ast) THEN
       RETURN visible_names;
     END
-    MUTABLE rtoc_each_items_155 = mod_value.ast.statements();
+    MUTABLE rtoc_each_items_155 = UNWRAP (mod_value.ast).statements;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_155.length() DO
     IF (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A StructDef) OR (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A EnumDef) OR (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A UnionDef) THEN
@@ -5100,7 +5100,7 @@ PRIVATE FN mIRLowering__imported_module_items(MUTABLE self: MIRLowering, mod_val
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF mod_value.ast THEN
-      MUTABLE hidden_type_items = mod_value.ast.statements() |> SELECT:? (IF !(mIRLowering__hidden_imported_type_statement?(rtoc_self_view, _, mod_value)) THEN NIL ELSE TRY (mIRLowering__lower(&rtoc_self_view, &_)) END) |> WHERE _ != NIL;
+      MUTABLE hidden_type_items = UNWRAP (mod_value.ast).statements |> SELECT:? (IF !(mIRLowering__hidden_imported_type_statement?(rtoc_self_view, _, mod_value)) THEN NIL ELSE TRY (mIRLowering__lower(&rtoc_self_view, &_)) END) |> WHERE _ != NIL;
       MUTABLE fn_items = ((mod_value.ast.statements() |> SELECT:? { MUTABLE rtoc_mutable_block_param_156 = COPY _;
       (IF (rtoc_mutable_block_param_156 IS_A FunctionDef AND (rtoc_mutable_block_param_156.name() == name)) THEN NIL ELSE (IF rtoc_mutable_block_param_156 IS_A FunctionDef THEN TRY (mIRLowering__lower_function_def(&rtoc_self_view, &rtoc_mutable_block_param_156)) ELSE (IF (rtoc_mutable_block_param_156 IS_A VarDecl OR rtoc_mutable_block_param_156 IS_A BindExpr) THEN TRY (mIRLowering__lower(&rtoc_self_view, &rtoc_mutable_block_param_156)) ELSE NIL END) END) END) } |> WHERE _ != NIL).flatten()) |> WHERE _ IS_A Emittable;
       RETURN ([hidden_type_items, fn_items]).flatten() |> WHERE _ IS_A Emittable;
@@ -5154,7 +5154,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE prev_source_dir: ?String = COPY mIRLowering__program_state(rtoc_self_view).source_dir;
   DEFER rtoc_self_view.state.program.source_dir = prev_source_dir;
   rtoc_self_view.state.program.source_dir = mod_value.source_dir;
-  RETURN (mod_value.ast.statements() |> SELECT:? (IF !(_ IS_A RequireNode) THEN NIL ELSE TRY (mIRLowering__lower_require(&rtoc_self_view, _)) END) |> WHERE _ != NIL).flatten() |> WHERE _ IS_A Emittable;
+  RETURN (UNWRAP (mod_value.ast).statements |> SELECT:? (IF !(_ IS_A RequireNode) THEN NIL ELSE TRY (mIRLowering__lower_require(&rtoc_self_view, _)) END) |> WHERE _ != NIL).flatten() |> WHERE _ IS_A Emittable;
 }
 END
 PRIVATE FN mIRLowering__imported_bc_helper_fns(self: MIRLowering, mod_value: CompiledModule, items: []Emittable) RETURNS ![]FnDef

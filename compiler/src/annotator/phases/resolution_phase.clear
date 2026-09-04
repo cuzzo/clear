@@ -91,7 +91,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN resolutionSession__resolve_mut(MUTABLE self: ResolutionSession, program: Program) RETURNS !ResolutionFacts@multiowned
+PUB FN resolutionSession__resolve_mut(MUTABLE self: ResolutionSession, MUTABLE program: Program) RETURNS !ResolutionFacts@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -334,7 +334,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF (((expected_return == actual_return) OR (expected_return == :Any)) OR (actual_return == :Any)) THEN
             RETURN;
           END
-          TRY (resolutionSession__error_mut(rtoc_self_view, COPY requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_RETURN_TYPE }, [], CAST({:union: node.name, :method: requirement.name, :expected: expected_return, :fn: requirement.name, :got: actual_return} AS {String@symbol}Any)));
+          TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY requirement.token }, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_RETURN_TYPE }, [], CAST({:union: node.name, :method: requirement.name, :expected: expected_return, :fn: requirement.name, :got: actual_return} AS {String@symbol}Any)));
         ELSE
           RETURN;
         END
@@ -1631,7 +1631,7 @@ PRIVATE FN resolutionSession__register_protocol_declaration(MUTABLE self: Resolu
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (resolutionSession__protocol_declared?(rtoc_self_view, node.name) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_46 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type_entry(rtoc_local_receiver_46, symbol(node.name))) }) THEN
-      TRY (resolutionSession__error_mut(rtoc_self_view, node.name_token, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: "protocol", :name: node.name} AS {String@symbol}Any)));
+      TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY node.name_token }, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: "protocol", :name: node.name} AS {String@symbol}Any)));
     END
     MUTABLE seen_associated: [Set]String = Set[];
     FOR _ IN node.associated_types DO
@@ -2084,7 +2084,7 @@ PUB FN resolutionSession__new(importer: ?ModuleImporter, source_dir: String, sou
 END
 PUB FN resolutionPhase__run(program: Program, importer: ?ModuleImporter, source_dir: String, source_code: ?String) RETURNS !ResolutionFacts@multiowned ->
   RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_63 = TRY (resolutionSession__new(importer, source_dir, source_code));
-  TRY (resolutionSession__resolve_mut(&rtoc_mutable_receiver_63, program)) };
+  TRY (resolutionSession__resolve_mut(&rtoc_mutable_receiver_63, &program)) };
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
