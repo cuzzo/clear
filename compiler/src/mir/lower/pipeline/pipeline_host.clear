@@ -361,7 +361,7 @@ END
 PUB FN pipelineHost__pipe_binding_zig_name(self: PipelineHost, clear_name: String) RETURNS String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "__pipe_${clear_name.deletePrefix("$")}";
 }
 END
@@ -396,7 +396,7 @@ END
 PUB FN pipelineHost__typed_block_expr(self: PipelineHost, label: String, body: []Emittable, result_type: Type) RETURNS MIRBlockExpr
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE block = MIRBlockExpr{ label: COPY label, body: body, lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
     block.result_type = COPY result_type;
     RETURN block;
@@ -833,7 +833,7 @@ PRIVATE FN pipelineHost__owning_pipeline_temp_stmts(self: PipelineHost, name: St
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (pipelineMaterializer__owning_pipeline_temp_stmts(rtoc_self_view.materializer, name, source, type_info, zig_type, alloc));
 }
 END

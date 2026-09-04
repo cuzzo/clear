@@ -123,7 +123,7 @@ END
 PRIVATE FN fsmTransform__collect_body_locals(stmts: []Locatable) RETURNS ![]PromotedLocalFact ->
   MUTABLE out: []PromotedLocalFact = ( { MUTABLE rtoc_empty_list_8: []PromotedLocalFact = List[]; rtoc_empty_list_8 } );
   MUTABLE seen: {String}Bool = {};
-  aST__each_locatable_list(stmts, FALSE, %(node: Locatable) USE(MUTABLE out, MUTABLE seen) -> {
+  aST__each_locatable_list(stmts, FALSE, %(MUTABLE node: Locatable) USE(MUTABLE out, MUTABLE seen) -> {
   MUTABLE entry: ?PromotedLocalFact = TRY (fsmTransform__local_entry_for_node(&node));
   IF !(entry) THEN
       RETURN;

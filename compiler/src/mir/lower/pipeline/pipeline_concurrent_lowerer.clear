@@ -332,7 +332,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bounded_stream_plan(self: PipelineCo
   MUTABLE lhs: Identifier = COPY castLocatableToIdentifier__pipeline_concurrent_lowerer(plan.lhs);
   RETURN TRY (pipelineConcurrentLowerer__lower_bounded_stream_terminal_plan(self, plan.terminal_kind, &lhs, plan));
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_bounded_stream_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, MUTABLE lhs: Identifier, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_bounded_stream_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, MUTABLE lhs: Identifier, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   IF (terminal_kind == PipelineConcurrentTerminalKind.Select) THEN
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_bounded_select(self, &lhs, plan.conc_op, castLocatableToSelectOp__pipeline_concurrent_lowerer(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Where) THEN
@@ -525,7 +525,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_stream_plan(self: PipelineConcurrent
   MUTABLE lhs: Identifier = COPY castLocatableToIdentifier__pipeline_concurrent_lowerer(plan.lhs);
   RETURN TRY (pipelineConcurrentLowerer__lower_stream_terminal_plan(self, plan.terminal_kind, &lhs, plan));
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, MUTABLE lhs: Identifier, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(self: PipelineConcurrentLowerer, terminal_kind: PipelineConcurrentTerminalKind, MUTABLE lhs: Identifier, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   IF (terminal_kind == PipelineConcurrentTerminalKind.Select) THEN
     RETURN PipelineConcurrentResult{ MIRBlockExpr: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_stream_select(self, &lhs, plan.conc_op, castLocatableToSelectOp__pipeline_concurrent_lowerer(plan.inner))) };
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Where) THEN
@@ -842,7 +842,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__callback_body(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp, body_kind: PipelineConcurrentCallbackBodyKind, ret_type: Type, capture_map: {String}String, capture_symbols: {String}SymbolEntry) RETURNS ![]Emittable ->
   IF (body_kind == PipelineConcurrentCallbackBodyKind.Expr) THEN
     MUTABLE expr_node: ?Locatable = TRY (pipelineConcurrentLowerer__callback_expression(self, conc_op));
-    MUTABLE expr_mir = pipelineConcurrentLowerer__callback_expr_mir_call(self, UNWRAP (expr_node), "__item", capture_map, capture_symbols, "__rt");
+    MUTABLE expr_mir = pipelineConcurrentLowerer__callback_expr_mir_call(self, UNWRAP (UNWRAP (expr_node)), "__item", capture_map, capture_symbols, "__rt");
     IF (expr_mir IS_A Call OR expr_mir IS_A MIRMethodCall) THEN
       emittable__set_try_wrap_mut(&expr_mir, FALSE);    END
     MUTABLE expr_type = TRY (aST__full_type_mut(expr_node));

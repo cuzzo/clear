@@ -5541,7 +5541,7 @@ END
 PRIVATE FN typeAnalysisSession__validate_where_effect_contract_mut(self: TypeAnalysisSession, op: WhereOp, effect: SelectorEffectFact) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((!(selectorEffectFact__asynchronous(effect)) AND (selectorEffectFact__required_mode(effect) == NIL)) AND (type__resolved(selectorEffectFact__value_type(effect)) == :Bool)) THEN
       RETURN;
     END
@@ -5609,7 +5609,7 @@ END
 PRIVATE FN typeAnalysisSession__parse_batch_window_time_ns(self: TypeAnalysisSession, str: String) RETURNS !?Int64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(str, compilerRegexCompile("\\A(\\d+(?:\\.\\d+)?)(ms|s|min|h)\\z"));
     IF !(m) THEN
       RETURN NIL;
@@ -5834,7 +5834,7 @@ END
 PRIVATE FN typeAnalysisSession__observable_reducible_scalar?(self: TypeAnalysisSession, acc_type: String@symbol) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ([:Int8, :Int16, :Int32, :Int64, :UInt8, :Byte, :UInt16, :UInt32, :UInt64, :Float32, :Float64]).contains?(acc_type);
 }
 END
@@ -6000,7 +6000,7 @@ END
 PRIVATE FN typeAnalysisSession__analyze_pipe_to_named_function(self: TypeAnalysisSession, MUTABLE node: BinaryOp, sig: FunctionSignature, func_name: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan = TRY (typeAnalysisSession__pipe_arity_plan(rtoc_self_view, sig, 1));
     IF pipeArityPlan__mismatch?(plan) THEN
       IF pipeArityPlan__exact?(plan) THEN
@@ -6043,7 +6043,7 @@ END
 PRIVATE FN typeAnalysisSession__propagate_pipeline_recovery_mut(self: TypeAnalysisSession, MUTABLE node: BinaryOp, call: FuncCall, retain_error_union: Bool) RETURNS Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE error_type = NIL;
     error_type = call.error_union_type;
     IF (retain_error_union AND error_type) THEN
@@ -6057,7 +6057,7 @@ END
 PRIVATE FN typeAnalysisSession__pipe_arity_plan(self: TypeAnalysisSession, sig: FunctionSignature, given_args: Int64) RETURNS !PipeArityPlan
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE params = TRY (functionSignature__params(sig));
     RETURN PipeArityPlan{ params: COPY params, min_args: params |> COUNT (_.required == TRUE), max_args: params.length(), given_args: COPY given_args };
 }
@@ -8740,7 +8740,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN TRY (typeAnalysisSession__field_container_source(rtoc_self_view, &get_field_mutable));
       END
       MUTABLE transparent_operand: ?Locatable = aST__borrow_transparent_operand(expr_value_mutable);
-      IF transparent_operand EXISTS AS transparent_operand_value THEN
+      IF transparent_operand EXISTS AS MUTABLE transparent_operand_value THEN
         RETURN typeAnalysisSession__find_container_source(rtoc_self_view, &transparent_operand_value);
       END
       RETURN NIL;
@@ -17310,7 +17310,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN typeAnalysisSession__emit_missing_stream_yields_contract_mut(self: TypeAnalysisSession, node: BgStreamBlock, contract: Type) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_missing_stream_yields_contract_mut(self: TypeAnalysisSession, MUTABLE node: BgStreamBlock, contract: Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
