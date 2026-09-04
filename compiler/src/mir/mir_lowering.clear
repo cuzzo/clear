@@ -13172,7 +13172,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN bg;
 }
 END
-PRIVATE FN mIRLowering__bg_alloc_expr(self: MIRLowering, node: BgBlock, rt_name: String) RETURNS !Emittable
+PRIVATE FN mIRLowering__bg_alloc_expr(self: MIRLowering, MUTABLE node: BgBlock, rt_name: String) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13184,7 +13184,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY receiver }, method: "heapAlloc", args: ( { MUTABLE rtoc_empty_list_508: []Any = List[]; rtoc_empty_list_508 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
 }
 END
-PRIVATE FN mIRLowering__bg_body_materialization(MUTABLE self: MIRLowering, node: BgBlock, caps: FiberCtxBuilderResult, analysis: ?CaptureAnalysis, pointer_captures: [Set]String, bg_rt: String, id: MIRLoweringGeneratedId, is_void: Bool, inner_t: Type, capture_close_plans: {String}ResourceClosePlan) RETURNS !BgBodyMaterialization
+PRIVATE FN mIRLowering__bg_body_materialization(MUTABLE self: MIRLowering, MUTABLE node: BgBlock, caps: FiberCtxBuilderResult, analysis: ?CaptureAnalysis, pointer_captures: [Set]String, bg_rt: String, id: MIRLoweringGeneratedId, is_void: Bool, inner_t: Type, capture_close_plans: {String}ResourceClosePlan) RETURNS !BgBodyMaterialization
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13199,7 +13199,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN BgBodyMaterialization{ run_body: COPY run_body, emit_body: COPY emit_body };
 }
 END
-PRIVATE FN mIRLowering__bg_body_steps(self: MIRLowering, node: BgBlock) RETURNS ![]BgBodyStep
+PRIVATE FN mIRLowering__bg_body_steps(self: MIRLowering, MUTABLE node: BgBlock) RETURNS ![]BgBodyStep
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13216,7 +13216,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN steps;
 }
 END
-PRIVATE FN mIRLowering__lower_bg_body_steps(MUTABLE self: MIRLowering, node: BgBlock, id: MIRLoweringGeneratedId, is_void: Bool, inner_t: Type) RETURNS !BgBodyMaterialization
+PRIVATE FN mIRLowering__lower_bg_body_steps(MUTABLE self: MIRLowering, MUTABLE node: BgBlock, id: MIRLoweringGeneratedId, is_void: Bool, inner_t: Type) RETURNS !BgBodyMaterialization
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13327,7 +13327,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__enforce_bg_capture_strategies_mut(self: MIRLowering, node: Node, ignored_captured: {String}Type) RETURNS !Void
+PRIVATE FN mIRLowering__enforce_bg_capture_strategies_mut(self: MIRLowering, MUTABLE node: Node, ignored_captured: {String}Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13479,7 +13479,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN MIRLoweringReturnValue{ MIRBgBlock: COPY bg };
 }
 END
-PRIVATE FN mIRLowering__lower_yield(MUTABLE self: MIRLowering, node: YieldExpr) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_yield(MUTABLE self: MIRLowering, MUTABLE node: YieldExpr) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
