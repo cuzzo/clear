@@ -4938,8 +4938,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (path_a.first() != path_b.first()) THEN
       RETURN FALSE;
     END
-    MUTABLE len = ([path_a.length(), path_b.length()]).min();
-    RETURN (path_a.substr(0, (len - 0)) == path_b.substr(0, (len - 0)));
+    MUTABLE len = min(path_a.length(), path_b.length());
+    RETURN (path_a[0..<len] == path_b[0..<len]);
 }
 END
 PRIVATE FN typeAnalysisSession__reject_arg_type_matches?(self: TypeAnalysisSession, MUTABLE arg: Locatable, kind: String@symbol) RETURNS !Bool
@@ -12019,7 +12019,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((required == :reentrant) OR (IF (required == NIL) THEN
       (actual == NIL)
     ELSE
-      ((actual == NIL) OR (actual? == required))
+      ((actual == NIL) OR (actual == required))
     END));
 }
 END
@@ -16944,7 +16944,7 @@ PRIVATE FN typeAnalysisSession__retryable_with_fallible_body_error_mut(self: Typ
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE detail = sources.first(3).join(", ");
+    MUTABLE detail = (sources[0..<min(3, sources.length())]).join(", ");
     IF (sources.length() > 3) THEN
       detail = (detail $+ ", ...");
     END
