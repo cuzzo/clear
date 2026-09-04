@@ -3700,11 +3700,13 @@ PRIVATE FN capabilityAuditSession__predicate_impurity_reason(self: CapabilityAud
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (IF capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) != NIL THEN capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) ELSE TRY (capabilityAuditSession__matched_stdlib_impurity_reason(rtoc_self_view, call)) END) != NIL THEN
-    RETURN ((IF capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) != NIL THEN capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) ELSE TRY (capabilityAuditSession__matched_stdlib_impurity_reason(rtoc_self_view, call)) END))?;
-    ELSE
-    RETURN TRY (capabilityAuditSession__semantic_function_impurity_reason(rtoc_self_view, callee));
+    IF capabilityAuditSession__call_declared_impurity_reason(rtoc_self_view, call) EXISTS AS declared THEN
+      RETURN COPY declared;
     END
+    IF TRY (capabilityAuditSession__matched_stdlib_impurity_reason(rtoc_self_view, call)) EXISTS AS stdlib THEN
+      RETURN COPY stdlib;
+    END
+    RETURN TRY (capabilityAuditSession__semantic_function_impurity_reason(rtoc_self_view, callee));
 }
 END
 PRIVATE FN capabilityAuditSession__call_declared_impurity_reason(self: CapabilityAuditSession, call: CapabilityAuditCall) RETURNS ?String
@@ -4180,13 +4182,13 @@ PRIVATE FN capabilityAuditSession__flush_deferred_recovery_validations_mut(self:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN (TRY (capabilityAuditSession__deferred_recovery_validations(rtoc_self_view))) DO
-    MUTABLE callee: ?FunctionDef@multiowned = TRY (capabilityAuditSession__function_node_for(rtoc_self_view, _.callee_name));
+    FOR MUTABLE validation IN (TRY (capabilityAuditSession__deferred_recovery_validations(rtoc_self_view))) DO
+    MUTABLE callee: ?FunctionDef@multiowned = TRY (capabilityAuditSession__function_node_for(rtoc_self_view, validation.callee_name));
     IF !(((callee != NIL) AND (callee.can_fail == TRUE))) THEN
-        TRY (capabilityAuditSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BinaryOp: COPY _.node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :OR_ELSE_NEEDS_RECOVERABLE_LEFT }, [], CAST({:got: TRY (type__surface_name_type(_.value_type))} AS {String@symbol}Any)));
+        TRY (capabilityAuditSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BinaryOp: COPY validation.node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :OR_ELSE_NEEDS_RECOVERABLE_LEFT }, [], CAST({:got: TRY (type__surface_name_type(validation.value_type))} AS {String@symbol}Any)));
     END
-    _.left.can_fail = TRUE;
-    _.left.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__capability_audit_session(_.value_type)));
+    validation.left.can_fail = TRUE;
+    validation.left.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__capability_audit_session(validation.value_type)));
     END
     (TRY (capabilityAuditSession__deferred_recovery_validations(rtoc_self_view))).clear();
 }
