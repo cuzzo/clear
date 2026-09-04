@@ -5395,7 +5395,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (scope__declare(&rtoc_mutable_receiver_112, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     IF (UNWRAP (aST__node_right( Locatable{ BinaryOp: COPY node })) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR (locatable__stream_mode(node.right) OR_ELSE FALSE)))) THEN
         MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, FALSE, %() USE(item_type, node, rtoc_self_view) -> {
-      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
+      TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))));
       rubyToClearVoid__type_analysis_session()
         });
         node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(rtoc_self_view, castLocatableToNode__type_analysis_session(node.right), analysis, FALSE, FALSE)) OR_ELSE analysis);
@@ -6915,7 +6915,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_157 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_157, "_", NIL, (IF item_type EXISTS AS rtoc_wrap_6915 THEN SymbolEntryTypeInput{ Type: COPY rtoc_wrap_6915 } ELSE NIL END), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view) -> {
-        rtoc_lambda_result_158 = TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op).expression()));
+        rtoc_lambda_result_158 = TRY (typeAnalysisSession__visit(&rtoc_self_view, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
         rtoc_lambda_result_158
       }))
     });
@@ -6945,7 +6945,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_160 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_160, "_", NIL, (IF item_type EXISTS AS rtoc_wrap_6945 THEN SymbolEntryTypeInput{ Type: COPY rtoc_wrap_6945 } ELSE NIL END), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view) -> {
-        FOR _ IN UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op).body() DO
+        FOR _ IN clearParserConcurrentPipelineOp__body(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op)) DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
         END
         NIL
@@ -6971,7 +6971,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_161 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_161, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
-        rtoc_lambda_result_162 = TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op).expression()));
+        rtoc_lambda_result_162 = TRY (typeAnalysisSession__visit(&rtoc_self_view, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
         rtoc_lambda_result_162
       }))
     });
@@ -7035,7 +7035,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_164 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_164, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
-        FOR _ IN UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op).body() DO
+        FOR _ IN clearParserConcurrentPipelineOp__body(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op)) DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
         END
         NIL
@@ -7525,7 +7525,7 @@ PRIVATE FN typeAnalysisSession__integer_range_target_type(self: TypeAnalysisSess
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE current_type = COPY effective_type;
     IF (IF current_type IS_A Type AS type THEN type__error_union?(type) ELSE FALSE END) THEN
-      MUTABLE payload_type = current_type.payload_type();
+      MUTABLE payload_type = typeTypeInput__payload_type(current_type);
       IF !(payload_type) THEN
         RETURN NIL;
       END
@@ -8725,7 +8725,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF expr_value_mutable IS_A GetIndex AS get_index THEN
         ti = TRY (aST__full_type_mut(get_index.target));
-        IF TRY (type__collection_value?(ti)) THEN
+        IF TRY (type__collection_value?(UNWRAP (ti))) THEN
           RETURN typeAnalysisSession__root_variable_name(rtoc_self_view, get_index.target);
         END
       END
@@ -12450,7 +12450,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(schemas__struct?(schema)) THEN
       RETURN FALSE;
     END
-    IF !(UNWRAP (schema).methods().key?(node.name)) THEN
+    IF !(schemaValue__methods(UNWRAP (schema)).key?(node.name)) THEN
       RETURN FALSE;
     END
     MUTABLE source_name = COPY node.name;
@@ -13695,7 +13695,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((((node.takes OR_ELSE FALSE) AND matchSubjectPlan__union?(plan)) AND expr IS_A Identifier)) THEN
       RETURN;
     END
-    MUTABLE source_name = expr.name();
+    MUTABLE source_name = locatable__name(expr);
     MUTABLE rtoc_graph_13664 = typeAnalysisSession__ownership_graph(rtoc_self_view);
     MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_13664, source_name);
     IF graph_node EXISTS AS graph_node_value THEN
@@ -13862,7 +13862,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF (IF payload IS_A Type AS type THEN type__indirect?(type) ELSE FALSE END) THEN
       MUTABLE inner_type = COPY payload;
-      &inner_type.strip_layout_mut();
+      &matchPayload__strip_layout_mut(inner_type);
       match_case.indirect_payload_as = TRUE;
       RETURN CAST(TRY (typeAnalysisSession__apply_type_subst(rtoc_self_view, castMatchPayloadToTypeTypeInput(inner_type), plan.union_subst)) AS Type);
     END
@@ -20100,7 +20100,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < _.params.length() DO
-      IF ((UNWRAP (_.params[rtoc_idx]).symbol).binding_id == sym.binding_id) THEN
+      IF ((UNWRAP (_.params[rtoc_idx]).symbol).binding_id == UNWRAP (sym).binding_id) THEN
           RETURN COPY CAST(UNWRAP (_.params[rtoc_idx]).name AS String);
       END
       rtoc_idx = rtoc_idx + 1;

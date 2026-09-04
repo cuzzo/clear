@@ -6020,7 +6020,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF last_step EXISTS AS last_step_value THEN
         MUTABLE last_step_value_mutable = COPY last_step_value;
         MUTABLE expr_type = TRY (aST__full_type_mut(last_step_value_mutable.expr));
-        MUTABLE retained_error =       IF ((TRUE AND (last_step_value_mutable.expr.retain_error_channel() == TRUE)) AND TRUE) THEN
+        MUTABLE retained_error =       IF ((TRUE AND (locatable__retain_error_channel(last_step_value_mutable.expr) == TRUE)) AND TRUE) THEN
           last_step_value_mutable.expr.error_union_type
         ELSE
           NIL
@@ -9014,7 +9014,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_316.length() DO
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST((emittable__name(UNWRAP (rtoc_each_items_316[rtoc_idx]))) AS String)] OR_ELSE mIRLowering__new());
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[CAST((emittable__name(rtoc_each_items_316[rtoc_idx])) AS String)] OR_ELSE mIRLowering__new());
       MUTABLE ti = COPY rtoc_each_items_316[rtoc_idx]?.type;
       IF !(((((IF rtoc_each_items_316[rtoc_idx]?.symbol != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_317 = CAST((rtoc_each_items_316[rtoc_idx]?.symbol) AS SymbolEntry);
@@ -16239,7 +16239,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_594)) }}";
     MUTABLE transfer_name: ?String = NIL;
     IF ((node.result != NIL) AND (UNWRAP (node.result) IS_A Identifier)) THEN
-      MUTABLE raw_name = COPY CAST(UNWRAP (node.result).name() AS String);
+      MUTABLE raw_name = COPY CAST(locatable__name(UNWRAP (node.result)) AS String);
       MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(rtoc_self_view))))[raw_name];
       transfer_name = mIRLowering__zig_safe_name(rtoc_self_view, raw_name);
       IF entry EXISTS AS entry_value THEN

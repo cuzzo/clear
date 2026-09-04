@@ -34,3 +34,14 @@ END
 # End Ruby module Annotator::Domains::ControlFlow
 # End Ruby module Annotator::Domains
 # End Ruby module Annotator
+
+# Ruby asks `respond_to?(:strip_layout_mut)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN matchPayload__strip_layout_mut(value: MatchPayload) RETURNS !?TypeCapabilities EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    MatchPayload.TypeMultiowned AS item -> RETURN TRY (type__strip_layout_mut(item));,
+    MatchPayload.Type AS item -> RETURN TRY (type__strip_layout_mut(item));,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

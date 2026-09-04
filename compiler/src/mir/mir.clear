@@ -19810,3 +19810,15 @@ PUB FN emittable__receiver(value: Emittable) RETURNS ?Emittable@boxed ->
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:destroy_order_bucket)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN fsmDestroyAction__destroy_order_bucket(value: FsmDestroyAction) RETURNS ?Int64 EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    FsmDestroyAction.FsmDestroyCleanup AS item -> RETURN fsmDestroyCleanup__destroy_order_bucket(item);,
+    FsmDestroyAction.FsmDestroyStmt AS item -> RETURN fsmDestroyStmt__destroy_order_bucket(item);,
+    FsmDestroyAction.FsmDestroyLockRelease AS item -> RETURN fsmDestroyLockRelease__destroy_order_bucket(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

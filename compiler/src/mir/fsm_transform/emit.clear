@@ -156,7 +156,7 @@ PRIVATE FN emit__ordered_fsm_destroy_actions(ctx: FsmEmitContext) RETURNS ![]Fsm
   MUTABLE rtoc_indexed_output_5 = [];
   MUTABLE rtoc_indexed_i_4 = 0;
   WHILE rtoc_indexed_i_4 < rtoc_indexed_items_3.length() DO
-    &rtoc_indexed_output_5.append(Tuple{COPY UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), [UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]).destroy_order_bucket(), UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]).destroy_order_index(rtoc_indexed_i_4)]});
+    &rtoc_indexed_output_5.append(Tuple{COPY UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), [fsmDestroyAction__destroy_order_bucket(UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4])), UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]).destroy_order_index(rtoc_indexed_i_4)]});
     rtoc_indexed_i_4 = rtoc_indexed_i_4 + 1;
   END
   rtoc_indexed_output_5 |> ORDER_BY _._1 |> SELECT _._0
@@ -828,7 +828,7 @@ PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []Fsm
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE name = COPY CAST(desc.result_var AS String);
+    MUTABLE name = COPY CAST(UNWRAP (desc).result_var AS String);
     IF !(seen.add?(name)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
