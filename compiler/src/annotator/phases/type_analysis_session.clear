@@ -5864,7 +5864,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "UNNEST"));
     MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     MUTABLE inner_bind_name = NIL;
-    MUTABLE expr = locatable__expression(node.right);
+    MUTABLE expr: ?Locatable@boxed = locatable__expression(node.right);
     IF (expr IS_A BinaryOp AND (expr.op() == :BIND_VAR)) THEN
       inner_bind_name = expr.right().name();
     END
@@ -19390,7 +19390,7 @@ PRIVATE FN typeAnalysisSession__stamp_keep_carrier_op_mut(self: TypeAnalysisSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF ((IF root IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_474 = locatable__symbol(root);
+    IF ((IF root IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_474: ?SymbolEntry@multiowned = locatable__symbol(root);
     symbolEntry__carrier_polymorphic(rtoc_local_receiver_474) }) THEN
       node.carrier_op = IF ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_475 = root.symbol;
       symbolEntry__carrier_contract(rtoc_local_receiver_475) } == :monomorphic) THEN
@@ -20115,7 +20115,7 @@ PRIVATE FN typeAnalysisSession__lifetime_sources_for_value(self: TypeAnalysisSes
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sources: []SymbolEntry@multiowned = ( { MUTABLE rtoc_empty_list_507: []SymbolEntry@multiowned = List[]; rtoc_empty_list_507 } );
     IF TRUE THEN
-      MUTABLE sym = aST__node__symbol(val_node);
+      MUTABLE sym: ?SymbolEntry@multiowned = aST__node__symbol(val_node);
       IF sym THEN
         sources = ruby_array_concat_SymbolEntry_multiowned(sources, CAST(TRY (symbolEntry__lifetime_sources(sym)) AS []SymbolEntry@multiowned));
       END
