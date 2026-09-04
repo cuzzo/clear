@@ -19405,7 +19405,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE carrier =   IF type__multiowned?(UNWRAP (type)) THEN
       :multiowned
-    ELSE_IF type__shared?(type) THEN
+    ELSE_IF type__shared?(UNWRAP (type)) THEN
       :shared
     ELSE_IF (((!(TRY (type__any_rc?(type))) AND !(TRY (type__split_open_stream?(type)))) AND !(type__shared_promise?(type))) AND !(type__split?(type))) THEN
       :plain
