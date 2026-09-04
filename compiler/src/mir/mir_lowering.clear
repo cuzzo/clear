@@ -1902,7 +1902,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE state = mIRLowering__initial_ownership_finalization_context(rtoc_self_view);
     MUTABLE packets: []LoweredStmtPacket = ( { MUTABLE rtoc_empty_list_31: []LoweredStmtPacket = List[]; rtoc_empty_list_31 } );
     FOR MUTABLE rtoc_for_elem_1903 IN stmts DO
-    MUTABLE packet: ?LoweredStmtPacket = TRY (mIRLowering__lowered_stmt_packet(&rtoc_self_view, state, &rtoc_for_elem_1903));
+    MUTABLE packet: ?LoweredStmtPacket = TRY (mIRLowering__lowered_stmt_packet(&rtoc_self_view, &state, &rtoc_for_elem_1903));
     IF packet EXISTS AS packet_value THEN
         &packets.append(packet_value);
     END
@@ -16399,7 +16399,7 @@ PRIVATE FN mIRLowering__pick_equality_helper(self: MIRLowering, left: Locatable,
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE lt: ?Type = TRY (mIRLowering__type_info_for(rtoc_self_view, left));
     MUTABLE rt: ?Type = TRY (mIRLowering__type_info_for(rtoc_self_view, right));
-    IF (TRY (type__string_comparable_with?(lt, CAST(rt AS ?Type))) OR TRY (type__string_comparable_with?(rt, CAST(lt AS ?Type)))) THEN
+    IF (TRY (type__string_comparable_with?(UNWRAP (lt), CAST(rt AS ?Type))) OR TRY (type__string_comparable_with?(rt, CAST(lt AS ?Type)))) THEN
       RETURN CAST(Tuple{"expectEqualStrings", List[]} AS Tuple<String, []String>);
     END
     MUTABLE slice_elem: ?String = (IF TRY (mIRLowering__slice_element_zig_type(rtoc_self_view, CAST(lt AS Type))) != NIL THEN TRY (mIRLowering__slice_element_zig_type(rtoc_self_view, CAST(lt AS Type))) ELSE TRY (mIRLowering__slice_element_zig_type(rtoc_self_view, CAST(rt AS Type))) END);
@@ -16446,7 +16446,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN NIL;
 END
-PRIVATE FN mIRLowering__lower_raise(MUTABLE self: MIRLowering, node: Raise) RETURNS !ScopeBlock
+PRIVATE FN mIRLowering__lower_raise(MUTABLE self: MIRLowering, MUTABLE node: Raise) RETURNS !ScopeBlock
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16946,7 +16946,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN WeakUpgrade{ source: COPY inner, zig_base: COPY base, func: func, lowered_node_id: NIL, ownership_consumption: NIL };
 }
 END
-PRIVATE FN mIRLowering__lower_freeze(MUTABLE self: MIRLowering, node: FreezeNode) RETURNS !FreezeExpr
+PRIVATE FN mIRLowering__lower_freeze(MUTABLE self: MIRLowering, MUTABLE node: FreezeNode) RETURNS !FreezeExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -17290,7 +17290,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((!(zig_type.contains?("PartitionedStringMap")) AND !(zig_type.contains?("PartitionedNumericMap"))) AND !(zig_type.contains?("NumericMapType")));
 }
 END
-PRIVATE FN mIRLowering__non_empty_hash_literal(MUTABLE self: MIRLowering, node: HashLit, plan: HashLiteralPlan, capability: HashLiteralCapabilityPlan) RETURNS !MIRBlockExpr
+PRIVATE FN mIRLowering__non_empty_hash_literal(MUTABLE self: MIRLowering, MUTABLE node: HashLit, plan: HashLiteralPlan, capability: HashLiteralCapabilityPlan) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -18852,7 +18852,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (IF name IS_A GetField AS get_field THEN get_field.target IS_A OptionalUnwrap ELSE FALSE END);
 }
 END
-PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowering, node: Assignment) RETURNS !IfBindStmt
+PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !IfBindStmt
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -18923,7 +18923,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN IfBindStmt{ bindings: COPY [{:expr: optional_ptr, :capture: capture, :node_ref: FALSE}], then_body: then_body, else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
-PRIVATE FN mIRLowering__assignment_target_plan(MUTABLE self: MIRLowering, node: Assignment) RETURNS !AssignmentTargetPlan
+PRIVATE FN mIRLowering__assignment_target_plan(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !AssignmentTargetPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -19282,13 +19282,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ScopeBlock{ body: COPY [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY cleanup_call }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Set: COPY assign }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
-PRIVATE FN mIRLowering__lower_auto_lock_assignment(MUTABLE self: MIRLowering, node: Assignment) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_auto_lock_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE stmts: []Emittable = List[];
     MUTABLE value_pending: []Emittable = List[];
-    MUTABLE facts = TRY (mIRLowering__auto_lock_assignment_facts(rtoc_self_view, node));
+    MUTABLE facts = TRY (mIRLowering__auto_lock_assignment_facts(rtoc_self_view, &node));
     IF facts.cleanup_alloc EXISTS AS cleanup_alloc_value THEN
       MUTABLE lifecycle: ?PassStateValue = COPY node.field_lifecycle_plan;
       IF !((IF lifecycle != NIL THEN

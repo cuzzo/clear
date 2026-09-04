@@ -5346,7 +5346,7 @@ END
 PRIVATE FN typeAnalysisSession__analyze_collect_op(self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lhs_t = TRY (aST__full_type_mut(node.left));
     IF !((((TRUE) AND type__future?(lhs_t)) AND type__observable?(lhs_t))) THEN
       MUTABLE ty: String = "<unknown>";
@@ -5469,7 +5469,7 @@ END
 PRIVATE FN typeAnalysisSession__select_stream_result_type(self: TypeAnalysisSession, source_type: Type, source: PipelineSourceFact, effect: SelectorEffectFact) RETURNS !Type
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cardinality =   IF (pipelineSourceFact__stream?(source) AND source_type.shape.expression.kind IS_A StreamTypeExpression) THEN
       (CAST(source_type.shape.expression.kind AS StreamTypeExpression)).cardinality
     ELSE
@@ -5481,7 +5481,7 @@ END
 PRIVATE FN typeAnalysisSession__selector_effect_fact(self: TypeAnalysisSession, MUTABLE expression: Locatable) RETURNS !SelectorEffectFact
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE expression_type = TRY (aST__full_type_mut(expression));
     MUTABLE recoverable: ?Type@multiowned = TRY (typeAnalysisSession__recoverable_result_type(rtoc_self_view, &expression, "pipeline selector recovery"));
     MUTABLE wrapped = (recoverable OR_ELSE expression_type);
@@ -5491,7 +5491,7 @@ END
 PRIVATE FN typeAnalysisSession__validate_select_effect_contract_mut(self: TypeAnalysisSession, MUTABLE op: SelectOp, effect: SelectorEffectFact) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     op.tense_plan = TensePlanValue{ TenseOperationPlan: COPY effect.plan };
     MUTABLE declared_order = COPY CAST(op.modifier_order AS String);
     MUTABLE required_order = selectorEffectFact__required_order(effect);
@@ -5518,7 +5518,7 @@ END
 PRIVATE FN typeAnalysisSession__retain_select_error_channel_mut(self: TypeAnalysisSession, MUTABLE expression: Locatable) RETURNS Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (aST__node_retain_error_channel(expression) EXISTS) THEN
       locatable__set_retain_error_channel_mut(&expression, TRUE);    END
 }
@@ -5526,7 +5526,7 @@ END
 PRIVATE FN typeAnalysisSession__select_effect_suffix(self: TypeAnalysisSession, mode: ?String@symbol) RETURNS String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (mode == :fallible) THEN
       RETURN "!";
     ELSE_IF (mode == :optional) THEN
@@ -17143,7 +17143,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__resolve_error_selectors_mut(self: TypeAnalysisSession, node: WithBlock, MUTABLE clause: ErrorClause, is_snapshot_txn: Bool = FALSE) RETURNS !Void
+PRIVATE FN typeAnalysisSession__resolve_error_selectors_mut(self: TypeAnalysisSession, MUTABLE node: WithBlock, MUTABLE clause: ErrorClause, is_snapshot_txn: Bool = FALSE) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

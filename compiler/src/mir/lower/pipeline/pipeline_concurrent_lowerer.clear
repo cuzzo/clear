@@ -328,7 +328,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_bc_concurrent_where_prune(self: Pipe
   rtoc_lambda_result_7
   });
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_bounded_stream_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_bounded_stream_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE lhs: Identifier = COPY castLocatableToIdentifier__pipeline_concurrent_lowerer(plan.lhs);
   RETURN TRY (pipelineConcurrentLowerer__lower_bounded_stream_terminal_plan(self, plan.terminal_kind, &lhs, plan));
 END
@@ -521,7 +521,7 @@ PRIVATE FN pipelineConcurrentLowerer__bc_rescue_policy(self: PipelineConcurrentL
     RETURN NIL;
   END
 END
-PRIVATE FN pipelineConcurrentLowerer__lower_stream_plan(self: PipelineConcurrentLowerer, plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
+PRIVATE FN pipelineConcurrentLowerer__lower_stream_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE lhs: Identifier = COPY castLocatableToIdentifier__pipeline_concurrent_lowerer(plan.lhs);
   RETURN TRY (pipelineConcurrentLowerer__lower_stream_terminal_plan(self, plan.terminal_kind, &lhs, plan));
 END

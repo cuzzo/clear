@@ -343,7 +343,7 @@ END
 PRIVATE FN pipelineHost__agg_max_sentinel_mir(self: PipelineHost, zig_t: String, result_type: Type) RETURNS PipelineHostReturnValue
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF type__unsigned_integer?(result_type) THEN
       RETURN PipelineHostReturnValue{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE
@@ -354,7 +354,7 @@ END
 PUB FN pipelineHost__pipeline_context_active?(self: PipelineHost) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineContextState__active?(pipelineHost__current_context(rtoc_self_view));
 }
 END
@@ -825,7 +825,7 @@ PRIVATE FN pipelineHost__cleanup_bearing_type?(self: PipelineHost, type_info: Ty
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (pipelineMaterializer__cleanup_bearing_type?(rtoc_self_view.materializer, type_info));
 }
 END

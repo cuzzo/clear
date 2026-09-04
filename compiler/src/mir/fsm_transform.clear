@@ -128,7 +128,7 @@ PRIVATE FN fsmTransform__collect_body_locals(stmts: []Locatable) RETURNS ![]Prom
   IF !(entry) THEN
       RETURN;
   END
-  MUTABLE name = COPY entry.name;
+  MUTABLE name = COPY UNWRAP (entry).name;
   IF seen[name] THEN
       RETURN;
   END

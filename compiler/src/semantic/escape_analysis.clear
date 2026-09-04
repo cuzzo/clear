@@ -1142,7 +1142,7 @@ PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, arg
 END
 PUB FN escapeAnalysis__loop_body_has_frame_allocation_candidate?(body: []Node) RETURNS !Bool ->
   MUTABLE found: Bool = FALSE;
-  TRY (localBindingAnalysis__each_direct_loop_node(body, %(MUTABLE node: Locatable) USE(MUTABLE found) -> {
+  TRY (localBindingAnalysis__each_direct_loop_node(castNodeListToLocatableList(body), %(MUTABLE node: Locatable) USE(MUTABLE found) -> {
   IF found THEN
       RETURN;
   END
