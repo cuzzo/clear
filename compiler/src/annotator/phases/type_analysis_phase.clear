@@ -110,7 +110,7 @@ PRIVATE FN annotationTypeInventory__location(node: Locatable) RETURNS String ->
   IF !(token) THEN
     RETURN "?";
   END
-  RETURN "${UNWRAP (token).line}:${token.column.toString()}";
+  RETURN "${(UNWRAP (token).line).toString()}:${token.column.toString()}";
 END
 PUB FN annotationTypeInventory__new(typed_node_count: Int64, violations: []Violation) RETURNS AnnotationTypeInventory@multiowned ->
   MUTABLE self = AnnotationTypeInventory{ typed_node_count: typed_node_count, violations: List[] };

@@ -9038,7 +9038,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (fn_node.reentrance_kind == :reentrant_not_logical) THEN
       variant_text = "EFFECTS REENTRANT:NOT_LOGICAL";
     ELSE
-      variant_text = "EFFECTS REENTRANT:MAX_DEPTH(${UNWRAP (fn_node.max_depth_n)})";
+      variant_text = "EFFECTS REENTRANT:MAX_DEPTH(${(UNWRAP (fn_node.max_depth_n)).toString()})";
     END
     TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :REENTRANT_NEEDS_FALLIBLE_RETURN }, [], CAST({:variant_text: variant_text, :fn: fn_node.name, :err: err_name, :rt: rt_str, :suggested: suggested} AS {String@symbol}Any)));
 }
