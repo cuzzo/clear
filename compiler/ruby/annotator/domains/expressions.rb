@@ -688,12 +688,21 @@ module Annotator
         # A NIL branch carries no storage, so it says nothing about ownership.
         # Ruby's `next nil unless code` is exactly this shape: the value branch
         # owns its string and the other yields nothing.
+        #
+        # The same reasoning holds for any owned payload, not just a string:
+        # the taken branch moves its value out and the untaken one is never
+        # built, so there is nothing to copy and nothing to leak. Ruby's
+        # `scope&.resolve_entry(name)` translates to exactly this shape. What
+        # the lowering genuinely cannot materialise -- a branch that is itself
+        # an unhoisted optional access -- the MIR checker still rejects.
         carriers = branch_types.reject { |type| type.resolved == :NIL }
         return false if carriers.empty?
 
         carriers.all? do |type|
           payload = type.optional? ? T.cast(type.wrapped_type, Type) : type
-          payload.string? && !payload.symbol? && !payload.rodata?
+          next false if payload.rodata?
+
+          payload.string? || payload.struct? || payload.any_rc? || payload.any_sync?
         end
       end
 

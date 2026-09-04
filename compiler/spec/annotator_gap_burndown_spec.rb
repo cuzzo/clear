@@ -803,7 +803,11 @@ RSpec.describe "annotator branch gap burndown" do
     expect(boxed_match.full_type!.resolved).to eq(:Box)
 
     codes = direct_errors(ann).map { |err| err[1] }
-    expect(codes).to include(:IF_EXPR_RESULT_NOT_COPYABLE, :MATCH_EXPR_NEEDS_CASE, :MATCH_EXPR_RESULT_NOT_COPYABLE)
+    expect(codes).to include(:IF_EXPR_THEN_NEEDS_VALUE, :IF_EXPR_NEEDS_ELSE, :MATCH_EXPR_NEEDS_CASE)
+    # An owned struct result is legal in expression form: the taken branch
+    # moves its value out and the untaken one is never built. See
+    # transpile-tests/expr_if_match_owned_result.clear.
+    expect(codes).not_to include(:IF_EXPR_RESULT_NOT_COPYABLE, :MATCH_EXPR_RESULT_NOT_COPYABLE)
   end
 
   it "covers scoped lifetime storage and root traversal branches" do

@@ -1,0 +1,53 @@
+# An expression-form IF or MATCH may yield an OWNED value, not just a Copy one.
+# The taken branch moves its value out and the untaken branch is never built,
+# so there is nothing to copy and nothing to leak -- the same reasoning that
+# already admitted owned strings. Ruby's `scope&.resolve_entry(name)` and
+# `cond ? build : nil` translate to exactly this shape, and forbidding it left
+# them with no translation. What the lowering genuinely cannot materialise the
+# MIR checker still rejects.
+STRUCT Entry { name: String }
+STRUCT Scope { tag: String }
+UNION Kind { A: Int64, B: Int64 }
+
+FN make(k: String) RETURNS Entry -> RETURN Entry{ name: COPY k }; END
+
+FN resolve(s: Scope, name: String) RETURNS ?Entry@multiowned ->
+    IF name == "a" THEN
+        RETURN COPY Entry{ name: COPY name } @multiowned;
+    END
+    RETURN NIL;
+END
+
+FN pick(k: Kind) RETURNS Entry ->
+    RETURN MATCH k START
+      Kind.A AS v -> make("a"),
+      Kind.B AS v -> make("b")
+    END;
+END
+
+FN main() RETURNS Void ->
+    # Both branches allocate; only the taken one is built.
+    MUTABLE flag = TRUE;
+    a: Entry = IF flag THEN make("yes") ELSE make("no") END;
+    ASSERT a.name == "yes", "then branch owns its value";
+    flag = FALSE;
+    b: Entry = IF flag THEN make("yes") ELSE make("no") END;
+    ASSERT b.name == "no", "else branch owns its value";
+
+    # An owned String branch beside a rodata one.
+    s: String = IF flag THEN "left" ELSE COPY a.name END;
+    ASSERT s == "yes", "owned string branch";
+
+    # The safe-navigation shape: an Rc handle or nothing.
+    MUTABLE scope: ?Scope = Scope{ tag: "s" };
+    found: ?Entry@multiowned = IF scope != NIL THEN resolve(scope, "a") ELSE NIL END;
+    ASSERT (found?.name OR_ELSE "") == "a", "handle through the expression";
+    scope = NIL;
+    none: ?Entry@multiowned = IF scope != NIL THEN resolve(scope, "a") ELSE NIL END;
+    ASSERT none == NIL, "nil branch yields nothing";
+
+    # MATCH expressions carry owned results the same way.
+    ASSERT pick(Kind{ A: 1_i64 }).name == "a", "match arm owns its value";
+    ASSERT pick(Kind{ B: 2_i64 }).name == "b", "other match arm";
+    RETURN;
+END
