@@ -312,7 +312,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
   MUTABLE local_entries = _.binding_nodes.each_with_object({}, %(node: BindingNode, map: {String}SymbolEntry@multiowned) -> {
     MUTABLE sym = aST__node__symbol(node);
     IF sym IS_A SymbolEntry THEN
-      map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
+      map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
       RETURN;
     END
     NIL
@@ -1552,7 +1552,7 @@ END
 PUB FN escapeAnalysis__record_symbol_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry) RETURNS Void ->
   MUTABLE sym: ?SymbolEntry@multiowned = escapeAnalysis__symbol_for_binding_node(node);
   IF sym THEN
-    symbols[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
+    symbols[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
   END
 END
 PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry, binding_values: {String}[]Locatable) RETURNS Void ->
@@ -1564,7 +1564,7 @@ PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbol
   IF !((value != NIL)) THEN
     RETURN;
   END
-  MUTABLE binding_key: String = (MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.MIRDestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END);
+  MUTABLE binding_key: String = (MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END);
   MUTABLE binding_entry = COPY (binding_values[binding_key] OR_ELSE List[]);
   &binding_entry.append(value);
   binding_values[binding_key] = COPY binding_entry;
