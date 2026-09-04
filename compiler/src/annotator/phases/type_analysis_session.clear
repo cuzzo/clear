@@ -1449,7 +1449,8 @@ PRIVATE FN typeAnalysisSession__og_set_live(self: TypeAnalysisSession, name: Str
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), name);
+    MUTABLE rtoc_graph_1451 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_1451, name);
     IF graph_node EXISTS AS graph_node_value THEN
       MUTABLE graph_node_value_mutable = COPY graph_node_value;
       graph_node_value_mutable.state = :live;
@@ -4676,7 +4677,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     scope__local_entry_mut(rtoc_local_receiver_95, _.name()) }));
     TRY (typeAnalysisSession__og_declare(rtoc_self_view, _.name(), NIL, _.type()));
     IF !(_.takes()) THEN
-        MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), _.name());
+        MUTABLE rtoc_graph_4679 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+        MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_4679, _.name());
         IF graph_node EXISTS AS graph_node_value THEN
           MUTABLE graph_node_value_mutable = COPY graph_node_value;
           graph_node_value_mutable.kind = :borrowed;
@@ -4901,7 +4903,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRY (typeAnalysisSession__call_returns_borrowed_view?(rtoc_self_view, castLocatableToCallNode__type_analysis_session(node)));
     END
     IF node IS_A Identifier AS identifier THEN
-      IF !(((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier)) != NIL) AND (((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier)))?).kind == :borrowed))) THEN
+      MUTABLE rtoc_graph_4905 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+      IF !(((ownershipGraph__get_index(rtoc_graph_4905, identifier__name(identifier)) != NIL) AND (((ownershipGraph__get_index(rtoc_graph_4905, identifier__name(identifier)))?).kind == :borrowed))) THEN
         RETURN FALSE;
       END
       MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, identifier__name(identifier)));
@@ -8635,7 +8638,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         var_name = COPY (MATCH node START DeclarationNode.VarDecl AS item -> CAST(item.name AS String), DeclarationNode.BindExpr AS item -> CAST(item.name AS String) END);
       END
-      MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), var_name);
+      MUTABLE rtoc_graph_8640 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+      MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_8640, var_name);
       IF graph_node EXISTS AS graph_node_value THEN
         MUTABLE graph_node_value_mutable = COPY graph_node_value;
         graph_node_value_mutable.kind = :borrowed;
@@ -9210,9 +9214,8 @@ PRIVATE FN typeAnalysisSession__cap_var_storage(self: TypeAnalysisSession, MUTAB
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sym = aST__node__symbol(node);
-    IF sym THEN
-      RETURN sym.storage();
+    IF aST__node__symbol(var_node) EXISTS AS sym THEN
+      RETURN symbolEntry__storage(sym);
     END
     RETURN type__ownership_storage((TRY (aST__full_type_mut(var_node))));
 }
@@ -12863,7 +12866,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       lightweightSnapshot__each_state( UNWRAP (snap), %(path: String, state: String@symbol) USE(snap, rtoc_self_view) -> {
-        MUTABLE node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), path);
+        MUTABLE rtoc_graph_12868 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+        MUTABLE node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_12868, path);
         IF !(node) THEN
               RETURN;
         END
@@ -13368,7 +13372,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__og_declare(rtoc_self_view, rtoc_mutable_block_param_327.name, NIL, TypeTypeInput{ Type: COPY unwrapped }));
       IF container_source EXISTS AS container_source_value THEN
           MUTABLE container_source_value_mutable = COPY container_source_value;
-          MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), rtoc_mutable_block_param_327.name);
+          MUTABLE rtoc_graph_13374 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+          MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_13374, rtoc_mutable_block_param_327.name);
           IF graph_node EXISTS AS graph_node_value THEN
             MUTABLE graph_node_value_mutable = COPY graph_node_value;
             graph_node_value_mutable.kind = :borrowed;
@@ -13657,7 +13662,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE source_name = expr.name();
-    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), source_name);
+    MUTABLE rtoc_graph_13664 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_13664, source_name);
     IF graph_node EXISTS AS graph_node_value THEN
       IF (graph_node_value.kind != :borrowed) THEN
         expr.was_moved = TRUE;
@@ -13833,7 +13839,8 @@ PRIVATE FN typeAnalysisSession__borrow_match_payload_binding_mut(self: TypeAnaly
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_writer_receiver_334: OwnershipNode = UNWRAP (ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), binding));
+    MUTABLE rtoc_graph_13841 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    MUTABLE rtoc_writer_receiver_334: OwnershipNode = UNWRAP (ownershipGraph__get_index(rtoc_graph_13841, binding));
     rtoc_writer_receiver_334.kind = :borrowed;
     MUTABLE rtoc_mutable_receiver_336 = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_335 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     scope__entry_for_write_mut(&rtoc_mutable_receiver_335, binding) });
@@ -14124,7 +14131,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     symbolEntry__mark_borrowed_alias_mut(&rtoc_mutable_receiver_353);
     TRY (typeAnalysisSession__classify_ownership_mut(rtoc_self_view, UNWRAP (node.symbol)));
     TRY (typeAnalysisSession__og_declare(rtoc_self_view, CAST(node.var_name AS String), NIL, castTypeToTypeTypeInput__type_analysis_session(elem_ti)));
-    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), CAST(node.var_name AS String));
+    MUTABLE rtoc_graph_14133 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_14133, CAST(node.var_name AS String));
     IF graph_node EXISTS AS graph_node_value THEN
         MUTABLE graph_node_value_mutable = COPY graph_node_value;
         graph_node_value_mutable.kind = :borrowed;
@@ -14225,7 +14233,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), UNWRAP (rtoc_each_items_361[rtoc_idx]));
+      MUTABLE rtoc_graph_14235 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+      MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_14235, UNWRAP (rtoc_each_items_361[rtoc_idx]));
       IF !(((graph_node != NIL) AND (graph_node.state == :moved))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -15077,7 +15086,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     symbolEntry__mark_non_escaping_mut(&symbol);
     symbolEntry__mark_borrowed_alias_mut(&symbol);
-    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), plan.destination);
+    MUTABLE rtoc_graph_15088 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_15088, plan.destination);
     IF graph_node EXISTS AS graph_node_value THEN
       MUTABLE graph_node_value_mutable = COPY graph_node_value;
       graph_node_value_mutable.kind = :borrowed;
@@ -15273,7 +15283,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_381 = typeAnalysisSession__ownership_graph(rtoc_self_view);
       ownershipGraph__moved?(rtoc_local_receiver_381, node.name) } THEN
-        TRY (typeAnalysisSession__emit_use_of_moved_error_mut(rtoc_self_view, node, UNWRAP (ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), node.name))));
+        MUTABLE rtoc_graph_15285 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+        TRY (typeAnalysisSession__emit_use_of_moved_error_mut(rtoc_self_view, node, UNWRAP (ownershipGraph__get_index(rtoc_graph_15285, node.name))));
       END
       MUTABLE owner: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, node.name));
       IF owner != NIL THEN
@@ -16140,7 +16151,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
       IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_400 = typeAnalysisSession__ownership_graph(rtoc_self_view);
       ownershipGraph__moved?(rtoc_local_receiver_400, check) } THEN
-          TRY (typeAnalysisSession__emit_use_of_moved_path_error_mut(rtoc_self_view, node, path, ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), check)));
+          MUTABLE rtoc_graph_16153 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+          TRY (typeAnalysisSession__emit_use_of_moved_path_error_mut(rtoc_self_view, node, path, ownershipGraph__get_index(rtoc_graph_16153, check)));
           BREAK;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -19473,7 +19485,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE graph_path = (path |> SELECT _.toString()).join(".");
-    IF !(ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), graph_path)) THEN
+    MUTABLE rtoc_graph_19487 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    IF !(ownershipGraph__get_index(rtoc_graph_19487, graph_path)) THEN
       TRY (typeAnalysisSession__declare_assignment_graph_path_mut(rtoc_self_view, graph_path, value_type));
     END
     TRY (typeAnalysisSession__og_set_moved(rtoc_self_view, graph_path, aST__node_value(UNWRAP (castNodeToLocatable(node))).token(), :move));
@@ -19502,7 +19515,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN;
         END
         MUTABLE source_name: ?String = typeAnalysisSession__root_variable_name(rtoc_self_view, assignment.value);
-        IF ((source_name != NIL) AND ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), source_name) != NIL) AND (((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), source_name))?).kind == :borrowed))) THEN
+        MUTABLE rtoc_graph_19517 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+        IF ((source_name != NIL) AND ((ownershipGraph__get_index(rtoc_graph_19517, source_name) != NIL) AND (((ownershipGraph__get_index(rtoc_graph_19517, source_name))?).kind == :borrowed))) THEN
           TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Assignment: COPY assignment } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_BORROWED_INDEX }, [], CAST({:source: source_name} AS {String@symbol}Any)));
         END
       ELSE
@@ -19547,7 +19561,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       NIL
     END)))) THEN
-      IF ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), rhs_name) != NIL) AND (((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), rhs_name))?).kind == :borrowed)) THEN
+      MUTABLE rtoc_graph_19563 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+      IF ((ownershipGraph__get_index(rtoc_graph_19563, rhs_name) != NIL) AND (((ownershipGraph__get_index(rtoc_graph_19563, rhs_name))?).kind == :borrowed)) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_BORROWED_PARAM }, [], CAST({:name: rhs_name} AS {String@symbol}Any)));
       END
       MUTABLE lhs_name: String = "";
@@ -19735,7 +19750,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE is_takes = (TRUE AND symbolEntry__takes( UNWRAP (info)));
       IF !(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_488 = typeAnalysisSession__ownership_graph(rtoc_self_view);
-      ownershipGraph__live?(rtoc_local_receiver_488, UNWRAP (rtoc_each_items_486[rtoc_idx])) } OR ((is_takes AND ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), UNWRAP (rtoc_each_items_486[rtoc_idx])) != NIL) AND ownershipNode__moved?(((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), UNWRAP (rtoc_each_items_486[rtoc_idx])))?))))))) THEN
+      MUTABLE rtoc_graph_19752 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+      ownershipGraph__live?(rtoc_local_receiver_488, UNWRAP (rtoc_each_items_486[rtoc_idx])) } OR ((is_takes AND ((ownershipGraph__get_index(rtoc_graph_19752, UNWRAP (rtoc_each_items_486[rtoc_idx])) != NIL) AND ownershipNode__moved?(((ownershipGraph__get_index(rtoc_graph_19752, UNWRAP (rtoc_each_items_486[rtoc_idx])))?))))))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -20459,7 +20475,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF TRY (type__implicitly_copyable?(vt, %(t: String@symbol) USE(rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(rtoc_self_view, t)))) THEN
         RETURN NIL;
       END
-      MUTABLE existing: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier_mutable));
+      MUTABLE rtoc_graph_20477 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+      MUTABLE existing: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_20477, identifier__name(identifier_mutable));
       IF existing EXISTS AS existing_value THEN
         IF ownershipNode__specific_move_action?(existing_value) THEN
         IF ((consumer_param_type != NIL) AND (UNWRAP (existing).move_consumer_param_type == NIL)) THEN
@@ -20490,7 +20507,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (type__primitive?(vt) OR type__id_handle?(vt)) THEN
         RETURN NIL;
       END
-      MUTABLE existing: ?OwnershipNode = COPY ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier_mutable));
+      MUTABLE rtoc_graph_20509 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+      MUTABLE existing: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_20509, identifier__name(identifier_mutable));
       IF existing EXISTS AS existing_value THEN
         IF ownershipNode__specific_move_action?(existing_value) THEN
         IF ((consumer_param_type != NIL) AND (UNWRAP (existing).move_consumer_param_type == NIL)) THEN
@@ -20512,10 +20530,11 @@ PRIVATE FN typeAnalysisSession__consume_generic_map_value_mut(self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE rtoc_graph_20535 = typeAnalysisSession__ownership_graph(rtoc_self_view);
     MUTABLE borrowed =   IF node IS_A GetIndex THEN
       TRUE
     ELSE_IF node IS_A Identifier THEN
-      ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), UNWRAP (locatable__name(node))) != NIL) AND (((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), UNWRAP (locatable__name(node))))?).kind == :borrowed))
+      ((ownershipGraph__get_index(rtoc_graph_20535, UNWRAP (locatable__name(node))) != NIL) AND (((ownershipGraph__get_index(rtoc_graph_20535, UNWRAP (locatable__name(node))))?).kind == :borrowed))
     ELSE
       FALSE
     END;
@@ -20567,7 +20586,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE borrowed_name: ?String = NIL;
     IF val_node IS_A GetIndex AS get_index THEN
       borrowed_name = "${(typeAnalysisSession__root_variable_name(rtoc_self_view, Locatable{ GetIndex: COPY get_index }) OR_ELSE "")}[index]";
-    ELSE_IF (IF val_node IS_A Identifier AS identifier THEN ((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier)) != NIL) AND (((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), identifier__name(identifier)))?).kind == :borrowed)) ELSE FALSE END) THEN
+    MUTABLE rtoc_graph_20588 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    ELSE_IF (IF val_node IS_A Identifier AS identifier THEN ((ownershipGraph__get_index(rtoc_graph_20588, identifier__name(identifier)) != NIL) AND (((ownershipGraph__get_index(rtoc_graph_20588, identifier__name(identifier)))?).kind == :borrowed)) ELSE FALSE END) THEN
       borrowed_name = locatable__name(val_node);
     END
     IF !(borrowed_name) THEN
