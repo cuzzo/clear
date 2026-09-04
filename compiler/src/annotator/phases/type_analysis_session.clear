@@ -3062,7 +3062,7 @@ PRIVATE FN typeAnalysisSession__auto_param_slot_label(self: TypeAnalysisSession,
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn: FunctionDef = COPY CAST(slot.decl_node AS FunctionDef);
     MUTABLE param = COPY UNWRAP (fn.params[UNWRAP (slot.index)]);
-    RETURN "parameter '${param.name}' of `${slot.fn_name}`";
+    RETURN "parameter '${param.name}' of `${(slot.fn_name OR_ELSE "")}`";
 }
 END
 PRIVATE FN typeAnalysisSession__auto_local_slot_label(self: TypeAnalysisSession, slot: Slot) RETURNS String
@@ -11446,7 +11446,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF result.error EXISTS AS error_value THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BinaryOp: COPY binary_op_mutable } }, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_ERROR_GENERIC }, [], CAST({:detail: error_value} AS {String@symbol}Any)));
       END
-      MUTABLE result_type: Type = COPY castTypeToType( UNWRAP (result.type));
+      MUTABLE result_type: Type = COPY (UNWRAP (result.type));
       IF typeAnalysisSession__stale_auto_node_type?(rtoc_self_view, result_type) THEN
         RETURN FALSE;
       END
@@ -12992,7 +12992,7 @@ PRIVATE FN typeAnalysisSession__annotate_comptime_is_a_mut(MUTABLE self: TypeAna
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (typeAnalysisSession__annotate_is_a_operand_mut(&rtoc_self_view, castLocatableToNode(node.left), "Left"));
+    TRY (typeAnalysisSession__annotate_is_a_operand_mut(&rtoc_self_view, IsARight{ Locatable: COPY node.left }, "Left"));
     TRY (typeAnalysisSession__annotate_is_a_operand_mut(&rtoc_self_view, &node.right, "Right"));
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ IsA: COPY node }, :Bool));
 }
@@ -22287,15 +22287,6 @@ END
 FN castTypeToStringSymbol(value: Type) RETURNS String@symbol ->
   RETURN panic("Invalid cast to String@symbol");
 END
-FN castTypeToType(value: Type) RETURNS Type ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN Type{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN Type{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN Type{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to Type");
-  END
-  panic("Invalid cast to Type");
-END
 FN castTypeToTypeConstructionInput__type_analysis_session(value: Type) RETURNS TypeConstructionInput ->
   RETURN TypeConstructionInput{ Type: COPY value };
 END
@@ -22714,7 +22705,7 @@ END
 
 FN castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(value: TypeAnalysisSessionReturnValueItem) RETURNS FunctionSignatureLifetimeSource ->
   PARTIAL MATCH value START
-    TypeAnalysisSessionReturnValueItem.StringValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: COPY cast_payload };,
+    TypeAnalysisSessionReturnValueItem.StringValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: symbol(cast_payload) };,
     TypeAnalysisSessionReturnValueItem.SymbolValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to FunctionSignatureLifetimeSource");
   END
