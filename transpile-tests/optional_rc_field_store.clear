@@ -1,0 +1,22 @@
+# Storing a non-optional Rc handle into an `?T@multiowned` field: the optional
+# destination coerces the handle for free, so the retain must NOT emit an
+# optional unwrap (`if (rc) |x|`) on a non-optional Rc. Unwrapping is a
+# SOURCE-model decision, exactly like retain-vs-copy.
+STRUCT Cond { tag: String }
+STRUCT Session { current: ?Cond@multiowned }
+
+FN main() RETURNS Void ->
+    s = Session{ current: COPY Cond{ tag: "a" } @multiowned };
+    ASSERT (s.current?.tag OR_ELSE "") == "a", "stored through the optional";
+
+    # An optional SOURCE still takes the unwrapping path.
+    kept: ?Cond@multiowned = KEEP s.current;
+    ASSERT (kept?.tag OR_ELSE "") == "a", "retained the handle";
+    ASSERT (s.current?.tag OR_ELSE "") == "a", "source still holds it";
+
+    # A NIL optional source retains nothing.
+    empty = Session{ current: NIL };
+    none: ?Cond@multiowned = KEEP empty.current;
+    ASSERT none == NIL, "nil stays nil";
+    RETURN;
+END

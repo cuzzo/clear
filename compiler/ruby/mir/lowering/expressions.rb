@@ -2921,7 +2921,10 @@ module MIRLoweringExpressions
     when :forbidden
       raise "annotation admitted COPY of linear type #{lifecycle.type_key}"
     when :retain
-      if ti.optional? && ti.wrapped_type&.any_rc?
+      # Unwrapping is a SOURCE-model decision, like retain-vs-copy above. An
+      # optional destination coerces a non-optional handle for free, but
+      # `if (rc) |x|` on a non-optional Rc is not Zig.
+      if ti.optional? && source_ti.optional? && ti.wrapped_type&.any_rc?
       wrapped = T.must(ti.wrapped_type)
       capture = "__copy_rc_#{lowering_counters.next_tmp_id}"
       func = wrapped.shared? ? "arcRetain" : "rcRetain"
@@ -2930,8 +2933,9 @@ module MIRLoweringExpressions
       copied.result_type = Type.new(ti)
       copied
       else
-        func = ti.shared? ? "arcRetain" : "rcRetain"
-        MIR::RcRetain.new(source, rc_payload_zig_type(ti), func)
+        retain_ti = ti.optional? ? T.must(ti.wrapped_type) : ti
+        func = retain_ti.shared? ? "arcRetain" : "rcRetain"
+        MIR::RcRetain.new(source, rc_payload_zig_type(retain_ti), func)
       end
     when :deep_clone, :generic
       # COPY duplicates the value that exists at its own expression boundary.
