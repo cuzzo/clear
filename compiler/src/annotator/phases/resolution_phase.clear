@@ -961,17 +961,22 @@ PRIVATE FN resolutionSession__import_inline_struct_variants_mut(self: Resolution
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    schema.variants.keys() |> EACH {
-    MUTABLE variant: ?SchemasUnionSchemaVariantValue = (schema.variants[_] OR_ELSE CAST(panic("missing hash key") AS ?SchemasUnionSchemaVariantValue));
-    IF !(((variant != NIL) AND (variant IS_A InlineStructVariant))) THEN
-      CONTINUE;
+    FOR variant_name IN schema.variants.keys() DO
+      IF schema.variants[variant_name] EXISTS AS variant_value THEN
+        IF variant_value IS_A InlineStructVariant AS inline_variant THEN
+          MUTABLE synthetic_name = symbol("${union_name}_${variant_name}");
+          MUTABLE fields: {String@symbol}SchemasStructSchemaFieldInput = {};
+          FOR field_name IN inline_variant.fields.keys() DO
+            IF inline_variant.fields[field_name] EXISTS AS field_type THEN
+              fields[field_name] = SchemasStructSchemaFieldInput{ StructFieldMultiowned: COPY StructField{ type: TRY (type__new(castTypeTypeInputToTypeConstructionInput__resolution_phase(field_type))), default: NIL, borrowed: FALSE } };
+            END
+          END
+    MUTABLE scope = TRY (resolutionSession__current_scope(rtoc_self_view));
+          scope__declare_type(&scope, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(fields, ( { MUTABLE rtoc_empty_list_24: []String@symbol = List[]; rtoc_empty_list_24 } ), ( { MUTABLE rtoc_empty_list_25: []GenericParamDecl = List[]; rtoc_empty_list_25 } ), {}, {})) });
+        END
+      END
     END
-    MUTABLE synthetic_name = symbol("${union_name}_${_}");
-    (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(synthetic_name, TRY (structSchema__new(variant.fields().transform_values(%(type) -> {
-      rtoc_lambda_result_23 = StructField{ type: TRY (type__new(type)), default: NIL, borrowed: FALSE };
-      rtoc_lambda_result_23
-    }), ( { MUTABLE rtoc_empty_list_24: []String@symbol = List[]; rtoc_empty_list_24 } ), ( { MUTABLE rtoc_empty_list_25: []GenericParamDecl = List[]; rtoc_empty_list_25 } ), {}, {})));
-    };
+
 }
 END
 PRIVATE FN resolutionSession__clone_imported_schema(self: ResolutionSession, schema: SchemaValue) RETURNS !?SchemaValue

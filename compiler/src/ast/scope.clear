@@ -205,7 +205,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN scopeTypes__declare(&rtoc_self_view.type_store, name, schema);
 }
 END
-FN scope__declare_type(MUTABLE self: Scope, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry ->
+PUB FN scope__declare_type(MUTABLE self: Scope, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry ->
   scope__install_type(&self, name, schema);
 END
 PUB FN scope__resolve_type_definition(self: Scope, name: String@symbol) RETURNS !?SchemaValue
