@@ -103,9 +103,10 @@ by.each do |f, hits|
       end
     end
 
-    # The receiver may be a path, an indexed element, a call, or an UNWRAP of
-    # any of those; a bare-identifier pattern misses most real sites.
-    recv_pat = /(?:UNWRAP\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:__\w+)?\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:\[[^\]]*\])?(?:\.[a-z_]\w*(?:\[[^\]]*\])?)*)/
+    # The receiver may be a path, an indexed element, a call, an UNWRAP of any
+    # of those, or a PARENTHESISED expression -- `(TRY (f(x))).meth()` is the
+    # commonest shape rtoc emits, and a bare-identifier pattern misses it.
+    recv_pat = /(?:\((?:[^()]|\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))*\)|UNWRAP\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:__\w+)?\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[a-z_]\w*(?:\[[^\]]*\])?(?:\.[a-z_]\w*(?:\[[^\]]*\])?)*)/
     # `.meth()` or `.meth(args)` -- the latter only when the accessor takes
     # nothing but the receiver.
     call_pat = ARITY[fn] == 1 ? /\((?:[^()]|\([^()]*\))*\)/ : /\(\)/
