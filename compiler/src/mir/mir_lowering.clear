@@ -6266,7 +6266,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF move_node.value IS_A Identifier THEN
         &names.append(COPY CAST(aST__node_name(move_node.value) AS String));
       ELSE
-        names = ruby_array_concat_String__mir_lowering(names, mIRLowering__fsm_ast_result_consumed_roots(rtoc_self_view, move_node.value));
+        names = ruby_array_concat_String__mir_lowering(names, mIRLowering__fsm_ast_result_consumed_roots(rtoc_self_view, &move_node.value));
       END
     ELSE_IF node IS_A Identifier AS identifier THEN
       MUTABLE identifier_mutable = COPY identifier;
@@ -6749,7 +6749,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF identifier.symbol != NIL THEN
         decl = COPY ((identifier.symbol)?).reg;
       END
-      MUTABLE renamed = (((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(UNWRAP (decl)))] != NIL))) OR (TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view))))[name]) OR name);
+      MUTABLE renamed = (((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(decl))] != NIL))) OR (TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view))))[name]) OR name);
       RETURN CAST([renamed] AS []String);
     ELSE
       RETURN CAST(( { MUTABLE rtoc_empty_list_234: []String = List[]; rtoc_empty_list_234 } ) AS []String);
@@ -11365,7 +11365,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE decl: ?SymbolEntryRegInput = decl_branch_value;
       MUTABLE mapped: ?String = NIL;
       IF decl EXISTS THEN
-        mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(UNWRAP (decl)))];
+        mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(decl))];
       END
       RETURN (((IF mIRLowering__capture_state(rtoc_self_view).do_capture_map != NIL THEN
         (mIRLowering__capture_state(rtoc_self_view).do_capture_map)[var_name]
@@ -12598,7 +12598,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
     MUTABLE mapped: ?String = NIL;
         IF decl EXISTS THEN
-          mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(UNWRAP (decl)))];
+          mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(decl))];
         END
     IF mapped EXISTS AS mapped_value THEN
           out[rtoc_key] = (out[rtoc_key] OR_ELSE mapped_value);
@@ -13921,7 +13921,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable);
     END
     IF ((node.op == symbol("AND")) OR (node.op == symbol("OR"))) THEN
-      RETURN Emittable{ MIRBinOp: COPY TRY (mIRLowering__lower_lazy_boolean_op(&rtoc_self_view, &node)) };
+      RETURN Emittable{ MIRBinOp: COPY TRY (mIRLowering__lower_lazy_boolean_op(&rtoc_self_view, node)) };
     END
     IF node.string_concat THEN
       MUTABLE left = TRY (mIRLowering__hoist_alloc(rtoc_self_view, TRY (mIRLowering__widen_symbol_to_bytes(rtoc_self_view, CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable), node.left)), node.left));
@@ -14389,7 +14389,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node = COPY facts.node;
     MUTABLE left = TRY (mIRLowering__string_comparison_operand(rtoc_self_view, facts.left, &node.left));
     MUTABLE right = TRY (mIRLowering__string_comparison_operand(rtoc_self_view, facts.right, &node.right));
-    RETURN BinaryMirOperands{ left: COPY TRY (mIRLowering__hoist_alloc(rtoc_self_view, &left, node.left)), right: COPY TRY (mIRLowering__hoist_alloc(rtoc_self_view, &right, &node.right)) };
+    RETURN BinaryMirOperands{ left: COPY TRY (mIRLowering__hoist_alloc(rtoc_self_view, &left, &node.left)), right: COPY TRY (mIRLowering__hoist_alloc(rtoc_self_view, &right, &node.right)) };
 }
 END
 PRIVATE FN mIRLowering__string_comparison_operand(self: MIRLowering, value: Emittable, MUTABLE ast_node: Locatable) RETURNS !Emittable
@@ -18417,7 +18417,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN mIRLowering__owned_return_call_init?(rtoc_self_view, cast__expr(mir_cast));
     END
     IF (((init != NIL) AND (init IS_A TryExpr)) OR ((init != NIL) AND (init IS_A TryOptional))) THEN
-      RETURN mIRLowering__owned_return_call_init?( UNWRAP (rtoc_self_view), emittable__expr(init));
+      RETURN mIRLowering__owned_return_call_init?( rtoc_self_view, emittable__expr(init));
     END
     RETURN !(!(((IF init? IS_A Call AS call THEN call__owned_return?(call) ELSE FALSE END))));
 }
@@ -19436,7 +19436,7 @@ PRIVATE FN mIRLowering__lower_runtime_is_a_if(MUTABLE self: MIRLowering, node: I
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE else_body: ?[]Emittable = NIL;
     MUTABLE then_body = NIL;
-    MUTABLE subject, subject_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(condition, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition( &rtoc_self_view, condition.left)));
+    MUTABLE subject, subject_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(condition, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition( rtoc_self_view, condition.left)));
     MUTABLE variant: ?String = COPY condition.runtime_variant_name;
     MUTABLE cond = TRY (mIRLowering__union_tag_condition(rtoc_self_view, CAST(subject AS Emittable), UNWRAP (variant)));
     MUTABLE payload_bindings = TRY (mIRLowering__runtime_is_a_payload_bindings(rtoc_self_view, condition, CAST(subject AS Emittable), UNWRAP (variant)));
@@ -19758,7 +19758,7 @@ PRIVATE FN mIRLowering__lower_while(MUTABLE self: MIRLowering, node: WhileLoop) 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE cond, cond_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(node, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition( &rtoc_self_view, node.condition)));
+    MUTABLE cond, cond_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(node, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition( rtoc_self_view, node.condition)));
     MUTABLE b = COPY node.do_branch;
     MUTABLE body = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_733: ?[]Emittable = NIL;
     IF b IS_A []Any THEN
@@ -19781,7 +19781,7 @@ PRIVATE FN mIRLowering__lower_while_bind(MUTABLE self: MIRLowering, node: WhileB
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE cond, cond_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(node, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition( &rtoc_self_view, node.condition, TRUE)));
+    MUTABLE cond, cond_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(node, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition( rtoc_self_view, node.condition, TRUE)));
     MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, node.do_branch));
     MUTABLE capture_cleanup: ?CleanupEntry@multiowned = TRY (mIRLowering__bind_capture_cleanup(rtoc_self_view, node.condition));
     IF capture_cleanup EXISTS AS capture_cleanup_value THEN
@@ -20967,7 +20967,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF identifier.symbol != NIL THEN
           decl = COPY ((identifier.symbol)?).reg;
         END
-        MUTABLE name = ((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(UNWRAP (decl)))] != NIL))) OR mIRLowering__zig_safe_name(rtoc_self_view, identifier__name(identifier)));
+        MUTABLE name = ((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(decl))] != NIL))) OR mIRLowering__zig_safe_name(rtoc_self_view, identifier__name(identifier)));
         IF name THEN
           &names.insert(name);
         END

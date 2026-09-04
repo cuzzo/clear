@@ -35,7 +35,7 @@ PUB FN emit__build_trampoline(fn_node: FunctionDef, lowering: MIRLowering) RETUR
   MUTABLE param_fields = params |> SELECT emit__frame_field(_.name, _.type_info);
   MUTABLE param_init_fields = params |> SELECT emit__frame_init(_.name, Emittable{ Ident: COPY Ident{ name: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } });
   MUTABLE context = TRY (emit__current_frame_context(fn_node));
-  MUTABLE base_cases = plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY TRY (emit__lower_frame_expr(_.cond_ast, lowering, context)), value: COPY TRY (emit__lower_frame_expr( &_.value_ast, lowering, context)) };
+  MUTABLE base_cases = plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY TRY (emit__lower_frame_expr(&_.cond_ast, lowering, context)), value: COPY TRY (emit__lower_frame_expr( &_.value_ast, lowering, context)) };
   MUTABLE recurse_arg_inits = {
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_1: []Locatable = plan.recurse_args;
@@ -164,7 +164,7 @@ END
 PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan, lowering: MIRLowering) RETURNS !MutualThunkArm ->
   MUTABLE own_plan = COPY (TRY (emit__mutual_thunk_plan_mut(cf))).own_plan;
   MUTABLE context = TRY (emit__mutual_frame_context(cf));
-  MUTABLE base_cases = own_plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY TRY (emit__lower_frame_expr(_.cond_ast, lowering, context)), value: COPY TRY (emit__lower_frame_expr( &_.value_ast, lowering, context)) };
+  MUTABLE base_cases = own_plan.base_cases |> SELECT ThunkBaseCase{ cond: COPY TRY (emit__lower_frame_expr(&_.cond_ast, lowering, context)), value: COPY TRY (emit__lower_frame_expr( &_.value_ast, lowering, context)) };
   MUTABLE target_fn = COPY own_plan.target_fn;
   MUTABLE target_args = COPY own_plan.target_args;
   MUTABLE target_params = TRY (emit__function_params(CAST(TRY (emit__find_cycle_member(cf, target_fn)) AS FunctionDef)));
