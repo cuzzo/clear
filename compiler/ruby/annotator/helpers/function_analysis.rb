@@ -451,7 +451,12 @@ module FunctionAnalysis
         all_catch_bodies << node.default_catch if function_has_default_catch?(node)
         catch_body_scan = with_body_fact_frame(Semantic::BodyIdentity.unassigned) do
           all_catch_bodies.compact.each do |clause_body|
-            with_new_scope do
+            # A CATCH clause is part of its function, exactly like Ruby's
+            # method-level `rescue`: the parameters are in scope there. The
+            # routine scope that declared them has already been popped by the
+            # time the clause bodies are visited, so declare them again.
+            with_routine_analysis_scope(node) do
+              declare_and_verify_params(node)
               current_scope.declare("__error", nil, :ErrorContext, false, false, nil, :stack)
               if candidate_snap_types.size == 1
                 current_scope.declare("snapshot", nil, T.must(candidate_snap_types.first).to_sym, false, false, nil, :stack)

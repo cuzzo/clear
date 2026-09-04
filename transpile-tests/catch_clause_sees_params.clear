@@ -1,0 +1,39 @@
+# A function-level CATCH is part of its function, exactly like Ruby's
+# method-level `rescue`: the parameters are in scope there. The routine scope
+# that declares them is popped before the clause bodies are visited, so the
+# clause has to re-declare them -- without that, `RETURN s.n + k` in a CATCH
+# is "Undefined variable 's'".
+STRUCT S { n: Int64 }
+
+FN risky(k: Int64) RETURNS !Int64 ->
+    IF k < 0_i64 THEN
+        RAISE Input, "negative";
+    END
+    RETURN k;
+END
+
+FN attempt(s: S, k: Int64) RETURNS !Int64
+  REQUIRES s: LOCAL
+->
+WITH POLYMORPHIC s AS view {
+    RETURN TRY (risky(k));
+}
+CATCH Input
+  RETURN s.n + k;
+END
+
+FN labelled(prefix: String, k: Int64) RETURNS !String ->
+    TRY (risky(k));
+    RETURN COPY prefix;
+CATCH Input
+  RETURN "${prefix}:failed";
+END
+
+FN main() RETURNS Void ->
+    s = S{ n: 7_i64 };
+    ASSERT (attempt(s, 3_i64) OR_ELSE -1_i64) == 3_i64, "success path";
+    ASSERT (attempt(s, -1_i64) OR_ELSE -1_i64) == 6_i64, "catch reads both parameters";
+    ASSERT (labelled("run", 1_i64) OR_ELSE "") == "run", "success path keeps its value";
+    ASSERT (labelled("run", -1_i64) OR_ELSE "") == "run:failed", "catch interpolates a parameter";
+    RETURN;
+END
