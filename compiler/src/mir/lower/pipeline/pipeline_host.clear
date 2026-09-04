@@ -106,7 +106,7 @@ END
 PRIVATE FN pipelineHost__build_list_lowerer(self: PipelineHost) RETURNS !PipelineListLowerer
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN PipelineListLowerer{ visit_mir: %(node) USE(rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, node)), visit_expr: %(ignored_list_node, expr_node, placeholder) USE(MUTABLE rtoc_self_view) -> pipelineHost__with_pipeline_context(&rtoc_self_view, placeholder, NIL, %() USE(expr_node, rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, expr_node))), visit_expr_head: %(expr_node, placeholder, alloc) USE(MUTABLE rtoc_self_view) -> { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_alias_arg_3 = %() USE(alloc, expr_node, rtoc_self_view) -> pipelineLoweringBridge__with_pipeline_decl_alloc(rtoc_self_view.lowering_bridge, alloc, %() USE(expr_node, rtoc_self_view) -> TRY (pipelineHost__visit_mir_head( &rtoc_self_view, expr_node)));
     pipelineHost__with_pipeline_context(&rtoc_self_view, placeholder, rtoc_mutable_alias_arg_3) }, visit_reduce_expr: %(expr_node, item_placeholder, acc_placeholder) USE(MUTABLE rtoc_self_view) -> pipelineHost__with_pipeline_context(&rtoc_self_view, item_placeholder, acc_placeholder, %() USE(expr_node, rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, expr_node))), visit_body: %(body_stmts, placeholder) USE(MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_4 = TRY (pipelineHost__visit_pipeline_body_mir(&rtoc_self_view, body_stmts, placeholder));
@@ -126,7 +126,7 @@ END
 PRIVATE FN pipelineHost__build_binding_chain_lowerer(self: PipelineHost) RETURNS !PipelineBindingChainLowerer
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN PipelineBindingChainLowerer{ bc_target: %() USE(rtoc_self_view) -> pipelineHost__bc_target?(rtoc_self_view), next_label: %() USE(MUTABLE rtoc_self_view) -> pipelineHost__next_pipe_label(&rtoc_self_view), set_current_label: %(label) USE(MUTABLE rtoc_self_view) -> pipelineHost__set_current_pipe_label(&rtoc_self_view, label), pipe_binding_zig_name: %(clear_name) USE(rtoc_self_view) -> pipelineHost__pipe_binding_zig_name(rtoc_self_view, clear_name), visit_mir: %(node) USE(rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, node)), visit_mir_with_placeholder: %(node, placeholder) USE(MUTABLE rtoc_self_view) -> pipelineHost__with_pipeline_context(&rtoc_self_view, placeholder, NIL, %() USE(node, rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, node))), visit_mir_with_reduce_placeholders: %(node, item_placeholder, acc_placeholder) USE(MUTABLE rtoc_self_view) -> pipelineHost__with_pipeline_context(&rtoc_self_view, item_placeholder, acc_placeholder, %() USE(node, rtoc_self_view) -> TRY (pipelineHost__visit_mir(rtoc_self_view, node))), transpile_type: %(type_info) USE(rtoc_self_view) -> TRY (pipelineHost__transpile_type(rtoc_self_view, type_info)), with_named_bindings: %(bindings, blk) USE(MUTABLE rtoc_self_view) -> pipelineHost__with_named_bindings(&rtoc_self_view, bindings, blk), ast_uses_placeholder: %(node) USE(rtoc_self_view) -> pipelineHost__ast_node_uses_placeholder?( &rtoc_self_view, node) };
 }
 END
@@ -801,7 +801,7 @@ END
 PRIVATE FN pipelineHost__pipeline_schema_lookup(self: PipelineHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineMaterializer__schema_lookup(rtoc_self_view.materializer);
 }
 END

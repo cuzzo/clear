@@ -4787,7 +4787,7 @@ END
 PRIVATE FN typeAnalysisSession__verify_returns(self: TypeAnalysisSession, node: RoutineNode, found_returns: []ReturnFact, declared_return: ?TypeTypeInput) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE declared_type_branch_value: ?Type = NIL;
     IF (declared_return == NIL) THEN
       declared_type_branch_value = NIL;
@@ -4827,7 +4827,7 @@ END
 PRIVATE FN typeAnalysisSession__get_return_strategy(self: TypeAnalysisSession, return_type: TypeTypeInput) RETURNS !String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE type = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(return_type)));
     IF (!(TRY (type__requires_move?(type))) OR type__heap?(type)) THEN
       RETURN :register;
@@ -4841,7 +4841,7 @@ END
 PRIVATE FN typeAnalysisSession__verify_return(self: TypeAnalysisSession, MUTABLE node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(TRY (typeAnalysisSession__return_is_borrow?(rtoc_self_view, node))) THEN
       RETURN TRUE;
     END
@@ -4908,7 +4908,7 @@ END
 PRIVATE FN typeAnalysisSession__return_is_borrow?(self: TypeAnalysisSession, node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan: ?TenseOperationPlan = CAST(locatable__tense_plan(node) AS ?TenseOperationPlan);
     IF plan EXISTS AS plan_value THEN
       IF tenseOperationPlan__owns_result?(plan_value) THEN
@@ -4950,7 +4950,7 @@ END
 PRIVATE FN typeAnalysisSession__paths_overlap?(self: TypeAnalysisSession, path_a: []String@symbol, path_b: []String@symbol) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (path_a.first() != path_b.first()) THEN
       RETURN FALSE;
     END
@@ -4961,7 +4961,7 @@ END
 PRIVATE FN typeAnalysisSession__reject_arg_type_matches?(self: TypeAnalysisSession, MUTABLE arg: Locatable, kind: String@symbol) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE pred: ?Any@multiowned = COPY (CAST({:unsigned_integer: %(t) -> (TRUE AND type__unsigned_integer?(t))} AS {String@symbol}Any@multiowned))[kind];
     IF pred EXISTS AS pred_value THEN
       MUTABLE type = TRY (aST__full_type_mut(arg));
@@ -17058,7 +17058,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__field_name_for_msg(self: TypeAnalysisSession, node: GetField) RETURNS String
+PRIVATE FN typeAnalysisSession__field_name_for_msg(self: TypeAnalysisSession, MUTABLE node: GetField) RETURNS String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
