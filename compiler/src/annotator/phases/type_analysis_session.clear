@@ -10119,10 +10119,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       typeAnalysisSession__add_capture_name_when(rtoc_self_view, &result.resource_captures, name, (type__resource?(t) OR !((close_plan == NIL))));
       MUTABLE string_map_cleanup = (TRY (type__captured_plain_string_map_needs_deinit?(t)) AND (close_plan == NIL));
       typeAnalysisSession__add_capture_name_when(rtoc_self_view, &result.resource_captures, name, string_map_cleanup);
-      typeAnalysisSession__set_capture_close_plan_when(rtoc_self_view, result.close_plans, name, resourceClosePlan__method("deinit", 2), string_map_cleanup);
+      typeAnalysisSession__set_capture_close_plan_when(rtoc_self_view, &result.close_plans, name, resourceClosePlan__method("deinit", 2), string_map_cleanup);
     END
     close_plan = symbolEntry__close_plan(info);
-    typeAnalysisSession__set_capture_close_plan_when(rtoc_self_view, result.close_plans, name, close_plan, !((close_plan == NIL)));
+    typeAnalysisSession__set_capture_close_plan_when(rtoc_self_view, &result.close_plans, name, close_plan, !((close_plan == NIL)));
     result.has_local = (result.has_local OR symbolEntry__local?(info));
     result.has_rc = (result.has_rc OR (symbolEntry__storage(info) == :multiowned));
     MUTABLE ti = symbolEntry__type(info);
@@ -10147,14 +10147,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     &names.insert(COPY name);
 }
 END
-PRIVATE FN typeAnalysisSession__set_capture_close_plan_when(self: TypeAnalysisSession, plans: {String}ResourceClosePlan, name: String, plan: ?ResourceClosePlan, active: Bool) RETURNS Void
+PRIVATE FN typeAnalysisSession__set_capture_close_plan_when(self: TypeAnalysisSession, MUTABLE plans: {String}ResourceClosePlan, name: String, plan: ?ResourceClosePlan, active: Bool) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(active) THEN
       RETURN;
     END
-    plans[name] = (plans[name] OR_ELSE plan?);
+    plans[name] = (plans[name] OR_ELSE UNWRAP (plan));
 }
 END
 PRIVATE FN typeAnalysisSession__record_capture_move_mut(self: TypeAnalysisSession, ctx: CaptureContext, name: String, MUTABLE info: SymbolEntry, node: Identifier) RETURNS !Void
@@ -17009,8 +17009,8 @@ PRIVATE FN typeAnalysisSession__field_name_for_msg(self: TypeAnalysisSession, no
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (TRUE AND node.field) THEN
-      RETURN COPY CAST(node.field AS String);
+    IF !(node.field.empty?()) THEN
+      RETURN COPY node.field;
     END
     RETURN COPY "<field>";
 }
@@ -22341,7 +22341,7 @@ FN ruby_array_concat_Any__type_analysis_session(left: []Any, right: []Any) RETUR
     &result.append(COPY rtoc_left_item);
   END
   FOR rtoc_right_item IN right DO
-    &result.append(COPY rtoc_right_item);
+    &result.append(KEEP rtoc_right_item);
   END
   RETURN result;
 END
@@ -22351,7 +22351,7 @@ FN ruby_array_concat_Edit__type_analysis_session(left: []Edit, right: []Edit) RE
     &result.append(COPY rtoc_left_item);
   END
   FOR rtoc_right_item IN right DO
-    &result.append(COPY rtoc_right_item);
+    &result.append(KEEP rtoc_right_item);
   END
   RETURN result;
 END
@@ -22361,7 +22361,7 @@ FN ruby_array_concat_SymbolEntry_multiowned(left: []SymbolEntry, right: []Symbol
     &result.append(COPY rtoc_left_item);
   END
   FOR rtoc_right_item IN right DO
-    &result.append(COPY rtoc_right_item);
+    &result.append(KEEP rtoc_right_item);
   END
   RETURN result;
 END
