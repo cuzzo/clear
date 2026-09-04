@@ -1022,7 +1022,7 @@ PUB STRUCT StructLit {
   fields: {String}Locatable,
   storage: ?String@symbol,
   type_args: ?[]Type,
-  borrowed_field_names: ?PassStateValue,
+  borrowed_field_names: ?[Set]String,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,
@@ -1052,6 +1052,12 @@ PUB STRUCT StructLit {
   was_moved: ?Bool,
   zig_pattern: ?String@symbol
 }
+PUB FN structLit__borrowed_fields?(self: StructLit) RETURNS Bool EFFECTS REENTRANT ->
+  IF self.borrowed_field_names EXISTS AS names THEN
+    RETURN !(names.empty?());
+  END
+  RETURN FALSE;
+END
 PUB STRUCT LambdaLit {
   token: Token,
   params: ?[]Param,

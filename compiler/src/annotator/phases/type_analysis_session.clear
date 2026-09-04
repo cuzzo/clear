@@ -7471,7 +7471,12 @@ PRIVATE FN typeAnalysisSession__integer_literal_range_value(self: TypeAnalysisSe
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A Literal AS literal THEN
       IF ((literal.type == :PREFIXED_INT) OR (literal.type == :INT64)) THEN
-        RETURN literal.value;
+        IF literal.value EXISTS AS token_value THEN
+          IF token_value IS_A Int64 AS int_value THEN
+            RETURN COPY int_value;
+          END
+        END
+        RETURN NIL;
       END
     END
     RETURN typeAnalysisSession__negative_integer_literal_range_value(rtoc_self_view, node);
@@ -10922,7 +10927,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE cap_types = lock_capabilities |> SELECT:? capabilityTransition__lock_identity(_) |> WHERE _ != NIL;
-    typeAnalysisSession__phase_audit_inputs(rtoc_self_view).lock_analysis.clause_sites.append(COPY LockClauseSite{ node: node, cap_types: COPY cap_types });
+    typeAnalysisSession__phase_audit_inputs(rtoc_self_view).lock_analysis.clause_sites.append(COPY LockClauseSite{ node: COPY node, cap_types: COPY cap_types });
     NIL;
 }
 END
@@ -15181,7 +15186,7 @@ PRIVATE FN typeAnalysisSession__mark_borrowed_field_bind_alias_mut(self: TypeAna
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((node.value IS_A StructLit AND node.value.borrowed_fields?())) THEN
+    IF !((IF node.value IS_A StructLit AS struct_lit THEN structLit__borrowed_fields?(struct_lit) ELSE FALSE END)) THEN
       RETURN;
     END
     MUTABLE sym = COPY UNWRAP (node.symbol);
@@ -16828,11 +16833,10 @@ PRIVATE FN typeAnalysisSession__with_block_has_versioned_arm?(self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN !(!((IF node.arms != NIL THEN
-      node.arms |> ANY (_.family == :VERSIONED)
-    ELSE
-      NIL
-    END)));
+    IF node.arms EXISTS AS arms THEN
+      RETURN arms |> ANY (_.family == :VERSIONED);
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN typeAnalysisSession__mark_unrequired_polymorphic_with_runtime_mut(self: TypeAnalysisSession, node: WithBlock, MUTABLE fn_ctx: FunctionContext) RETURNS !Void
