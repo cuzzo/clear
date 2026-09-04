@@ -2070,7 +2070,7 @@ PUB FN escapeAnalysis__canonical_symbol(sym: ?SymbolEntry) RETURNS ?SymbolEntry@
       decl_branch_value = NIL;
     END
     MUTABLE decl: ?SymbolEntryRegInput = decl_branch_value;
-    RETURN (((((decl != NIL) AND (aST__node__symbol( castSymbolEntryRegInputToLocatable(decl)) EXISTS)) AND decl.symbol)) OR sym_value);
+    RETURN (((((decl != NIL) AND (aST__node__symbol( castSymbolEntryRegInputToLocatable(decl)) EXISTS)) AND symbolEntryRegInput__symbol(decl))) OR sym_value);
   ELSE
     RETURN NIL;
   END

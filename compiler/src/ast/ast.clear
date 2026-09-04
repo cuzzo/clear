@@ -17160,3 +17160,244 @@ PUB FN castNodeOrTypeToNode(value: NodeOrType) RETURNS Node ->
   END
   panic("Invalid cast to Node");
 END
+
+# Ruby asks `respond_to?(:stream_mode)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__stream_mode(value: Locatable) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    Locatable.SelectOp AS item -> RETURN COPY item.stream_mode;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:right_source)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__right_source(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.JoinOp AS item -> RETURN COPY item.right_source;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:default_expr)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__default_expr(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.RecoverOp AS item -> RETURN COPY item.default_expr;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:initial_value)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__initial_value(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.ReduceOp AS item -> RETURN COPY item.initial_value;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:target_map)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__target_map(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.ShardOp AS item -> RETURN COPY item.target_map;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:implicit_layout_cost)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__implicit_layout_cost(value: Locatable) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    Locatable.Program AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.RequireNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ProtocolRequirement AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ProtocolDef AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.FunctionDef AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ImplementationDef AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ConformanceDef AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.StructDef AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.VarDecl AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Assignment AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.DestructureTarget AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.DestructuringAssignment AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.BindExpr AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.BinaryOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.IsA AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.UnaryOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.CallSiteOverride AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Identifier AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Literal AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ListLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.TupleLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.DefaultArrayLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.HashLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.DefaultLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.StructLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.LambdaLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.IfStatement AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.IfBind AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.WhileLoop AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.WhileBindLoop AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.BreakNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ContinueNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.FuncCall AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.MethodCall AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.GetField AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.GetIndex AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Cast AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ReturnNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Assert AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Raise AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ThrowNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.DieNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Slice AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Require AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.DeferStmt AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.WithBlock AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.SyncPolicyDecl AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.SelectOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.WhereOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.IndexOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ReduceOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.OrderByOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.LimitOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.UnnestOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.DistinctOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.EachOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.TapOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.SkipOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.CollectOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.TakeWhileOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.WindowOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.BatchWindowOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.JoinOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.FindOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.AnyOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.AllOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.CountOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.SumOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.AverageOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.MinOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.MaxOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ShardOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ConcurrentOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Placeholder AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Copy AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.OptionalUnwrap AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.TenseNavigation AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.MutableBorrow AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.OrElseRaise AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.OrElseExit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.OrElsePass AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.OrElsePrune AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.OrElseBreak AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.CatchBlock AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.RecoverOp AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.BlockExpr AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.StringConcat AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.CapabilityWrap AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.MoveNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.CopyNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.KeepNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ShareNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.LinkNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ResolveNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.FreezeNode AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.PassStmt AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.StructPattern AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.RangeLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ExternFnDecl AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ExternStructDecl AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.EnumDef AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.UnionDef AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.UnionVariantLit AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.StaticCall AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.DoBlock AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.BgBlock AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ThenChain AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.BgStreamBlock AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.YieldExpr AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.CloseStream AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.NextExpr AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.MatchStatement AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ForRange AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ForEach AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.TestBlock AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.WhenBlock AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.LetBinding AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.TestThat AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.AssertRaises AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.BenchmarkStmt AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.SmashStmt AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ProfileStmt AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.StubDecl AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Drop AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.SuppressCleanup AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.Return AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.ReassignCleanup AS item -> RETURN COPY item.implicit_layout_cost;,
+    Locatable.FieldCleanup AS item -> RETURN COPY item.implicit_layout_cost;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:retain_error_channel)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__retain_error_channel(value: Locatable) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    Locatable.BinaryOp AS item -> RETURN COPY item.retain_error_channel;,
+    Locatable.FuncCall AS item -> RETURN COPY item.retain_error_channel;,
+    Locatable.MethodCall AS item -> RETURN COPY item.retain_error_channel;,
+    Locatable.StaticCall AS item -> RETURN COPY item.retain_error_channel;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:carrier_op)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__carrier_op(value: Locatable) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    Locatable.CopyNode AS item -> RETURN COPY item.carrier_op;,
+    Locatable.KeepNode AS item -> RETURN COPY item.carrier_op;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:finish)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__finish(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.RangeLit AS item -> RETURN COPY item.finish;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:pool_method)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__pool_method(value: Locatable) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    Locatable.MethodCall AS item -> RETURN COPY item.pool_method;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

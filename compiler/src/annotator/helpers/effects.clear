@@ -218,3 +218,16 @@ FN castAstScanInputToLocatable(value: AstScanInput) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
+
+# Ruby asks `respond_to?(:computed_stack_tier)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN asyncStackTarget__computed_stack_tier(value: AsyncStackTarget) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    AsyncStackTarget.BgBlock AS item -> RETURN COPY item.computed_stack_tier;,
+    AsyncStackTarget.BgStreamBlock AS item -> RETURN COPY item.computed_stack_tier;,
+    AsyncStackTarget.DoBranch AS item -> RETURN COPY item.computed_stack_tier;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

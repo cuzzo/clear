@@ -10177,7 +10177,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_indexed_output_373
     };
     MUTABLE receiver_index = IF node IS_A FuncCall THEN
-      ((node.protocol_receiver_index OR_ELSE 0))
+      ((callNode__protocol_receiver_index(node) OR_ELSE 0))
     ELSE
       0
     END;
@@ -15234,7 +15234,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE target_sync =   IF target_node IS_A OptionalUnwrap THEN
       (IF locatable__symbol(UNWRAP (aST__node_target( target_node))) != NIL THEN
-      (target_node.target.symbol).sync()
+      (locatable__symbol(target_node.target)).sync()
     ELSE
       NIL
     END)
@@ -18417,7 +18417,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN mIRLowering__owned_return_call_init?(rtoc_self_view, cast__expr(mir_cast));
     END
     IF (((init != NIL) AND (init IS_A TryExpr)) OR ((init != NIL) AND (init IS_A TryOptional))) THEN
-      RETURN mIRLowering__owned_return_call_init?( rtoc_self_view, emittable__expr(UNWRAP (init)));
+      RETURN mIRLowering__owned_return_call_init?( rtoc_self_view, emittable__expr(UNWRAP (UNWRAP (init))));
     END
     RETURN !(!(((IF init? IS_A Call AS call THEN call__owned_return?(call) ELSE FALSE END))));
 }
@@ -19671,7 +19671,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE receiver: ?Type = TRY (type__from_node_mut(aST__node_target(Locatable{ GetIndex: COPY get_index_mutable }), "IF binding runtime shape"));
       RETURN ((type__pool?( UNWRAP (receiver)) OR TRY (mIRLowering__mutable_struct_list_bind?(rtoc_self_view, Locatable{ GetIndex: COPY get_index_mutable }))) OR TRY (mIRLowering__plain_map_pointer_bind?(rtoc_self_view, Locatable{ GetIndex: COPY get_index_mutable })));
     END
-    RETURN (expr IS_A MethodCall AND (expr.pool_method == :get));
+    RETURN (expr IS_A MethodCall AND (locatable__pool_method(expr) == :get));
 }
 END
 PRIVATE FN mIRLowering__capture_expr_payload_type(self: MIRLowering, expr: Locatable) RETURNS !Type
@@ -23315,6 +23315,17 @@ PUB FN mIRLoweringReturnValue__cleanup_entry(value: MIRLoweringReturnValue) RETU
   PARTIAL MATCH value START
     MIRLoweringReturnValue.Cleanup AS item -> RETURN COPY item.cleanup_entry;,
     MIRLoweringReturnValue.ErrCleanup AS item -> RETURN COPY item.cleanup_entry;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:protocol_receiver_index)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN callNode__protocol_receiver_index(value: CallNode) RETURNS ?Int64 ->
+  PARTIAL MATCH value START
+    CallNode.FuncCall AS item -> RETURN COPY item.protocol_receiver_index;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;

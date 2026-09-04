@@ -11,3 +11,16 @@ PUB UNION AccessPathNode { GetField: GetField, GetIndex: GetIndex, OptionalUnwra
 # End Ruby module Annotator::Domains::Variables
 # End Ruby module Annotator::Domains
 # End Ruby module Annotator
+
+# Ruby asks `respond_to?(:target)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN accessPathNode__target(value: AccessPathNode) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    AccessPathNode.GetField AS item -> RETURN COPY item.target;,
+    AccessPathNode.GetIndex AS item -> RETURN COPY item.target;,
+    AccessPathNode.OptionalUnwrap AS item -> RETURN COPY item.target;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

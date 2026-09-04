@@ -147,3 +147,28 @@ FN castAssignmentNodeToLocatable(value: AssignmentNode) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
+
+# Ruby asks `respond_to?(:stack_size)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN asyncBodyNode__stack_size(value: AsyncBodyNode) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    AsyncBodyNode.BgBlock AS item -> RETURN COPY item.stack_size;,
+    AsyncBodyNode.BgStreamBlock AS item -> RETURN COPY item.stack_size;,
+    AsyncBodyNode.DoBranch AS item -> RETURN COPY item.stack_size;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:can_smash)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN asyncBodyNode__can_smash(value: AsyncBodyNode) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    AsyncBodyNode.BgBlock AS item -> RETURN COPY item.can_smash;,
+    AsyncBodyNode.DoBranch AS item -> RETURN COPY item.can_smash;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
